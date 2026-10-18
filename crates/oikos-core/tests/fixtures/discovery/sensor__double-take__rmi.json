@@ -1,0 +1,1 @@
+{"name":"double_take_bedroom3","icon":"mdi:account","value_template":"{{ value_json.camera }}","state_topic":"homeassistant/sensor/double-take/rmi/state","json_attributes_topic":"homeassistant/sensor/double-take/rmi/state","availability_topic":"double-take/available","unique_id":"double_take_bedroom3"}

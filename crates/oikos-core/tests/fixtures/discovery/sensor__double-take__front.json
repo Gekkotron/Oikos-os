@@ -1,0 +1,1 @@
+{"name":"double_take_front","icon":"mdi:camera","value_template":"{{ value_json.counts.person }}","state_topic":"homeassistant/sensor/double-take/front/state","json_attributes_topic":"homeassistant/sensor/double-take/front/state","availability_topic":"double-take/available","unique_id":"double_take_front"}
