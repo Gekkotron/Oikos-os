@@ -8,5 +8,6 @@ mod config;
 
 pub mod command;
 pub mod discovery;
+pub mod registry;
 pub mod state;
 pub mod template;

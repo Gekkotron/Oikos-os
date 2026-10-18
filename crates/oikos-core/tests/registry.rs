@@ -1,0 +1,593 @@
+//! The registry against the recorded house: routing, effective entities, folding, state and
+//! the subscription set.
+
+mod common;
+
+use std::collections::BTreeSet;
+
+use oikos_core::discovery::DiscoveryTopic;
+use oikos_core::model::{EntityCategory, Kind, StateValue, UNASSIGNED_AREA};
+use oikos_core::registry::{Change, Inbound, Registry, RegistryConfig};
+use serde_json::json;
+
+const AT: u64 = 1_700_000_000;
+
+const ALARM_SWITCH: &str = "0xbc33acfffe36db49_switch_alarm_zigbee2mqtt";
+const STAIR_LIGHT: &str = "0x847127fffe24e322_switch_zigbee2mqtt";
+const STAIR_LIGHT_TOPIC: &str = "oikos/switch/0x847127fffe24e322/switch/config";
+const THERMOMETER_TOPIC: &str = "zigbee2mqtt/rooms/bedroom2/thermometer";
+const SHUTTER_COVER: &str = "0x847127fffe08106c_cover_zigbee2mqtt";
+const SHUTTER_MOVING: &str = "0x847127fffe08106c_moving_zigbee2mqtt";
+const LINKQUALITY: &str = "0x5c0272fffea35cfb_linkquality_zigbee2mqtt";
+const HOUSE_ALARM: &str = "jeedom_house_alarm";
+const HOUSE_ALARM_TOPIC: &str = "oikos/alarm_control_panel/jeedom/house_alarm/config";
+
+fn config() -> RegistryConfig {
+    RegistryConfig {
+        discovery_prefixes: common::strings(&["oikos"]),
+        ui_prefix: "oikos/ui".to_owned(),
+        z2m_base: "zigbee2mqtt".to_owned(),
+        reserved: common::strings(&["ui", "automation"]),
+    }
+}
+
+/// Files of a fixture sub-directory as `(stem, bytes)`, sorted by stem.
+fn files(sub: &str) -> Vec<(String, Vec<u8>)> {
+    let dir = common::fixture_dir().join(sub);
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("fixture dir") {
+        let path = entry.expect("dir entry").path();
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("fixture stem")
+            .to_owned();
+        out.push((stem, std::fs::read(&path).expect("fixture")));
+    }
+    out.sort();
+    out
+}
+
+fn feed(registry: &mut Registry, topic: &str, payload: Vec<u8>) -> Vec<Change> {
+    let inbound = registry.route(topic, payload, AT);
+    registry.apply(inbound)
+}
+
+/// The whole recorded house: bridge, discovery, overrides and areas, then every state.
+fn load_house() -> Registry {
+    let mut registry = Registry::new(config());
+    for (file, topic) in [
+        ("bridge_info.json", "zigbee2mqtt/bridge/info"),
+        ("bridge_devices.json", "zigbee2mqtt/bridge/devices"),
+        ("bridge_state.json", "zigbee2mqtt/bridge/state"),
+    ] {
+        feed(&mut registry, topic, common::fixture(file).into_bytes());
+    }
+    for (stem, payload) in files("discovery") {
+        let topic = format!("oikos/{}/config", stem.replace("__", "/"));
+        feed(&mut registry, &topic, payload);
+    }
+    for (stem, payload) in files("ui") {
+        feed(&mut registry, &format!("oikos/ui/{stem}"), payload);
+    }
+    for (stem, payload) in files("states") {
+        let topic = format!("zigbee2mqtt/{}", stem.replace("__", "/"));
+        feed(&mut registry, &topic, payload);
+    }
+    registry
+}
+
+fn discovery_topic(topic: &str) -> DiscoveryTopic {
+    common::discovery_topic(topic)
+}
+
+fn override_payload(unique_id: &str, payload: &str) -> Inbound {
+    Inbound::Override {
+        unique_id: unique_id.to_owned(),
+        payload: payload.as_bytes().to_vec(),
+    }
+}
+
+#[test]
+fn house_loads() {
+    let registry = load_house();
+    let entities = registry.entities().count();
+    assert!(entities >= 400, "entities: {entities}");
+    assert_eq!(registry.devices().count(), 66);
+    let areas: Vec<String> = registry
+        .effective_areas()
+        .iter()
+        .take(5)
+        .map(|a| a.id.clone())
+        .collect();
+    assert_eq!(
+        areas,
+        common::strings(&["living", "bedroom1", "bedroom2", "bedroom3", "office"])
+    );
+    assert_eq!(registry.bridge().version.as_deref(), Some("2.14.1"));
+    assert!(registry.template_failures().is_empty());
+    assert!(!registry.subscription_topics().is_empty());
+    assert!(registry.subscription_topics().contains(THERMOMETER_TOPIC));
+    eprintln!(
+        "house: {} entities, {} devices, {} areas, {} ignored, {} template failures, {} subscriptions",
+        entities,
+        registry.devices().count(),
+        registry.effective_areas().len(),
+        registry.ignored().len(),
+        registry.template_failures().len(),
+        registry.subscription_topics().len()
+    );
+}
+
+#[test]
+fn overrides_apply() {
+    let registry = load_house();
+    let entity = registry.entity(ALARM_SWITCH).expect("alarm switch");
+    assert_eq!(entity.area, "living");
+    assert!(entity.ui.security_action);
+    assert!(registry.raw_override(ALARM_SWITCH).is_some());
+}
+
+#[test]
+fn path_area_and_as_light() {
+    let mut registry = load_house();
+    let entity = registry.entity(STAIR_LIGHT).expect("stair light");
+    assert_eq!(entity.area, "stair");
+    assert_eq!(entity.kind, Kind::Switch);
+
+    let changes = registry.apply(override_payload(STAIR_LIGHT, r#"{"asLight":true}"#));
+    assert!(changes.contains(&Change::EntityUpserted(STAIR_LIGHT.to_owned())));
+    let entity = registry.entity(STAIR_LIGHT).expect("stair light");
+    assert_eq!(entity.kind, Kind::Light);
+    assert_eq!(entity.protocol_kind, Kind::Switch);
+    assert!(entity.ui.as_light);
+
+    let changes = registry.apply(override_payload(STAIR_LIGHT, ""));
+    assert!(changes.contains(&Change::EntityUpserted(STAIR_LIGHT.to_owned())));
+    let entity = registry.entity(STAIR_LIGHT).expect("stair light");
+    assert_eq!(entity.kind, Kind::Switch);
+    assert!(entity.ui.is_default());
+    assert!(registry.raw_override(STAIR_LIGHT).is_none());
+}
+
+#[test]
+fn removal_and_subscriptions() {
+    let mut registry = load_house();
+
+    // The stair light shares its state topic with its linkquality sensor: no subscription change.
+    let before = registry.subscription_topics().clone();
+    let changes = registry.apply(Inbound::Discovery(
+        discovery_topic(STAIR_LIGHT_TOPIC),
+        Vec::new(),
+    ));
+    assert!(changes.contains(&Change::EntityRemoved(STAIR_LIGHT.to_owned())));
+    assert!(!changes.contains(&Change::SubscriptionsChanged));
+    assert!(registry.entity(STAIR_LIGHT).is_none());
+    assert!(registry.state(STAIR_LIGHT).is_none());
+    assert_eq!(registry.subscription_topics(), &before);
+    assert!(
+        !registry
+            .entities_on_topic("zigbee2mqtt/rooms/stair/light")
+            .contains(&STAIR_LIGHT.to_owned())
+    );
+
+    // The house alarm is alone on its topics: removing it shrinks the subscription set.
+    assert!(
+        registry
+            .subscription_topics()
+            .contains("jeedom/alarm/state")
+    );
+    let changes = registry.apply(Inbound::Discovery(
+        discovery_topic(HOUSE_ALARM_TOPIC),
+        Vec::new(),
+    ));
+    assert!(changes.contains(&Change::EntityRemoved(HOUSE_ALARM.to_owned())));
+    assert!(changes.contains(&Change::SubscriptionsChanged));
+    assert!(
+        !registry
+            .subscription_topics()
+            .contains("jeedom/alarm/state")
+    );
+    assert!(registry.entities_on_topic("jeedom/alarm/state").is_empty());
+
+    // Removing it again changes nothing.
+    let changes = registry.apply(Inbound::Discovery(
+        discovery_topic(HOUSE_ALARM_TOPIC),
+        Vec::new(),
+    ));
+    assert!(changes.is_empty(), "{changes:?}");
+}
+
+#[test]
+fn state_routes_to_all_entities_on_shared_topic() {
+    let mut registry = load_house();
+    let payload = common::fixture("states/rooms__bedroom2__thermometer.json");
+    let inbound = registry.route(THERMOMETER_TOPIC, payload.into_bytes(), AT + 1);
+    assert!(matches!(inbound, Inbound::State { .. }), "{inbound:?}");
+    let changes = registry.apply(inbound);
+    for key in [
+        "temperature",
+        "humidity",
+        "battery",
+        "linkquality",
+        "voltage",
+    ] {
+        let id = format!("0x5c0272fffea35cfb_{key}_zigbee2mqtt");
+        assert!(
+            changes.contains(&Change::StateChanged(id.clone())),
+            "{id}: {changes:?}"
+        );
+        let state = registry.state(&id).expect("state");
+        assert!(
+            matches!(state.value, StateValue::Number(_)),
+            "{id}: {state:?}"
+        );
+        assert_eq!(state.last_update, Some(AT + 1));
+    }
+    assert_eq!(
+        registry.entities_on_topic(THERMOMETER_TOPIC).len(),
+        5,
+        "{:?}",
+        registry.entities_on_topic(THERMOMETER_TOPIC)
+    );
+}
+
+#[test]
+fn folding_moving_into_cover() {
+    let registry = load_house();
+    let moving = registry.entity(SHUTTER_MOVING).expect("moving sensor");
+    assert_eq!(moving.part_of.as_deref(), Some(SHUTTER_COVER));
+    let cover = registry.entity(SHUTTER_COVER).expect("cover");
+    assert_eq!(cover.part_of, None);
+    // A device with one light folds its numbers and selects into it.
+    let light = "0x1051dbfffe1a4058_light_zigbee2mqtt";
+    for id in [
+        "0x1051dbfffe1a4058_effect_zigbee2mqtt",
+        "0x1051dbfffe1a4058_effect_speed_zigbee2mqtt",
+        "0x1051dbfffe1a4058_palette_zigbee2mqtt",
+    ] {
+        let entity = registry.entity(id).expect("folded entity");
+        assert_eq!(entity.part_of.as_deref(), Some(light), "{id}");
+    }
+    assert_eq!(registry.entity(light).expect("light").part_of, None);
+}
+
+#[test]
+fn diagnostic_flag_present() {
+    let registry = load_house();
+    let entity = registry.entity(LINKQUALITY).expect("linkquality");
+    assert_eq!(entity.category, EntityCategory::Diagnostic);
+    assert!(!entity.enabled_by_default);
+}
+
+#[test]
+fn garbage_never_panics() {
+    let mut registry = load_house();
+    let before: Vec<String> = registry.entities().map(|e| e.unique_id.clone()).collect();
+    let ignored_before = registry.ignored().len();
+
+    let changes = registry.apply(Inbound::Discovery(
+        discovery_topic("oikos/sensor/garbage/x/config"),
+        vec![0xff, 0xfe, b'{'],
+    ));
+    assert!(changes.contains(&Change::IgnoredChanged), "{changes:?}");
+    assert_eq!(registry.ignored().len(), ignored_before + 1);
+    assert!(
+        registry
+            .ignored()
+            .iter()
+            .any(|i| i.topic == "oikos/sensor/garbage/x/config")
+    );
+
+    let _ = registry.apply(override_payload(STAIR_LIGHT, "{"));
+    let _ = registry.apply(Inbound::Areas(Vec::new()));
+    let _ = registry.apply(Inbound::Z2mDevices(b"null".to_vec()));
+    let _ = registry.apply(Inbound::Z2mBridgeInfo(b"[1,2".to_vec()));
+    let _ = registry.apply(Inbound::Z2mBridgeState(vec![0xff]));
+    let _ = registry.apply(Inbound::State {
+        topic: "zigbee2mqtt/rooms/stair/light".to_owned(),
+        payload: vec![0xff, 0xfe],
+        at: AT,
+    });
+    let _ = registry.apply(Inbound::State {
+        topic: "zigbee2mqtt/rooms/stair/light".to_owned(),
+        payload: b"[".to_vec(),
+        at: AT,
+    });
+    let _ = registry.apply(Inbound::Irrelevant);
+    let _ = registry.route("", Vec::new(), AT);
+    let _ = registry.route("oikos/ui/", Vec::new(), AT);
+    let _ = registry.route("oikos//config", vec![0], AT);
+
+    let after: Vec<String> = registry.entities().map(|e| e.unique_id.clone()).collect();
+    assert_eq!(before, after);
+    assert_eq!(registry.devices().count(), 66);
+}
+
+#[test]
+fn identical_payload_is_noop() {
+    let mut registry = load_house();
+    let payload = common::fixture("discovery/switch__0x847127fffe24e322__switch.json");
+    let changes = registry.apply(Inbound::Discovery(
+        discovery_topic(STAIR_LIGHT_TOPIC),
+        payload.clone().into_bytes(),
+    ));
+    assert!(changes.is_empty(), "{changes:?}");
+
+    let changes = registry.apply(Inbound::Areas(
+        common::fixture("ui/_areas.json").into_bytes(),
+    ));
+    assert!(changes.is_empty(), "{changes:?}");
+
+    let changes = registry.apply(override_payload(
+        ALARM_SWITCH,
+        &common::fixture("ui/0xbc33acfffe36db49_switch_alarm_zigbee2mqtt.json"),
+    ));
+    assert!(changes.is_empty(), "{changes:?}");
+
+    let changes = registry.apply(Inbound::Z2mDevices(
+        common::fixture("bridge_devices.json").into_bytes(),
+    ));
+    assert!(changes.is_empty(), "{changes:?}");
+
+    // A re-published config with a different body is an upsert.
+    let edited = payload.replace("\"name\":null", "\"name\":\"Stair\"");
+    assert_ne!(edited, payload);
+    let changes = registry.apply(Inbound::Discovery(
+        discovery_topic(STAIR_LIGHT_TOPIC),
+        edited.into_bytes(),
+    ));
+    assert_eq!(
+        changes,
+        vec![Change::EntityUpserted(STAIR_LIGHT.to_owned())]
+    );
+}
+
+#[test]
+fn area_resolution_by_name_case_insensitive() {
+    let mut registry = load_house();
+    registry.apply(override_payload(STAIR_LIGHT, r#"{"area":"Living"}"#));
+    assert_eq!(registry.entity(STAIR_LIGHT).expect("entity").area, "living");
+
+    // An unknown area becomes an implicit one, listed after the declared ones with name = id.
+    registry.apply(override_payload(STAIR_LIGHT, r#"{"area":"attic"}"#));
+    assert_eq!(registry.entity(STAIR_LIGHT).expect("entity").area, "attic");
+    let areas = registry.effective_areas();
+    let declared = registry.areas_document().areas.len();
+    let attic = areas
+        .iter()
+        .position(|a| a.id == "attic")
+        .expect("implicit area");
+    assert!(attic >= declared);
+    assert_eq!(areas[attic].name, "attic");
+    assert_eq!(areas.last().map(|a| a.id.as_str()), Some(UNASSIGNED_AREA));
+}
+
+#[test]
+fn override_before_discovery_applies_when_the_entity_appears() {
+    let mut registry = Registry::new(config());
+    let changes = registry.apply(override_payload("test_switch", r#"{"area":"Garage"}"#));
+    assert!(changes.is_empty(), "{changes:?}");
+    assert!(registry.raw_override("test_switch").is_some());
+
+    let config = json!({
+        "unique_id": "test_switch",
+        "state_topic": "zigbee2mqtt/test",
+        "command_topic": "zigbee2mqtt/test/set",
+        "device": {"identifiers": ["zigbee2mqtt_0xtest"], "name": "test"}
+    });
+    let changes = registry.apply(Inbound::Discovery(
+        discovery_topic("oikos/switch/test/config"),
+        config.to_string().into_bytes(),
+    ));
+    assert_eq!(
+        changes,
+        vec![
+            Change::EntityUpserted("test_switch".to_owned()),
+            Change::SubscriptionsChanged
+        ]
+    );
+    assert_eq!(
+        registry.entity("test_switch").expect("entity").area,
+        "Garage"
+    );
+    assert_eq!(
+        registry.subscription_topics(),
+        &BTreeSet::from(["zigbee2mqtt/test".to_owned()])
+    );
+
+    // Declaring the area afterwards resolves the override's name to the declared id.
+    let changes = registry.apply(Inbound::Areas(
+        br#"{"areas":[{"id":"garage","name":"Garage"}]}"#.to_vec(),
+    ));
+    assert_eq!(
+        changes,
+        vec![
+            Change::EntityUpserted("test_switch".to_owned()),
+            Change::AreasChanged
+        ]
+    );
+    assert_eq!(
+        registry.entity("test_switch").expect("entity").area,
+        "garage"
+    );
+}
+
+#[test]
+fn device_based_discovery_expands_and_removes() {
+    let mut registry = Registry::new(config());
+    let topic = discovery_topic("oikos/device/0xdev/config");
+    let config = json!({
+        "dev": {"ids": ["zigbee2mqtt_0xdev"], "name": "rooms/office/strip"},
+        "o": {"name": "test"},
+        "~": "zigbee2mqtt/rooms/office/strip",
+        "cmps": {
+            "light": {"p": "light", "uniq_id": "dev_light", "stat_t": "~", "cmd_t": "~/set", "schema": "json"},
+            "speed": {"p": "number", "uniq_id": "dev_speed", "stat_t": "~", "cmd_t": "~/set"}
+        }
+    });
+    let changes = registry.apply(Inbound::Discovery(
+        topic.clone(),
+        config.to_string().into_bytes(),
+    ));
+    assert_eq!(
+        changes,
+        vec![
+            Change::EntityUpserted("dev_light".to_owned()),
+            Change::EntityUpserted("dev_speed".to_owned()),
+            Change::SubscriptionsChanged
+        ]
+    );
+    let light = registry.entity("dev_light").expect("light");
+    assert_eq!(light.area, "office");
+    assert_eq!(
+        light.discovery_topic,
+        "oikos/light/0xdev/light/config".to_owned()
+    );
+    assert_eq!(
+        registry
+            .entity("dev_speed")
+            .expect("number")
+            .part_of
+            .as_deref(),
+        Some("dev_light")
+    );
+    assert!(registry.ignored().is_empty());
+
+    // A re-publish without the number (HA marks removals with a platform-only entry) drops it.
+    let config = json!({
+        "dev": {"ids": ["zigbee2mqtt_0xdev"], "name": "rooms/office/strip"},
+        "o": {"name": "test"},
+        "~": "zigbee2mqtt/rooms/office/strip",
+        "cmps": {
+            "light": {"p": "light", "uniq_id": "dev_light", "stat_t": "~", "cmd_t": "~/set", "schema": "json"},
+            "speed": {"p": "number"}
+        }
+    });
+    let changes = registry.apply(Inbound::Discovery(
+        topic.clone(),
+        config.to_string().into_bytes(),
+    ));
+    assert_eq!(changes, vec![Change::EntityRemoved("dev_speed".to_owned())]);
+    assert!(registry.entity("dev_light").is_some());
+
+    // An empty payload on the device topic removes everything it produced.
+    let changes = registry.apply(Inbound::Discovery(topic, Vec::new()));
+    assert_eq!(
+        changes,
+        vec![
+            Change::EntityRemoved("dev_light".to_owned()),
+            Change::SubscriptionsChanged
+        ]
+    );
+    assert_eq!(registry.entities().count(), 0);
+    assert!(registry.subscription_topics().is_empty());
+}
+
+#[test]
+fn template_failure_marks_unknown_and_recovers() {
+    let mut registry = Registry::new(config());
+    let broken = json!({
+        "unique_id": "broken",
+        "state_topic": "zigbee2mqtt/broken",
+        "value_template": "{{ value_json.x | no_such_filter }}"
+    });
+    registry.apply(Inbound::Discovery(
+        discovery_topic("oikos/sensor/broken/config"),
+        broken.to_string().into_bytes(),
+    ));
+    let changes = registry.apply(Inbound::State {
+        topic: "zigbee2mqtt/broken".to_owned(),
+        payload: br#"{"x":1}"#.to_vec(),
+        at: AT,
+    });
+    assert!(!changes.contains(&Change::StateChanged("broken".to_owned())));
+    assert_eq!(
+        registry.state("broken").expect("state").value,
+        StateValue::Unknown
+    );
+    assert_eq!(
+        registry.template_failures(),
+        &BTreeSet::from(["broken".to_owned()])
+    );
+
+    let fixed = json!({
+        "unique_id": "broken",
+        "state_topic": "zigbee2mqtt/broken",
+        "value_template": "{{ value_json.x }}"
+    });
+    registry.apply(Inbound::Discovery(
+        discovery_topic("oikos/sensor/broken/config"),
+        fixed.to_string().into_bytes(),
+    ));
+    let changes = registry.apply(Inbound::State {
+        topic: "zigbee2mqtt/broken".to_owned(),
+        payload: br#"{"x":1}"#.to_vec(),
+        at: AT,
+    });
+    assert_eq!(changes, vec![Change::StateChanged("broken".to_owned())]);
+    assert_eq!(
+        registry.state("broken").expect("state").value,
+        StateValue::Number(1.0)
+    );
+    assert!(registry.template_failures().is_empty());
+}
+
+#[test]
+fn route_classifies_every_topic_kind() {
+    let registry = load_house();
+    let route = |topic: &str| registry.route(topic, b"x".to_vec(), AT);
+    assert!(matches!(route("oikos/ui/_areas"), Inbound::Areas(_)));
+    assert!(matches!(
+        route("oikos/ui/some_id"),
+        Inbound::Override { unique_id, .. } if unique_id == "some_id"
+    ));
+    assert!(matches!(
+        route("zigbee2mqtt/bridge/devices"),
+        Inbound::Z2mDevices(_)
+    ));
+    assert!(matches!(
+        route("zigbee2mqtt/bridge/info"),
+        Inbound::Z2mBridgeInfo(_)
+    ));
+    assert!(matches!(
+        route("oikos/switch/x/config"),
+        Inbound::Discovery(DiscoveryTopic { component, .. }, _) if component == "switch"
+    ));
+    assert!(matches!(
+        route(THERMOMETER_TOPIC),
+        Inbound::State { at, .. } if at == AT
+    ));
+    assert!(matches!(route("oikos/automation/x"), Inbound::Irrelevant));
+    assert!(matches!(
+        route("zigbee2mqtt/nobody/here"),
+        Inbound::Irrelevant
+    ));
+    assert!(matches!(
+        route("homeassistant/switch/x/config"),
+        Inbound::Irrelevant
+    ));
+}
+
+#[test]
+fn bridge_state_feeds_entity_availability() {
+    let mut registry = load_house();
+    // Every Z2M entity declares `zigbee2mqtt/bridge/state` as an availability topic, so once
+    // subscribed the bridge state is a state message for them as well as the bridge.
+    let inbound = registry.route(
+        "zigbee2mqtt/bridge/state",
+        br#"{"state":"offline"}"#.to_vec(),
+        AT,
+    );
+    let changes = registry.apply(inbound);
+    assert!(changes.contains(&Change::BridgeChanged), "{changes:?}");
+    assert!(changes.contains(&Change::StateChanged(STAIR_LIGHT.to_owned())));
+    assert_eq!(
+        registry.bridge().state,
+        oikos_core::model::Availability::Offline
+    );
+    assert_eq!(
+        registry.state(STAIR_LIGHT).expect("state").availability,
+        oikos_core::model::Availability::Offline
+    );
+}
