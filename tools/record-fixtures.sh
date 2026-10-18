@@ -19,7 +19,16 @@ for t in 'homeassistant/#' 'oikos/#' 'zigbee2mqtt/bridge/info' \
 done
 
 # -W exits non-zero on timeout; that is the expected end of the window.
-mosquitto_sub "${args[@]}" >"$RAW" || true
+rc=0
+mosquitto_sub "${args[@]}" >"$RAW" || rc=$?
+if [ "$rc" -ne 0 ] && [ "$rc" -ne 27 ]; then
+  echo "mosquitto_sub failed (exit $rc); fixtures left untouched" >&2
+  exit 1
+fi
+if ! grep -q '^1 ' "$RAW"; then
+  echo "no retained messages received; fixtures left untouched" >&2
+  exit 1
+fi
 
 mkdir -p "$OUT"
 rm -rf "$OUT/discovery" "$OUT/states" "$OUT/ui"
@@ -33,8 +42,11 @@ cur = None
 for line in open(raw, encoding="utf-8", errors="replace").read().split("\n"):
     m = re.match(r"^([01]) (\S+) ?(.*)$", line)
     if m:
-        cur = m.group(2)
-        msgs[cur] = [m.group(1), m.group(3)]
+        cur = None
+        # Only retained messages count; keep the first one per topic.
+        if m.group(1) == "1" and m.group(2) not in msgs:
+            cur = m.group(2)
+            msgs[cur] = ["1", m.group(3)]
     elif cur is not None:
         msgs[cur][1] += "\n" + line
 SECRET_KEYS = {"password", "network_key", "pan_id", "ext_pan_id", "extended_pan_id"}
