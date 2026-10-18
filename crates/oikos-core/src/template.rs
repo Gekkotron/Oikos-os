@@ -21,7 +21,7 @@ pub enum TemplateError {
     /// has no numeric meaning without a default.
     #[error("undefined value: {0}")]
     Undefined(String),
-    /// Any other evaluation failure (unknown filter, bad operation, …).
+    /// Any other evaluation failure (invalid operation, bad argument, …).
     #[error("template error: {0}")]
     Other(String),
 }
@@ -151,7 +151,7 @@ mod filters {
         kwargs: Kwargs,
     ) -> Result<Value, JinjaError> {
         let default = default_arg(default, &kwargs)?;
-        match to_f64(value) {
+        match to_f64(value).filter(|f| f.is_finite()) {
             Some(f) => Ok(Value::from(f)),
             None => default.ok_or_else(|| undefined(format!("float got invalid input {value:?}"))),
         }
@@ -182,7 +182,8 @@ mod filters {
     }
 
     /// HA `iif(if_true, if_false, if_none=None)`: `if_none` applies only to `none` and
-    /// only when given; otherwise truthiness decides.
+    /// only when given; otherwise truthiness decides. Undefined input is an error (Strict
+    /// mode does not intercept filter arguments, and a missing key must not become `off`).
     pub fn iif(
         value: &Value,
         if_true: Value,
@@ -195,6 +196,9 @@ mod filters {
             None => kwargs.get::<Option<Value>>("if_none")?,
         };
         kwargs.assert_all_used()?;
+        if value.is_undefined() {
+            return Err(undefined("iif: value is undefined".to_owned()));
+        }
         if let (true, Some(v)) = (value.is_none(), if_none) {
             return Ok(v);
         }

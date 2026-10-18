@@ -65,6 +65,7 @@ fn float_and_int_follow_home_assistant_semantics() {
     let t = t();
     assert_eq!(t.render("{{ value | float }}", "21.5").unwrap(), "21.5");
     assert_eq!(t.render("{{ value | int }}", "21.9").unwrap(), "21");
+    assert_eq!(t.render("{{ value | int }}", "3.7").unwrap(), "3");
     assert_eq!(t.render("{{ true | float }}", "x").unwrap(), "1.0");
     assert_eq!(
         t.render("{{ value_json.b | int }}", r#"{"b":false}"#)
@@ -94,6 +95,21 @@ fn float_and_int_follow_home_assistant_semantics() {
         t.render("{{ value_json.x | int }}", r#"{"x":null}"#),
         Err(TemplateError::Undefined(_))
     ));
+}
+
+#[test]
+fn float_rejects_non_finite_values() {
+    let t = t();
+    for payload in ["nan", "inf", "-inf", "NaN"] {
+        assert!(
+            matches!(
+                t.render("{{ value | float }}", payload),
+                Err(TemplateError::Undefined(_))
+            ),
+            "{payload}"
+        );
+        assert_eq!(t.render("{{ value | float(0) }}", payload).unwrap(), "0");
+    }
 }
 
 #[test]
@@ -184,6 +200,19 @@ fn if_else_and_iif() {
             .unwrap(),
         "off"
     );
+}
+
+#[test]
+fn iif_on_undefined_input_is_an_error() {
+    let t = t();
+    assert!(matches!(
+        t.render("{{ value_json.nope | iif('on','off') }}", "{}"),
+        Err(TemplateError::Undefined(_))
+    ));
+    assert!(matches!(
+        t.render("{{ value_json.nope | iif('on','off','none') }}", "{}"),
+        Err(TemplateError::Undefined(_))
+    ));
 }
 
 #[test]
