@@ -6,7 +6,7 @@
 //! values are strict: printing or testing one is an error, so a template whose payload lacks
 //! the key it reads fails instead of rendering an empty string.
 
-use minijinja::value::{Kwargs, Serde, ValueKind};
+use minijinja::value::{Kwargs, Rest, Serde, ValueKind};
 use minijinja::{Environment, Error as JinjaError, ErrorKind, UndefinedBehavior, Value};
 use serde_json::Map;
 
@@ -65,6 +65,7 @@ impl Templates {
         env.add_filter("is_defined", filters::is_defined);
         env.add_filter("is_number", filters::is_number);
         env.add_filter("iif", filters::iif);
+        env.add_filter("truncate", filters::truncate);
         env.add_test("is_number", filters::is_number);
         Self { env }
     }
@@ -207,5 +208,57 @@ mod filters {
         } else {
             Ok(if_false.unwrap_or_else(|| Value::from(false)))
         }
+    }
+
+    /// Jinja2 `truncate(length=255, killwords=false, end="...", leeway=5)`: text longer than
+    /// `length + leeway` characters is cut to `length` including `end`, at the last space
+    /// unless `killwords`. Zigbee2MQTT text sensors use `truncate(254, True, '', 0)`.
+    pub fn truncate(value: &str, args: Rest<Value>, kwargs: Kwargs) -> Result<String, JinjaError> {
+        if args.len() > 4 {
+            return Err(JinjaError::new(
+                ErrorKind::TooManyArguments,
+                "truncate takes at most 4 positional arguments",
+            ));
+        }
+        let length = match args.first() {
+            Some(v) => usize::try_from(v.clone())?,
+            None => kwargs.get::<Option<usize>>("length")?.unwrap_or(255),
+        };
+        let killwords = match args.get(1) {
+            Some(v) => v.is_true(),
+            None => kwargs.get::<Option<bool>>("killwords")?.unwrap_or(false),
+        };
+        let end = match args.get(2) {
+            Some(v) => v.as_str().map_or_else(|| v.to_string(), str::to_owned),
+            None => kwargs
+                .get::<Option<String>>("end")?
+                .unwrap_or_else(|| "...".to_owned()),
+        };
+        let leeway = match args.get(3) {
+            Some(v) => usize::try_from(v.clone())?,
+            None => kwargs.get::<Option<usize>>("leeway")?.unwrap_or(5),
+        };
+        kwargs.assert_all_used()?;
+        let end_len = end.chars().count();
+        if length < end_len {
+            return Err(JinjaError::new(
+                ErrorKind::InvalidOperation,
+                "truncate: expected length >= the length of end",
+            ));
+        }
+        let chars: Vec<char> = value.chars().collect();
+        if chars.len() <= length.saturating_add(leeway) {
+            return Ok(value.to_owned());
+        }
+        let keep: String = chars[..length - end_len].iter().collect();
+        let kept = if killwords {
+            keep
+        } else {
+            match keep.rfind(' ') {
+                Some(space) => keep[..space].to_owned(),
+                None => keep,
+            }
+        };
+        Ok(kept + &end)
     }
 }

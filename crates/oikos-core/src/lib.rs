@@ -5,4 +5,5 @@
 pub mod model;
 
 pub mod discovery;
+pub mod state;
 pub mod template;

@@ -1,0 +1,989 @@
+//! State mapping against the recorded house fixtures and hand-written configs.
+
+mod common;
+
+use std::collections::BTreeMap;
+
+use oikos_core::discovery::{DiscoveryTopic, Parsed, TopicClass, classify, parse};
+use oikos_core::model::{
+    Availability, ClimateState, CoverState, Entity, EntityState, Hs, LightState, StateValue,
+    VacuumState, WaterHeaterState,
+};
+use oikos_core::state::color::{rgb_to_hs, xy_to_hs};
+use oikos_core::state::{Applied, StateError, apply_message};
+use oikos_core::template::{TemplateError, Templates};
+use serde_json::{Value, json};
+
+const AT: u64 = 1_700_000_000;
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| (*s).to_owned()).collect()
+}
+
+fn discovery_topic(topic: &str) -> DiscoveryTopic {
+    match classify(topic, &strings(&["oikos"]), &strings(&["ui", "automation"])) {
+        TopicClass::Discovery(t) => t,
+        other => panic!("{topic} is not a discovery topic: {other:?}"),
+    }
+}
+
+fn entity_from_payload(topic_str: &str, payload: &str) -> Entity {
+    let topic = discovery_topic(topic_str);
+    match parse(&topic, payload.as_bytes(), topic_str) {
+        Ok(Parsed::Entity(entity)) => *entity,
+        other => panic!("{topic_str} did not parse as an entity: {other:?}"),
+    }
+}
+
+/// Parses one recorded discovery fixture (file name without `.json`) into an entity.
+fn parse_fixture(file_stem: &str) -> Entity {
+    let topic_str = format!("oikos/{}/config", file_stem.replace("__", "/"));
+    let payload = common::fixture(&format!("discovery/{file_stem}.json"));
+    entity_from_payload(&topic_str, &payload)
+}
+
+/// Builds an entity from a hand-written config for `component`.
+fn entity(component: &str, config: Value) -> Entity {
+    entity_from_payload(
+        &format!("oikos/{component}/test/config"),
+        &config.to_string(),
+    )
+}
+
+/// Every recorded discovery fixture that parses as an entity.
+fn all_entities() -> Vec<Entity> {
+    let dir = common::fixture_dir().join("discovery");
+    let mut entities = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("discovery fixture dir") {
+        let path = entry.expect("dir entry").path();
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("fixture stem")
+            .to_owned();
+        let topic_str = format!("oikos/{}/config", stem.replace("__", "/"));
+        let topic = discovery_topic(&topic_str);
+        let payload = std::fs::read(&path).expect("fixture");
+        if let Ok(Parsed::Entity(entity)) = parse(&topic, &payload, &topic_str) {
+            entities.push(*entity);
+        }
+    }
+    entities
+}
+
+/// Every recorded device state as `(topic, payload)`.
+fn all_states() -> Vec<(String, String)> {
+    let dir = common::fixture_dir().join("states");
+    let mut states = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("states fixture dir") {
+        let path = entry.expect("dir entry").path();
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("fixture stem")
+            .to_owned();
+        let topic = format!("zigbee2mqtt/{}", stem.replace("__", "/"));
+        states.push((topic, std::fs::read_to_string(&path).expect("fixture")));
+    }
+    states
+}
+
+fn state_fixture(name: &str) -> (String, String) {
+    (
+        format!("zigbee2mqtt/{}", name.replace("__", "/")),
+        common::fixture(&format!("states/{name}.json")),
+    )
+}
+
+fn apply(entity: &Entity, state: &mut EntityState, topic: &str, payload: &str) -> Applied {
+    apply_message(entity, state, topic, payload, AT, &Templates::new())
+        .unwrap_or_else(|e| panic!("{} on {topic}: {e}", entity.unique_id))
+}
+
+#[test]
+fn recorded_states_apply_to_every_entity() {
+    let templates = Templates::new();
+    let entities = all_entities();
+    let states = all_states();
+    assert!(entities.len() > 400, "entities: {}", entities.len());
+    assert_eq!(states.len(), 64);
+    let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut errors = Vec::new();
+    for (topic, payload) in &states {
+        for entity in &entities {
+            let bound = entity.bindings.topics().contains(topic);
+            let mut state = EntityState::default();
+            match apply_message(entity, &mut state, topic, payload, AT, &templates) {
+                Ok(Applied::Changed) => {
+                    assert!(bound, "{} changed on unbound {topic}", entity.unique_id);
+                    assert_eq!(state.last_update, Some(AT));
+                    *counts.entry("changed").or_default() += 1;
+                }
+                Ok(Applied::Unchanged) => {
+                    assert!(bound, "{} unchanged on unbound {topic}", entity.unique_id);
+                    assert_eq!(state, EntityState::default());
+                    *counts.entry("unchanged").or_default() += 1;
+                }
+                Ok(Applied::NotForThisEntity) => {
+                    assert!(!bound, "{} ignored bound {topic}", entity.unique_id);
+                    assert_eq!(state, EntityState::default());
+                    *counts.entry("not_for_this_entity").or_default() += 1;
+                }
+                Err(e) => errors.push(format!("{} on {topic}: {e}", entity.unique_id)),
+            }
+        }
+    }
+    eprintln!("state mapping on fixtures: {counts:?}");
+    assert!(errors.is_empty(), "errors: {errors:#?}");
+    let changed = counts.get("changed").copied().unwrap_or_default();
+    assert!(changed >= 300, "changed: {changed}");
+}
+
+#[test]
+fn thermometer_temperature_is_number_with_unit() {
+    let entity = parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
+    let (topic, payload) = state_fixture("rooms__bedroom1__thermometer");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&entity, &mut state, &topic, &payload),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::Number(18.4));
+    assert_eq!(entity.unit.as_deref(), Some("°C"));
+    assert_eq!(state.last_update, Some(AT));
+}
+
+#[test]
+fn contact_sensor_maps_to_on_off() {
+    let entity = parse_fixture("binary_sensor__0x00158d00054266a8__contact");
+    let config = &entity.bindings.config;
+    // The Z2M door sensor publishes `contact`: false means open, which HA shows as ON.
+    assert_eq!(config["payload_on"], json!(false));
+    assert_eq!(config["payload_off"], json!(true));
+    assert_eq!(
+        config["value_template"],
+        json!("{{ value_json[\"contact\"] }}")
+    );
+
+    // The recorded payload has contact=true (door closed): what the fixture implies is OFF.
+    let (topic, payload) = state_fixture("rooms__living__door_north");
+    let recorded: Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(recorded["contact"], json!(true));
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&entity, &mut state, &topic, &payload),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::OnOff(false));
+
+    // contact=false (door open) => ON.
+    assert_eq!(
+        apply(
+            &entity,
+            &mut state,
+            &topic,
+            r#"{"contact":false,"battery":100}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::OnOff(true));
+
+    // A value that matches neither payload is ignored.
+    assert_eq!(
+        apply(&entity, &mut state, &topic, r#"{"contact":"maybe"}"#),
+        Applied::Unchanged
+    );
+    assert_eq!(state.value, StateValue::OnOff(true));
+}
+
+#[test]
+fn json_light_state() {
+    let light = entity(
+        "light",
+        json!({
+            "unique_id": "l1",
+            "name": "L1",
+            "schema": "json",
+            "state_topic": "test/light",
+            "command_topic": "test/light/set",
+            "brightness": true,
+            "supported_color_modes": ["hs"],
+            "effect": true,
+            "effect_list": ["blink"]
+        }),
+    );
+    let mut state = EntityState::default();
+    let payload = r#"{"state":"ON","brightness":127,"color":{"h":30,"s":40},"effect":"blink"}"#;
+    assert_eq!(
+        apply(&light, &mut state, "test/light", payload),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Light(LightState {
+            on: true,
+            brightness: Some(127),
+            hs: Some(Hs { h: 30.0, s: 40.0 }),
+            color_temp: None,
+            effect: Some("blink".into()),
+        })
+    );
+
+    // A partial update keeps the other fields.
+    assert_eq!(
+        apply(&light, &mut state, "test/light", r#"{"state":"OFF"}"#),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Light(LightState {
+            on: false,
+            brightness: Some(127),
+            hs: Some(Hs { h: 30.0, s: 40.0 }),
+            color_temp: None,
+            effect: Some("blink".into()),
+        })
+    );
+
+    // Z2M scale 254 and xy colour, on a recorded light.
+    let leds = parse_fixture("light__0x1051dbfffe1a4058__light");
+    let (topic, payload) = state_fixture("rooms__bedroom1__leds");
+    let mut state = EntityState::default();
+    assert_eq!(apply(&leds, &mut state, &topic, &payload), Applied::Changed);
+    let StateValue::Light(light) = &state.value else {
+        panic!("not a light: {:?}", state.value);
+    };
+    assert!(!light.on);
+    assert_eq!(light.brightness, Some(0));
+    assert_eq!(light.effect.as_deref(), Some("solid"));
+    // xy (0.3688, 0.3684) is a warm white: a yellowish hue with low saturation.
+    let hs = light.hs.expect("xy colour converted");
+    assert!(hs.s < 30.0, "warm white should have low saturation: {hs:?}");
+    assert!((30.0..=60.0).contains(&hs.h), "warm white hue: {hs:?}");
+    assert_eq!(
+        apply(
+            &leds,
+            &mut state,
+            &topic,
+            r#"{"state":"ON","brightness":254}"#
+        ),
+        Applied::Changed
+    );
+    let StateValue::Light(light) = &state.value else {
+        panic!("not a light: {:?}", state.value);
+    };
+    assert!(light.on);
+    assert_eq!(light.brightness, Some(255));
+}
+
+#[test]
+fn default_schema_light_rgb_to_hs() {
+    let light = entity(
+        "light",
+        json!({
+            "unique_id": "l2",
+            "name": "L2",
+            "state_topic": "test/l2/state",
+            "command_topic": "test/l2/set",
+            "brightness_state_topic": "test/l2/brightness",
+            "brightness_scale": 100,
+            "rgb_state_topic": "test/l2/rgb",
+            "color_temp_state_topic": "test/l2/ct",
+            "effect_state_topic": "test/l2/effect",
+            "effect_list": ["rainbow"]
+        }),
+    );
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&light, &mut state, "test/l2/state", "ON"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&light, &mut state, "test/l2/brightness", "100"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&light, &mut state, "test/l2/rgb", "255,0,0"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&light, &mut state, "test/l2/ct", "370"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&light, &mut state, "test/l2/effect", "rainbow"),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Light(LightState {
+            on: true,
+            brightness: Some(255),
+            hs: Some(Hs { h: 0.0, s: 100.0 }),
+            color_temp: Some(370),
+            effect: Some("rainbow".into()),
+        })
+    );
+    // Half scale rounds to the 0..=255 range.
+    assert_eq!(
+        apply(&light, &mut state, "test/l2/brightness", "50"),
+        Applied::Changed
+    );
+    let StateValue::Light(l) = &state.value else {
+        panic!("not a light: {:?}", state.value);
+    };
+    assert_eq!(l.brightness, Some(128));
+    // Unparseable brightness is ignored.
+    assert_eq!(
+        apply(&light, &mut state, "test/l2/brightness", "bright"),
+        Applied::Unchanged
+    );
+    // Unknown on/off payload is ignored.
+    assert_eq!(
+        apply(&light, &mut state, "test/l2/state", "MAYBE"),
+        Applied::Unchanged
+    );
+
+    // Templated default-schema fields on one shared topic (Philips TV ambilight).
+    let philips = parse_fixture("light__philips__philips_tv_philips_ambilight");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &philips,
+            &mut state,
+            "philips/status",
+            r#"{"ambilight_power":"On","ambilight_brightness":5,"ambilight_mode":"FOLLOW_VIDEO"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Light(LightState {
+            on: true,
+            brightness: Some(128),
+            hs: None,
+            color_temp: None,
+            effect: Some("FOLLOW_VIDEO".into()),
+        })
+    );
+}
+
+#[test]
+fn color_conversions() {
+    assert_eq!(rgb_to_hs(255, 0, 0), Hs { h: 0.0, s: 100.0 });
+    assert_eq!(rgb_to_hs(0, 255, 0), Hs { h: 120.0, s: 100.0 });
+    assert_eq!(rgb_to_hs(0, 0, 255), Hs { h: 240.0, s: 100.0 });
+    assert_eq!(rgb_to_hs(0, 0, 0), Hs { h: 0.0, s: 0.0 });
+    assert_eq!(rgb_to_hs(255, 255, 255), Hs { h: 0.0, s: 0.0 });
+    let grey = rgb_to_hs(128, 128, 128);
+    assert_eq!(grey.s, 0.0);
+
+    // Reference values from Home Assistant's `color_xy_to_RGB` (wide RGB D65 matrix):
+    // D65 white (0.3127, 0.3290) -> (245, 254, 255); sRGB red (0.64, 0.33) -> (255, 92, 47);
+    // (0.3, 0.6) -> (156, 255, 68). Rounding instead of truncation moves a channel by one.
+    let white = xy_to_hs(0.3127, 0.3290);
+    assert!(white.s < 5.0, "{white:?}");
+    let red = xy_to_hs(0.64, 0.33);
+    assert!((red.h - 13.0).abs() < 1.0, "{red:?}");
+    assert!((red.s - 81.5).abs() < 1.0, "{red:?}");
+    let green = xy_to_hs(0.3, 0.6);
+    assert!((green.h - 92.0).abs() < 1.0, "{green:?}");
+    assert!((green.s - 73.5).abs() < 1.0, "{green:?}");
+    // Degenerate input does not panic.
+    let degenerate = xy_to_hs(0.0, 0.0);
+    assert!(degenerate.h.is_finite() && degenerate.s.is_finite());
+}
+
+#[test]
+fn cover_state_and_position() {
+    let cover = entity(
+        "cover",
+        json!({
+            "unique_id": "c1",
+            "name": "C1",
+            "state_topic": "test/cover/state",
+            "position_topic": "test/cover/position",
+            "command_topic": "test/cover/set"
+        }),
+    );
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&cover, &mut state, "test/cover/state", "open"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&cover, &mut state, "test/cover/position", "40"),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Cover(CoverState {
+            state: Some("open".into()),
+            position: Some(40),
+        })
+    );
+    assert_eq!(
+        apply(&cover, &mut state, "test/cover/state", "closing"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&cover, &mut state, "test/cover/state", "sideways"),
+        Applied::Unchanged
+    );
+    let StateValue::Cover(c) = &state.value else {
+        panic!("not a cover: {:?}", state.value);
+    };
+    assert_eq!(c.state.as_deref(), Some("closing"));
+
+    // Recorded Z2M shutter: state and position share one topic and use custom words.
+    let shutter = parse_fixture("cover__0x000d6ffffe9d44e4__cover");
+    let (topic, payload) = state_fixture("rooms__office__shutter");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&shutter, &mut state, &topic, &payload),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Cover(CoverState {
+            state: Some("closed".into()),
+            position: Some(0),
+        })
+    );
+    assert_eq!(
+        apply(
+            &shutter,
+            &mut state,
+            &topic,
+            r#"{"moving":"UP","position":30,"state":"OPEN"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Cover(CoverState {
+            state: Some("opening".into()),
+            position: Some(30),
+        })
+    );
+}
+
+#[test]
+fn climate_fields() {
+    let climate = parse_fixture("climate__daikin_192_168_1_150__climate");
+    let topic = "daikin/192.168.1.150/ha/state";
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &climate,
+            &mut state,
+            topic,
+            r#"{"current_temperature":20.5,"target_temperature":21,"mode":"heat","fan_mode":"auto","swing_mode":"off"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Climate(ClimateState {
+            current: Some(20.5),
+            target: Some(21.0),
+            mode: Some("heat".into()),
+            fan_mode: Some("auto".into()),
+            action: None,
+        })
+    );
+    // Availability through the list form without a template, non-JSON payload.
+    assert_eq!(
+        apply(
+            &climate,
+            &mut state,
+            "daikin/bridge/availability",
+            "offline"
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Offline);
+
+    let heater = entity(
+        "water_heater",
+        json!({
+            "unique_id": "wh",
+            "name": "WH",
+            "mode_state_topic": "wh/mode",
+            "current_temperature_topic": "wh/current",
+            "temperature_state_topic": "wh/target",
+            "temperature_state_template": "{{ value_json.t }}",
+            "mode_command_topic": "wh/mode/set"
+        }),
+    );
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&heater, &mut state, "wh/mode", "eco"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&heater, &mut state, "wh/current", "48.5"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&heater, &mut state, "wh/target", r#"{"t": 55}"#),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::WaterHeater(WaterHeaterState {
+            mode: Some("eco".into()),
+            current: Some(48.5),
+            target: Some(55.0),
+        })
+    );
+}
+
+#[test]
+fn vacuum_and_alarm_states() {
+    let vacuum = parse_fixture("vacuum__roborock_40313ca8b964__roborock_40313ca8b964");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &vacuum,
+            &mut state,
+            "roborock/ha/state",
+            r#"{"state":"cleaning","battery_level":61,"fan_speed":"Turbo"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Vacuum(VacuumState {
+            state: Some("cleaning".into()),
+            battery: Some(61),
+            fan_speed: Some("Turbo".into()),
+        })
+    );
+    assert_eq!(
+        apply(&vacuum, &mut state, "roborock/ha/state", "not json"),
+        Applied::Unchanged
+    );
+    assert_eq!(
+        apply(&vacuum, &mut state, "roborock/alive", "0"),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Offline);
+    assert_eq!(
+        apply(&vacuum, &mut state, "roborock/alive", "1"),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Online);
+
+    let alarm = parse_fixture("alarm_control_panel__jeedom__house_alarm");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&alarm, &mut state, "jeedom/alarm/state", "armed_home"),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::Alarm("armed_home".into()));
+    assert_eq!(
+        apply(&alarm, &mut state, "jeedom/alarm/state", "exploded"),
+        Applied::Unchanged
+    );
+    assert_eq!(state.value, StateValue::Alarm("armed_home".into()));
+}
+
+#[test]
+fn switch_number_and_select_from_recorded_devices() {
+    let siren = parse_fixture("switch__0xbc33acfffe36db49__switch_alarm");
+    let (topic, payload) = state_fixture("alarm__siren_living");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&siren, &mut state, &topic, &payload),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::OnOff(false));
+    assert_eq!(
+        apply(&siren, &mut state, &topic, r#"{"alarm":true}"#),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::OnOff(true));
+
+    let count = parse_fixture("number__0x1051dbfffe1a4058__active_count");
+    let effect = parse_fixture("select__0x1051dbfffe1a4058__effect");
+    let (topic, payload) = state_fixture("rooms__bedroom1__leds");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&count, &mut state, &topic, &payload),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::Number(173.0));
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&effect, &mut state, &topic, &payload),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::Text("solid".into()));
+
+    // A null option renders as none: the value becomes unknown, like HA.
+    let indicator = parse_fixture("select__0x000d6ffffe9d44e4__indicator_mode");
+    let mut state = EntityState {
+        value: StateValue::Text("on".into()),
+        ..EntityState::default()
+    };
+    assert_eq!(
+        apply(
+            &indicator,
+            &mut state,
+            "zigbee2mqtt/rooms/office/shutter",
+            r#"{"indicator_mode":null}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::Unknown);
+}
+
+#[test]
+fn availability_from_bridge_state() {
+    let entity = parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &entity,
+            &mut state,
+            "zigbee2mqtt/bridge/state",
+            r#"{"state":"offline"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Offline);
+    assert_eq!(state.value, StateValue::Unknown);
+    // Same availability again: nothing changed.
+    assert_eq!(
+        apply(
+            &entity,
+            &mut state,
+            "zigbee2mqtt/bridge/state",
+            r#"{"state":"offline"}"#
+        ),
+        Applied::Unchanged
+    );
+    assert_eq!(
+        apply(
+            &entity,
+            &mut state,
+            "zigbee2mqtt/bridge/state",
+            r#"{"state":"online"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Online);
+    // A payload the template cannot read, or an unknown word, leaves availability alone.
+    assert_eq!(
+        apply(&entity, &mut state, "zigbee2mqtt/bridge/state", "offline"),
+        Applied::Unchanged
+    );
+    assert_eq!(
+        apply(
+            &entity,
+            &mut state,
+            "zigbee2mqtt/bridge/state",
+            r#"{"state":"sleeping"}"#
+        ),
+        Applied::Unchanged
+    );
+    assert_eq!(state.availability, Availability::Online);
+}
+
+#[test]
+fn availability_modes_with_several_topics() {
+    let config = |mode: &str| {
+        json!({
+            "unique_id": format!("s_{mode}"),
+            "name": "S",
+            "state_topic": "dev/state",
+            "availability_mode": mode,
+            "availability": [
+                {"topic": "bridge/state", "value_template": "{{ value_json.state }}"},
+                {"topic": "dev/availability", "payload_available": "yes", "payload_not_available": "no"}
+            ]
+        })
+    };
+
+    let all = entity("sensor", config("all"));
+    let mut state = EntityState::default();
+    // The device topic has not reported yet: not every topic is online.
+    assert_eq!(
+        apply(&all, &mut state, "bridge/state", r#"{"state":"online"}"#),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Offline);
+    assert_eq!(
+        apply(&all, &mut state, "dev/availability", "yes"),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Online);
+    assert_eq!(
+        apply(&all, &mut state, "bridge/state", r#"{"state":"offline"}"#),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Offline);
+    // The per-topic record is kept in a reserved attribute.
+    assert_eq!(
+        state.attributes["__availability"],
+        json!({"bridge/state": "offline", "dev/availability": "online"})
+    );
+
+    let any = entity("sensor", config("any"));
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&any, &mut state, "dev/availability", "no"),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Offline);
+    assert_eq!(
+        apply(&any, &mut state, "bridge/state", r#"{"state":"online"}"#),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Online);
+    assert_eq!(
+        apply(&any, &mut state, "bridge/state", r#"{"state":"offline"}"#),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Offline);
+
+    let latest = entity("sensor", config("latest"));
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&latest, &mut state, "dev/availability", "no"),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Offline);
+    assert_eq!(
+        apply(&latest, &mut state, "bridge/state", r#"{"state":"online"}"#),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Online);
+}
+
+#[test]
+fn missing_key_on_shared_topic_leaves_value_unchanged() {
+    let entity = parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
+    let mut state = EntityState {
+        value: StateValue::Number(1.0),
+        ..EntityState::default()
+    };
+    assert_eq!(
+        apply(
+            &entity,
+            &mut state,
+            "zigbee2mqtt/rooms/bedroom1/thermometer",
+            r#"{"other":1}"#
+        ),
+        Applied::Unchanged
+    );
+    assert_eq!(state.value, StateValue::Number(1.0));
+    assert_eq!(state.last_update, None);
+    // A scalar payload has no `value_json` at all: same outcome.
+    assert_eq!(
+        apply(
+            &entity,
+            &mut state,
+            "zigbee2mqtt/rooms/bedroom1/thermometer",
+            "18.4"
+        ),
+        Applied::Unchanged
+    );
+    assert_eq!(state.value, StateValue::Number(1.0));
+}
+
+#[test]
+fn attributes_merge() {
+    // state_topic == json_attributes_topic: one message feeds both.
+    let front = parse_fixture("sensor__double-take__front");
+    let topic = "homeassistant/sensor/double-take/front/state";
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &front,
+            &mut state,
+            topic,
+            r#"{"counts":{"person":2},"camera":"front"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::Number(2.0));
+    assert_eq!(state.attributes["counts"], json!({"person": 2}));
+    assert_eq!(state.attributes["camera"], json!("front"));
+    // Shallow merge: keys overwrite, others stay.
+    assert_eq!(
+        apply(
+            &front,
+            &mut state,
+            topic,
+            r#"{"counts":{"person":0},"zone":"door"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.value, StateValue::Number(0.0));
+    assert_eq!(state.attributes["counts"], json!({"person": 0}));
+    assert_eq!(state.attributes["camera"], json!("front"));
+    assert_eq!(state.attributes["zone"], json!("door"));
+    // Not an object: ignored.
+    assert_eq!(
+        apply(&front, &mut state, topic, r#"[1,2]"#),
+        Applied::Unchanged
+    );
+    assert_eq!(state.attributes.len(), 3);
+
+    // A templated attributes payload on its own topic.
+    let templated = entity(
+        "switch",
+        json!({
+            "unique_id": "sw",
+            "name": "SW",
+            "state_topic": "sw/state",
+            "command_topic": "sw/set",
+            "json_attributes_topic": "sw/attrs",
+            "json_attributes_template": "{{ value_json.data | tojson }}"
+        }),
+    );
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &templated,
+            &mut state,
+            "sw/attrs",
+            r#"{"data":{"lqi":12,"battery":90}}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.attributes["lqi"], json!(12));
+    assert_eq!(state.attributes["battery"], json!(90));
+    assert_eq!(state.value, StateValue::Unknown);
+    assert_eq!(
+        apply(&templated, &mut state, "sw/attrs", r#"{"nope":1}"#),
+        Applied::Unchanged
+    );
+}
+
+#[test]
+fn message_for_unrelated_topic() {
+    let entity = parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &entity,
+            &mut state,
+            "zigbee2mqtt/rooms/bath/thermometer",
+            r#"{"temperature":1}"#
+        ),
+        Applied::NotForThisEntity
+    );
+    assert_eq!(state, EntityState::default());
+    // Command topics are not state topics either.
+    let switch = parse_fixture("switch__0xbc33acfffe36db49__switch_alarm");
+    assert_eq!(
+        apply(
+            &switch,
+            &mut state,
+            "zigbee2mqtt/alarm/siren_living/set/alarm",
+            "ON"
+        ),
+        Applied::NotForThisEntity
+    );
+}
+
+#[test]
+fn button_never_changes_state() {
+    let button = parse_fixture("button__0x00158d0005422e73__identify");
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &button,
+            &mut state,
+            "zigbee2mqtt/rooms/living/door_entrance",
+            r#"{"identify":null}"#
+        ),
+        Applied::NotForThisEntity
+    );
+    assert_eq!(
+        apply(
+            &button,
+            &mut state,
+            "zigbee2mqtt/bridge/state",
+            r#"{"state":"online"}"#
+        ),
+        Applied::Changed
+    );
+    assert_eq!(state.availability, Availability::Online);
+    assert_eq!(state.value, StateValue::Unknown);
+}
+
+#[test]
+fn template_syntax_error_is_reported() {
+    // `now()` does not exist in the engine: a permanent template error.
+    let network_map =
+        parse_fixture("sensor__1221051039810110150109113116116_0x00124b0022983b3e__network_map");
+    let mut state = EntityState::default();
+    let err = apply_message(
+        &network_map,
+        &mut state,
+        "zigbee2mqtt/bridge/response/networkmap",
+        r#"{"data":{"value":{"nodes":[]}}}"#,
+        AT,
+        &Templates::new(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, StateError::Template(TemplateError::Syntax(_))),
+        "{err:?}"
+    );
+    // Its attributes topic is the state topic: what was read before the failure stays.
+    assert_eq!(state.attributes["nodes"], json!([]));
+    assert_eq!(state.value, StateValue::Unknown);
+    assert_eq!(state.last_update, None);
+
+    let mut state = EntityState::default();
+    let broken = entity(
+        "sensor",
+        json!({
+            "unique_id": "broken",
+            "name": "B",
+            "state_topic": "b/state",
+            "value_template": "{{ value | nosuchfilter }}"
+        }),
+    );
+    let err =
+        apply_message(&broken, &mut state, "b/state", "1", AT, &Templates::new()).unwrap_err();
+    assert!(
+        matches!(err, StateError::Template(TemplateError::Syntax(_))),
+        "{err:?}"
+    );
+    assert_eq!(state, EntityState::default());
+}
+
+#[test]
+fn hostile_payloads_never_panic() {
+    let templates = Templates::new();
+    let payloads = [
+        "",
+        " ",
+        "{",
+        "[",
+        "null",
+        "{\"state\":null}",
+        "{\"brightness\":-5,\"color\":{\"h\":\"x\"},\"color_temp\":1e30}",
+        "{\"position\":1e308}",
+        "{\"battery_level\":300}",
+        "\u{0}\u{ffff}",
+        "255,0",
+        "a,b,c",
+        "1e999",
+        "NaN",
+    ];
+    for entity in all_entities() {
+        for topic in entity.bindings.topics() {
+            for payload in payloads {
+                let mut state = EntityState::default();
+                let _ = apply_message(&entity, &mut state, &topic, payload, AT, &templates);
+            }
+        }
+    }
+}

@@ -216,6 +216,47 @@ fn iif_on_undefined_input_is_an_error() {
 }
 
 #[test]
+fn truncate_follows_jinja2() {
+    let t = t();
+    // Within length + leeway: untouched.
+    assert_eq!(
+        t.render("{{ value | truncate(10) }}", "hello world")
+            .unwrap(),
+        "hello world"
+    );
+    // Cut at the last space, with the default end.
+    assert_eq!(
+        t.render("{{ value | truncate(12) }}", "hello wide world of jinja")
+            .unwrap(),
+        "hello..."
+    );
+    // killwords cuts mid-word; a custom end and no leeway.
+    assert_eq!(
+        t.render("{{ value | truncate(5, True, '', 0) }}", "abcdefgh")
+            .unwrap(),
+        "abcde"
+    );
+    assert_eq!(
+        t.render(
+            "{{ value | truncate(6, killwords=True, end='~') }}",
+            "abcdefghijklmn"
+        )
+        .unwrap(),
+        "abcde~"
+    );
+    // The Zigbee2MQTT text sensor template, with a default for a missing key.
+    let z2m = "{{ value_json[\"ts\"] | default('',True) | string | truncate(254, True, '', 0) }}";
+    assert_eq!(
+        t.render(z2m, r#"{"ts":"2026-10-18T21:43:50.006Z"}"#)
+            .unwrap(),
+        "2026-10-18T21:43:50.006Z"
+    );
+    assert_eq!(t.render(z2m, r#"{"other":1}"#).unwrap(), "");
+    // Length shorter than the end marker is an evaluation error, not a crash.
+    assert!(t.render("{{ value | truncate(2) }}", "abcdefghij").is_err());
+}
+
+#[test]
 fn syntax_error() {
     let t = t();
     assert!(matches!(
