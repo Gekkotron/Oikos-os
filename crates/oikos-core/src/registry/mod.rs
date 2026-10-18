@@ -137,6 +137,11 @@ impl Registry {
         &self.config
     }
 
+    /// The template engine the registry renders with, for command mapping.
+    pub fn templates(&self) -> &Templates {
+        &self.templates
+    }
+
     /// Classifies a message: `<ui_prefix>/_areas` → [`Inbound::Areas`], `<ui_prefix>/<id>` →
     /// [`Inbound::Override`], `<z2m>/bridge/{devices,info,state}`, a discovery topic, a topic
     /// in [`subscription_topics`](Self::subscription_topics) → [`Inbound::State`] with `at`,

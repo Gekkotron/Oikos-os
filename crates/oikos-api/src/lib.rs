@@ -7,5 +7,5 @@ mod snapshot;
 mod views;
 
 pub use events::{ApiError, CommandResponse, ConnectionStatus, OverridePatch, WsEvent};
-pub use snapshot::{Snapshot, snapshot};
+pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView};

@@ -23,24 +23,41 @@ pub struct Snapshot {
 
 /// Builds the snapshot of `reg`, stamped `at` (unix seconds).
 pub fn snapshot(reg: &Registry, connection: ConnectionStatus, at: u64) -> Snapshot {
-    let no_state = EntityState::default();
-    let entities: Vec<EntityView> = reg
-        .entities()
-        .map(|e| EntityView::from(e, reg.state(&e.unique_id).unwrap_or(&no_state)))
-        .collect();
+    Snapshot {
+        connection,
+        bridge: reg.bridge().into(),
+        areas: area_views(reg),
+        devices: device_views(reg),
+        entities: entity_views(reg),
+        ignored: reg.ignored().iter().map(IgnoredView::from).collect(),
+        generated_at: at,
+    }
+}
 
+/// Every entity of `reg` with its state, by unique id.
+pub fn entity_views(reg: &Registry) -> Vec<EntityView> {
+    let no_state = EntityState::default();
+    reg.entities()
+        .map(|e| EntityView::from(e, reg.state(&e.unique_id).unwrap_or(&no_state)))
+        .collect()
+}
+
+/// The effective areas of `reg`, each with its entity count.
+pub fn area_views(reg: &Registry) -> Vec<AreaView> {
     let mut per_area: BTreeMap<&str, usize> = BTreeMap::new();
     for entity in reg.entities() {
         *per_area.entry(entity.area.as_str()).or_default() += 1;
     }
-    let areas = reg
-        .effective_areas()
+    reg.effective_areas()
         .iter()
         .map(|a| AreaView::new(a, per_area.get(a.id.as_str()).copied().unwrap_or(0)))
-        .collect();
+        .collect()
+}
 
-    let devices = reg
-        .devices()
+/// The devices of `reg`, each with what its entities report.
+pub fn device_views(reg: &Registry) -> Vec<DeviceView> {
+    let no_state = EntityState::default();
+    reg.devices()
         .map(|device| {
             let members: Vec<_> = reg
                 .entities()
@@ -49,15 +66,5 @@ pub fn snapshot(reg: &Registry, connection: ConnectionStatus, at: u64) -> Snapsh
                 .collect();
             DeviceView::new(device, &members)
         })
-        .collect();
-
-    Snapshot {
-        connection,
-        bridge: reg.bridge().into(),
-        areas,
-        devices,
-        entities,
-        ignored: reg.ignored().iter().map(IgnoredView::from).collect(),
-        generated_at: at,
-    }
+        .collect()
 }

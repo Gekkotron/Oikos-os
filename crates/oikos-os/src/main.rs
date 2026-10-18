@@ -1,10 +1,19 @@
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::time::Duration;
 
 use oikos_os::cli::Cli;
 use oikos_os::config::Config;
-use oikos_os::logging;
+use oikos_os::hub::Hub;
+use oikos_os::{logging, mqtt};
+use tokio::sync::mpsc;
+
+/// Publishes waiting for the MQTT task before the hub refuses new ones.
+const PUBLISH_QUEUE: usize = 64;
+/// How long the Disconnect packet gets to reach the wire before the task is dropped.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
@@ -14,6 +23,28 @@ async fn main() -> anyhow::Result<ExitCode> {
             let cfg = Config::load(config.as_deref())?;
             logging::init(&cfg.log);
             tracing::info!(host = %cfg.mqtt.host, port = cfg.mqtt.port, "starting oikos-os");
+
+            let (publish_tx, publish_rx) = mpsc::channel(PUBLISH_QUEUE);
+            let hub = Hub::new(&cfg, publish_tx);
+            let (link, mut link_task) = mqtt::start(
+                cfg.mqtt.clone(),
+                cfg.topics.clone(),
+                Arc::clone(&hub),
+                publish_rx,
+            );
+            // The HTTP server (REST, WebSocket, static UI) is started here with `hub` once it exists.
+
+            tokio::signal::ctrl_c().await?;
+            tracing::info!("shutting down");
+            link.disconnect().await;
+            if tokio::time::timeout(SHUTDOWN_GRACE, &mut link_task)
+                .await
+                .is_err()
+            {
+                tracing::warn!("the broker did not take the disconnect in time");
+                link_task.abort();
+            }
+            tracing::info!("stopped");
             Ok(ExitCode::SUCCESS)
         }
         Cli::McpStdio { server } => {
