@@ -31,20 +31,27 @@ const PLAIN_ON: Command = Command::TurnOn {
     effect: None,
 };
 
-/// `Toggle` resolved against the current value; any other command as it is.
-fn resolve_toggle<'a>(m: &Mapper<'a>) -> &'a Command {
-    if *m.command != Command::Toggle {
-        return m.command;
+/// `Toggle` resolved against the current value and `TurnOn` at brightness 0 turned into
+/// `TurnOff` (as Home Assistant does before the MQTT layer); any other command as it is.
+fn resolve_on_off<'a>(m: &Mapper<'a>) -> &'a Command {
+    match m.command {
+        Command::Toggle => {
+            let on = matches!(
+                m.state.value,
+                StateValue::OnOff(true) | StateValue::Light(LightState { on: true, .. })
+            );
+            if on { &Command::TurnOff } else { &PLAIN_ON }
+        }
+        Command::TurnOn {
+            brightness: Some(0),
+            ..
+        } => &Command::TurnOff,
+        other => other,
     }
-    let on = matches!(
-        m.state.value,
-        StateValue::OnOff(true) | StateValue::Light(LightState { on: true, .. })
-    );
-    if on { &Command::TurnOff } else { &PLAIN_ON }
 }
 
 fn switch(m: &Mapper<'_>) -> Result<Vec<Publish>, CommandError> {
-    let word = match resolve_toggle(m) {
+    let word = match resolve_on_off(m) {
         Command::TurnOn { .. } => m.word("payload_on", "ON"),
         Command::TurnOff => m.word("payload_off", "OFF"),
         _ => return Err(m.unsupported()),
@@ -80,7 +87,7 @@ fn device_brightness(brightness: u8, scale: f64) -> u64 {
 
 fn light(m: &Mapper<'_>) -> Result<Vec<Publish>, CommandError> {
     let json_schema = m.config.get("schema").and_then(Value::as_str) == Some("json");
-    let (brightness, color, effect) = match resolve_toggle(m) {
+    let (brightness, color, effect) = match resolve_on_off(m) {
         Command::TurnOn {
             brightness,
             color,
@@ -167,12 +174,14 @@ fn light_default(
         (_, b) => b,
     };
     if let Some(hs) = color {
+        // `hs_command_template` sees `hue` and `sat` besides `value`, as Home Assistant documents.
         let payload = format!("{},{}", hs.h, hs.s);
+        let extra = [("hue", json!(hs.h)), ("sat", json!(hs.s))];
         out.push(m.publish(
             "hs_command_topic",
             Some("hs_command_template"),
             &payload,
-            &[],
+            &extra,
         )?);
     }
     if let Some(brightness) = brightness {
@@ -318,7 +327,10 @@ fn arm_word(mode: AlarmMode) -> (&'static str, &'static str) {
 }
 
 /// The action word on `command_topic`, through `command_template` (context `action`, `code`)
-/// when present; the code is checked against `code_arm_required` / `code_disarm_required`.
+/// when present. When the panel requires a code (`code_arm_required` /
+/// `code_disarm_required`), one must be given, and it must match a literal configured `code`
+/// (`REMOTE_CODE` / `REMOTE_CODE_TEXT` leave the check to the device), as Home Assistant's
+/// `_validate_code` does.
 fn alarm(m: &Mapper<'_>) -> Result<Vec<Publish>, CommandError> {
     let caps = &m.entity.capabilities;
     let ((key, default), code, code_required) = match m.command {
@@ -338,13 +350,20 @@ fn alarm(m: &Mapper<'_>) -> Result<Vec<Publish>, CommandError> {
         ),
         _ => return Err(m.unsupported()),
     };
-    if code_required && code.is_none() {
-        return Err(CommandError::MissingCode);
+    if code_required {
+        let Some(code) = code.as_deref() else {
+            return Err(CommandError::MissingCode);
+        };
+        match m.config.get("code").and_then(Value::as_str) {
+            None | Some("REMOTE_CODE" | "REMOTE_CODE_TEXT") => {}
+            Some(configured) if configured == code => {}
+            Some(_) => return Err(CommandError::WrongCode),
+        }
     }
     let action = m.word(key, default);
     let extra = [
         ("action", Value::from(action.as_str())),
-        ("code", code.as_deref().map_or(Value::Null, Value::from)),
+        ("code", Value::from(code.as_deref().unwrap_or(""))),
     ];
     Ok(vec![m.publish(
         "command_topic",

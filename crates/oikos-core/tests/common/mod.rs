@@ -52,3 +52,24 @@ pub fn entity(component: &str, config: Value) -> Entity {
         &config.to_string(),
     )
 }
+
+/// Every recorded discovery fixture that parses as an entity.
+pub fn all_entities() -> Vec<Entity> {
+    let dir = fixture_dir().join("discovery");
+    let mut entities = Vec::new();
+    for entry in std::fs::read_dir(&dir).expect("discovery fixture dir") {
+        let path = entry.expect("dir entry").path();
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("fixture stem")
+            .to_owned();
+        let topic_str = format!("oikos/{}/config", stem.replace("__", "/"));
+        let topic = discovery_topic(&topic_str);
+        let payload = std::fs::read(&path).expect("fixture");
+        if let Ok(Parsed::Entity(entity)) = parse(&topic, &payload, &topic_str) {
+            entities.push(*entity);
+        }
+    }
+    entities
+}

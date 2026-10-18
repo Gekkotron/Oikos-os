@@ -40,6 +40,9 @@ pub enum CommandError {
     /// Arming (`code_arm_required`) or disarming (`code_disarm_required`) needs a code.
     #[error("a code is required")]
     MissingCode,
+    /// The code differs from the panel's configured literal `code`.
+    #[error("wrong code")]
+    WrongCode,
 }
 
 /// Maps `cmd` for `entity` to the publishes that carry it out; `state` resolves

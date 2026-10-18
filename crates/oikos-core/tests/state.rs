@@ -4,7 +4,6 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use oikos_core::discovery::{Parsed, parse};
 use oikos_core::model::{
     Availability, ClimateState, CoverState, Entity, EntityState, Hs, LightState, StateValue,
     VacuumState, WaterHeaterState,
@@ -15,27 +14,6 @@ use oikos_core::template::{TemplateError, Templates};
 use serde_json::{Value, json};
 
 const AT: u64 = 1_700_000_000;
-
-/// Every recorded discovery fixture that parses as an entity.
-fn all_entities() -> Vec<Entity> {
-    let dir = common::fixture_dir().join("discovery");
-    let mut entities = Vec::new();
-    for entry in std::fs::read_dir(&dir).expect("discovery fixture dir") {
-        let path = entry.expect("dir entry").path();
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .expect("fixture stem")
-            .to_owned();
-        let topic_str = format!("oikos/{}/config", stem.replace("__", "/"));
-        let topic = common::discovery_topic(&topic_str);
-        let payload = std::fs::read(&path).expect("fixture");
-        if let Ok(Parsed::Entity(entity)) = parse(&topic, &payload, &topic_str) {
-            entities.push(*entity);
-        }
-    }
-    entities
-}
 
 /// Every recorded device state as `(topic, payload)`.
 fn all_states() -> Vec<(String, String)> {
@@ -69,7 +47,7 @@ fn apply(entity: &Entity, state: &mut EntityState, topic: &str, payload: &str) -
 #[test]
 fn recorded_states_apply_to_every_entity() {
     let templates = Templates::new();
-    let entities = all_entities();
+    let entities = common::all_entities();
     let states = all_states();
     assert!(entities.len() > 400, "entities: {}", entities.len());
     assert_eq!(states.len(), 64);
@@ -1080,7 +1058,7 @@ fn hostile_payloads_never_panic() {
         "1e999",
         "NaN",
     ];
-    for entity in all_entities() {
+    for entity in common::all_entities() {
         for topic in entity.bindings.topics() {
             for payload in payloads {
                 let mut state = EntityState::default();

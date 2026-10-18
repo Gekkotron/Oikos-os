@@ -69,7 +69,7 @@ fn json_light_turn_on_with_brightness_and_color() {
         json!({"state": "ON", "brightness": 254, "color": {"h": 30.0, "s": 50.0}, "effect": "rainbow"})
     );
 
-    // Half brightness scales to the device range (128 * 254 / 255 = 127.5 rounds down).
+    // Half brightness scales to the device range: 128 * 254 / 255 = 127.498 rounds to 127.
     let publishes = ok(&leds, &turn_on(Some(128), None, None));
     assert_eq!(
         json_payload(&publishes[0]),
@@ -131,6 +131,34 @@ fn default_schema_light_publishes_three_topics() {
     assert_eq!(
         ok(&light, &Command::TurnOff),
         vec![publish("home/lamp/set", "OFF")]
+    );
+
+    // `hs_command_template` sees `hue` and `sat`, as Home Assistant documents.
+    let templated = common::entity(
+        "light",
+        json!({
+            "command_topic": "home/lamp/set",
+            "hs_command_topic": "home/lamp/hs/set",
+            "hs_command_template": "{\"hue\": {{ hue }}, \"sat\": {{ sat }}}",
+            "brightness_command_topic": "home/lamp/brightness/set",
+            "brightness_command_template": "{\"level\": {{ value }}}",
+            "effect_command_topic": "home/lamp/effect/set",
+            "effect_command_template": "{\"fx\": \"{{ value }}\"}",
+            "effect_list": ["blink"],
+            "state_topic": "home/lamp"
+        }),
+    );
+    assert_eq!(
+        ok(
+            &templated,
+            &turn_on(Some(255), Some(Hs { h: 120.0, s: 100.0 }), Some("blink"))
+        ),
+        vec![
+            publish("home/lamp/hs/set", "{\"hue\": 120.0, \"sat\": 100.0}"),
+            publish("home/lamp/brightness/set", "{\"level\": 255}"),
+            publish("home/lamp/effect/set", "{\"fx\": \"blink\"}"),
+            publish("home/lamp/set", "ON"),
+        ]
     );
 
     // `first` sends ON before the attributes.
@@ -226,6 +254,36 @@ fn toggle_uses_current_state() {
     assert_eq!(
         json_payload(&ok(&leds, &Command::Toggle)[0]),
         json!({"state": "ON"})
+    );
+}
+
+#[test]
+fn turn_on_at_zero_brightness_turns_off() {
+    let leds = common::parse_fixture("light__0x1051dbfffe1a4058__light");
+    let publishes = ok(&leds, &turn_on(Some(0), Some(Hs { h: 1.0, s: 1.0 }), None));
+    assert_eq!(publishes.len(), 1);
+    assert_eq!(json_payload(&publishes[0]), json!({"state": "OFF"}));
+
+    let lamp = common::entity(
+        "light",
+        json!({
+            "command_topic": "home/lamp/set",
+            "brightness_command_topic": "home/lamp/brightness/set",
+            "state_topic": "home/lamp"
+        }),
+    );
+    assert_eq!(
+        ok(&lamp, &turn_on(Some(0), None, None)),
+        vec![publish("home/lamp/set", "OFF")]
+    );
+    // A switch shown as a light: off as well.
+    let switch = common::parse_fixture("switch__0x00124b0024bc601e__switch");
+    assert_eq!(
+        ok(&switch, &turn_on(Some(0), None, None)),
+        vec![publish(
+            "zigbee2mqtt/rooms/garage/watering_stove/set",
+            "OFF"
+        )]
     );
 }
 
@@ -572,9 +630,30 @@ fn alarm_arm_requires_code_when_configured() {
         ),
         vec![publish("home/alarm/set", "ARM_CUSTOM_BYPASS")]
     );
-    // Disarming does not need the code here.
+    // A code that differs from the configured literal is refused.
+    assert_eq!(
+        err(
+            &alarm,
+            &state,
+            &Command::Arm {
+                mode: AlarmMode::Away,
+                code: Some("0000".to_owned())
+            }
+        ),
+        CommandError::WrongCode
+    );
+    // Disarming does not need the code here, so none is checked.
     assert_eq!(
         ok(&alarm, &Command::Disarm { code: None }),
+        vec![publish("home/alarm/set", "DISARM")]
+    );
+    assert_eq!(
+        ok(
+            &alarm,
+            &Command::Disarm {
+                code: Some("0000".to_owned())
+            }
+        ),
         vec![publish("home/alarm/set", "DISARM")]
     );
 
@@ -612,6 +691,50 @@ fn alarm_arm_requires_code_when_configured() {
         ),
         vec![publish("home/alarm/set", "stay")]
     );
+    // `REMOTE_CODE` leaves the check to the device: any code goes through.
+    assert_eq!(
+        ok(
+            &strict,
+            &Command::Disarm {
+                code: Some("whatever".to_owned())
+            }
+        ),
+        vec![publish("home/alarm/set", "off")]
+    );
+
+    // A literal code is checked on disarm too.
+    let literal = common::entity(
+        "alarm_control_panel",
+        json!({
+            "command_topic": "home/alarm/set",
+            "state_topic": "home/alarm",
+            "code": "4321"
+        }),
+    );
+    assert_eq!(
+        err(
+            &literal,
+            &state,
+            &Command::Disarm {
+                code: Some("1234".to_owned())
+            }
+        ),
+        CommandError::WrongCode
+    );
+    assert_eq!(
+        err(&literal, &state, &Command::Disarm { code: None }),
+        CommandError::MissingCode
+    );
+    assert_eq!(
+        ok(
+            &literal,
+            &Command::Disarm {
+                code: Some("4321".to_owned())
+            }
+        ),
+        vec![publish("home/alarm/set", "DISARM")]
+    );
+
     // A mode the panel does not support is out of range.
     assert!(matches!(
         err(
@@ -651,9 +774,15 @@ fn recorded_alarm_renders_command_template() {
             code: None,
         },
     );
-    assert_eq!(json_payload(&publishes[0])["action"], "ARM_HOME");
+    assert_eq!(
+        json_payload(&publishes[0]),
+        json!({"action": "ARM_HOME", "code": ""})
+    );
     let publishes = ok(&alarm, &Command::Disarm { code: None });
-    assert_eq!(json_payload(&publishes[0])["action"], "DISARM");
+    assert_eq!(
+        json_payload(&publishes[0]),
+        json!({"action": "DISARM", "code": ""})
+    );
 }
 
 #[test]
@@ -856,24 +985,7 @@ fn recorded_switch_turn_on() {
 #[test]
 fn every_command_on_every_fixture_is_mapped_or_rejected() {
     let templates = Templates::new();
-    let dir = common::fixture_dir().join("discovery");
-    let mut entities = Vec::new();
-    for entry in std::fs::read_dir(&dir).expect("discovery fixture dir") {
-        let path = entry.expect("dir entry").path();
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .expect("fixture stem")
-            .to_owned();
-        let topic_str = format!("oikos/{}/config", stem.replace("__", "/"));
-        let topic = common::discovery_topic(&topic_str);
-        let payload = std::fs::read(&path).expect("fixture");
-        if let Ok(oikos_core::discovery::Parsed::Entity(entity)) =
-            oikos_core::discovery::parse(&topic, &payload, &topic_str)
-        {
-            entities.push(*entity);
-        }
-    }
+    let entities = common::all_entities();
     assert!(entities.len() > 400);
     let commands = [
         turn_on(None, None, None),
