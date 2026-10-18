@@ -7,12 +7,12 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use oikos_api::{
-    AreaView, CommandResponse, ConnectionStatus, EntityView, OverridePatch, Snapshot, WsEvent,
-    area_views, device_views, snapshot,
+    AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch, Snapshot,
+    WsEvent, area_views, device_views, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{AreasDocument, Availability, Command, PatchError, UiOverride};
-use oikos_core::registry::{Change, Registry, RegistryConfig};
+use oikos_core::registry::{Change, Inbound, Registry, RegistryConfig};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::clock;
@@ -41,6 +41,9 @@ pub enum HubError {
 pub struct Hub {
     registry: RwLock<Registry>,
     events: broadcast::Sender<WsEvent>,
+    /// The ids that received a state message, changed or not: Zigbee2MQTT echoes the whole
+    /// device state on every `/set`, so a no-op command is confirmed by its echo.
+    state_seen: broadcast::Sender<String>,
     connection: watch::Sender<ConnectionStatus>,
     publisher: mpsc::Sender<Publish>,
     ui_prefix: String,
@@ -59,10 +62,12 @@ impl Hub {
             reserved: RegistryConfig::default_reserved(),
         });
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
+        let (state_seen, _) = broadcast::channel(EVENT_CAPACITY);
         let (connection, _) = watch::channel(ConnectionStatus::Connecting);
         Arc::new(Hub {
             registry: RwLock::new(registry),
             events,
+            state_seen,
             connection,
             publisher,
             ui_prefix: cfg.topics.ui_prefix.clone(),
@@ -76,16 +81,24 @@ impl Hub {
     /// changes (the MQTT task watches for [`Change::SubscriptionsChanged`]).
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
         let at = clock::now();
-        let (changes, events, failing) = {
+        let (changes, events, failing, seen) = {
             let mut reg = self.write();
             let inbound = reg.route(topic, payload.to_vec(), at);
+            let seen = match &inbound {
+                Inbound::State { topic, .. } => reg.entities_on_topic(topic).to_vec(),
+                _ => Vec::new(),
+            };
             let changes = reg.apply(inbound);
             let events = events_for(&reg, &changes);
-            (changes, events, reg.template_failures().clone())
+            (changes, events, reg.template_failures().clone(), seen)
         };
         self.log_new_template_failures(&failing);
         for event in events {
             self.broadcast(event);
+        }
+        for id in seen {
+            // An error only means no command is waiting right now.
+            let _ = self.state_seen.send(id);
         }
         changes
     }
@@ -134,6 +147,15 @@ impl Hub {
         (reg.entities().count(), reg.devices().count())
     }
 
+    /// The topics no entity could be made from, with the reason.
+    pub fn ignored(&self) -> Vec<IgnoredView> {
+        self.read()
+            .ignored()
+            .iter()
+            .map(IgnoredView::from)
+            .collect()
+    }
+
     pub fn entity_view(&self, id: &str) -> Option<EntityView> {
         let reg = self.read();
         let entity = reg.entity(id)?;
@@ -142,10 +164,12 @@ impl Hub {
     }
 
     /// Maps `cmd`, publishes it and waits up to `confirm_timeout_ms` for the entity's state to
-    /// change. An unknown or offline entity is rejected before anything is published.
+    /// change or for any state message addressed to it (a no-op command is echoed unchanged).
+    /// An unknown or offline entity is rejected before anything is published.
     pub async fn send_command(&self, id: &str, cmd: Command) -> Result<CommandResponse, HubError> {
         // Subscribed before publishing, so a fast echo cannot slip between the two.
         let mut events = self.subscribe();
+        let mut seen = self.state_seen.subscribe();
         let publishes = {
             let reg = self.read();
             let entity = reg
@@ -163,12 +187,21 @@ impl Hub {
 
         let confirmed = tokio::time::timeout(self.confirm_timeout, async {
             loop {
-                match events.recv().await {
-                    Ok(WsEvent::StateChanged { id: changed, state }) if changed == id => {
-                        return Some(state);
-                    }
-                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(broadcast::error::RecvError::Closed) => return None,
+                tokio::select! {
+                    event = events.recv() => match event {
+                        Ok(WsEvent::StateChanged { id: changed, state }) if changed == id => {
+                            return Some(state);
+                        }
+                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Closed) => return None,
+                    },
+                    seen_id = seen.recv() => match seen_id {
+                        Ok(seen_id) if seen_id == id => {
+                            return Some(self.read().state(id).cloned().unwrap_or_default());
+                        }
+                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
+                        Err(broadcast::error::RecvError::Closed) => return None,
+                    },
                 }
             }
         })

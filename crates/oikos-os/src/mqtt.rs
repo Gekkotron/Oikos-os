@@ -35,10 +35,16 @@ pub struct Handle {
 }
 
 impl Handle {
-    /// Queues a Disconnect; the task ends once it is on the wire.
-    pub async fn disconnect(&self) {
-        if let Err(err) = self.client.disconnect().await {
-            tracing::warn!(error = %err, "could not queue the disconnect");
+    /// Queues a Disconnect without waiting; the task ends once it is on the wire. `false` when
+    /// it could not be queued (the request queue is full or the event loop is gone), in which
+    /// case the owner aborts the task instead of waiting for a packet that will never go out.
+    pub fn disconnect(&self) -> bool {
+        match self.client.try_disconnect() {
+            Ok(()) => true,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not queue the disconnect");
+                false
+            }
         }
     }
 }
@@ -160,7 +166,9 @@ async fn outbound(
                     return;
                 }
                 let now_online = matches!(*connection.borrow_and_update(), ConnectionStatus::Online);
-                if now_online && !online {
+                // Every change that lands on Online is a (re)connect: the watch coalesces
+                // `Online → Offline → Online` into one change, so the previous flag says nothing.
+                if now_online {
                     // A clean session: the broker remembers nothing, so subscribe to everything.
                     subscribed = hub.subscription_topics();
                     let filters: BTreeSet<String> = static_filters(&topics)

@@ -7,6 +7,7 @@ use std::time::Duration;
 use oikos_api::WsEvent;
 use oikos_core::command::Publish;
 use oikos_core::model::{Command, Kind, StateValue};
+use oikos_core::registry::Change;
 use oikos_os::config::Config;
 use oikos_os::hub::{Hub, HubError};
 use tokio::sync::mpsc;
@@ -259,4 +260,82 @@ async fn unknown_entity_is_unknown_error() {
     assert_eq!(result, Err(HubError::UnknownEntity("nope".to_owned())));
     assert!(publisher.try_recv().is_err());
     assert!(hub.entity_view("nope").is_none());
+}
+
+/// Sends `TurnOn` to the switch and ingests `echo` on its state topic once the publish is
+/// out. Returns the response, what the echo changed and how long the hub took to answer.
+async fn turn_on_with_echo(
+    hub: &Arc<Hub>,
+    mut publisher: mpsc::Receiver<Publish>,
+    echo: &'static [u8],
+) -> (oikos_api::CommandResponse, Vec<Change>, Duration) {
+    let state_topic = switch_state_topic();
+    let echo_task = {
+        let hub = Arc::clone(hub);
+        tokio::spawn(async move {
+            let published = publisher.recv().await.expect("the command publish");
+            assert_eq!(published.payload, "ON");
+            hub.ingest(&state_topic, echo)
+        })
+    };
+    let started = std::time::Instant::now();
+    let response = hub
+        .send_command(
+            SWITCH_ID,
+            Command::TurnOn {
+                brightness: None,
+                color: None,
+                effect: None,
+            },
+        )
+        .await
+        .expect("mapped and published");
+    let changes = echo_task.await.expect("echo task");
+    (response, changes, started.elapsed())
+}
+
+/// `response` was accepted with the switch ON, well before the 50 ms timeout.
+fn assert_confirmed_on(response: &oikos_api::CommandResponse, elapsed: Duration) {
+    assert!(response.accepted, "{response:?}");
+    assert_eq!(response.reason, None);
+    assert_eq!(
+        response.state.as_ref().expect("current state").value,
+        StateValue::OnOff(true)
+    );
+    assert!(
+        elapsed < Duration::from_millis(40),
+        "resolved by the echo, not the 50 ms timeout: {elapsed:?}"
+    );
+}
+
+/// Z2M echoes the device state on every `/set`, changed or not: a message on the entity's
+/// topic that leaves its state untouched still confirms the command instead of timing out.
+#[tokio::test]
+async fn send_command_resolves_on_unchanged_echo() {
+    let (hub, publisher) = hub();
+    feed_switch(&hub);
+    hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+
+    // A partial update without `state`: the registry reports nothing changed.
+    let (response, changes, elapsed) =
+        turn_on_with_echo(&hub, publisher, br#"{"linkquality":120}"#).await;
+
+    assert!(
+        !changes.contains(&Change::StateChanged(SWITCH_ID.to_owned())),
+        "the echo must leave the state untouched for this test: {changes:?}"
+    );
+    assert_confirmed_on(&response, elapsed);
+}
+
+/// Turning on a switch that is already ON: the echoed `{"state":"ON"}` confirms it. (The
+/// core reports a re-sent equal value as a change, so this also goes through `StateChanged`.)
+#[tokio::test]
+async fn send_command_resolves_on_same_state_echo() {
+    let (hub, publisher) = hub();
+    feed_switch(&hub);
+    hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+
+    let (response, _, elapsed) = turn_on_with_echo(&hub, publisher, br#"{"state":"ON"}"#).await;
+
+    assert_confirmed_on(&response, elapsed);
 }
