@@ -83,6 +83,6 @@ pub struct EntityState {
     /// Merged from `json_attributes_topic`.
     pub attributes: Map<String, Value>,
     pub availability: Availability,
-    /// Unix time in milliseconds of the last state message, when any.
+    /// Unix time in seconds of the last state message, when any.
     pub last_update: Option<u64>,
 }

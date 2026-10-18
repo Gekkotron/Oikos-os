@@ -3,6 +3,7 @@
 
 use serde_json::{Map, Value};
 
+use crate::config::brightness_scale;
 use crate::model::{Entity, EntityState, Hs, LightState, StateValue};
 use crate::state::color::{rgb_to_hs, xy_to_hs};
 use crate::state::util::{self, Message, Read};
@@ -40,13 +41,6 @@ pub(super) fn apply(
         state.value = StateValue::Light(light);
     }
     Ok(applied)
-}
-
-/// `brightness_scale` (default 255), guarded against zero and negatives.
-fn brightness_scale(config: &Value) -> f64 {
-    util::config_f64(config, "brightness_scale")
-        .filter(|scale| *scale > 0.0)
-        .unwrap_or(255.0)
 }
 
 fn scale_brightness(raw: f64, scale: f64) -> Option<u8> {

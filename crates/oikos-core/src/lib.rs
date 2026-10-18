@@ -4,6 +4,9 @@
 
 pub mod model;
 
+mod config;
+
+pub mod command;
 pub mod discovery;
 pub mod state;
 pub mod template;

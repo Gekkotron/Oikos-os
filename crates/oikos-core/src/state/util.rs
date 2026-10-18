@@ -1,5 +1,5 @@
-//! Helpers shared by the mappers: the message being applied, config lookup, templated reads
-//! and payload parsing.
+//! Helpers shared by the mappers: the message being applied, config lookup (re-exported from
+//! [`crate::config`]), templated reads and payload parsing.
 
 use serde_json::{Map, Value};
 
@@ -120,35 +120,7 @@ impl Message<'_> {
     }
 }
 
-/// A config entry as text: strings as they are, booleans and numbers as JSON writes them
-/// (Zigbee2MQTT publishes `payload_on: false` as a boolean).
-pub(crate) fn config_string(config: &Value, key: &str) -> Option<String> {
-    match config.get(key)? {
-        Value::String(s) => Some(s.clone()),
-        Value::Bool(b) => Some(b.to_string()),
-        Value::Number(n) => Some(n.to_string()),
-        _ => None,
-    }
-}
-
-/// [`config_string`] with a default.
-pub(crate) fn config_string_or(config: &Value, key: &str, default: &str) -> String {
-    config_string(config, key).unwrap_or_else(|| default.to_owned())
-}
-
-/// A numeric config entry (a number, or a numeric string).
-pub(crate) fn config_f64(config: &Value, key: &str) -> Option<f64> {
-    match config.get(key)? {
-        Value::Number(n) => n.as_f64().filter(|f| f.is_finite()),
-        Value::String(s) => parse_number(s),
-        _ => None,
-    }
-}
-
-/// A finite number, trimmed.
-pub(crate) fn parse_number(text: &str) -> Option<f64> {
-    text.trim().parse::<f64>().ok().filter(|f| f.is_finite())
-}
+pub(crate) use crate::config::{config_f64, config_string, config_string_or, parse_number};
 
 /// The payload as a JSON object.
 pub(crate) fn parse_object(payload: &str) -> Option<Map<String, Value>> {

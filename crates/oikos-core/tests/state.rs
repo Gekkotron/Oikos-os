@@ -4,7 +4,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use oikos_core::discovery::{DiscoveryTopic, Parsed, TopicClass, classify, parse};
+use oikos_core::discovery::{Parsed, parse};
 use oikos_core::model::{
     Availability, ClimateState, CoverState, Entity, EntityState, Hs, LightState, StateValue,
     VacuumState, WaterHeaterState,
@@ -15,40 +15,6 @@ use oikos_core::template::{TemplateError, Templates};
 use serde_json::{Value, json};
 
 const AT: u64 = 1_700_000_000;
-
-fn strings(items: &[&str]) -> Vec<String> {
-    items.iter().map(|s| (*s).to_owned()).collect()
-}
-
-fn discovery_topic(topic: &str) -> DiscoveryTopic {
-    match classify(topic, &strings(&["oikos"]), &strings(&["ui", "automation"])) {
-        TopicClass::Discovery(t) => t,
-        other => panic!("{topic} is not a discovery topic: {other:?}"),
-    }
-}
-
-fn entity_from_payload(topic_str: &str, payload: &str) -> Entity {
-    let topic = discovery_topic(topic_str);
-    match parse(&topic, payload.as_bytes(), topic_str) {
-        Ok(Parsed::Entity(entity)) => *entity,
-        other => panic!("{topic_str} did not parse as an entity: {other:?}"),
-    }
-}
-
-/// Parses one recorded discovery fixture (file name without `.json`) into an entity.
-fn parse_fixture(file_stem: &str) -> Entity {
-    let topic_str = format!("oikos/{}/config", file_stem.replace("__", "/"));
-    let payload = common::fixture(&format!("discovery/{file_stem}.json"));
-    entity_from_payload(&topic_str, &payload)
-}
-
-/// Builds an entity from a hand-written config for `component`.
-fn entity(component: &str, config: Value) -> Entity {
-    entity_from_payload(
-        &format!("oikos/{component}/test/config"),
-        &config.to_string(),
-    )
-}
 
 /// Every recorded discovery fixture that parses as an entity.
 fn all_entities() -> Vec<Entity> {
@@ -62,7 +28,7 @@ fn all_entities() -> Vec<Entity> {
             .expect("fixture stem")
             .to_owned();
         let topic_str = format!("oikos/{}/config", stem.replace("__", "/"));
-        let topic = discovery_topic(&topic_str);
+        let topic = common::discovery_topic(&topic_str);
         let payload = std::fs::read(&path).expect("fixture");
         if let Ok(Parsed::Entity(entity)) = parse(&topic, &payload, &topic_str) {
             entities.push(*entity);
@@ -141,7 +107,7 @@ fn recorded_states_apply_to_every_entity() {
 
 #[test]
 fn thermometer_temperature_is_number_with_unit() {
-    let entity = parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
+    let entity = common::parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
     let (topic, payload) = state_fixture("rooms__bedroom1__thermometer");
     let mut state = EntityState::default();
     assert_eq!(
@@ -155,7 +121,7 @@ fn thermometer_temperature_is_number_with_unit() {
 
 #[test]
 fn contact_sensor_maps_to_on_off() {
-    let entity = parse_fixture("binary_sensor__0x00158d00054266a8__contact");
+    let entity = common::parse_fixture("binary_sensor__0x00158d00054266a8__contact");
     let config = &entity.bindings.config;
     // The Z2M door sensor publishes `contact`: false means open, which HA shows as ON.
     assert_eq!(config["payload_on"], json!(false));
@@ -198,7 +164,7 @@ fn contact_sensor_maps_to_on_off() {
 
 #[test]
 fn json_light_state() {
-    let light = entity(
+    let light = common::entity(
         "light",
         json!({
             "unique_id": "l1",
@@ -246,7 +212,7 @@ fn json_light_state() {
     );
 
     // Z2M scale 254 and xy colour, on a recorded light.
-    let leds = parse_fixture("light__0x1051dbfffe1a4058__light");
+    let leds = common::parse_fixture("light__0x1051dbfffe1a4058__light");
     let (topic, payload) = state_fixture("rooms__bedroom1__leds");
     let mut state = EntityState::default();
     assert_eq!(apply(&leds, &mut state, &topic, &payload), Applied::Changed);
@@ -292,7 +258,7 @@ fn json_light_state() {
     assert_eq!(light.color_temp, Some(370));
 
     // brightness_scale 0 falls back to 255 instead of dividing by zero.
-    let zero_scale = entity(
+    let zero_scale = common::entity(
         "light",
         json!({
             "unique_id": "l0",
@@ -322,7 +288,7 @@ fn json_light_state() {
 
 #[test]
 fn default_schema_light_rgb_to_hs() {
-    let light = entity(
+    let light = common::entity(
         "light",
         json!({
             "unique_id": "l2",
@@ -389,7 +355,7 @@ fn default_schema_light_rgb_to_hs() {
     );
 
     // Templated default-schema fields on one shared topic (Philips TV ambilight).
-    let philips = parse_fixture("light__philips__philips_tv_philips_ambilight");
+    let philips = common::parse_fixture("light__philips__philips_tv_philips_ambilight");
     let mut state = EntityState::default();
     assert_eq!(
         apply(
@@ -440,7 +406,7 @@ fn color_conversions() {
 
 #[test]
 fn cover_state_and_position() {
-    let cover = entity(
+    let cover = common::entity(
         "cover",
         json!({
             "unique_id": "c1",
@@ -481,7 +447,7 @@ fn cover_state_and_position() {
 
     // Without a position topic, `stopped` keeps a closed cover closed (HA: closed or closing
     // -> closed) and ends an opening move as open.
-    let plain = entity(
+    let plain = common::entity(
         "cover",
         json!({
             "unique_id": "c2",
@@ -524,7 +490,7 @@ fn cover_state_and_position() {
     assert_eq!(cover_state(&state).as_deref(), Some("open"));
 
     // Inverted range: position_open 0, position_closed 100 -> stored so that 100 is open.
-    let inverted = entity(
+    let inverted = common::entity(
         "cover",
         json!({
             "unique_id": "c3",
@@ -571,7 +537,7 @@ fn cover_state_and_position() {
     );
 
     // Recorded Z2M shutter: state and position share one topic and use custom words.
-    let shutter = parse_fixture("cover__0x000d6ffffe9d44e4__cover");
+    let shutter = common::parse_fixture("cover__0x000d6ffffe9d44e4__cover");
     let (topic, payload) = state_fixture("rooms__office__shutter");
     let mut state = EntityState::default();
     assert_eq!(
@@ -605,7 +571,7 @@ fn cover_state_and_position() {
 
 #[test]
 fn climate_fields() {
-    let climate = parse_fixture("climate__daikin_192_168_1_150__climate");
+    let climate = common::parse_fixture("climate__daikin_192_168_1_150__climate");
     let topic = "daikin/192.168.1.150/ha/state";
     let mut state = EntityState::default();
     assert_eq!(
@@ -639,7 +605,7 @@ fn climate_fields() {
     );
     assert_eq!(state.availability, Availability::Offline);
 
-    let heater = entity(
+    let heater = common::entity(
         "water_heater",
         json!({
             "unique_id": "wh",
@@ -676,7 +642,7 @@ fn climate_fields() {
 
 #[test]
 fn vacuum_and_alarm_states() {
-    let vacuum = parse_fixture("vacuum__roborock_40313ca8b964__roborock_40313ca8b964");
+    let vacuum = common::parse_fixture("vacuum__roborock_40313ca8b964__roborock_40313ca8b964");
     let mut state = EntityState::default();
     assert_eq!(
         apply(
@@ -710,7 +676,7 @@ fn vacuum_and_alarm_states() {
     );
     assert_eq!(state.availability, Availability::Online);
 
-    let alarm = parse_fixture("alarm_control_panel__jeedom__house_alarm");
+    let alarm = common::parse_fixture("alarm_control_panel__jeedom__house_alarm");
     let mut state = EntityState::default();
     assert_eq!(
         apply(&alarm, &mut state, "jeedom/alarm/state", "armed_home"),
@@ -726,7 +692,7 @@ fn vacuum_and_alarm_states() {
 
 #[test]
 fn switch_number_and_select_from_recorded_devices() {
-    let siren = parse_fixture("switch__0xbc33acfffe36db49__switch_alarm");
+    let siren = common::parse_fixture("switch__0xbc33acfffe36db49__switch_alarm");
     let (topic, payload) = state_fixture("alarm__siren_living");
     let mut state = EntityState::default();
     assert_eq!(
@@ -740,8 +706,8 @@ fn switch_number_and_select_from_recorded_devices() {
     );
     assert_eq!(state.value, StateValue::OnOff(true));
 
-    let count = parse_fixture("number__0x1051dbfffe1a4058__active_count");
-    let effect = parse_fixture("select__0x1051dbfffe1a4058__effect");
+    let count = common::parse_fixture("number__0x1051dbfffe1a4058__active_count");
+    let effect = common::parse_fixture("select__0x1051dbfffe1a4058__effect");
     let (topic, payload) = state_fixture("rooms__bedroom1__leds");
     let mut state = EntityState::default();
     assert_eq!(
@@ -757,7 +723,7 @@ fn switch_number_and_select_from_recorded_devices() {
     assert_eq!(state.value, StateValue::Text("solid".into()));
 
     // A null option renders as none: the value becomes unknown, like HA.
-    let indicator = parse_fixture("select__0x000d6ffffe9d44e4__indicator_mode");
+    let indicator = common::parse_fixture("select__0x000d6ffffe9d44e4__indicator_mode");
     let mut state = EntityState {
         value: StateValue::Text("on".into()),
         ..EntityState::default()
@@ -776,7 +742,7 @@ fn switch_number_and_select_from_recorded_devices() {
 
 #[test]
 fn availability_from_bridge_state() {
-    let entity = parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
+    let entity = common::parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
     let mut state = EntityState::default();
     assert_eq!(
         apply(
@@ -841,7 +807,7 @@ fn availability_modes_with_several_topics() {
         })
     };
 
-    let all = entity("sensor", config("all"));
+    let all = common::entity("sensor", config("all"));
     let mut state = EntityState::default();
     // The device topic has not reported yet: not every topic is online.
     assert_eq!(
@@ -865,7 +831,7 @@ fn availability_modes_with_several_topics() {
         json!({"bridge/state": "offline", "dev/availability": "online"})
     );
 
-    let any = entity("sensor", config("any"));
+    let any = common::entity("sensor", config("any"));
     let mut state = EntityState::default();
     assert_eq!(
         apply(&any, &mut state, "dev/availability", "no"),
@@ -883,7 +849,7 @@ fn availability_modes_with_several_topics() {
     );
     assert_eq!(state.availability, Availability::Offline);
 
-    let latest = entity("sensor", config("latest"));
+    let latest = common::entity("sensor", config("latest"));
     let mut state = EntityState::default();
     assert_eq!(
         apply(&latest, &mut state, "dev/availability", "no"),
@@ -899,7 +865,7 @@ fn availability_modes_with_several_topics() {
 
 #[test]
 fn missing_key_on_shared_topic_leaves_value_unchanged() {
-    let entity = parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
+    let entity = common::parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
     let mut state = EntityState {
         value: StateValue::Number(1.0),
         ..EntityState::default()
@@ -931,7 +897,7 @@ fn missing_key_on_shared_topic_leaves_value_unchanged() {
 #[test]
 fn attributes_merge() {
     // state_topic == json_attributes_topic: one message feeds both.
-    let front = parse_fixture("sensor__double-take__front");
+    let front = common::parse_fixture("sensor__double-take__front");
     let topic = "homeassistant/sensor/double-take/front/state";
     let mut state = EntityState::default();
     assert_eq!(
@@ -968,7 +934,7 @@ fn attributes_merge() {
     assert_eq!(state.attributes.len(), 3);
 
     // A templated attributes payload on its own topic.
-    let templated = entity(
+    let templated = common::entity(
         "switch",
         json!({
             "unique_id": "sw",
@@ -1000,7 +966,7 @@ fn attributes_merge() {
 
 #[test]
 fn message_for_unrelated_topic() {
-    let entity = parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
+    let entity = common::parse_fixture("sensor__0x5c0272fffebbe0c4__temperature");
     let mut state = EntityState::default();
     assert_eq!(
         apply(
@@ -1013,7 +979,7 @@ fn message_for_unrelated_topic() {
     );
     assert_eq!(state, EntityState::default());
     // Command topics are not state topics either.
-    let switch = parse_fixture("switch__0xbc33acfffe36db49__switch_alarm");
+    let switch = common::parse_fixture("switch__0xbc33acfffe36db49__switch_alarm");
     assert_eq!(
         apply(
             &switch,
@@ -1027,7 +993,7 @@ fn message_for_unrelated_topic() {
 
 #[test]
 fn button_never_changes_state() {
-    let button = parse_fixture("button__0x00158d0005422e73__identify");
+    let button = common::parse_fixture("button__0x00158d0005422e73__identify");
     let mut state = EntityState::default();
     assert_eq!(
         apply(
@@ -1054,8 +1020,9 @@ fn button_never_changes_state() {
 #[test]
 fn template_syntax_error_is_reported() {
     // `now()` does not exist in the engine: a permanent template error.
-    let network_map =
-        parse_fixture("sensor__1221051039810110150109113116116_0x00124b0022983b3e__network_map");
+    let network_map = common::parse_fixture(
+        "sensor__1221051039810110150109113116116_0x00124b0022983b3e__network_map",
+    );
     let mut state = EntityState::default();
     let err = apply_message(
         &network_map,
@@ -1076,7 +1043,7 @@ fn template_syntax_error_is_reported() {
     assert_eq!(state.last_update, None);
 
     let mut state = EntityState::default();
-    let broken = entity(
+    let broken = common::entity(
         "sensor",
         json!({
             "unique_id": "broken",

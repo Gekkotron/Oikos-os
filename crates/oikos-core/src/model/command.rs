@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// A light colour without brightness: `h` in degrees 0..<360, `s` in 0..=1.
+/// A light colour without brightness: `h` in degrees 0..<360, `s` in percent 0..=100.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Hs {
     pub h: f64,
