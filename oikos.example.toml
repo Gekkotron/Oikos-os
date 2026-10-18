@@ -1,0 +1,24 @@
+[mqtt]
+host = "192.168.1.91"
+port = 1883
+user = "oikos"
+password = "change-me"
+client_id = "oikos-os"
+send_ha_birth = false
+ha_status_topic = "homeassistant/status"
+
+[topics]
+discovery_prefixes = ["oikos"]
+ui_prefix = "oikos/ui"
+z2m_base = "zigbee2mqtt"
+
+[http]
+bind = "0.0.0.0:8080"
+
+[commands]
+confirm_timeout_ms = 5000
+subscription_debounce_ms = 500
+
+[log]
+level = "info"
+json = false
