@@ -274,6 +274,50 @@ fn json_light_state() {
     };
     assert!(light.on);
     assert_eq!(light.brightness, Some(255));
+
+    // color_mode "color_temp" is exclusive: the stored hs is cleared, color_temp kept.
+    assert_eq!(
+        apply(
+            &leds,
+            &mut state,
+            &topic,
+            r#"{"color_mode":"color_temp","color_temp":370,"color":{"x":0.5,"y":0.4}}"#
+        ),
+        Applied::Changed
+    );
+    let StateValue::Light(light) = &state.value else {
+        panic!("not a light: {:?}", state.value);
+    };
+    assert_eq!(light.hs, None);
+    assert_eq!(light.color_temp, Some(370));
+
+    // brightness_scale 0 falls back to 255 instead of dividing by zero.
+    let zero_scale = entity(
+        "light",
+        json!({
+            "unique_id": "l0",
+            "name": "L0",
+            "schema": "json",
+            "state_topic": "test/l0",
+            "command_topic": "test/l0/set",
+            "brightness": true,
+            "brightness_scale": 0
+        }),
+    );
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(
+            &zero_scale,
+            &mut state,
+            "test/l0",
+            r#"{"state":"ON","brightness":51}"#
+        ),
+        Applied::Changed
+    );
+    let StateValue::Light(light) = &state.value else {
+        panic!("not a light: {:?}", state.value);
+    };
+    assert_eq!(light.brightness, Some(51));
 }
 
 #[test]
@@ -434,6 +478,97 @@ fn cover_state_and_position() {
         panic!("not a cover: {:?}", state.value);
     };
     assert_eq!(c.state.as_deref(), Some("closing"));
+
+    // Without a position topic, `stopped` keeps a closed cover closed (HA: closed or closing
+    // -> closed) and ends an opening move as open.
+    let plain = entity(
+        "cover",
+        json!({
+            "unique_id": "c2",
+            "name": "C2",
+            "state_topic": "test/c2/state",
+            "command_topic": "test/c2/set"
+        }),
+    );
+    let mut state = EntityState::default();
+    let cover_state = |state: &EntityState| match &state.value {
+        StateValue::Cover(c) => c.state.clone(),
+        other => panic!("not a cover: {other:?}"),
+    };
+    assert_eq!(
+        apply(&plain, &mut state, "test/c2/state", "closed"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&plain, &mut state, "test/c2/state", "stopped"),
+        Applied::Changed
+    );
+    assert_eq!(cover_state(&state).as_deref(), Some("closed"));
+    assert_eq!(
+        apply(&plain, &mut state, "test/c2/state", "closing"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&plain, &mut state, "test/c2/state", "stopped"),
+        Applied::Changed
+    );
+    assert_eq!(cover_state(&state).as_deref(), Some("closed"));
+    assert_eq!(
+        apply(&plain, &mut state, "test/c2/state", "opening"),
+        Applied::Changed
+    );
+    assert_eq!(
+        apply(&plain, &mut state, "test/c2/state", "stopped"),
+        Applied::Changed
+    );
+    assert_eq!(cover_state(&state).as_deref(), Some("open"));
+
+    // Inverted range: position_open 0, position_closed 100 -> stored so that 100 is open.
+    let inverted = entity(
+        "cover",
+        json!({
+            "unique_id": "c3",
+            "name": "C3",
+            "position_topic": "test/c3/position",
+            "position_open": 0,
+            "position_closed": 100,
+            "command_topic": "test/c3/set"
+        }),
+    );
+    let mut state = EntityState::default();
+    assert_eq!(
+        apply(&inverted, &mut state, "test/c3/position", "0"),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Cover(CoverState {
+            state: Some("open".into()),
+            position: Some(100),
+        })
+    );
+    assert_eq!(
+        apply(&inverted, &mut state, "test/c3/position", "75"),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Cover(CoverState {
+            state: Some("open".into()),
+            position: Some(25),
+        })
+    );
+    assert_eq!(
+        apply(&inverted, &mut state, "test/c3/position", "100"),
+        Applied::Changed
+    );
+    assert_eq!(
+        state.value,
+        StateValue::Cover(CoverState {
+            state: Some("closed".into()),
+            position: Some(0),
+        })
+    );
 
     // Recorded Z2M shutter: state and position share one topic and use custom words.
     let shutter = parse_fixture("cover__0x000d6ffffe9d44e4__cover");
@@ -982,7 +1117,15 @@ fn hostile_payloads_never_panic() {
         for topic in entity.bindings.topics() {
             for payload in payloads {
                 let mut state = EntityState::default();
-                let _ = apply_message(&entity, &mut state, &topic, payload, AT, &templates);
+                if let Err(err) =
+                    apply_message(&entity, &mut state, &topic, payload, AT, &templates)
+                {
+                    assert!(
+                        matches!(err, StateError::Template(_)),
+                        "{} on {topic} with {payload:?}: {err:?}",
+                        entity.unique_id
+                    );
+                }
             }
         }
     }

@@ -82,8 +82,8 @@ fn open_or_closed(position: u8) -> &'static str {
 }
 
 /// The canonical state for a received word, following Home Assistant: `stopped` becomes
-/// `closed` when the known position is 0 (with a position topic) or the cover was closing
-/// (without one), else `open`.
+/// `closed` when the known position is 0 (with a position topic) or the cover was closed or
+/// closing (without one), else `open`.
 fn resolve_state(config: &Value, word: &str, cover: &CoverState) -> Option<&'static str> {
     let matches = |key: &str, default: &str| {
         word.eq_ignore_ascii_case(&util::config_string_or(config, key, default))
@@ -92,7 +92,7 @@ fn resolve_state(config: &Value, word: &str, cover: &CoverState) -> Option<&'sta
         let closed = if config.get("position_topic").is_some() {
             cover.position == Some(0)
         } else {
-            cover.state.as_deref() == Some("closing")
+            matches!(cover.state.as_deref(), Some("closed" | "closing"))
         };
         return Some(if closed { "closed" } else { "open" });
     }
