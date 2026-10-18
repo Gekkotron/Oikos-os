@@ -122,20 +122,28 @@ impl Default for LogConfig {
     }
 }
 
-/// Env keys (lowercase, `__`-nested) of string-typed fields.
-const STRING_ENV_KEYS: &[&str] = &[
-    "mqtt__host",
-    "mqtt__user",
-    "mqtt__password",
-    "mqtt__client_id",
-    "mqtt__ha_status_topic",
-    "topics__ui_prefix",
-    "topics__z2m_base",
-    "http__bind",
-    "log__level",
+/// Dotted, lowercase keys of string-typed fields. Single source of truth for
+/// both the Env filter (figment's `ignore` sees the key after `split`, i.e.
+/// `mqtt.password`) and the raw-string merge.
+pub const STRING_ENV_KEYS: &[&str] = &[
+    "mqtt.host",
+    "mqtt.user",
+    "mqtt.password",
+    "mqtt.client_id",
+    "mqtt.ha_status_topic",
+    "topics.ui_prefix",
+    "topics.z2m_base",
+    "http.bind",
+    "log.level",
 ];
 
 impl Config {
+    /// The `OIKOS_*` env layer for non-string fields; string fields are
+    /// excluded because figment would guess `123456` to be a number.
+    pub fn env_provider() -> Env {
+        Env::prefixed("OIKOS_").split("__").ignore(STRING_ENV_KEYS)
+    }
+
     /// Loads defaults, merged with the TOML file (`oikos.toml` when `path` is
     /// `None`; a missing file is fine), merged with `OIKOS_` env vars
     /// (`__` separates nesting levels).
@@ -144,13 +152,13 @@ impl Config {
         let file = path.unwrap_or_else(|| Path::new("oikos.toml"));
         let mut figment = Figment::from(Serialized::defaults(Config::default()))
             .merge(Toml::file(file))
-            .merge(Env::prefixed("OIKOS_").split("__").ignore(STRING_ENV_KEYS));
+            .merge(Self::env_provider());
         // String fields keep the raw env text: figment would otherwise guess
         // `123456` or `007` to be numbers.
         for key in STRING_ENV_KEYS {
-            let var = format!("OIKOS_{}", key.to_uppercase());
+            let var = format!("OIKOS_{}", key.replace('.', "__").to_uppercase());
             if let Ok(value) = std::env::var(&var) {
-                figment = figment.merge(Serialized::default(&key.replace("__", "."), value));
+                figment = figment.merge(Serialized::default(key, value));
             }
         }
         figment.extract()

@@ -74,11 +74,43 @@ fn numeric_looking_env_strings_stay_strings() {
         jail.set_env("OIKOS_MQTT__CLIENT_ID", "1");
         jail.set_env("OIKOS_MQTT__USER", "007");
         jail.set_env("OIKOS_MQTT__HOST", "192.168.1.91");
+        jail.set_env("OIKOS_MQTT__HA_STATUS_TOPIC", "42");
+        jail.set_env("OIKOS_TOPICS__UI_PREFIX", "7");
+        jail.set_env("OIKOS_TOPICS__Z2M_BASE", "0123");
+        jail.set_env("OIKOS_HTTP__BIND", "8080");
+        jail.set_env("OIKOS_LOG__LEVEL", "5");
         let cfg = Config::load(None)?;
+        assert_eq!(cfg.mqtt.ha_status_topic, "42");
+        assert_eq!(cfg.topics.ui_prefix, "7");
+        assert_eq!(cfg.topics.z2m_base, "0123");
+        assert_eq!(cfg.http.bind, "8080");
+        assert_eq!(cfg.log.level, "5");
         assert_eq!(cfg.mqtt.password.as_deref(), Some("123456"));
         assert_eq!(cfg.mqtt.client_id, "1");
         assert_eq!(cfg.mqtt.user.as_deref(), Some("007"));
         assert_eq!(cfg.mqtt.host, "192.168.1.91");
+        Ok(())
+    });
+}
+
+#[test]
+fn env_layer_excludes_string_keys() {
+    Jail::expect_with(|jail| {
+        for key in oikos_os::config::STRING_ENV_KEYS {
+            jail.set_env(
+                format!("OIKOS_{}", key.replace('.', "__").to_uppercase()),
+                "123",
+            );
+        }
+        jail.set_env("OIKOS_MQTT__PORT", "1999");
+        let env = figment::Figment::from(Config::env_provider());
+        for key in oikos_os::config::STRING_ENV_KEYS {
+            assert!(
+                env.find_value(key).is_err(),
+                "{key} leaked into the Env layer"
+            );
+        }
+        assert!(env.find_value("mqtt.port").is_ok());
         Ok(())
     });
 }
