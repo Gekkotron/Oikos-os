@@ -12,6 +12,7 @@ pub const UNASSIGNED_AREA: &str = "Unassigned";
 
 /// One room.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", default)]
 pub struct Area {
     pub id: String,
@@ -33,6 +34,7 @@ pub struct Area {
 
 /// Retained payload of `oikos/ui/_areas`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct AreasDocument {
     pub areas: Vec<Area>,

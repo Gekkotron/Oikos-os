@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// A light colour without brightness: `h` in degrees 0..<360, `s` in percent 0..=100.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Hs {
     pub h: f64,
     pub s: f64,
@@ -11,6 +12,7 @@ pub struct Hs {
 
 /// Alarm panel arming modes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum AlarmMode {
     Home,
@@ -22,6 +24,7 @@ pub enum AlarmMode {
 
 /// What a client asks an entity to do; the hub maps it to MQTT publishes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Command {
     /// `brightness` is 0..=255; `color` carries no brightness; `effect` is one of the light's effects.

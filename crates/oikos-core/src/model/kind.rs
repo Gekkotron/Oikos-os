@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// The entity kinds Oikos supports, one per Home Assistant MQTT component.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Light,

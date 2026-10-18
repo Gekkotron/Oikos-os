@@ -7,6 +7,7 @@ use super::command::Hs;
 
 /// Whether the entity (or the bridge) is reachable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum Availability {
     Online,
@@ -17,6 +18,7 @@ pub enum Availability {
 
 /// A light's state; `brightness` is normalised to 0..=255.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct LightState {
     pub on: bool,
     pub brightness: Option<u8>,
@@ -27,6 +29,7 @@ pub struct LightState {
 
 /// A cover's state; `position` is normalised to 0 (closed) ..= 100 (open).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct CoverState {
     pub state: Option<String>,
     pub position: Option<u8>,
@@ -34,6 +37,7 @@ pub struct CoverState {
 
 /// A climate's state.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct ClimateState {
     pub current: Option<f64>,
     pub target: Option<f64>,
@@ -44,6 +48,7 @@ pub struct ClimateState {
 
 /// A vacuum's state; `battery` is 0..=100.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct VacuumState {
     pub state: Option<String>,
     pub battery: Option<u8>,
@@ -52,6 +57,7 @@ pub struct VacuumState {
 
 /// A water heater's state.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct WaterHeaterState {
     pub mode: Option<String>,
     pub current: Option<f64>,
@@ -60,6 +66,7 @@ pub struct WaterHeaterState {
 
 /// The typed value of an entity, by kind.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum StateValue {
     OnOff(bool),
@@ -78,6 +85,7 @@ pub enum StateValue {
 
 /// Everything known about an entity's current state.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct EntityState {
     pub value: StateValue,
     /// Merged from `json_attributes_topic`.

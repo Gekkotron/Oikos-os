@@ -11,6 +11,7 @@ use super::ui_override::UiOverride;
 
 /// Home Assistant `entity_category`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum EntityCategory {
     #[default]
@@ -21,6 +22,7 @@ pub enum EntityCategory {
 
 /// Keypad (digits) or text field for an alarm code.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum CodeFormat {
     #[default]
@@ -30,6 +32,7 @@ pub enum CodeFormat {
 
 /// What an entity can do, as the app's `Capabilities`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(default)]
 pub struct Capabilities {
     pub brightness: bool,

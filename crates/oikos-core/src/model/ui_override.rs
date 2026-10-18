@@ -25,6 +25,7 @@ pub const LIGHT_ON_PRESETS: &[&str] = &["white", "warm", "red", "green", "blue"]
 /// enum-like values stay strings so a role this hub does not know survives a read-modify-write);
 /// encoding omits every field at its default, as the app does.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase", default)]
 pub struct UiOverride {
     #[serde(skip_serializing_if = "Option::is_none")]
