@@ -17,8 +17,14 @@ async fn main() -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Cli::McpStdio { server } => {
-            let cfg = Config::load(None)?;
+            let (cfg, load_err) = match Config::load(None) {
+                Ok(cfg) => (cfg, None),
+                Err(e) => (Config::default(), Some(e)),
+            };
             logging::init(&cfg.log);
+            if let Some(e) = load_err {
+                tracing::warn!(error = %e, "ignoring invalid config, using defaults for logging");
+            }
             tracing::error!(%server, "mcp-stdio is not implemented yet");
             Ok(ExitCode::from(2))
         }

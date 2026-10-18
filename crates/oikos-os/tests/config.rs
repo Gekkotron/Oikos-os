@@ -66,3 +66,19 @@ fn debug_redacts_password() {
     cfg.mqtt.password = None;
     assert!(format!("{:?}", cfg.mqtt).contains("password: None"));
 }
+
+#[test]
+fn numeric_looking_env_strings_stay_strings() {
+    Jail::expect_with(|jail| {
+        jail.set_env("OIKOS_MQTT__PASSWORD", "123456");
+        jail.set_env("OIKOS_MQTT__CLIENT_ID", "1");
+        jail.set_env("OIKOS_MQTT__USER", "007");
+        jail.set_env("OIKOS_MQTT__HOST", "192.168.1.91");
+        let cfg = Config::load(None)?;
+        assert_eq!(cfg.mqtt.password.as_deref(), Some("123456"));
+        assert_eq!(cfg.mqtt.client_id, "1");
+        assert_eq!(cfg.mqtt.user.as_deref(), Some("007"));
+        assert_eq!(cfg.mqtt.host, "192.168.1.91");
+        Ok(())
+    });
+}

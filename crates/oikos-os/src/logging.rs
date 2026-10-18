@@ -12,8 +12,8 @@ pub fn init(cfg: &LogConfig) {
         .with_env_filter(filter)
         .with_writer(std::io::stderr);
     if cfg.json {
-        builder.json().init();
+        let _ = builder.json().try_init();
     } else {
-        builder.pretty().init();
+        let _ = builder.pretty().try_init();
     }
 }

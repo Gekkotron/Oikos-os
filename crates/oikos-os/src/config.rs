@@ -122,6 +122,19 @@ impl Default for LogConfig {
     }
 }
 
+/// Env keys (lowercase, `__`-nested) of string-typed fields.
+const STRING_ENV_KEYS: &[&str] = &[
+    "mqtt__host",
+    "mqtt__user",
+    "mqtt__password",
+    "mqtt__client_id",
+    "mqtt__ha_status_topic",
+    "topics__ui_prefix",
+    "topics__z2m_base",
+    "http__bind",
+    "log__level",
+];
+
 impl Config {
     /// Loads defaults, merged with the TOML file (`oikos.toml` when `path` is
     /// `None`; a missing file is fine), merged with `OIKOS_` env vars
@@ -129,9 +142,17 @@ impl Config {
     #[allow(clippy::result_large_err)] // signature fixed by the spec
     pub fn load(path: Option<&Path>) -> Result<Config, figment::Error> {
         let file = path.unwrap_or_else(|| Path::new("oikos.toml"));
-        Figment::from(Serialized::defaults(Config::default()))
+        let mut figment = Figment::from(Serialized::defaults(Config::default()))
             .merge(Toml::file(file))
-            .merge(Env::prefixed("OIKOS_").split("__"))
-            .extract()
+            .merge(Env::prefixed("OIKOS_").split("__").ignore(STRING_ENV_KEYS));
+        // String fields keep the raw env text: figment would otherwise guess
+        // `123456` or `007` to be numbers.
+        for key in STRING_ENV_KEYS {
+            let var = format!("OIKOS_{}", key.to_uppercase());
+            if let Ok(value) = std::env::var(&var) {
+                figment = figment.merge(Serialized::default(&key.replace("__", "."), value));
+            }
+        }
+        figment.extract()
     }
 }
