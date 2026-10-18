@@ -3,3 +3,5 @@
 //! No I/O, no async; compiles to native and `wasm32-unknown-unknown`.
 
 pub mod model;
+
+pub mod discovery;

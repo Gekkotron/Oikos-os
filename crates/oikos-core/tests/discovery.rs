@@ -1,0 +1,432 @@
+//! Home Assistant MQTT discovery parsing against the recorded house fixtures.
+
+mod common;
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use oikos_core::discovery::{
+    DiscoveryTopic, Parsed, TopicClass, capabilities, classify, expand, expand_device_based,
+    naming, parse,
+};
+use oikos_core::model::{AlarmMode, Bindings, Entity, EntityCategory, Kind, UNASSIGNED_AREA};
+use serde_json::{Value, json};
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| (*s).to_owned()).collect()
+}
+
+/// Rebuilds the discovery topic a fixture was recorded from, under the `oikos` prefix.
+fn fixture_topic(file_stem: &str) -> String {
+    format!("oikos/{}/config", file_stem.replace("__", "/"))
+}
+
+fn discovery_topic(topic: &str) -> DiscoveryTopic {
+    match classify(topic, &strings(&["oikos"]), &strings(&["ui", "automation"])) {
+        TopicClass::Discovery(t) => t,
+        other => panic!("{topic} is not a discovery topic: {other:?}"),
+    }
+}
+
+/// Parses one recorded discovery fixture (file name without `.json`) into an entity.
+fn parse_fixture(file_stem: &str) -> Entity {
+    let topic_str = fixture_topic(file_stem);
+    let topic = discovery_topic(&topic_str);
+    let payload = common::fixture(&format!("discovery/{file_stem}.json"));
+    match parse(&topic, payload.as_bytes(), &topic_str) {
+        Ok(Parsed::Entity(entity)) => *entity,
+        other => panic!("{file_stem} did not parse as an entity: {other:?}"),
+    }
+}
+
+#[test]
+fn classifies_topics() {
+    let prefixes = strings(&["oikos"]);
+    let reserved = strings(&["ui", "automation"]);
+    assert_eq!(
+        classify("oikos/light/x/y/config", &prefixes, &reserved),
+        TopicClass::Discovery(DiscoveryTopic {
+            prefix: "oikos".into(),
+            component: "light".into(),
+            node_id: Some("x".into()),
+            object_id: "y".into(),
+        })
+    );
+    assert_eq!(
+        classify("oikos/ui/0xabc", &prefixes, &reserved),
+        TopicClass::Reserved("ui".into())
+    );
+    assert_eq!(
+        classify("oikos/ui/_areas", &prefixes, &reserved),
+        TopicClass::Reserved("ui".into())
+    );
+    assert_eq!(
+        classify(
+            "homeassistant/sensor/x/config",
+            &strings(&["oikos", "homeassistant"]),
+            &reserved
+        ),
+        TopicClass::Discovery(DiscoveryTopic {
+            prefix: "homeassistant".into(),
+            component: "sensor".into(),
+            node_id: None,
+            object_id: "x".into(),
+        })
+    );
+    assert_eq!(
+        classify("oikos/light/x/y/state", &prefixes, &reserved),
+        TopicClass::Other
+    );
+    assert_eq!(
+        classify("zigbee2mqtt/rooms/a/b", &prefixes, &reserved),
+        TopicClass::Other
+    );
+}
+
+#[test]
+fn expands_abbreviations_and_tilde() {
+    let raw = json!({
+        "~": "zigbee2mqtt/x",
+        "stat_t": "~",
+        "cmd_t": "~/set",
+        "avty": [{"t": "zigbee2mqtt/bridge/state", "val_tpl": "{{ value_json.state }}"}],
+        "dev": {"ids": ["zigbee2mqtt_0x1"], "sa": "Living"}
+    });
+    let expanded = expand(raw);
+    assert_eq!(expanded["state_topic"], json!("zigbee2mqtt/x"));
+    assert_eq!(expanded["command_topic"], json!("zigbee2mqtt/x/set"));
+    assert_eq!(
+        expanded["availability"][0]["topic"],
+        json!("zigbee2mqtt/bridge/state")
+    );
+    assert_eq!(
+        expanded["availability"][0]["value_template"],
+        json!("{{ value_json.state }}")
+    );
+    assert_eq!(
+        expanded["device"]["identifiers"],
+        json!(["zigbee2mqtt_0x1"])
+    );
+    assert_eq!(expanded["device"]["suggested_area"], json!("Living"));
+    assert!(expanded.get("~").is_none());
+    assert!(expanded.get("stat_t").is_none());
+    assert!(expanded.get("dev").is_none());
+}
+
+#[test]
+fn parses_every_recorded_discovery_file() {
+    let dir = common::fixture_dir().join("discovery");
+    let mut entities = 0usize;
+    let mut ignored = 0usize;
+    let mut removed = 0usize;
+    let mut reasons = BTreeMap::<String, usize>::new();
+    let mut errors = Vec::<String>::new();
+    let mut files = 0usize;
+    for entry in std::fs::read_dir(&dir).expect("discovery fixture dir") {
+        let path = entry.expect("dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        files += 1;
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("utf-8 file stem");
+        let topic_str = fixture_topic(stem);
+        let topic = discovery_topic(&topic_str);
+        let payload = std::fs::read(&path).expect("fixture bytes");
+        match parse(&topic, &payload, &topic_str) {
+            Ok(Parsed::Entity(entity)) => {
+                entities += 1;
+                assert!(!entity.unique_id.is_empty(), "{stem}: empty unique_id");
+                assert!(
+                    !entity.bindings.topics().is_empty(),
+                    "{stem}: no topic to subscribe to"
+                );
+                assert_eq!(entity.discovery_topic, topic_str);
+                assert_eq!(entity.area, UNASSIGNED_AREA);
+                assert!(entity.part_of.is_none());
+            }
+            Ok(Parsed::Ignored { reason }) => {
+                ignored += 1;
+                *reasons.entry(reason).or_default() += 1;
+            }
+            Ok(Parsed::Removed) => removed += 1,
+            Err(e) => errors.push(format!("{topic_str}: {e}")),
+        }
+    }
+    println!(
+        "discovery fixtures: {files} files, {entities} entities, {ignored} ignored, {removed} removed"
+    );
+    println!("ignored reasons: {reasons:?}");
+    println!("errors: {errors:?}");
+    assert!(errors.is_empty(), "parse errors: {errors:?}");
+    assert!(entities >= 400, "only {entities} entities");
+    assert_eq!(entities + ignored + removed, files);
+    assert_eq!(removed, 0);
+}
+
+#[test]
+fn light_capabilities_from_recorded_json_schema_light() {
+    let light = parse_fixture("light__0x00124b0011b6b80f__light_4");
+    assert_eq!(light.kind, Kind::Light);
+    assert_eq!(light.protocol_kind, Kind::Light);
+    assert!(light.capabilities.brightness);
+    assert!(light.capabilities.effects.iter().any(|e| e == "blink"));
+    assert_eq!(
+        light.capabilities.color_modes,
+        BTreeSet::from(["brightness".to_owned()])
+    );
+    assert_eq!(light.unique_id, "0x00124b0011b6b80f_light_4_zigbee2mqtt");
+    assert_eq!(
+        light.device_id.as_deref(),
+        Some("zigbee2mqtt_0x00124b0011b6b80f")
+    );
+    assert_eq!(light.name, "outdoor/light_sensors_door 4");
+    assert_eq!(light.label.as_deref(), Some("4"));
+    assert!(light.path_area.is_none());
+}
+
+#[test]
+fn cover_number_select_alarm_capabilities() {
+    let cover = parse_fixture("cover__0x804b50fffe252151__cover");
+    assert_eq!(cover.kind, Kind::Cover);
+    assert!(cover.capabilities.position);
+    assert_eq!(cover.name, "shutter");
+    assert_eq!(cover.device_name.as_deref(), Some("shutter"));
+    assert_eq!(cover.path_area.as_deref(), Some("bedroom2"));
+
+    let number = parse_fixture("number__0x1051dbfffe1a4058__effect_speed");
+    assert_eq!(number.kind, Kind::Number);
+    assert_eq!(number.capabilities.min, Some(0.0));
+    assert_eq!(number.capabilities.max, Some(255.0));
+    assert!(number.capabilities.step.is_some());
+
+    let select = parse_fixture("select__0x000d6ffffe9d44e4__indicator_mode");
+    assert_eq!(select.kind, Kind::Select);
+    assert!(!select.capabilities.options.is_empty());
+
+    let alarm = parse_fixture("alarm_control_panel__jeedom__house_alarm");
+    assert_eq!(alarm.kind, Kind::AlarmPanel);
+    assert_eq!(
+        alarm.capabilities.alarm_modes,
+        BTreeSet::from([AlarmMode::Home, AlarmMode::Away, AlarmMode::Night])
+    );
+    // No `code` in the config: arming never asks for one.
+    assert!(!alarm.capabilities.code_arm_required);
+    assert!(!alarm.capabilities.code_disarm_required);
+    assert_eq!(alarm.name, "Alarm");
+
+    let vacuum = parse_fixture("vacuum__roborock_40313ca8b964__roborock_40313ca8b964");
+    assert_eq!(
+        vacuum.capabilities.vacuum_actions,
+        strings(&["start", "pause", "stop", "return_to_base", "locate"])
+    );
+    assert_eq!(vacuum.capabilities.fan_speeds.len(), 6);
+
+    let climate = parse_fixture("climate__daikin_192_168_1_150__climate");
+    assert_eq!(climate.capabilities.hvac_modes.len(), 6);
+    assert_eq!(climate.capabilities.fan_modes.len(), 7);
+    assert_eq!(climate.capabilities.min_temp, Some(10.0));
+    assert_eq!(climate.capabilities.max_temp, Some(32.0));
+    assert_eq!(climate.capabilities.temp_step, Some(0.5));
+}
+
+#[test]
+fn naming_and_path_area() {
+    assert_eq!(
+        naming::split(Some("rooms/bedroom1/thermometer"), Some("Temperature")),
+        (
+            "thermometer Temperature".to_owned(),
+            Some("thermometer".to_owned()),
+            Some("Temperature".to_owned()),
+            Some("bedroom1".to_owned())
+        )
+    );
+    assert_eq!(
+        naming::split(Some("outdoor/pool"), Some("Water")),
+        (
+            "outdoor/pool Water".to_owned(),
+            Some("outdoor/pool".to_owned()),
+            Some("Water".to_owned()),
+            None
+        )
+    );
+    assert_eq!(
+        naming::split(Some("rooms/bedroom1/thermometer"), None),
+        (
+            "thermometer".to_owned(),
+            Some("thermometer".to_owned()),
+            None,
+            Some("bedroom1".to_owned())
+        )
+    );
+    assert_eq!(
+        naming::split(None, Some("Water")),
+        ("Water".to_owned(), None, None, None)
+    );
+}
+
+#[test]
+fn diagnostic_and_disabled_are_kept_and_flagged() {
+    let linkquality = parse_fixture("sensor__0x0000000000000000__linkquality");
+    assert_eq!(linkquality.category, EntityCategory::Diagnostic);
+    assert!(!linkquality.enabled_by_default);
+    assert_eq!(linkquality.unit.as_deref(), Some("lqi"));
+    assert_eq!(linkquality.icon.as_deref(), Some("mdi:signal"));
+
+    let effect = parse_fixture("select__0x9035eafffec07012__effect");
+    assert_eq!(effect.category, EntityCategory::Primary);
+    assert!(!effect.enabled_by_default);
+
+    let identify = parse_fixture("button__0x00158d0006ea91e3__identify");
+    assert_eq!(identify.category, EntityCategory::Config);
+    assert!(identify.enabled_by_default);
+    assert_eq!(identify.device_class.as_deref(), Some("identify"));
+}
+
+#[test]
+fn empty_payload_is_removed_and_ignored_component_is_ignored() {
+    let light = discovery_topic("oikos/light/0x1/light/config");
+    assert!(matches!(
+        parse(&light, b"", "oikos/light/0x1/light/config"),
+        Ok(Parsed::Removed)
+    ));
+
+    let update = discovery_topic("oikos/update/0x1/update/config");
+    match parse(
+        &update,
+        br#"{"name":"Firmware"}"#,
+        "oikos/update/0x1/update/config",
+    ) {
+        Ok(Parsed::Ignored { reason }) => assert!(reason.contains("update"), "{reason}"),
+        other => panic!("expected Ignored, got {other:?}"),
+    }
+
+    let device = discovery_topic("oikos/device/0x1/config");
+    match parse(&device, br#"{"cmps":{}}"#, "oikos/device/0x1/config") {
+        Ok(Parsed::Ignored { reason }) => {
+            assert_eq!(reason, "device-based discovery: expanded by caller");
+        }
+        other => panic!("expected Ignored, got {other:?}"),
+    }
+
+    assert!(parse(&light, b"{not json", "oikos/light/0x1/light/config").is_err());
+    assert!(parse(&light, b"[1,2]", "oikos/light/0x1/light/config").is_err());
+    assert!(parse(&light, b"\xff\xfe", "oikos/light/0x1/light/config").is_err());
+
+    let sensor = discovery_topic("oikos/sensor/0x1/temp/config");
+    assert!(
+        parse(
+            &sensor,
+            br#"{"name":"Temperature"}"#,
+            "oikos/sensor/0x1/temp/config"
+        )
+        .is_err(),
+        "a sensor without state_topic is invalid"
+    );
+
+    // No unique_id: falls back to <component>.<node_id>.<object_id>.
+    let payload = br#"{"state_topic":"z/t","command_topic":"z/t/set"}"#;
+    match parse(&light, payload, "oikos/light/0x1/light/config") {
+        Ok(Parsed::Entity(entity)) => {
+            assert_eq!(entity.unique_id, "light.0x1.light");
+            assert_eq!(entity.name, "light");
+            assert!(entity.device_id.is_none());
+        }
+        other => panic!("expected Entity, got {other:?}"),
+    }
+}
+
+#[test]
+fn device_based_discovery_expands_cmps() {
+    let topic = discovery_topic("oikos/device/plug_1/config");
+    let payload = br#"{
+        "~": "z/plug_1",
+        "dev": {"ids": ["plug_1"], "name": "rooms/office/plug"},
+        "o": {"name": "handwritten"},
+        "avty": [{"t": "~/availability"}],
+        "cmps": {
+            "relay": {"p": "switch", "stat_t": "~", "cmd_t": "~/set", "uniq_id": "plug_1_relay"},
+            "power": {"p": "sensor", "stat_t": "~", "val_tpl": "{{ value_json.power }}", "uniq_id": "plug_1_power"},
+            "gone": {"p": "sensor"}
+        }
+    }"#;
+    let expanded = expand_device_based(&topic, payload).expect("device-based config expands");
+    assert_eq!(expanded.len(), 2);
+    let by_id: BTreeMap<&str, &(DiscoveryTopic, Value)> = expanded
+        .iter()
+        .map(|item| (item.0.object_id.as_str(), item))
+        .collect();
+
+    let (relay_topic, relay) = by_id["relay"];
+    assert_eq!(relay_topic.component, "switch");
+    assert_eq!(relay_topic.node_id.as_deref(), Some("plug_1"));
+    assert_eq!(relay["state_topic"], json!("z/plug_1"));
+    assert_eq!(relay["command_topic"], json!("z/plug_1/set"));
+    assert_eq!(relay["device"]["identifiers"], json!(["plug_1"]));
+    assert_eq!(relay["origin"]["name"], json!("handwritten"));
+    assert_eq!(
+        relay["availability"][0]["topic"],
+        json!("z/plug_1/availability")
+    );
+    assert!(relay.get("~").is_none());
+    assert!(relay.get("platform").is_none() && relay.get("p").is_none());
+
+    let (power_topic, power) = by_id["power"];
+    assert_eq!(power_topic.component, "sensor");
+    assert_eq!(power["state_topic"], json!("z/plug_1"));
+    assert_eq!(power["value_template"], json!("{{ value_json.power }}"));
+
+    // The expanded configs parse as ordinary entities.
+    let bytes = serde_json::to_vec(power).expect("serialises");
+    match parse(power_topic, &bytes, "oikos/device/plug_1/config") {
+        Ok(Parsed::Entity(entity)) => {
+            assert_eq!(entity.unique_id, "plug_1_power");
+            assert_eq!(entity.kind, Kind::Sensor);
+            assert_eq!(entity.path_area.as_deref(), Some("office"));
+        }
+        other => panic!("expected Entity, got {other:?}"),
+    }
+}
+
+#[test]
+fn bindings_topics_rule() {
+    let bindings = Bindings {
+        config: json!({
+            "state_topic": "z/l",
+            "brightness_state_topic": "z/l/brightness",
+            "command_topic": "z/l/set",
+            "brightness_command_topic": "z/l/brightness/set",
+            "set_position_topic": "z/l/position/set",
+            "json_attributes_topic": "z/l/attributes",
+            "availability": [{"topic": "z/bridge/state"}, {"topic": "z/l/availability"}]
+        }),
+    };
+    assert_eq!(
+        bindings.topics(),
+        BTreeSet::from_iter(strings(&[
+            "z/l",
+            "z/l/brightness",
+            "z/l/attributes",
+            "z/bridge/state",
+            "z/l/availability",
+        ]))
+    );
+}
+
+#[test]
+fn capabilities_from_config_reads_alarm_code() {
+    let cfg = json!({
+        "supported_features": ["arm_home", "arm_custom_bypass"],
+        "code": "REMOTE_CODE_TEXT",
+        "code_disarm_required": false
+    });
+    let caps = capabilities::from_config(Kind::AlarmPanel, &cfg);
+    assert_eq!(
+        caps.alarm_modes,
+        BTreeSet::from([AlarmMode::Home, AlarmMode::CustomBypass])
+    );
+    assert!(caps.code_arm_required);
+    assert!(!caps.code_disarm_required);
+    assert_eq!(caps.code_format, oikos_core::model::CodeFormat::Text);
+}
