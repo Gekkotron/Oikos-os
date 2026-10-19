@@ -873,3 +873,103 @@ body {
     display: none;
   }
 }
+
+/* Override editor */
+.override {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.override__group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+}
+
+.override__legend {
+  padding: 0 6px;
+  font: var(--type-label);
+  opacity: 0.7;
+}
+
+.override__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.override__label {
+  font: var(--type-label);
+  opacity: 0.8;
+}
+
+.override__flag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--touch-min);
+  cursor: pointer;
+}
+
+.override__check {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent-amber);
+}
+
+.override__slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.override__slider .btn {
+  flex: none;
+}
+
+.override__value {
+  flex: none;
+  min-width: 56px;
+  font: var(--type-label);
+  text-align: right;
+}
+
+.override__error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--offline) 15%, transparent);
+  color: var(--offline);
+  font: var(--type-body);
+  overflow-wrap: anywhere;
+}
+
+.override__error[hidden] {
+  display: none;
+}
+
+.override__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.override__save:not(:disabled) {
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
+}
+
+.override .field,
+.override .select {
+  box-sizing: border-box;
+}

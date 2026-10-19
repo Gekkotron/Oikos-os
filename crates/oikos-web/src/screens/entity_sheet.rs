@@ -9,6 +9,7 @@ use oikos_core::model::{Availability, Kind};
 use crate::format::{format_timestamp, short_name, word};
 use crate::house::House;
 use crate::icons::kind_icon;
+use crate::override_editor::OverrideEditor;
 use crate::screens::home::card_for;
 
 fn availability_class(availability: Availability) -> &'static str {
@@ -182,7 +183,7 @@ fn SheetBody(id: String) -> impl IntoView {
         {move || entity.get().and_then(|e| device_panel(house, &e))}
         {move || entity.get().map(|e| state_panel(&e))}
         <Panel title="Override">
-            <div class="sheet__override"></div>
+            {entity.get_untracked().map(|e| view! { <OverrideEditor entity=e /> })}
         </Panel>
     }
 }
