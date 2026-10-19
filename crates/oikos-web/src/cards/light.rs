@@ -44,7 +44,7 @@ pub fn has_colour(color_modes: &std::collections::BTreeSet<String>) -> bool {
 }
 
 /// The turn-on or turn-off command for a toggle to `on`.
-pub(super) fn power_command(on: bool) -> Command {
+pub(crate) fn power_command(on: bool) -> Command {
     if on {
         Command::TurnOn {
             brightness: None,

@@ -2637,3 +2637,74 @@ a[aria-current="page"] .nav__glyph {
   left: 0;
   background: var(--accent-amber);
 }
+
+/* A room group's sheet: a line of status and buttons, a slider for all members, one row each. */
+.group__line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.group__slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.group__slider .slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.group__members {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group__member {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.group__member-name {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  min-height: var(--touch-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: var(--type-body);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.group__member-state {
+  opacity: 0.7;
+  font: var(--type-label);
+}
+
+.group__rename {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.group__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--touch-min);
+}

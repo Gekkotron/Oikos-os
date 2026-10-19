@@ -59,6 +59,14 @@ mod tests {
     }
 
     #[test]
+    fn group_sheet_is_a_return_target() {
+        assert_eq!(
+            return_target("/group/salon/light", "").as_deref(),
+            Some("/group/salon/light")
+        );
+    }
+
+    #[test]
     fn sheets_are_not() {
         assert_eq!(return_target("/entity/lamp", ""), None);
         assert_eq!(return_target("/entity/a%2Fb", "x=1"), None);

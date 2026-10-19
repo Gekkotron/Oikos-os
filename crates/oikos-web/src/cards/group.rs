@@ -16,16 +16,16 @@ use crate::icons::{CHEVRON_DOWN, CHEVRON_UP, STOP, kind_icon};
 /// `summary` only notify when they change, so a state echo repaints only the card whose group
 /// it touches.
 #[derive(Clone, Copy)]
-struct GroupView {
-    members: Memo<Vec<EntityView>>,
-    summary: Memo<GroupSummary>,
-    name: Memo<String>,
-    area_name: Memo<String>,
-    pending: Signal<bool>,
+pub(crate) struct GroupView {
+    pub(crate) members: Memo<Vec<EntityView>>,
+    pub(crate) summary: Memo<GroupSummary>,
+    pub(crate) name: Memo<String>,
+    pub(crate) area_name: Memo<String>,
+    pub(crate) pending: Signal<bool>,
 }
 
 impl GroupView {
-    fn new(key: &GroupKey, sender: Sender) -> Self {
+    pub(crate) fn new(key: &GroupKey, sender: Sender) -> Self {
         let house = expect_context::<House>();
         let members = {
             let key = key.clone();
@@ -60,7 +60,7 @@ impl GroupView {
     }
 
     /// Sends `cmd` to the members that can take it.
-    fn send(&self, sender: Sender, cmd: Command) {
+    pub(crate) fn send(&self, sender: Sender, cmd: Command) {
         let ids = self.members.with_untracked(|ms| targets(ms, &cmd));
         sender.send_group(&ids, cmd);
     }
@@ -123,6 +123,32 @@ fn card_label(view: GroupView, state: fn(&GroupSummary) -> String) -> Signal<Str
     })
 }
 
+/// ▲ ■ ▼ as a row of buttons sending Open, Stop and Close to `on_command`. `suffix` ends their
+/// accessible names ("Open" + " all shutters").
+#[component]
+pub fn CoverButtons(suffix: &'static str, on_command: Callback<Command>) -> impl IntoView {
+    let button = move |text: &'static str, icon: &'static str, cmd: Command| {
+        let label = format!("{text}{suffix}");
+        view! {
+            <button
+                type="button"
+                class="btn btn--icon"
+                aria-label=label.clone()
+                title=label
+                inner_html=icon
+                on:click=move |_| on_command.run(cmd.clone())
+            ></button>
+        }
+    };
+    view! {
+        <div class="card__controls">
+            {button("Open", CHEVRON_UP, Command::Open)}
+            {button("Stop", STOP, Command::Stop)}
+            {button("Close", CHEVRON_DOWN, Command::Close)}
+        </div>
+    }
+}
+
 /// A room's shutters as one card: how many are open, ▲ ■ ▼ for all of them, a bar for each.
 #[component]
 pub fn CoverGroupCard(key: GroupKey) -> impl IntoView {
@@ -134,18 +160,6 @@ pub fn CoverGroupCard(key: GroupKey) -> impl IntoView {
         format!("{} open, {} closed", s.on, s.total - s.on)
     });
 
-    let button = move |text: &'static str, icon: &'static str, cmd: Command| {
-        view! {
-            <button
-                type="button"
-                class="btn btn--icon"
-                aria-label=text
-                title=text
-                inner_html=icon
-                on:click=move |_| view.send(sender, cmd.clone())
-            ></button>
-        }
-    };
     let bars = move || {
         summary.with(|s| {
             s.positions
@@ -164,11 +178,10 @@ pub fn CoverGroupCard(key: GroupKey) -> impl IntoView {
         <GroupFrame kind=Kind::Cover key=key view=view label=label>
             <span class="card__value">{move || summary.with(cover_text)}</span>
             <div class="group__bars">{bars}</div>
-            <div class="card__controls">
-                {button("Open all shutters", CHEVRON_UP, Command::Open)}
-                {button("Stop all shutters", STOP, Command::Stop)}
-                {button("Close all shutters", CHEVRON_DOWN, Command::Close)}
-            </div>
+            <CoverButtons
+                suffix=" all shutters"
+                on_command=Callback::new(move |cmd| view.send(sender, cmd))
+            />
         </GroupFrame>
     }
 }
