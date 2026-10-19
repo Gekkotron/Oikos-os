@@ -14,6 +14,14 @@ fn availability_class(availability: Availability) -> &'static str {
     }
 }
 
+/// A callback that opens the detail sheet of entity `id`. Call it while building a component
+/// (it needs the router context).
+pub fn open_entity(id: &str) -> Callback<()> {
+    let navigate = leptos_router::hooks::use_navigate();
+    let path = format!("/entity/{id}");
+    Callback::new(move |()| navigate(&path, Default::default()))
+}
+
 /// A card for one entity. `on_click` fires from the header tap target; `children` is the body
 /// (value, controls). `pending` shows a pulsing dot while a command awaits its state echo.
 #[component]

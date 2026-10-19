@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
+pub mod api;
 pub mod app;
+pub mod commands;
 pub mod components;
 pub mod format;
 pub mod house;

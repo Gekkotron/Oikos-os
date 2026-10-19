@@ -4,7 +4,9 @@ use leptos::prelude::*;
 use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::path;
 
+use crate::commands::Pending;
 use crate::components::status_pill::StatusPill;
+use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
 use crate::screens::devices::DevicesScreen;
 use crate::screens::entity_sheet::EntitySheetScreen;
@@ -25,6 +27,22 @@ fn next_theme(theme: Theme) -> Theme {
 pub fn App() -> impl IntoView {
     let house = House::new();
     provide_context(house);
+    let toasts = Toasts::new();
+    provide_context(toasts);
+    provide_context(Pending::new());
+    // A command the hub gave up on: tell the user, then clear it so the next one fires again.
+    Effect::new(move |_| {
+        if let Some((id, reason)) = house.command_failed.get() {
+            let name = house
+                .entities
+                .with_untracked(|m| m.get(&id).map(|e| e.name.clone()));
+            toasts.push(match name {
+                Some(name) => format!("{name}: {reason}"),
+                None => reason,
+            });
+            house.command_failed.set(None);
+        }
+    });
     let theme = install_theme();
     #[cfg(target_arch = "wasm32")]
     crate::ws::connect("/ws", house);
@@ -56,6 +74,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/settings") view=SettingsScreen />
                 </Routes>
             </main>
+            <ToastQueue />
         </Router>
     }
 }
