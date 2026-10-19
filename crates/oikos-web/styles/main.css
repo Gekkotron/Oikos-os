@@ -1493,13 +1493,23 @@ body {
 }
 
 .flow-switch {
-  box-sizing: content-box;
-  padding: 11px 0;
+  padding: 0;
   border: 0;
-  background-clip: content-box;
   color: inherit;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Grows the hit area to 48 px without touching the visible track. */
+.flow-switch::before {
+  content: "";
+  position: absolute;
+  inset: -11px 0;
+}
+
+.flow-switch:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 2px;
 }
 
 .flow-switch:disabled {
@@ -1525,6 +1535,16 @@ body {
   flex: 1;
   min-width: 0;
   margin: 0;
+}
+
+.flow-canvas__header .btn {
+  flex: none;
+}
+
+@media (max-width: 600px) {
+  .flow-canvas__header .sheet__title {
+    flex: 1 1 100%;
+  }
 }
 
 .flow-invalid {
@@ -1555,7 +1575,7 @@ body {
 
 .flow-wire {
   fill: none;
-  stroke: var(--chip-border);
+  stroke: var(--wire);
   stroke-width: 2;
 }
 
@@ -1596,6 +1616,32 @@ body {
 
 .flow-node--command {
   --node-accent: var(--accent-mint);
+}
+
+.flow-node--orphan {
+  opacity: 0.5;
+}
+
+.flow-node__in,
+.flow-node__out {
+  position: absolute;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--wire);
+  border-radius: 50%;
+  background: var(--card-bg);
+}
+
+/* Centred on the card's outer edge: the 4 px left border sits outside the padding box. */
+.flow-node__in {
+  left: -4px;
+  transform: translate(-50%, -50%);
+}
+
+.flow-node__out {
+  right: -1px;
+  transform: translate(50%, -50%);
 }
 
 .flow-node--lit {
@@ -1648,6 +1694,12 @@ body {
   animation: flow-pulse var(--motion-medium) ease-in-out infinite alternate;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .flow-node--pending {
+    animation: none;
+  }
+}
+
 @keyframes flow-pulse {
   from {
     box-shadow: 0 0 4px color-mix(in srgb, var(--node-accent) 30%, transparent);
@@ -1665,6 +1717,12 @@ body {
   line-height: 1;
   opacity: 0.7;
   transform: translateY(-50%);
+}
+
+.flow-port--taken {
+  color: var(--accent-mint);
+  font-weight: 700;
+  opacity: 1;
 }
 
 .run-list {

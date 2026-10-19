@@ -11,6 +11,7 @@
   --card-on-bg: linear-gradient(145deg, rgb(255 196 87 / 28%), rgb(255 196 87 / 10%));
   --card-on-ink: #fff4dc;
   --chip-border: rgb(255 255 255 / 14%);
+  --wire: rgb(255 255 255 / 28%);
   --shadow: 0 8px 24px rgb(0 0 0 / 35%);
 
   /* Accents */
@@ -62,6 +63,7 @@
   --card-on-bg: #1f1b16;
   --card-on-ink: #f5f1ea;
   --chip-border: #d9d0c2;
+  --wire: #b8ad9c;
   --shadow: 0 6px 18px rgb(60 40 10 / 10%);
   --accent-mint: #3f6b3a;
   --accent-amber: #d98b3a;
@@ -89,6 +91,7 @@
     --card-on-bg: #1f1b16;
     --card-on-ink: #f5f1ea;
     --chip-border: #d9d0c2;
+    --wire: #b8ad9c;
     --shadow: 0 6px 18px rgb(60 40 10 / 10%);
     --accent-mint: #3f6b3a;
     --accent-amber: #d98b3a;

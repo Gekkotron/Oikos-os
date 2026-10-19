@@ -161,9 +161,11 @@ async fn unknown_flow_links_back() {
 
 #[wasm_bindgen_test]
 async fn parked_delay_counts_down() {
+    // The shape the engine really produces while it waits: the delay step is only recorded
+    // after the wait, so the last step is the `if` that took the false branch.
     let now = (js_sys::Date::now() / 1000.0) as u64;
-    let mut wait = step("wait", "");
-    wait.at = now;
+    let mut moving = step("moving", "false");
+    moving.at = now;
     let run = RunView {
         id: "r1".into(),
         flow_id: "living_led_motion".into(),
@@ -171,7 +173,7 @@ async fn parked_delay_counts_down() {
         started_at: now,
         ended_at: None,
         trigger: None,
-        steps: vec![step("motion", ""), step("moving", "false"), wait],
+        steps: vec![step("motion", "occupancy = false"), moving],
     };
     let flow = FlowView {
         definition: Flow::decode(REFERENCE.as_bytes()).unwrap(),
@@ -188,7 +190,37 @@ async fn parked_delay_counts_down() {
         1,
         "{html}"
     );
+    assert_eq!(count(&host, ".flow-node--pending"), 1, "{html}");
     assert!(html.contains(" left"), "{html}");
     assert!(html.contains("4:5") || html.contains("5:00"), "{html}");
     assert!(html.contains("disabled"), "{html}");
+    // The wire into the parked delay is lit.
+    assert_eq!(count(&host, ".flow-wire--lit"), 2, "{html}");
+    // The if card lights the port it took instead of repeating it on a second line.
+    assert_eq!(count(&host, ".flow-port--taken"), 1, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn cards_have_handles_and_orphans_fade() {
+    let mut definition = Flow::decode(REFERENCE.as_bytes()).unwrap();
+    definition.edges.retain(|e| e.to != "off");
+    let flow = FlowView {
+        definition,
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let host = host();
+    let _mounted = mount(&host, vec![flow], "/flows/living_led_motion");
+    tick().await;
+    let html = host.inner_html();
+    // Every node but the trigger has an input; every node has an output (two for the if).
+    assert_eq!(count(&host, ".flow-node__in"), 4, "{html}");
+    assert_eq!(count(&host, ".flow-node__out"), 6, "{html}");
+    assert_eq!(count(&host, ".flow-node--orphan"), 1, "{html}");
+    assert_eq!(
+        count(&host, "[data-node=off].flow-node--orphan"),
+        1,
+        "{html}"
+    );
 }

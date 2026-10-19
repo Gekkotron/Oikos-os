@@ -4,21 +4,23 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use oikos_api::FlowView;
 
+use crate::alerts::relative_time;
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
+use crate::components::now::Now;
 use crate::flows::{status_word, summary};
 use crate::format::format_timestamp;
 use crate::house::House;
 
-/// The last run as "Done · <time>", or "No runs yet".
-fn last_run(flow: &FlowView) -> String {
+/// The last run as "Done · 2 min ago", or "No runs yet".
+fn last_run(flow: &FlowView, now: u64) -> String {
     flow.runs.first().map_or_else(
         || "No runs yet".to_owned(),
         |run| {
             format!(
                 "{} · {}",
                 status_word(run.status),
-                format_timestamp(run.started_at)
+                relative_time(run.started_at, now)
             )
         },
     )
@@ -31,7 +33,11 @@ fn FlowRow(flow: FlowView) -> impl IntoView {
     let name = flow.definition.name.clone();
     let enabled = flow.definition.enabled;
     let invalid = flow.invalid.clone();
-    let run = last_run(&flow);
+    let now = expect_context::<Now>();
+    let started = flow
+        .runs
+        .first()
+        .map(|run| format_timestamp(run.started_at));
     let line = match &invalid {
         Some(reason) => reason.clone(),
         None => summary(&flow.definition),
@@ -44,7 +50,9 @@ fn FlowRow(flow: FlowView) -> impl IntoView {
                     {name.clone()}
                 </A>
                 <span class="flow-row__summary">{line}</span>
-                <span class="flow-row__run">{run}</span>
+                <span class="flow-row__run" title=started>
+                    {move || last_run(&flow, now.0.get())}
+                </span>
             </div>
             {invalid
                 .clone()

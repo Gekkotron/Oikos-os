@@ -3,9 +3,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use oikos_api::{EntityView, RunStatus, RunView, StepOutcome};
+use oikos_api::{EntityView, RunStatus, RunView, StepOutcome, TriggerInfo};
 use oikos_core::command::command_name;
-use oikos_core::flow::{Flow, Node, NodeKind, Op};
+use oikos_core::flow::{Flow, Node, NodeKind, Op, parse_duration};
 
 use crate::format::entity_title;
 
@@ -174,6 +174,67 @@ pub fn summary(flow: &Flow) -> String {
         .join(" → ")
 }
 
+/// A JSON value as the cards print it: strings bare, everything else as JSON.
+pub fn value_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// What the trigger step shows: `"{entity title} = {value}"` from the run's trigger, or
+/// `manual` for a run started by hand. Computed here instead of printing the engine's detail,
+/// which carries the raw entity id.
+pub fn trigger_line(
+    trigger: Option<&TriggerInfo>,
+    entities: &BTreeMap<String, EntityView>,
+) -> String {
+    match trigger {
+        Some(t) => format!(
+            "{} = {}",
+            entity_label(&t.entity, entities),
+            value_text(&t.value)
+        ),
+        None => "manual".to_owned(),
+    }
+}
+
+/// The non-trigger nodes nothing leads to; they can never run and are drawn faded.
+pub fn orphans(flow: &Flow) -> BTreeSet<String> {
+    flow.nodes
+        .iter()
+        .filter(|n| !matches!(n.kind, NodeKind::TriggerState(_)))
+        .filter(|n| !flow.edges.iter().any(|e| e.to == n.id))
+        .map(|n| n.id.clone())
+        .collect()
+}
+
+/// The `delay` node a running run is parked on, with the second it started waiting at. The
+/// engine records a `delay` step only after the wait, so while it waits the run's last step is
+/// the node before it (an `if`, whose `detail` names the port taken, or a command): the parked
+/// node is that step's first successor that is a `delay`. The countdown ends at
+/// `since + parse_duration(for)`.
+pub fn parked_node(flow: &Flow, run: &RunView) -> Option<(String, u64)> {
+    if run.status != RunStatus::Running {
+        return None;
+    }
+    let step = run.steps.last()?;
+    let node = flow.node(&step.node)?;
+    let port = matches!(node.kind, NodeKind::If(_)).then_some(step.detail.as_str());
+    flow.successors(&step.node, port)
+        .into_iter()
+        .find(|n| matches!(n.kind, NodeKind::Delay(_)))
+        .map(|n| (n.id.clone(), step.at))
+}
+
+/// The second a parked delay ends at: `since` plus the delay's duration.
+pub fn parked_deadline(flow: &Flow, node_id: &str, since: u64) -> Option<u64> {
+    let NodeKind::Delay(p) = &flow.node(node_id)?.kind else {
+        return None;
+    };
+    Some(since + parse_duration(&p.for_).ok()?.as_secs())
+}
+
 /// What a run touched: the latest outcome of each visited node and the edges it followed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Highlight {
@@ -182,8 +243,9 @@ pub struct Highlight {
     pub edges: BTreeSet<(String, Option<String>, String)>,
 }
 
-/// The highlight of `run` on `flow`. An edge is lit when both ends were visited and, for an
-/// `if`, its port is the branch the latest step of that `if` took (its `detail`).
+/// The highlight of `run` on `flow`. An edge is lit when both ends were visited (or its end is
+/// the delay the run is parked on) and, for an `if`, its port is the branch the latest step of
+/// that `if` took (its `detail`).
 pub fn highlight(flow: &Flow, run: Option<&RunView>) -> Highlight {
     let mut out = Highlight::default();
     let Some(run) = run else { return out };
@@ -192,8 +254,10 @@ pub fn highlight(flow: &Flow, run: Option<&RunView>) -> Highlight {
         out.nodes.insert(step.node.clone(), step.outcome);
         details.insert(&step.node, &step.detail);
     }
+    let parked = parked_node(flow, run).map(|(id, _)| id);
     for edge in &flow.edges {
-        if !out.nodes.contains_key(&edge.from) || !out.nodes.contains_key(&edge.to) {
+        let to_parked = parked.as_deref() == Some(edge.to.as_str());
+        if !out.nodes.contains_key(&edge.from) || !(out.nodes.contains_key(&edge.to) || to_parked) {
             continue;
         }
         let from_is_if = flow
@@ -374,6 +438,80 @@ mod tests {
         );
         assert!(!h.edges.contains(&edge("moving", Some("true"), "on")));
         assert_eq!(highlight(&reference(), None), Highlight::default());
+    }
+
+    fn running(steps: Vec<StepView>) -> RunView {
+        RunView {
+            id: "r".into(),
+            flow_id: "f".into(),
+            status: RunStatus::Running,
+            started_at: 1,
+            ended_at: None,
+            trigger: None,
+            steps,
+        }
+    }
+
+    #[test]
+    fn parked_node_follows_the_branch_taken() {
+        let flow = reference();
+        let mut moving = step("moving", StepOutcome::Ok, "false");
+        moving.at = 100;
+        let run = running(vec![step("motion", StepOutcome::Ok, ""), moving]);
+        assert_eq!(parked_node(&flow, &run), Some(("wait".to_owned(), 100)));
+        assert_eq!(parked_deadline(&flow, "wait", 100), Some(400));
+        // The true branch leads to a command, not a delay.
+        let run = running(vec![step("moving", StepOutcome::Ok, "true")]);
+        assert_eq!(parked_node(&flow, &run), None);
+        // A finished run, or one with no steps, parks nowhere.
+        let mut done = running(vec![step("moving", StepOutcome::Ok, "false")]);
+        done.status = RunStatus::Done;
+        assert_eq!(parked_node(&flow, &done), None);
+        assert_eq!(parked_node(&flow, &running(vec![])), None);
+        // A plain node's successors are followed without a port.
+        let mut chain = reference();
+        chain.edges.retain(|e| e.from != "motion");
+        chain.edges.push(oikos_core::flow::Edge {
+            from: "motion".into(),
+            port: None,
+            to: "wait".into(),
+        });
+        let run = running(vec![step("motion", StepOutcome::Ok, "")]);
+        assert_eq!(parked_node(&chain, &run).map(|p| p.0), Some("wait".into()));
+    }
+
+    #[test]
+    fn highlight_lights_the_edge_into_the_parked_delay() {
+        let run = running(vec![
+            step("motion", StepOutcome::Ok, ""),
+            step("moving", StepOutcome::Ok, "false"),
+        ]);
+        let h = highlight(&reference(), Some(&run));
+        assert!(h.edges.contains(&(
+            "moving".to_owned(),
+            Some("false".to_owned()),
+            "wait".to_owned()
+        )));
+        assert!(!h.nodes.contains_key("wait"));
+    }
+
+    #[test]
+    fn trigger_line_uses_the_title_and_value() {
+        let t = TriggerInfo {
+            entity: "m".into(),
+            value: serde_json::json!(true),
+            previous: serde_json::json!(false),
+        };
+        assert_eq!(trigger_line(Some(&t), &BTreeMap::new()), "m = true");
+        assert_eq!(trigger_line(None, &BTreeMap::new()), "manual");
+    }
+
+    #[test]
+    fn orphans_are_non_triggers_without_incoming_edges() {
+        let mut flow = reference();
+        assert!(orphans(&flow).is_empty());
+        flow.edges.retain(|e| e.to != "off");
+        assert_eq!(orphans(&flow), BTreeSet::from(["off".to_owned()]));
     }
 
     #[test]

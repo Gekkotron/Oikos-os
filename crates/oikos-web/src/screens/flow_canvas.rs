@@ -5,17 +5,18 @@ use leptos::task::spawn_local;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use oikos_api::{FlowView, RunView, StepOutcome};
-use oikos_core::flow::{Flow, FlowMode, NodeKind, parse_duration};
+use oikos_core::flow::{Flow, FlowMode, NodeKind};
 
+use crate::alerts::relative_time;
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::now::Now;
 use crate::components::toast::Toasts;
 use crate::flows::{
-    NODE_H, NODE_W, canvas_size, highlight, layout, node_detail, node_title, port_offset,
-    status_class, status_word, wire_path,
+    NODE_H, NODE_W, canvas_size, highlight, layout, node_detail, node_title, orphans,
+    parked_deadline, parked_node, port_offset, status_class, status_word, trigger_line, wire_path,
 };
-use crate::format::{entity_title, format_timestamp};
+use crate::format::format_timestamp;
 use crate::house::House;
 use crate::icons::node_icon;
 
@@ -31,21 +32,6 @@ fn type_class(kind: &NodeKind) -> &'static str {
 /// `m:ss` of a number of seconds.
 fn minutes_seconds(secs: u64) -> String {
     format!("{}:{:02}", secs / 60, secs % 60)
-}
-
-/// The wall-clock second a delay step ends at, when `view`'s active run is parked on it:
-/// the step's start plus the node's duration.
-fn pending_deadline(flow: &Flow, view: &FlowView, node_id: &str) -> Option<u64> {
-    let run = view.runs.first()?;
-    if view.active_run.as_deref() != Some(run.id.as_str()) {
-        return None;
-    }
-    let step = run.steps.last().filter(|s| s.node == node_id)?;
-    let NodeKind::Delay(p) = &flow.node(node_id)?.kind else {
-        return None;
-    };
-    let wait = parse_duration(&p.for_).ok()?;
-    Some(step.at + wait.as_secs())
 }
 
 #[component]
@@ -76,7 +62,7 @@ fn Header(view: FlowView) -> impl IntoView {
                 "←"
                 <span class="sheet__back-label">"Flows"</span>
             </A>
-            <h1 class="sheet__title">{flow.name.clone()}</h1>
+            <h1 class="sheet__title flow-canvas__title">{flow.name.clone()}</h1>
             <FlowSwitch id=id name=flow.name.clone() enabled=flow.enabled invalid=invalid />
             <button type="button" class="btn" disabled=invalid || busy on:click=run_now>
                 "Run now"
@@ -94,6 +80,12 @@ fn Canvas(view: FlowView) -> impl IntoView {
     let placed = layout(&flow);
     let (width, height) = canvas_size(&placed);
     let lit = highlight(&flow, view.runs.first());
+    let orphaned = orphans(&flow);
+    let parked = view
+        .runs
+        .first()
+        .filter(|r| view.active_run.as_deref() == Some(r.id.as_str()))
+        .and_then(|r| parked_node(&flow, r));
     let pos = |id: &str| placed.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
 
     let wires = flow
@@ -124,13 +116,26 @@ fn Canvas(view: FlowView) -> impl IntoView {
             let outcome = lit.nodes.get(&node.id).copied();
             let failed = outcome == Some(StepOutcome::Failed);
             let is_lit = outcome.is_some() && !failed;
-            let deadline = pending_deadline(&flow, &view, &node.id);
-            let step_detail = view
+            let deadline = parked
+                .as_ref()
+                .filter(|(id, _)| *id == node.id)
+                .and_then(|(id, since)| parked_deadline(&flow, id, *since));
+            let latest = view
                 .runs
                 .first()
-                .and_then(|r| r.steps.iter().rev().find(|s| s.node == node.id))
-                .map(|s| s.detail.clone())
-                .filter(|d| !d.is_empty());
+                .and_then(|r| r.steps.iter().rev().find(|s| s.node == node.id));
+            let is_if = matches!(node.kind, NodeKind::If(_));
+            let is_trigger = matches!(node.kind, NodeKind::TriggerState(_));
+            let trigger_text = (is_trigger && latest.is_some()).then(|| {
+                let trigger = view.runs.first().and_then(|r| r.trigger.as_ref());
+                house.entities.with(|e| trigger_line(trigger, e))
+            });
+            let step_detail = if is_if {
+                None
+            } else {
+                trigger_text.or_else(|| latest.map(|s| s.detail.clone()).filter(|d| !d.is_empty()))
+            };
+            let taken = latest.filter(|_| is_if).map(|s| s.detail.clone());
             let step_line = move || match deadline {
                 Some(at) => Some(format!(
                     "{} left",
@@ -138,19 +143,34 @@ fn Canvas(view: FlowView) -> impl IntoView {
                 )),
                 None => step_detail.clone(),
             };
+            let title = node_title(node);
             let detail = house.entities.with(|e| node_detail(node, e));
-            let ports = matches!(node.kind, NodeKind::If(_)).then(|| {
+            let detail = (detail != title).then_some(detail);
+            let ports = is_if.then(|| {
                 ["true", "false"]
                     .into_iter()
                     .map(|port| {
                         let top = port_offset(&node.kind, Some(port));
                         view! {
-                            <span class="flow-port" style=format!("top:{top}px")>
+                            <span
+                                class="flow-port"
+                                class:flow-port--taken=taken.as_deref() == Some(port)
+                                style=format!("top:{top}px")
+                            >
                                 {port}
                             </span>
+                            <span class="flow-node__out" style=format!("top:{top}px")></span>
                         }
                     })
                     .collect_view()
+            });
+            let out_dot = (!is_if).then(|| {
+                let top = port_offset(&node.kind, None);
+                view! { <span class="flow-node__out" style=format!("top:{top}px")></span> }
+            });
+            let in_dot = (!is_trigger).then(|| {
+                let top = port_offset(&node.kind, None);
+                view! { <span class="flow-node__in" style=format!("top:{top}px")></span> }
             });
             Some(view! {
                 <div
@@ -158,13 +178,16 @@ fn Canvas(view: FlowView) -> impl IntoView {
                     class:flow-node--lit=is_lit
                     class:flow-node--failed=failed
                     class:flow-node--pending=deadline.is_some()
+                    class:flow-node--orphan=orphaned.contains(&node.id)
                     data-node=node.id.clone()
                     style=format!("left:{x}px;top:{y}px")
                 >
                     <span class="flow-node__icon" inner_html=node_icon(&node.kind)></span>
-                    <span class="flow-node__title">{node_title(node)}</span>
-                    <span class="flow-node__detail">{detail}</span>
+                    <span class="flow-node__title">{title}</span>
+                    {detail.map(|d| view! { <span class="flow-node__detail">{d}</span> })}
                     <span class="flow-node__step">{step_line}</span>
+                    {in_dot}
+                    {out_dot}
                     {ports}
                 </div>
             })
@@ -191,20 +214,11 @@ fn Canvas(view: FlowView) -> impl IntoView {
 #[component]
 fn RunItem(run: RunView, flow: Flow) -> impl IntoView {
     let house = expect_context::<House>();
-    let trigger = match &run.trigger {
-        None => "manual".to_owned(),
-        Some(t) => {
-            let name = house.entities.with(|e| {
-                e.get(&t.entity)
-                    .map_or_else(|| t.entity.clone(), entity_title)
-            });
-            let value = match &t.value {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            format!("{name} = {value}")
-        }
-    };
+    let now = expect_context::<Now>();
+    let trigger = house
+        .entities
+        .with(|e| trigger_line(run.trigger.as_ref(), e));
+    let started = run.started_at;
     let steps = run
         .steps
         .iter()
@@ -230,7 +244,9 @@ fn RunItem(run: RunView, flow: Flow) -> impl IntoView {
             <details>
                 <summary>
                     <span class="run__status">{status_word(run.status)}</span>
-                    <span class="run__time">{format_timestamp(run.started_at)}</span>
+                    <span class="run__time" title=format_timestamp(started)>
+                        {move || relative_time(started, now.0.get())}
+                    </span>
                     <span class="run__trigger">{trigger}</span>
                 </summary>
                 <ol class="run__steps">{steps}</ol>

@@ -51,6 +51,7 @@ fn mount(host: &web_sys::Element, flows: Vec<FlowView>) -> Box<dyn std::any::Any
         move || {
             provide_context(house);
             provide_context(Toasts::new());
+            provide_context(oikos_web::components::now::install_now());
             view! {
                 <Router>
                     <FlowsScreen />

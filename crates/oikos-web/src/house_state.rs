@@ -87,6 +87,11 @@ pub fn upsert_run(flows: &mut [FlowView], flow_id: &str, run: RunView) {
     let Some(flow) = flows.iter_mut().find(|f| f.definition.id == flow_id) else {
         return;
     };
+    let held = flow.runs.iter().find(|r| r.id == run.id);
+    // A late `Running` broadcast must not re-activate a run the house already saw end.
+    if run.status == RunStatus::Running && held.is_some_and(|r| r.status != RunStatus::Running) {
+        return;
+    }
     if run.status == RunStatus::Running {
         flow.active_run = Some(run.id.clone());
     } else if flow.active_run.as_deref() == Some(run.id.as_str()) {
@@ -378,6 +383,13 @@ mod tests {
             run: run("r2", Done),
         });
         assert_eq!(s.flows[0].active_run, None);
+        // A late Running event for a finished run changes nothing.
+        s.apply(WsEvent::FlowRunChanged {
+            flow_id: "f".into(),
+            run: run("r2", Running),
+        });
+        assert_eq!(s.flows[0].active_run, None);
+        assert_eq!(s.flows[0].runs[0].status, Done);
         // The history is capped at 20.
         for i in 0..25 {
             s.apply(WsEvent::FlowRunChanged {
