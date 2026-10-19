@@ -21,6 +21,7 @@ use crate::components::alert_row::RecentAlerts;
 use crate::components::area_chip::AreaChip;
 use crate::components::room_title::RoomTitle;
 use crate::house::House;
+use crate::nav::HomeRoom;
 
 /// The id of the virtual "Favorites" chip.
 const FAVORITES: &str = "__favorites__";
@@ -128,7 +129,8 @@ pub fn HomeScreen() -> impl IntoView {
             .areas
             .with(|a| counts.with(|c| chips(a, favorites.get(), c)))
     });
-    let selected = RwSignal::new(None::<String>);
+    // Kept above the router, so coming back from a sheet keeps the room.
+    let selected = expect_context::<HomeRoom>().0;
     // The chosen chip, or the first one while nothing (valid) is chosen.
     let current = Memo::new(move |_| {
         chip_list.with(|list| {

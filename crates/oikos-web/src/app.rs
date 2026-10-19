@@ -11,6 +11,7 @@ use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
 use crate::icons::{BOLT, SHIELD};
+use crate::nav::{TrackReturnPath, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
 use crate::screens::devices::DevicesScreen;
@@ -51,6 +52,7 @@ pub fn App() -> impl IntoView {
     provide_context(toasts);
     provide_context(Pending::new());
     provide_context(install_now());
+    install_nav();
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
     Effect::new(move |_| {
         if let Some((id, reason)) = house.command_failed.get() {
@@ -77,6 +79,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Router>
+            <TrackReturnPath />
             <header class="topbar">
                 <span class="topbar__name">"Oikos"</span>
                 <StatusPill />

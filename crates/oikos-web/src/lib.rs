@@ -12,6 +12,7 @@ pub mod format;
 pub mod house;
 pub mod house_state;
 pub mod icons;
+pub mod nav;
 pub mod override_editor;
 pub mod screens;
 pub mod security;
