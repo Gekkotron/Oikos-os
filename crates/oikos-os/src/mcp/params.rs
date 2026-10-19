@@ -315,6 +315,13 @@ mod tests {
             "single",
             "true",
             "false",
+            "port",
+            "for",
+            "to",
+            "from",
+            "entity",
+            "op",
+            "mode",
         ] {
             assert!(description.contains(needle), "`{needle}` is missing");
         }

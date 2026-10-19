@@ -1,4 +1,4 @@
-//! The six flow tools. They live beside the eleven of `tools.rs` in a second router, combined
+//! The six flow tools. They live beside the eleven house tools of `tools.rs` in a second router, combined
 //! in [`OikosMcp::new`], and share their conventions: lists are wrapped in objects, write tools
 //! go through `log_write`, and a refusal is answered in-band.
 

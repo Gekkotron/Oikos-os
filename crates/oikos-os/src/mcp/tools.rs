@@ -1,4 +1,4 @@
-//! The eleven tools. Read tools work on one snapshot (one read lock, released before any
+//! The eleven tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
 //! await); write tools log their arguments and go through the hub's writers.
 
 use std::collections::BTreeSet;
@@ -234,12 +234,25 @@ pub(super) fn log_write<P: Serialize>(tool: &'static str, params: &P) {
 }
 
 /// The arguments as JSON, with `command.code` (an alarm panel code, a secret) replaced by
-/// `***` when present so the rest of the call stays readable in the log.
+/// `***` when present, at the top level or in a flow's `command` nodes, so the rest of the call stays readable in the log.
 fn logged_args<P: Serialize>(params: &P) -> String {
     match serde_json::to_value(params) {
         Ok(mut value) => {
             if let Some(code) = value.get_mut("command").and_then(|c| c.get_mut("code")) {
                 *code = Value::from("***");
+            }
+            let nodes = value
+                .get_mut("flow")
+                .and_then(|flow| flow.get_mut("nodes"))
+                .and_then(Value::as_array_mut);
+            for node in nodes.into_iter().flatten() {
+                let code = node
+                    .get_mut("params")
+                    .and_then(|params| params.get_mut("command"))
+                    .and_then(|command| command.get_mut("code"));
+                if let Some(code) = code {
+                    *code = Value::from("***");
+                }
             }
             value.to_string()
         }
@@ -273,7 +286,7 @@ fn contains_ci(haystack: &str, lowercase_needle: &str) -> bool {
 mod tests {
     use oikos_core::model::{AlarmMode, Command};
 
-    use super::super::params::SendCommandParams;
+    use super::super::params::{SendCommandParams, SetFlowParams};
     use super::logged_args;
 
     #[test]
@@ -296,6 +309,19 @@ mod tests {
             assert!(logged.contains("\"id\":\"panel_1\""), "{logged}");
             assert!(logged.contains("\"type\":\""), "{logged}");
         }
+    }
+
+    #[test]
+    fn set_flow_log_hides_the_alarm_code_of_command_nodes() {
+        let flow = oikos_core::flow::Flow::decode(
+            br#"{"id":"night","name":"Night","nodes":[{"id":"arm","type":"command",
+                "params":{"entity":"panel","command":{"type":"arm","mode":"away","code":"1234"}}}]}"#,
+        )
+        .expect("flow");
+        let logged = logged_args(&SetFlowParams { flow });
+        assert!(!logged.contains("1234"), "{logged}");
+        assert!(logged.contains("\"code\":\"***\""), "{logged}");
+        assert!(logged.contains("\"id\":\"night\""), "{logged}");
     }
 
     #[test]

@@ -124,7 +124,7 @@ fn instructions() -> String {
          `accepted: false` with the reason. The `oikos://snapshot` resource is the whole house \
          as one JSON document. Automations are flows: `list_flows` and `get_flow` read them, \
          `set_flow` creates or replaces one (validated against the house, saved retained on \
-         `<automation_prefix>/<id>`, `oikos/automation/<id>` by default), `set_flow_enabled` \
+         `oikos/automation/<id>`, the prefix being configurable), `set_flow_enabled` \
          switches it and `delete_flow` removes it; `run_flow` starts a manual run. A flow is a \
          graph of four node types: `trigger.state` (an entity's state changes), `if` (compares \
          a value; edges leaving it name the port `true` or `false`), `delay` (`5m`, `1h30m`) \
