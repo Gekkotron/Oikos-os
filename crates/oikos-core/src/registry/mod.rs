@@ -17,7 +17,7 @@ use crate::model::{
     Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, Kind, StateValue,
     UNASSIGNED_AREA, UiOverride,
 };
-use crate::state::{Applied, StateError, apply_message};
+use crate::state::{Applied, StateError, apply_parts};
 use crate::template::Templates;
 
 pub use ignored::Ignored;
@@ -78,7 +78,11 @@ pub enum Inbound {
 pub enum Change {
     EntityUpserted(String),
     EntityRemoved(String),
+    /// The entity's value, attributes or availability differ from before the message.
     StateChanged(String),
+    /// The entity read something from the message (so `last_update` moved) but nothing
+    /// differs: a device echoing its state, or a re-delivered report.
+    StateReported(String),
     AreasChanged,
     DevicesChanged,
     BridgeChanged,
@@ -302,8 +306,11 @@ impl Registry {
         }
     }
 
-    /// Hands the message to every entity reading `topic`. A template failure leaves the value
-    /// `Unknown` and lists the entity in `template_failures`; a later successful message clears it.
+    /// Hands the message to every entity reading `topic`: [`Change::StateChanged`] when its
+    /// value, attributes or availability differ afterwards, [`Change::StateReported`] when
+    /// something was read but nothing differs. A template failure leaves the value `Unknown`
+    /// and lists the entity in `template_failures`; it is cleared once the kind mapper stores
+    /// a value again (an availability update on the same entity does not clear it).
     fn apply_state(&mut self, topic: &str, payload: &[u8], at: u64, changes: &mut Vec<Change>) {
         let Ok(text) = std::str::from_utf8(payload) else {
             return;
@@ -316,20 +323,24 @@ impl Registry {
             else {
                 continue;
             };
-            match apply_message(entity, state, topic, text, at, &self.templates) {
-                Ok(Applied::Changed) => {
-                    self.template_failures.remove(id);
-                    changes.push(Change::StateChanged(id.clone()));
+            let before = state.clone();
+            let reported = match apply_parts(entity, state, topic, text, at, &self.templates) {
+                Ok(parts) => {
+                    if parts.value == Applied::Changed {
+                        self.template_failures.remove(id);
+                    }
+                    parts.overall() == Applied::Changed
                 }
-                Ok(Applied::Unchanged | Applied::NotForThisEntity) => {}
                 Err(StateError::Template(_)) => {
-                    let had_value = state.value != StateValue::Unknown;
                     state.value = StateValue::Unknown;
                     self.template_failures.insert(id.clone());
-                    if had_value {
-                        changes.push(Change::StateChanged(id.clone()));
-                    }
+                    false
                 }
+            };
+            if differs(&before, state) {
+                changes.push(Change::StateChanged(id.clone()));
+            } else if reported {
+                changes.push(Change::StateReported(id.clone()));
             }
         }
     }
@@ -420,6 +431,13 @@ impl Registry {
             }
         }
     }
+}
+
+/// True when anything but `last_update` differs between the two states.
+fn differs(before: &EntityState, after: &EntityState) -> bool {
+    before.value != after.value
+        || before.availability != after.availability
+        || before.attributes != after.attributes
 }
 
 /// `entity` with the fields the registry computes reset to what discovery produces, so it

@@ -198,23 +198,32 @@ fn removal_and_subscriptions() {
     assert!(changes.is_empty(), "{changes:?}");
 }
 
+const THERMOMETER_KEYS: [&str; 5] = [
+    "temperature",
+    "humidity",
+    "battery",
+    "linkquality",
+    "voltage",
+];
+
+/// The house already holds the recorded thermometer state, so a re-delivery is a report for
+/// each of the five entities on the topic (and still moves `last_update`); a payload where
+/// only the temperature differs changes that entity and reports the four others.
 #[test]
 fn state_routes_to_all_entities_on_shared_topic() {
     let mut registry = load_house();
     let payload = common::fixture("states/rooms__bedroom2__thermometer.json");
-    let inbound = registry.route(THERMOMETER_TOPIC, payload.into_bytes(), AT + 1);
+    let inbound = registry.route(THERMOMETER_TOPIC, payload.clone().into_bytes(), AT + 1);
     assert!(matches!(inbound, Inbound::State { .. }), "{inbound:?}");
     let changes = registry.apply(inbound);
-    for key in [
-        "temperature",
-        "humidity",
-        "battery",
-        "linkquality",
-        "voltage",
-    ] {
+    for key in THERMOMETER_KEYS {
         let id = format!("0x5c0272fffea35cfb_{key}_zigbee2mqtt");
         assert!(
-            changes.contains(&Change::StateChanged(id.clone())),
+            changes.contains(&Change::StateReported(id.clone())),
+            "{id}: {changes:?}"
+        );
+        assert!(
+            !changes.contains(&Change::StateChanged(id.clone())),
             "{id}: {changes:?}"
         );
         let state = registry.state(&id).expect("state");
@@ -229,6 +238,101 @@ fn state_routes_to_all_entities_on_shared_topic() {
         5,
         "{:?}",
         registry.entities_on_topic(THERMOMETER_TOPIC)
+    );
+
+    let mut edited: serde_json::Value = serde_json::from_str(&payload).expect("json");
+    edited["temperature"] = json!(99.5);
+    let inbound = registry.route(THERMOMETER_TOPIC, edited.to_string().into_bytes(), AT + 2);
+    let changes = registry.apply(inbound);
+    for key in THERMOMETER_KEYS {
+        let id = format!("0x5c0272fffea35cfb_{key}_zigbee2mqtt");
+        let expected = if key == "temperature" {
+            Change::StateChanged(id.clone())
+        } else {
+            Change::StateReported(id.clone())
+        };
+        assert!(changes.contains(&expected), "{id}: {changes:?}");
+        assert_eq!(
+            registry.state(&id).expect("state").last_update,
+            Some(AT + 2)
+        );
+    }
+    assert_eq!(
+        registry
+            .state("0x5c0272fffea35cfb_temperature_zigbee2mqtt")
+            .expect("state")
+            .value,
+        StateValue::Number(99.5)
+    );
+}
+
+/// A report equal to the current state is `StateReported`, never `StateChanged`: the value,
+/// the attributes and the availability are compared, `last_update` alone moving is not a
+/// change. An availability flip is a change; the same availability again is nothing at all.
+#[test]
+fn equal_value_report_is_reported_not_changed() {
+    let mut registry = Registry::new(config());
+    let config = json!({
+        "unique_id": "test_switch",
+        "state_topic": "zigbee2mqtt/test",
+        "command_topic": "zigbee2mqtt/test/set",
+        "availability": [{"topic": "zigbee2mqtt/bridge/state", "value_template": "{{ value_json.state }}"}],
+        "device": {"identifiers": ["zigbee2mqtt_0xtest"], "name": "test"}
+    });
+    registry.apply(Inbound::Discovery(
+        discovery_topic("oikos/switch/test/config"),
+        config.to_string().into_bytes(),
+    ));
+    let state = |payload: &str, at: u64| Inbound::State {
+        topic: "zigbee2mqtt/test".to_owned(),
+        payload: payload.as_bytes().to_vec(),
+        at,
+    };
+
+    let changes = registry.apply(state("ON", AT));
+    assert_eq!(
+        changes,
+        vec![Change::StateChanged("test_switch".to_owned())]
+    );
+
+    let changes = registry.apply(state("ON", AT + 1));
+    assert_eq!(
+        changes,
+        vec![Change::StateReported("test_switch".to_owned())]
+    );
+    let current = registry.state("test_switch").expect("state");
+    assert_eq!(current.value, StateValue::OnOff(true));
+    assert_eq!(current.last_update, Some(AT + 1));
+
+    let changes = registry.apply(state("OFF", AT + 2));
+    assert_eq!(
+        changes,
+        vec![Change::StateChanged("test_switch".to_owned())]
+    );
+
+    // A message the mapper cannot read (neither ON nor OFF) is no report at all.
+    let changes = registry.apply(state("maybe", AT + 3));
+    assert!(changes.is_empty(), "{changes:?}");
+    assert_eq!(
+        registry.state("test_switch").expect("state").last_update,
+        Some(AT + 2)
+    );
+
+    let bridge = |payload: &str, at: u64| Inbound::State {
+        topic: "zigbee2mqtt/bridge/state".to_owned(),
+        payload: payload.as_bytes().to_vec(),
+        at,
+    };
+    let changes = registry.apply(bridge(r#"{"state":"offline"}"#, AT + 4));
+    assert!(
+        changes.contains(&Change::StateChanged("test_switch".to_owned())),
+        "{changes:?}"
+    );
+    let changes = registry.apply(bridge(r#"{"state":"offline"}"#, AT + 5));
+    assert!(
+        !changes.contains(&Change::StateChanged("test_switch".to_owned()))
+            && !changes.contains(&Change::StateReported("test_switch".to_owned())),
+        "{changes:?}"
     );
 }
 
@@ -329,6 +433,25 @@ fn identical_payload_is_noop() {
         common::fixture("bridge_devices.json").into_bytes(),
     ));
     assert!(changes.is_empty(), "{changes:?}");
+
+    // A re-delivered state is a report, not a change (and not a no-op: the device spoke).
+    let changes = feed(
+        &mut registry,
+        THERMOMETER_TOPIC,
+        common::fixture("states/rooms__bedroom2__thermometer.json").into_bytes(),
+    );
+    assert!(
+        !changes.iter().any(|c| matches!(c, Change::StateChanged(_))),
+        "{changes:?}"
+    );
+    assert_eq!(
+        changes
+            .iter()
+            .filter(|c| matches!(c, Change::StateReported(_)))
+            .count(),
+        5,
+        "{changes:?}"
+    );
 
     // A re-published config with a different body is an upsert.
     let edited = payload.replace("\"name\":null", "\"name\":\"Stair\"");

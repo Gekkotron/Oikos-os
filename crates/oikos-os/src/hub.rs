@@ -51,8 +51,8 @@ pub struct EntityDetail {
 pub struct Hub {
     registry: RwLock<Registry>,
     events: broadcast::Sender<WsEvent>,
-    /// The ids that received a state message, changed or not: Zigbee2MQTT echoes the whole
-    /// device state on every `/set`, so a no-op command is confirmed by its echo.
+    /// The ids whose state was reported, changed or not: Zigbee2MQTT echoes the whole device
+    /// state on every `/set`, so a no-op command is confirmed by its echo.
     state_seen: broadcast::Sender<String>,
     connection: watch::Sender<ConnectionStatus>,
     publisher: mpsc::Sender<Publish>,
@@ -94,12 +94,20 @@ impl Hub {
         let (changes, events, failing, seen) = {
             let mut reg = self.write();
             let inbound = reg.route(topic, payload.to_vec(), at);
-            let seen = match &inbound {
-                Inbound::State { topic, .. } => reg.entities_on_topic(topic).to_vec(),
-                _ => Vec::new(),
-            };
+            let is_state = matches!(inbound, Inbound::State { .. });
             let changes = reg.apply(inbound);
             let events = events_for(&reg, &changes);
+            let seen: Vec<String> = if is_state {
+                changes
+                    .iter()
+                    .filter_map(|change| match change {
+                        Change::StateChanged(id) | Change::StateReported(id) => Some(id.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
             (changes, events, reg.template_failures().clone(), seen)
         };
         self.log_new_template_failures(&failing);
@@ -379,7 +387,10 @@ fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
             Change::AreasChanged => Some(WsEvent::AreasChanged(area_views(reg))),
             Change::DevicesChanged => Some(WsEvent::DevicesChanged(device_views(reg))),
             Change::BridgeChanged => Some(WsEvent::BridgeChanged(reg.bridge().into())),
-            Change::IgnoredChanged | Change::SubscriptionsChanged => None,
+            // A report that changed nothing is not pushed to clients; it only confirms commands.
+            Change::StateReported(_) | Change::IgnoredChanged | Change::SubscriptionsChanged => {
+                None
+            }
         })
         .collect()
 }

@@ -308,34 +308,49 @@ fn assert_confirmed_on(response: &oikos_api::CommandResponse, elapsed: Duration)
     );
 }
 
-/// Z2M echoes the device state on every `/set`, changed or not: a message on the entity's
-/// topic that leaves its state untouched still confirms the command instead of timing out.
+/// A message on the entity's topic that carries nothing for it (a partial update without
+/// `state`, which the switch's template reads) is neither a change nor a report: the device
+/// did not speak about this entity, so the command is not confirmed by it.
 #[tokio::test]
-async fn send_command_resolves_on_unchanged_echo() {
+async fn send_command_ignores_an_echo_without_its_key() {
     let (hub, publisher) = hub();
     feed_switch(&hub);
     hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
 
-    // A partial update without `state`: the registry reports nothing changed.
-    let (response, changes, elapsed) =
+    let (response, changes, _) =
         turn_on_with_echo(&hub, publisher, br#"{"linkquality":120}"#).await;
 
     assert!(
-        !changes.contains(&Change::StateChanged(SWITCH_ID.to_owned())),
-        "the echo must leave the state untouched for this test: {changes:?}"
+        !changes.contains(&Change::StateChanged(SWITCH_ID.to_owned()))
+            && !changes.contains(&Change::StateReported(SWITCH_ID.to_owned())),
+        "the echo must say nothing about the switch for this test: {changes:?}"
     );
-    assert_confirmed_on(&response, elapsed);
+    assert!(!response.accepted, "{response:?}");
+    assert_eq!(
+        response.reason.as_deref(),
+        Some("no state change within 50 ms")
+    );
 }
 
-/// Turning on a switch that is already ON: the echoed `{"state":"ON"}` confirms it. (The
-/// core reports a re-sent equal value as a change, so this also goes through `StateChanged`.)
+/// Turning on a switch that is already ON: the echoed `{"state":"ON"}` is a
+/// `StateReported` (nothing differs), which confirms the command without any event reaching
+/// the WebSocket clients.
 #[tokio::test]
 async fn send_command_resolves_on_same_state_echo() {
     let (hub, publisher) = hub();
     feed_switch(&hub);
     hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+    let mut events = hub.subscribe();
 
-    let (response, _, elapsed) = turn_on_with_echo(&hub, publisher, br#"{"state":"ON"}"#).await;
+    let (response, changes, elapsed) =
+        turn_on_with_echo(&hub, publisher, br#"{"state":"ON"}"#).await;
 
+    assert_eq!(changes, vec![Change::StateReported(SWITCH_ID.to_owned())]);
     assert_confirmed_on(&response, elapsed);
+    assert!(
+        events
+            .try_recv()
+            .is_err_and(|err| err == tokio::sync::broadcast::error::TryRecvError::Empty),
+        "a report that changed nothing is not broadcast"
+    );
 }

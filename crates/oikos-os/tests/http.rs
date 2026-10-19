@@ -324,6 +324,20 @@ async fn ws_sends_snapshot_then_events() {
         json!({"type": "on_off", "value": true})
     );
 
+    // The same report again changes nothing and is not pushed; the next frame is the OFF.
+    server
+        .hub
+        .ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+    server
+        .hub
+        .ingest(&switch_state_topic(), br#"{"state":"OFF"}"#);
+    let event = next_json(&mut ws).await;
+    assert_eq!(event["type"], "state_changed");
+    assert_eq!(
+        event["state"]["value"],
+        json!({"type": "on_off", "value": false})
+    );
+
     ws.close(None).await.expect("close");
 }
 

@@ -41,8 +41,29 @@ pub enum StateError {
     Template(TemplateError),
 }
 
+/// What each reader of a message did, so the registry can tell a value stored by the kind
+/// mapper from an availability or attribute update on the same message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Parts {
+    pub(crate) availability: Applied,
+    pub(crate) attributes: Applied,
+    /// The kind mapper's outcome: `Changed` when it stored a value.
+    pub(crate) value: Applied,
+}
+
+impl Parts {
+    /// The outcome of the message as a whole: the strongest of the three.
+    pub(crate) fn overall(self) -> Applied {
+        util::strongest(
+            util::strongest(self.availability, self.attributes),
+            self.value,
+        )
+    }
+}
+
 /// Applies the message published on `topic` to `state`, with `at` as the caller's timestamp
-/// for `last_update` when something changed.
+/// for `last_update` when something was stored (a value equal to the previous one included:
+/// the device spoke).
 ///
 /// On `Err`, whatever was read before the failing template (availability, attributes) stays
 /// applied; the value is untouched.
@@ -54,22 +75,33 @@ pub fn apply_message(
     at: u64,
     templates: &Templates,
 ) -> Result<Applied, StateError> {
+    apply_parts(entity, state, topic, payload, at, templates).map(Parts::overall)
+}
+
+/// [`apply_message`] with the outcome of each reader kept apart.
+pub(crate) fn apply_parts(
+    entity: &Entity,
+    state: &mut EntityState,
+    topic: &str,
+    payload: &str,
+    at: u64,
+    templates: &Templates,
+) -> Result<Parts, StateError> {
     let message = util::Message {
         templates,
         config: &entity.bindings.config,
         topic,
         payload,
     };
-    let mut applied = availability::apply(&message, state)?;
-    applied = util::strongest(applied, apply_attributes(&message, state)?);
-    applied = util::strongest(
-        applied,
-        kinds::apply(entity, state, topic, payload, templates)?,
-    );
-    if applied == Applied::Changed {
+    let parts = Parts {
+        availability: availability::apply(&message, state)?,
+        attributes: apply_attributes(&message, state)?,
+        value: kinds::apply(entity, state, topic, payload, templates)?,
+    };
+    if parts.overall() == Applied::Changed {
         state.last_update = Some(at);
     }
-    Ok(applied)
+    Ok(parts)
 }
 
 /// Merges the JSON object published on `json_attributes_topic` (after
