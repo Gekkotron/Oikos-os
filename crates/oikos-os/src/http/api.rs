@@ -10,8 +10,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
-    ApiError, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
-    Snapshot,
+    AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView,
+    OverridePatch, Snapshot,
 };
 use oikos_core::model::{AreasDocument, Command};
 use serde::Serialize;
@@ -33,6 +33,8 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         )
         .route("/areas", put(set_areas))
         .route("/ignored", get(ignored))
+        .route("/alerts", get(alerts))
+        .route("/alerts/{id}/actions/{action}", post(alert_action))
         .fallback(not_found)
 }
 
@@ -139,4 +141,17 @@ async fn set_areas(
 
 async fn ignored(State(hub): HubState) -> Json<Vec<IgnoredView>> {
     Json(hub.ignored())
+}
+
+async fn alerts(State(hub): HubState) -> Json<Vec<AlertView>> {
+    Json(hub.alerts())
+}
+
+/// Publishes the reply for a tapped alert button; `202` once it is handed to the broker task.
+async fn alert_action(
+    State(hub): HubState,
+    Path((id, action)): Path<(String, String)>,
+) -> Result<StatusCode, HttpError> {
+    hub.reply(&id, &action)?;
+    Ok(StatusCode::ACCEPTED)
 }

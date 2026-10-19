@@ -458,3 +458,103 @@ async fn cors_is_open_to_any_origin() {
         Some("*")
     );
 }
+
+// ----- push alerts -----
+
+const HISTORY_TOPIC: &str = "oikos-push/history";
+const ALERT_ENTRY: &str = r#"{"v":1,"id":"frigate-front-1696","channel":"camera","severity":"warning","title":"Front Door","body":"Person in Porch","actions":[{"id":"disarm","label":"Disarm"}],"silent":false,"sent_at":1760880000,"source":"frigate"}"#;
+
+fn history_payload() -> Vec<u8> {
+    format!("[{ALERT_ENTRY}]").into_bytes()
+}
+
+#[tokio::test]
+async fn alerts_route_and_ws_event() {
+    let server = Server::start().await;
+    let mut ws = server.ws().await;
+    let snapshot = next_json(&mut ws).await;
+    assert_eq!(snapshot["type"], "snapshot");
+    assert_eq!(snapshot["alerts"], json!([]));
+
+    server.hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    let event = next_json(&mut ws).await;
+    assert_eq!(event["type"], "alerts_changed");
+    assert_eq!(event["alerts"][0]["id"], "frigate-front-1696");
+
+    let response = server.get("/api/v1/alerts").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let alerts: Value = response.json().await.expect("json");
+    assert_eq!(alerts.as_array().map(Vec::len), Some(1));
+    assert_eq!(alerts[0]["channel"], "camera");
+}
+
+#[tokio::test]
+async fn areas_changed_reaches_the_socket() {
+    let server = Server::start().await;
+    server.online();
+    let mut ws = server.ws().await;
+    next_json(&mut ws).await;
+
+    let response = server
+        .client
+        .put(server.url("/api/v1/areas"))
+        .json(&json!({"areas": [{"id": "stair", "name": "Stair", "order": 2}]}))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let event = next_json(&mut ws).await;
+    assert_eq!(event["type"], "areas_changed");
+    assert!(event["areas"].is_array(), "got {event}");
+}
+
+#[tokio::test]
+async fn alert_action_publishes_and_404s() {
+    let mut server = Server::start().await;
+    server.online();
+    server.hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    let response = server
+        .client
+        .post(server.url("/api/v1/alerts/frigate-front-1696/actions/disarm"))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let published = server.publisher.recv().await.expect("a publish");
+    assert_eq!(published.topic, "oikos-push/responses");
+
+    let response = server
+        .client
+        .post(server.url("/api/v1/alerts/nope/actions/disarm"))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body: Value = response.json().await.expect("json");
+    assert!(body["error"].as_str().unwrap_or_default().contains("nope"));
+
+    let response = server
+        .client
+        .post(server.url("/api/v1/alerts/frigate-front-1696/actions/zzz"))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn alert_action_refused_offline() {
+    let server = Server::start().await;
+    server.hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    let response = server
+        .client
+        .post(server.url("/api/v1/alerts/frigate-front-1696/actions/disarm"))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}

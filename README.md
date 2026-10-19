@@ -58,6 +58,8 @@ The hub listens on `[http] bind` (default `0.0.0.0:8080`), CORS open to any orig
 | `PUT /api/v1/areas` | Replaces the declared rooms (`oikos/ui/_areas`) and returns the resulting list. |
 | `GET /api/v1/ignored` | The discovery topics that did not become an entity, each with the reason. |
 | `GET /ws` | WebSocket: a snapshot first, then every hub event as a JSON text frame. |
+| `GET /api/v1/alerts` | The push alerts OikosPush keeps in its retained history, newest first. |
+| `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on the responses topic); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
 
 Errors are `{"error": "…"}` with 400 (bad patch), 404 (unknown entity or route), 422 (command refused) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 
