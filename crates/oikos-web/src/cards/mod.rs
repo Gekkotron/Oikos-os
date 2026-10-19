@@ -72,12 +72,16 @@ pub fn PowerToggle(
     on: bool,
     #[prop(into)] label: String,
     on_toggle: Callback<()>,
+    /// The accessible name when the visible label does not say what the switch is for.
+    #[prop(optional, into)]
+    aria_label: Option<String>,
 ) -> impl IntoView {
     view! {
         <button
             type="button"
             class="power"
             role="switch"
+            aria-label=aria_label
             aria-checked=on.to_string()
             on:click=move |_| on_toggle.run(())
         >

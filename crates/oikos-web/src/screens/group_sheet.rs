@@ -226,9 +226,10 @@ fn member_row(sender: Sender, member: EntityView) -> impl IntoView {
     let controls = match member.kind {
         Kind::Cover => {
             let id = member.id.clone();
+            let suffix = format!(" {}", member.name);
             view! {
                 <CoverButtons
-                    suffix=""
+                    suffix=suffix
                     on_command=Callback::new(move |cmd| sender.send(&id, cmd, None))
                 />
             }
@@ -238,7 +239,8 @@ fn member_row(sender: Sender, member: EntityView) -> impl IntoView {
             let id = member.id.clone();
             let on = is_on(&member.state);
             let toggle = Callback::new(move |()| sender.send(&id, power_command(!on), None));
-            view! { <PowerToggle on=on label="" on_toggle=toggle /> }.into_any()
+            view! { <PowerToggle on=on label="" on_toggle=toggle aria_label=member.name.clone() /> }
+                .into_any()
         }
     };
     view! {
@@ -302,7 +304,8 @@ fn Customize(key: GroupKey, members: Memo<Vec<EntityView>>) -> impl IntoView {
     };
 
     // Takes `ids` out of the group, one request each; the hub's echo folds the sheet.
-    let ungroup = move |ids: Vec<String>| {
+    // `failed` runs when a request is refused, so a checkbox can tick itself back.
+    let ungroup = move |ids: Vec<String>, failed: Callback<()>| {
         leptos::task::spawn_local(async move {
             for id in ids {
                 let mut patch = oikos_api::OverridePatch::new();
@@ -313,6 +316,7 @@ fn Customize(key: GroupKey, members: Memo<Vec<EntityView>>) -> impl IntoView {
                     }),
                     Err(_) => {
                         toasts.push(SAVE_FAILED);
+                        failed.run(());
                         return;
                     }
                 }
@@ -334,7 +338,7 @@ fn Customize(key: GroupKey, members: Memo<Vec<EntityView>>) -> impl IntoView {
                                     prop:checked=move || ticked.get()
                                     on:change=move |_| {
                                         ticked.set(false);
-                                        ungroup(vec![id.clone()]);
+                                        ungroup(vec![id.clone()], Callback::new(move |()| ticked.set(true)));
                                     }
                                 />
                                 <span>{m.name.clone()}</span>
@@ -376,7 +380,7 @@ fn Customize(key: GroupKey, members: Memo<Vec<EntityView>>) -> impl IntoView {
             <button
                 type="button"
                 class="btn"
-                on:click=move |_| ungroup(members.with_untracked(|ms| ms.iter().map(|m| m.id.clone()).collect()))
+                on:click=move |_| ungroup(members.with_untracked(|ms| ms.iter().map(|m| m.id.clone()).collect()), Callback::new(|()| {}))
             >
                 "Ungroup all"
             </button>

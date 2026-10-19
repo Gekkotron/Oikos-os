@@ -126,7 +126,7 @@ fn card_label(view: GroupView, state: fn(&GroupSummary) -> String) -> Signal<Str
 /// ▲ ■ ▼ as a row of buttons sending Open, Stop and Close to `on_command`. `suffix` ends their
 /// accessible names ("Open" + " all shutters").
 #[component]
-pub fn CoverButtons(suffix: &'static str, on_command: Callback<Command>) -> impl IntoView {
+pub fn CoverButtons(#[prop(into)] suffix: String, on_command: Callback<Command>) -> impl IntoView {
     let button = move |text: &'static str, icon: &'static str, cmd: Command| {
         let label = format!("{text}{suffix}");
         view! {
