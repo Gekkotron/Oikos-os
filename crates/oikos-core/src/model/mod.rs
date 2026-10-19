@@ -6,7 +6,7 @@ mod device;
 mod entity;
 mod kind;
 mod state;
-mod ui_override;
+pub(crate) mod ui_override;
 
 pub use area::{Area, AreasDocument, UNASSIGNED_AREA};
 pub use command::{AlarmMode, Command, Hs};

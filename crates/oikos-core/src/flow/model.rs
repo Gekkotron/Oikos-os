@@ -1,0 +1,333 @@
+//! The flow document: nodes, edges and the lenient JSON form stored on the broker.
+
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::model::Command;
+use crate::model::ui_override::strip_nulls;
+
+/// What a trigger does while a run of the same flow is still active.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum FlowMode {
+    /// The new trigger is ignored and recorded as a skipped run.
+    #[default]
+    Single,
+    /// The active run is cancelled and a new one starts ("N minutes after the last motion").
+    Restart,
+}
+
+/// A whole automation. Unknown keys are kept in [`Flow::extra`] so a newer writer's fields survive.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct Flow {
+    /// `[a-z0-9_-]{1,64}`, the last topic segment.
+    pub id: String,
+    /// Free text shown in the UI.
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// A disabled flow keeps its definition but never runs. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub mode: FlowMode,
+    #[serde(default)]
+    pub nodes: Vec<Node>,
+    #[serde(default)]
+    pub edges: Vec<Edge>,
+    /// Fields this hub does not know, preserved verbatim.
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+impl Default for Flow {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            description: None,
+            enabled: true,
+            mode: FlowMode::default(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            extra: BTreeMap::new(),
+        }
+    }
+}
+
+impl Flow {
+    /// Decodes a retained payload leniently: nulls read as absent (at the top level, on each node
+    /// and in each node's params), unknown keys are kept. The error is serde's message.
+    pub fn decode(payload: &[u8]) -> Result<Flow, String> {
+        let mut value: Value = serde_json::from_slice(payload).map_err(|e| e.to_string())?;
+        let Some(object) = value.as_object_mut() else {
+            return Err("a flow must be a JSON object".to_owned());
+        };
+        strip_nulls(object);
+        if let Some(Value::Array(nodes)) = object.get_mut("nodes") {
+            for node in nodes {
+                if let Some(node) = node.as_object_mut() {
+                    strip_nulls(node);
+                    if let Some(Value::Object(params)) = node.get_mut("params") {
+                        strip_nulls(params);
+                    }
+                }
+            }
+        }
+        serde_json::from_value(value).map_err(|e| e.to_string())
+    }
+
+    /// Encodes as compact JSON; `{}` only if serialisation somehow fails.
+    pub fn encode(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_owned())
+    }
+}
+
+/// One step of a flow. On the wire: `{"id", "type", "params", "name"?, "position"?}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct Node {
+    /// Unique within the flow; edges refer to it.
+    pub id: String,
+    /// Label shown on the canvas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Canvas placement; the hub ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<Position>,
+    #[serde(flatten)]
+    pub kind: NodeKind,
+    /// Fields this hub does not know, preserved verbatim.
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Canvas coordinates of a node.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// The node types, tagged by `type` with their `params`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(tag = "type", content = "params")]
+pub enum NodeKind {
+    /// Starts a run when an entity's state changes.
+    #[serde(rename = "trigger.state")]
+    TriggerState(TriggerStateParams),
+    /// Branches on a comparison of an entity (or the trigger value) with a constant.
+    #[serde(rename = "if")]
+    If(IfParams),
+    /// Waits before continuing.
+    #[serde(rename = "delay")]
+    Delay(DelayParams),
+    /// Sends a command to an entity.
+    #[serde(rename = "command")]
+    Command(CommandParams),
+}
+
+impl NodeKind {
+    /// The wire tag of this node type.
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            NodeKind::TriggerState(_) => "trigger.state",
+            NodeKind::If(_) => "if",
+            NodeKind::Delay(_) => "delay",
+            NodeKind::Command(_) => "command",
+        }
+    }
+
+    /// The named output ports: `true` and `false` for `if`, none for the others (which have one
+    /// unnamed output).
+    pub fn ports(&self) -> &'static [&'static str] {
+        match self {
+            NodeKind::If(_) => &["true", "false"],
+            _ => &[],
+        }
+    }
+}
+
+/// Params of `trigger.state`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct TriggerStateParams {
+    /// Entity id (from `search` / `list_entities`).
+    pub entity: String,
+    /// Only trigger when the new value equals this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Value>,
+    /// Only trigger when the previous value equalled this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<Value>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `if`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct IfParams {
+    pub op: Op,
+    /// The constant the value is compared with.
+    pub value: Value,
+    /// The entity to read; the trigger's value when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity: Option<String>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `delay`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct DelayParams {
+    /// A duration such as `90s`, `5m` or `1h30m`.
+    #[serde(rename = "for")]
+    pub for_: String,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `command`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct CommandParams {
+    pub entity: String,
+    pub command: Command,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// A connection from a node's output to another node; `port` picks an `if` branch.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct Edge {
+    pub from: String,
+    pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
+}
+
+/// Comparison operators of the `if` node.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Op {
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    const REFERENCE: &str = r#"{
+      "id": "living_led_motion", "name": "Living LED on motion", "enabled": true, "mode": "restart",
+      "nodes": [
+        { "id": "motion", "type": "trigger.state", "name": "Motion",
+          "params": { "entity": "0x00158d00044c4d4c_occupancy_zigbee2mqtt" } },
+        { "id": "moving", "type": "if", "params": { "op": "eq", "value": true } },
+        { "id": "on", "type": "command",
+          "params": { "entity": "0x9035eafffec07012_light_zigbee2mqtt", "command": { "type": "turn_on" } } },
+        { "id": "wait", "type": "delay", "params": { "for": "5m" } },
+        { "id": "off", "type": "command",
+          "params": { "entity": "0x9035eafffec07012_light_zigbee2mqtt", "command": { "type": "turn_off" } } }
+      ],
+      "edges": [
+        { "from": "motion", "to": "moving" },
+        { "from": "moving", "port": "true", "to": "on" },
+        { "from": "moving", "port": "false", "to": "wait" },
+        { "from": "wait", "to": "off" }
+      ]
+    }"#;
+
+    #[test]
+    fn decodes_the_reference_flow() {
+        let flow = Flow::decode(REFERENCE.as_bytes()).unwrap();
+        assert_eq!(flow.nodes.len(), 5);
+        assert_eq!(flow.edges.len(), 4);
+        assert_eq!(flow.mode, FlowMode::Restart);
+        assert!(flow.enabled);
+        assert_eq!(flow.nodes[0].name.as_deref(), Some("Motion"));
+        match &flow.nodes[1].kind {
+            NodeKind::If(p) => {
+                assert_eq!(p.op, Op::Eq);
+                assert_eq!(p.value, json!(true));
+                assert_eq!(p.entity, None);
+            }
+            other => panic!("expected if, got {other:?}"),
+        }
+        match &flow.nodes[3].kind {
+            NodeKind::Delay(p) => assert_eq!(p.for_, "5m"),
+            other => panic!("expected delay, got {other:?}"),
+        }
+        assert_eq!(flow.edges[1].port.as_deref(), Some("true"));
+        // Wire shape survives a round trip.
+        assert_eq!(Flow::decode(flow.encode().as_bytes()).unwrap(), flow);
+        let wire: Value = serde_json::from_str(&flow.encode()).unwrap();
+        assert_eq!(wire["nodes"][3]["params"]["for"], json!("5m"));
+        assert_eq!(wire["nodes"][3]["type"], json!("delay"));
+    }
+
+    #[test]
+    fn enabled_defaults_true_and_mode_defaults_single() {
+        let flow = Flow::decode(br#"{"id":"a","name":"A"}"#).unwrap();
+        assert!(flow.enabled);
+        assert_eq!(flow.mode, FlowMode::Single);
+        assert!(flow.nodes.is_empty() && flow.edges.is_empty());
+        assert!(Flow::default().enabled);
+        let nulls = Flow::decode(br#"{"id":"a","name":"A","enabled":null,"mode":null}"#).unwrap();
+        assert!(nulls.enabled);
+    }
+
+    #[test]
+    fn unknown_keys_round_trip() {
+        let payload = br#"{"id":"a","name":"A","colour":"red","nodes":[
+            {"id":"w","type":"delay","params":{"for":"1m","note":"x"},"tag":1}]}"#;
+        let flow = Flow::decode(payload).unwrap();
+        assert_eq!(flow.extra.get("colour"), Some(&json!("red")));
+        assert_eq!(flow.nodes[0].extra.get("tag"), Some(&json!(1)));
+        let again = Flow::decode(flow.encode().as_bytes()).unwrap();
+        assert_eq!(again, flow);
+        match &again.nodes[0].kind {
+            NodeKind::Delay(p) => assert_eq!(p.extra.get("note"), Some(&json!("x"))),
+            other => panic!("expected delay, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_node_type_is_an_error() {
+        let payload =
+            br#"{"id":"a","name":"A","nodes":[{"id":"t","type":"trigger.time","params":{}}]}"#;
+        let err = Flow::decode(payload).unwrap_err();
+        assert!(err.contains("trigger.time"), "{err}");
+    }
+
+    #[test]
+    fn ports_of_if_are_true_false_and_others_have_none() {
+        let flow = Flow::decode(REFERENCE.as_bytes()).unwrap();
+        assert_eq!(flow.nodes[1].kind.ports(), &["true", "false"]);
+        assert_eq!(flow.nodes[1].kind.type_name(), "if");
+        for i in [0, 2, 3, 4] {
+            assert!(flow.nodes[i].kind.ports().is_empty());
+        }
+        assert_eq!(flow.nodes[0].kind.type_name(), "trigger.state");
+    }
+}
