@@ -23,15 +23,26 @@ fn time_line(alert: &AlertView, now: u64) -> String {
 pub fn AlertRow(alert: AlertView) -> impl IntoView {
     let now = expect_context::<Now>();
     let href = format!("/alerts/{}", alert.id);
-    let thumb = match alert.image_url.clone() {
-        Some(src) => view! {
-            <img class="alert-row__thumb" src=src loading="lazy" alt="" />
+    // A picture that fails to load (gone, or refused) falls back to the channel glyph instead
+    // of the browser's broken-image icon.
+    let broken = RwSignal::new(false);
+    let channel = alert.channel;
+    let image_url = alert.image_url.clone();
+    let thumb = move || match image_url.clone() {
+        Some(src) if !broken.get() => view! {
+            <img
+                class="alert-row__thumb"
+                src=src
+                loading="lazy"
+                alt=""
+                on:error=move |_| broken.set(true)
+            />
         }
         .into_any(),
-        None => view! {
+        _ => view! {
             <span
                 class="alert-row__thumb alert-row__thumb--glyph"
-                inner_html=channel_icon(alert.channel)
+                inner_html=channel_icon(channel)
             ></span>
         }
         .into_any(),
