@@ -1,6 +1,7 @@
 //! Human-readable state values for cards.
 
-use oikos_core::model::{EntityState, StateValue};
+use oikos_api::EntityView;
+use oikos_core::model::{EntityState, Kind, StateValue};
 
 const DASH: &str = "—";
 
@@ -105,6 +106,48 @@ pub fn short_name(name: &str, device_name: Option<&str>) -> String {
     }
 }
 
+/// "binary_sensor" as "Binary sensor".
+pub fn kind_word(kind: Kind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|v| v.as_str().map(word))
+        .unwrap_or_default()
+}
+
+/// What tells an entity apart from its same-named siblings: set when the entity is named exactly
+/// like its device (a siren whose four entities are all "door_siren"), then its device class
+/// ("Siren"), else its kind ("Binary sensor"). `None` for an entity with a name of its own.
+pub fn title_suffix(entity: &EntityView) -> Option<String> {
+    let device = entity.device_name.as_deref().filter(|d| !d.is_empty())?;
+    if !entity.name.eq_ignore_ascii_case(device) {
+        return None;
+    }
+    Some(
+        entity
+            .device_class
+            .as_deref()
+            .filter(|c| !c.is_empty())
+            .map_or_else(|| kind_word(entity.kind), word),
+    )
+}
+
+/// The card title: [`short_name`] plus the [`title_suffix`] when there is one.
+pub fn entity_title(entity: &EntityView) -> String {
+    let short = short_name(&entity.name, entity.device_name.as_deref());
+    match title_suffix(entity) {
+        Some(suffix) => format!("{short} · {suffix}"),
+        None => short,
+    }
+}
+
+/// The label of an entity in a list of links: its title and its kind, where the suffix of a
+/// same-named entity stands in for the kind.
+pub fn list_label(entity: &EntityView) -> String {
+    let short = short_name(&entity.name, entity.device_name.as_deref());
+    let tail = title_suffix(entity).unwrap_or_else(|| kind_word(entity.kind));
+    format!("{short} · {tail}")
+}
+
 /// An RFC 3339 date-time as "2026-10-19 09:41" (the time as sent, no zone conversion).
 fn date_time(s: &str) -> Option<String> {
     let b = s.as_bytes();
@@ -174,8 +217,61 @@ pub fn word(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::display_value;
-    use oikos_core::model::{ClimateState, EntityState, LightState, StateValue};
+    use super::{display_value, entity_title, list_label};
+    use oikos_api::EntityView;
+    use oikos_core::model::{
+        Capabilities, ClimateState, EntityCategory, EntityState, Kind, LightState, StateValue,
+        UiOverride,
+    };
+
+    fn entity(name: &str, device: &str, kind: Kind, class: Option<&str>) -> EntityView {
+        EntityView {
+            id: "x".into(),
+            device_id: None,
+            name: name.into(),
+            device_name: Some(device.into()),
+            label: None,
+            kind,
+            protocol_kind: kind,
+            device_class: class.map(Into::into),
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "salon".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui: UiOverride::default(),
+            state: EntityState::default(),
+        }
+    }
+
+    #[test]
+    fn same_named_entity_gets_its_class_or_kind() {
+        let siren = entity(
+            "door_siren",
+            "door_siren",
+            Kind::BinarySensor,
+            Some("tamper"),
+        );
+        assert_eq!(entity_title(&siren), "door_siren · Tamper");
+        assert_eq!(list_label(&siren), "door_siren · Tamper");
+        let plain = entity("door_siren", "Door_Siren", Kind::Switch, None);
+        assert_eq!(entity_title(&plain), "door_siren · Switch");
+    }
+
+    #[test]
+    fn distinct_names_are_untouched() {
+        let e = entity(
+            "powers/ac energy",
+            "powers/ac",
+            Kind::Sensor,
+            Some("energy"),
+        );
+        assert_eq!(entity_title(&e), "Energy");
+        assert_eq!(list_label(&e), "Energy · Sensor");
+    }
+
     #[test]
     fn unknown_text_renders_as_dash() {
         let s = EntityState {

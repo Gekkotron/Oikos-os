@@ -4,9 +4,9 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use oikos_api::DeviceView;
 
-use crate::format::short_name;
+use crate::format::list_label;
 use crate::house::House;
-use crate::screens::entity_sheet::{availability_class, availability_word, kind_word};
+use crate::screens::entity_sheet::{availability_class, availability_word};
 
 /// True when the device's name, model, vendor or IEEE address contains `query`, ignoring case.
 /// A blank query matches everything.
@@ -59,12 +59,7 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
     let links = move || {
         house.entities.with(|m| {
             ids.iter()
-                .filter_map(|id| {
-                    m.get(id).map(|e| {
-                        let name = short_name(&e.name, e.device_name.as_deref());
-                        (e.id.clone(), format!("{name} · {}", kind_word(e.kind)))
-                    })
-                })
+                .filter_map(|id| m.get(id).map(|e| (e.id.clone(), list_label(e))))
                 .collect::<Vec<_>>()
         })
     };

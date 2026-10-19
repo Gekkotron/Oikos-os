@@ -4,9 +4,9 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use oikos_api::{DeviceView, EntityView};
-use oikos_core::model::{Availability, Kind};
+use oikos_core::model::Availability;
 
-use crate::format::{format_timestamp, short_name, word};
+use crate::format::{format_timestamp, kind_word, list_label, title_suffix};
 use crate::house::House;
 use crate::icons::kind_icon;
 use crate::override_editor::OverrideEditor;
@@ -26,14 +26,6 @@ pub(crate) fn availability_word(availability: Availability) -> &'static str {
         Availability::Offline => "Offline",
         Availability::Unknown => "Unknown",
     }
-}
-
-/// "binary_sensor" as "Binary sensor".
-pub(crate) fn kind_word(kind: Kind) -> String {
-    serde_json::to_value(kind)
-        .ok()
-        .and_then(|v| v.as_str().map(word))
-        .unwrap_or_default()
 }
 
 fn pretty<T: serde::Serialize>(value: &T) -> String {
@@ -71,12 +63,7 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
             .entity_ids
             .iter()
             .filter(|id| **id != entity.id)
-            .filter_map(|id| {
-                m.get(id).map(|e| {
-                    let name = short_name(&e.name, e.device_name.as_deref());
-                    (e.id.clone(), format!("{name} · {}", kind_word(e.kind)))
-                })
-            })
+            .filter_map(|id| m.get(id).map(|e| (e.id.clone(), list_label(e))))
             .collect()
     });
     let dash = || "—".to_owned();
@@ -159,10 +146,14 @@ pub fn SheetBody(id: String) -> impl IntoView {
                     .map_or_else(|| e.area.clone(), |a| a.name.clone())
             });
             let availability = e.state.availability;
+            let title = match title_suffix(&e) {
+                Some(suffix) => format!("{} · {suffix}", e.name),
+                None => e.name.clone(),
+            };
             view! {
                 <span class="sheet__icon" inner_html=kind_icon(e.kind, e.device_class.as_deref())></span>
                 <div class="sheet__titles">
-                    <h1 class="sheet__title">{e.name.clone()}</h1>
+                    <h1 class="sheet__title">{title}</h1>
                     <p class="sheet__subtitle">
                         {area} " · " {kind_word(e.kind)} " · "
                         <span class=availability_class(availability)></span>
