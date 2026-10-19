@@ -46,7 +46,7 @@ impl FlowStore {
             runs: BTreeMap::new(),
             active: BTreeMap::new(),
             counter: 0,
-            runs_kept,
+            runs_kept: runs_kept.max(1),
         }
     }
 
@@ -171,9 +171,15 @@ impl FlowStore {
     fn push_run(&mut self, flow_id: &str, run: RunView) {
         let runs = self.runs.entry(flow_id.to_owned()).or_default();
         runs.push_front(run);
-        // A run still `Running` can fall off the end if more than `runs_kept` runs start
-        // before it ends; its later steps and end are then no-ops.
-        runs.truncate(self.runs_kept);
+        // Never evict the run `active` names: it is still going and its steps and end must find
+        // it. That can leave the deque one longer than `runs_kept` until it ends.
+        let active = self.active.get(flow_id);
+        while runs.len() > self.runs_kept {
+            match runs.iter().rposition(|run| Some(&run.id) != active) {
+                Some(index) => runs.remove(index),
+                None => break,
+            };
+        }
     }
 
     fn next_run_id(&mut self) -> String {
@@ -433,5 +439,78 @@ mod tests {
                 .record_step("ghost", "r1", skipped.steps[0].clone())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn ending_the_only_kept_run_clears_active_and_keeps_it() {
+        let mut store = FlowStore::new(1);
+        store.apply("living", REFERENCE);
+        let run = store.begin_run("living", None, 1).unwrap();
+        store.add_skipped_run("living", "motion", None, 2).unwrap();
+        store
+            .end_run("living", &run.id, RunStatus::Done, 3)
+            .unwrap();
+        assert_eq!(store.active_run("living"), None);
+        let runs = store.get("living").unwrap().runs;
+        assert!(runs.iter().any(|r| r.id == run.id));
+    }
+
+    #[test]
+    fn running_run_survives_skipped_runs() {
+        let mut store = FlowStore::new(2);
+        store.apply("living", REFERENCE);
+        let run = store.begin_run("living", None, 1).unwrap();
+        for at in 2..=4 {
+            store.add_skipped_run("living", "motion", None, at).unwrap();
+        }
+        let view = store.get("living").unwrap();
+        assert_eq!(view.active_run.as_deref(), Some(run.id.as_str()));
+        assert!(view.runs.iter().any(|r| r.id == run.id));
+        assert!(
+            store
+                .record_step(
+                    "living",
+                    &run.id,
+                    StepView {
+                        node: "on".into(),
+                        at: 5,
+                        outcome: StepOutcome::Ok,
+                        detail: String::new(),
+                    }
+                )
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn end_run_of_an_evicted_run_still_clears_active() {
+        let mut store = FlowStore::new(0);
+        store.apply("living", REFERENCE);
+        let run = store.begin_run("living", None, 1).unwrap();
+        store.end_run("living", &run.id, RunStatus::Done, 2);
+        assert_eq!(store.active_run("living"), None);
+    }
+
+    #[test]
+    fn hostile_json_shapes_do_not_panic() {
+        let mut store = FlowStore::new(20);
+        for payload in [&b"[]"[..], b"5", b"\"x\"", b"null"] {
+            store.apply("living", payload);
+            assert!(store.get("living").unwrap().invalid.is_some());
+            store.apply("living", b"");
+        }
+    }
+
+    #[test]
+    fn null_or_empty_id_is_filled_from_topic() {
+        for fragment in ["\"id\": null", "\"id\": \"\""] {
+            let mut store = FlowStore::new(20);
+            let payload = String::from_utf8(REFERENCE.to_vec())
+                .unwrap()
+                .replace("\"id\": \"living\"", fragment);
+            store.apply("living", payload.as_bytes());
+            assert_eq!(store.flows().len(), 1, "{fragment}");
+            assert_eq!(store.flows()[0].id, "living");
+        }
     }
 }
