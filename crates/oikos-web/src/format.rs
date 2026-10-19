@@ -26,11 +26,17 @@ pub fn display_value(state: &EntityState, unit: Option<&str>) -> String {
                 (None, None) => DASH.into(),
             }
         }
-        StateValue::Climate(c) => match (c.current, c.target) {
-            (Some(cur), Some(tgt)) => format!("{} → {}", number(cur), with_unit(number(tgt), unit)),
-            (Some(v), None) | (None, Some(v)) => with_unit(number(v), unit),
-            (None, None) => c.mode.as_deref().map_or_else(|| DASH.into(), word),
-        },
+        StateValue::Climate(c) => {
+            // The hub sends no unit for climates; Home Assistant's default is Celsius.
+            let unit = unit.filter(|u| !u.is_empty()).unwrap_or("°C");
+            match (c.current, c.target) {
+                (Some(cur), Some(tgt)) => {
+                    format!("{} → {}", number(cur), with_unit(number(tgt), Some(unit)))
+                }
+                (Some(v), None) | (None, Some(v)) => with_unit(number(v), Some(unit)),
+                (None, None) => c.mode.as_deref().map_or_else(|| DASH.into(), word),
+            }
+        }
         StateValue::Alarm(s) => word(s),
         StateValue::Vacuum(v) => v.state.as_deref().map_or_else(|| DASH.into(), word),
         StateValue::WaterHeater(w) => match (w.current, w.target) {
@@ -187,6 +193,19 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(display_value(&s, None), "Armed away");
+    }
+    #[test]
+    fn climate_defaults_to_celsius_when_unit_unknown() {
+        let c = ClimateState {
+            current: Some(22.0),
+            target: Some(15.0),
+            ..Default::default()
+        };
+        let s = EntityState {
+            value: StateValue::Climate(c),
+            ..Default::default()
+        };
+        assert_eq!(display_value(&s, None), "22 → 15 °C");
     }
     #[test]
     fn climate_shows_current_and_target() {
