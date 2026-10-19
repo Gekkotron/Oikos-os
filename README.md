@@ -77,7 +77,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8080`), CORS open to any orig
 | `POST /api/v1/flows/{id}/enabled` | `{"enabled": bool}`; returns the flow. |
 | `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or already running. |
 
-Errors are `{"error": "…"}` with 400 (bad patch), 404 (unknown entity or route), 422 (command refused) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
+Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` differs from the path: `id mismatch`), 404 (unknown entity, flow or route), 422 (command refused, or a flow that is invalid, disabled or already running) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 
 ## MCP
 
@@ -140,6 +140,7 @@ Screens:
 - Devices: the administration view of the Zigbee devices.
 - Settings: the hub status and the theme switch (Auto, Night, Warm).
 - Alerts (`/alerts`): the push alerts OikosPush keeps, with channel chips and day groups, and a "Recent alerts" section on Home; the detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". Same screens as the Android app; the body stays in the producer's language.
+- Flows (`/flows`, `/flows/<id>`): the flows list with an enable switch per flow, and a read-only canvas per flow with the last run lit on the graph and the run history below it.
 
 Development runs in two terminals:
 
@@ -166,6 +167,46 @@ cd crates/oikos-web && wasm-pack test --headless --chrome
 ```
 
 Install the tools with `cargo install trunk --locked` and `cargo install wasm-pack --locked`. `wasm-pack` fetches a matching chromedriver on first use; Google Chrome must be installed.
+
+## Flows
+
+A flow is an n8n-style automation: a small graph of nodes stored as one retained JSON document under `oikos/automation/<id>` on the broker (the id is `[a-z0-9_-]{1,64}`). The hub subscribes to that prefix, validates every document it reads, and runs the valid, enabled ones. An invalid document is kept and shown with the reason, but never runs.
+
+```json
+{
+  "id": "living_led_motion", "name": "Living LED on motion", "enabled": true, "mode": "restart",
+  "nodes": [
+    { "id": "motion", "type": "trigger.state", "params": { "entity": "0x00158d00044c4d4c_occupancy_zigbee2mqtt" } },
+    { "id": "moving", "type": "if", "params": { "op": "eq", "value": true } },
+    { "id": "on", "type": "command", "params": { "entity": "<light id>", "command": { "type": "turn_on" } } },
+    { "id": "wait", "type": "delay", "params": { "for": "5m" } },
+    { "id": "off", "type": "command", "params": { "entity": "<light id>", "command": { "type": "turn_off" } } }
+  ],
+  "edges": [
+    { "from": "motion", "to": "moving" },
+    { "from": "moving", "port": "true", "to": "on" },
+    { "from": "moving", "port": "false", "to": "wait" },
+    { "from": "wait", "to": "off" }
+  ]
+}
+```
+
+| Type | Params | Outputs | Behaviour |
+| --- | --- | --- | --- |
+| `trigger.state` | `entity` (id), optional `to`, optional `from` | one | Starts a run when the entity's scalar changes to a different value. `to`/`from` filter on the new/previous scalar. Never fires on the first value after boot or reconnect, on an availability-only change, or on an equal-value report. |
+| `if` | `op` one of `eq ne gt lt gte lte`, `value` (bool, number or string), optional `entity` | `true`, `false` | Compares the scalar of `entity` (default: the entity that triggered the run, read live) to `value`. `gt lt gte lte` need both sides numeric, otherwise the node fails. |
+| `delay` | `for`: `"90s"`, `"5m"`, `"1h30m"` | one | Pauses the run. Cancelled with the run. |
+| `command` | `entity` (id), `command` (the API's `Command` JSON) | one | Sends the command through the hub's command path, confirmed by the entity's state echo within `confirm_timeout_ms`, exactly like the API's `send_command`. No echo, a rejection or an offline entity fails the node. |
+
+A run follows the graph from the trigger that fired, depth first. A failing node ends the run as `failed` at that step. A non-trigger node with no incoming edge never runs.
+
+The scalar is the one value of a state that triggers and `if` compare: the on/off bool, the number, the text, a light's `on`, a cover's `state`.
+
+`mode` says what a trigger does while a run of the same flow is still active. `single` (the default) ignores the new trigger and records a skipped run. `restart` cancels the active run and starts a new one, which is what makes "5 minutes after the last motion" work: motion coming back cancels the pending `delay`.
+
+Two config keys: `[topics] automation_prefix` (default `oikos/automation`) and `[automation] runs_kept` (recent runs remembered per flow, default 20). Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker.
+
+The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `run_flow` and friends), and the web UI shows them at `/flows` with the last run lit on the canvas. See [HTTP API](#http-api) for the REST routes.
 
 ## Security
 
