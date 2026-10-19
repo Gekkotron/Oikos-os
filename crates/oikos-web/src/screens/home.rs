@@ -59,7 +59,7 @@ fn entity_ids<'a>(entities: impl Iterator<Item = &'a EntityView>, chip: &str) ->
 }
 
 /// The card component for an entity's kind.
-fn card_for(entity: EntityView) -> AnyView {
+pub(crate) fn card_for(entity: EntityView) -> AnyView {
     match entity.kind {
         Kind::Light => view! { <LightCard entity=entity /> }.into_any(),
         Kind::Switch => view! { <SwitchCard entity=entity /> }.into_any(),

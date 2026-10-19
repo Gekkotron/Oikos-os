@@ -151,6 +151,17 @@ fn with_unit(value: String, unit: Option<&str>) -> String {
     }
 }
 
+/// Unix seconds as ISO 8601 UTC ("2026-10-19T09:41:00Z"); "—" when out of range.
+pub fn format_timestamp(seconds: u64) -> String {
+    let format =
+        time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
+    i64::try_from(seconds)
+        .ok()
+        .and_then(|s| time::OffsetDateTime::from_unix_timestamp(s).ok())
+        .and_then(|t| t.format(&format).ok())
+        .unwrap_or_else(|| DASH.into())
+}
+
 /// `heat_cool` becomes "Heat cool".
 pub fn word(s: &str) -> String {
     let spaced = s.replace('_', " ");
@@ -348,5 +359,20 @@ mod tests {
         assert_eq!(short_name("Salon", Some("Salon")), "Salon");
         assert_eq!(short_name("Lamp", None), "Lamp");
         assert_eq!(short_name("Lamp", Some("Other device")), "Lamp");
+    }
+}
+
+#[cfg(test)]
+mod ts_tests {
+    use super::format_timestamp;
+
+    #[test]
+    fn unix_epoch_formats_as_iso() {
+        assert_eq!(format_timestamp(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn a_recent_timestamp_formats_in_utc() {
+        assert_eq!(format_timestamp(1_792_402_860), "2026-10-19T09:41:00Z");
     }
 }
