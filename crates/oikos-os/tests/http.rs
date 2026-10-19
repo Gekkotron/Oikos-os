@@ -25,6 +25,10 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 const SWITCH_FIXTURE: &str = "discovery/switch__0x847127fffe24e322__switch.json";
 const SWITCH_ID: &str = "0x847127fffe24e322_switch_zigbee2mqtt";
 const SWITCH_TOPIC: &str = "oikos/switch/0x847127fffe24e322/switch/config";
+/// The same device's link-quality sensor: it reads the same state topic as the switch.
+const LINKQUALITY_FIXTURE: &str = "discovery/sensor__0x847127fffe24e322__linkquality.json";
+const LINKQUALITY_ID: &str = "0x847127fffe24e322_linkquality_zigbee2mqtt";
+const LINKQUALITY_TOPIC: &str = "oikos/sensor/0x847127fffe24e322/linkquality/config";
 
 fn fixtures() -> PathBuf {
     PathBuf::from(concat!(
@@ -387,13 +391,19 @@ async fn ws_sends_snapshot_then_events() {
 }
 
 /// The test runtime is single-threaded, so the client cannot be served while the test floods
-/// the hub: the broadcast receiver lags and the stream recovers with a fresh snapshot.
+/// the hub: the broadcast receiver lags and the stream recovers with a fresh snapshot. The
+/// events still queued when it lagged are older than that snapshot and must not follow it:
+/// the first frame after it is the one for a message ingested afterwards.
 #[tokio::test]
 async fn ws_lag_sends_fresh_snapshot() {
     let server = Server::start().await;
+    server
+        .hub
+        .ingest(LINKQUALITY_TOPIC, &fixture(LINKQUALITY_FIXTURE));
     let mut ws = server.ws().await;
     assert_eq!(next_json(&mut ws).await["type"], "snapshot");
 
+    // The flood only ever changes the switch; the sensor's key is absent from every payload.
     let topic = switch_state_topic();
     for i in 0..1100 {
         let payload: &[u8] = if i % 2 == 0 {
@@ -406,18 +416,28 @@ async fn ws_lag_sends_fresh_snapshot() {
 
     let recovered = next_json(&mut ws).await;
     assert_eq!(recovered["type"], "snapshot");
+    let switch = recovered["entities"]
+        .as_array()
+        .expect("entities")
+        .iter()
+        .find(|e| e["id"] == SWITCH_ID)
+        .expect("the switch");
     assert_eq!(
-        recovered["entities"][0]["state"]["value"],
+        switch["state"]["value"],
         json!({"type": "on_off", "value": false})
     );
 
-    server.hub.ingest(&topic, br#"{"state":"ON"}"#);
-    loop {
-        let event = next_json(&mut ws).await;
-        if event["type"] == "state_changed" && event["state"]["value"]["value"] == true {
-            break;
-        }
-    }
+    server.hub.ingest(&topic, br#"{"linkquality":42}"#);
+    let event = next_json(&mut ws).await;
+    assert_eq!(
+        (event["type"].as_str(), event["id"].as_str()),
+        (Some("state_changed"), Some(LINKQUALITY_ID)),
+        "no event older than the snapshot may follow it: {event}"
+    );
+    assert_eq!(
+        event["state"]["value"],
+        json!({"type": "number", "value": 42.0})
+    );
 }
 
 #[tokio::test]
