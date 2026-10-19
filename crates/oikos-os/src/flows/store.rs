@@ -172,7 +172,7 @@ impl FlowStore {
         let runs = self.runs.entry(flow_id.to_owned()).or_default();
         runs.push_front(run);
         // Never evict the run `active` names: it is still going and its steps and end must find
-        // it. That can leave the deque one longer than `runs_kept` until it ends.
+        // it. That can leave the deque one longer than `runs_kept` until the next run is pushed after it ends.
         let active = self.active.get(flow_id);
         while runs.len() > self.runs_kept {
             match runs.iter().rposition(|run| Some(&run.id) != active) {
@@ -267,10 +267,8 @@ impl FlowStore {
         status: RunStatus,
         at: u64,
     ) -> Option<RunView> {
-        let run = self.run_mut(flow_id, run_id)?;
-        run.status = status;
-        run.ended_at = Some(at);
-        let run = run.clone();
+        // Clear the active slot first, whether or not the run is still in the history, so a
+        // lost run can never leave the flow stuck "active".
         if self
             .active
             .get(flow_id)
@@ -278,7 +276,10 @@ impl FlowStore {
         {
             self.active.remove(flow_id);
         }
-        Some(run)
+        let run = self.run_mut(flow_id, run_id)?;
+        run.status = status;
+        run.ended_at = Some(at);
+        Some(run.clone())
     }
 }
 
@@ -483,11 +484,29 @@ mod tests {
     }
 
     #[test]
-    fn end_run_of_an_evicted_run_still_clears_active() {
-        let mut store = FlowStore::new(0);
-        store.apply("living", REFERENCE);
+    fn end_run_of_a_missing_run_returns_none() {
+        let mut store = store_with_flow();
         let run = store.begin_run("living", None, 1).unwrap();
-        store.end_run("living", &run.id, RunStatus::Done, 2);
+        // Removing and re-adding the flow drops its runs.
+        store.apply("living", b"");
+        store.apply("living", REFERENCE);
+        assert!(
+            store
+                .end_run("living", &run.id, RunStatus::Done, 2)
+                .is_none()
+        );
+        assert_eq!(store.active_run("living"), None);
+    }
+
+    #[test]
+    fn end_run_clears_a_dangling_active_id() {
+        let mut store = store_with_flow();
+        store.active.insert("living".into(), "ghost".into());
+        assert!(
+            store
+                .end_run("living", "ghost", RunStatus::Done, 2)
+                .is_none()
+        );
         assert_eq!(store.active_run("living"), None);
     }
 
