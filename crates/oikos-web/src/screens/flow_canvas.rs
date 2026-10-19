@@ -8,6 +8,7 @@ use oikos_api::{FlowView, RunView, StepOutcome};
 use oikos_core::flow::{Flow, FlowMode, NodeKind, parse_duration};
 
 use crate::api;
+use crate::components::flow_switch::FlowSwitch;
 use crate::components::now::Now;
 use crate::components::toast::Toasts;
 use crate::flows::{
@@ -48,34 +49,6 @@ fn pending_deadline(flow: &Flow, view: &FlowView, node_id: &str) -> Option<u64> 
 }
 
 #[component]
-fn FlowSwitch(id: String, name: String, enabled: bool, disabled: bool) -> impl IntoView {
-    let toasts = expect_context::<Toasts>();
-    let label = format!("Enable {name}");
-    let toggle = move |_| {
-        let id = id.clone();
-        spawn_local(async move {
-            if let Err(e) = api::set_flow_enabled(&id, !enabled).await {
-                toasts.push(e.error);
-            }
-        });
-    };
-    view! {
-        <button
-            type="button"
-            role="switch"
-            class="switch"
-            class:switch--on=enabled
-            aria-checked=enabled.to_string()
-            aria-label=label
-            disabled=disabled
-            on:click=toggle
-        >
-            <span class="switch__knob"></span>
-        </button>
-    }
-}
-
-#[component]
 fn Header(view: FlowView) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let flow = &view.definition;
@@ -104,7 +77,7 @@ fn Header(view: FlowView) -> impl IntoView {
                 <span class="sheet__back-label">"Flows"</span>
             </A>
             <h1 class="sheet__title">{flow.name.clone()}</h1>
-            <FlowSwitch id=id name=flow.name.clone() enabled=flow.enabled disabled=invalid />
+            <FlowSwitch id=id name=flow.name.clone() enabled=flow.enabled invalid=invalid />
             <button type="button" class="btn" disabled=invalid || busy on:click=run_now>
                 "Run now"
             </button>
@@ -244,7 +217,12 @@ fn RunItem(run: RunView, flow: Flow) -> impl IntoView {
                 StepOutcome::Failed => "failed",
                 _ => "skipped",
             };
-            view! { <li>{format!("{node} · {outcome} · {}", s.detail)}</li> }
+            let line = if s.detail.is_empty() {
+                format!("{node} · {outcome}")
+            } else {
+                format!("{node} · {outcome} · {}", s.detail)
+            };
+            view! { <li>{line}</li> }
         })
         .collect_view();
     view! {

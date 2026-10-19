@@ -1,12 +1,11 @@
 //! The Flows page: one row per automation with its summary, last run and an enable switch.
 
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 use leptos_router::components::A;
 use oikos_api::FlowView;
 
 use crate::api;
-use crate::components::toast::Toasts;
+use crate::components::flow_switch::FlowSwitch;
 use crate::flows::{status_word, summary};
 use crate::format::format_timestamp;
 use crate::house::House;
@@ -27,7 +26,6 @@ fn last_run(flow: &FlowView) -> String {
 
 #[component]
 fn FlowRow(flow: FlowView) -> impl IntoView {
-    let toasts = expect_context::<Toasts>();
     let id = flow.definition.id.clone();
     let href = format!("/flows/{}", api::encode_id(&id));
     let name = flow.definition.name.clone();
@@ -38,18 +36,7 @@ fn FlowRow(flow: FlowView) -> impl IntoView {
         Some(reason) => reason.clone(),
         None => summary(&flow.definition),
     };
-    let label = format!("Enable {name}");
-    let toggle = {
-        let id = id.clone();
-        move |_| {
-            let id = id.clone();
-            spawn_local(async move {
-                if let Err(e) = api::set_flow_enabled(&id, !enabled).await {
-                    toasts.push(e.error);
-                }
-            });
-        }
-    };
+    let name_for_switch = name.clone();
     view! {
         <li class="flow-row">
             <div class="flow-row__main">
@@ -62,18 +49,7 @@ fn FlowRow(flow: FlowView) -> impl IntoView {
             {invalid
                 .clone()
                 .map(|reason| view! { <span class="badge badge--invalid" title=reason>"Invalid"</span> })}
-            <button
-                type="button"
-                role="switch"
-                class="switch"
-                class:switch--on=enabled
-                aria-checked=enabled.to_string()
-                aria-label=label
-                disabled=invalid.is_some()
-                on:click=toggle
-            >
-                <span class="switch__knob"></span>
-            </button>
+            <FlowSwitch id=id name=name_for_switch enabled=enabled invalid=invalid.is_some() />
         </li>
     }
 }
