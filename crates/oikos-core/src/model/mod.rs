@@ -6,6 +6,7 @@ mod device;
 mod entity;
 mod kind;
 mod placement;
+mod room_groups;
 mod state;
 pub(crate) mod ui_override;
 
@@ -15,6 +16,7 @@ pub use device::{BridgeInfo, Device};
 pub use entity::{Bindings, Capabilities, CodeFormat, Entity, EntityCategory};
 pub use kind::{IGNORED_COMPONENTS, Kind};
 pub use placement::{Placement, SensorGroup, SensorSection};
+pub use room_groups::{GroupKey, GroupKind, MIN_GROUP_MEMBERS};
 pub use state::{
     Availability, ClimateState, CoverState, EntityState, LightState, StateValue, VacuumState,
     WaterHeaterState,

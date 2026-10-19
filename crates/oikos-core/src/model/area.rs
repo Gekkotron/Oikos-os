@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::GroupKind;
 use super::ui_override::strip_nulls;
 
 /// The area of every entity that has no override, suggested area or path area.
@@ -70,5 +71,52 @@ impl AreasDocument {
                 ..Area::default()
             }),
         }
+    }
+
+    /// Edits one kind's room group card on area `area`, leaving the other kind and every other
+    /// field alone. `name`: `None` leaves it, `Some(None)` or a blank removes it, `Some(Some(n))`
+    /// sets it trimmed; `favorite`: `None` leaves it. An undeclared id is declared like
+    /// [`AreasDocument::rename`] does. Returns false, changing nothing, for the Unassigned area.
+    pub fn set_group(
+        &mut self,
+        area: &str,
+        kind: GroupKind,
+        name: Option<Option<&str>>,
+        favorite: Option<bool>,
+    ) -> bool {
+        if area == UNASSIGNED_AREA {
+            return false;
+        }
+        let index = match self.areas.iter().position(|a| a.id == area) {
+            Some(index) => index,
+            None => {
+                self.areas.push(Area {
+                    id: area.to_owned(),
+                    name: area.to_owned(),
+                    ..Area::default()
+                });
+                self.areas.len() - 1
+            }
+        };
+        let area = &mut self.areas[index];
+        let key = kind.key();
+        if let Some(name) = name {
+            match name.map(str::trim).filter(|n| !n.is_empty()) {
+                Some(name) => {
+                    area.group_names.insert(key.to_owned(), name.to_owned());
+                }
+                None => {
+                    area.group_names.remove(key);
+                }
+            }
+        }
+        if let Some(favorite) = favorite {
+            if favorite {
+                area.group_favorites.insert(key.to_owned());
+            } else {
+                area.group_favorites.remove(key);
+            }
+        }
+        true
     }
 }

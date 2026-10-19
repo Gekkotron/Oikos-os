@@ -2,7 +2,7 @@
 
 mod common;
 
-use oikos_core::model::{AreasDocument, UNASSIGNED_AREA};
+use oikos_core::model::{AreasDocument, GroupKind, UNASSIGNED_AREA};
 
 #[test]
 fn recorded_areas_round_trip() {
@@ -50,4 +50,36 @@ fn rename_declares_an_implicit_area() {
 #[test]
 fn unassigned_area_constant() {
     assert_eq!(UNASSIGNED_AREA, "Unassigned");
+}
+
+#[test]
+fn set_group_edits_only_its_kind() {
+    let raw = br#"{"areas":[{"id":"dehors","name":"Dehors","groupNames":{"light":"Spots"},"newKey":true}]}"#;
+    let mut doc = AreasDocument::decode(raw).unwrap();
+    assert!(doc.set_group(
+        "dehors",
+        GroupKind::Cover,
+        Some(Some("  Volets ")),
+        Some(true)
+    ));
+    assert_eq!(
+        doc.encode(),
+        r#"{"areas":[{"id":"dehors","name":"Dehors","groupNames":{"cover":"Volets","light":"Spots"},"groupFavorites":["cover"],"newKey":true}]}"#
+    );
+    assert!(doc.set_group("dehors", GroupKind::Cover, Some(None), None));
+    assert!(!doc.encode().contains(r#""cover":"#));
+    assert!(doc.encode().contains(r#""light":"Spots""#));
+    assert!(doc.set_group("dehors", GroupKind::Light, Some(Some("  ")), None));
+    assert!(!doc.encode().contains("groupNames"));
+    assert!(doc.encode().contains(r#""groupFavorites":["cover"]"#));
+    assert!(!doc.set_group(UNASSIGNED_AREA, GroupKind::Cover, Some(Some("x")), None));
+    assert_eq!(doc.areas.len(), 1);
+}
+
+#[test]
+fn set_group_declares_an_implicit_area() {
+    let mut doc = AreasDocument::default();
+    assert!(doc.set_group("salon", GroupKind::Light, Some(Some("Spots")), None));
+    assert_eq!(doc.areas[0].id, "salon");
+    assert_eq!(doc.areas[0].name, "salon");
 }
