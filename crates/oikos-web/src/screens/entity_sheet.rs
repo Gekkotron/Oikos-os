@@ -108,7 +108,7 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
                                     .map(|(id, name)| {
                                         view! {
                                             <li>
-                                                <A href=format!("/entity/{id}")>{name}</A>
+                                                <A href=format!("/entity/{}", crate::api::encode_id(&id))>{name}</A>
                                             </li>
                                         }
                                     })

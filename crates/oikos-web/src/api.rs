@@ -49,31 +49,54 @@ async fn read_json<T: DeserializeOwned>(response: Response) -> Result<T, ApiErro
     response.json::<T>().await.map_err(network_error)
 }
 
+/// `id` as one URL path segment: everything but the unreserved characters (`A-Za-z0-9-._~`)
+/// becomes `%XX` over its UTF-8 bytes, so `/`, `#`, `?`, `%` and spaces cannot change the route.
+///
+/// Hand-rolled rather than `js_sys::encode_uri_component` (which also leaves `!'()*` alone and
+/// panics off wasm, so it cannot be unit-tested natively) or the `percent-encoding` crate (an
+/// extra dependency for ten lines).
+pub fn encode_id(id: &str) -> String {
+    let mut out = String::with_capacity(id.len());
+    for b in id.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
 pub async fn send_command(id: &str, cmd: Command) -> Result<CommandResponse, ApiError> {
-    let url = format!("/api/v1/entities/{id}/command");
+    let url = format!("/api/v1/entities/{}/command", encode_id(id));
     let response = check(Request::post(&url).json(&cmd), Some(BROKER_OFFLINE)).await?;
     read_json(response).await
 }
 
 /// Presses alert `id`'s button `action`; the hub forwards it to the producer.
 pub async fn send_alert_action(id: &str, action: &str) -> Result<(), ApiError> {
-    let url = format!("/api/v1/alerts/{id}/actions/{action}");
+    let url = format!(
+        "/api/v1/alerts/{}/actions/{}",
+        encode_id(id),
+        encode_id(action)
+    );
     check(Request::post(&url).build(), Some(BROKER_OFFLINE)).await?;
     Ok(())
 }
 
 pub async fn set_override(id: &str, patch: OverridePatch) -> Result<EntityView, ApiError> {
-    let url = format!("/api/v1/entities/{id}/override");
+    let url = format!("/api/v1/entities/{}/override", encode_id(id));
     let response = check(Request::patch(&url).json(&Value::Object(patch)), None).await?;
     read_json(response).await
 }
 
 pub async fn clear_override(id: &str) -> Result<(), ApiError> {
-    let url = format!("/api/v1/entities/{id}/override");
+    let url = format!("/api/v1/entities/{}/override", encode_id(id));
     check(Request::delete(&url).build(), None).await?;
     Ok(())
 }
 
+// Reserved: the area editor is not built yet, so nothing calls this.
 pub async fn set_areas(doc: AreasDocument) -> Result<Vec<oikos_api::AreaView>, ApiError> {
     let response = check(Request::put("/api/v1/areas").json(&doc), None).await?;
     read_json(response).await
@@ -81,7 +104,18 @@ pub async fn set_areas(doc: AreasDocument) -> Result<Vec<oikos_api::AreaView>, A
 
 #[cfg(test)]
 mod tests {
-    use super::decode_error;
+    use super::{decode_error, encode_id};
+
+    #[test]
+    fn ordinary_ids_pass_through() {
+        assert_eq!(encode_id("light.kitchen_lamp-1~x"), "light.kitchen_lamp-1~x");
+    }
+
+    #[test]
+    fn reserved_characters_are_escaped() {
+        assert_eq!(encode_id("a/b#c?d e%f"), "a%2Fb%23c%3Fd%20e%25f");
+        assert_eq!(encode_id("é"), "%C3%A9");
+    }
 
     #[test]
     fn server_message_is_surfaced() {

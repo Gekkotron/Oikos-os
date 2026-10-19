@@ -22,7 +22,7 @@ fn time_line(alert: &AlertView, now: u64) -> String {
 #[component]
 pub fn AlertRow(alert: AlertView) -> impl IntoView {
     let now = expect_context::<Now>();
-    let href = format!("/alerts/{}", alert.id);
+    let href = format!("/alerts/{}", crate::api::encode_id(&alert.id));
     // A picture that fails to load (gone, or refused) falls back to the channel glyph instead
     // of the browser's broken-image icon.
     let broken = RwSignal::new(false);

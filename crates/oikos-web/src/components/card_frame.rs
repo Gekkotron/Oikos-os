@@ -18,7 +18,7 @@ fn availability_class(availability: Availability) -> &'static str {
 /// (it needs the router context).
 pub fn open_entity(id: &str) -> Callback<()> {
     let navigate = leptos_router::hooks::use_navigate();
-    let path = format!("/entity/{id}");
+    let path = format!("/entity/{}", crate::api::encode_id(id));
     Callback::new(move |()| navigate(&path, Default::default()))
 }
 

@@ -105,7 +105,7 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
                             .map(|(id, name)| {
                                 view! {
                                     <li>
-                                        <A href=format!("/entity/{id}")>{name}</A>
+                                        <A href=format!("/entity/{}", crate::api::encode_id(&id))>{name}</A>
                                     </li>
                                 }
                             })

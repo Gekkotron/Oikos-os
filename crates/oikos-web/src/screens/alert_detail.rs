@@ -184,7 +184,7 @@ fn DetailBody(alert: AlertView) -> impl IntoView {
             {device
                 .map(|unique_id| {
                     view! {
-                        <A href=format!("/entity/{unique_id}") attr:class="btn alert-detail__device">
+                        <A href=format!("/entity/{}", crate::api::encode_id(&unique_id)) attr:class="btn alert-detail__device">
                             "Open device"
                         </A>
                     }
