@@ -162,6 +162,8 @@ cd ../.. && cargo build --release -p oikos-os
 
 The hub reads `dist/` when it is compiled. Rebuild the hub after every `trunk build`. A binary built before `trunk build` serves a 503 page that says the UI has not been built.
 
+`tools/restart.sh` does both builds, stops the running hub and starts the new one (`--debug` for the debug profile, `--no-web` to reuse `dist/`). It warns when `target/` passes 10 GB; `--sweep` first deletes build artifacts untouched for 14 days (`cargo install cargo-sweep`).
+
 The smoke test mounts the app in headless Chrome and checks the shell:
 
 ```sh

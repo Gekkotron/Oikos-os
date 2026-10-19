@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Build the web UI and the hub, stop the running hub, start the new one.
 #
-# Usage: tools/restart.sh [--no-web] [--debug]
+# Usage: tools/restart.sh [--no-web] [--debug] [--sweep]
 #   --no-web  skip `trunk build` (reuse crates/oikos-web/dist)
 #   --debug   build and run the debug profile instead of release
+#   --sweep   first delete build artifacts untouched for 14 days (needs
+#             `cargo install cargo-sweep`); the current builds are kept
+#
+# A warning is printed when target/ is over TARGET_WARN_GB (default 10).
 #
 # The hub runs detached from this shell, from the repo root (so it reads
 # ./oikos.toml), and logs to target/oikos-os.log (OIKOS_LOG overrides).
@@ -12,10 +16,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE=release
 BUILD_WEB=1
+SWEEP=0
 for arg in "$@"; do
   case "$arg" in
     --no-web) BUILD_WEB=0 ;;
     --debug) PROFILE=debug ;;
+    --sweep) SWEEP=1 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -27,6 +33,22 @@ HEALTH="http://${BIND:-127.0.0.1:8081}/health"
 
 cargo_flags=()
 [ "$PROFILE" = release ] && cargo_flags+=(--release)
+
+# 0. Keep target/ in check: stale artifacts pile up because cargo never deletes old ones.
+if [ "$SWEEP" = 1 ]; then
+  if cargo sweep --version >/dev/null 2>&1; then
+    echo "==> cargo sweep --time 14"
+    (cd "$ROOT" && cargo sweep --time 14 | tail -n 1)
+  else
+    echo "    --sweep ignored: cargo-sweep is not installed (cargo install cargo-sweep)" >&2
+  fi
+fi
+if [ -d "$ROOT/target" ]; then
+  target_gb="$(du -sg "$ROOT/target" 2>/dev/null | cut -f1)"
+  if [ "${target_gb:-0}" -gt "${TARGET_WARN_GB:-10}" ]; then
+    echo "WARNING: target/ is ${target_gb} GB; run tools/restart.sh --sweep (or cargo clean) before the disk fills" >&2
+  fi
+fi
 
 # 1. Build the web UI first: the hub embeds dist/ at compile time.
 if [ "$BUILD_WEB" = 1 ]; then
