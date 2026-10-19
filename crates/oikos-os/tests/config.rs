@@ -14,6 +14,8 @@ fn defaults_match_spec() {
         assert_eq!(cfg.topics.discovery_prefixes, vec!["oikos".to_string()]);
         assert_eq!(cfg.topics.ui_prefix, "oikos/ui");
         assert_eq!(cfg.topics.z2m_base, "zigbee2mqtt");
+        assert_eq!(cfg.topics.automation_prefix, "oikos/automation");
+        assert_eq!(cfg.automation.runs_kept, 20);
         assert_eq!(cfg.http.bind, "0.0.0.0:8080");
         assert_eq!(cfg.commands.confirm_timeout_ms, 5000);
         assert_eq!(cfg.commands.subscription_debounce_ms, 500);
@@ -136,6 +138,18 @@ fn debug_redacts_frigate_password() {
         let text = format!("{cfg:?}");
         assert!(text.contains("http://f:8971"));
         assert!(!text.contains("hunter2"), "{text}");
+        Ok(())
+    });
+}
+
+#[test]
+fn env_overrides_automation_keys() {
+    Jail::expect_with(|jail| {
+        jail.set_env("OIKOS_TOPICS__AUTOMATION_PREFIX", "home/flows");
+        jail.set_env("OIKOS_AUTOMATION__RUNS_KEPT", "5");
+        let cfg = Config::load(None)?;
+        assert_eq!(cfg.topics.automation_prefix, "home/flows");
+        assert_eq!(cfg.automation.runs_kept, 5);
         Ok(())
     });
 }

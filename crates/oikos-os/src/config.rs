@@ -17,6 +17,7 @@ pub struct Config {
     pub log: LogConfig,
     pub push: PushConfig,
     pub frigate: FrigateConfig,
+    pub automation: AutomationConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -66,6 +67,8 @@ pub struct TopicsConfig {
     pub discovery_prefixes: Vec<String>,
     pub ui_prefix: String,
     pub z2m_base: String,
+    /// Where flow definitions live: `<prefix>/<flow id>`, retained, one JSON document each.
+    pub automation_prefix: String,
 }
 
 impl Default for TopicsConfig {
@@ -74,6 +77,7 @@ impl Default for TopicsConfig {
             discovery_prefixes: vec!["oikos".into()],
             ui_prefix: "oikos/ui".into(),
             z2m_base: "zigbee2mqtt".into(),
+            automation_prefix: "oikos/automation".into(),
         }
     }
 }
@@ -179,6 +183,20 @@ impl fmt::Debug for FrigateConfig {
     }
 }
 
+/// The flow engine's knobs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AutomationConfig {
+    /// How many recent runs the hub keeps per flow (newest first); older ones are dropped.
+    pub runs_kept: usize,
+}
+
+impl Default for AutomationConfig {
+    fn default() -> Self {
+        Self { runs_kept: 20 }
+    }
+}
+
 /// Dotted, lowercase keys of string-typed fields. Single source of truth for
 /// both the Env filter (figment's `ignore` sees the key after `split`, i.e.
 /// `mqtt.password`) and the raw-string merge.
@@ -190,6 +208,7 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "mqtt.ha_status_topic",
     "topics.ui_prefix",
     "topics.z2m_base",
+    "topics.automation_prefix",
     "http.bind",
     "log.level",
     "push.history_topic",
