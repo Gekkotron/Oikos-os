@@ -20,9 +20,10 @@ pub(super) fn resolve(raw: &str, declared: &[Area]) -> String {
 }
 
 /// The effective area of an entity: override → `suggested_area` → `path_area` → `Unassigned`,
-/// each resolved against the declared areas.
+/// each resolved against the declared areas. A blank override area is as good as absent.
 pub(super) fn effective(entity: &Entity, override_area: Option<&str>, declared: &[Area]) -> String {
     let raw = override_area
+        .filter(|area| !area.trim().is_empty())
         .or(entity.suggested_area.as_deref())
         .or(entity.path_area.as_deref())
         .unwrap_or(UNASSIGNED_AREA);

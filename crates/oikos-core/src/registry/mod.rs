@@ -229,6 +229,13 @@ impl Registry {
         areas::effective_list(&self.areas.areas, self.entities.values())
     }
 
+    /// The area id `raw` stands for: a declared id as is, a declared name (ignoring case) as
+    /// its id, anything else as written (an implicit area). What a writer should store so the
+    /// retained override and the effective area agree.
+    pub fn resolve_area(&self, raw: &str) -> String {
+        areas::resolve(raw, &self.areas.areas)
+    }
+
     pub fn bridge(&self) -> &BridgeInfo {
         &self.bridge
     }

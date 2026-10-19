@@ -486,6 +486,31 @@ fn area_resolution_by_name_case_insensitive() {
     assert_eq!(areas.last().map(|a| a.id.as_str()), Some(UNASSIGNED_AREA));
 }
 
+/// A blank `area` in a retained override (written by another client) is as good as absent:
+/// the entity keeps its discovered area instead of joining an implicit area with a blank id.
+#[test]
+fn blank_override_area_is_ignored() {
+    let mut registry = load_house();
+    for blank in ["", "  "] {
+        registry.apply(override_payload(
+            STAIR_LIGHT,
+            &format!(r#"{{"area":"{blank}"}}"#),
+        ));
+        assert_eq!(
+            registry.entity(STAIR_LIGHT).expect("entity").area,
+            "stair",
+            "{blank:?}"
+        );
+        assert!(
+            registry
+                .effective_areas()
+                .iter()
+                .all(|a| !a.id.trim().is_empty()),
+            "{blank:?}"
+        );
+    }
+}
+
 #[test]
 fn override_before_discovery_applies_when_the_entity_appears() {
     let mut registry = Registry::new(config());

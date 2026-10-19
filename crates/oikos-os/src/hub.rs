@@ -283,7 +283,8 @@ impl Hub {
     }
 
     /// Patches the entity's override, publishes it retained and applies it locally so the
-    /// returned view already reflects it (the broker's echo is then a no-op).
+    /// returned view already reflects it (the broker's echo is then a no-op). The `area` is
+    /// stored canonically: a declared name becomes its id, a blank string clears the field.
     pub async fn set_override(
         &self,
         id: &str,
@@ -296,7 +297,13 @@ impl Hub {
             }
             reg.raw_override(id).cloned().unwrap_or_default()
         };
-        let next = current.apply_patch(patch)?;
+        let mut next = current.apply_patch(patch)?;
+        next.area = next
+            .area
+            .as_deref()
+            .map(str::trim)
+            .filter(|area| !area.is_empty())
+            .map(|area| self.read().resolve_area(area));
         self.write_override(id, &next)
     }
 

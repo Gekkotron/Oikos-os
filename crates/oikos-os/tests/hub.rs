@@ -483,3 +483,57 @@ async fn write_refused_while_offline() {
         r#"{"favorite":true}"#
     );
 }
+
+/// The area written by an override is stored canonically: a declared name resolves to its
+/// id (so the retained JSON and the hub agree), a blank string clears the field instead of
+/// becoming an implicit area with an empty id.
+#[tokio::test]
+async fn set_override_canonicalises_area() {
+    let (hub, mut publisher) = hub();
+    feed_switch(&hub);
+    hub.set_areas(AreasDocument {
+        areas: vec![Area {
+            id: "living".to_owned(),
+            name: "Living".to_owned(),
+            ..Area::default()
+        }],
+    })
+    .await
+    .expect("areas");
+    publisher.try_recv().expect("the areas publish");
+
+    let mut patch = serde_json::Map::new();
+    patch.insert("area".to_owned(), serde_json::Value::from("Living"));
+    let view = hub.set_override(SWITCH_ID, &patch).await.expect("override");
+    assert_eq!(view.area, "living");
+    assert_eq!(view.ui.area.as_deref(), Some("living"));
+    assert_eq!(
+        publisher.try_recv().expect("the override publish").payload,
+        r#"{"area":"living"}"#
+    );
+    assert_eq!(
+        hub.entity_detail(SWITCH_ID)
+            .and_then(|d| d.raw_override)
+            .and_then(|o| o.area),
+        Some("living".to_owned())
+    );
+
+    // An undeclared area is kept as written (an implicit area).
+    patch.insert("area".to_owned(), serde_json::Value::from("Attic"));
+    let view = hub.set_override(SWITCH_ID, &patch).await.expect("override");
+    assert_eq!(view.area, "Attic");
+    publisher.try_recv().expect("the override publish");
+
+    for blank in ["", "   "] {
+        patch.insert("area".to_owned(), serde_json::Value::from(blank));
+        let view = hub.set_override(SWITCH_ID, &patch).await.expect("override");
+        assert_eq!(view.area, "stair", "{blank:?} clears the area");
+        assert_eq!(view.ui.area, None);
+        assert_eq!(
+            publisher.try_recv().expect("the override publish").payload,
+            "",
+            "{blank:?} leaves a default override, retained empty"
+        );
+        assert!(hub.snapshot().areas.iter().all(|a| !a.id.trim().is_empty()));
+    }
+}
