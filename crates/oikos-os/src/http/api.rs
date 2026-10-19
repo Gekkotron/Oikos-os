@@ -51,7 +51,9 @@ impl IntoResponse for HttpError {
 impl From<HubError> for HttpError {
     fn from(err: HubError) -> Self {
         let status = match &err {
-            HubError::UnknownEntity(_) => StatusCode::NOT_FOUND,
+            HubError::UnknownEntity(_) | HubError::UnknownAlert(_) | HubError::UnknownAction(_) => {
+                StatusCode::NOT_FOUND
+            }
             HubError::Rejected(_) | HubError::Command(_) => StatusCode::UNPROCESSABLE_ENTITY,
             HubError::Patch(_) => StatusCode::BAD_REQUEST,
             HubError::Publish(_) => StatusCode::SERVICE_UNAVAILABLE,

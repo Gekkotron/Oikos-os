@@ -577,3 +577,132 @@ async fn invalid_discovery_is_logged_once() {
         "and logged again when it breaks anew"
     );
 }
+
+// ----- push alerts -----
+
+const HISTORY_TOPIC: &str = "oikos-push/history";
+const ALERT_ENTRY: &str = r#"{"v":1,"id":"frigate-front-1696","channel":"camera","severity":"warning","title":"Front Door","body":"Person in Porch","image_url":"http://192.168.1.20:5000/api/events/1696/snapshot.jpg","actions":[{"id":"disarm","label":"Disarm"}],"silent":false,"sent_at":1760880000,"source":"frigate"}"#;
+
+fn history_payload() -> Vec<u8> {
+    format!("[{ALERT_ENTRY}]").into_bytes()
+}
+
+#[tokio::test]
+async fn history_payload_fills_alerts_and_broadcasts() {
+    let (hub, _publisher) = hub();
+    let mut events = hub.subscribe();
+
+    let changes = hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    assert!(changes.is_empty(), "no registry change: {changes:?}");
+    match next_event(&mut events).await {
+        WsEvent::AlertsChanged { alerts } => {
+            assert_eq!(alerts.len(), 1);
+            assert_eq!(alerts[0].id, "frigate-front-1696");
+            assert_eq!(hub.alerts(), alerts);
+            assert_eq!(hub.snapshot().alerts, alerts);
+        }
+        other => panic!("expected AlertsChanged, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn identical_history_does_not_broadcast_again() {
+    let (hub, _publisher) = hub();
+    let mut events = hub.subscribe();
+    hub.ingest(HISTORY_TOPIC, &history_payload());
+    next_event(&mut events).await;
+
+    hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), events.recv())
+            .await
+            .is_err(),
+        "an unchanged history must not be re-broadcast"
+    );
+}
+
+#[tokio::test]
+async fn empty_history_payload_clears_the_list() {
+    let (hub, _publisher) = hub();
+    let mut events = hub.subscribe();
+    hub.ingest(HISTORY_TOPIC, &history_payload());
+    next_event(&mut events).await;
+
+    hub.ingest(HISTORY_TOPIC, b"");
+
+    assert!(matches!(
+        next_event(&mut events).await,
+        WsEvent::AlertsChanged { alerts } if alerts.is_empty()
+    ));
+    assert!(hub.alerts().is_empty());
+}
+
+#[tokio::test]
+async fn non_array_history_keeps_previous_list() {
+    let (hub, _publisher) = hub();
+    let mut events = hub.subscribe();
+    hub.ingest(HISTORY_TOPIC, &history_payload());
+    next_event(&mut events).await;
+
+    hub.ingest(HISTORY_TOPIC, b"{}");
+
+    assert_eq!(hub.alerts().len(), 1);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), events.recv())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn reply_publishes_the_app_payload() {
+    let (hub, mut publisher) = hub();
+    hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    hub.reply("frigate-front-1696", "disarm")
+        .expect("reply accepted");
+
+    let published = publisher.recv().await.expect("a publish");
+    assert_eq!(published.topic, "oikos-push/responses");
+    assert!(!published.retain);
+    let value: serde_json::Value = serde_json::from_str(&published.payload).expect("json");
+    assert_eq!(value["id"], "frigate-front-1696");
+    assert_eq!(value["action"], "disarm");
+    assert_eq!(value["install_id"], "oikos-web");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let ts = value["ts"].as_u64().expect("ts in seconds");
+    assert!(now.abs_diff(ts) <= 5, "ts {ts} is not within 5 s of {now}");
+    let raw = &published.payload;
+    let pos = |key: &str| raw.find(key).expect(key);
+    assert!(pos("\"id\"") < pos("\"action\""));
+    assert!(pos("\"action\"") < pos("\"install_id\""));
+    assert!(pos("\"install_id\"") < pos("\"ts\""));
+}
+
+#[tokio::test]
+async fn reply_rejects_unknown_alert_action_and_offline() {
+    let (hub, _publisher) = hub();
+    hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    assert!(matches!(
+        hub.reply("nope", "disarm"),
+        Err(HubError::UnknownAlert(id)) if id == "nope"
+    ));
+    assert!(matches!(
+        hub.reply("frigate-front-1696", "zzz"),
+        Err(HubError::UnknownAction(action)) if action == "zzz"
+    ));
+
+    hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".into(),
+    });
+    assert!(matches!(
+        hub.reply("frigate-front-1696", "disarm"),
+        Err(HubError::Publish(_))
+    ));
+}

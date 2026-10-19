@@ -15,7 +15,7 @@ use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, Sleep};
 
-use crate::config::{MqttConfig, TopicsConfig};
+use crate::config::{MqttConfig, PushConfig, TopicsConfig};
 use crate::hub::Hub;
 
 const KEEP_ALIVE: Duration = Duration::from_secs(30);
@@ -54,6 +54,7 @@ impl Handle {
 pub fn start(
     cfg: MqttConfig,
     topics: TopicsConfig,
+    push: PushConfig,
     hub: Arc<Hub>,
     publish_rx: mpsc::Receiver<Publish>,
 ) -> (Handle, JoinHandle<()>) {
@@ -80,6 +81,7 @@ pub fn start(
         Arc::clone(&hub),
         cfg.clone(),
         topics,
+        push,
         publish_rx,
         Arc::clone(&resubscribe),
     ));
@@ -156,6 +158,7 @@ async fn outbound(
     hub: Arc<Hub>,
     cfg: MqttConfig,
     topics: TopicsConfig,
+    push: PushConfig,
     mut publish_rx: mpsc::Receiver<Publish>,
     resubscribe: Arc<Notify>,
 ) {
@@ -176,7 +179,7 @@ async fn outbound(
                     // Subscribe to everything, whether or not the broker resumed the session:
                     // the registry may have moved on while the link was down.
                     subscribed = hub.subscription_topics();
-                    let filters: BTreeSet<String> = static_filters(&topics)
+                    let filters: BTreeSet<String> = static_filters(&topics, &push)
                         .into_iter()
                         .chain(subscribed.iter().cloned())
                         .collect();
@@ -231,7 +234,7 @@ async fn outbound(
 }
 
 /// The wildcards that are always subscribed: discovery, the Z2M bridge and the UI sub-tree.
-fn static_filters(topics: &TopicsConfig) -> BTreeSet<String> {
+fn static_filters(topics: &TopicsConfig, push: &PushConfig) -> BTreeSet<String> {
     topics
         .discovery_prefixes
         .iter()
@@ -239,6 +242,7 @@ fn static_filters(topics: &TopicsConfig) -> BTreeSet<String> {
         .chain([
             format!("{}/bridge/#", topics.z2m_base),
             format!("{}/#", topics.ui_prefix),
+            push.history_topic.clone(),
         ])
         .collect()
 }

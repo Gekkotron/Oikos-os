@@ -29,6 +29,7 @@ async fn main() -> anyhow::Result<ExitCode> {
             let (link, mut link_task) = mqtt::start(
                 cfg.mqtt.clone(),
                 cfg.topics.clone(),
+                cfg.push.clone(),
                 Arc::clone(&hub),
                 publish_rx,
             );

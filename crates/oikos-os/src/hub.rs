@@ -6,9 +6,10 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
+use crate::alerts::{AlertStore, Applied};
 use oikos_api::{
-    AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch, Snapshot,
-    WsEvent, area_views, device_views, snapshot,
+    AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
+    Snapshot, WsEvent, area_views, device_views, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{AreasDocument, Availability, Command, PatchError, UiOverride};
@@ -37,6 +38,22 @@ pub enum HubError {
     /// task; nothing was applied locally.
     #[error("publish: {0}")]
     Publish(String),
+    #[error("unknown alert `{0}`")]
+    UnknownAlert(String),
+    #[error("unknown action `{0}`")]
+    UnknownAction(String),
+}
+
+/// The `install_id` the web sends in a reply; the app sends its own install id.
+const WEB_INSTALL_ID: &str = "oikos-web";
+
+/// The reply the app's `ReplyWorker` publishes, field order included.
+#[derive(serde::Serialize)]
+struct Reply<'a> {
+    id: &'a str,
+    action: &'a str,
+    install_id: &'a str,
+    ts: u64,
 }
 
 /// What [`Hub::entity_detail`] returns: the view plus what the view leaves out.
@@ -58,6 +75,10 @@ pub struct Hub {
     connection: watch::Sender<ConnectionStatus>,
     publisher: mpsc::Sender<Publish>,
     ui_prefix: String,
+    /// OikosPush's retained history topic and its decoded copy.
+    history_topic: String,
+    responses_topic: String,
+    alerts: Mutex<AlertStore>,
     confirm_timeout: Duration,
     subscription_debounce: Duration,
     /// Entities whose template failure was already logged, so each failure is logged once.
@@ -84,6 +105,9 @@ impl Hub {
             connection,
             publisher,
             ui_prefix: cfg.topics.ui_prefix.clone(),
+            history_topic: cfg.push.history_topic.clone(),
+            responses_topic: cfg.push.responses_topic.clone(),
+            alerts: Mutex::new(AlertStore::new()),
             confirm_timeout: Duration::from_millis(cfg.commands.confirm_timeout_ms),
             subscription_debounce: Duration::from_millis(cfg.commands.subscription_debounce_ms),
             logged_failures: Mutex::new(BTreeSet::new()),
@@ -94,6 +118,10 @@ impl Hub {
     /// Routes and applies one broker message, broadcasts the resulting events and reports the
     /// changes (the MQTT task watches for [`Change::SubscriptionsChanged`]).
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
+        if topic == self.history_topic {
+            self.ingest_history(topic, payload);
+            return Vec::new();
+        }
         let at = clock::now();
         let (changes, events, failing, seen, ignored) = {
             let mut reg = self.write();
@@ -151,7 +179,64 @@ impl Hub {
 
     pub fn snapshot(&self) -> Snapshot {
         let connection = self.connection.borrow().clone();
-        snapshot(&self.read(), connection, clock::now())
+        let mut snapshot = snapshot(&self.read(), connection, clock::now());
+        snapshot.alerts = self.alerts();
+        snapshot
+    }
+
+    /// The push alerts, newest first as OikosPush published them.
+    pub fn alerts(&self) -> Vec<AlertView> {
+        self.alerts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .list()
+            .to_vec()
+    }
+
+    /// Publishes the reply the app would publish when the user taps `action` on alert `id`.
+    pub fn reply(&self, id: &str, action: &str) -> Result<(), HubError> {
+        {
+            let alerts = self
+                .alerts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let alert = alerts
+                .find(id)
+                .ok_or_else(|| HubError::UnknownAlert(id.to_owned()))?;
+            if !alert.actions.iter().any(|a| a.id == action) {
+                return Err(HubError::UnknownAction(action.to_owned()));
+            }
+        }
+        let payload = serde_json::to_string(&Reply {
+            id,
+            action,
+            install_id: WEB_INSTALL_ID,
+            ts: clock::now(),
+        })
+        .map_err(|err| HubError::Publish(err.to_string()))?;
+        self.publish(Publish {
+            topic: self.responses_topic.clone(),
+            payload,
+            retain: false,
+        })
+    }
+
+    /// A history payload never touches the registry: it is decoded into the alert store and,
+    /// when the list changed, broadcast. A payload that is not an array is logged once.
+    fn ingest_history(&self, topic: &str, payload: &[u8]) {
+        let applied = self
+            .alerts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .apply(payload);
+        match applied {
+            Applied::Changed(alerts) => self.broadcast(WsEvent::AlertsChanged { alerts }),
+            Applied::Unchanged => {}
+            Applied::Invalid { first_time: true } => {
+                tracing::warn!(%topic, "invalid history payload ignored");
+            }
+            Applied::Invalid { first_time: false } => {}
+        }
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<WsEvent> {
