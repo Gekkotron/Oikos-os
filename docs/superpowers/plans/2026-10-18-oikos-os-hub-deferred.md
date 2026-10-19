@@ -37,3 +37,13 @@ Date: 2026-10-19 · Source: per-task reviews and the whole-branch review of 4d7d
 - **Clip seeking**: Frigate answers `Range` on `/api/events/<id>/clip.mp4` with a plain `200`, so the web player cannot seek; the hub passes `Range` through (tested). Either Frigate's recordings API (`/api/<camera>/start/<ts>/end/<ts>/clip.mp4`) or a hub-side cache with ranges would fix it.
 - **Absorbing OikosPush**: when the hub takes over FCM, the topics move to `oikos/history` and `oikos/push/responses` (config keys `[push]`), the `install_id` of a web reply stops being the `oikos-web` constant, and the alert `loc` hint can drive a translated body.
 - **Alert actions and "Open device" were not exercised on real data**: the current history has no alert with `actions` or `entity_id`; both paths are covered by tests only.
+
+### Deferred minors from the web alerts final review (2026-10-19)
+
+- Media proxy: the 401 token clear is unconditional, so two concurrent 401s log in twice (compare-and-clear).
+- Media proxy: `ETag` / `Last-Modified` / `Cache-Control` are not forwarded, so thumbnails re-download full 1280x720 snapshots on every navigation; request `snapshot.jpg?h=112` for rows.
+- Alert detail: a failed snapshot hides the play button although the clip may still exist (snapshot and clip retentions differ in Frigate).
+- Alert store: `last_bad_payload` is never reset by a valid payload, so bad → good → same bad is not logged again.
+- `sent_at` 0 (never sent by OikosPush) renders as "20748 d ago"; print a dash or make it optional.
+- Alert and action ids are interpolated raw into web paths; percent-encode them.
+- `AlertsScreen`'s `<For>` key embeds the whole day group, so one changed alert re-renders its group.
