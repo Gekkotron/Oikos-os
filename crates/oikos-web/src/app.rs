@@ -44,6 +44,7 @@ pub fn App() -> impl IntoView {
         }
     });
     let theme = install_theme();
+    provide_context(theme);
     #[cfg(target_arch = "wasm32")]
     crate::ws::connect("/ws", house);
 

@@ -1110,3 +1110,25 @@ body {
   font: var(--type-label);
   opacity: 0.7;
 }
+
+/* Settings */
+.settings__title {
+  margin-bottom: 4px;
+}
+
+.settings__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.segmented {
+  display: flex;
+  gap: 8px;
+}
+
+.segmented__option {
+  flex: 1;
+  justify-content: center;
+  min-height: var(--touch-min);
+}
