@@ -27,6 +27,8 @@
   --connected-bg: rgb(80 230 170 / 15%);
   --warning: #ffc457;
   --warning-bg: rgb(255 196 87 / 15%);
+  --solar: #ffc457;
+  --danger: #ff7a9a;
 
   /* Shape */
   --radius-card: 20px;
@@ -75,6 +77,8 @@
   --connected-bg: #e6efe3;
   --warning: #8a5a00;
   --warning-bg: #f6e7c8;
+  --solar: #d98b3a;
+  --danger: #c4526b;
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   --type-display: 500 28px/34px var(--font-display);
   --type-display-spacing: 0;

@@ -82,6 +82,80 @@ const NODE_HOURGLASS: &str = svg!(
 );
 const NODE_PLAY: &str = svg!(r#"<path d="M7 4.5v15l12-7.5z"/>"#);
 
+// Energy and Security glyphs.
+pub const SUN: &str = svg!(
+    r#"<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5"/><path d="M12 19v2.5"/><path d="m4.9 4.9 1.8 1.8"/><path d="m17.3 17.3 1.8 1.8"/><path d="M2.5 12H5"/><path d="M19 12h2.5"/><path d="m4.9 19.1 1.8-1.8"/><path d="m17.3 6.7 1.8-1.8"/>"#
+);
+pub const PYLON: &str = svg!(
+    r#"<path d="M9 21 11 3h2l2 18"/><path d="M5 8h14"/><path d="M6.5 13h11"/><path d="m9.5 21 5-8"/><path d="m14.5 21-5-8"/>"#
+);
+pub const HOUSE: &str =
+    svg!(r#"<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-6h4v6"/>"#);
+pub const PLUG: &str = svg!(
+    r#"<path d="M9 3v5"/><path d="M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>"#
+);
+pub const PLAY: &str = svg!(r#"<path d="M7 4.5v15l12-7.5z"/>"#);
+pub const WAVES: &str = svg!(
+    r#"<path d="M2.5 9c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M2.5 15c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/>"#
+);
+pub const LOCK_OPEN: &str = svg!(
+    r#"<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.7"/><circle cx="12" cy="16" r="1.2"/>"#
+);
+pub const SHIELD: &str = CHANNEL_SECURITY;
+pub const BOLT: &str = CHANNEL_ENERGY;
+pub const DROP: &str = HUMIDITY;
+pub const WATER_HEATER_GLYPH: &str = WATER_HEATER;
+pub const HEAT_PUMP: &str = svg!(
+    r#"<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="3.5"/><path d="M12 8.5v7"/><path d="M8.5 12h7"/>"#
+);
+pub const OVEN: &str = svg!(
+    r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 8h18"/><rect x="6" y="11" width="12" height="7" rx="1"/><circle cx="7" cy="5.5" r="0.8"/><circle cx="10" cy="5.5" r="0.8"/>"#
+);
+pub const FRIDGE: &str = svg!(
+    r#"<rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M5 10h14"/><path d="M9 6v2"/><path d="M9 13v3"/>"#
+);
+pub const WASHER: &str = svg!(
+    r#"<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="5"/><path d="M8.5 12.5c1.5-1.5 3.5 1.5 5 0s2 .5 2 .5"/><circle cx="7" cy="6" r="0.8"/>"#
+);
+pub const DRYER: &str = svg!(
+    r#"<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="5"/><path d="M10 11.5c0 2 4 1 4 3"/><circle cx="7" cy="6" r="0.8"/><circle cx="17" cy="6" r="0.8"/>"#
+);
+pub const DISHWASHER: &str = svg!(
+    r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 8h18"/><path d="M7 12h10"/><path d="M7 15.5h10"/><circle cx="7" cy="5.5" r="0.8"/>"#
+);
+
+/// The glyph of a Security sensor tile, by device class: the kind icon's door, window, motion,
+/// occupancy and smoke, plus a drop for leaks, a shield for SOS, waves for vibration and an
+/// open lock for tamper.
+pub fn sensor_icon(device_class: Option<&str>) -> &'static str {
+    match device_class {
+        Some("door" | "garage_door" | "opening") => DOOR,
+        Some("window") => WINDOW,
+        Some("motion") => MOTION,
+        Some("occupancy" | "presence") => OCCUPANCY,
+        Some("smoke" | "carbon_monoxide" | "gas") => SMOKE,
+        Some("moisture") => DROP,
+        Some("safety") => SHIELD,
+        Some("vibration") => WAVES,
+        Some("tamper") => LOCK_OPEN,
+        _ => BINARY_SENSOR,
+    }
+}
+
+/// The glyph of a consumer node by its `energyIcon` key; the plug when unset or unknown.
+pub fn consumer_glyph(key: Option<&str>) -> &'static str {
+    match key {
+        Some("water_heater") => WATER_HEATER_GLYPH,
+        Some("heat_pump") => HEAT_PUMP,
+        Some("oven") => OVEN,
+        Some("fridge") => FRIDGE,
+        Some("washer") => WASHER,
+        Some("dryer") => DRYER,
+        Some("dishwasher") => DISHWASHER,
+        _ => PLUG,
+    }
+}
+
 /// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, an
 /// hourglass for a delay and a play triangle for a command.
 pub fn node_icon(kind: &NodeKind) -> &'static str {
@@ -162,9 +236,56 @@ fn device_class_icon(device_class: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{channel_icon, kind_icon};
+    use super::{BINARY_SENSOR, PLUG, channel_icon, consumer_glyph, kind_icon, sensor_icon};
     use oikos_api::AlertChannel;
     use oikos_core::model::Kind;
+
+    #[test]
+    fn sensor_icons_cover_every_group() {
+        let classes = [
+            "door",
+            "window",
+            "garage_door",
+            "opening",
+            "motion",
+            "occupancy",
+            "presence",
+            "smoke",
+            "carbon_monoxide",
+            "gas",
+            "moisture",
+            "safety",
+            "vibration",
+            "tamper",
+        ];
+        for class in classes {
+            let icon = sensor_icon(Some(class));
+            assert!(icon.starts_with("<svg"), "{class}");
+            assert_ne!(icon, BINARY_SENSOR, "{class} has no glyph of its own");
+        }
+        assert_eq!(sensor_icon(Some("battery")), BINARY_SENSOR);
+        assert_eq!(sensor_icon(None), BINARY_SENSOR);
+    }
+
+    #[test]
+    fn consumer_glyphs_default_to_the_plug() {
+        assert_eq!(consumer_glyph(None), PLUG);
+        assert_eq!(consumer_glyph(Some("fusion")), PLUG);
+        let keys = [
+            "water_heater",
+            "heat_pump",
+            "oven",
+            "fridge",
+            "washer",
+            "dryer",
+            "dishwasher",
+        ];
+        let glyphs: Vec<_> = keys.iter().map(|k| consumer_glyph(Some(k))).collect();
+        for (i, g) in glyphs.iter().enumerate() {
+            assert_ne!(*g, PLUG, "{}", keys[i]);
+            assert!(!glyphs[..i].contains(g), "duplicate glyph for {}", keys[i]);
+        }
+    }
 
     const KINDS: [Kind; 12] = [
         Kind::Light,

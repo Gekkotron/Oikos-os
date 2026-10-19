@@ -3,21 +3,36 @@
 use leptos::prelude::*;
 use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::path;
+use oikos_core::model::{Kind, StateValue};
 
 use crate::commands::Pending;
 use crate::components::now::install_now;
 use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
+use crate::icons::{BOLT, SHIELD};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
 use crate::screens::devices::DevicesScreen;
+use crate::screens::energy::EnergyScreen;
 use crate::screens::entity_sheet::EntitySheetScreen;
 use crate::screens::flow_canvas::FlowCanvasScreen;
 use crate::screens::flows::FlowsScreen;
 use crate::screens::home::HomeScreen;
+use crate::screens::security::SecurityScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::theme::{Theme, install_theme};
+
+/// True while any alarm panel is other than disarmed: armed, arming, pending or triggered. The
+/// Security tab glyph takes the warning colour then, as the app's tab icon does.
+pub(crate) fn any_alarm_armed<'a>(
+    mut entities: impl Iterator<Item = &'a oikos_api::EntityView>,
+) -> bool {
+    entities.any(|e| {
+        e.kind == Kind::AlarmPanel
+            && matches!(&e.state.value, StateValue::Alarm(s) if !matches!(s.as_str(), "disarmed" | "disarming" | "unknown" | ""))
+    })
+}
 
 /// The next theme in the Auto, Night, Warm cycle.
 fn next_theme(theme: Theme) -> Theme {
@@ -51,6 +66,12 @@ pub fn App() -> impl IntoView {
     });
     let theme = install_theme();
     provide_context(theme);
+    let alarm_armed = Memo::new(move |_| house.entities.with(|m| any_alarm_armed(m.values())));
+    let solar_active = Memo::new(move |_| {
+        house
+            .entities
+            .with(|m| crate::energy::any_solar_active(m.values()))
+    });
     #[cfg(target_arch = "wasm32")]
     crate::ws::connect("/ws", house);
 
@@ -69,6 +90,22 @@ pub fn App() -> impl IntoView {
                 </button>
                 <nav class="topbar__nav">
                     <A href="/" exact=true>"Home"</A>
+                    <A href="/energy">
+                        <span
+                            class="nav__glyph"
+                            class:nav__glyph--solar=move || solar_active.get()
+                            inner_html=BOLT
+                        ></span>
+                        "Energy"
+                    </A>
+                    <A href="/security">
+                        <span
+                            class="nav__glyph"
+                            class:nav__glyph--armed=move || alarm_armed.get()
+                            inner_html=SHIELD
+                        ></span>
+                        "Security"
+                    </A>
                     <A href="/alerts">"Alerts"</A>
                     <A href="/flows">"Flows"</A>
                     <A href="/devices">"Devices"</A>
@@ -79,6 +116,8 @@ pub fn App() -> impl IntoView {
                 <Routes fallback=HomeScreen>
                     <Route path=path!("/") view=HomeScreen />
                     <Route path=path!("/entity/:id") view=EntitySheetScreen />
+                    <Route path=path!("/energy") view=EnergyScreen />
+                    <Route path=path!("/security") view=SecurityScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
                     <Route path=path!("/flows") view=FlowsScreen />
@@ -89,5 +128,50 @@ pub fn App() -> impl IntoView {
             </main>
             <ToastQueue />
         </Router>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::any_alarm_armed;
+    use oikos_api::EntityView;
+    use oikos_core::model::{
+        Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride,
+    };
+
+    fn panel(state: &str) -> EntityView {
+        EntityView {
+            id: "alarm".into(),
+            device_id: None,
+            name: "Alarm".into(),
+            device_name: None,
+            label: None,
+            kind: Kind::AlarmPanel,
+            protocol_kind: Kind::AlarmPanel,
+            device_class: None,
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "hall".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui: UiOverride::default(),
+            state: EntityState {
+                value: StateValue::Alarm(state.into()),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn armed_glyph_follows_the_panel_state() {
+        assert!(!any_alarm_armed([panel("disarmed")].iter()));
+        assert!(!any_alarm_armed([panel("disarming")].iter()));
+        assert!(any_alarm_armed([panel("armed_away")].iter()));
+        assert!(any_alarm_armed([panel("arming")].iter()));
+        assert!(any_alarm_armed([panel("pending")].iter()));
+        assert!(any_alarm_armed([panel("triggered")].iter()));
+        assert!(!any_alarm_armed(std::iter::empty()));
     }
 }

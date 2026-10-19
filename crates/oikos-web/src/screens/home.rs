@@ -2,7 +2,8 @@
 
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
-use oikos_core::model::{Kind, UNASSIGNED_AREA};
+use oikos_core::model::{Kind, Placement, UNASSIGNED_AREA};
+use std::collections::BTreeMap;
 
 use crate::cards::alarm::AlarmPanelCard;
 use crate::cards::binary_sensor::BinarySensorCard;
@@ -23,9 +24,25 @@ use crate::house::House;
 /// The id of the virtual "Favorites" chip.
 const FAVORITES: &str = "__favorites__";
 
+/// True when Home shows `e`: a primary entity that the app's placement rule keeps on Home (an
+/// entity with an energy role or shown on Security leaves Home unless it is pinned).
+pub(crate) fn shows_on_home(e: &EntityView) -> bool {
+    e.is_primary() && Placement::on_home(e.kind, e.device_class.as_deref(), &e.ui)
+}
+
+/// How many entities Home shows per area id.
+fn home_counts<'a>(entities: impl Iterator<Item = &'a EntityView>) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    for e in entities.filter(|e| shows_on_home(e)) {
+        *counts.entry(e.area.clone()).or_insert(0) += 1;
+    }
+    counts
+}
+
 /// The chips in the order they are shown: Favorites first (when `favorites` is non-zero), then
-/// the areas exactly as the hub sent them, except that "Unassigned" moves to the end.
-fn chips(areas: &[AreaView], favorites: usize) -> Vec<AreaView> {
+/// the areas exactly as the hub sent them, except that "Unassigned" moves to the end. Each chip
+/// carries the count of entities Home shows there (`counts`), not the hub's primary count.
+fn chips(areas: &[AreaView], favorites: usize, counts: &BTreeMap<String, usize>) -> Vec<AreaView> {
     let mut chips = Vec::with_capacity(areas.len() + 1);
     if favorites > 0 {
         chips.push(AreaView {
@@ -37,8 +54,22 @@ fn chips(areas: &[AreaView], favorites: usize) -> Vec<AreaView> {
             primary_count: favorites,
         });
     }
-    chips.extend(areas.iter().filter(|a| a.id != UNASSIGNED_AREA).cloned());
-    chips.extend(areas.iter().filter(|a| a.id == UNASSIGNED_AREA).cloned());
+    let counted = |a: &AreaView| AreaView {
+        primary_count: counts.get(&a.id).copied().unwrap_or(0),
+        ..a.clone()
+    };
+    chips.extend(
+        areas
+            .iter()
+            .filter(|a| a.id != UNASSIGNED_AREA)
+            .map(counted),
+    );
+    chips.extend(
+        areas
+            .iter()
+            .filter(|a| a.id == UNASSIGNED_AREA)
+            .map(counted),
+    );
     chips
 }
 
@@ -46,7 +77,7 @@ fn chips(areas: &[AreaView], favorites: usize) -> Vec<AreaView> {
 /// override first, then by name.
 fn entity_ids<'a>(entities: impl Iterator<Item = &'a EntityView>, chip: &str) -> Vec<String> {
     let mut shown: Vec<&EntityView> = entities
-        .filter(|e| e.is_primary())
+        .filter(|e| shows_on_home(e))
         .filter(|e| {
             if chip == FAVORITES {
                 e.ui.favorite
@@ -86,11 +117,16 @@ pub fn HomeScreen() -> impl IntoView {
     let favorites = Memo::new(move |_| {
         house.entities.with(|m| {
             m.values()
-                .filter(|e| e.is_primary() && e.ui.favorite)
+                .filter(|e| shows_on_home(e) && e.ui.favorite)
                 .count()
         })
     });
-    let chip_list = Memo::new(move |_| house.areas.with(|a| chips(a, favorites.get())));
+    let counts = Memo::new(move |_| house.entities.with(|m| home_counts(m.values())));
+    let chip_list = Memo::new(move |_| {
+        house
+            .areas
+            .with(|a| counts.with(|c| chips(a, favorites.get(), c)))
+    });
     let selected = RwSignal::new(None::<String>);
     // The chosen chip, or the first one while nothing (valid) is chosen.
     let current = Memo::new(move |_| {
@@ -177,8 +213,114 @@ pub fn HomeScreen() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::{FAVORITES, chips};
-    use oikos_api::AreaView;
+    use std::collections::BTreeMap;
+
+    use super::{FAVORITES, chips, entity_ids, home_counts};
+    use oikos_api::{AreaView, EntityView};
+    use oikos_core::model::{
+        Capabilities, EntityCategory, EntityState, Kind, UNASSIGNED_AREA, UiOverride,
+    };
+
+    fn entity(id: &str, kind: Kind, device_class: Option<&str>, ui: UiOverride) -> EntityView {
+        EntityView {
+            id: id.into(),
+            device_id: None,
+            name: id.into(),
+            device_name: None,
+            label: None,
+            kind,
+            protocol_kind: kind,
+            device_class: device_class.map(Into::into),
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "living".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui,
+            state: EntityState::default(),
+        }
+    }
+
+    fn role(role: &str, pinned: bool, hidden: bool) -> UiOverride {
+        UiOverride {
+            energy_role: Some(role.into()),
+            home_pinned: pinned,
+            hidden,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn energy_and_security_entities_leave_home() {
+        let all = [
+            entity("lamp", Kind::Light, None, UiOverride::default()),
+            entity(
+                "grid",
+                Kind::Sensor,
+                Some("power"),
+                role("grid", false, false),
+            ),
+            entity(
+                "solar",
+                Kind::Sensor,
+                Some("power"),
+                role("solar", true, false),
+            ),
+            entity(
+                "hidden",
+                Kind::Sensor,
+                Some("power"),
+                role("grid", true, true),
+            ),
+            entity(
+                "door",
+                Kind::BinarySensor,
+                Some("door"),
+                UiOverride::default(),
+            ),
+            entity(
+                "siren",
+                Kind::Switch,
+                None,
+                UiOverride {
+                    security_action: true,
+                    ..Default::default()
+                },
+            ),
+            entity("plug", Kind::Switch, None, UiOverride::default()),
+        ];
+        assert_eq!(entity_ids(all.iter(), "living"), ["lamp", "plug", "solar"]);
+    }
+
+    #[test]
+    fn chip_counts_follow_home_rule() {
+        let mut outside = entity(
+            "door",
+            Kind::BinarySensor,
+            Some("door"),
+            UiOverride::default(),
+        );
+        outside.area = UNASSIGNED_AREA.into();
+        let all = [
+            entity("lamp", Kind::Light, None, UiOverride::default()),
+            entity(
+                "grid",
+                Kind::Sensor,
+                Some("power"),
+                role("grid", false, false),
+            ),
+            outside,
+        ];
+        let counts = home_counts(all.iter());
+        assert_eq!(counts.get("living"), Some(&1));
+        assert_eq!(counts.get(UNASSIGNED_AREA), None);
+        let areas = [area("living"), area(UNASSIGNED_AREA)];
+        let list = chips(&areas, 0, &counts);
+        assert_eq!(list[0].primary_count, 1);
+        assert_eq!(list[1].primary_count, 0);
+    }
 
     fn area(id: &str) -> AreaView {
         AreaView {
@@ -198,13 +340,17 @@ mod tests {
     #[test]
     fn keeps_hub_order_and_moves_unassigned_last() {
         let areas = [area("zeta"), area("Unassigned"), area("alpha")];
-        assert_eq!(ids(&chips(&areas, 0)), ["zeta", "alpha", "Unassigned"]);
+        assert_eq!(
+            ids(&chips(&areas, 0, &BTreeMap::new())),
+            ["zeta", "alpha", "Unassigned"]
+        );
     }
 
     #[test]
     fn favorites_chip_comes_first_when_any() {
         let areas = [area("kitchen")];
-        assert_eq!(ids(&chips(&areas, 2)), [FAVORITES, "kitchen"]);
-        assert_eq!(ids(&chips(&areas, 0)), ["kitchen"]);
+        let none = BTreeMap::new();
+        assert_eq!(ids(&chips(&areas, 2, &none)), [FAVORITES, "kitchen"]);
+        assert_eq!(ids(&chips(&areas, 0, &none)), ["kitchen"]);
     }
 }

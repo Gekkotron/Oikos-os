@@ -203,10 +203,17 @@ body {
   display: flex;
   flex: 1 0 100%;
   gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.topbar__nav::-webkit-scrollbar {
+  display: none;
 }
 
 .topbar__nav a {
-  flex: 1;
+  flex: 1 0 auto;
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -224,6 +231,37 @@ body {
 .topbar__nav a[aria-current="page"] {
   background: var(--warning-bg);
   color: var(--accent-amber);
+}
+
+/* The Energy and Security links carry a glyph that lights with the house: solar producing,
+   alarm armed. The text stays, so the bar reads without colour. */
+.nav__glyph {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  color: var(--ink);
+  opacity: 0.6;
+}
+
+.nav__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+.nav__glyph--solar {
+  color: var(--solar);
+  opacity: 1;
+}
+
+.nav__glyph--armed {
+  color: var(--warning);
+  opacity: 1;
+}
+
+a[aria-current="page"] .nav__glyph {
+  color: inherit;
+  opacity: 1;
 }
 
 .theme-toggle {
