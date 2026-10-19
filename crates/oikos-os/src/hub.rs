@@ -12,7 +12,7 @@ use oikos_api::{
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{AreasDocument, Availability, Command, PatchError, UiOverride};
-use oikos_core::registry::{Change, Inbound, Registry, RegistryConfig};
+use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::clock;
@@ -62,6 +62,8 @@ pub struct Hub {
     subscription_debounce: Duration,
     /// Entities whose template failure was already logged, so each failure is logged once.
     logged_failures: Mutex<BTreeSet<String>>,
+    /// Ignored discovery topics (with their reason) already logged, so each is logged once.
+    logged_ignored: Mutex<BTreeSet<(String, String)>>,
 }
 
 impl Hub {
@@ -85,6 +87,7 @@ impl Hub {
             confirm_timeout: Duration::from_millis(cfg.commands.confirm_timeout_ms),
             subscription_debounce: Duration::from_millis(cfg.commands.subscription_debounce_ms),
             logged_failures: Mutex::new(BTreeSet::new()),
+            logged_ignored: Mutex::new(BTreeSet::new()),
         })
     }
 
@@ -92,12 +95,20 @@ impl Hub {
     /// changes (the MQTT task watches for [`Change::SubscriptionsChanged`]).
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
         let at = clock::now();
-        let (changes, events, failing, seen) = {
+        let (changes, events, failing, seen, ignored) = {
             let mut reg = self.write();
             let inbound = reg.route(topic, payload.to_vec(), at);
             let is_state = matches!(inbound, Inbound::State { .. });
+            let is_override = matches!(inbound, Inbound::Override { .. });
             let changes = reg.apply(inbound);
             let events = events_for(&reg, &changes);
+            let ignored = changes
+                .contains(&Change::IgnoredChanged)
+                .then(|| reg.ignored().to_vec());
+            // The registry drops an override it cannot decode without a trace; say so here.
+            if is_override && !payload.is_empty() && UiOverride::decode(payload).is_none() {
+                tracing::warn!(%topic, "invalid override payload ignored");
+            }
             // A message on a topic that only carries an entity's availability says nothing
             // about its state, so it does not count as the entity speaking.
             let seen: Vec<String> = if is_state {
@@ -116,9 +127,18 @@ impl Hub {
             } else {
                 Vec::new()
             };
-            (changes, events, reg.template_failures().clone(), seen)
+            (
+                changes,
+                events,
+                reg.template_failures().clone(),
+                seen,
+                ignored,
+            )
         };
         self.log_new_template_failures(&failing);
+        if let Some(ignored) = ignored {
+            self.log_new_ignored(&ignored);
+        }
         for event in events {
             self.broadcast(event);
         }
@@ -171,6 +191,15 @@ impl Hub {
     pub fn counts(&self) -> (usize, usize) {
         let reg = self.read();
         (reg.entities().count(), reg.devices().count())
+    }
+
+    /// How many ignored discovery topics are currently logged as such (invalid payloads, not
+    /// ignored components); for tests and diagnostics.
+    pub fn logged_ignored_len(&self) -> usize {
+        self.logged_ignored
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
     }
 
     /// The topics no entity could be made from, with the reason.
@@ -378,6 +407,28 @@ impl Hub {
         for id in failing {
             if logged.insert(id.clone()) {
                 tracing::warn!(entity = %id, "template failure");
+            }
+        }
+    }
+
+    /// Warns once per ignored discovery topic and reason, leaving out the components the hub
+    /// ignores on purpose; a topic that recovers and breaks again is warned again.
+    fn log_new_ignored(&self, ignored: &[Ignored]) {
+        let mut logged = self
+            .logged_ignored
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        logged.retain(|(topic, reason)| {
+            ignored
+                .iter()
+                .any(|i| i.topic == *topic && i.reason == *reason)
+        });
+        for entry in ignored {
+            if entry.reason.starts_with("ignored component") {
+                continue;
+            }
+            if logged.insert((entry.topic.clone(), entry.reason.clone())) {
+                tracing::warn!(topic = %entry.topic, reason = %entry.reason, "discovery payload ignored");
             }
         }
     }

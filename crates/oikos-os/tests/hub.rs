@@ -537,3 +537,49 @@ async fn set_override_canonicalises_area() {
         assert!(hub.snapshot().areas.iter().all(|a| !a.id.trim().is_empty()));
     }
 }
+
+/// A discovery payload that cannot become an entity is logged once with its topic: not again
+/// on re-delivery, not for an ignored component (expected noise), and again only after the
+/// topic recovered and broke anew.
+#[tokio::test]
+async fn invalid_discovery_is_logged_once() {
+    let (hub, _publisher) = hub();
+    assert_eq!(hub.logged_ignored_len(), 0);
+
+    let garbage: &[u8] = &[0xff, 0xfe, b'{'];
+    hub.ingest("oikos/sensor/garbage/x/config", garbage);
+    assert_eq!(hub.ignored().len(), 1);
+    assert_eq!(hub.logged_ignored_len(), 1);
+    hub.ingest("oikos/sensor/garbage/x/config", garbage);
+    assert_eq!(
+        hub.logged_ignored_len(),
+        1,
+        "a re-delivery is not logged again"
+    );
+
+    hub.ingest("oikos/update/x/config", br#"{"unique_id":"u"}"#);
+    assert_eq!(hub.ignored().len(), 2);
+    assert_eq!(
+        hub.logged_ignored_len(),
+        1,
+        "an ignored component is not logged"
+    );
+
+    hub.ingest(
+        "oikos/sensor/garbage/x/config",
+        br#"{"unique_id":"g","state_topic":"zigbee2mqtt/g"}"#,
+    );
+    assert_eq!(hub.ignored().len(), 1);
+    assert_eq!(
+        hub.logged_ignored_len(),
+        0,
+        "a topic that recovered is forgotten"
+    );
+
+    hub.ingest("oikos/sensor/garbage/x/config", garbage);
+    assert_eq!(
+        hub.logged_ignored_len(),
+        1,
+        "and logged again when it breaks anew"
+    );
+}
