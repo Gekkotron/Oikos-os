@@ -40,11 +40,14 @@ pub struct ListDevicesParams {
 pub struct ListEntitiesParams {
     /// Only entities in this area (an area id from `list_areas`).
     pub area: Option<String>,
-    /// Only entities shown as this kind (a switch overridden as a light counts as a light).
+    /// Only entities shown as this kind, in snake_case (`light`, `switch`, `cover`, `climate`,
+    /// `sensor`, `binary_sensor`, `alarm_panel`, `number`, `select`, `button`, `vacuum`,
+    /// `water_heater`); a switch overridden as a light counts as a light.
     pub kind: Option<Kind>,
     /// Only the entities of this device (a device id from `list_devices`).
     pub device_id: Option<String>,
-    /// Case-insensitive substring matched against the entity name and id.
+    /// Case-insensitive substring matched against the entity name and id only; device names,
+    /// models and vendors are searched by `list_devices` and `search`.
     pub query: Option<String>,
     /// Only entities whose last state message is at or after this unix time, in seconds.
     pub changed_since: Option<u64>,
@@ -106,7 +109,7 @@ pub struct SearchParams {
     /// Case-insensitive substring matched against device friendly names, models and vendors
     /// and against entity names and ids.
     pub query: String,
-    /// At most this many devices and this many entities, 20 by default.
+    /// At most this many devices and this many entities: 20 by default, 500 at most.
     pub limit: Option<usize>,
 }
 
@@ -134,9 +137,9 @@ pub struct EntityPage {
     pub items: Vec<EntityView>,
 }
 
-/// An entity view with what the view leaves out.
+/// An entity view with what the view leaves out (the wire shape of the hub's `EntityDetail`).
 #[derive(Debug, Serialize, JsonSchema)]
-pub struct EntityDetail {
+pub struct EntityDetailView {
     #[serde(flatten)]
     pub entity: EntityView,
     /// The expanded discovery config: topics, templates and payload constants.

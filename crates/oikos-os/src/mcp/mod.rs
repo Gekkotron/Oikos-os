@@ -42,8 +42,13 @@ impl OikosMcp {
     }
 }
 
-/// The streamable HTTP service to nest at `/mcp`: stateful sessions kept in memory, any
-/// `Host` accepted (the hub is reached by LAN name or address, like the rest of the API).
+/// The streamable HTTP service to nest at `/mcp`, with stateful sessions kept in memory.
+///
+/// Any `Host` is accepted: rmcp's DNS-rebinding guard (loopback hosts only by default) is
+/// switched off. That is acceptable in v1 only because the REST API on the same router is
+/// equally open, with permissive CORS and no auth, and the hub is reached by LAN name or
+/// address. Revisit with auth: prefer `with_allowed_hosts([...])` derived from the configured
+/// bind address or hostname.
 pub fn mcp_service(hub: Arc<Hub>) -> StreamableHttpService<OikosMcp, LocalSessionManager> {
     let config = StreamableHttpServerConfig::default().disable_allowed_hosts();
     StreamableHttpService::new(

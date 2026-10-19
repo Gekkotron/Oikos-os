@@ -8,10 +8,11 @@ use oikos_core::model::{AreasDocument, EntityCategory};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{tool, tool_router};
 use serde::Serialize;
+use serde_json::Value;
 
 use super::params::{
     AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_LIMIT, DEFAULT_SEARCH_LIMIT, DeviceList,
-    EntityDetail, EntityPage, GetEntityParams, IgnoredList, Include, ListDevicesParams,
+    EntityDetailView, EntityPage, GetEntityParams, IgnoredList, Include, ListDevicesParams,
     ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult, SendCommandParams, SetAreasParams,
     SetOverrideParams,
 };
@@ -134,12 +135,12 @@ impl OikosMcp {
     async fn get_entity(
         &self,
         Parameters(params): Parameters<GetEntityParams>,
-    ) -> ToolResult<EntityDetail> {
+    ) -> ToolResult<EntityDetailView> {
         let detail = self
             .hub
             .entity_detail(&params.id)
             .ok_or_else(|| ToolError(format!("unknown entity `{}`", params.id)))?;
-        Ok(Json(EntityDetail {
+        Ok(Json(EntityDetailView {
             entity: detail.view,
             bindings: detail.bindings,
             raw_override: detail.raw_override,
@@ -189,7 +190,7 @@ impl OikosMcp {
     #[tool(name = "search", annotations(read_only_hint = true))]
     async fn search(&self, Parameters(params): Parameters<SearchParams>) -> Json<SearchResult> {
         let query = params.query.to_lowercase();
-        let limit = params.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
+        let limit = params.limit.unwrap_or(DEFAULT_SEARCH_LIMIT).min(MAX_LIMIT);
         let snapshot = self.hub.snapshot();
         let devices = snapshot
             .devices
@@ -215,11 +216,23 @@ impl OikosMcp {
     }
 }
 
-/// Every write tool leaves a trace of what was asked.
+/// Every write tool leaves a trace of what was asked, minus any alarm code.
 fn log_write<P: Serialize>(tool: &'static str, params: &P) {
-    let args =
-        serde_json::to_string(params).unwrap_or_else(|err| format!("<unserializable: {err}>"));
-    tracing::info!(tool, args = %args, "mcp write");
+    tracing::info!(tool, args = %logged_args(params), "mcp write");
+}
+
+/// The arguments as JSON, with `command.code` (an alarm panel code, a secret) replaced by
+/// `***` when present so the rest of the call stays readable in the log.
+fn logged_args<P: Serialize>(params: &P) -> String {
+    match serde_json::to_value(params) {
+        Ok(mut value) => {
+            if let Some(code) = value.get_mut("command").and_then(|c| c.get_mut("code")) {
+                *code = Value::from("***");
+            }
+            value.to_string()
+        }
+        Err(err) => format!("<unserializable: {err}>"),
+    }
 }
 
 /// What `include: "primary"` keeps: what the app shows.
@@ -250,4 +263,50 @@ fn entity_matches(entity: &EntityView, query: &str) -> bool {
 
 fn contains_ci(haystack: &str, lowercase_needle: &str) -> bool {
     haystack.to_lowercase().contains(lowercase_needle)
+}
+
+#[cfg(test)]
+mod tests {
+    use oikos_core::model::{AlarmMode, Command};
+
+    use super::super::params::SendCommandParams;
+    use super::logged_args;
+
+    #[test]
+    fn send_command_log_hides_the_alarm_code() {
+        for command in [
+            Command::Arm {
+                mode: AlarmMode::Away,
+                code: Some("1234".to_owned()),
+            },
+            Command::Disarm {
+                code: Some("1234".to_owned()),
+            },
+        ] {
+            let logged = logged_args(&SendCommandParams {
+                id: "panel_1".to_owned(),
+                command,
+            });
+            assert!(!logged.contains("1234"), "{logged}");
+            assert!(logged.contains("\"code\":\"***\""), "{logged}");
+            assert!(logged.contains("\"id\":\"panel_1\""), "{logged}");
+            assert!(logged.contains("\"type\":\""), "{logged}");
+        }
+    }
+
+    #[test]
+    fn send_command_log_keeps_a_command_without_code() {
+        let logged = logged_args(&SendCommandParams {
+            id: "lamp".to_owned(),
+            command: Command::TurnOn {
+                brightness: Some(42),
+                color: None,
+                effect: None,
+            },
+        });
+        assert_eq!(
+            logged,
+            r#"{"command":{"brightness":42,"type":"turn_on"},"id":"lamp"}"#
+        );
+    }
 }
