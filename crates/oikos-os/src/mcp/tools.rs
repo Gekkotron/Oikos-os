@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use oikos_api::{CommandResponse, DeviceView, EntityView};
-use oikos_core::model::{AreasDocument, EntityCategory};
+use oikos_core::model::AreasDocument;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{tool, tool_router};
 use serde::Serialize;
@@ -103,7 +103,7 @@ impl OikosMcp {
             .snapshot()
             .entities
             .into_iter()
-            .filter(|entity| include == Include::All || is_primary(entity))
+            .filter(|entity| include == Include::All || entity.is_primary())
             .filter(|entity| params.area.as_deref().is_none_or(|a| entity.area == a))
             .filter(|entity| params.kind.is_none_or(|k| entity.kind == k))
             .filter(|entity| {
@@ -185,23 +185,35 @@ impl OikosMcp {
         Ok(Json(response))
     }
 
-    /// Finds devices (by friendly name, model or vendor) and entities (by name or id) whose
-    /// text contains the query, case-insensitively.
+    /// Finds devices (by friendly name, model or vendor) and entities (by name or id, or
+    /// belonging to a matching device) whose text contains the query, case-insensitively.
     #[tool(name = "search", annotations(read_only_hint = true))]
     async fn search(&self, Parameters(params): Parameters<SearchParams>) -> Json<SearchResult> {
         let query = params.query.to_lowercase();
         let limit = params.limit.unwrap_or(DEFAULT_SEARCH_LIMIT).min(MAX_LIMIT);
         let snapshot = self.hub.snapshot();
-        let devices = snapshot
+        let matched_devices: BTreeSet<String> = snapshot
             .devices
-            .into_iter()
+            .iter()
             .filter(|device| device_matches(device, &query))
-            .take(limit)
+            .map(|device| device.id.clone())
             .collect();
         let entities = snapshot
             .entities
             .into_iter()
-            .filter(|entity| entity_matches(entity, &query))
+            .filter(|entity| {
+                entity_matches(entity, &query)
+                    || entity
+                        .device_id
+                        .as_deref()
+                        .is_some_and(|id| matched_devices.contains(id))
+            })
+            .take(limit)
+            .collect();
+        let devices = snapshot
+            .devices
+            .into_iter()
+            .filter(|device| matched_devices.contains(&device.id))
             .take(limit)
             .collect();
         Json(SearchResult { devices, entities })
@@ -233,14 +245,6 @@ fn logged_args<P: Serialize>(params: &P) -> String {
         }
         Err(err) => format!("<unserializable: {err}>"),
     }
-}
-
-/// What `include: "primary"` keeps: what the app shows.
-fn is_primary(entity: &EntityView) -> bool {
-    entity.category == EntityCategory::Primary
-        && entity.enabled_by_default
-        && entity.part_of.is_none()
-        && !entity.ui.hidden
 }
 
 /// `query` is already lowercase.

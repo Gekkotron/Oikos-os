@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
+use std::collections::BTreeMap;
+
 use oikos_api::{ConnectionStatus, Snapshot, WsEvent, snapshot};
+use oikos_core::model::EntityCategory;
 use oikos_core::registry::{Registry, RegistryConfig};
 
 const AT: u64 = 1_700_000_000;
@@ -98,6 +101,53 @@ fn snapshot_of_recorded_house_serializes() {
         .expect("thermometer");
     assert!(thermometer.battery.is_some());
     assert!(thermometer.linkquality.is_some());
+}
+
+/// Each area counts its entities and, apart, the primary ones (what the UI shows by
+/// default: primary category, enabled by default, not folded, not hidden).
+#[test]
+fn area_views_count_entities_and_primary_entities() {
+    let registry = load_house();
+    let snap = snapshot(&registry, ConnectionStatus::Online, AT);
+    let mut entities: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut primary: BTreeMap<&str, usize> = BTreeMap::new();
+    for entity in &snap.entities {
+        *entities.entry(entity.area.as_str()).or_default() += 1;
+        if entity.is_primary() {
+            *primary.entry(entity.area.as_str()).or_default() += 1;
+        }
+    }
+    assert!(!snap.areas.is_empty());
+    for area in &snap.areas {
+        assert_eq!(
+            area.entity_count,
+            entities.get(area.id.as_str()).copied().unwrap_or(0),
+            "{}",
+            area.id
+        );
+        assert_eq!(
+            area.primary_count,
+            primary.get(area.id.as_str()).copied().unwrap_or(0),
+            "{}",
+            area.id
+        );
+    }
+    let total_primary: usize = snap.areas.iter().map(|a| a.primary_count).sum();
+    let total: usize = snap.areas.iter().map(|a| a.entity_count).sum();
+    assert_eq!(total, snap.entities.len());
+    assert!(
+        total_primary > 0 && total_primary < total,
+        "{total_primary}/{total}"
+    );
+
+    let diagnostic = snap
+        .entities
+        .iter()
+        .find(|e| e.category == EntityCategory::Diagnostic)
+        .expect("a diagnostic entity");
+    assert!(!diagnostic.is_primary());
+    let json = serde_json::to_value(&snap.areas[0]).expect("serialize");
+    assert!(json["primary_count"].is_u64(), "{json}");
 }
 
 #[test]

@@ -32,6 +32,17 @@ pub struct EntityView {
 }
 
 impl EntityView {
+    /// True when the UI shows this entity by default: primary category, enabled by default,
+    /// not folded into another entity, not hidden by its override.
+    pub fn is_primary(&self) -> bool {
+        is_primary(
+            self.category,
+            self.enabled_by_default,
+            self.part_of.is_some(),
+            self.ui.hidden,
+        )
+    }
+
     pub fn from(entity: &Entity, state: &EntityState) -> Self {
         let name = match entity.ui.name.as_deref() {
             Some(name) if !name.trim().is_empty() => name.to_owned(),
@@ -122,19 +133,34 @@ pub struct AreaView {
     pub name: String,
     pub icon: Option<String>,
     pub order: Option<i32>,
+    /// Every entity whose effective area this is, diagnostics and hidden ones included.
     pub entity_count: usize,
+    /// The entities the UI shows by default (see [`EntityView::is_primary`]); what a room
+    /// chip or card count should display.
+    pub primary_count: usize,
 }
 
 impl AreaView {
-    pub fn new(area: &Area, entity_count: usize) -> Self {
+    pub fn new(area: &Area, entity_count: usize, primary_count: usize) -> Self {
         Self {
             id: area.id.clone(),
             name: area.name.clone(),
             icon: area.icon.clone(),
             order: area.order,
             entity_count,
+            primary_count,
         }
     }
+}
+
+/// The primary rule shared by [`EntityView::is_primary`] and the area counts.
+pub(crate) fn is_primary(
+    category: EntityCategory,
+    enabled_by_default: bool,
+    folded: bool,
+    hidden: bool,
+) -> bool {
+    category == EntityCategory::Primary && enabled_by_default && !folded && !hidden
 }
 
 /// The Zigbee2MQTT bridge.

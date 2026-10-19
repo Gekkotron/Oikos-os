@@ -483,6 +483,33 @@ async fn send_command_search_areas_and_the_small_tools() {
     );
     assert_eq!(none["entities"].as_array().map(Vec::len), Some(0));
 
+    // Once the devices are known, a query matching a device (`rooms/stair/light`) also
+    // returns that device's entities, although their names do not contain it.
+    server.hub.ingest(
+        "zigbee2mqtt/bridge/devices",
+        &fixture("bridge_devices.json"),
+    );
+    let by_device = json_of(
+        "search",
+        &call(&client, "search", json!({"query": "stair"})).await,
+    );
+    assert!(
+        by_device["devices"]
+            .as_array()
+            .expect("devices")
+            .iter()
+            .any(|d| d["friendly_name"] == "rooms/stair/light"),
+        "{by_device}"
+    );
+    let ids: Vec<&str> = by_device["entities"]
+        .as_array()
+        .expect("entities")
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect();
+    assert!(ids.contains(&SWITCH_ID), "{ids:?}");
+    assert!(ids.contains(&LINKQUALITY_ID), "{ids:?}");
+
     let devices = json_of(
         "list_devices",
         &call(&client, "list_devices", json!({"query": "zbmini"})).await,

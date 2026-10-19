@@ -271,13 +271,13 @@ async fn unknown_entity_is_unknown_error() {
     assert!(hub.entity_view("nope").is_none());
 }
 
-/// Sends `TurnOn` to the switch and ingests `echo` on its state topic once the publish is
-/// out. Returns the response, what the echo changed and how long the hub took to answer.
+/// Sends `TurnOn` to the switch and ingests `echo` on its state topic as soon as the publish
+/// is out. Returns the response and what the echo changed.
 async fn turn_on_with_echo(
     hub: &Arc<Hub>,
     mut publisher: mpsc::Receiver<Publish>,
     echo: &'static [u8],
-) -> (oikos_api::CommandResponse, Vec<Change>, Duration) {
+) -> (oikos_api::CommandResponse, Vec<Change>) {
     let state_topic = switch_state_topic();
     let echo_task = {
         let hub = Arc::clone(hub);
@@ -287,7 +287,6 @@ async fn turn_on_with_echo(
             hub.ingest(&state_topic, echo)
         })
     };
-    let started = std::time::Instant::now();
     let response = hub
         .send_command(
             SWITCH_ID,
@@ -300,20 +299,16 @@ async fn turn_on_with_echo(
         .await
         .expect("mapped and published");
     let changes = echo_task.await.expect("echo task");
-    (response, changes, started.elapsed())
+    (response, changes)
 }
 
-/// `response` was accepted with the switch ON, well before the 50 ms timeout.
-fn assert_confirmed_on(response: &oikos_api::CommandResponse, elapsed: Duration) {
+/// `response` was accepted with the switch ON (a timeout would carry a reason).
+fn assert_confirmed_on(response: &oikos_api::CommandResponse) {
     assert!(response.accepted, "{response:?}");
     assert_eq!(response.reason, None);
     assert_eq!(
         response.state.as_ref().expect("current state").value,
         StateValue::OnOff(true)
-    );
-    assert!(
-        elapsed < Duration::from_millis(40),
-        "resolved by the echo, not the 50 ms timeout: {elapsed:?}"
     );
 }
 
@@ -326,8 +321,7 @@ async fn send_command_ignores_an_echo_without_its_key() {
     feed_switch(&hub);
     hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
 
-    let (response, changes, _) =
-        turn_on_with_echo(&hub, publisher, br#"{"linkquality":120}"#).await;
+    let (response, changes) = turn_on_with_echo(&hub, publisher, br#"{"linkquality":120}"#).await;
 
     assert!(
         !changes.contains(&Change::StateChanged(SWITCH_ID.to_owned()))
@@ -346,16 +340,16 @@ async fn send_command_ignores_an_echo_without_its_key() {
 /// the WebSocket clients.
 #[tokio::test]
 async fn send_command_resolves_on_same_state_echo() {
-    let (hub, publisher) = hub();
+    // A timeout well above the immediate echo: the echo must resolve it, not the clock.
+    let (hub, publisher) = hub_with_timeout(500);
     feed_switch(&hub);
     hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
     let mut events = hub.subscribe();
 
-    let (response, changes, elapsed) =
-        turn_on_with_echo(&hub, publisher, br#"{"state":"ON"}"#).await;
+    let (response, changes) = turn_on_with_echo(&hub, publisher, br#"{"state":"ON"}"#).await;
 
     assert_eq!(changes, vec![Change::StateReported(SWITCH_ID.to_owned())]);
-    assert_confirmed_on(&response, elapsed);
+    assert_confirmed_on(&response);
     assert!(
         events
             .try_recv()

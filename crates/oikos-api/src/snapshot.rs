@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::events::ConnectionStatus;
-use crate::views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView};
+use crate::views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView, is_primary};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Snapshot {
@@ -42,15 +42,27 @@ pub fn entity_views(reg: &Registry) -> Vec<EntityView> {
         .collect()
 }
 
-/// The effective areas of `reg`, each with its entity count.
+/// The effective areas of `reg`, each with its entity count and its primary entity count.
 pub fn area_views(reg: &Registry) -> Vec<AreaView> {
-    let mut per_area: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut per_area: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
     for entity in reg.entities() {
-        *per_area.entry(entity.area.as_str()).or_default() += 1;
+        let (entities, primary) = per_area.entry(entity.area.as_str()).or_default();
+        *entities += 1;
+        if is_primary(
+            entity.category,
+            entity.enabled_by_default,
+            entity.part_of.is_some(),
+            entity.ui.hidden,
+        ) {
+            *primary += 1;
+        }
     }
     reg.effective_areas()
         .iter()
-        .map(|a| AreaView::new(a, per_area.get(a.id.as_str()).copied().unwrap_or(0)))
+        .map(|a| {
+            let (entities, primary) = per_area.get(a.id.as_str()).copied().unwrap_or((0, 0));
+            AreaView::new(a, entities, primary)
+        })
         .collect()
 }
 

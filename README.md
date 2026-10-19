@@ -58,7 +58,7 @@ Errors are `{"error": "…"}` with 400 (bad patch), 404 (unknown entity or route
 The MCP server at `http://<host>:8080/mcp` (streamable HTTP) offers eleven tools and one resource:
 
 - `bridge_info` — the Zigbee2MQTT bridge and the state of the link to the broker.
-- `list_areas` — the rooms, each with its entity count.
+- `list_areas` — the rooms, each with its entity count and the count of entities shown by default (`primary_count`).
 - `set_areas` — replaces the declared rooms and returns the resulting list.
 - `list_devices` — the Zigbee devices with availability, battery and link quality, optionally filtered by area or by name, model or vendor.
 - `list_entities` — a page of entities with their state; by default only what the app shows (`include: "all"` for everything).
@@ -66,7 +66,7 @@ The MCP server at `http://<host>:8080/mcp` (streamable HTTP) offers eleven tools
 - `set_override` — changes fields of the app's `oikos/ui/<id>` override (`null` clears a field).
 - `clear_override` — removes the override entirely.
 - `send_command` — publishes a command and reports `accepted` once the device echoes the change.
-- `search` — devices (name, model, vendor) and entities (name, id) containing the query.
+- `search` — devices (name, model, vendor) and entities (name, id, or belonging to a matching device) containing the query.
 - `list_ignored` — the discovery topics that did not become an entity, with the reason.
 - Resource `oikos://snapshot` — the whole house as one JSON document.
 
@@ -96,6 +96,10 @@ Claude Desktop only speaks stdio, so it launches `oikos-os mcp-stdio`, a proxy t
 ```
 
 The proxy exits with `cannot reach Oikos-os MCP server at …` when the hub is down; its logs go to stderr, stdout carries the protocol.
+
+## Security
+
+There is none yet, and that is deliberate for v1: the hub binds on `0.0.0.0`, answers any origin (CORS `*`) and its MCP endpoint accepts any `Host` header. Any device on the LAN, and any web page open in a browser on the LAN (through DNS rebinding), can therefore read the whole house and send commands, alarm arming and disarming included. Keep the hub off the internet: no port forwarding, no exposure through a reverse proxy without authentication in front of it. `get_entity` and the `bindings` it returns hand out the raw discovery config; for a bridge other than Zigbee2MQTT that config could carry credentials in topics or templates. Authentication and TLS arrive in a later phase.
 
 ## Development
 
