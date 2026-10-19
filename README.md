@@ -127,6 +127,7 @@ Screens:
 - Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor.
 - Devices: the administration view of the Zigbee devices.
 - Settings: the hub status and the theme switch (Auto, Night, Warm).
+- Alerts (`/alerts`): the push alerts OikosPush keeps, with channel chips and day groups, and a "Recent alerts" section on Home; the detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". Same screens as the Android app; the body stays in the producer's language.
 
 Development runs in two terminals:
 

@@ -14,4 +14,5 @@ fn app_renders() {
     let html = host.inner_html();
     assert!(html.contains("Oikos"));
     assert!(html.contains("pill"));
+    assert!(html.contains("Alerts"));
 }

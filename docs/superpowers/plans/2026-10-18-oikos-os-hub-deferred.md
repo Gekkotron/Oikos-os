@@ -30,3 +30,10 @@ Date: 2026-10-19 · Source: per-task reviews and the whole-branch review of 4d7d
 - Task 13: implementer DONE at 889409e; controller manual check: raw streamable-HTTP initialize/tools/list (11 tools)/list_areas/list_entities/search/bridge_info/resources ok; bad set_override returns isError with reason; `claude mcp add --transport http oikos http://localhost:8080/mcp` registered (local scope) and `claude mcp list` probed it; SIGINT shutdown clean. Minor (deferred): search matches entities only by their own name/id, so 'stair' finds 3 devices but 0 entities — consider including entities of matched devices.
 - Task 13: complete (commits a3f7045..1586d0b, review clean after 1 fix round; controller: fmt/clippy clean, workspace tests pass; with_allowed_hosts exists in rmcp 3.5; no other tracing call logs a Command). Minor (deferred): search finds entities only by own name/id.
 - Task 14: complete (commits 1586d0b..ba93da3, review clean). Minor (deferred): strip a `/mcp` suffix from `--server` defensively; proxy does not reconnect after a hub restart (client restarts it); upstream session not DELETEd on stdin close.
+
+## After the web alerts wave (2026-10-19)
+
+- **`list_alerts` MCP tool**: the hub holds the push history (`Hub::alerts()`, `AlertView`); an MCP tool over it is a few lines and lets the assistant answer "what did the cameras see".
+- **Clip seeking**: Frigate answers `Range` on `/api/events/<id>/clip.mp4` with a plain `200`, so the web player cannot seek; the hub passes `Range` through (tested). Either Frigate's recordings API (`/api/<camera>/start/<ts>/end/<ts>/clip.mp4`) or a hub-side cache with ranges would fix it.
+- **Absorbing OikosPush**: when the hub takes over FCM, the topics move to `oikos/history` and `oikos/push/responses` (config keys `[push]`), the `install_id` of a web reply stops being the `oikos-web` constant, and the alert `loc` hint can drive a translated body.
+- **Alert actions and "Open device" were not exercised on real data**: the current history has no alert with `actions` or `entity_id`; both paths are covered by tests only.
