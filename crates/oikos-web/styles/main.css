@@ -612,3 +612,8 @@ body {
   color: var(--warning);
   font: var(--type-label);
 }
+
+.card__value--big {
+  font-size: 26px;
+  line-height: 32px;
+}

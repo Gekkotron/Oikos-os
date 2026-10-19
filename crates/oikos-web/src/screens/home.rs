@@ -4,9 +4,14 @@ use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::model::{Kind, UNASSIGNED_AREA};
 
+use crate::cards::binary_sensor::BinarySensorCard;
+use crate::cards::button::ButtonCard;
 use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
 use crate::cards::light::LightCard;
+use crate::cards::number::NumberCard;
+use crate::cards::select::SelectCard;
+use crate::cards::sensor::SensorCard;
 use crate::cards::switch::SwitchCard;
 use crate::commands::Pending;
 use crate::components::area_chip::AreaChip;
@@ -73,6 +78,11 @@ fn card_for(entity: EntityView) -> AnyView {
         Kind::Switch => view! { <SwitchCard entity=entity /> }.into_any(),
         Kind::Cover => view! { <CoverCard entity=entity /> }.into_any(),
         Kind::Climate => view! { <ClimateCard entity=entity /> }.into_any(),
+        Kind::Sensor => view! { <SensorCard entity=entity /> }.into_any(),
+        Kind::BinarySensor => view! { <BinarySensorCard entity=entity /> }.into_any(),
+        Kind::Number => view! { <NumberCard entity=entity /> }.into_any(),
+        Kind::Select => view! { <SelectCard entity=entity /> }.into_any(),
+        Kind::Button => view! { <ButtonCard entity=entity /> }.into_any(),
         _ => generic_card(entity),
     }
 }

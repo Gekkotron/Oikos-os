@@ -1,8 +1,13 @@
 //! Entity cards, one component per kind.
 
+pub mod binary_sensor;
+pub mod button;
 pub mod climate;
 pub mod cover;
 pub mod light;
+pub mod number;
+pub mod select;
+pub mod sensor;
 pub mod switch;
 
 use leptos::prelude::*;
