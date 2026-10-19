@@ -80,6 +80,7 @@ impl House {
             WsEvent::BridgeChanged(bridge) => self.bridge.set(bridge),
             WsEvent::ConnectionChanged(connection) => self.connection.set(connection),
             WsEvent::AlertsChanged { alerts } => self.alerts.set(alerts),
+            WsEvent::FlowsChanged { .. } | WsEvent::FlowRunChanged { .. } => {}
             WsEvent::CommandFailed { id, reason } => self.command_failed.set(Some((id, reason))),
         }
     }

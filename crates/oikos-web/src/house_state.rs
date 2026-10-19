@@ -67,6 +67,7 @@ impl HouseState {
             WsEvent::BridgeChanged(bridge) => self.bridge = bridge,
             WsEvent::ConnectionChanged(connection) => self.connection = connection,
             WsEvent::AlertsChanged { alerts } => self.alerts = alerts,
+            WsEvent::FlowsChanged { .. } | WsEvent::FlowRunChanged { .. } => {}
             WsEvent::CommandFailed { .. } => {}
         }
     }
@@ -148,6 +149,7 @@ mod tests {
                 reason: "r".into(),
             }],
             alerts: vec![],
+            flows: vec![],
             generated_at: 42,
         }
     }

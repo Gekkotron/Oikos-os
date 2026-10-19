@@ -5,6 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::alerts::AlertView;
+use crate::flows::{FlowView, RunView};
 use crate::snapshot::Snapshot;
 use crate::views::{AreaView, BridgeView, DeviceView, EntityView};
 
@@ -35,6 +36,8 @@ pub enum WsEvent {
     AreasChanged { areas: Vec<AreaView> },
     DevicesChanged { devices: Vec<DeviceView> },
     AlertsChanged { alerts: Vec<AlertView> },
+    FlowsChanged { flows: Vec<FlowView> },
+    FlowRunChanged { flow_id: String, run: RunView },
     BridgeChanged(BridgeView),
     ConnectionChanged(ConnectionStatus),
     CommandFailed { id: String, reason: String },
@@ -76,6 +79,10 @@ mod tests {
             (
                 WsEvent::AlertsChanged { alerts: vec![] },
                 json!({"type": "alerts_changed", "alerts": []}),
+            ),
+            (
+                WsEvent::FlowsChanged { flows: vec![] },
+                json!({"type": "flows_changed", "flows": []}),
             ),
         ];
         for (event, expected) in cases {

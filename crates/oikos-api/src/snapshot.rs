@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::alerts::AlertView;
 use crate::events::ConnectionStatus;
+use crate::flows::FlowView;
 use crate::views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView, is_primary};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -22,6 +23,9 @@ pub struct Snapshot {
     /// The push alerts (newest first); empty until the hub reads the history topic.
     #[serde(default)]
     pub alerts: Vec<AlertView>,
+    /// The flows with their recent runs; empty until the hub fills it.
+    #[serde(default)]
+    pub flows: Vec<FlowView>,
     pub generated_at: u64,
 }
 
@@ -35,6 +39,7 @@ pub fn snapshot(reg: &Registry, connection: ConnectionStatus, at: u64) -> Snapsh
         entities: entity_views(reg),
         ignored: reg.ignored().iter().map(IgnoredView::from).collect(),
         alerts: Vec::new(),
+        flows: Vec::new(),
         generated_at: at,
     }
 }
