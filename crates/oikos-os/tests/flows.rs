@@ -167,6 +167,45 @@ async fn set_flow_refused_while_offline() {
 }
 
 #[tokio::test]
+async fn set_flow_refuses_alarm_codes() {
+    let (hub, mut publisher) = hub_with_entities();
+    for command in [
+        Command::Arm {
+            mode: oikos_core::model::AlarmMode::Away,
+            code: Some("1234".to_owned()),
+        },
+        Command::Disarm {
+            code: Some("1234".to_owned()),
+        },
+    ] {
+        let mut flow = reference_flow();
+        for node in &mut flow.nodes {
+            if let NodeKind::Command(params) = &mut node.kind {
+                params.command = command.clone();
+            }
+        }
+        match hub.set_flow(flow).await {
+            Err(HubError::InvalidFlow(reason)) => {
+                assert!(reason.contains("alarm codes are not allowed"), "{reason}");
+            }
+            other => panic!("expected InvalidFlow, got {other:?}"),
+        }
+    }
+    assert!(publisher.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn run_flow_refused_while_offline() {
+    let (hub, _publisher) = hub_with_entities();
+    hub.ingest(FLOW_TOPIC, reference_json().as_bytes());
+    hub.set_connection(ConnectionStatus::Connecting);
+    assert_eq!(
+        hub.run_flow("living"),
+        Err(HubError::Publish("broker offline".to_owned()))
+    );
+}
+
+#[tokio::test]
 async fn delete_flow_publishes_empty_retained() {
     let (hub, mut publisher) = hub_with_entities();
     assert!(matches!(
@@ -462,6 +501,7 @@ async fn motion_false_turns_off_after_the_delay() {
     motion(&hub, false);
     motion(&hub, true);
     next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(published(&log).len(), 1, "only the ON so far");
     motion(&hub, false);
     let waiting = next_run(&mut events, |r| {
         r.status == RunStatus::Running && step_nodes(r) == ["motion", "moving"]
@@ -470,7 +510,11 @@ async fn motion_false_turns_off_after_the_delay() {
     assert_eq!(waiting.steps[1].detail, "false");
     settle().await;
 
-    tokio::time::advance(Duration::from_secs(5 * 60 + 1)).await;
+    tokio::time::advance(Duration::from_secs(4 * 60 + 59)).await;
+    settle().await;
+    assert_eq!(published(&log).len(), 1, "still waiting at 4m59s");
+    no_run_event(&mut events).await;
+    tokio::time::advance(Duration::from_secs(2)).await;
     let run = next_run_event(&mut events, RunStatus::Done).await;
     assert_eq!(step_nodes(&run), ["motion", "moving", "wait", "off"]);
     assert_eq!(run.steps[2].detail, "waited 5m");
@@ -582,6 +626,47 @@ async fn reconnect_replay_is_silent() {
 
     motion(&hub, false);
     next_run_event(&mut events, RunStatus::Running).await;
+}
+
+/// The retained replay after a reconnect is usually byte-identical to the last state, so the
+/// registry emits no change for it; the engine must still be armed for the next real change.
+#[tokio::test]
+async fn identical_replay_then_real_motion_fires() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    hub.ingest(FLOW_TOPIC, reference_json().as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    motion(&hub, false);
+    hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+    hub.set_connection(ConnectionStatus::Online);
+    motion(&hub, false);
+    no_run_event(&mut events).await;
+
+    motion(&hub, true);
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(step_nodes(&run), ["motion", "moving", "on"]);
+    assert_eq!(run.steps[2].detail, "accepted");
+}
+
+/// The seed path itself: the entity has no value when the flow is armed, its first report is
+/// recorded silently and the next change fires.
+#[tokio::test]
+async fn lagged_then_identical_report_reseeds() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    hub.ingest(FLOW_TOPIC, reference_json().as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    motion(&hub, false);
+    no_run_event(&mut events).await;
+
+    motion(&hub, true);
+    next_run_event(&mut events, RunStatus::Done).await;
 }
 
 #[tokio::test]

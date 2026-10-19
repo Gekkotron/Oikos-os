@@ -4,7 +4,9 @@
 //! state when the hub (re)connects, and those replays must never start a run: a light switching
 //! because the hub restarted is worse than a light that misses one trigger. So a trigger only
 //! fires on a change between two values the engine itself has seen, and the map is emptied
-//! whenever the link drops or the engine falls behind the event stream.
+//! whenever the link drops or the engine falls behind the event stream. Every report of a
+//! watched entity (changed or not) missing from the map seeds it silently again, so an
+//! identical retained replay arms the entity without firing.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -17,7 +19,7 @@ use tokio::task::{AbortHandle, JoinSet};
 
 use super::EngineRequest;
 use crate::clock;
-use crate::hub::Hub;
+use crate::hub::{Hub, StateSeen};
 use oikos_api::ConnectionStatus;
 
 /// What a finished run task reports: the flow, the run and how it ended.
@@ -37,13 +39,15 @@ struct Active {
 /// starts it through `Hub::start_engine`, which subscribes earlier so no event is missed.
 pub async fn run(hub: Arc<Hub>, requests: mpsc::UnboundedReceiver<EngineRequest>) {
     let events = hub.subscribe();
-    run_with(hub, events, requests).await;
+    let seen = hub.subscribe_state_seen();
+    run_with(hub, events, seen, requests).await;
 }
 
 /// [`run`] with the event subscription already taken.
 pub(super) async fn run_with(
     hub: Arc<Hub>,
     mut events: broadcast::Receiver<WsEvent>,
+    mut seen: broadcast::Receiver<StateSeen>,
     mut requests: mpsc::UnboundedReceiver<EngineRequest>,
 ) {
     let mut engine = Engine {
@@ -85,6 +89,14 @@ pub(super) async fn run_with(
                     tracing::warn!(missed, "flow engine lagged behind the events, forgetting values");
                     engine.known.clear();
                 }
+                Err(broadcast::error::RecvError::Closed) => return,
+            },
+            // After the events, so a change is stored by `StateChanged` first. This one only
+            // re-seeds an entity whose report was identical to its last state (no event).
+            seen = seen.recv() => match seen {
+                Ok(seen) => engine.state_seen(&seen),
+                // Nothing to recover: the next report of an entity seeds it again.
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return,
             },
         }
@@ -170,6 +182,23 @@ impl Engine {
                 self.known.clear();
             }
             _ => {}
+        }
+    }
+
+    /// A state topic of `id` was reported, changed or not. A watched entity missing from the
+    /// map is seeded silently from the registry: after a reconnect the retained replay is
+    /// usually identical to the last state, so the registry emits no `StateChanged` for it.
+    ///
+    /// A report from before the latest link drop is stale (the engine may only get to it after
+    /// the clear) and is ignored: its registry value is exactly the pre-drop one.
+    fn state_seen(&mut self, seen: &StateSeen) {
+        let id = seen.id.as_str();
+        if seen.epoch == self.hub.link_epoch()
+            && self.watched.contains(id)
+            && !self.known.contains_key(id)
+        {
+            let scalar = self.hub.entity_scalar(id);
+            self.known.insert(id.to_owned(), scalar);
         }
     }
 

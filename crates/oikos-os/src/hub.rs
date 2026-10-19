@@ -3,6 +3,7 @@
 //! and drains its publishes from the channel given to [`Hub::new`]; the HTTP layer reads it.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
@@ -75,12 +76,23 @@ pub struct EntityDetail {
     pub raw_override: Option<UiOverride>,
 }
 
+/// A report on a state topic of `id`, with the link epoch it was ingested in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateSeen {
+    pub id: String,
+    /// [`Hub::link_epoch`] when the report arrived; a report from before the latest link drop
+    /// is stale and must not seed anything.
+    pub epoch: u64,
+}
+
 pub struct Hub {
     registry: RwLock<Registry>,
     events: broadcast::Sender<WsEvent>,
     /// The ids whose state was reported, changed or not: Zigbee2MQTT echoes the whole device
     /// state on every `/set`, so a no-op command is confirmed by its echo.
-    state_seen: broadcast::Sender<String>,
+    state_seen: broadcast::Sender<StateSeen>,
+    /// Counts the times the broker link left `Online`.
+    link_epoch: AtomicU64,
     connection: watch::Sender<ConnectionStatus>,
     publisher: mpsc::Sender<Publish>,
     ui_prefix: String,
@@ -123,6 +135,7 @@ impl Hub {
             registry: RwLock::new(registry),
             events,
             state_seen,
+            link_epoch: AtomicU64::new(0),
             connection,
             publisher,
             ui_prefix: cfg.topics.ui_prefix.clone(),
@@ -202,7 +215,8 @@ impl Hub {
         }
         for id in seen {
             // An error only means no command is waiting right now.
-            let _ = self.state_seen.send(id);
+            let epoch = self.link_epoch();
+            let _ = self.state_seen.send(StateSeen { id, epoch });
         }
         changes
     }
@@ -294,6 +308,9 @@ impl Hub {
             }
         });
         if changed {
+            if status != ConnectionStatus::Online {
+                self.link_epoch.fetch_add(1, Ordering::SeqCst);
+            }
             self.broadcast(WsEvent::ConnectionChanged(status));
         }
     }
@@ -352,6 +369,18 @@ impl Hub {
         })
     }
 
+    /// How many times the broker link left `Online`.
+    pub fn link_epoch(&self) -> u64 {
+        self.link_epoch.load(Ordering::SeqCst)
+    }
+
+    /// A receiver of every id whose state topic was reported, changed or not. The flow engine
+    /// uses it to re-seed an entity whose retained replay was identical to its last state,
+    /// which the registry (it only emits real changes) does not announce.
+    pub fn subscribe_state_seen(&self) -> broadcast::Receiver<StateSeen> {
+        self.state_seen.subscribe()
+    }
+
     /// Maps `cmd`, publishes it and waits up to `confirm_timeout_ms` for the entity's value to
     /// change or for a report on one of its state topics (a no-op command is echoed
     /// unchanged). An availability message alone confirms nothing. An unknown or offline
@@ -395,7 +424,7 @@ impl Hub {
                         Err(broadcast::error::RecvError::Closed) => return None,
                     },
                     seen_id = seen.recv() => match seen_id {
-                        Ok(seen_id) if seen_id == id => {
+                        Ok(seen_id) if seen_id.id == id => {
                             return Some(self.read().state(id).cloned().unwrap_or_default());
                         }
                         Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}

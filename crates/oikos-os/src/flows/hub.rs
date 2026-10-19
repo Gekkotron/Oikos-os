@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
-use oikos_api::{FlowView, RunStatus, RunView, StepView, TriggerInfo, WsEvent};
+use oikos_api::{ConnectionStatus, FlowView, RunStatus, RunView, StepView, TriggerInfo, WsEvent};
 use oikos_core::command::{Publish, map_command};
 use oikos_core::flow::{Flow, NodeKind, Scalar, validate};
+use oikos_core::model::Command;
 
 use super::{EngineRequest, StoreApplied};
 use crate::clock;
@@ -83,8 +84,12 @@ impl Hub {
         self.write_flow(&flow)
     }
 
-    /// Starts a manual run: creates it and asks the engine to execute it.
+    /// Starts a manual run: creates it and asks the engine to execute it. Refused while the broker
+    /// link is down, like the other writers: the run's commands could not be published.
     pub fn run_flow(&self, id: &str) -> Result<RunView, HubError> {
+        if !matches!(*self.connection().borrow(), ConnectionStatus::Online) {
+            return Err(HubError::Publish("broker offline".to_owned()));
+        }
         let run = {
             let mut store = self.flow_store();
             let view = store
@@ -201,6 +206,15 @@ impl Hub {
                 )));
             };
             if let NodeKind::Command(params) = &node.kind {
+                if matches!(
+                    params.command,
+                    Command::Arm { code: Some(_), .. } | Command::Disarm { code: Some(_) }
+                ) {
+                    return Err(HubError::InvalidFlow(format!(
+                        "node `{}`: alarm codes are not allowed in flows (they would be stored in clear on the broker)",
+                        node.id
+                    )));
+                }
                 let state = reg.state(entity).cloned().unwrap_or_default();
                 map_command(found, &state, &params.command, reg.templates())
                     .map_err(|err| HubError::InvalidFlow(format!("node `{}`: {err}", node.id)))?;
@@ -234,6 +248,12 @@ impl Hub {
             return tokio::spawn(async {});
         };
         let events = self.subscribe();
-        tokio::spawn(super::engine::run_with(Arc::clone(self), events, requests))
+        let seen = self.subscribe_state_seen();
+        tokio::spawn(super::engine::run_with(
+            Arc::clone(self),
+            events,
+            seen,
+            requests,
+        ))
     }
 }
