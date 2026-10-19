@@ -35,6 +35,14 @@ pub(super) fn with_on(state: &EntityState, on: bool) -> Option<EntityState> {
     })
 }
 
+/// Whether a light with these colour modes takes a colour. Zigbee2MQTT lights advertise `xy`
+/// rather than `hs`; the hub sends the picked hue and saturation whatever the mode.
+pub fn has_colour(color_modes: &std::collections::BTreeSet<String>) -> bool {
+    ["hs", "xy", "rgb", "rgbw", "rgbww"]
+        .iter()
+        .any(|mode| color_modes.contains(*mode))
+}
+
 /// The turn-on or turn-off command for a toggle to `on`.
 pub(super) fn power_command(on: bool) -> Command {
     if on {
@@ -110,7 +118,7 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
     });
 
     let open = open_entity(&entity.id);
-    let swatch = entity.capabilities.color_modes.contains("hs").then(|| {
+    let swatch = has_colour(&entity.capabilities.color_modes).then(|| {
         let color = light.as_ref().and_then(|l| l.hs).map_or_else(
             || "var(--accent-violet)".to_owned(),
             |hs| format!("hsl({} {}% 55%)", hs.h.round(), hs.s.round()),
@@ -134,5 +142,32 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
             <PowerToggle on=on label=label on_toggle=toggle />
             <div class="card__controls">{slider}{swatch}</div>
         </CardFrame>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::has_colour;
+
+    fn modes(list: &[&str]) -> BTreeSet<String> {
+        list.iter().map(|m| (*m).to_owned()).collect()
+    }
+
+    #[test]
+    fn zigbee_xy_lights_take_a_colour() {
+        assert!(has_colour(&modes(&["xy"])));
+        assert!(has_colour(&modes(&["color_temp", "xy"])));
+        assert!(has_colour(&modes(&["hs"])));
+        assert!(has_colour(&modes(&["rgb"])));
+    }
+
+    #[test]
+    fn white_only_lights_do_not() {
+        assert!(!has_colour(&modes(&[])));
+        assert!(!has_colour(&modes(&["brightness"])));
+        assert!(!has_colour(&modes(&["color_temp"])));
+        assert!(!has_colour(&modes(&["onoff"])));
     }
 }

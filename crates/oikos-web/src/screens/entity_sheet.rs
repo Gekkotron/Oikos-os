@@ -7,6 +7,7 @@ use oikos_api::{DeviceView, EntityView};
 use oikos_core::model::{Availability, Command, EntityState, Hs, Kind, LightState, StateValue};
 
 use crate::cards::Sender;
+use crate::cards::light::has_colour;
 use crate::components::hs_wheel::HsWheel;
 
 use crate::format::{format_timestamp, kind_word, list_label, title_suffix, wrap_id};
@@ -59,10 +60,10 @@ fn light_hs(entity: &EntityView) -> Option<Hs> {
 #[component]
 fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
     let sender = Sender::from_context();
-    let has_hs = Memo::new(move |_| {
+    let shows_colour = Memo::new(move |_| {
         entity.with(|e| {
             e.as_ref()
-                .is_some_and(|e| e.kind == Kind::Light && e.capabilities.color_modes.contains("hs"))
+                .is_some_and(|e| e.kind == Kind::Light && has_colour(&e.capabilities.color_modes))
         })
     });
     let value = Signal::derive(move || entity.with(|e| e.as_ref().and_then(light_hs)));
@@ -92,7 +93,7 @@ fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
         );
     });
     view! {
-        <Show when=move || has_hs.get()>
+        <Show when=move || shows_colour.get()>
             <Panel title="Colour">
                 <HsWheel value=value on_pick=on_pick />
             </Panel>
