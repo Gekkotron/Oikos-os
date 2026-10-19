@@ -13,8 +13,10 @@ clap.workspace = true
 figment.workspace = true
 futures-util.workspace = true
 oikos-api = { path = "../oikos-api" }
-oikos-core = { path = "../oikos-core" }
+oikos-core = { path = "../oikos-core", features = ["schemars"] }
+rmcp.workspace = true
 rumqttc.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -26,4 +28,5 @@ tracing-subscriber.workspace = true
 [dev-dependencies]
 figment = { workspace = true, features = ["test"] }
 reqwest.workspace = true
+rmcp = { workspace = true, features = ["transport-streamable-http-client-reqwest"] }
 tokio-tungstenite.workspace = true

@@ -38,6 +38,16 @@ pub enum HubError {
     Publish(String),
 }
 
+/// What [`Hub::entity_detail`] returns: the view plus what the view leaves out.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntityDetail {
+    pub view: EntityView,
+    /// The expanded discovery config the entity was built from.
+    pub bindings: serde_json::Value,
+    /// The override retained on `<ui_prefix>/<id>`, verbatim.
+    pub raw_override: Option<UiOverride>,
+}
+
 pub struct Hub {
     registry: RwLock<Registry>,
     events: broadcast::Sender<WsEvent>,
@@ -161,6 +171,19 @@ impl Hub {
         let entity = reg.entity(id)?;
         let state = reg.state(id).cloned().unwrap_or_default();
         Some(EntityView::from(entity, &state))
+    }
+
+    /// The entity's view with its expanded discovery config (topics, templates, payload
+    /// constants) and the override as retained, `None` when none is retained for it.
+    pub fn entity_detail(&self, id: &str) -> Option<EntityDetail> {
+        let reg = self.read();
+        let entity = reg.entity(id)?;
+        let state = reg.state(id).cloned().unwrap_or_default();
+        Some(EntityDetail {
+            view: EntityView::from(entity, &state),
+            bindings: entity.bindings.config.clone(),
+            raw_override: reg.raw_override(id).cloned(),
+        })
     }
 
     /// Maps `cmd`, publishes it and waits up to `confirm_timeout_ms` for the entity's state to

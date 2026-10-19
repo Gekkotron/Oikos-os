@@ -6,4 +6,5 @@ pub mod config;
 pub mod http;
 pub mod hub;
 pub mod logging;
+pub mod mcp;
 pub mod mqtt;

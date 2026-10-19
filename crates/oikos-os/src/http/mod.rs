@@ -1,5 +1,5 @@
 //! The HTTP surface over the hub: `/health`, the JSON API under `/api/v1`, the WebSocket
-//! stream at `/ws` and the placeholder page for every other path.
+//! stream at `/ws`, the MCP server at `/mcp` and the placeholder page for every other path.
 
 mod api;
 mod static_ui;
@@ -16,18 +16,18 @@ use tower_http::cors::CorsLayer;
 
 use crate::config::HttpConfig;
 use crate::hub::Hub;
+use crate::mcp;
 
-/// The API, the WebSocket and the placeholder page, with CORS open to any origin (no auth in
-/// v1). Unknown paths under `/api` answer a JSON 404; every other unknown path gets the page.
-///
-/// Mount point for the MCP service: Task 13 calls `.nest_service("/mcp", …)` on the result;
-/// a nested service takes precedence over the fallback.
+/// The API, the WebSocket, the MCP server and the placeholder page, with CORS open to any
+/// origin (no auth in v1). Unknown paths under `/api` answer a JSON 404; every other unknown
+/// path gets the page. The MCP service is nested, so it takes precedence over the fallback.
 pub fn router(hub: Arc<Hub>) -> Router {
     Router::new()
         .route("/health", get(api::health))
         .nest("/api/v1", api::routes())
         .route("/api/{*rest}", any(api::not_found))
         .route("/ws", get(ws::upgrade))
+        .nest_service("/mcp", mcp::mcp_service(Arc::clone(&hub)))
         .fallback(static_ui::index)
         .layer(CorsLayer::permissive())
         .with_state(hub)
