@@ -389,6 +389,46 @@ a[aria-current="page"] .nav__glyph {
   letter-spacing: var(--type-display-spacing);
 }
 
+.room__heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 4px 0 12px;
+}
+
+.room__heading .room__title {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.room__heading .room__rename {
+  border-color: transparent;
+  opacity: 0.6;
+}
+
+.room__heading .room__rename:hover,
+.room__heading .room__rename:focus-visible {
+  opacity: 1;
+}
+
+.room__heading .room__rename svg {
+  width: 18px;
+  height: 18px;
+}
+
+.room__heading .room__field {
+  flex: 1 1 auto;
+  width: auto;
+  font: var(--type-card-value);
+}
+
+.room__heading .room__action {
+  flex: none;
+  padding: 0 16px;
+}
+
 .room__empty {
   margin: 24px 0;
   opacity: 0.6;
@@ -398,6 +438,26 @@ a[aria-current="page"] .nav__glyph {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: var(--grid-gap);
+}
+
+/* Home cards are roomier than the shared grid. */
+.grid--home {
+  --card-padding: 16px;
+  --card-min-height: 120px;
+  --grid-gap: 12px;
+  --type-card-name: 500 14px/18px var(--font-body);
+  --type-card-value: 600 20px/26px var(--font-body);
+}
+
+.grid--home .card__icon {
+  width: 28px;
+  height: 28px;
+}
+
+@media (min-width: 720px) {
+  .grid--home {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
 }
 
 .card__value {

@@ -19,6 +19,7 @@ use crate::cards::vacuum::VacuumCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::alert_row::RecentAlerts;
 use crate::components::area_chip::AreaChip;
+use crate::components::room_title::RoomTitle;
 use crate::house::House;
 
 /// The id of the virtual "Favorites" chip.
@@ -147,14 +148,20 @@ pub fn HomeScreen() -> impl IntoView {
             || house.entities.with(|m| !m.is_empty())
             || matches!(house.connection.get(), oikos_api::ConnectionStatus::Online)
     });
-    let title = move || {
+    let title = Signal::derive(move || {
         chip_list.with(|list| {
             current
                 .get()
                 .and_then(|id| list.iter().find(|c| c.id == id).map(|c| c.name.clone()))
                 .unwrap_or_default()
         })
-    };
+    });
+    // The room the title can rename: not Favorites, not Unassigned.
+    let room = Signal::derive(move || {
+        current
+            .get()
+            .filter(|id| id != FAVORITES && id != UNASSIGNED_AREA)
+    });
 
     let on_chip = Callback::new(move |id: String| selected.set(Some(id)));
 
@@ -163,7 +170,7 @@ pub fn HomeScreen() -> impl IntoView {
             when=move || loaded.get()
             fallback=|| {
                 view! {
-                    <div class="grid" aria-busy="true">
+                    <div class="grid grid--home" aria-busy="true">
                         <div class="card card--skeleton"></div>
                         <div class="card card--skeleton"></div>
                         <div class="card card--skeleton"></div>
@@ -186,12 +193,12 @@ pub fn HomeScreen() -> impl IntoView {
                 />
             </nav>
             <section class="room">
-                <h1 class="room__title">{title}</h1>
+                <RoomTitle id=room name=title />
                 <Show
                     when=move || ids.with(|v| !v.is_empty())
                     fallback=|| view! { <p class="room__empty">"Nothing here yet."</p> }
                 >
-                    <div class="grid">
+                    <div class="grid grid--home">
                         <For
                             each=move || ids.get()
                             key=|id| id.clone()

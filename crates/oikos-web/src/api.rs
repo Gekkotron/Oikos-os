@@ -111,7 +111,15 @@ pub async fn run_flow(id: &str) -> Result<RunView, ApiError> {
     read_json(response).await
 }
 
-// Reserved: the area editor is not built yet, so nothing calls this.
+/// Renames area `id`; the hub answers with the area list it now has.
+pub async fn rename_area(id: &str, name: &str) -> Result<Vec<oikos_api::AreaView>, ApiError> {
+    let url = format!("/api/v1/areas/{}", encode_id(id));
+    let body = serde_json::json!({ "name": name });
+    let response = check(Request::patch(&url).json(&body), None).await?;
+    read_json(response).await
+}
+
+// Reserved: a full area editor is not built yet, so nothing calls this.
 pub async fn set_areas(doc: AreasDocument) -> Result<Vec<oikos_api::AreaView>, ApiError> {
     let response = check(Request::put("/api/v1/areas").json(&doc), None).await?;
     read_json(response).await

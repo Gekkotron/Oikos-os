@@ -5,5 +5,6 @@ pub mod card_frame;
 pub mod flow_switch;
 pub mod hs_wheel;
 pub mod now;
+pub mod room_title;
 pub mod status_pill;
 pub mod toast;
