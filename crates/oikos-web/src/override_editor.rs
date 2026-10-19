@@ -115,18 +115,23 @@ fn FlagField(
     get: fn(&UiOverride) -> bool,
     set: fn(&mut UiOverride, bool),
 ) -> impl IntoView {
+    let on = move || draft.with(get);
     view! {
         <label class="override__flag">
             <span class="override__label">{label}</span>
-            <input
-                class="override__check"
-                type="checkbox"
-                prop:checked=move || draft.with(get)
-                on:change=move |ev| {
-                    let on = event_target_checked(&ev);
-                    draft.update(|d| set(d, on));
+            <button
+                type="button"
+                role="switch"
+                class="switch"
+                class:switch--on=on
+                aria-checked=move || on().to_string()
+                on:click=move |_| {
+                    let next = !draft.with_untracked(get);
+                    draft.update(|d| set(d, next));
                 }
-            />
+            >
+                <span class="switch__knob"></span>
+            </button>
         </label>
     }
 }
@@ -296,6 +301,9 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let id = entity.id.clone();
     let is_switch = entity.protocol_kind == Kind::Switch;
+    // The light-on options only mean something for lights, and for switches that can be shown
+    // as one.
+    let has_light = is_switch || entity.protocol_kind == Kind::Light;
 
     // What the hub currently has; follows changes from outside (the app, MCP).
     let stored = {
@@ -420,6 +428,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     set=|d, v| d.ungrouped = v
                 />
             </Group>
+            {has_light.then(|| view! {
             <Group title="Light">
                 {is_switch
                     .then(|| {
@@ -441,6 +450,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 />
                 <BrightnessField draft=draft />
             </Group>
+            })}
             <Group title="Energy">
                 <ChoiceField
                     label="Energy role"

@@ -108,7 +108,10 @@ mod tests {
 
     #[test]
     fn ordinary_ids_pass_through() {
-        assert_eq!(encode_id("light.kitchen_lamp-1~x"), "light.kitchen_lamp-1~x");
+        assert_eq!(
+            encode_id("light.kitchen_lamp-1~x"),
+            "light.kitchen_lamp-1~x"
+        );
     }
 
     #[test]

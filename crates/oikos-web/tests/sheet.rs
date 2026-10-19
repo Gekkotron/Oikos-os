@@ -4,9 +4,7 @@ use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::Router;
 use oikos_api::{EntityView, WsEvent};
-use oikos_core::model::{
-    Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride,
-};
+use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride};
 use oikos_web::commands::Pending;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
@@ -80,10 +78,15 @@ async fn state_echo_keeps_the_override_draft() {
         .query_selector(".override__save")
         .unwrap()
         .expect("save button");
-    assert!(!save.has_attribute("disabled"), "the edit makes the form dirty");
+    assert!(
+        !save.has_attribute("disabled"),
+        "the edit makes the form dirty"
+    );
 
     // A save the test server cannot take fails and leaves an error on the form.
-    save.clone().unchecked_into::<web_sys::HtmlElement>().click();
+    save.clone()
+        .unchecked_into::<web_sys::HtmlElement>()
+        .click();
     gloo_timers::future::TimeoutFuture::new(500).await;
     let error = host
         .query_selector(".override__error")

@@ -916,6 +916,19 @@ body {
   opacity: 0.8;
 }
 
+.override__flag .switch {
+  padding: 0;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.override__flag .switch:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 2px;
+}
+
 .override__flag {
   display: flex;
   align-items: center;
@@ -923,14 +936,6 @@ body {
   gap: 12px;
   min-height: var(--touch-min);
   cursor: pointer;
-}
-
-.override__check {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  accent-color: var(--accent-amber);
 }
 
 .override__slider {
