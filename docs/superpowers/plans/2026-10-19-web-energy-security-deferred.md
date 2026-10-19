@@ -33,4 +33,4 @@ Status: written 2026-10-19 after the implementation wave of `2026-10-19-web-ener
 
 ## Process
 
-- The dev machine's disk filled up mid-wave: this repo's `target/` had grown to 29 GB (15 GB debug, 13 GB wasm). Deleting `target/debug/incremental` and `target/wasm32-unknown-unknown/debug/incremental` freed enough. A `cargo clean` of the stale `deps/` or a `CARGO_TARGET_DIR` on a bigger volume would avoid a repeat.
+- The dev machine's disk filled up mid-wave: this repo's `target/` had grown to 29 GB (15 GB debug, 13 GB wasm). Deleting `target/debug/incremental` and `target/wasm32-unknown-unknown/debug/incremental` freed enough. Fixed the same evening: `cargo clean`, then a `[profile.dev]` with line tables only and no debug info for dependencies brought a full rebuild to 4.2 GB. Still open: `cargo sweep` for stale artifacts and a shared `CARGO_TARGET_DIR`.

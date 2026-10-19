@@ -45,3 +45,12 @@ wasm-bindgen-test = "0.3"
 rust-embed = { version = "8", features = ["debug-embed"] }
 mime_guess = "2"
 time = { version = "0.3", features = ["formatting", "macros"] }
+
+# Keep `target/` small: line tables only for our crates, no debug info and a little
+# optimisation for dependencies (native and wasm). Release builds are untouched.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+opt-level = 1
