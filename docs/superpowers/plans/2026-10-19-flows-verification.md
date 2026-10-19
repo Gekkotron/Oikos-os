@@ -46,4 +46,46 @@ No manual `run_flow`, no publish to sensors, no manual LED switch. The LED is le
 - The Entrée card shows its name twice (name and entity label are identical); the trigger cards otherwise show an area name, which is good.
 - The If card shows "= true" and "true" as two lines; the second looks redundant.
 - A trigger that flaps (false, true in one second) leaves a cancelled run in the history; consider hiding cancelled runs with no side effect or labelling them "superseded".
-- No wasm UI test covers the flow pages yet (the smoke test only mounts the shell).
+- The wasm tests `flow_canvas` and `flows_list` cover the flow pages; the smoke test only mounts the shell. (Most items above were fixed in the final fix wave below.)
+
+## Final fix wave
+
+Fixes after the whole-branch review: engine re-seed from every report, alarm codes refused, run_flow refused offline, the switch pill, the parked delay, handles, relative times, the `--wire` token, and a late `Running` event no longer re-activating a finished run.
+
+### Gates
+
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+- `cargo test --workspace`: 376 passed, 0 failed.
+- `cargo test -p oikos-os --test flows` five times in a row: `33 passed; 0 failed` each time.
+- `cargo check` for oikos-core, oikos-api and oikos-web on wasm32-unknown-unknown: clean.
+- `wasm-pack test --headless --chrome` in crates/oikos-web, one result line per binary:
+  - `flow_canvas`: `test result: ok. 5 passed; 0 failed`
+  - `flows_list`: `test result: ok. 2 passed; 0 failed`
+  - `smoke`: `test result: ok. 1 passed; 0 failed`
+  - `cover`: `test result: ok. 1 passed; 0 failed`
+  - `sheet`: `test result: ok. 1 passed; 0 failed`
+  - `wheel`: `test result: ok. 1 passed; 0 failed`
+- `identical_replay_then_real_motion_fires` was run against the old engine first and failed (no run within 2 s), then passed with the fix.
+
+### Hub restart and the re-authored flow
+
+`trunk build --release`, `cargo build --release -p oikos-os`, old hub stopped, new one started from the repo root; `/health`: `{"status":"ok","connection":{"type":"online"},"entities":464}`.
+
+`set_flow` over MCP replaced `living_led_motion`: same three triggers and `moving` if; true goes to `on`; false goes to `clear_entree` (if Entrée occupancy = false) then `clear_north` (north = false) then `clear_corridor` (corridor = false) then `wait` (delay 5m) then `off`; the false ports of the three clear-ifs have no edges; mode `restart`. Reply (trimmed): `isError: false`, `invalid: null`, `active_run: null`, `enabled: true`, `mode: restart`, 10 nodes, 9 edges, `runs: []` (runs are in memory and the restart emptied them).
+
+### Screenshots (session scratchpad, not committed)
+
+`ff-canvas-1280.png`, `ff-canvas-390.png`, `ff-list-1280.png`, `ff-list-390.png`, `ff-canvas-light-1280.png`, `ff-list-light-390.png`.
+
+What they show:
+
+- The enable switch is a proper pill: an amber track with the white knob inside it at the right (Night and Warm). The hit area is the invisible 48 px pseudo-element.
+- Canvas at 1280: the title "Living LED on motion" is on one line; the switch, a compact "Run now" and the `restart` chip sit on the right; "Run now" no longer stretches.
+- Canvas at 390: the back button is on its own row, the title on its own full line, then the switch, Run now and the chip.
+- Handles: an input dot on the left edge of every non-trigger card, an output dot on the right edge of every card, and one output dot next to each of the `true` and `false` labels of every `if`. Wires start and end on the dots. In the Warm theme the wires are now clearly visible.
+- Trigger cards show the node title; the entity title appears on a second line only when it differs (Motion north / Cuisine, Motion corridor / Couloir; Entrée has no second line). The canvas is wider than the viewport, so the last cards are reached by scrolling.
+- The list page shows one row with the summary chain and "No runs yet". Relative times could not be seen on a real run (see below); they are covered by the wasm tests.
+
+### Run observed
+
+No motion event reached the hub between the restart and the screenshots, so no real run was observed in this wave, and the lit canvas, the countdown and the relative times were not screenshotted on the house (the wasm tests cover them with the run shape the engine produces). No `run_flow`, no publish to sensors, no manual LED switch.
