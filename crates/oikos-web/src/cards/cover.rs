@@ -12,9 +12,9 @@ use crate::icons::{CHEVRON_DOWN, CHEVRON_UP, STOP};
 
 /// True when a folded child named "moving" says the cover is moving: an on/off state that is
 /// on, or a text state of "moving", "opening" or "closing".
-pub fn is_moving(children: &[EntityView]) -> bool {
+pub fn is_moving<'a>(children: impl IntoIterator<Item = &'a EntityView>) -> bool {
     children
-        .iter()
+        .into_iter()
         .filter(|c| c.name.to_lowercase().contains("moving"))
         .any(|c| match &c.state.value {
             StateValue::OnOff(on) => *on,
@@ -43,8 +43,20 @@ fn with_position(state: &EntityState, position: u8) -> Option<EntityState> {
 pub fn CoverCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let label = display_value(&entity.state, entity.unit.as_deref());
-    // Read once: the parent is rebuilt when its own state changes, not when a child's does.
-    let moving = is_moving(&expect_context::<House>().part_of_children(&entity.id));
+    // The folded "moving" child changes on its own, without rebuilding this card, so the badge
+    // follows it through a memo (which only notifies when the answer flips).
+    let house = expect_context::<House>();
+    let moving = {
+        let id = entity.id.clone();
+        Memo::new(move |_| {
+            house.entities.with(|m| {
+                is_moving(
+                    m.values()
+                        .filter(|e| e.part_of.as_deref() == Some(id.as_str())),
+                )
+            })
+        })
+    };
     let position = match &entity.state.value {
         StateValue::Cover(c) => c.position.unwrap_or(0),
         _ => 0,
@@ -105,7 +117,7 @@ pub fn CoverCard(entity: EntityView) -> impl IntoView {
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
             <span class="card__value">{label}</span>
-            {moving.then(|| view! { <span class="badge">"Moving"</span> })}
+            {move || moving.get().then(|| view! { <span class="badge">"Moving"</span> })}
             {slider}
             {buttons}
         </CardFrame>
