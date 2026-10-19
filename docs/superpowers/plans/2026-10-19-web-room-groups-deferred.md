@@ -11,6 +11,7 @@ Status: written 2026-10-19 after the implementation of `2026-10-19-web-room-grou
 ## Needs a follow-up in the hub or MCP
 
 - **MCP tool for group names and favourites**: `set_areas` keeps group fields the caller leaves out, but there is no tool to set `groupNames` or `groupFavorites`. The REST route `PATCH /api/v1/areas/{id}/groups/{kind}` is the only writer.
+- **`set_areas` doc comment points at a REST route**: it sends MCP clients to `PATCH /api/v1/areas/{id}/groups/{kind}`; an MCP group tool would replace that pointer.
 - **`set_areas` cannot clear a field**: an empty value means "keep", so an icon or group field cannot be cleared over MCP. A `null` sentinel, as in `set_override`, would fix it.
 
 ## Missing browser tests (`crates/oikos-web/tests`)
@@ -21,6 +22,7 @@ Status: written 2026-10-19 after the implementation of `2026-10-19-web-room-grou
 
 ## Behaviour gaps
 
+- **Favorites chip count**: it counts cards (a folded group once) while room chips count entities. Cosmetic.
 - **"Ungroup all" stops at the first failure**: the members after the failed one are not tried, and the sheet does not say so.
 - **Stale group name**: the group sheet's name field is seeded once when it opens, so it goes stale if the name changes elsewhere while the sheet is open.
 - **Favourite switch has no in-flight guard**: a second tap while the first request is pending sends another request.
