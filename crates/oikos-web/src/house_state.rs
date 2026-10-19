@@ -34,6 +34,15 @@ impl HouseState {
         }
     }
 
+    /// The entities folded into `parent_id` through `part_of`.
+    pub fn part_of_children(&self, parent_id: &str) -> Vec<EntityView> {
+        self.entities
+            .values()
+            .filter(|e| e.part_of.as_deref() == Some(parent_id))
+            .cloned()
+            .collect()
+    }
+
     /// A snapshot replaces everything; every other event patches one field.
     pub fn apply(&mut self, event: WsEvent) {
         match event {
@@ -268,5 +277,20 @@ mod tests {
         s.apply(WsEvent::Snapshot(snapshot(&["a"])));
         assert!(!s.entities.contains_key("stale"));
         assert_eq!(s.entities.len(), 1);
+    }
+
+    #[test]
+    fn part_of_children_returns_folded_entities() {
+        let mut state = HouseState::new();
+        state.apply(WsEvent::EntityUpserted(entity("cover.hall")));
+        let mut child = entity("cover.hall_moving");
+        child.part_of = Some("cover.hall".into());
+        state.apply(WsEvent::EntityUpserted(child));
+        assert_eq!(state.part_of_children("cover.hall").len(), 1);
+        assert_eq!(
+            state.part_of_children("cover.hall")[0].id,
+            "cover.hall_moving"
+        );
+        assert!(state.part_of_children("cover.hall_moving").is_empty());
     }
 }

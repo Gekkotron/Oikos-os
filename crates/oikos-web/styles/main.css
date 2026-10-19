@@ -536,3 +536,79 @@ body {
     transition: none;
   }
 }
+
+/* Buttons, steppers and selects shared by the control cards */
+.btn {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--touch-min);
+  padding: 0 12px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-nav);
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:focus-visible,
+.select:focus-visible,
+.field:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 2px;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn--round {
+  flex: none;
+  width: var(--touch-min);
+  padding: 0;
+  font: var(--type-card-value);
+}
+
+.btn--active {
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.stepper__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.select,
+.field {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--touch-min);
+  padding: 0 12px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-nav);
+  background: var(--card-bg);
+  color: inherit;
+  font: var(--type-body);
+}
+
+.badge {
+  align-self: flex-start;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font: var(--type-label);
+}

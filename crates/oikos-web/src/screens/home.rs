@@ -4,6 +4,8 @@ use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::model::{Kind, UNASSIGNED_AREA};
 
+use crate::cards::climate::ClimateCard;
+use crate::cards::cover::CoverCard;
 use crate::cards::light::LightCard;
 use crate::cards::switch::SwitchCard;
 use crate::commands::Pending;
@@ -69,6 +71,8 @@ fn card_for(entity: EntityView) -> AnyView {
     match entity.kind {
         Kind::Light => view! { <LightCard entity=entity /> }.into_any(),
         Kind::Switch => view! { <SwitchCard entity=entity /> }.into_any(),
+        Kind::Cover => view! { <CoverCard entity=entity /> }.into_any(),
+        Kind::Climate => view! { <ClimateCard entity=entity /> }.into_any(),
         _ => generic_card(entity),
     }
 }

@@ -32,6 +32,16 @@ impl House {
         }
     }
 
+    /// The entities folded into `parent_id` through `part_of`, read without subscribing.
+    pub fn part_of_children(&self, parent_id: &str) -> Vec<EntityView> {
+        self.entities.with_untracked(|m| {
+            m.values()
+                .filter(|e| e.part_of.as_deref() == Some(parent_id))
+                .cloned()
+                .collect()
+        })
+    }
+
     /// Fans `event` out to the signals the way `HouseState::apply` patches its fields.
     pub fn apply(&self, event: WsEvent) {
         match event {

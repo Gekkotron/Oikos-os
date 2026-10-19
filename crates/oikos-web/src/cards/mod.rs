@@ -1,5 +1,7 @@
 //! Entity cards, one component per kind.
 
+pub mod climate;
+pub mod cover;
 pub mod light;
 pub mod switch;
 
@@ -8,6 +10,7 @@ use oikos_core::model::{Command, EntityState};
 
 use crate::commands::{Pending, fire_command};
 use crate::components::toast::Toasts;
+use crate::format::word;
 use crate::house::House;
 
 /// The contexts a card needs to send commands, captured while the card is built so event
@@ -66,5 +69,65 @@ pub fn PowerToggle(
                 <span class="switch__knob"></span>
             </span>
         </button>
+    }
+}
+
+/// A value readout between `−` and `+` step buttons. The buttons are disabled when there is
+/// nothing to step from; `on_step` receives `-1.0` or `1.0`.
+#[component]
+pub fn Stepper(
+    #[prop(into)] label: String,
+    can_step: bool,
+    on_step: Callback<f64>,
+) -> impl IntoView {
+    view! {
+        <div class="stepper">
+            <button
+                type="button"
+                class="btn btn--round"
+                aria-label="Decrease"
+                disabled=!can_step
+                on:click=move |_| on_step.run(-1.0)
+            >
+                "−"
+            </button>
+            <span class="card__value stepper__value">{label}</span>
+            <button
+                type="button"
+                class="btn btn--round"
+                aria-label="Increase"
+                disabled=!can_step
+                on:click=move |_| on_step.run(1.0)
+            >
+                "+"
+            </button>
+        </div>
+    }
+}
+
+/// A labelled `<select>` over `options`; `on_select` receives the picked option.
+#[component]
+pub fn ModeSelect(
+    #[prop(into)] label: String,
+    options: Vec<String>,
+    selected: Option<String>,
+    on_select: Callback<String>,
+) -> impl IntoView {
+    let items = options
+        .into_iter()
+        .map(|option| {
+            let is_selected = selected.as_deref() == Some(option.as_str());
+            let text = word(&option);
+            view! { <option value=option selected=is_selected>{text}</option> }
+        })
+        .collect_view();
+    view! {
+        <select
+            class="select"
+            aria-label=label
+            on:change=move |ev| on_select.run(event_target_value(&ev))
+        >
+            {items}
+        </select>
     }
 }

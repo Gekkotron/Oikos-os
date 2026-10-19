@@ -82,7 +82,7 @@ fn with_unit(value: String, unit: Option<&str>) -> String {
 }
 
 /// `heat_cool` becomes "Heat cool".
-fn word(s: &str) -> String {
+pub fn word(s: &str) -> String {
     let spaced = s.replace('_', " ");
     let mut chars = spaced.chars();
     match chars.next() {
