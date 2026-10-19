@@ -532,6 +532,60 @@ body {
   cursor: pointer;
 }
 
+/* The hue and saturation picker on the entity sheet */
+.hs {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.hs__wheel {
+  position: relative;
+  width: min(100%, 240px);
+  aspect-ratio: 1;
+  border: 2px solid var(--chip-border);
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, #fff, rgb(255 255 255 / 0%)),
+    conic-gradient(
+      hsl(0 100% 50%),
+      hsl(60 100% 50%),
+      hsl(120 100% 50%),
+      hsl(180 100% 50%),
+      hsl(240 100% 50%),
+      hsl(300 100% 50%),
+      hsl(360 100% 50%)
+    );
+  box-sizing: border-box;
+  cursor: crosshair;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.hs__wheel:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 4px;
+}
+
+.hs__marker {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 55%);
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.hs__readout {
+  margin: 0;
+  font: var(--type-label);
+  opacity: 0.8;
+}
+
 .swatch:focus-visible {
   outline: 2px solid var(--accent-mint);
   outline-offset: 2px;

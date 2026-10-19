@@ -4,7 +4,10 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use oikos_api::{DeviceView, EntityView};
-use oikos_core::model::Availability;
+use oikos_core::model::{Availability, Command, EntityState, Hs, Kind, LightState, StateValue};
+
+use crate::cards::Sender;
+use crate::components::hs_wheel::HsWheel;
 
 use crate::format::{format_timestamp, kind_word, list_label, title_suffix, wrap_id};
 use crate::house::House;
@@ -40,6 +43,60 @@ fn Panel(title: &'static str, children: Children) -> impl IntoView {
             <h2 class="sheet__heading">{title}</h2>
             {children()}
         </section>
+    }
+}
+
+/// The colour of a light, when its state has one.
+fn light_hs(entity: &EntityView) -> Option<Hs> {
+    match &entity.state.value {
+        StateValue::Light(l) => l.hs,
+        _ => None,
+    }
+}
+
+/// The HS colour wheel of a light that can show colour. Built once per sheet: the wheel reads the
+/// light's colour through signals, so a state echo moves its marker without rebuilding it.
+#[component]
+fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
+    let sender = Sender::from_context();
+    let has_hs = Memo::new(move |_| {
+        entity.with(|e| {
+            e.as_ref()
+                .is_some_and(|e| e.kind == Kind::Light && e.capabilities.color_modes.contains("hs"))
+        })
+    });
+    let value = Signal::derive(move || entity.with(|e| e.as_ref().and_then(light_hs)));
+    let on_pick = Callback::new(move |hs: Hs| {
+        let guess = entity.with_untracked(|e| {
+            let e = e.as_ref()?;
+            let StateValue::Light(light) = &e.state.value else {
+                return None;
+            };
+            Some(EntityState {
+                value: StateValue::Light(LightState {
+                    on: true,
+                    hs: Some(hs),
+                    ..light.clone()
+                }),
+                ..e.state.clone()
+            })
+        });
+        sender.send(
+            &id,
+            Command::TurnOn {
+                brightness: None,
+                color: Some(hs),
+                effect: None,
+            },
+            guess,
+        );
+    });
+    view! {
+        <Show when=move || has_hs.get()>
+            <Panel title="Colour">
+                <HsWheel value=value on_pick=on_pick />
+            </Panel>
+        </Show>
     }
 }
 
@@ -135,7 +192,10 @@ pub fn SheetBody(id: String) -> impl IntoView {
     // What the override editor starts from. It follows outside changes on its own; handing it
     // the live entity would rebuild it (and drop unsaved typing) on every WebSocket echo.
     let initial = house.entities.with_untracked(|m| m.get(&id).cloned());
-    let entity = Memo::new(move |_| house.entities.with(|m| m.get(&id).cloned()));
+    let entity = {
+        let id = id.clone();
+        Memo::new(move |_| house.entities.with(|m| m.get(&id).cloned()))
+    };
 
     let header = move || {
         entity.get().map(|e| {
@@ -176,6 +236,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
         <Panel title="Controls">
             <div class="sheet__controls">{move || entity.get().map(card_for)}</div>
         </Panel>
+        <ColourPanel id=id.clone() entity=entity />
         {move || entity.get().and_then(|e| device_panel(house, &e))}
         {move || entity.get().map(|e| state_panel(&e))}
         <Panel title="Override">

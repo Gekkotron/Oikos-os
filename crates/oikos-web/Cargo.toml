@@ -31,12 +31,16 @@ wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = [
     "Document",
+    "DomRect",
     "Element",
+    "KeyboardEvent",
+    "MouseEvent",
+    "PointerEvent",
     "ScrollBehavior",
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
 ] }
 
 [dev-dependencies]
-web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventInit", "HtmlElement", "HtmlInputElement", "Node"] }
+web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventInit", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "KeyboardEventInit", "Node"] }
 wasm-bindgen-test.workspace = true

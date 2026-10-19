@@ -109,6 +109,7 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
         }
     });
 
+    let open = open_entity(&entity.id);
     let swatch = entity.capabilities.color_modes.contains("hs").then(|| {
         let color = light.as_ref().and_then(|l| l.hs).map_or_else(
             || "var(--accent-violet)".to_owned(),
@@ -119,8 +120,9 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
                 type="button"
                 class="swatch"
                 title="Colour"
-                aria-label="Colour"
+                aria-label="Colour: open to change it"
                 style:background=color
+                on:click=move |_| open.run(())
             ></button>
         }
     });
