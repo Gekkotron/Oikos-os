@@ -8,6 +8,15 @@ use super::{ModeSelect, Sender};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::format::{display_value, word};
 
+/// The short button label for a vacuum action.
+fn action_label(action: &str) -> String {
+    match action {
+        "return_to_base" => "Dock".into(),
+        "clean_spot" => "Spot".into(),
+        other => word(other),
+    }
+}
+
 #[component]
 pub fn VacuumCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
@@ -24,11 +33,11 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
         .cloned()
         .map(|action| {
             let id = entity.id.clone();
-            let text = word(&action);
+            let text = action_label(&action);
             view! {
                 <button
                     type="button"
-                    class="btn"
+                    class="btn btn--compact"
                     on:click=move |_| {
                         sender.send(&id, Command::VacuumAction { action: action.clone() }, None);
                     }
@@ -64,8 +73,24 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
             <span class="card__value">{label}</span>
-            <div class="card__controls card__controls--wrap">{actions}</div>
-            <div class="card__controls">{fan_select}</div>
+            <div class="card__controls card__controls--grid">{actions}</div>
+            <div class="card__controls card__controls--stack">{fan_select}</div>
         </CardFrame>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::action_label;
+
+    #[test]
+    fn short_action_labels() {
+        assert_eq!(action_label("return_to_base"), "Dock");
+        assert_eq!(action_label("clean_spot"), "Spot");
+        assert_eq!(action_label("locate"), "Locate");
+        assert_eq!(action_label("start"), "Start");
+        assert_eq!(action_label("pause"), "Pause");
+        assert_eq!(action_label("stop"), "Stop");
+        assert_eq!(action_label("custom_thing"), "Custom thing");
     }
 }

@@ -8,6 +8,7 @@ use super::Sender;
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::format::display_value;
 use crate::house::House;
+use crate::icons::{CHEVRON_DOWN, CHEVRON_UP, STOP};
 
 /// True when a folded child named "moving" says the cover is moving: an on/off state that is
 /// on, or a text state of "moving", "opening" or "closing".
@@ -49,23 +50,24 @@ pub fn CoverCard(entity: EntityView) -> impl IntoView {
         _ => 0,
     };
 
-    let button = |text: &'static str, cmd: Command| {
+    let button = |text: &'static str, icon: &'static str, cmd: Command| {
         let id = entity.id.clone();
         view! {
             <button
                 type="button"
-                class="btn"
+                class="btn btn--icon"
+                aria-label=text
+                title=text
+                inner_html=icon
                 on:click=move |_| sender.send(&id, cmd.clone(), None)
-            >
-                {text}
-            </button>
+            ></button>
         }
     };
     let buttons = view! {
         <div class="card__controls">
-            {button("Open", Command::Open)}
-            {button("Stop", Command::Stop)}
-            {button("Close", Command::Close)}
+            {button("Open", CHEVRON_UP, Command::Open)}
+            {button("Stop", STOP, Command::Stop)}
+            {button("Close", CHEVRON_DOWN, Command::Close)}
         </div>
     };
 

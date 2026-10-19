@@ -34,6 +34,8 @@ pub fn CardFrame(
     let icon = kind_icon(entity.kind, entity.device_class.as_deref());
     let availability = entity.state.availability;
     let is_on = crate::format::is_on(&entity.state);
+    let short = crate::format::short_name(&entity.name, entity.device_name.as_deref());
+    let full_name = entity.name.clone();
     let offline = availability == Availability::Offline;
 
     view! {
@@ -45,7 +47,7 @@ pub fn CardFrame(
         >
             <button type="button" class="card__header" on:click=move |_| on_click.run(())>
                 <span class="card__icon" inner_html=icon></span>
-                <span class="card__name">{entity.name}</span>
+                <span class="card__name" title=full_name>{short}</span>
                 <span class="card__dots">
                     <span class="dot dot--pending" class:dot--active=move || pending.get()></span>
                     <span class=availability_class(availability)></span>

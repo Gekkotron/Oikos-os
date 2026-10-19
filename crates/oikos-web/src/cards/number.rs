@@ -6,7 +6,7 @@ use oikos_core::model::{Command, EntityState, StateValue};
 
 use super::Sender;
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::display_value;
+use crate::format::{display_value, value_class};
 
 #[component]
 pub fn NumberCard(entity: EntityView) -> impl IntoView {
@@ -42,7 +42,7 @@ pub fn NumberCard(entity: EntityView) -> impl IntoView {
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
-            <span class="card__value">{label}</span>
+            <span class=value_class(&label)>{label.clone()}</span>
             <div class="card__controls">
                 <input
                     class="slider"

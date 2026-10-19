@@ -6,7 +6,7 @@ use oikos_core::model::{ClimateState, Command, EntityState, StateValue};
 
 use super::{ModeSelect, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::display_value;
+use crate::format::{degrees, display_value};
 
 const DEFAULT_STEP: f64 = 0.5;
 
@@ -41,6 +41,13 @@ fn with_climate(state: &EntityState, f: impl FnOnce(&mut ClimateState)) -> Optio
 pub fn ClimateCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let label = display_value(&entity.state, entity.unit.as_deref());
+    let target_text = degrees(
+        match &entity.state.value {
+            StateValue::Climate(c) => c.target,
+            _ => None,
+        },
+        entity.unit.as_deref(),
+    );
     let (target, mode, fan) = match &entity.state.value {
         StateValue::Climate(c) => (c.target, c.mode.clone(), c.fan_mode.clone()),
         _ => (None, None, None),
@@ -83,8 +90,9 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
-            <Stepper label=label can_step=target.is_some() on_step=on_step />
-            <div class="card__controls">{mode_select}{fan_select}</div>
+            <span class="card__value">{label}</span>
+            <Stepper label=target_text can_step=target.is_some() on_step=on_step />
+            <div class="card__controls card__controls--stack">{mode_select}{fan_select}</div>
         </CardFrame>
     }
 }

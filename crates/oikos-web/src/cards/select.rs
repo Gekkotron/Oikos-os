@@ -30,7 +30,7 @@ pub fn SelectCard(entity: EntityView) -> impl IntoView {
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
-            <div class="card__controls">
+            <div class="card__controls card__controls--stack">
                 <ModeSelect label="Option" options=options selected=current on_select=on_select />
             </div>
         </CardFrame>

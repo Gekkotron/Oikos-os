@@ -99,7 +99,7 @@ pub fn Stepper(
             >
                 "−"
             </button>
-            <span class="card__value stepper__value">{label}</span>
+            <span class="stepper__value">{label}</span>
             <button
                 type="button"
                 class="btn btn--round"

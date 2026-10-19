@@ -46,7 +46,7 @@ pub fn AlarmPanelCard(entity: EntityView) -> impl IntoView {
             view! {
                 <button
                     type="button"
-                    class="btn"
+                    class="btn btn--compact"
                     on:click=move |_| {
                         let code = code_for(arm_required, &typed.get_untracked());
                         typed.set(String::new());
@@ -89,9 +89,9 @@ pub fn AlarmPanelCard(entity: EntityView) -> impl IntoView {
         <CardFrame entity=entity on_click=on_click pending=pending>
             <span class="card__value">{label}</span>
             <div class="card__controls">{code_input}</div>
-            <div class="card__controls card__controls--wrap">
+            <div class="card__controls card__controls--grid">
                 {arm_buttons}
-                <button type="button" class="btn" on:click=disarm>
+                <button type="button" class="btn btn--compact" on:click=disarm>
                     "Disarm"
                 </button>
             </div>

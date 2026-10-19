@@ -66,6 +66,11 @@ const ILLUMINANCE: &str = svg!(
     r#"<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5"/><path d="M12 19v2.5"/><path d="m4.9 4.9 1.8 1.8"/><path d="m17.3 17.3 1.8 1.8"/><path d="M2.5 12H5"/><path d="M19 12h2.5"/><path d="m4.9 19.1 1.8-1.8"/><path d="m17.3 6.7 1.8-1.8"/>"#
 );
 
+/// Cover control glyphs: open (up), stop and close (down).
+pub const CHEVRON_UP: &str = svg!(r#"<path d="m6 15 6-6 6 6"/>"#);
+pub const STOP: &str = svg!(r#"<rect x="7" y="7" width="10" height="10" rx="2"/>"#);
+pub const CHEVRON_DOWN: &str = svg!(r#"<path d="m6 9 6 6 6-6"/>"#);
+
 /// The icon for an entity: the device class wins when we draw one, else the kind's.
 pub fn kind_icon(kind: Kind, device_class: Option<&str>) -> &'static str {
     if let Some(icon) = device_class.and_then(device_class_icon) {
