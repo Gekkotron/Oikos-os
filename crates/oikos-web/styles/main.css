@@ -169,3 +169,117 @@ body {
     animation: none;
   }
 }
+
+/* App shell */
+.topbar {
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  box-sizing: border-box;
+  margin: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-nav);
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+.topbar__name {
+  font: var(--type-display);
+  letter-spacing: var(--type-display-spacing);
+  margin-right: auto;
+}
+
+.topbar__nav {
+  display: flex;
+  flex: 1 0 100%;
+  gap: 4px;
+}
+
+.topbar__nav a {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch-min);
+  padding: 0 12px;
+  border-radius: var(--radius-nav);
+  color: inherit;
+  font: var(--type-label);
+  text-decoration: none;
+  transition:
+    background var(--motion-short) var(--ease),
+    color var(--motion-short) var(--ease);
+}
+
+.topbar__nav a[aria-current="page"] {
+  background: var(--warning-bg);
+  color: var(--accent-amber);
+}
+
+.theme-toggle {
+  min-height: var(--touch-min);
+  padding: 0 14px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-nav);
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-nav);
+  font: var(--type-label);
+  white-space: nowrap;
+}
+
+.pill__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+.pill--connecting {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.pill--online {
+  color: var(--connected);
+  background: var(--connected-bg);
+}
+
+.pill--offline {
+  color: var(--offline);
+  background: color-mix(in srgb, var(--offline) 15%, transparent);
+}
+
+.screen {
+  box-sizing: border-box;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 8px;
+}
+
+@media (min-width: 720px) {
+  .topbar__nav {
+    flex: 0 1 auto;
+  }
+
+  .topbar__nav a {
+    flex: none;
+  }
+}
