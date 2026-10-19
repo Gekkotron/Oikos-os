@@ -57,6 +57,7 @@ impl OikosMcp {
             .areas
             .into_iter()
             .map(|mut area| {
+                adopt_listed_fields(&mut area);
                 if let Some(old) = current.areas.iter().find(|a| a.id == area.id) {
                     area.icon = area.icon.or_else(|| old.icon.clone());
                     if area.group_names.is_empty() {
@@ -65,9 +66,10 @@ impl OikosMcp {
                     if area.group_favorites.is_empty() {
                         area.group_favorites = old.group_favorites.clone();
                     }
-                    if area.extra.is_empty() {
-                        area.extra = old.extra.clone();
-                    }
+                    // Key by key: what the caller sends wins, the rest is kept.
+                    let mut extra = old.extra.clone();
+                    extra.append(&mut area.extra);
+                    area.extra = extra;
                 }
                 area
             })
@@ -358,5 +360,26 @@ mod tests {
             logged,
             r#"{"command":{"brightness":42,"type":"turn_on"},"id":"lamp"}"#
         );
+    }
+}
+
+/// `list_areas` speaks snake_case (`group_names`, `group_favorites`) and adds counts; a client
+/// sending that output back lands those keys in the area's `extra`. Takes the counts out and
+/// moves the two group fields to their real place unless the camelCase field says otherwise.
+/// Not a serde alias on `Area`, which is the app's wire format and encodes camelCase only.
+fn adopt_listed_fields(area: &mut oikos_core::model::Area) {
+    area.extra.remove("entity_count");
+    area.extra.remove("primary_count");
+    if let Some(names) = area.extra.remove("group_names")
+        && area.group_names.is_empty()
+        && let Ok(names) = serde_json::from_value(names)
+    {
+        area.group_names = names;
+    }
+    if let Some(favorites) = area.extra.remove("group_favorites")
+        && area.group_favorites.is_empty()
+        && let Ok(favorites) = serde_json::from_value(favorites)
+    {
+        area.group_favorites = favorites;
     }
 }

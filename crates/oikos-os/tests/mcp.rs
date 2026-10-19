@@ -734,3 +734,51 @@ async fn mcp_set_areas_keeps_group_fields() {
         }]})
     );
 }
+
+#[tokio::test]
+async fn mcp_list_then_set_areas_round_trips() {
+    let mut server = Server::start().await;
+    server.online();
+    server.hub.ingest(
+        "oikos/ui/_areas",
+        br#"{"areas":[{"id":"dehors","name":"Dehors","icon":"tree","groupNames":{"cover":"Volets"},"groupFavorites":["cover"],"newKey":true}]}"#,
+    );
+    let client = server.client().await;
+
+    let mut listed = json_of("list_areas", &call(&client, "list_areas", json!({})).await);
+    // The fixture house also lists `stair`, derived from its entities; sending it back would
+    // declare it, which is not what this test is about.
+    listed["areas"]
+        .as_array_mut()
+        .expect("areas")
+        .retain(|a| a["id"] == "dehors");
+    listed["areas"][0]["name"] = json!("Outdoor");
+    json_of(
+        "set_areas",
+        &call(&client, "set_areas", listed.clone()).await,
+    );
+    let published = server.publisher.try_recv().expect("the areas publish");
+    let doc: Value = serde_json::from_str(&published.payload).expect("json");
+    assert_eq!(
+        doc,
+        json!({"areas": [{
+            "id": "dehors", "name": "Outdoor", "icon": "tree",
+            "groupNames": {"cover": "Volets"}, "groupFavorites": ["cover"], "newKey": true
+        }]})
+    );
+
+    // Editing the listed `group_names` is applied.
+    listed["areas"][0]["group_names"] = json!({"cover": "Stores"});
+    json_of("set_areas", &call(&client, "set_areas", listed).await);
+    let published = server.publisher.try_recv().expect("the second publish");
+    let doc: Value = serde_json::from_str(&published.payload).expect("json");
+    assert_eq!(
+        doc["areas"][0]["groupNames"],
+        json!({"cover": "Stores"}),
+        "{doc}"
+    );
+    assert!(doc["areas"][0].get("group_names").is_none(), "{doc}");
+    assert_eq!(doc["areas"][0]["newKey"], json!(true));
+
+    client.cancel().await.expect("close");
+}
