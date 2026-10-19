@@ -70,6 +70,12 @@ The hub listens on `[http] bind` (default `0.0.0.0:8080`), CORS open to any orig
 | `GET /api/v1/alerts` | The push alerts OikosPush keeps in its retained history, newest first. |
 | `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on the responses topic); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
 | `GET /api/v1/media?url=…` | A Frigate snapshot or clip fetched by the hub with the Frigate login (`[frigate]`); `Range` is passed through so clips seek. `400` without a valid URL, `403` off the Frigate origin, `502` when Frigate is unreachable. |
+| `GET /api/v1/flows` | Every flow with its engine state: definition, why it is invalid, the active run and the recent runs. |
+| `GET /api/v1/flows/{id}` | One flow; `404` for an unknown id. |
+| `PUT /api/v1/flows/{id}` | Creates or replaces a flow (`oikos/automation/<id>`). The path id wins: a body without `id` takes it, another one is `400 id mismatch`. `422` for a flow that does not validate, `503` while the broker link is down. |
+| `DELETE /api/v1/flows/{id}` | Removes the flow (204), or `404`. |
+| `POST /api/v1/flows/{id}/enabled` | `{"enabled": bool}`; returns the flow. |
+| `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or already running. |
 
 Errors are `{"error": "…"}` with 400 (bad patch), 404 (unknown entity or route), 422 (command refused) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 

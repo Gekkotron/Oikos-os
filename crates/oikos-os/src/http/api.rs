@@ -12,9 +12,10 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
-    AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView,
-    OverridePatch, Snapshot,
+    AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EntityView, FlowView,
+    IgnoredView, OverridePatch, RunView, Snapshot,
 };
+use oikos_core::flow::Flow;
 use oikos_core::model::{AreasDocument, Command};
 use serde::Serialize;
 
@@ -39,6 +40,13 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/alerts", get(alerts))
         .route("/alerts/{id}/actions/{action}", post(alert_action))
         .route("/media", get(media))
+        .route("/flows", get(flows))
+        .route(
+            "/flows/{id}",
+            get(get_flow).put(put_flow).delete(delete_flow),
+        )
+        .route("/flows/{id}/enabled", post(set_flow_enabled))
+        .route("/flows/{id}/run", post(run_flow))
         .fallback(not_found)
 }
 
@@ -212,4 +220,82 @@ async fn alert_action(
 ) -> Result<StatusCode, HttpError> {
     hub.reply(&id, &action)?;
     Ok(StatusCode::ACCEPTED)
+}
+
+/// Every flow with its engine state.
+async fn flows(State(hub): HubState) -> Json<Vec<FlowView>> {
+    Json(hub.flows())
+}
+
+/// One flow; `404` for an unknown id.
+async fn get_flow(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<Json<FlowView>, HttpError> {
+    hub.flow(&id)
+        .map(Json)
+        .ok_or_else(|| HubError::UnknownFlow(id).into())
+}
+
+/// Creates or replaces a flow. The path id wins: a body without an `id` takes it, a body with
+/// another one is `400 id mismatch`. `422` for a flow that does not validate, `503` while the
+/// broker link is down.
+async fn put_flow(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<serde_json::Value>,
+) -> Result<Json<FlowView>, HttpError> {
+    let Json(mut value) = body?;
+    if let Some(object) = value.as_object_mut() {
+        match object.get("id").and_then(|v| v.as_str()) {
+            None | Some("") => {
+                object.insert("id".to_owned(), serde_json::Value::String(id.clone()));
+            }
+            Some(body_id) if body_id != id => {
+                return Err(HttpError {
+                    status: StatusCode::BAD_REQUEST,
+                    error: "id mismatch".to_owned(),
+                });
+            }
+            Some(_) => {}
+        }
+    }
+    let flow = Flow::decode(value.to_string().as_bytes()).map_err(|error| HttpError {
+        status: StatusCode::UNPROCESSABLE_ENTITY,
+        error,
+    })?;
+    Ok(Json(hub.set_flow(flow).await?))
+}
+
+/// Removes a flow (204); `404` for an unknown id.
+async fn delete_flow(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    hub.delete_flow(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The `POST /flows/{id}/enabled` body.
+#[derive(serde::Deserialize)]
+struct EnabledBody {
+    enabled: bool,
+}
+
+/// Enables or disables a flow and returns it as it now stands.
+async fn set_flow_enabled(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<EnabledBody>,
+) -> Result<Json<FlowView>, HttpError> {
+    let Json(EnabledBody { enabled }) = body?;
+    Ok(Json(hub.set_flow_enabled(&id, enabled).await?))
+}
+
+/// Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or busy.
+async fn run_flow(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<RunView>), HttpError> {
+    Ok((StatusCode::ACCEPTED, Json(hub.run_flow(&id)?)))
 }

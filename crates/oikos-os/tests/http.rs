@@ -57,6 +57,27 @@ fn switch_state_topic() -> String {
         .to_owned()
 }
 
+/// The LED and the motion sensor the reference flow talks to.
+const LED_TOPIC: &str = "oikos/light/0x60a423fffe94d1c6/light/config";
+const LED_FIXTURE: &str = "discovery/light__0x60a423fffe94d1c6__light.json";
+const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
+const MOTION_TOPIC: &str = "oikos/binary_sensor/0x00158d008b5a2d65/occupancy/config";
+const MOTION_FIXTURE: &str = "discovery/binary_sensor__0x00158d008b5a2d65__occupancy.json";
+const MOTION_ID: &str = "0x00158d008b5a2d65_occupancy_zigbee2mqtt";
+
+/// The living-room reference flow, as the UI would send it.
+fn reference_flow() -> Value {
+    json!({
+        "id": "living", "name": "Living LED on motion", "enabled": true, "mode": "restart",
+        "nodes": [
+            { "id": "motion", "type": "trigger.state", "params": { "entity": MOTION_ID } },
+            { "id": "on", "type": "command",
+              "params": { "entity": LED_ID, "command": { "type": "turn_on" } } }
+        ],
+        "edges": [ { "from": "motion", "to": "on" } ]
+    })
+}
+
 struct Server {
     hub: Arc<Hub>,
     publisher: mpsc::Receiver<Publish>,
@@ -69,6 +90,16 @@ impl Server {
     /// `Connecting`: a test that writes calls [`Server::online`] first.
     async fn start() -> Server {
         Server::start_with(config()).await
+    }
+
+    /// Like [`Server::start`], with the LED and the motion sensor discovered too and the broker
+    /// link up, so flows can be written.
+    async fn start_with_flows() -> Server {
+        let server = Server::start().await;
+        server.hub.ingest(LED_TOPIC, &fixture(LED_FIXTURE));
+        server.hub.ingest(MOTION_TOPIC, &fixture(MOTION_FIXTURE));
+        server.online();
+        server
     }
 
     /// Like [`Server::start`], with its own configuration.
@@ -920,4 +951,181 @@ async fn media_proxy_gives_up_quickly_on_an_unreachable_frigate() {
         "took {:?}",
         started.elapsed()
     );
+}
+
+#[tokio::test]
+async fn put_flow_then_get_and_list() {
+    let server = Server::start_with_flows().await;
+
+    let put = server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&reference_flow())
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(put.status(), StatusCode::OK);
+    let put: Value = put.json().await.expect("json");
+    assert_eq!(put["definition"]["name"], "Living LED on motion");
+
+    let one = server.get("/api/v1/flows/living").await;
+    assert_eq!(one.status(), StatusCode::OK);
+    let one: Value = one.json().await.expect("json");
+    assert_eq!(one["definition"]["name"], "Living LED on motion");
+
+    let list: Value = server
+        .get("/api/v1/flows")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(list.as_array().map(Vec::len), Some(1));
+
+    let missing = server.get("/api/v1/flows/nope").await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    let missing: Value = missing.json().await.expect("json");
+    assert!(missing["error"].as_str().unwrap().contains("unknown flow"));
+}
+
+#[tokio::test]
+async fn put_flow_invalid_422_and_id_mismatch_400() {
+    let server = Server::start_with_flows().await;
+
+    let mut bad = reference_flow();
+    bad["nodes"][1]["params"]["entity"] = json!("no_such_entity");
+    let res = server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&bad)
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let res = server
+        .client
+        .put(server.url("/api/v1/flows/other"))
+        .json(&reference_flow())
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let res: Value = res.json().await.expect("json");
+    assert_eq!(res["error"], "id mismatch");
+
+    // A body without an id takes the path's.
+    let mut anonymous = reference_flow();
+    anonymous.as_object_mut().unwrap().remove("id");
+    let res = server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&anonymous)
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::OK);
+    let res: Value = res.json().await.expect("json");
+    assert_eq!(res["definition"]["id"], "living");
+}
+
+#[tokio::test]
+async fn flows_offline_503() {
+    let server = Server::start_with_flows().await;
+    server.hub.set_connection(ConnectionStatus::Connecting);
+    let res = server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&reference_flow())
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn delete_flow_204_then_404() {
+    let server = Server::start_with_flows().await;
+    server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&reference_flow())
+        .send()
+        .await
+        .expect("PUT");
+
+    let del = server
+        .client
+        .delete(server.url("/api/v1/flows/living"))
+        .send()
+        .await
+        .expect("DELETE");
+    assert_eq!(del.status(), StatusCode::NO_CONTENT);
+    let del = server
+        .client
+        .delete(server.url("/api/v1/flows/living"))
+        .send()
+        .await
+        .expect("DELETE");
+    assert_eq!(del.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn enabled_and_run_endpoints() {
+    let server = Server::start_with_flows().await;
+    server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&reference_flow())
+        .send()
+        .await
+        .expect("PUT");
+
+    let post = |path: &'static str, body: Value| {
+        let req = server.client.post(server.url(path)).json(&body);
+        async move { req.send().await.expect("POST") }
+    };
+
+    let res = post("/api/v1/flows/living/enabled", json!({"enabled": false})).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let res: Value = res.json().await.expect("json");
+    assert_eq!(res["definition"]["enabled"], false);
+
+    let res = post("/api/v1/flows/living/run", json!({})).await;
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let res: Value = res.json().await.expect("json");
+    assert!(res["error"].as_str().unwrap().contains("flow is disabled"));
+
+    let res = post("/api/v1/flows/living/enabled", json!({"enabled": true})).await;
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // The engine is not started here, so the run stays `running`.
+    let res = post("/api/v1/flows/living/run", json!({})).await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let res: Value = res.json().await.expect("json");
+    assert_eq!(res["status"], "running");
+
+    let res = post("/api/v1/flows/nope/run", json!({})).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn ws_carries_flows_changed() {
+    let server = Server::start_with_flows().await;
+    let mut ws = server.ws().await;
+    let first = next_json(&mut ws).await;
+    assert_eq!(first["type"], "snapshot");
+    assert_eq!(first["flows"].as_array().map(Vec::len), Some(0));
+
+    server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&reference_flow())
+        .send()
+        .await
+        .expect("PUT");
+    let event = next_json(&mut ws).await;
+    assert_eq!(event["type"], "flows_changed");
+    assert_eq!(event["flows"].as_array().map(Vec::len), Some(1));
+
+    ws.close(None).await.expect("close");
 }
