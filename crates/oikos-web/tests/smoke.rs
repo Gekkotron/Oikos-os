@@ -15,4 +15,5 @@ fn app_renders() {
     assert!(html.contains("Oikos"));
     assert!(html.contains("pill"));
     assert!(html.contains("Alerts"));
+    assert!(html.contains("Flows"));
 }

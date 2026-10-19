@@ -1426,3 +1426,83 @@ body {
   font: var(--type-label);
   opacity: 0.6;
 }
+
+/* Flows list */
+.flow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow-list__empty {
+  margin: 24px 0;
+  opacity: 0.7;
+  text-align: center;
+}
+
+.flow-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+}
+
+.flow-row__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.flow-row__name {
+  overflow: hidden;
+  color: var(--ink);
+  font: var(--type-body);
+  font-weight: 600;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-row__summary,
+.flow-row__run {
+  overflow: hidden;
+  font: var(--type-label);
+  opacity: 0.75;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-row__run {
+  opacity: 0.55;
+}
+
+.badge--invalid {
+  align-self: center;
+  background: color-mix(in srgb, var(--accent-rose) 22%, transparent);
+  color: var(--accent-rose);
+}
+
+.flow-row .switch {
+  box-sizing: content-box;
+  padding: 11px 0;
+  border: 0;
+  background-clip: content-box;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.flow-row .switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}

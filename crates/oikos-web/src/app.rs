@@ -13,6 +13,7 @@ use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
 use crate::screens::devices::DevicesScreen;
 use crate::screens::entity_sheet::EntitySheetScreen;
+use crate::screens::flows::FlowsScreen;
 use crate::screens::home::HomeScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::theme::{Theme, install_theme};
@@ -68,6 +69,7 @@ pub fn App() -> impl IntoView {
                 <nav class="topbar__nav">
                     <A href="/" exact=true>"Home"</A>
                     <A href="/alerts">"Alerts"</A>
+                    <A href="/flows">"Flows"</A>
                     <A href="/devices">"Devices"</A>
                     <A href="/settings">"Settings"</A>
                 </nav>
@@ -78,6 +80,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/entity/:id") view=EntitySheetScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
+                    <Route path=path!("/flows") view=FlowsScreen />
                     <Route path=path!("/devices") view=DevicesScreen />
                     <Route path=path!("/settings") view=SettingsScreen />
                 </Routes>
