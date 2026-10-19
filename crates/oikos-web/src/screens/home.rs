@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
-use oikos_core::model::{Kind, Placement, UNASSIGNED_AREA};
+use oikos_core::model::{GroupKind, Kind, Placement, UNASSIGNED_AREA};
 use std::collections::{BTreeMap, HashSet};
 
 use crate::cards::alarm::AlarmPanelCard;
@@ -10,6 +10,7 @@ use crate::cards::binary_sensor::BinarySensorCard;
 use crate::cards::button::ButtonCard;
 use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
+use crate::cards::group::{CoverGroupCard, LightGroupCard};
 use crate::cards::light::LightCard;
 use crate::cards::number::NumberCard;
 use crate::cards::select::SelectCard;
@@ -20,7 +21,7 @@ use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::alert_row::RecentAlerts;
 use crate::components::area_chip::AreaChip;
 use crate::components::room_title::RoomTitle;
-use crate::groups::{HomeItem, home_items, members};
+use crate::groups::{HomeItem, favorites_count, home_items};
 use crate::house::House;
 use crate::nav::HomeRoom;
 
@@ -78,25 +79,6 @@ fn chips(areas: &[AreaView], favorites: usize, counts: &BTreeMap<String, usize>)
     chips
 }
 
-/// The ids of the entities to show under `chip`, in display order. Groups are expanded into
-/// their members: Home keeps showing single cards until it renders group cards.
-fn entity_ids<'a>(
-    entities: impl Iterator<Item = &'a EntityView>,
-    areas: &[AreaView],
-    chip: &str,
-) -> Vec<String> {
-    let all: Vec<&EntityView> = entities.collect();
-    let by_id: BTreeMap<String, EntityView> =
-        all.iter().map(|e| (e.id.clone(), (*e).clone())).collect();
-    home_items(all.into_iter(), areas, chip)
-        .into_iter()
-        .flat_map(|item| match item {
-            HomeItem::Entity(id) => vec![id],
-            HomeItem::Group(key) => members(&by_id, &key).into_iter().map(|e| e.id).collect(),
-        })
-        .collect()
-}
-
 fn is_sensor_of_class(e: &EntityView, class: &str) -> bool {
     e.kind == Kind::Sensor && e.device_class.as_deref() == Some(class)
 }
@@ -143,11 +125,9 @@ pub fn HomeScreen() -> impl IntoView {
     // Memos only notify when their value changes, so a state echo leaves chips and the card list
     // alone and repaints just the one card that changed.
     let favorites = Memo::new(move |_| {
-        house.entities.with(|m| {
-            m.values()
-                .filter(|e| shows_on_home(e) && e.ui.favorite)
-                .count()
-        })
+        house
+            .areas
+            .with(|a| house.entities.with(|m| favorites_count(m.values(), a)))
     });
     let counts = Memo::new(move |_| house.entities.with(|m| home_counts(m.values())));
     let chip_list = Memo::new(move |_| {
@@ -166,11 +146,11 @@ pub fn HomeScreen() -> impl IntoView {
                 .or_else(|| list.first().map(|c| c.id.clone()))
         })
     });
-    let ids = Memo::new(move |_| {
+    let items = Memo::new(move |_| {
         current.get().map_or_else(Vec::new, |chip| {
             house
                 .areas
-                .with(|a| house.entities.with(|m| entity_ids(m.values(), a, &chip)))
+                .with(|a| house.entities.with(|m| home_items(m.values(), a, &chip)))
         })
     });
     let loaded = Memo::new(move |_| {
@@ -225,19 +205,27 @@ pub fn HomeScreen() -> impl IntoView {
             <section class="room">
                 <RoomTitle id=room name=title />
                 <Show
-                    when=move || ids.with(|v| !v.is_empty())
+                    when=move || items.with(|v| !v.is_empty())
                     fallback=|| view! { <p class="room__empty">"Nothing here yet."</p> }
                 >
                     <div class="grid grid--home">
                         <For
-                            each=move || ids.get()
-                            key=|id| id.clone()
-                            children=move |id| {
-                                // One memo per card: it only changes when this entity does.
-                                let entity = Memo::new(move |_| {
-                                    house.entities.with(|m| m.get(&id).cloned())
-                                });
-                                view! { {move || entity.get().map(card_for)} }
+                            each=move || items.get()
+                            key=|item| item.clone()
+                            children=move |item| match item {
+                                HomeItem::Entity(id) => {
+                                    // One memo per card: it only changes when this entity does.
+                                    let entity = Memo::new(move |_| {
+                                        house.entities.with(|m| m.get(&id).cloned())
+                                    });
+                                    view! { {move || entity.get().map(card_for)} }.into_any()
+                                }
+                                HomeItem::Group(key) if key.kind == GroupKind::Cover => {
+                                    view! { <CoverGroupCard key=key /> }.into_any()
+                                }
+                                HomeItem::Group(key) => {
+                                    view! { <LightGroupCard key=key /> }.into_any()
+                                }
                             }
                         />
                     </div>

@@ -2600,3 +2600,40 @@ a[aria-current="page"] .nav__glyph {
   }
 }
 /* /Energy */
+
+/* A room's group card spans the row; its header carries a count badge and its body one mini bar
+   per shutter. */
+.card--wide {
+  grid-column: 1 / -1;
+}
+
+.group__count {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-border);
+  font: var(--type-label);
+}
+
+.group__bars {
+  display: flex;
+  gap: 4px;
+  height: 24px;
+}
+
+.group__bar {
+  position: relative;
+  flex: 1;
+  max-width: 28px;
+  overflow: hidden;
+  border-radius: 4px;
+  border: 1px solid var(--chip-border);
+}
+
+.group__fill {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: var(--accent-amber);
+}

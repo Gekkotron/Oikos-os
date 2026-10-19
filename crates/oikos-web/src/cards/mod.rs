@@ -5,6 +5,7 @@ pub mod binary_sensor;
 pub mod button;
 pub mod climate;
 pub mod cover;
+pub mod group;
 pub mod light;
 pub mod number;
 pub mod select;
@@ -49,6 +50,14 @@ impl Sender {
             self.pending,
             optimistic,
         );
+    }
+
+    /// Sends `cmd` to every one of `ids` at once, with no optimistic state: a group card shows
+    /// each member's own echo.
+    pub fn send_group(&self, ids: &[String], cmd: Command) {
+        for id in ids {
+            self.send(id, cmd.clone(), None);
+        }
     }
 
     /// True while `id` has a command in flight.
