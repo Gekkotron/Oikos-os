@@ -156,6 +156,24 @@ pub fn consumer_glyph(key: Option<&str>) -> &'static str {
     }
 }
 
+/// The glyph of an Energy diagram node by its kind.
+pub fn role_icon(kind: oikos_core::energy::NodeKind) -> &'static str {
+    use oikos_core::energy::NodeKind as K;
+    match kind {
+        K::Solar => SUN,
+        K::Grid => PYLON,
+        K::Battery => BATTERY,
+        K::House => HOUSE,
+        K::Consumer | K::More => PLUG,
+        K::Water => DROP,
+    }
+}
+
+/// The glyph of a consumer node by its chosen icon; the plug when none.
+pub fn consumer_icon(icon: Option<oikos_core::energy::ConsumerIcon>) -> &'static str {
+    consumer_glyph(icon.map(oikos_core::energy::ConsumerIcon::key))
+}
+
 /// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, an
 /// hourglass for a delay and a play triangle for a command.
 pub fn node_icon(kind: &NodeKind) -> &'static str {
@@ -265,6 +283,20 @@ mod tests {
         }
         assert_eq!(sensor_icon(Some("battery")), BINARY_SENSOR);
         assert_eq!(sensor_icon(None), BINARY_SENSOR);
+    }
+
+    #[test]
+    fn role_icons_follow_the_app() {
+        use oikos_core::energy::{ConsumerIcon, NodeKind as K};
+        assert_eq!(super::role_icon(K::Solar), super::SUN);
+        assert_eq!(super::role_icon(K::Grid), super::PYLON);
+        assert_eq!(super::role_icon(K::Battery), super::BATTERY);
+        assert_eq!(super::role_icon(K::House), super::HOUSE);
+        assert_eq!(super::role_icon(K::Consumer), PLUG);
+        assert_eq!(super::role_icon(K::More), PLUG);
+        assert_eq!(super::role_icon(K::Water), super::DROP);
+        assert_eq!(super::consumer_icon(None), PLUG);
+        assert_eq!(super::consumer_icon(Some(ConsumerIcon::Oven)), super::OVEN);
     }
 
     #[test]

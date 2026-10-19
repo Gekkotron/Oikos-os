@@ -2130,3 +2130,223 @@ a[aria-current="page"] .nav__glyph {
   }
 }
 /* /Security */
+
+/* Energy */
+.energy {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.energy .room__title {
+  margin-bottom: 0;
+}
+
+.energy__subtitle {
+  margin: 0;
+  font: var(--type-body);
+  opacity: 0.7;
+}
+
+.energy__hint {
+  margin: 0;
+  color: var(--warning);
+  font: var(--type-label);
+}
+
+.energy__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.energy__empty .btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 0 16px;
+  text-decoration: none;
+}
+
+.energy-diagram {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 520px;
+  margin-inline: auto;
+  aspect-ratio: 260 / 250;
+  padding: 8px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  box-shadow: var(--shadow), inset 0 1px 0 rgb(255 255 255 / 8%);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+.energy-diagram__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.energy-edge {
+  fill: none;
+  stroke: var(--ink);
+  stroke-dasharray: 6 8;
+  stroke-linecap: round;
+  opacity: 0.9;
+  animation: energy-dash linear infinite;
+}
+
+.energy-edge--solar {
+  stroke: var(--solar);
+}
+
+.energy-edge--grid,
+.energy-edge--water {
+  stroke: var(--accent-cyan);
+}
+
+.energy-edge--battery {
+  stroke: var(--accent-mint);
+}
+
+.energy-edge--consumer {
+  stroke: var(--accent-violet);
+}
+
+.energy-edge--out {
+  animation-direction: reverse;
+}
+
+.energy-edge--idle {
+  stroke-dasharray: none;
+  opacity: 0.25;
+  animation: none;
+}
+
+@keyframes energy-dash {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+.energy-node {
+  --node: var(--ink);
+  color: var(--ink);
+}
+
+.energy-node--solar {
+  --node: var(--solar);
+}
+
+.energy-node--grid,
+.energy-node--water {
+  --node: var(--accent-cyan);
+}
+
+.energy-node--battery {
+  --node: var(--accent-mint);
+}
+
+.energy-node--consumer {
+  --node: var(--accent-violet);
+}
+
+.energy-node--click {
+  cursor: pointer;
+}
+
+.energy-node--off {
+  opacity: 0.38;
+}
+
+.energy-node__disc {
+  fill: color-mix(in srgb, var(--node) 18%, transparent);
+  stroke: var(--node);
+  stroke-width: 1;
+}
+
+.energy-node--water .energy-node__disc {
+  stroke-dasharray: 3 3;
+}
+
+.energy-node__glyph {
+  display: flex;
+  width: 20px;
+  height: 20px;
+  color: var(--node);
+}
+
+.energy-node__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+.energy-node__label,
+.energy-node__value {
+  fill: currentcolor;
+  font: var(--type-label);
+  font-size: 10px;
+}
+
+.energy-node__label {
+  opacity: 0.65;
+}
+
+.energy__more-toggle {
+  flex: none;
+  align-self: center;
+  padding: 0 16px;
+}
+
+.energy-card__total {
+  display: block;
+  font: var(--type-label);
+  opacity: 0.65;
+}
+
+.energy-card__sensors,
+.energy-more ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.energy-more__title {
+  margin: 0 0 8px;
+  font: var(--type-card-value);
+}
+
+.energy-more__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 0 var(--card-padding);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  color: var(--ink);
+  font: var(--type-body);
+  align-items: center;
+  cursor: pointer;
+}
+
+.energy-more__row:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .energy-edge {
+    animation: none;
+  }
+}
+/* /Energy */
