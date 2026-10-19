@@ -316,3 +316,44 @@ Add to `house_state.rs` tests: `alerts_changed_replaces_the_list` (apply `Alerts
   ```
   Expected: all PASS; the hub binary embeds the new `dist/`.
 - [ ] **Step 3: Commit** `docs: push alerts in the web UI` and leave the branch on `main`, unpushed (the user pushes).
+
+### Task 10: Frigate media proxy (added during execution)
+
+**Why (ledger finding):** the real history's `image_url`/`video_url` are all on `http://192.168.1.91:8971`, Frigate's login port, so the browser cannot load any snapshot or clip and every camera alert shows "Media no longer available". Spec §4.4 named this proxy as the follow-up; it is pulled in because without it the feature shows no camera picture in this house.
+
+**Files:**
+- Modify: `Cargo.toml` (reqwest features add `"stream"`), `crates/oikos-os/src/config.rs` (`FrigateConfig`, `Config.frigate`), `oikos.example.toml`, `README.md`
+- Create: `crates/oikos-os/src/media.rs` (pure URL logic + the `MediaProxy` client)
+- Modify: `crates/oikos-os/src/alerts.rs` (`AlertStore::with_media_origin`), `crates/oikos-os/src/hub.rs` (store construction, `Hub::media()`), `crates/oikos-os/src/http/api.rs` (route `/media`)
+- Test: unit tests in `media.rs` and `alerts.rs`; `crates/oikos-os/tests/config.rs`; `crates/oikos-os/tests/http.rs` with a fake Frigate server
+
+**Interfaces:**
+```rust
+// config.rs
+#[serde(default)] pub struct FrigateConfig { pub url: Option<String>, pub user: Option<String>, pub password: Option<String> } // Debug redacts password; url normalised without trailing slash
+// media.rs
+pub fn origin_of(url: &str) -> Option<String>;                 // "http://h:8971" (scheme://host[:port], lowercase host, default port dropped)
+pub fn proxied(url: &str, media_origin: &str) -> Option<String>; // Some("/api/v1/media?url=<percent-encoded url>") when same origin, else None
+pub struct MediaProxy { client: reqwest::Client, cfg: FrigateConfig, origin: String, token: tokio::sync::Mutex<Option<String>> }
+impl MediaProxy {
+    pub fn new(cfg: FrigateConfig) -> Option<Arc<MediaProxy>>;   // None when url is unset
+    /// Fetches `url` (must be on the origin, else `MediaError::Forbidden`) with the frigate_token cookie when a login is configured; passes `range` through; on 401 logs in again once.
+    pub async fn fetch(&self, url: &str, range: Option<&str>) -> Result<Upstream, MediaError>;
+}
+pub struct Upstream { pub status: u16, pub content_type: Option<String>, pub content_length: Option<String>, pub content_range: Option<String>, pub accept_ranges: Option<String>, pub body: axum::body::Body }
+pub enum MediaError { Forbidden, Unavailable(String) }
+// alerts.rs
+impl AlertStore { pub fn with_media_origin(origin: Option<String>) -> Self } // apply() rewrites image_url/video_url through `proxied` when the origin is set
+// hub.rs
+impl Hub { pub fn media(&self) -> Option<Arc<MediaProxy>> }
+// http: GET /api/v1/media?url=…  → 400 missing/invalid url, 403 other origin or no proxy, else the upstream status with the four headers and the streamed body
+```
+Login: `POST <url>/api/login` with JSON `{"user","password"}`; the token is the `frigate_token` cookie of the reply's `Set-Cookie` headers; it is cached in memory; one re-login on a 401 from the media fetch, then the 401 is passed through. Without `user`/`password` the proxy fetches with no cookie (unauthenticated port behind a configured origin).
+
+- [ ] **Step 1: Tests first.** `media.rs`: `origin_of_normalises` (`http://H:8971/x` → `http://h:8971`; `http://h:80/` → `http://h`; `https://h/` → `https://h`; `nope` → None), `proxied_only_same_origin` (same origin → `/api/v1/media?url=http%3A%2F%2Fh%3A8971%2Fapi%2Fevents%2F1%2Fsnapshot.jpg`; other port → None). `alerts.rs`: `apply_rewrites_media_on_the_frigate_origin` (image_url/video_url on the origin rewritten, an off-origin image_url untouched). `tests/config.rs`: defaults `frigate.url == None`; `OIKOS_FRIGATE__PASSWORD` stays a string and `Debug` redacts it. `tests/http.rs`: a `fake_frigate()` axum server with `POST /api/login` (checks body `{"user":"u","password":"p"}`, answers `Set-Cookie: frigate_token=tok; Path=/`), `GET /api/events/1/snapshot.jpg` (401 without `Cookie: frigate_token=tok`, else 200 `image/jpeg` body `JPEG`, echoing a `Range` header into `Content-Range: bytes 0-3/4` with 206); tests `media_proxy_logs_in_and_streams` (GET `/api/v1/media?url=<fake>/api/events/1/snapshot.jpg` → 200, content-type image/jpeg, body "JPEG"; the fake saw exactly one login), `media_proxy_passes_range_through` (206 + content-range), `media_proxy_relogs_once_on_401` (fake invalidates the token after the first fetch → second fetch gets 200 and the fake saw two logins), `media_proxy_refuses_other_origins` (403), `media_proxy_400_without_url`, `alerts_carry_proxied_media_urls` (ingest a history whose image_url is on the fake origin → `/api/v1/alerts` shows the `/api/v1/media?url=` form).
+- [ ] **Step 2: Run** `cargo test -p oikos-os media` → FAIL.
+- [ ] **Step 3: Implement** as in Interfaces; `Server::start_with(cfg: Config)` in tests/http.rs next to `start()`.
+- [ ] **Step 4: Docs**: `[frigate]` in `oikos.example.toml` and README (why the login port needs it; the web never sees the password).
+- [ ] **Step 5: Run** the full gate (fmt, clippy, workspace tests, wasm checks) → PASS.
+- [ ] **Step 6: Commit** `feat(os): proxy Frigate media with the Frigate login`.
+- [ ] **Step 7: Verify in the house**: put the Frigate `url`, `user`, `password` from the user's own setup payload into the git-ignored `oikos.toml` without printing them, rebuild the release hub, restart it, and confirm `curl -sI 'http://127.0.0.1:8080/api/v1/media?url=…'` on a real snapshot returns 200 `image/jpeg`, then a CDP screenshot of a camera alert's detail with its picture.

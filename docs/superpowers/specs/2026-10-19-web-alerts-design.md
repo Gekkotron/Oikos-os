@@ -143,6 +143,8 @@ A full screen in the sheet style of `/entity/:id` (the web has no bottom sheet).
 
 The browser loads `image_url` and `video_url` directly. This works with Frigate's unauthenticated port (5000). If the alert URLs point at Frigate's login port (8971), the browser has no session cookie and the media shows "Media no longer available". A hub-side media proxy with the Frigate login (mirroring the app's `FrigateAuth`) is a follow-up, not part of this change. Assumption, stated to the user: the alert URLs use the unauthenticated port.
 
+**Amendment (2026-10-19, during execution).** The assumption was checked against the real history: every media URL is on `http://192.168.1.91:8971`, the login port. The proxy therefore moved into this change (plan Task 10): an optional `[frigate] url / user / password` section; the hub rewrites `image_url` and `video_url` that sit on that origin to `/api/v1/media?url=<original>`; `GET /api/v1/media` fetches the original with Frigate's `frigate_token` cookie (login on `POST /api/login`, re-login once on 401, `Range` passed through so clips seek), and refuses any other origin. The browser still never sees the Frigate password. Without the section, the behaviour above (direct loading) stands.
+
 Images are not cached beyond what the browser does. No `loc`-based localisation: the web is English and shows `body` as the server wrote it.
 
 ### 4.5 Glyphs
