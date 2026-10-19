@@ -3,10 +3,11 @@
 //! and drains its publishes from the channel given to [`Hub::new`]; the HTTP layer reads it.
 
 use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use crate::alerts::{AlertStore, Applied};
+use crate::flows::FlowStore;
 use crate::media::MediaProxy;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
@@ -19,6 +20,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::clock;
 use crate::config::Config;
+pub use crate::flows::EngineRequest;
 
 /// Events kept for a slow WebSocket client before it starts missing some.
 const EVENT_CAPACITY: usize = 1024;
@@ -43,6 +45,12 @@ pub enum HubError {
     UnknownAlert(String),
     #[error("unknown action `{0}`")]
     UnknownAction(String),
+    #[error("unknown flow `{0}`")]
+    UnknownFlow(String),
+    /// The flow cannot be saved or run: it does not validate, or names something the house
+    /// does not have.
+    #[error("invalid flow: {0}")]
+    InvalidFlow(String),
 }
 
 /// The `install_id` the web sends in a reply; the app sends its own install id.
@@ -80,6 +88,13 @@ pub struct Hub {
     history_topic: String,
     responses_topic: String,
     alerts: Mutex<AlertStore>,
+    /// The retained flow definitions and their runs.
+    flow_store: Mutex<FlowStore>,
+    /// The topic prefix flows are retained under, one topic per flow id.
+    automation_prefix: String,
+    /// Requests for the flow engine; the engine takes the receiving end once.
+    engine_tx: mpsc::UnboundedSender<EngineRequest>,
+    engine_rx: Mutex<Option<mpsc::UnboundedReceiver<EngineRequest>>>,
     /// Frigate media served through the hub; `None` without a `[frigate] url`.
     media: Option<Arc<MediaProxy>>,
     confirm_timeout: Duration,
@@ -103,6 +118,7 @@ impl Hub {
         let (connection, _) = watch::channel(ConnectionStatus::Connecting);
         let media = MediaProxy::new(cfg.frigate.clone());
         let alerts = AlertStore::with_media_origin(media.as_ref().map(|m| m.origin().to_owned()));
+        let (engine_tx, engine_rx) = mpsc::unbounded_channel();
         Arc::new(Hub {
             registry: RwLock::new(registry),
             events,
@@ -113,6 +129,10 @@ impl Hub {
             history_topic: cfg.push.history_topic.clone(),
             responses_topic: cfg.push.responses_topic.clone(),
             alerts: Mutex::new(alerts),
+            flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
+            automation_prefix: cfg.topics.automation_prefix.clone(),
+            engine_tx,
+            engine_rx: Mutex::new(Some(engine_rx)),
             media,
             confirm_timeout: Duration::from_millis(cfg.commands.confirm_timeout_ms),
             subscription_debounce: Duration::from_millis(cfg.commands.subscription_debounce_ms),
@@ -126,6 +146,10 @@ impl Hub {
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
         if topic == self.history_topic {
             self.ingest_history(topic, payload);
+            return Vec::new();
+        }
+        if let Some(id) = self.flow_id_of(topic) {
+            self.ingest_flow(id, payload);
             return Vec::new();
         }
         let at = clock::now();
@@ -187,6 +211,7 @@ impl Hub {
         let connection = self.connection.borrow().clone();
         let mut snapshot = snapshot(&self.read(), connection, clock::now());
         snapshot.alerts = self.alerts();
+        snapshot.flows = self.flows();
         snapshot
     }
 
@@ -474,7 +499,7 @@ impl Hub {
     /// `Online` the publish is refused: a write accepted during an outage would show in the
     /// hub, never reach the broker and vanish at the next restart. A full queue (64 publishes
     /// already pending) is an error for the caller too, not a hang.
-    fn publish(&self, publish: Publish) -> Result<(), HubError> {
+    pub(crate) fn publish(&self, publish: Publish) -> Result<(), HubError> {
         if !matches!(*self.connection.borrow(), ConnectionStatus::Online) {
             return Err(HubError::Publish("broker offline".to_owned()));
         }
@@ -488,7 +513,7 @@ impl Hub {
         })
     }
 
-    fn broadcast(&self, event: WsEvent) {
+    pub(crate) fn broadcast(&self, event: WsEvent) {
         // An error only means nobody is listening right now.
         let _ = self.events.send(event);
     }
@@ -529,9 +554,42 @@ impl Hub {
         }
     }
 
+    /// The flow store, taken as it is when a thread panicked while holding it.
+    pub(crate) fn flow_store(&self) -> MutexGuard<'_, FlowStore> {
+        self.flow_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Asks the flow engine to do something; nobody listening is fine (no engine started).
+    pub(crate) fn send_engine(&self, request: EngineRequest) {
+        let _ = self.engine_tx.send(request);
+    }
+
+    /// The topic of flow `id`.
+    pub(crate) fn flow_topic(&self, id: &str) -> String {
+        format!("{}/{id}", self.automation_prefix)
+    }
+
+    /// The flow id when `topic` is exactly `<automation_prefix>/<id>`; deeper topics are not flows.
+    fn flow_id_of<'a>(&self, topic: &'a str) -> Option<&'a str> {
+        let id = topic
+            .strip_prefix(self.automation_prefix.as_str())?
+            .strip_prefix('/')?;
+        (!id.is_empty() && !id.contains('/')).then_some(id)
+    }
+
+    /// The receiving end of the engine requests, handed out once.
+    pub fn take_engine_requests(&self) -> Option<mpsc::UnboundedReceiver<EngineRequest>> {
+        self.engine_rx
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+    }
+
     /// A poisoned lock means a thread panicked while holding it; the registry never panics on
     /// a hostile payload, so the state is taken as it is and the fact is logged.
-    fn read(&self) -> RwLockReadGuard<'_, Registry> {
+    pub(crate) fn read(&self) -> RwLockReadGuard<'_, Registry> {
         self.registry.read().unwrap_or_else(|poisoned| {
             tracing::error!("registry lock was poisoned; continuing with its last state");
             poisoned.into_inner()

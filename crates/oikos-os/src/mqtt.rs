@@ -233,7 +233,8 @@ async fn outbound(
     }
 }
 
-/// The wildcards that are always subscribed: discovery, the Z2M bridge and the UI sub-tree.
+/// The wildcards that are always subscribed: discovery, the Z2M bridge, the UI sub-tree, the
+/// flow definitions and the push history.
 fn static_filters(topics: &TopicsConfig, push: &PushConfig) -> BTreeSet<String> {
     topics
         .discovery_prefixes
@@ -242,6 +243,7 @@ fn static_filters(topics: &TopicsConfig, push: &PushConfig) -> BTreeSet<String> 
         .chain([
             format!("{}/bridge/#", topics.z2m_base),
             format!("{}/#", topics.ui_prefix),
+            format!("{}/#", topics.automation_prefix),
             push.history_topic.clone(),
         ])
         .collect()
