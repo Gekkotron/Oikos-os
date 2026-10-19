@@ -1,5 +1,6 @@
 //! The hub's flow engine: the store of decoded definitions and their run history.
 
+pub mod engine;
 mod hub;
 mod store;
 

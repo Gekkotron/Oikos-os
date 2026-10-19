@@ -26,6 +26,7 @@ async fn main() -> anyhow::Result<ExitCode> {
 
             let (publish_tx, publish_rx) = mpsc::channel(PUBLISH_QUEUE);
             let hub = Hub::new(&cfg, publish_tx);
+            let engine = hub.start_engine();
             let (link, mut link_task) = mqtt::start(
                 cfg.mqtt.clone(),
                 cfg.topics.clone(),
@@ -48,6 +49,7 @@ async fn main() -> anyhow::Result<ExitCode> {
             } else {
                 link_task.abort();
             }
+            engine.abort();
             http_task.abort();
             tracing::info!("stopped");
             Ok(ExitCode::SUCCESS)

@@ -1,6 +1,10 @@
 //! The flow side of the hub: ingesting retained definitions, the writers behind the REST and
 //! MCP flow tools, and the run bookkeeping the engine reports through.
 
+use std::sync::Arc;
+
+use tokio::task::JoinHandle;
+
 use oikos_api::{FlowView, RunStatus, RunView, StepView, TriggerInfo, WsEvent};
 use oikos_core::command::{Publish, map_command};
 use oikos_core::flow::{Flow, NodeKind, Scalar, validate};
@@ -205,5 +209,19 @@ impl Hub {
         self.ingest_flow(&flow.id, payload.as_bytes());
         self.flow(&flow.id)
             .ok_or_else(|| HubError::UnknownFlow(flow.id.clone()))
+    }
+}
+
+impl Hub {
+    /// Starts the flow engine on the runtime. The event subscription is taken before the task
+    /// spawns so nothing ingested right after this call is missed. A second call logs a warning
+    /// and returns an already finished handle: the request receiver can be taken only once.
+    pub fn start_engine(self: &Arc<Self>) -> JoinHandle<()> {
+        let Some(requests) = self.take_engine_requests() else {
+            tracing::warn!("the flow engine was already started");
+            return tokio::spawn(async {});
+        };
+        let events = self.subscribe();
+        tokio::spawn(super::engine::run_with(Arc::clone(self), events, requests))
     }
 }

@@ -33,4 +33,5 @@ tracing-subscriber.workspace = true
 assert_cmd.workspace = true
 figment = { workspace = true, features = ["test"] }
 rmcp = { workspace = true, features = ["transport-child-process"] }
+tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite.workspace = true
