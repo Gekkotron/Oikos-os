@@ -1932,6 +1932,7 @@ dependencies = [
  "futures-util",
  "gloo-net",
  "gloo-timers",
+ "js-sys",
  "leptos",
  "leptos_router",
  "oikos-api",

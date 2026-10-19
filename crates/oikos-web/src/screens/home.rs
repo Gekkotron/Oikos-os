@@ -16,6 +16,7 @@ use crate::cards::sensor::SensorCard;
 use crate::cards::switch::SwitchCard;
 use crate::cards::vacuum::VacuumCard;
 use crate::cards::water_heater::WaterHeaterCard;
+use crate::components::alert_row::RecentAlerts;
 use crate::components::area_chip::AreaChip;
 use crate::house::House;
 
@@ -169,6 +170,7 @@ pub fn HomeScreen() -> impl IntoView {
                     </div>
                 </Show>
             </section>
+            <RecentAlerts />
         </Show>
     }
 }

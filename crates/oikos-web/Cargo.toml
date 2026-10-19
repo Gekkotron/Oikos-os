@@ -18,6 +18,7 @@ console_error_panic_hook.workspace = true
 futures-util.workspace = true
 gloo-net.workspace = true
 gloo-timers.workspace = true
+js-sys.workspace = true
 leptos.workspace = true
 leptos_router.workspace = true
 oikos-api = { path = "../oikos-api" }

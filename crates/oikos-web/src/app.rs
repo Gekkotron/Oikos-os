@@ -5,6 +5,7 @@ use leptos_router::components::{A, Route, Router, Routes};
 use leptos_router::path;
 
 use crate::commands::Pending;
+use crate::components::now::install_now;
 use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
@@ -30,6 +31,7 @@ pub fn App() -> impl IntoView {
     let toasts = Toasts::new();
     provide_context(toasts);
     provide_context(Pending::new());
+    provide_context(install_now());
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
     Effect::new(move |_| {
         if let Some((id, reason)) = house.command_failed.get() {
