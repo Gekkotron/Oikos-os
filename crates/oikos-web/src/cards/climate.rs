@@ -1,4 +1,5 @@
-//! The climate card: current and target temperature, step buttons, mode and fan selects.
+//! The climate card, centred: the room temperature large, the target between step buttons, then
+//! the mode and fan pickers side by side.
 
 use leptos::prelude::*;
 use oikos_api::EntityView;
@@ -6,7 +7,7 @@ use oikos_core::model::{ClimateState, Command, EntityState, StateValue};
 
 use super::{ModeSelect, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::{degrees, display_value};
+use crate::format::{degrees, word};
 
 const DEFAULT_STEP: f64 = 0.5;
 
@@ -40,18 +41,17 @@ fn with_climate(state: &EntityState, f: impl FnOnce(&mut ClimateState)) -> Optio
 #[component]
 pub fn ClimateCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let label = display_value(&entity.state, entity.unit.as_deref());
-    let target_text = degrees(
-        match &entity.state.value {
-            StateValue::Climate(c) => c.target,
-            _ => None,
-        },
-        entity.unit.as_deref(),
-    );
-    let (target, mode, fan) = match &entity.state.value {
-        StateValue::Climate(c) => (c.target, c.mode.clone(), c.fan_mode.clone()),
-        _ => (None, None, None),
+    let (current, target, mode, fan) = match &entity.state.value {
+        StateValue::Climate(c) => (c.current, c.target, c.mode.clone(), c.fan_mode.clone()),
+        _ => (None, None, None, None),
     };
+    let unit = entity.unit.as_deref();
+    // The room temperature, or the mode when the unit reports none.
+    let now_text = match (current, mode.as_deref()) {
+        (None, Some(mode)) => word(mode),
+        _ => degrees(current, unit),
+    };
+    let target_text = degrees(target, unit);
     let caps = &entity.capabilities;
 
     let on_step = {
@@ -74,7 +74,7 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
             let guess = with_climate(&state, |c| c.mode = Some(picked.clone()));
             sender.send(&id, Command::SetHvacMode { mode: picked }, guess);
         });
-        view! { <ModeSelect label="Mode" options=caps.hvac_modes.clone() selected=mode on_select=on_select /> }
+        view! { <ModeSelect label="Mode" options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
     });
     let fan_select = (!caps.fan_modes.is_empty()).then(|| {
         let id = entity.id.clone();
@@ -83,16 +83,18 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
             let guess = with_climate(&state, |c| c.fan_mode = Some(picked.clone()));
             sender.send(&id, Command::SetFanMode { mode: picked }, guess);
         });
-        view! { <ModeSelect label="Fan" options=caps.fan_modes.clone() selected=fan on_select=on_select /> }
+        view! { <ModeSelect label="Fan" options=caps.fan_modes.clone() selected=fan on_select=on_select captioned=true /> }
     });
 
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
-            <span class="card__value">{label}</span>
-            <Stepper label=target_text can_step=target.is_some() on_step=on_step />
-            <div class="card__controls card__controls--stack">{mode_select}{fan_select}</div>
+            <div class="thermo">
+                <span class="thermo__now">{now_text}</span>
+                <Stepper label=target_text caption="Target" can_step=target.is_some() on_step=on_step />
+                <div class="thermo__picks">{mode_select}{fan_select}</div>
+            </div>
         </CardFrame>
     }
 }

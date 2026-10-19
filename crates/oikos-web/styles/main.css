@@ -742,15 +742,110 @@ a[aria-current="page"] .nav__glyph {
   gap: 4px;
 }
 
+.stepper .btn--round {
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  line-height: 1;
+}
+
 .stepper__value {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  align-items: center;
   font: var(--type-card-value);
-  font-size: 14px;
+  font-size: 16px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
+}
+
+.stepper__caption {
+  font: var(--type-label);
+  opacity: 0.65;
+}
+
+/* Climate and water heater cards: everything centred under the header */
+.thermo {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.thermo__now {
+  font-size: 34px;
+  line-height: 40px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.thermo__picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+  gap: 8px;
+}
+
+.thermo__picks:empty {
+  display: none;
+}
+
+/* A select with its caption above the value, both inside one pill */
+.pick {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 52px;
+  padding: 4px 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--chip-border);
+  border-radius: 18px;
+  background: var(--card-bg);
+  cursor: pointer;
+}
+
+.pick:focus-within {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 2px;
+}
+
+.pick__caption {
+  font: var(--type-label);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.pick__select {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font: var(--type-body);
+  font-weight: 600;
+  text-align: center;
+  text-align-last: center;
+  text-overflow: ellipsis;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.pick__select option {
+  color: var(--ink);
+  background: var(--bg);
 }
 
 .select,

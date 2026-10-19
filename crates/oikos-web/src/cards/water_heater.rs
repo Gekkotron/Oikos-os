@@ -61,16 +61,18 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
             let guess = with_water_heater(&state, |w| w.mode = Some(picked.clone()));
             sender.send(&id, Command::SetHvacMode { mode: picked }, guess);
         });
-        view! { <ModeSelect label="Mode" options=caps.hvac_modes.clone() selected=mode on_select=on_select /> }
+        view! { <ModeSelect label="Mode" options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
     });
 
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
-            <span class="card__value">{label}</span>
-            <Stepper label=target_text can_step=target.is_some() on_step=on_step />
-            <div class="card__controls card__controls--stack">{mode_select}</div>
+            <div class="thermo">
+                <span class="thermo__now">{label}</span>
+                <Stepper label=target_text caption="Target" can_step=target.is_some() on_step=on_step />
+                <div class="thermo__picks">{mode_select}</div>
+            </div>
         </CardFrame>
     }
 }

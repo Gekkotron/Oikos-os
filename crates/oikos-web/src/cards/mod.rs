@@ -81,12 +81,13 @@ pub fn PowerToggle(
 }
 
 /// A value readout between `−` and `+` step buttons. The buttons are disabled when there is
-/// nothing to step from; `on_step` receives `-1.0` or `1.0`.
+/// nothing to step from; `on_step` receives `-1.0` or `1.0`. `caption` names the value above it.
 #[component]
 pub fn Stepper(
     #[prop(into)] label: String,
     can_step: bool,
     on_step: Callback<f64>,
+    #[prop(optional)] caption: Option<&'static str>,
 ) -> impl IntoView {
     view! {
         <div class="stepper">
@@ -99,7 +100,10 @@ pub fn Stepper(
             >
                 "−"
             </button>
-            <span class="stepper__value">{label}</span>
+            <span class="stepper__value">
+                {caption.map(|c| view! { <span class="stepper__caption">{c}</span> })}
+                {label}
+            </span>
             <button
                 type="button"
                 class="btn btn--round"
@@ -113,13 +117,15 @@ pub fn Stepper(
     }
 }
 
-/// A labelled `<select>` over `options`; `on_select` receives the picked option.
+/// A labelled `<select>` over `options`; `on_select` receives the picked option. `captioned`
+/// shows the label above the value, inside the pill, instead of leaving it to screen readers.
 #[component]
 pub fn ModeSelect(
     #[prop(into)] label: String,
     options: Vec<String>,
     selected: Option<String>,
     on_select: Callback<String>,
+    #[prop(optional)] captioned: bool,
 ) -> impl IntoView {
     let items = options
         .into_iter()
@@ -129,13 +135,22 @@ pub fn ModeSelect(
             view! { <option value=option selected=is_selected>{text}</option> }
         })
         .collect_view();
+    let on_change = move |ev| on_select.run(event_target_value(&ev));
+    if captioned {
+        return view! {
+            <label class="pick">
+                <span class="pick__caption">{label}</span>
+                <select class="pick__select" on:change=on_change>
+                    {items}
+                </select>
+            </label>
+        }
+        .into_any();
+    }
     view! {
-        <select
-            class="select"
-            aria-label=label
-            on:change=move |ev| on_select.run(event_target_value(&ev))
-        >
+        <select class="select" aria-label=label on:change=on_change>
             {items}
         </select>
     }
+    .into_any()
 }
