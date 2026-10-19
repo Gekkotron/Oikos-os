@@ -18,7 +18,7 @@ use super::params::{
 };
 use super::{OikosMcp, ToolError};
 
-type ToolResult<T> = Result<Json<T>, ToolError>;
+pub(super) type ToolResult<T> = Result<Json<T>, ToolError>;
 
 #[tool_router(vis = "pub(super)")]
 impl OikosMcp {
@@ -229,7 +229,7 @@ impl OikosMcp {
 }
 
 /// Every write tool leaves a trace of what was asked, minus any alarm code.
-fn log_write<P: Serialize>(tool: &'static str, params: &P) {
+pub(super) fn log_write<P: Serialize>(tool: &'static str, params: &P) {
     tracing::info!(tool, args = %logged_args(params), "mcp write");
 }
 

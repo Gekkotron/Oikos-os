@@ -33,10 +33,14 @@ pub struct Flow {
     /// A disabled flow keeps its definition but never runs. Defaults to `true`.
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// `single` (the default) ignores a trigger while a run is active; `restart` cancels the
+    /// active run and starts a new one, which is how to express "N minutes after the last event".
     #[serde(default)]
     pub mode: FlowMode,
+    /// The steps; exactly the `trigger.state` nodes start a run.
     #[serde(default)]
     pub nodes: Vec<Node>,
+    /// The connections between nodes, followed from a trigger onwards.
     #[serde(default)]
     pub edges: Vec<Edge>,
     /// Fields this hub does not know, preserved verbatim.
@@ -160,7 +164,7 @@ impl NodeKind {
 pub struct TriggerStateParams {
     /// Entity id (from `search` / `list_entities`).
     pub entity: String,
-    /// Only trigger when the new value equals this.
+    /// Only trigger when the new value equals this (a JSON value such as `true`, `"ON"`, `21.5`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<Value>,
     /// Only trigger when the previous value equalled this.
@@ -174,10 +178,11 @@ pub struct TriggerStateParams {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct IfParams {
+    /// How the value is compared with `value`: `eq`, `ne`, `gt`, `lt`, `gte` or `lte`.
     pub op: Op,
     /// The constant the value is compared with.
     pub value: Value,
-    /// The entity to read; the trigger's value when absent.
+    /// The entity whose current value is read; when absent the value that fired the trigger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entity: Option<String>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
@@ -199,7 +204,9 @@ pub struct DelayParams {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct CommandParams {
+    /// The entity to command (an id from `search` / `list_entities`).
     pub entity: String,
+    /// The command, the same JSON as `send_command`'s, e.g. `{"type": "turn_on"}`.
     pub command: Command,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
@@ -209,8 +216,12 @@ pub struct CommandParams {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct Edge {
+    /// The id of the source node.
     pub from: String,
+    /// The id of the node that runs next.
     pub to: String,
+    /// `true` or `false` for an edge leaving an `if`, which requires it; absent for every
+    /// other node.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub port: Option<String>,
 }

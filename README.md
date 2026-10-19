@@ -81,7 +81,7 @@ Errors are `{"error": "…"}` with 400 (bad patch), 404 (unknown entity or route
 
 ## MCP
 
-The MCP server at `http://<host>:8080/mcp` (streamable HTTP) offers eleven tools and one resource:
+The MCP server at `http://<host>:8080/mcp` (streamable HTTP) offers seventeen tools and one resource:
 
 - `bridge_info` — the Zigbee2MQTT bridge and the state of the link to the broker.
 - `list_areas` — the rooms, each with its entity count and the count of entities shown by default (`primary_count`).
@@ -94,6 +94,12 @@ The MCP server at `http://<host>:8080/mcp` (streamable HTTP) offers eleven tools
 - `send_command` — publishes a command and reports `accepted` once the device echoes the change.
 - `search` — devices (name, model, vendor) and entities (name, id, or belonging to a matching device) containing the query.
 - `list_ignored` — the discovery topics that did not become an entity, with the reason.
+- `list_flows` — the automations (flows) with name, enabled state, node count and latest run.
+- `get_flow` — one flow with its definition and recent runs.
+- `set_flow` — creates or replaces a flow (`trigger.state`, `if`, `delay` and `command` nodes; `mode: restart` for "N minutes after the last …"), validated against the house.
+- `delete_flow` — removes a flow.
+- `set_flow_enabled` — turns a flow on or off.
+- `run_flow` — starts a manual run of a flow.
 - Resource `oikos://snapshot` — the whole house as one JSON document.
 
 A failed tool call answers in-band (`isError: true` with the reason) so the assistant can retry with better arguments.

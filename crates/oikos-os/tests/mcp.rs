@@ -40,7 +40,20 @@ const EXPECTED_TOOLS: &[&str] = &[
     "send_command",
     "search",
     "list_ignored",
+    "list_flows",
+    "get_flow",
+    "set_flow",
+    "delete_flow",
+    "set_flow_enabled",
+    "run_flow",
 ];
+
+const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
+const LED_TOPIC: &str = "oikos/light/0x60a423fffe94d1c6/light/config";
+const LED_FIXTURE: &str = "discovery/light__0x60a423fffe94d1c6__light.json";
+const MOTION_ID: &str = "0x00158d008b5a2d65_occupancy_zigbee2mqtt";
+const MOTION_TOPIC: &str = "oikos/binary_sensor/0x00158d008b5a2d65/occupancy/config";
+const MOTION_FIXTURE: &str = "discovery/binary_sensor__0x00158d008b5a2d65__occupancy.json";
 
 fn fixtures() -> PathBuf {
     PathBuf::from(concat!(
@@ -81,6 +94,16 @@ impl Server {
             publisher,
             addr,
         }
+    }
+
+    /// A [`Server::start`] hub that also knows the LED and the motion sensor, with the broker
+    /// link up, so flows can be written. (A separate constructor: the other tests count entities.)
+    async fn start_with_flows() -> Server {
+        let server = Server::start().await;
+        server.hub.ingest(LED_TOPIC, &fixture(LED_FIXTURE));
+        server.hub.ingest(MOTION_TOPIC, &fixture(MOTION_FIXTURE));
+        server.online();
+        server
     }
 
     /// Marks the broker link up, so the hub's writers publish.
@@ -528,6 +551,158 @@ async fn send_command_search_areas_and_the_small_tools() {
         &call(&client, "list_ignored", json!({})).await,
     );
     assert!(ignored["ignored"].is_array());
+
+    client.cancel().await.expect("close");
+}
+
+/// The reference automation: LED on at motion, off five minutes after the last motion.
+fn reference_flow() -> Value {
+    json!({
+        "id": "living", "name": "Living LED on motion", "enabled": true, "mode": "restart",
+        "nodes": [
+            { "id": "motion", "type": "trigger.state", "params": { "entity": MOTION_ID } },
+            { "id": "moving", "type": "if", "params": { "op": "eq", "value": true } },
+            { "id": "on", "type": "command",
+              "params": { "entity": LED_ID, "command": { "type": "turn_on" } } },
+            { "id": "wait", "type": "delay", "params": { "for": "5m" } },
+            { "id": "off", "type": "command",
+              "params": { "entity": LED_ID, "command": { "type": "turn_off" } } }
+        ],
+        "edges": [
+            { "from": "motion", "to": "moving" },
+            { "from": "moving", "port": "true", "to": "on" },
+            { "from": "moving", "port": "false", "to": "wait" },
+            { "from": "wait", "to": "off" }
+        ]
+    })
+}
+
+#[tokio::test]
+async fn set_flow_then_get_and_list() {
+    let server = Server::start_with_flows().await;
+    let client = server.client().await;
+
+    let set = json_of(
+        "set_flow",
+        &call(&client, "set_flow", json!({ "flow": reference_flow() })).await,
+    );
+    assert_eq!(set["definition"]["id"], "living");
+    assert_eq!(set["invalid"], Value::Null);
+
+    let got = json_of(
+        "get_flow",
+        &call(&client, "get_flow", json!({ "id": "living" })).await,
+    );
+    assert_eq!(got["definition"]["name"], "Living LED on motion");
+
+    let list = json_of("list_flows", &call(&client, "list_flows", json!({})).await);
+    let flows = list["flows"].as_array().expect("flows");
+    assert_eq!(flows.len(), 1);
+    assert_eq!(flows[0]["id"], "living");
+    assert_eq!(flows[0]["enabled"], true);
+    assert_eq!(flows[0]["nodes"], 5);
+    assert_eq!(flows[0]["last_run"], Value::Null);
+
+    let missing = call(&client, "get_flow", json!({ "id": "nope" })).await;
+    assert_eq!(missing.is_error, Some(true));
+    assert!(
+        text_of(&missing).contains("unknown flow"),
+        "{}",
+        text_of(&missing)
+    );
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn set_flow_reports_validation_in_band() {
+    let server = Server::start_with_flows().await;
+    let client = server.client().await;
+
+    let mut flow = reference_flow();
+    flow["edges"][1] = json!({ "from": "moving", "to": "on" });
+    let result = call(&client, "set_flow", json!({ "flow": flow })).await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(text_of(&result).contains("port"), "{}", text_of(&result));
+    assert!(server.hub.flow("living").is_none());
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn set_flow_enabled_and_run_flow() {
+    let server = Server::start_with_flows().await;
+    let client = server.client().await;
+    json_of(
+        "set_flow",
+        &call(&client, "set_flow", json!({ "flow": reference_flow() })).await,
+    );
+
+    let off = json_of(
+        "set_flow_enabled",
+        &call(
+            &client,
+            "set_flow_enabled",
+            json!({ "id": "living", "enabled": false }),
+        )
+        .await,
+    );
+    assert_eq!(off["definition"]["enabled"], false);
+    let refused = call(&client, "run_flow", json!({ "id": "living" })).await;
+    assert_eq!(refused.is_error, Some(true));
+    assert!(
+        text_of(&refused).contains("disabled"),
+        "{}",
+        text_of(&refused)
+    );
+
+    let on = json_of(
+        "set_flow_enabled",
+        &call(
+            &client,
+            "set_flow_enabled",
+            json!({ "id": "living", "enabled": true }),
+        )
+        .await,
+    );
+    assert_eq!(on["definition"]["enabled"], true);
+    let run = json_of(
+        "run_flow",
+        &call(&client, "run_flow", json!({ "id": "living" })).await,
+    );
+    assert_eq!(run["flow_id"], "living");
+    assert_eq!(run["status"], "running");
+
+    let list = json_of("list_flows", &call(&client, "list_flows", json!({})).await);
+    assert_eq!(list["flows"][0]["last_run"]["status"], "running");
+    assert!(list["flows"][0]["last_run"]["started_at"].is_u64());
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn delete_flow() {
+    let mut server = Server::start_with_flows().await;
+    let client = server.client().await;
+    json_of(
+        "set_flow",
+        &call(&client, "set_flow", json!({ "flow": reference_flow() })).await,
+    );
+    while server.publisher.try_recv().is_ok() {}
+
+    let deleted = json_of(
+        "delete_flow",
+        &call(&client, "delete_flow", json!({ "id": "living" })).await,
+    );
+    assert_eq!(deleted, json!({ "id": "living" }));
+    let published = server.publisher.try_recv().expect("retained clear");
+    assert_eq!(published.topic, "oikos/automation/living");
+    assert!(published.payload.is_empty() && published.retain);
+    let list = json_of("list_flows", &call(&client, "list_flows", json!({})).await);
+    assert_eq!(list["flows"].as_array().map(Vec::len), Some(0));
+
+    let again = call(&client, "delete_flow", json!({ "id": "living" })).await;
+    assert_eq!(again.is_error, Some(true));
 
     client.cancel().await.expect("close");
 }

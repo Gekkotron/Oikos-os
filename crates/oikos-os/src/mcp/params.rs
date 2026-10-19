@@ -3,7 +3,9 @@
 
 use oikos_api::{
     AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView, OverridePatch,
+    RunStatus,
 };
+use oikos_core::flow::Flow;
 use oikos_core::model::{Area, Command, Kind, UiOverride};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -159,6 +161,110 @@ pub struct IgnoredList {
     pub ignored: Vec<IgnoredView>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetFlowParams {
+    /// The flow id, as `list_flows` returns it.
+    pub id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SetFlowParams {
+    /// The whole flow; it replaces any flow with the same `id` (retained on
+    /// `oikos/automation/<id>`) and is checked before it is saved, so a refusal names what to
+    /// fix. Fields: `id` (1 to 64 characters of `a-z`, `0-9`, `_` and `-`), `name` (free text),
+    /// `description` (optional), `enabled` (default `true`; a disabled flow is kept but never
+    /// runs), `mode`, `nodes` and `edges`.
+    ///
+    /// `mode` is `single` (the default: a trigger that fires while a run is active is ignored)
+    /// or `restart` (it cancels the active run and starts over). Use `restart` for "N minutes
+    /// after the last ..." (motion, door, button): each new trigger restarts the wait, so the
+    /// final action only happens once the events stop.
+    ///
+    /// Each node is `{"id": "<unique in the flow>", "type": "<type>", "params": {...}}` with an
+    /// optional `name` label. The four types:
+    ///
+    /// - `trigger.state` starts a run when an entity's state changes. params: `entity` (an id
+    ///   from `search` or `list_entities`), optional `to` (only when the new value equals it)
+    ///   and `from` (only when the previous value equalled it), as JSON values such as `true`,
+    ///   `"ON"` or `21.5`. A flow needs at least one trigger, and the run carries that entity's
+    ///   new value.
+    /// - `if` branches on a comparison. params: `op` (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`),
+    ///   `value` (the constant to compare with) and optional `entity`. Without `entity` it
+    ///   compares the triggering entity's live value, the one that fired the run; with it, that
+    ///   entity's current value. It has two output ports, `true` and `false`.
+    /// - `delay` waits. params: `for`, a duration such as `90s`, `5m` or `1h30m` (units `s`, `m`,
+    ///   `h`, combined without spaces).
+    /// - `command` sends a command to an entity. params: `entity` (an id) and `command`, the same
+    ///   JSON as `send_command`'s, e.g. `{"type": "turn_on", "brightness": 200}` or
+    ///   `{"type": "turn_off"}`. The entity must exist and support the command.
+    ///
+    /// `edges` is a list of `{"from": "<node id>", "to": "<node id>"}` followed from a trigger.
+    /// An edge leaving an `if` must also carry `"port": "true"` or `"port": "false"` (the branch
+    /// it belongs to; omit a branch to do nothing there); edges leaving any other node have no
+    /// `port`.
+    ///
+    /// Example, LED on at motion and off five minutes after the last motion: `mode: "restart"`,
+    /// nodes `motion` (`trigger.state`, entity the sensor), `moving` (`if`, `op: "eq"`,
+    /// `value: true`), `on` (`command`, `turn_on`), `wait` (`delay`, `for: "5m"`) and `off`
+    /// (`command`, `turn_off`); edges `motion` to `moving`, `moving` port `true` to `on`,
+    /// `moving` port `false` to `wait`, `wait` to `off`.
+    pub flow: Flow,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteFlowParams {
+    /// The flow id, as `list_flows` returns it.
+    pub id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SetFlowEnabledParams {
+    /// The flow id, as `list_flows` returns it.
+    pub id: String,
+    /// `true` lets the flow run; `false` keeps it saved but stops it from running.
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RunFlowParams {
+    /// The flow id, as `list_flows` returns it.
+    pub id: String,
+}
+
+/// The flows, one summary each; `get_flow` has the definition and the run history.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FlowList {
+    pub flows: Vec<FlowSummary>,
+}
+
+/// One flow in a list.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FlowSummary {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    /// Why the flow cannot run, when it cannot (a stored flow that no longer validates).
+    pub invalid: Option<String>,
+    /// How many nodes the flow has.
+    pub nodes: usize,
+    /// The most recent run; `None` when the flow never ran.
+    pub last_run: Option<LastRun>,
+}
+
+/// How the latest run of a flow went.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LastRun {
+    pub status: RunStatus,
+    /// Unix seconds.
+    pub started_at: u64,
+}
+
+/// The id of a flow that `delete_flow` removed.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Deleted {
+    pub id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +295,28 @@ mod tests {
             Include::All
         );
         assert!(serde_json::from_str::<Include>("\"All\"").is_err());
+    }
+
+    /// The `flow` documentation is written by hand: it must name every node type, both `if`
+    /// ports and both modes, since it is all an assistant reads before writing a flow.
+    #[test]
+    fn set_flow_doc_names_every_node_type_and_mode() {
+        let schema = schemars::schema_for!(SetFlowParams);
+        let description = schema.as_value()["properties"]["flow"]["description"]
+            .as_str()
+            .expect("flow is documented")
+            .to_owned();
+        for needle in [
+            "trigger.state",
+            "if",
+            "delay",
+            "command",
+            "restart",
+            "single",
+            "true",
+            "false",
+        ] {
+            assert!(description.contains(needle), "`{needle}` is missing");
+        }
     }
 }

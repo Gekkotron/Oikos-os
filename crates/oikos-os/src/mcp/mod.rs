@@ -1,9 +1,10 @@
-//! The MCP server: eleven tools and the `oikos://snapshot` resource over the hub, served at
+//! The MCP server: seventeen tools and the `oikos://snapshot` resource over the hub, served at
 //! `/mcp` over streamable HTTP with stateful sessions, and the stdio proxy in front of it.
 //!
 //! A failed tool call is answered in-band (`isError: true` with the reason as text) rather
 //! than as a JSON-RPC error, so the assistant reads why and retries with better arguments.
 
+mod flow_tools;
 mod params;
 mod stdio_proxy;
 mod tools;
@@ -40,7 +41,7 @@ impl OikosMcp {
     pub fn new(hub: Arc<Hub>) -> Self {
         Self {
             hub,
-            tool_router: Self::tool_router(),
+            tool_router: Self::tool_router() + Self::flow_tool_router(),
         }
     }
 }
@@ -121,7 +122,16 @@ fn instructions() -> String {
          `null` clears a field) and `clear_override` removes it. `send_command` publishes to \
          the device and reports `accepted: true` once the next state echo confirms it, or \
          `accepted: false` with the reason. The `oikos://snapshot` resource is the whole house \
-         as one JSON document.",
+         as one JSON document. Automations are flows: `list_flows` and `get_flow` read them, \
+         `set_flow` creates or replaces one (validated against the house, saved retained on \
+         `<automation_prefix>/<id>`, `oikos/automation/<id>` by default), `set_flow_enabled` \
+         switches it and `delete_flow` removes it; `run_flow` starts a manual run. A flow is a \
+         graph of four node types: `trigger.state` (an entity's state changes), `if` (compares \
+         a value; edges leaving it name the port `true` or `false`), `delay` (`5m`, `1h30m`) \
+         and `command` (the same JSON as `send_command`). Entity ids come from `search` or \
+         `list_entities`. For \"N minutes after the last motion\" use `mode: restart`, so \
+         every new trigger restarts the wait; the default `single` ignores triggers while a \
+         run is active.",
         fields = UiOverride::FIELDS.join(", ")
     )
 }
@@ -205,5 +215,13 @@ mod tests {
         }
         assert!(text.contains("lightOnBrightness"));
         assert!(text.contains(SNAPSHOT_URI));
+    }
+
+    #[test]
+    fn instructions_mention_flows() {
+        let text = instructions();
+        for needle in ["set_flow", "restart", "oikos/automation", "run_flow"] {
+            assert!(text.contains(needle), "{needle} missing");
+        }
     }
 }

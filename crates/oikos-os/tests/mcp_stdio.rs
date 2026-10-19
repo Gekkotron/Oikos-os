@@ -35,6 +35,12 @@ const EXPECTED_TOOLS: &[&str] = &[
     "send_command",
     "search",
     "list_ignored",
+    "list_flows",
+    "get_flow",
+    "set_flow",
+    "delete_flow",
+    "set_flow_enabled",
+    "run_flow",
 ];
 
 fn fixtures() -> PathBuf {
