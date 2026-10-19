@@ -205,14 +205,27 @@ pub fn AlertDetailScreen() -> impl IntoView {
             .alerts
             .with(|a| a.iter().find(|a| a.id == wanted).cloned())
     });
+    // Before the snapshot arrives the list is empty for a moment; a deep link or a reload must
+    // not flash "no longer available" then (same guard as the entity sheet).
+    let loaded = Memo::new(move |_| {
+        house.alerts.with(|a| !a.is_empty())
+            || matches!(house.connection.get(), oikos_api::ConnectionStatus::Online)
+    });
     view! {
         <div class="sheet alert-detail">
             {move || match alert.get() {
                 Some(alert) => view! { <DetailBody alert=alert /> }.into_any(),
-                None => {
+                None if loaded.get() => {
                     view! {
                         {back_header(None)}
                         <p class="alerts__empty">"This alert is no longer available"</p>
+                    }
+                        .into_any()
+                }
+                None => {
+                    view! {
+                        {back_header(None)}
+                        <div class="alert-media alert-media--skeleton" aria-busy="true"></div>
                     }
                         .into_any()
                 }

@@ -374,6 +374,11 @@ body {
   box-shadow: none;
 }
 
+.alert-media--skeleton {
+  animation: skeleton-pulse 1.4s var(--ease) infinite alternate;
+  box-shadow: none;
+}
+
 @keyframes skeleton-pulse {
   from {
     opacity: 0.35;
