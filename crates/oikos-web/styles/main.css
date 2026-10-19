@@ -2174,8 +2174,9 @@ a[aria-current="page"] .nav__glyph {
   width: 100%;
   max-width: 520px;
   margin-inline: auto;
-  aspect-ratio: 260 / 250;
-  padding: 8px;
+  /* Taller than the 260 × 250 drawing: the bottom-left node's labels hang below the viewBox. */
+  aspect-ratio: 260 / 272;
+  padding: 8px 8px 28px;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-card);
   background: var(--card-bg);

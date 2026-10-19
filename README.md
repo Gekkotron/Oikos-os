@@ -135,7 +135,9 @@ The web UI is a Leptos app that runs in the browser as wasm, built with Trunk. T
 
 Screens:
 
-- Home: room chips to filter by area, and one card per entity kind.
+- Home: room chips to filter by area, and one card per entity kind. Home follows the app's placement rule: an entity with an energy role or shown on Security leaves Home unless its override pins it (`homePinned`), and the chips count what Home shows.
+- Energy (`/energy`): the live power flow as in the app. Solar on top, the house in the centre, the grid on the left, consumers on an arc to the right, the battery or the water meter bottom-left; lines thicken and run faster with power and follow import or export. Under the diagram, one card per node with the live value and the lifetime kWh of its paired energy counter. Roles come from the `energyRole` override (`solar`, `grid`, `grid_export`, `battery`, `house`, `consumer`, `water`), set from the entity sheet or over MCP.
+- Security (`/security`): the alarm panel as a hero card (arm modes, Disarm, inline code when the panel asks for one), the opted-in actions (`securityAction`, asking first unless `securityAsk` is off), a summary line ("1 smoke · 2 open" or "All clear"), the safety and intrusion sensors in sections (Openings, Motion, Fire, Water, Other) as two-column tiles, and the recent alerts. `securityHidden` takes a sensor off the tab.
 - Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor.
 - Devices: the administration view of the Zigbee devices.
 - Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night, Warm).
