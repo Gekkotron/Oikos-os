@@ -1,4 +1,4 @@
-//! The HTTP API, the WebSocket stream and the placeholder page, served on an ephemeral port
+//! The HTTP API, the WebSocket stream and the embedded web UI, served on an ephemeral port
 //! over a hub driven by fixtures (no broker).
 
 use std::net::SocketAddr;
@@ -441,29 +441,8 @@ async fn ws_lag_sends_fresh_snapshot() {
 }
 
 #[tokio::test]
-async fn root_serves_placeholder() {
+async fn cors_is_open_to_any_origin() {
     let server = Server::start().await;
-
-    for path in ["/", "/rooms/stair", "/index.html"] {
-        let response = server.get(path).await;
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-        assert_eq!(
-            response
-                .headers()
-                .get("content-type")
-                .and_then(|v| v.to_str().ok()),
-            Some("text/html; charset=utf-8"),
-            "{path}"
-        );
-        let body = response.text().await.expect("body");
-        assert!(body.contains("<title>Oikos-os</title>"), "{path}");
-        assert!(
-            body.contains("Oikos-os is running. The web UI arrives in the next phase."),
-            "{path}"
-        );
-        assert!(body.contains("href=\"/api/v1/snapshot\""), "{path}");
-        assert!(body.contains("href=\"/health\""), "{path}");
-    }
 
     let cors = server
         .client

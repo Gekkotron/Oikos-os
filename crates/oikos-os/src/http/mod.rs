@@ -1,5 +1,5 @@
 //! The HTTP surface over the hub: `/health`, the JSON API under `/api/v1`, the WebSocket
-//! stream at `/ws`, the MCP server at `/mcp` and the placeholder page for every other path.
+//! stream at `/ws`, the MCP server at `/mcp` and the embedded web UI for every other path.
 
 mod api;
 mod static_ui;
@@ -18,9 +18,9 @@ use crate::config::HttpConfig;
 use crate::hub::Hub;
 use crate::mcp;
 
-/// The API, the WebSocket, the MCP server and the placeholder page, with CORS open to any
+/// The API, the WebSocket, the MCP server and the web UI, with CORS open to any
 /// origin (no auth in v1). Unknown paths under `/api` answer a JSON 404; every other unknown
-/// path gets the page. The MCP service is nested, so it takes precedence over the fallback.
+/// path gets the web UI. The MCP service is nested, so it takes precedence over the fallback.
 pub fn router(hub: Arc<Hub>) -> Router {
     Router::new()
         .route("/health", get(api::health))

@@ -1,5 +1,6 @@
 /target
 oikos.toml
-crates/oikos-web/dist
+crates/oikos-web/dist/*
+!crates/oikos-web/dist/.gitkeep
 .DS_Store
 .superpowers/
