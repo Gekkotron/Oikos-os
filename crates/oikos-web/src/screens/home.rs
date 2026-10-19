@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::model::{Kind, Placement, UNASSIGNED_AREA};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::cards::alarm::AlarmPanelCard;
 use crate::cards::binary_sensor::BinarySensorCard;
@@ -89,7 +89,31 @@ fn entity_ids<'a>(entities: impl Iterator<Item = &'a EntityView>, chip: &str) ->
         })
         .collect();
     shown.sort_by_cached_key(|e| (e.ui.order.unwrap_or(i32::MAX), e.name.to_lowercase()));
-    shown.into_iter().map(|e| e.id.clone()).collect()
+    without_paired_humidity(shown)
+        .into_iter()
+        .map(|e| e.id.clone())
+        .collect()
+}
+
+fn is_sensor_of_class(e: &EntityView, class: &str) -> bool {
+    e.kind == Kind::Sensor && e.device_class.as_deref() == Some(class)
+}
+
+/// `shown` without the humidity sensors whose device's temperature sensor is also in `shown`:
+/// the temperature card carries the humidity reading.
+fn without_paired_humidity(mut shown: Vec<&EntityView>) -> Vec<&EntityView> {
+    let with_temperature: HashSet<&str> = shown
+        .iter()
+        .filter(|e| is_sensor_of_class(e, "temperature"))
+        .filter_map(|e| e.device_id.as_deref())
+        .collect();
+    shown.retain(|e| {
+        !(is_sensor_of_class(e, "humidity")
+            && e.device_id
+                .as_deref()
+                .is_some_and(|d| with_temperature.contains(d)))
+    });
+    shown
 }
 
 /// The card component for an entity's kind.
@@ -301,6 +325,71 @@ mod tests {
             entity("plug", Kind::Switch, None, UiOverride::default()),
         ];
         assert_eq!(entity_ids(all.iter(), "living"), ["lamp", "plug", "solar"]);
+    }
+
+    fn on_device(mut e: EntityView, device: &str) -> EntityView {
+        e.device_id = Some(device.into());
+        e
+    }
+
+    fn thermometer_parts(prefix: &str, device: &str) -> [EntityView; 2] {
+        [
+            on_device(
+                entity(
+                    &format!("{prefix}_t"),
+                    Kind::Sensor,
+                    Some("temperature"),
+                    UiOverride::default(),
+                ),
+                device,
+            ),
+            on_device(
+                entity(
+                    &format!("{prefix}_h"),
+                    Kind::Sensor,
+                    Some("humidity"),
+                    UiOverride::default(),
+                ),
+                device,
+            ),
+        ]
+    }
+
+    #[test]
+    fn humidity_is_folded_into_its_temperature_sensor() {
+        let [t, h] = thermometer_parts("th", "dev");
+        let lamp = entity("lamp", Kind::Light, None, UiOverride::default());
+        let all = [t, h, lamp];
+        assert_eq!(entity_ids(all.iter(), "living"), ["lamp", "th_t"]);
+    }
+
+    #[test]
+    fn humidity_stays_without_a_temperature_on_the_same_device() {
+        let [t, _] = thermometer_parts("a", "dev_a");
+        let [_, h] = thermometer_parts("b", "dev_b");
+        let all = [t, h];
+        assert_eq!(entity_ids(all.iter(), "living"), ["a_t", "b_h"]);
+    }
+
+    #[test]
+    fn humidity_without_device_id_stays() {
+        let t = entity(
+            "t",
+            Kind::Sensor,
+            Some("temperature"),
+            UiOverride::default(),
+        );
+        let h = entity("h", Kind::Sensor, Some("humidity"), UiOverride::default());
+        let all = [t, h];
+        assert_eq!(entity_ids(all.iter(), "living"), ["h", "t"]);
+    }
+
+    #[test]
+    fn favorite_humidity_stays_when_its_temperature_is_not_a_favorite() {
+        let [t, mut h] = thermometer_parts("th", "dev");
+        h.ui.favorite = true;
+        let all = [t, h];
+        assert_eq!(entity_ids(all.iter(), FAVORITES), ["th_h"]);
     }
 
     #[test]

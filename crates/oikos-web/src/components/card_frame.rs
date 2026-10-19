@@ -29,12 +29,20 @@ pub fn CardFrame(
     entity: EntityView,
     on_click: Callback<()>,
     #[prop(into, optional)] pending: Signal<bool>,
+    /// Replaces the title computed from the entity; empty keeps the computed one.
+    #[prop(into, optional)]
+    title: String,
     children: Children,
 ) -> impl IntoView {
     let icon = kind_icon(entity.kind, entity.device_class.as_deref());
     let availability = entity.state.availability;
     let is_on = crate::format::is_on(&entity.state);
-    let short = crate::format::wrap_id(&crate::format::entity_title(&entity));
+    let title = if title.is_empty() {
+        crate::format::entity_title(&entity)
+    } else {
+        title
+    };
+    let short = crate::format::wrap_id(&title);
     let full_name = entity.name.clone();
     let offline = availability == Availability::Offline;
 
