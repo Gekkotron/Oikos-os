@@ -684,6 +684,26 @@ a[aria-current="page"] .nav__glyph {
   opacity: 0.8;
 }
 
+/* Preset chips under the colour wheel (White, as in the app) */
+.colour__presets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.colour__swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--chip-border);
+  border-radius: 50%;
+}
+
+.colour__swatch--white {
+  background: #fff;
+}
+
 .swatch:focus-visible {
   outline: 2px solid var(--accent-mint);
   outline-offset: 2px;

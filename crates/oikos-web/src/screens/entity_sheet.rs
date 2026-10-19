@@ -56,8 +56,18 @@ fn light_hs(entity: &EntityView) -> Option<Hs> {
     }
 }
 
-/// The HS colour wheel of a light that can show colour. Built once per sheet: the wheel reads the
-/// light's colour through signals, so a state echo moves its marker without rebuilding it.
+/// Pure white: what the White chip sends.
+const WHITE: Hs = Hs { h: 0.0, s: 0.0 };
+
+/// Whether a light's colour reads as white, as the app's White chip decides it: saturation
+/// under 2 %. A light without a colour is not.
+fn is_white(hs: Option<Hs>) -> bool {
+    hs.is_some_and(|hs| hs.s < 2.0)
+}
+
+/// The HS colour wheel of a light that can show colour, and a White chip under it as in the
+/// app. Built once per sheet: the wheel reads the light's colour through signals, so a state
+/// echo moves its marker without rebuilding it.
 #[component]
 fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
     let sender = Sender::from_context();
@@ -97,6 +107,18 @@ fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
         <Show when=move || shows_colour.get()>
             <Panel title="Colour">
                 <HsWheel value=value on_pick=on_pick />
+                <div class="colour__presets">
+                    <button
+                        type="button"
+                        class="chip"
+                        class:chip--selected=move || is_white(value.get())
+                        aria-pressed=move || is_white(value.get()).to_string()
+                        on:click=move |_| on_pick.run(WHITE)
+                    >
+                        <span class="colour__swatch colour__swatch--white"></span>
+                        "White"
+                    </button>
+                </div>
             </Panel>
         </Show>
     }
@@ -284,5 +306,20 @@ pub fn EntitySheetScreen() -> impl IntoView {
                 }
             }}
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WHITE, is_white};
+    use oikos_core::model::Hs;
+
+    #[test]
+    fn white_is_near_zero_saturation() {
+        assert!(is_white(Some(WHITE)));
+        assert!(is_white(Some(Hs { h: 200.0, s: 1.5 })));
+        assert!(!is_white(Some(Hs { h: 0.0, s: 2.0 })));
+        assert!(!is_white(Some(Hs { h: 120.0, s: 80.0 })));
+        assert!(!is_white(None));
     }
 }
