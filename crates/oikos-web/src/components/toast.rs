@@ -69,7 +69,7 @@ pub fn ToastQueue() -> impl IntoView {
                             title="Dismiss"
                             on:click=move |_| toasts.dismiss(id)
                         >
-                            {t.text}
+                            {crate::format::wrap_id(&t.text)}
                         </button>
                     }
                 }

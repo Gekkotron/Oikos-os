@@ -34,7 +34,7 @@ pub fn CardFrame(
     let icon = kind_icon(entity.kind, entity.device_class.as_deref());
     let availability = entity.state.availability;
     let is_on = crate::format::is_on(&entity.state);
-    let short = crate::format::entity_title(&entity);
+    let short = crate::format::wrap_id(&crate::format::entity_title(&entity));
     let full_name = entity.name.clone();
     let offline = availability == Availability::Offline;
 

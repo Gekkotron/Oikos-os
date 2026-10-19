@@ -106,6 +106,20 @@ pub fn short_name(name: &str, device_name: Option<&str>) -> String {
     }
 }
 
+/// `id` with a zero-width space after every `_` and `/`, so a long raw id wraps at those
+/// boundaries (with `overflow-wrap: break-word`) instead of in the middle of a word. For display
+/// only: never put the result in an attribute, a URL or something the user copies.
+pub fn wrap_id(id: &str) -> String {
+    let mut out = String::with_capacity(id.len() + 8);
+    for c in id.chars() {
+        out.push(c);
+        if matches!(c, '_' | '/') {
+            out.push('\u{200B}');
+        }
+    }
+    out
+}
+
 /// "binary_sensor" as "Binary sensor".
 pub fn kind_word(kind: Kind) -> String {
     serde_json::to_value(kind)
@@ -217,7 +231,7 @@ pub fn word(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{display_value, entity_title, list_label};
+    use super::{display_value, entity_title, list_label, wrap_id};
     use oikos_api::EntityView;
     use oikos_core::model::{
         Capabilities, ClimateState, EntityCategory, EntityState, Kind, LightState, StateValue,
@@ -244,6 +258,12 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn ids_break_after_underscores_and_slashes() {
+        assert_eq!(wrap_id("door_siren/x"), "door_\u{200B}siren/\u{200B}x");
+        assert_eq!(wrap_id("plain"), "plain");
     }
 
     #[test]

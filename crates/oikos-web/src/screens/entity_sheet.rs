@@ -6,7 +6,7 @@ use leptos_router::hooks::use_params_map;
 use oikos_api::{DeviceView, EntityView};
 use oikos_core::model::Availability;
 
-use crate::format::{format_timestamp, kind_word, list_label, title_suffix};
+use crate::format::{format_timestamp, kind_word, list_label, title_suffix, wrap_id};
 use crate::house::House;
 use crate::icons::kind_icon;
 use crate::override_editor::OverrideEditor;
@@ -48,7 +48,7 @@ fn Row(label: &'static str, #[prop(into)] value: String) -> impl IntoView {
     view! {
         <div class="sheet__row">
             <dt>{label}</dt>
-            <dd>{value}</dd>
+            <dd>{wrap_id(&value)}</dd>
         </div>
     }
 }
@@ -95,7 +95,7 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
                                     .map(|(id, name)| {
                                         view! {
                                             <li>
-                                                <A href=format!("/entity/{}", crate::api::encode_id(&id))>{name}</A>
+                                                <A href=format!("/entity/{}", crate::api::encode_id(&id))>{wrap_id(&name)}</A>
                                             </li>
                                         }
                                     })
@@ -153,7 +153,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
             view! {
                 <span class="sheet__icon" inner_html=kind_icon(e.kind, e.device_class.as_deref())></span>
                 <div class="sheet__titles">
-                    <h1 class="sheet__title">{title}</h1>
+                    <h1 class="sheet__title">{wrap_id(&title)}</h1>
                     <p class="sheet__subtitle">
                         {area} " · " {kind_word(e.kind)} " · "
                         <span class=availability_class(availability)></span>
@@ -209,7 +209,7 @@ pub fn EntitySheetScreen() -> impl IntoView {
                             </A>
                             <div class="sheet__titles">
                                 <h1 class="sheet__title">"Unknown entity"</h1>
-                                <p class="sheet__subtitle">{id.get()}</p>
+                                <p class="sheet__subtitle">{move || wrap_id(&id.get())}</p>
                             </div>
                         </header>
                     }

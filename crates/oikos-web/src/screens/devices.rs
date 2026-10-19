@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use oikos_api::DeviceView;
 
-use crate::format::list_label;
+use crate::format::{list_label, wrap_id};
 use crate::house::House;
 use crate::screens::entity_sheet::{availability_class, availability_word};
 
@@ -77,7 +77,7 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
                     title=availability_word(device.availability)
                 ></span>
                 <span class="device__titles">
-                    <span class="device__name">{device.friendly_name.clone()}</span>
+                    <span class="device__name">{wrap_id(&device.friendly_name)}</span>
                     <span class="device__model">{model_line(&device)}</span>
                 </span>
                 <span class="device__badges">
@@ -100,7 +100,7 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
                             .map(|(id, name)| {
                                 view! {
                                     <li>
-                                        <A href=format!("/entity/{}", crate::api::encode_id(&id))>{name}</A>
+                                        <A href=format!("/entity/{}", crate::api::encode_id(&id))>{wrap_id(&name)}</A>
                                     </li>
                                 }
                             })
@@ -159,7 +159,7 @@ pub fn DevicesScreen() -> impl IntoView {
                         children=|item| {
                             view! {
                                 <li class="ignored-list__item">
-                                    <code class="ignored-list__topic">{item.topic}</code>
+                                    <code class="ignored-list__topic">{wrap_id(&item.topic)}</code>
                                     <span class="ignored-list__reason">{item.reason}</span>
                                 </li>
                             }

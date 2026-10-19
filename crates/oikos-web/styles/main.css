@@ -107,7 +107,7 @@ body {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .card__dots {
@@ -755,7 +755,7 @@ body {
   margin: 0;
   font: var(--type-display);
   letter-spacing: var(--type-display-spacing);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .sheet__subtitle {
@@ -826,7 +826,7 @@ body {
   min-width: 0;
   margin: 0;
   text-align: right;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .sheet__links {
@@ -860,7 +860,7 @@ body {
   font-size: 12px;
   line-height: 18px;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .sheet__updated {
@@ -962,7 +962,7 @@ body {
   background: color-mix(in srgb, var(--offline) 15%, transparent);
   color: var(--offline);
   font: var(--type-body);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .override__error[hidden] {
@@ -1113,7 +1113,7 @@ body {
 .ignored-list__topic {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .ignored-list__reason {
