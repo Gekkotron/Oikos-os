@@ -58,4 +58,17 @@ impl AreasDocument {
     pub fn encode(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| r#"{"areas":[]}"#.to_owned())
     }
+
+    /// Names area `id` `name`, every other field kept; an undeclared id is declared with no
+    /// order, which keeps it after the ordered rooms.
+    pub fn rename(&mut self, id: &str, name: &str) {
+        match self.areas.iter_mut().find(|area| area.id == id) {
+            Some(area) => area.name = name.to_owned(),
+            None => self.areas.push(Area {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                ..Area::default()
+            }),
+        }
+    }
 }

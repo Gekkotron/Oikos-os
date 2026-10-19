@@ -15,7 +15,9 @@ use oikos_api::{
     Snapshot, WsEvent, area_views, device_views, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
-use oikos_core::model::{AreasDocument, Availability, Command, PatchError, UiOverride};
+use oikos_core::model::{
+    AreasDocument, Availability, Command, PatchError, UNASSIGNED_AREA, UiOverride,
+};
 use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -48,6 +50,8 @@ pub enum HubError {
     UnknownAction(String),
     #[error("unknown flow `{0}`")]
     UnknownFlow(String),
+    #[error("unknown area `{0}`")]
+    UnknownArea(String),
     /// The flow cannot be saved or run: it does not validate, or names something the house
     /// does not have.
     #[error("invalid flow: {0}")]
@@ -505,6 +509,31 @@ impl Hub {
         })?;
         self.ingest(&topic, payload.as_bytes());
         Ok(area_views(&self.read()))
+    }
+
+    /// Renames area `id` in the declared document, the app's other fields kept; an implicit
+    /// area (carried only by entities) becomes declared. `Unassigned` cannot be renamed.
+    pub async fn rename_area(&self, id: &str, name: &str) -> Result<Vec<AreaView>, HubError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(HubError::Rejected(
+                "an area name cannot be blank".to_owned(),
+            ));
+        }
+        if id == UNASSIGNED_AREA {
+            return Err(HubError::Rejected(
+                "`Unassigned` cannot be renamed".to_owned(),
+            ));
+        }
+        let mut doc = {
+            let reg = self.read();
+            if !reg.effective_areas().iter().any(|area| area.id == id) {
+                return Err(HubError::UnknownArea(id.to_owned()));
+            }
+            reg.areas_document().clone()
+        };
+        doc.rename(id, name);
+        self.set_areas(doc).await
     }
 
     fn write_override(&self, id: &str, next: &UiOverride) -> Result<EntityView, HubError> {

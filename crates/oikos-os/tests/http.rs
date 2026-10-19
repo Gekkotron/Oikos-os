@@ -390,6 +390,66 @@ async fn put_areas_and_list_ignored() {
 }
 
 #[tokio::test]
+async fn patch_area_renames_and_keeps_the_app_fields() {
+    let mut server = Server::start().await;
+    server.online();
+    server.hub.ingest(
+        "oikos/ui/_areas",
+        br#"{"areas":[{"id":"dehors","name":"Dehors","order":7,"groupNames":{"cover":"Volets"}}]}"#,
+    );
+
+    let response = server
+        .client
+        .patch(server.url("/api/v1/areas/dehors"))
+        .json(&json!({"name": "  Outdoor "}))
+        .send()
+        .await
+        .expect("PATCH");
+    assert_eq!(response.status(), StatusCode::OK);
+    let areas: Value = response.json().await.expect("json");
+    let dehors = areas
+        .as_array()
+        .expect("an array")
+        .iter()
+        .find(|a| a["id"] == "dehors")
+        .expect("the renamed area");
+    assert_eq!(dehors["name"], "Outdoor");
+    let published = server.publisher.try_recv().expect("the areas publish");
+    assert_eq!(published.topic, "oikos/ui/_areas");
+    assert_eq!(
+        published.payload,
+        r#"{"areas":[{"id":"dehors","name":"Outdoor","order":7,"groupNames":{"cover":"Volets"}}]}"#
+    );
+
+    for (path, name, status) in [
+        (
+            "/api/v1/areas/dehors",
+            " ",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            "/api/v1/areas/Unassigned",
+            "Nowhere",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        ("/api/v1/areas/attic", "Attic", StatusCode::NOT_FOUND),
+    ] {
+        let response = server
+            .client
+            .patch(server.url(path))
+            .json(&json!({"name": name}))
+            .send()
+            .await
+            .expect("PATCH");
+        assert_eq!(response.status(), status, "{path} {name:?}");
+    }
+    assert!(
+        server.publisher.try_recv().is_err(),
+        "a refused rename publishes nothing"
+    );
+}
+
+#[tokio::test]
 async fn ws_sends_snapshot_then_events() {
     let server = Server::start().await;
     let mut ws = server.ws().await;

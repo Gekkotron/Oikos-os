@@ -27,6 +27,27 @@ fn group_names_and_extra_survive() {
 }
 
 #[test]
+fn rename_keeps_the_id_and_every_other_field() {
+    let raw = br#"{"areas":[{"id":"dehors","name":"Dehors","order":7,"groupNames":{"cover":"Volets"},"newKey":true}]}"#;
+    let mut doc = AreasDocument::decode(raw).unwrap();
+    doc.rename("dehors", "Outdoor");
+    assert_eq!(
+        doc.encode(),
+        r#"{"areas":[{"id":"dehors","name":"Outdoor","order":7,"groupNames":{"cover":"Volets"},"newKey":true}]}"#
+    );
+}
+
+#[test]
+fn rename_declares_an_implicit_area() {
+    let mut doc = AreasDocument::decode(br#"{"areas":[{"id":"a","name":"A","order":0}]}"#).unwrap();
+    doc.rename("garden", "Garden");
+    assert_eq!(
+        doc.encode(),
+        r#"{"areas":[{"id":"a","name":"A","order":0},{"id":"garden","name":"Garden"}]}"#
+    );
+}
+
+#[test]
 fn unassigned_area_constant() {
     assert_eq!(UNASSIGNED_AREA, "Unassigned");
 }

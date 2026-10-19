@@ -36,6 +36,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
             patch(set_override).delete(clear_override),
         )
         .route("/areas", put(set_areas))
+        .route("/areas/{id}", patch(rename_area))
         .route("/ignored", get(ignored))
         .route("/alerts", get(alerts))
         .route("/alerts/{id}/actions/{action}", post(alert_action))
@@ -68,7 +69,8 @@ impl From<HubError> for HttpError {
             HubError::UnknownEntity(_)
             | HubError::UnknownAlert(_)
             | HubError::UnknownAction(_)
-            | HubError::UnknownFlow(_) => StatusCode::NOT_FOUND,
+            | HubError::UnknownFlow(_)
+            | HubError::UnknownArea(_) => StatusCode::NOT_FOUND,
             HubError::Rejected(_) | HubError::Command(_) | HubError::InvalidFlow(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
@@ -152,6 +154,21 @@ async fn set_areas(
 ) -> Result<Json<Vec<AreaView>>, HttpError> {
     let Json(doc) = body?;
     Ok(Json(hub.set_areas(doc).await?))
+}
+
+/// The `PATCH /areas/{id}` body.
+#[derive(serde::Deserialize)]
+struct RenameArea {
+    name: String,
+}
+
+async fn rename_area(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<RenameArea>,
+) -> Result<Json<Vec<AreaView>>, HttpError> {
+    let Json(RenameArea { name }) = body?;
+    Ok(Json(hub.rename_area(&id, &name).await?))
 }
 
 async fn ignored(State(hub): HubState) -> Json<Vec<IgnoredView>> {
