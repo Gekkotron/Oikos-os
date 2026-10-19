@@ -142,7 +142,7 @@ pub fn SettingsScreen() -> impl IntoView {
             </Panel>
             <Panel title="About">
                 <dl class="sheet__rows">
-                    <Row label="Product" value="Oikos" />
+                    <Row label="Product" value="Oikos-os" />
                     <Row label="Version" value=concat!("v", env!("CARGO_PKG_VERSION")) />
                     <Row label="Hub: this page's origin" value=origin() />
                 </dl>
