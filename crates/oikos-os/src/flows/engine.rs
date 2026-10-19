@@ -29,6 +29,8 @@ struct Active {
     /// The definition the run started with; a changed definition cancels the run.
     flow: Flow,
     abort: AbortHandle,
+    /// The task's id, to find the run again when the task panics.
+    task: tokio::task::Id,
 }
 
 /// Runs the engine until `requests` closes. Subscribes to the hub's events itself; the hub
@@ -48,13 +50,15 @@ pub(super) async fn run_with(
         hub,
         flows: Vec::new(),
         known: BTreeMap::new(),
+        watched: BTreeSet::new(),
         active: BTreeMap::new(),
         tasks: JoinSet::new(),
     };
     engine.reload();
     loop {
         // Requests first: a flow saved before the state it watches changes must be armed
-        // before that change is looked at.
+        // before that change is looked at. Finished runs before events: a run that is over must
+        // not count as active for a trigger in the same iteration.
         tokio::select! {
             biased;
             request = requests.recv() => {
@@ -72,6 +76,9 @@ pub(super) async fn run_with(
                     engine.handle_request(request);
                 }
             }
+            Some(joined) = engine.tasks.join_next_with_id(), if !engine.tasks.is_empty() => {
+                engine.run_finished(joined);
+            }
             event = events.recv() => match event {
                 Ok(event) => engine.handle_event(event),
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
@@ -80,9 +87,6 @@ pub(super) async fn run_with(
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
             },
-            Some(joined) = engine.tasks.join_next(), if !engine.tasks.is_empty() => {
-                engine.run_finished(joined);
-            }
         }
     }
 }
@@ -94,6 +98,10 @@ struct Engine {
     /// The last value seen for every entity a trigger watches; `None` inside means the entity
     /// had no value when last seen. Absent means never seen since the last reset.
     known: BTreeMap<String, Option<Scalar>>,
+    /// The entities watched as of the last reload. Kept apart from `known` because a
+    /// disconnect empties `known` while the watched set stays: those entities must stay
+    /// unseeded until the broker's replay shows them, not be re-seeded from stale values.
+    watched: BTreeSet<String>,
     active: BTreeMap<String, Active>,
     tasks: JoinSet<Finished>,
 }
@@ -116,14 +124,18 @@ impl Engine {
             .into_iter()
             .filter(|flow| flow.enabled)
             .collect();
-        let watched = self.watched();
+        let watched = self.watched_entities();
         self.known.retain(|id, _| watched.contains(id));
-        for id in watched {
-            if !self.known.contains_key(&id) {
-                let scalar = self.hub.entity_scalar(&id);
-                self.known.insert(id, scalar);
+        // Seed only what became watched now, and only while the link is up: otherwise the
+        // registry may hold pre-drop values and the broker's replay would look like a change.
+        let online = *self.hub.connection().borrow() == ConnectionStatus::Online;
+        if online {
+            for id in watched.difference(&self.watched) {
+                let scalar = self.hub.entity_scalar(id);
+                self.known.insert(id.clone(), scalar);
             }
         }
+        self.watched = watched;
         let stale: Vec<String> = self
             .active
             .iter()
@@ -136,7 +148,7 @@ impl Engine {
     }
 
     /// The entities some enabled flow triggers on.
-    fn watched(&self) -> BTreeSet<String> {
+    fn watched_entities(&self) -> BTreeSet<String> {
         self.flows
             .iter()
             .flat_map(|flow| flow.triggers())
@@ -167,7 +179,7 @@ impl Engine {
     fn state_changed(&mut self, id: &str, next: Option<Scalar>) {
         let Some(slot) = self.known.get(id) else {
             // Either not watched, or never seen since the last reset.
-            if self.watched().contains(id) {
+            if self.watched.contains(id) {
                 self.known.insert(id.to_owned(), next);
             }
             return;
@@ -187,6 +199,7 @@ impl Engine {
                     continue;
                 };
                 if params.entity == id
+                    && !fires.iter().any(|(f, _): &(Flow, String)| f.id == flow.id)
                     && filter_matches(params.to.as_ref(), &next)
                     && filter_matches(params.from.as_ref(), &previous)
                 {
@@ -258,6 +271,7 @@ impl Engine {
             Active {
                 run_id,
                 flow,
+                task: abort.id(),
                 abort,
             },
         );
@@ -274,9 +288,12 @@ impl Engine {
 
     /// A run task ended. A cancelled one was already ended by whoever cancelled it, and a run
     /// that finished at the very moment it was cancelled no longer matches `active`.
-    fn run_finished(&mut self, joined: Result<Finished, tokio::task::JoinError>) {
+    fn run_finished(
+        &mut self,
+        joined: Result<(tokio::task::Id, Finished), tokio::task::JoinError>,
+    ) {
         match joined {
-            Ok((flow_id, run_id, status)) => {
+            Ok((_, (flow_id, run_id, status))) => {
                 if self
                     .active
                     .get(&flow_id)
@@ -287,7 +304,23 @@ impl Engine {
                 }
             }
             Err(err) if err.is_cancelled() => {}
-            Err(err) => tracing::error!(error = %err, "a flow run panicked"),
+            Err(err) => {
+                tracing::error!(error = %err, "a flow run panicked");
+                // Without this the flow would stay active forever and never run again.
+                let flow_id = self
+                    .active
+                    .iter()
+                    .find(|(_, active)| active.task == err.id())
+                    .map(|(id, _)| id.clone());
+                if let Some(flow_id) = flow_id
+                    && let Some(active) = self.active.remove(&flow_id)
+                {
+                    let failure = step("engine", StepOutcome::Failed, "run panicked".to_owned());
+                    self.hub.record_step(&flow_id, &active.run_id, failure);
+                    self.hub
+                        .end_run(&flow_id, &active.run_id, RunStatus::Failed);
+                }
+            }
         }
     }
 }
@@ -299,6 +332,13 @@ fn filter_matches(filter: Option<&Value>, actual: &Scalar) -> bool {
 
 /// Walks the flow depth-first from `start`, recording a step per node before following its
 /// successors in edge order. The first failed step ends the run.
+///
+/// A cancelled run must not act: `abort()` only lands at the task's next `.await`, so a run can
+/// wake from its delay after the flow was deleted, disabled or the run ended. `record_step`
+/// reports whether the run is still the flow's active one; the run stops (as `Cancelled`) as
+/// soon as it is not, and every delay is followed by a step, so a command never follows a
+/// wake-up that was not checked. The window between that check and the publish inside
+/// `send_command` (no `.await` in between) is accepted.
 pub(super) async fn execute(
     hub: Arc<Hub>,
     flow: Flow,
@@ -310,11 +350,15 @@ pub(super) async fn execute(
     while let Some(id) = stack.pop() {
         let Some(node) = flow.node(&id) else {
             let step = step(&id, StepOutcome::Failed, "unknown node".to_owned());
-            hub.record_step(&flow.id, &run_id, step);
+            if !hub.record_step(&flow.id, &run_id, step) {
+                return RunStatus::Cancelled;
+            }
             return RunStatus::Failed;
         };
         let (outcome, detail, port) = run_node(&hub, node, trigger.as_ref()).await;
-        hub.record_step(&flow.id, &run_id, step(&node.id, outcome, detail));
+        if !hub.record_step(&flow.id, &run_id, step(&node.id, outcome, detail)) {
+            return RunStatus::Cancelled;
+        }
         if outcome == StepOutcome::Failed {
             return RunStatus::Failed;
         }
@@ -358,7 +402,7 @@ async fn run_node(
             };
             let left = match (&params.entity, trigger) {
                 (Some(entity), _) => hub.entity_scalar(entity),
-                (None, Some(trigger)) => Scalar::from_json(&trigger.value),
+                (None, Some(trigger)) => hub.entity_scalar(&trigger.entity),
                 (None, None) => return failed("no triggering entity".to_owned()),
             };
             match compare(left.as_ref(), params.op, &right) {

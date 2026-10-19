@@ -507,14 +507,61 @@ async fn motion_back_cancels_the_pending_off() {
     );
 }
 
+/// The flow is armed while the entities have no value yet (the seed holds nothing); the
+/// retained replay that follows must only be recorded.
 #[tokio::test]
 async fn boot_replay_starts_nothing() {
     let (hub, _publisher, _engine) = engine_hub();
-    let mut events = hub.subscribe();
     hub.ingest(FLOW_TOPIC, reference_json().as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
     hub.ingest(LED_STATE_TOPIC, br#"{"state":"OFF"}"#);
     motion(&hub, true);
     no_run_event(&mut events).await;
+}
+
+#[tokio::test]
+async fn boot_replay_after_reconnect_starts_nothing() {
+    let (hub, _publisher, _engine) = engine_hub();
+    hub.ingest(FLOW_TOPIC, reference_json().as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+    hub.set_connection(ConnectionStatus::Online);
+    hub.ingest(LED_STATE_TOPIC, br#"{"state":"OFF"}"#);
+    motion(&hub, true);
+    no_run_event(&mut events).await;
+}
+
+/// A flow edited between the reconnect and the replay must not re-seed the entities the
+/// disconnect made unknown from the registry's stale values.
+#[tokio::test]
+async fn reload_after_reconnect_does_not_reseed() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    hub.ingest(FLOW_TOPIC, reference_json().as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    motion(&hub, false);
+    hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+    hub.set_connection(ConnectionStatus::Online);
+    settle().await;
+    let mut flow = reference_flow();
+    flow.name = "edited".to_owned();
+    hub.ingest(FLOW_TOPIC, flow.encode().as_bytes());
+    settle().await;
+    motion(&hub, true);
+    no_run_event(&mut events).await;
+
+    motion(&hub, false);
+    next_run_event(&mut events, RunStatus::Running).await;
 }
 
 #[tokio::test]
@@ -725,4 +772,64 @@ async fn missing_entity_at_run_time_fails_the_step() {
     let last = run.steps.last().expect("a step");
     assert_eq!(last.node, "on");
     assert!(last.detail.contains("unknown entity"), "{}", last.detail);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_deleted_flow_never_publishes_after_its_delay() {
+    let (hub, mut publisher, _engine) = engine_hub();
+    hub.ingest(FLOW_TOPIC, reference_json().as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+    motion(&hub, true);
+    motion(&hub, false);
+    next_run(&mut events, |r| r.steps.len() == 2).await;
+    settle().await;
+
+    // No settle between the delete and the clock: the delay may wake before the engine has
+    // processed the reload that aborts it.
+    hub.delete_flow("living").await.expect("delete");
+    tokio::time::advance(Duration::from_secs(10 * 60)).await;
+
+    while let Ok(publish) = publisher.try_recv() {
+        assert_ne!(publish.topic, LED_COMMAND_TOPIC, "{publish:?}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn if_without_entity_reads_the_registry() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    let flow = tweaked(|v| {
+        v["mode"] = "single".into();
+        v["nodes"]
+            .as_array_mut()
+            .expect("nodes")
+            .push(serde_json::json!(
+                { "id": "pause", "type": "delay", "params": { "for": "1s" } }
+            ));
+        v["edges"][0] = serde_json::json!({ "from": "motion", "to": "pause" });
+        v["edges"]
+            .as_array_mut()
+            .expect("edges")
+            .push(serde_json::json!(
+                { "from": "pause", "to": "moving" }
+            ));
+    });
+    hub.ingest(FLOW_TOPIC, flow.as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    motion(&hub, false);
+    motion(&hub, true);
+    next_run(&mut events, |r| r.steps.len() == 1).await;
+    settle().await;
+    motion(&hub, false);
+    tokio::time::advance(Duration::from_secs(2)).await;
+
+    let run = next_run(&mut events, |r| {
+        r.status == RunStatus::Running && step_nodes(r).contains(&"moving")
+    })
+    .await;
+    assert_eq!(run.trigger.expect("trigger").value, serde_json::json!(true));
+    assert_eq!(run.steps.last().expect("step").detail, "false");
 }

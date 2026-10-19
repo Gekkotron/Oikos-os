@@ -139,11 +139,23 @@ impl Hub {
         Some(run)
     }
 
-    /// Appends a step to a run.
-    pub fn record_step(&self, flow_id: &str, run_id: &str, step: StepView) {
-        let run = self.flow_store().record_step(flow_id, run_id, step);
-        if let Some(run) = run {
-            self.broadcast_run(flow_id, &run);
+    /// Appends a step to a run, but only while it is the flow's active run (checked under the
+    /// store lock). Returns whether it was: `false` means the run was cancelled, ended or its
+    /// flow deleted, and the caller must stop acting.
+    pub fn record_step(&self, flow_id: &str, run_id: &str, step: StepView) -> bool {
+        let run = {
+            let mut store = self.flow_store();
+            if store.active_run(flow_id).as_deref() != Some(run_id) {
+                return false;
+            }
+            store.record_step(flow_id, run_id, step)
+        };
+        match run {
+            Some(run) => {
+                self.broadcast_run(flow_id, &run);
+                true
+            }
+            None => false,
         }
     }
 
