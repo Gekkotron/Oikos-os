@@ -1,5 +1,6 @@
 //! Entity cards, one component per kind.
 
+pub mod alarm;
 pub mod binary_sensor;
 pub mod button;
 pub mod climate;
@@ -9,6 +10,8 @@ pub mod number;
 pub mod select;
 pub mod sensor;
 pub mod switch;
+pub mod vacuum;
+pub mod water_heater;
 
 use leptos::prelude::*;
 use oikos_core::model::{Command, EntityState};

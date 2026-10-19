@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::model::{Kind, UNASSIGNED_AREA};
 
+use crate::cards::alarm::AlarmPanelCard;
 use crate::cards::binary_sensor::BinarySensorCard;
 use crate::cards::button::ButtonCard;
 use crate::cards::climate::ClimateCard;
@@ -13,10 +14,9 @@ use crate::cards::number::NumberCard;
 use crate::cards::select::SelectCard;
 use crate::cards::sensor::SensorCard;
 use crate::cards::switch::SwitchCard;
-use crate::commands::Pending;
+use crate::cards::vacuum::VacuumCard;
+use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::area_chip::AreaChip;
-use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::display_value;
 use crate::house::House;
 
 /// The id of the virtual "Favorites" chip.
@@ -58,19 +58,6 @@ fn entity_ids<'a>(entities: impl Iterator<Item = &'a EntityView>, chip: &str) ->
     shown.into_iter().map(|e| e.id.clone()).collect()
 }
 
-/// A card for any kind without a dedicated component: icon, name and the formatted value.
-fn generic_card(entity: EntityView) -> AnyView {
-    let pending = expect_context::<Pending>().signal(&entity.id);
-    let on_click = open_entity(&entity.id);
-    let value = display_value(&entity.state, entity.unit.as_deref());
-    view! {
-        <CardFrame entity=entity on_click=on_click pending=pending>
-            <span class="card__value">{value}</span>
-        </CardFrame>
-    }
-    .into_any()
-}
-
 /// The card component for an entity's kind.
 fn card_for(entity: EntityView) -> AnyView {
     match entity.kind {
@@ -83,7 +70,9 @@ fn card_for(entity: EntityView) -> AnyView {
         Kind::Number => view! { <NumberCard entity=entity /> }.into_any(),
         Kind::Select => view! { <SelectCard entity=entity /> }.into_any(),
         Kind::Button => view! { <ButtonCard entity=entity /> }.into_any(),
-        _ => generic_card(entity),
+        Kind::AlarmPanel => view! { <AlarmPanelCard entity=entity /> }.into_any(),
+        Kind::Vacuum => view! { <VacuumCard entity=entity /> }.into_any(),
+        Kind::WaterHeater => view! { <WaterHeaterCard entity=entity /> }.into_any(),
     }
 }
 

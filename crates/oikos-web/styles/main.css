@@ -617,3 +617,7 @@ body {
   font-size: 26px;
   line-height: 32px;
 }
+
+.card__controls--wrap {
+  flex-wrap: wrap;
+}
