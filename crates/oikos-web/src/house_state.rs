@@ -58,10 +58,12 @@ impl HouseState {
                     entity.state = state;
                 }
             }
-            WsEvent::AreasChanged(areas) => self.areas = areas,
-            WsEvent::DevicesChanged(devices) => self.devices = devices,
+            WsEvent::AreasChanged { areas } => self.areas = areas,
+            WsEvent::DevicesChanged { devices } => self.devices = devices,
             WsEvent::BridgeChanged(bridge) => self.bridge = bridge,
             WsEvent::ConnectionChanged(connection) => self.connection = connection,
+            // Filled in by the alerts work (Task 5): the web does not keep alerts yet.
+            WsEvent::AlertsChanged { .. } => {}
             WsEvent::CommandFailed { .. } => {}
         }
     }
@@ -142,6 +144,7 @@ mod tests {
                 topic: "t".into(),
                 reason: "r".into(),
             }],
+            alerts: vec![],
             generated_at: 42,
         }
     }
@@ -189,7 +192,9 @@ mod tests {
     #[test]
     fn areas_changed_replaces_the_chip_list() {
         let mut s = state_with(&[]);
-        s.apply(WsEvent::AreasChanged(vec![area("b"), area("a")]));
+        s.apply(WsEvent::AreasChanged {
+            areas: vec![area("b"), area("a")],
+        });
         let ids: Vec<_> = s.areas.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(ids, ["b", "a"]);
     }
@@ -197,7 +202,9 @@ mod tests {
     #[test]
     fn devices_changed_replaces_the_device_list() {
         let mut s = state_with(&[]);
-        s.apply(WsEvent::DevicesChanged(vec![device("x")]));
+        s.apply(WsEvent::DevicesChanged {
+            devices: vec![device("x")],
+        });
         assert_eq!(s.devices, vec![device("x")]);
     }
 

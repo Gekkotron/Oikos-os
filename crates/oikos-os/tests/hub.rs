@@ -81,7 +81,7 @@ async fn ingest_broadcasts_and_snapshots() {
     );
     assert!(matches!(
         next_event(&mut events).await,
-        WsEvent::DevicesChanged(devices) if devices.len() == 66
+        WsEvent::DevicesChanged { devices } if devices.len() == 66
     ));
 
     feed_switch(&hub);

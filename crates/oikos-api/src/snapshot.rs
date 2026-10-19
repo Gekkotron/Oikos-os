@@ -7,6 +7,7 @@ use oikos_core::registry::Registry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::alerts::AlertView;
 use crate::events::ConnectionStatus;
 use crate::views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView, is_primary};
 
@@ -18,6 +19,9 @@ pub struct Snapshot {
     pub devices: Vec<DeviceView>,
     pub entities: Vec<EntityView>,
     pub ignored: Vec<IgnoredView>,
+    /// The push alerts (newest first); empty until the hub reads the history topic.
+    #[serde(default)]
+    pub alerts: Vec<AlertView>,
     pub generated_at: u64,
 }
 
@@ -30,6 +34,7 @@ pub fn snapshot(reg: &Registry, connection: ConnectionStatus, at: u64) -> Snapsh
         devices: device_views(reg),
         entities: entity_views(reg),
         ignored: reg.ignored().iter().map(IgnoredView::from).collect(),
+        alerts: Vec::new(),
         generated_at: at,
     }
 }

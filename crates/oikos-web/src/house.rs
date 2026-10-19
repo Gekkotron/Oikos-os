@@ -71,10 +71,11 @@ impl House {
                     }
                 });
             }
-            WsEvent::AreasChanged(areas) => self.areas.set(areas),
-            WsEvent::DevicesChanged(devices) => self.devices.set(devices),
+            WsEvent::AreasChanged { areas } => self.areas.set(areas),
+            WsEvent::DevicesChanged { devices } => self.devices.set(devices),
             WsEvent::BridgeChanged(bridge) => self.bridge.set(bridge),
             WsEvent::ConnectionChanged(connection) => self.connection.set(connection),
+            WsEvent::AlertsChanged { .. } => {}
             WsEvent::CommandFailed { id, reason } => self.command_failed.set(Some((id, reason))),
         }
     }

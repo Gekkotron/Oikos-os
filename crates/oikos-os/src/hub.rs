@@ -465,8 +465,12 @@ fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
                 id: id.clone(),
                 state: state.clone(),
             }),
-            Change::AreasChanged => Some(WsEvent::AreasChanged(area_views(reg))),
-            Change::DevicesChanged => Some(WsEvent::DevicesChanged(device_views(reg))),
+            Change::AreasChanged => Some(WsEvent::AreasChanged {
+                areas: area_views(reg),
+            }),
+            Change::DevicesChanged => Some(WsEvent::DevicesChanged {
+                devices: device_views(reg),
+            }),
             Change::BridgeChanged => Some(WsEvent::BridgeChanged(reg.bridge().into())),
             // A report that changed nothing is not pushed to clients; it only confirms commands.
             Change::StateReported(_) | Change::IgnoredChanged | Change::SubscriptionsChanged => {
