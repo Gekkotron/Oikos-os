@@ -6,6 +6,7 @@ pub mod app;
 pub mod cards;
 pub mod commands;
 pub mod components;
+pub mod flows;
 pub mod format;
 pub mod house;
 pub mod house_state;

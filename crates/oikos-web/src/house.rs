@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use leptos::prelude::*;
 use oikos_api::{
-    AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView, WsEvent,
+    AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, FlowView,
+    IgnoredView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -17,6 +18,8 @@ pub struct House {
     pub ignored: RwSignal<Vec<IgnoredView>>,
     /// The push alerts, newest first.
     pub alerts: RwSignal<Vec<AlertView>>,
+    /// The flows with their recent runs.
+    pub flows: RwSignal<Vec<FlowView>>,
     /// The last rejected command as `(entity id, reason)`.
     pub command_failed: RwSignal<Option<(String, String)>>,
 }
@@ -31,6 +34,7 @@ impl House {
             entities: RwSignal::new(BTreeMap::new()),
             ignored: RwSignal::new(Vec::new()),
             alerts: RwSignal::new(Vec::new()),
+            flows: RwSignal::new(Vec::new()),
             command_failed: RwSignal::new(None),
         }
     }
@@ -57,6 +61,7 @@ impl House {
                     .set(s.entities.into_iter().map(|e| (e.id.clone(), e)).collect());
                 self.ignored.set(s.ignored);
                 self.alerts.set(s.alerts);
+                self.flows.set(s.flows);
             }
             WsEvent::EntityUpserted(view) => {
                 self.entities.update(|m| {
@@ -80,7 +85,11 @@ impl House {
             WsEvent::BridgeChanged(bridge) => self.bridge.set(bridge),
             WsEvent::ConnectionChanged(connection) => self.connection.set(connection),
             WsEvent::AlertsChanged { alerts } => self.alerts.set(alerts),
-            WsEvent::FlowsChanged { .. } | WsEvent::FlowRunChanged { .. } => {}
+            WsEvent::FlowsChanged { flows } => self.flows.set(flows),
+            WsEvent::FlowRunChanged { flow_id, run } => {
+                self.flows
+                    .update(|flows| crate::house_state::upsert_run(flows, &flow_id, run));
+            }
             WsEvent::CommandFailed { id, reason } => self.command_failed.set(Some((id, reason))),
         }
     }

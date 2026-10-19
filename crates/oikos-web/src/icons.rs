@@ -2,6 +2,7 @@
 //! current text colour.
 
 use oikos_api::AlertChannel;
+use oikos_core::flow::NodeKind;
 use oikos_core::model::Kind;
 
 macro_rules! svg {
@@ -71,6 +72,26 @@ const ILLUMINANCE: &str = svg!(
 pub const CHEVRON_UP: &str = svg!(r#"<path d="m6 15 6-6 6 6"/>"#);
 pub const STOP: &str = svg!(r#"<rect x="7" y="7" width="10" height="10" rx="2"/>"#);
 pub const CHEVRON_DOWN: &str = svg!(r#"<path d="m6 9 6 6 6-6"/>"#);
+
+const NODE_BOLT: &str = svg!(r#"<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>"#);
+const NODE_FORK: &str = svg!(
+    r#"<circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 7v3a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1"/><path d="M18 7v3"/>"#
+);
+const NODE_HOURGLASS: &str = svg!(
+    r#"<path d="M6 3h12"/><path d="M6 21h12"/><path d="M7 3v3a5 5 0 0 0 2 4l3 2-3 2a5 5 0 0 0-2 4v3"/><path d="M17 3v3a5 5 0 0 1-2 4l-3 2 3 2a5 5 0 0 1 2 4v3"/>"#
+);
+const NODE_PLAY: &str = svg!(r#"<path d="M7 4.5v15l12-7.5z"/>"#);
+
+/// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, an
+/// hourglass for a delay and a play triangle for a command.
+pub fn node_icon(kind: &NodeKind) -> &'static str {
+    match kind {
+        NodeKind::TriggerState(_) => NODE_BOLT,
+        NodeKind::If(_) => NODE_FORK,
+        NodeKind::Delay(_) => NODE_HOURGLASS,
+        NodeKind::Command(_) => NODE_PLAY,
+    }
+}
 
 const CHANNEL_ALARM: &str =
     svg!(r#"<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>"#);

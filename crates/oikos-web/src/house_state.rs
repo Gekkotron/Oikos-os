@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use oikos_api::{
-    AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView,
-    Snapshot, WsEvent,
+    AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, FlowView,
+    IgnoredView, RunStatus, RunView, Snapshot, WsEvent,
 };
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -17,6 +17,8 @@ pub struct HouseState {
     pub ignored: Vec<IgnoredView>,
     /// The push alerts, newest first, as the hub sent them.
     pub alerts: Vec<AlertView>,
+    /// The flows with their recent runs, as the hub sent them.
+    pub flows: Vec<FlowView>,
     pub generated_at: u64,
 }
 
@@ -34,6 +36,7 @@ impl HouseState {
             entities: s.entities.into_iter().map(|e| (e.id.clone(), e)).collect(),
             ignored: s.ignored,
             alerts: s.alerts,
+            flows: s.flows,
             generated_at: s.generated_at,
         }
     }
@@ -67,10 +70,33 @@ impl HouseState {
             WsEvent::BridgeChanged(bridge) => self.bridge = bridge,
             WsEvent::ConnectionChanged(connection) => self.connection = connection,
             WsEvent::AlertsChanged { alerts } => self.alerts = alerts,
-            WsEvent::FlowsChanged { .. } | WsEvent::FlowRunChanged { .. } => {}
+            WsEvent::FlowsChanged { flows } => self.flows = flows,
+            WsEvent::FlowRunChanged { flow_id, run } => upsert_run(&mut self.flows, &flow_id, run),
             WsEvent::CommandFailed { .. } => {}
         }
     }
+}
+
+/// How many runs a flow keeps in the client, matching what the hub sends.
+const RUN_HISTORY: usize = 20;
+
+/// Folds one run event into `flows`: the run with the same id is replaced, else it goes in
+/// front; the history is capped; `active_run` follows a running run and clears when the active
+/// one ends. A flow that is not listed is ignored (the next `FlowsChanged` will carry it).
+pub fn upsert_run(flows: &mut [FlowView], flow_id: &str, run: RunView) {
+    let Some(flow) = flows.iter_mut().find(|f| f.definition.id == flow_id) else {
+        return;
+    };
+    if run.status == RunStatus::Running {
+        flow.active_run = Some(run.id.clone());
+    } else if flow.active_run.as_deref() == Some(run.id.as_str()) {
+        flow.active_run = None;
+    }
+    match flow.runs.iter().position(|r| r.id == run.id) {
+        Some(i) => flow.runs[i] = run,
+        None => flow.runs.insert(0, run),
+    }
+    flow.runs.truncate(RUN_HISTORY);
 }
 
 #[cfg(test)]
@@ -288,6 +314,79 @@ mod tests {
         assert_eq!(ids, ["b", "a"]);
         s.apply(WsEvent::Snapshot(snapshot(&[])));
         assert!(s.alerts.is_empty());
+    }
+
+    fn flow_view(id: &str) -> oikos_api::FlowView {
+        oikos_api::FlowView {
+            definition: oikos_core::flow::Flow {
+                id: id.into(),
+                name: id.into(),
+                ..Default::default()
+            },
+            invalid: None,
+            active_run: None,
+            runs: vec![],
+        }
+    }
+
+    fn run(id: &str, status: oikos_api::RunStatus) -> oikos_api::RunView {
+        oikos_api::RunView {
+            id: id.into(),
+            flow_id: "f".into(),
+            status,
+            started_at: 1,
+            ended_at: None,
+            trigger: None,
+            steps: vec![],
+        }
+    }
+
+    #[test]
+    fn house_applies_run_events() {
+        use oikos_api::RunStatus::{Done, Running};
+        let mut s = state_with(&[]);
+        s.apply(WsEvent::FlowsChanged {
+            flows: vec![flow_view("f")],
+        });
+        // A run for an unknown flow is ignored.
+        s.apply(WsEvent::FlowRunChanged {
+            flow_id: "ghost".into(),
+            run: run("x", Running),
+        });
+        assert_eq!(s.flows.len(), 1);
+        s.apply(WsEvent::FlowRunChanged {
+            flow_id: "f".into(),
+            run: run("r1", Running),
+        });
+        assert_eq!(s.flows[0].active_run.as_deref(), Some("r1"));
+        assert_eq!(s.flows[0].runs.len(), 1);
+        s.apply(WsEvent::FlowRunChanged {
+            flow_id: "f".into(),
+            run: run("r2", Running),
+        });
+        let ids: Vec<_> = s.flows[0].runs.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["r2", "r1"]);
+        // Finishing r1 replaces it in place and leaves r2 active.
+        s.apply(WsEvent::FlowRunChanged {
+            flow_id: "f".into(),
+            run: run("r1", Done),
+        });
+        assert_eq!(s.flows[0].runs[1].status, Done);
+        assert_eq!(s.flows[0].active_run.as_deref(), Some("r2"));
+        s.apply(WsEvent::FlowRunChanged {
+            flow_id: "f".into(),
+            run: run("r2", Done),
+        });
+        assert_eq!(s.flows[0].active_run, None);
+        // The history is capped at 20.
+        for i in 0..25 {
+            s.apply(WsEvent::FlowRunChanged {
+                flow_id: "f".into(),
+                run: run(&format!("n{i}"), Done),
+            });
+        }
+        assert_eq!(s.flows[0].runs.len(), 20);
+        assert_eq!(s.flows[0].runs[0].id, "n24");
     }
 
     #[test]

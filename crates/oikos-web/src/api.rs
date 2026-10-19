@@ -1,7 +1,7 @@
 //! The hub's REST API. Every failure comes back as an [`ApiError`] whose text is fit for a toast.
 
 use gloo_net::http::{Request, Response};
-use oikos_api::{ApiError, CommandResponse, EntityView, OverridePatch};
+use oikos_api::{ApiError, CommandResponse, EntityView, FlowView, OverridePatch, RunView};
 use oikos_core::model::{AreasDocument, Command};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -94,6 +94,21 @@ pub async fn clear_override(id: &str) -> Result<(), ApiError> {
     let url = format!("/api/v1/entities/{}/override", encode_id(id));
     check(Request::delete(&url).build(), None).await?;
     Ok(())
+}
+
+/// Enables or disables flow `id`; the reply is the flow as the hub now has it.
+pub async fn set_flow_enabled(id: &str, enabled: bool) -> Result<FlowView, ApiError> {
+    let url = format!("/api/v1/flows/{}/enabled", encode_id(id));
+    let body = serde_json::json!({ "enabled": enabled });
+    let response = check(Request::post(&url).json(&body), None).await?;
+    read_json(response).await
+}
+
+/// Starts flow `id` by hand; the hub answers 202 with the new run.
+pub async fn run_flow(id: &str) -> Result<RunView, ApiError> {
+    let url = format!("/api/v1/flows/{}/run", encode_id(id));
+    let response = check(Request::post(&url).build(), None).await?;
+    read_json(response).await
 }
 
 // Reserved: the area editor is not built yet, so nothing calls this.
