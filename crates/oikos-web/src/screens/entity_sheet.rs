@@ -140,9 +140,14 @@ fn state_panel(entity: &EntityView) -> impl IntoView + use<> {
     }
 }
 
+/// The sheet for entity `id`. The caller keys it on the id, so it is built once per entity and
+/// nothing below it is rebuilt by a state echo unless it reads `entity` itself.
 #[component]
-fn SheetBody(id: String) -> impl IntoView {
+pub fn SheetBody(id: String) -> impl IntoView {
     let house = expect_context::<House>();
+    // What the override editor starts from. It follows outside changes on its own; handing it
+    // the live entity would rebuild it (and drop unsaved typing) on every WebSocket echo.
+    let initial = house.entities.with_untracked(|m| m.get(&id).cloned());
     let entity = Memo::new(move |_| house.entities.with(|m| m.get(&id).cloned()));
 
     let header = move || {
@@ -183,7 +188,7 @@ fn SheetBody(id: String) -> impl IntoView {
         {move || entity.get().and_then(|e| device_panel(house, &e))}
         {move || entity.get().map(|e| state_panel(&e))}
         <Panel title="Override">
-            {entity.get_untracked().map(|e| view! { <OverrideEditor entity=e /> })}
+            {initial.map(|e| view! { <OverrideEditor entity=e /> })}
         </Panel>
     }
 }

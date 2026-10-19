@@ -32,4 +32,5 @@ wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = ["Document", "Element"] }
 
 [dev-dependencies]
+web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventInit", "HtmlElement", "HtmlInputElement", "Node"] }
 wasm-bindgen-test.workspace = true
