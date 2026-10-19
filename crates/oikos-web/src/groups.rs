@@ -13,11 +13,12 @@ use crate::cards::cover::is_moving;
 use crate::format::is_on;
 use crate::screens::home::{FAVORITES, shows_on_home, without_paired_humidity};
 
-/// One card on Home: a single entity, or the group card of a room.
+/// One card on Home: a single entity, or the group card of a room. A group carries the ids of
+/// its members in Home order: under Favorites that can be fewer than the room's group.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum HomeItem {
     Entity(String),
-    Group(GroupKey),
+    Group { key: GroupKey, members: Vec<String> },
 }
 
 /// The entities Home shows, in Home order (the hub's `order` override first, then by name).
@@ -25,11 +26,6 @@ fn shown<'a>(entities: impl Iterator<Item = &'a EntityView>) -> Vec<&'a EntityVi
     let mut shown: Vec<&EntityView> = entities.filter(|e| shows_on_home(e)).collect();
     shown.sort_by_cached_key(|e| (e.ui.order.unwrap_or(i32::MAX), e.name.to_lowercase()));
     shown
-}
-
-/// The group `e` belongs to when its room has enough members, from `groups` (see [`groups_of`]).
-fn group_of(e: &EntityView, groups: &HashMap<GroupKey, usize>) -> Option<GroupKey> {
-    GroupKey::candidate(&e.area, e.kind, &e.ui).filter(|k| groups.contains_key(k))
 }
 
 /// The groups that exist among `shown`, each with its member count.
@@ -44,45 +40,59 @@ fn groups_of(shown: &[&EntityView]) -> HashMap<GroupKey, usize> {
     counts
 }
 
-/// What Home shows under `chip`, in display order: the entities as sorted by Home, each group
-/// folded into its first member's slot, then pinned cards, then by room, groups before singles.
-/// Under Favorites a favourited group takes all its members and a favourite member of another
-/// group shows alone.
+/// What Home shows under `chip`, in display order: filter first, then fold what is left (the
+/// app's `HomeUiBuilder` then `RoomGroups.fold`). A room chip shows the whole room; Favorites
+/// shows the favourite entities and every member of a favourited group. Each group folds into
+/// its first member's slot, then pinned cards, then by room, groups before singles.
 pub fn home_items<'a>(
     entities: impl Iterator<Item = &'a EntityView>,
     areas: &[AreaView],
     chip: &str,
 ) -> Vec<HomeItem> {
     let all = shown(entities);
-    let groups = groups_of(&all);
-    let favourited = |k: &GroupKey| is_favorite(areas, k);
+    let in_room = groups_of(&all);
     let candidates: Vec<&EntityView> = all
         .into_iter()
         .filter(|e| {
             if chip != FAVORITES {
                 return e.area == chip;
             }
-            match group_of(e, &groups) {
-                Some(k) => favourited(&k) || e.ui.favorite,
-                None => e.ui.favorite,
-            }
+            let favourited_group = GroupKey::candidate(&e.area, e.kind, &e.ui)
+                .is_some_and(|k| in_room.contains_key(&k) && is_favorite(areas, &k));
+            e.ui.favorite || favourited_group
         })
         .collect();
+    let candidates = without_paired_humidity(candidates);
+    let groups = groups_of(&candidates);
 
     let mut placed: Vec<(i32, usize, HomeItem)> = Vec::new();
-    let mut folded: Vec<GroupKey> = Vec::new();
-    for e in without_paired_humidity(candidates) {
+    // Where each group sits in `placed`, so later members join it.
+    let mut slots: HashMap<GroupKey, usize> = HashMap::new();
+    for e in candidates {
         let area_index = areas
             .iter()
             .position(|a| a.id == e.area)
             .unwrap_or(usize::MAX);
-        let group = group_of(e, &groups).filter(|k| chip != FAVORITES || favourited(k));
+        let group = GroupKey::candidate(&e.area, e.kind, &e.ui).filter(|k| groups.contains_key(k));
         match group {
-            Some(k) if folded.contains(&k) => {}
-            Some(k) => {
-                folded.push(k.clone());
-                placed.push((i32::MAX, area_index, HomeItem::Group(k)));
-            }
+            Some(k) => match slots.get(&k) {
+                Some(&slot) => {
+                    if let HomeItem::Group { members, .. } = &mut placed[slot].2 {
+                        members.push(e.id.clone());
+                    }
+                }
+                None => {
+                    slots.insert(k.clone(), placed.len());
+                    placed.push((
+                        i32::MAX,
+                        area_index,
+                        HomeItem::Group {
+                            key: k,
+                            members: vec![e.id.clone()],
+                        },
+                    ));
+                }
+            },
             None => placed.push((
                 e.ui.order.unwrap_or(i32::MAX),
                 area_index,
@@ -90,7 +100,9 @@ pub fn home_items<'a>(
             )),
         }
     }
-    placed.sort_by_key(|(order, area, item)| (*order, *area, !matches!(item, HomeItem::Group(_))));
+    placed.sort_by_key(|(order, area, item)| {
+        (*order, *area, !matches!(item, HomeItem::Group { .. }))
+    });
     placed.into_iter().map(|(_, _, item)| item).collect()
 }
 
@@ -126,8 +138,7 @@ pub fn is_favorite(areas: &[AreaView], key: &GroupKey) -> bool {
     area_of(areas, key).is_some_and(|a| a.group_favorites.contains(key.kind.key()))
 }
 
-/// How many items Favorites shows: favourite single entities plus favourited groups (a group
-/// counts once).
+/// How many cards the Favorites chip would show (a folded group counts once).
 pub fn favorites_count<'a>(
     entities: impl Iterator<Item = &'a EntityView>,
     areas: &[AreaView],
@@ -239,8 +250,14 @@ fn is_available(e: &EntityView) -> bool {
     e.state.availability != Availability::Offline
 }
 
-/// "Opening…", "Closing…", "All open", "All closed" or "N open · M closed".
+/// The card text of a group with no member online.
+const UNAVAILABLE: &str = "Unavailable";
+
+/// "Unavailable" when no member is online, else "Opening…", "Closing…", "All open", "All closed" or "N open · M closed".
 pub fn cover_text(s: &GroupSummary) -> String {
+    if !s.available {
+        return UNAVAILABLE.into();
+    }
     match s.moving {
         Some(Motion::Opening) => "Opening…".into(),
         Some(Motion::Closing) => "Closing…".into(),
@@ -250,9 +267,11 @@ pub fn cover_text(s: &GroupSummary) -> String {
     }
 }
 
-/// "All on", "All off" or "N of M on".
+/// "Unavailable" when no member is online, else "All on", "All off" or "N of M on".
 pub fn light_text(s: &GroupSummary) -> String {
-    if s.on == s.total {
+    if !s.available {
+        UNAVAILABLE.into()
+    } else if s.on == s.total {
         "All on".into()
     } else if s.on == 0 {
         "All off".into()
@@ -385,11 +404,14 @@ mod tests {
         }
     }
 
-    fn key(area: &str, kind: GroupKind) -> HomeItem {
-        HomeItem::Group(GroupKey {
-            area: area.into(),
-            kind,
-        })
+    fn key(area: &str, kind: GroupKind, members: &[&str]) -> HomeItem {
+        HomeItem::Group {
+            key: GroupKey {
+                area: area.into(),
+                kind,
+            },
+            members: members.iter().map(|m| (*m).to_owned()).collect(),
+        }
     }
 
     fn single(id: &str) -> HomeItem {
@@ -438,7 +460,10 @@ mod tests {
         ];
         assert_eq!(
             items(&all, &[area("living")], "living"),
-            [key("living", GroupKind::Light), single("plug")]
+            [
+                key("living", GroupKind::Light, &["lamp_a", "lamp_b"]),
+                single("plug")
+            ]
         );
     }
 
@@ -518,7 +543,7 @@ mod tests {
             items(&all, &[area("living")], "living"),
             [
                 single("zplug"),
-                key("living", GroupKind::Light),
+                key("living", GroupKind::Light, &["lamp_a", "lamp_b"]),
                 single("aplug")
             ]
         );
@@ -537,7 +562,63 @@ mod tests {
         let areas = [favourite_groups("living", &["cover"])];
         assert_eq!(
             items(&all, &areas, FAVORITES),
-            [key("living", GroupKind::Cover), single("lamp_a")]
+            [
+                key("living", GroupKind::Cover, &["blind_a", "blind_b"]),
+                single("lamp_a")
+            ]
+        );
+    }
+
+    fn favourite(mut e: EntityView) -> EntityView {
+        e.ui.favorite = true;
+        e
+    }
+
+    #[test]
+    fn individually_favourited_members_fold_under_favorites() {
+        let all = [
+            favourite(cover("blind_a", "living")),
+            favourite(cover("blind_b", "living")),
+        ];
+        assert_eq!(
+            items(&all, &[area("living")], FAVORITES),
+            [key("living", GroupKind::Cover, &["blind_a", "blind_b"])]
+        );
+        assert_eq!(favorites_count(all.iter(), &[area("living")]), 1);
+    }
+
+    #[test]
+    fn partial_favourites_fold_to_a_partial_group() {
+        let all = [
+            favourite(light("lamp_a", "living")),
+            favourite(light("lamp_b", "living")),
+            light("lamp_c", "living"),
+        ];
+        assert_eq!(
+            items(&all, &[area("living")], FAVORITES),
+            [key("living", GroupKind::Light, &["lamp_a", "lamp_b"])]
+        );
+        // The room chip still shows the whole group.
+        assert_eq!(
+            items(&all, &[area("living")], "living"),
+            [key(
+                "living",
+                GroupKind::Light,
+                &["lamp_a", "lamp_b", "lamp_c"]
+            )]
+        );
+    }
+
+    #[test]
+    fn single_favourite_member_stays_single() {
+        let all = [
+            favourite(light("lamp_a", "living")),
+            light("lamp_b", "living"),
+            light("lamp_c", "living"),
+        ];
+        assert_eq!(
+            items(&all, &[area("living")], FAVORITES),
+            [single("lamp_a")]
         );
     }
 
@@ -556,8 +637,8 @@ mod tests {
         assert_eq!(
             items(&all, &areas, FAVORITES),
             [
-                key("bath", GroupKind::Light),
-                key("attic", GroupKind::Light)
+                key("bath", GroupKind::Light, &["b1", "b2"]),
+                key("attic", GroupKind::Light, &["a1", "a2"])
             ]
         );
     }
@@ -601,6 +682,17 @@ mod tests {
         assert_eq!(group_name(&[], &cover_key), "Shutters");
         assert!(is_favorite(&areas, &cover_key));
         assert!(!is_favorite(&areas, &light_key));
+    }
+
+    #[test]
+    fn offline_groups_read_unavailable() {
+        let mut a = open("a");
+        let mut b = open("b");
+        a.state.availability = Availability::Offline;
+        b.state.availability = Availability::Offline;
+        let s = summary(&[a, b], &no_children());
+        assert_eq!(cover_text(&s), "Unavailable");
+        assert_eq!(light_text(&s), "Unavailable");
     }
 
     #[test]

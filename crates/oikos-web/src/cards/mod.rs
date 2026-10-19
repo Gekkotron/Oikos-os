@@ -64,6 +64,11 @@ impl Sender {
     pub fn pending(&self, id: &str) -> Signal<bool> {
         self.pending.signal(id)
     }
+
+    /// True while any of `ids` has a command in flight (tracked: one read of the set).
+    pub fn any_pending<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> bool {
+        self.pending.any(ids)
+    }
 }
 
 /// The pill toggle with a sliding knob. The whole row is the tap target.
@@ -75,6 +80,9 @@ pub fn PowerToggle(
     /// The accessible name when the visible label does not say what the switch is for.
     #[prop(optional, into)]
     aria_label: Option<String>,
+    /// Greys the switch out and ignores taps (a group with no member online).
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
 ) -> impl IntoView {
     view! {
         <button
@@ -83,6 +91,7 @@ pub fn PowerToggle(
             role="switch"
             aria-label=aria_label
             aria-checked=on.to_string()
+            disabled=move || disabled.get()
             on:click=move |_| on_toggle.run(())
         >
             <span class="power__label">{label}</span>

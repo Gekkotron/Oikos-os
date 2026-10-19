@@ -26,6 +26,11 @@ impl Pending {
         let id = id.to_owned();
         Signal::derive(move || set.with(|s| s.contains(&id)))
     }
+
+    /// True while any of `ids` has a command in flight; reads the set once (tracked).
+    pub fn any<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> bool {
+        self.0.with(|s| ids.into_iter().any(|id| s.contains(id)))
+    }
 }
 
 impl Default for Pending {

@@ -220,11 +220,11 @@ pub fn HomeScreen() -> impl IntoView {
                                     });
                                     view! { {move || entity.get().map(card_for)} }.into_any()
                                 }
-                                HomeItem::Group(key) if key.kind == GroupKind::Cover => {
-                                    view! { <CoverGroupCard key=key /> }.into_any()
+                                HomeItem::Group { key, members } if key.kind == GroupKind::Cover => {
+                                    view! { <CoverGroupCard key=key members=members /> }.into_any()
                                 }
-                                HomeItem::Group(key) => {
-                                    view! { <LightGroupCard key=key /> }.into_any()
+                                HomeItem::Group { key, members } => {
+                                    view! { <LightGroupCard key=key members=members /> }.into_any()
                                 }
                             }
                         />
@@ -253,7 +253,7 @@ mod tests {
             .into_iter()
             .map(|i| match i {
                 HomeItem::Entity(id) => id,
-                HomeItem::Group(k) => panic!("unexpected group {k:?}"),
+                HomeItem::Group { key, .. } => panic!("unexpected group {key:?}"),
             })
             .collect()
     }

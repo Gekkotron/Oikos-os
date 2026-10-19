@@ -25,12 +25,32 @@ pub(crate) struct GroupView {
 }
 
 impl GroupView {
-    pub(crate) fn new(key: &GroupKey, sender: Sender) -> Self {
+    /// A group card's view: the `ids` it folds, which under Favorites can be a part of the room's
+    /// group.
+    pub(crate) fn of_ids(key: &GroupKey, ids: Vec<String>, sender: Sender) -> Self {
+        let house = expect_context::<House>();
+        let members = Memo::new(move |_| {
+            house.entities.with(|m| {
+                ids.iter()
+                    .filter_map(|id| m.get(id).cloned())
+                    .collect::<Vec<_>>()
+            })
+        });
+        Self::new(key, members, sender)
+    }
+
+    /// The whole room group, as its sheet shows it.
+    pub(crate) fn of_group(key: &GroupKey, sender: Sender) -> Self {
         let house = expect_context::<House>();
         let members = {
             let key = key.clone();
             Memo::new(move |_| house.entities.with(|m| members(m, &key)))
         };
+        Self::new(key, members, sender)
+    }
+
+    fn new(key: &GroupKey, members: Memo<Vec<EntityView>>, sender: Sender) -> Self {
+        let house = expect_context::<House>();
         let summary =
             Memo::new(move |_| members.with(|ms| house.entities.with(|m| summary(ms, m))));
         let name = {
@@ -48,7 +68,7 @@ impl GroupView {
             })
         };
         let pending = Signal::derive(move || {
-            members.with(|ms| ms.iter().any(|e| sender.pending(&e.id).get()))
+            members.with(|ms| sender.any_pending(ms.iter().map(|e| e.id.as_str())))
         });
         Self {
             members,
@@ -126,7 +146,13 @@ fn card_label(view: GroupView, state: fn(&GroupSummary) -> String) -> Signal<Str
 /// ▲ ■ ▼ as a row of buttons sending Open, Stop and Close to `on_command`. `suffix` ends their
 /// accessible names ("Open" + " all shutters").
 #[component]
-pub fn CoverButtons(#[prop(into)] suffix: String, on_command: Callback<Command>) -> impl IntoView {
+pub fn CoverButtons(
+    #[prop(into)] suffix: String,
+    on_command: Callback<Command>,
+    /// Greys the buttons out (a group with no member online).
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+) -> impl IntoView {
     let button = move |text: &'static str, icon: &'static str, cmd: Command| {
         let label = format!("{text}{suffix}");
         view! {
@@ -135,6 +161,7 @@ pub fn CoverButtons(#[prop(into)] suffix: String, on_command: Callback<Command>)
                 class="btn btn--icon"
                 aria-label=label.clone()
                 title=label
+                disabled=move || disabled.get()
                 inner_html=icon
                 on:click=move |_| on_command.run(cmd.clone())
             ></button>
@@ -151,10 +178,10 @@ pub fn CoverButtons(#[prop(into)] suffix: String, on_command: Callback<Command>)
 
 /// A room's shutters as one card: how many are open, ▲ ■ ▼ for all of them, a bar for each.
 #[component]
-pub fn CoverGroupCard(key: GroupKey) -> impl IntoView {
+pub fn CoverGroupCard(key: GroupKey, members: Vec<String>) -> impl IntoView {
     debug_assert_eq!(key.kind, GroupKind::Cover);
     let sender = Sender::from_context();
-    let view = GroupView::new(&key, sender);
+    let view = GroupView::of_ids(&key, members, sender);
     let summary = view.summary;
     let label = card_label(view, |s| {
         format!("{} open, {} closed", s.on, s.total - s.on)
@@ -181,6 +208,7 @@ pub fn CoverGroupCard(key: GroupKey) -> impl IntoView {
             <CoverButtons
                 suffix=" all shutters"
                 on_command=Callback::new(move |cmd| view.send(sender, cmd))
+                disabled=Signal::derive(move || summary.with(|s| !s.available))
             />
         </GroupFrame>
     }
@@ -188,10 +216,10 @@ pub fn CoverGroupCard(key: GroupKey) -> impl IntoView {
 
 /// A room's lights as one card: how many are on and a switch for all of them.
 #[component]
-pub fn LightGroupCard(key: GroupKey) -> impl IntoView {
+pub fn LightGroupCard(key: GroupKey, members: Vec<String>) -> impl IntoView {
     debug_assert_eq!(key.kind, GroupKind::Light);
     let sender = Sender::from_context();
-    let view = GroupView::new(&key, sender);
+    let view = GroupView::of_ids(&key, members, sender);
     let summary = view.summary;
     let label = card_label(view, |s| format!("{} of {} on", s.on, s.total));
 
@@ -201,8 +229,17 @@ pub fn LightGroupCard(key: GroupKey) -> impl IntoView {
     view! {
         <GroupFrame kind=Kind::Light key=key view=view label=label>
             {move || {
-                let (on, text) = summary.with(|s| (s.on > 0, light_text(s)));
-                view! { <PowerToggle on=on label=text on_toggle=toggle /> }
+                let (on, text, available) = summary
+                    .with(|s| (s.on > 0, light_text(s), s.available));
+                view! {
+                    <PowerToggle
+                        on=on
+                        label=text
+                        on_toggle=toggle
+                        aria_label="All lights"
+                        disabled=!available
+                    />
+                }
             }}
         </GroupFrame>
     }

@@ -8,7 +8,7 @@ use oikos_core::model::{
     Availability, Capabilities, CoverState, EntityCategory, EntityState, GroupKey, GroupKind, Kind,
     LightState, StateValue, UiOverride,
 };
-use oikos_web::cards::group::CoverGroupCard;
+use oikos_web::cards::group::{CoverGroupCard, LightGroupCard};
 use oikos_web::commands::Pending;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
@@ -139,7 +139,10 @@ async fn cover_group_buttons_reach_every_member() {
         provide_context(pending);
         view! {
             <Router>
-                <CoverGroupCard key=key.clone() />
+                <CoverGroupCard
+                    key=key.clone()
+                    members=vec!["cover.a".to_owned(), "cover.b".to_owned(), "cover.c".to_owned()]
+                />
             </Router>
         }
     });
@@ -161,4 +164,79 @@ async fn cover_group_buttons_reach_every_member() {
         "{held:?}"
     );
     assert!(!held.contains("cover.c"), "{held:?}");
+}
+
+#[wasm_bindgen_test]
+async fn offline_light_group_is_unavailable_and_disabled() {
+    let host = host();
+    let house = House::new();
+    for id in ["light.a", "light.b"] {
+        house.apply(WsEvent::EntityUpserted(entity(
+            id,
+            Kind::Light,
+            StateValue::Light(LightState::default()),
+            Availability::Offline,
+        )));
+    }
+    salon(house);
+    let key = GroupKey {
+        area: "salon".into(),
+        kind: GroupKind::Light,
+    };
+    let _mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(Toasts::new());
+        provide_context(Pending::new());
+        view! {
+            <Router>
+                <LightGroupCard
+                    key=key.clone()
+                    members=vec!["light.a".to_owned(), "light.b".to_owned()]
+                />
+            </Router>
+        }
+    });
+    tick().await;
+    let toggle = host
+        .query_selector("[aria-label='All lights']")
+        .unwrap()
+        .expect("the switch is named for its purpose");
+    assert!(toggle.has_attribute("disabled"));
+    assert!(toggle.text_content().unwrap().contains("Unavailable"));
+}
+
+#[wasm_bindgen_test]
+async fn favorites_group_card_holds_only_its_members() {
+    let host = host();
+    let house = House::new();
+    for id in ["light.a", "light.b", "light.c"] {
+        let mut e = entity(
+            id,
+            Kind::Light,
+            StateValue::Light(LightState::default()),
+            Availability::Online,
+        );
+        e.ui.favorite = id != "light.c";
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    salon(house);
+    let _mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(Toasts::new());
+        provide_context(Pending::new());
+        provide_context(HomeRoom(RwSignal::new(Some("__favorites__".to_owned()))));
+        view! {
+            <Router>
+                <HomeScreen />
+            </Router>
+        }
+    });
+    tick().await;
+    let text = host
+        .query_selector(".card--wide")
+        .unwrap()
+        .expect("a group card")
+        .text_content()
+        .unwrap();
+    assert!(text.contains("×2"), "{text}");
 }

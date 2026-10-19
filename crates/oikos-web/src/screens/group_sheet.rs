@@ -88,7 +88,7 @@ fn count_text(kind: GroupKind, n: usize) -> String {
 #[component]
 fn GroupBody(key: GroupKey) -> impl IntoView {
     let sender = Sender::from_context();
-    let view = GroupView::new(&key, sender);
+    let view = GroupView::of_group(&key, sender);
     let GroupView {
         members,
         summary,
@@ -124,6 +124,7 @@ fn GroupBody(key: GroupKey) -> impl IntoView {
                     <CoverButtons
                         suffix=" all shutters"
                         on_command=Callback::new(move |cmd| view.send(sender, cmd))
+                        disabled=Signal::derive(move || summary.with(|s| !s.available))
                     />
                 </div>
                 <Show when=move || members.with(|ms| ms.iter().any(|m| m.capabilities.position))>
@@ -136,6 +137,7 @@ fn GroupBody(key: GroupKey) -> impl IntoView {
                             max="100"
                             step="1"
                             aria-label="All to"
+                            disabled=move || summary.with(|s| !s.available)
                             prop:value=start.to_string()
                             on:change=on_change
                         />
@@ -164,8 +166,17 @@ fn GroupBody(key: GroupKey) -> impl IntoView {
             });
             view! {
                 {move || {
-                    let (on, text) = summary.with(|s| (s.on > 0, light_text(s)));
-                    view! { <PowerToggle on=on label=text on_toggle=toggle /> }
+                    let (on, text, available) = summary
+                        .with(|s| (s.on > 0, light_text(s), s.available));
+                    view! {
+                        <PowerToggle
+                            on=on
+                            label=text
+                            on_toggle=toggle
+                            aria_label="All lights"
+                            disabled=!available
+                        />
+                    }
                 }}
                 <Show when=move || members.with(|ms| ms.iter().any(|m| m.capabilities.brightness))>
                     <label class="group__slider">
@@ -177,6 +188,7 @@ fn GroupBody(key: GroupKey) -> impl IntoView {
                             max="255"
                             step="1"
                             aria-label="Brightness"
+                            disabled=move || summary.with(|s| !s.available)
                             prop:value=start.to_string()
                             on:change=on_change
                         />
@@ -295,6 +307,10 @@ fn Customize(key: GroupKey, members: Memo<Vec<EntityView>>) -> impl IntoView {
         move |_| {
             let name = draft.get_untracked();
             let name = name.trim();
+            // Like the app: saving the name the group already has does nothing.
+            if name == house.areas.with_untracked(|a| custom_name(a, &key)).trim() {
+                return;
+            }
             save_group(Some((!name.is_empty()).then(|| name.to_owned())), None);
         }
     };
