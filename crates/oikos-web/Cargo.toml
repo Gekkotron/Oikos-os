@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 console_error_panic_hook.workspace = true
+futures-util.workspace = true
 gloo-net.workspace = true
 gloo-timers.workspace = true
 leptos.workspace = true

@@ -164,7 +164,7 @@ pub(crate) fn is_primary(
 }
 
 /// The Zigbee2MQTT bridge.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BridgeView {
     pub version: Option<String>,
     pub coordinator: Option<String>,

@@ -8,12 +8,15 @@ use crate::snapshot::Snapshot;
 use crate::views::{AreaView, BridgeView, DeviceView, EntityView};
 
 /// The hub's link to the MQTT broker.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConnectionStatus {
+    #[default]
     Connecting,
     Online,
-    Offline { reason: String },
+    Offline {
+        reason: String,
+    },
 }
 
 /// One message pushed to a WebSocket client.
