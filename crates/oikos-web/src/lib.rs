@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod app;
+pub mod cards;
 pub mod commands;
 pub mod components;
 pub mod format;

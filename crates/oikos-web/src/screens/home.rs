@@ -2,8 +2,10 @@
 
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
-use oikos_core::model::UNASSIGNED_AREA;
+use oikos_core::model::{Kind, UNASSIGNED_AREA};
 
+use crate::cards::light::LightCard;
+use crate::cards::switch::SwitchCard;
 use crate::commands::Pending;
 use crate::components::area_chip::AreaChip;
 use crate::components::card_frame::{CardFrame, open_entity};
@@ -64,7 +66,11 @@ fn generic_card(entity: EntityView) -> AnyView {
 
 /// The card component for an entity's kind.
 fn card_for(entity: EntityView) -> AnyView {
-    generic_card(entity)
+    match entity.kind {
+        Kind::Light => view! { <LightCard entity=entity /> }.into_any(),
+        Kind::Switch => view! { <SwitchCard entity=entity /> }.into_any(),
+        _ => generic_card(entity),
+    }
 }
 
 #[component]
