@@ -1235,3 +1235,39 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Alerts page and detail */
+.alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.alerts__day {
+  margin: 8px 0 0;
+  font: var(--type-label);
+  letter-spacing: 0.08em;
+  opacity: 0.6;
+  text-transform: uppercase;
+}
+
+.alerts__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--grid-gap);
+}
+
+.alerts__empty {
+  margin: 12px 0;
+  opacity: 0.6;
+}
+
+.chip__glyph {
+  display: inline-flex;
+}
+
+.chip__glyph svg {
+  width: 18px;
+  height: 18px;
+}

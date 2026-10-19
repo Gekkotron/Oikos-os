@@ -46,7 +46,7 @@ pub fn relative_time(sent_at: u64, now: u64) -> String {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DayLabel {
     Today,
     Yesterday,

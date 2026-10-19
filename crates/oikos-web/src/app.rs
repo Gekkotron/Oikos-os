@@ -9,6 +9,7 @@ use crate::components::now::install_now;
 use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
+use crate::screens::alerts::AlertsScreen;
 use crate::screens::devices::DevicesScreen;
 use crate::screens::entity_sheet::EntitySheetScreen;
 use crate::screens::home::HomeScreen;
@@ -65,6 +66,7 @@ pub fn App() -> impl IntoView {
                 </button>
                 <nav class="topbar__nav">
                     <A href="/" exact=true>"Home"</A>
+                    <A href="/alerts">"Alerts"</A>
                     <A href="/devices">"Devices"</A>
                     <A href="/settings">"Settings"</A>
                 </nav>
@@ -73,6 +75,7 @@ pub fn App() -> impl IntoView {
                 <Routes fallback=HomeScreen>
                     <Route path=path!("/") view=HomeScreen />
                     <Route path=path!("/entity/:id") view=EntitySheetScreen />
+                    <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/devices") view=DevicesScreen />
                     <Route path=path!("/settings") view=SettingsScreen />
                 </Routes>
