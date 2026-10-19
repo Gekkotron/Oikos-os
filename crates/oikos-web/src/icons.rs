@@ -1,6 +1,7 @@
 //! Inline SVG icons, one per kind plus device-class overrides. 24x24 line icons that take the
 //! current text colour.
 
+use oikos_api::AlertChannel;
 use oikos_core::model::Kind;
 
 macro_rules! svg {
@@ -71,6 +72,36 @@ pub const CHEVRON_UP: &str = svg!(r#"<path d="m6 15 6-6 6 6"/>"#);
 pub const STOP: &str = svg!(r#"<rect x="7" y="7" width="10" height="10" rx="2"/>"#);
 pub const CHEVRON_DOWN: &str = svg!(r#"<path d="m6 9 6 6 6-6"/>"#);
 
+const CHANNEL_ALARM: &str =
+    svg!(r#"<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>"#);
+const CHANNEL_SECURITY: &str = svg!(r#"<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z"/>"#);
+const CHANNEL_CAMERA: &str = svg!(
+    r#"<path d="M4 8h3l1.5-2.5h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>"#
+);
+const CHANNEL_ENERGY: &str = svg!(r#"<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>"#);
+const CHANNEL_CLIMATE: &str = svg!(
+    r#"<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 9v7"/><path d="M17.5 7h3"/>"#
+);
+const CHANNEL_SYSTEM: &str = svg!(
+    r#"<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3"/><path d="M12 18.5v3"/><path d="M2.5 12h3"/><path d="M18.5 12h3"/><path d="m5.3 5.3 2.1 2.1"/><path d="m16.6 16.6 2.1 2.1"/><path d="m5.3 18.7 2.1-2.1"/><path d="m16.6 7.4 2.1-2.1"/>"#
+);
+const CHANNEL_MISC: &str = svg!(
+    r#"<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="7.8" r="0.8"/>"#
+);
+
+/// The glyph of an alert channel: bell, shield, camera, bolt, thermometer, gear, info circle.
+pub fn channel_icon(channel: AlertChannel) -> &'static str {
+    match channel {
+        AlertChannel::Alarm => CHANNEL_ALARM,
+        AlertChannel::Security => CHANNEL_SECURITY,
+        AlertChannel::Camera => CHANNEL_CAMERA,
+        AlertChannel::Energy => CHANNEL_ENERGY,
+        AlertChannel::Climate => CHANNEL_CLIMATE,
+        AlertChannel::System => CHANNEL_SYSTEM,
+        AlertChannel::Misc => CHANNEL_MISC,
+    }
+}
+
 /// The icon for an entity: the device class wins when we draw one, else the kind's.
 pub fn kind_icon(kind: Kind, device_class: Option<&str>) -> &'static str {
     if let Some(icon) = device_class.and_then(device_class_icon) {
@@ -110,7 +141,8 @@ fn device_class_icon(device_class: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::kind_icon;
+    use super::{channel_icon, kind_icon};
+    use oikos_api::AlertChannel;
     use oikos_core::model::Kind;
 
     const KINDS: [Kind; 12] = [
@@ -137,6 +169,19 @@ mod tests {
                 !icons[..i].contains(icon),
                 "duplicate icon for {:?}",
                 KINDS[i]
+            );
+        }
+    }
+
+    #[test]
+    fn every_channel_has_a_distinct_svg() {
+        let icons: Vec<_> = AlertChannel::ALL.iter().map(|c| channel_icon(*c)).collect();
+        for (i, icon) in icons.iter().enumerate() {
+            assert!(icon.starts_with("<svg") && icon.ends_with("</svg>"));
+            assert!(
+                !icons[..i].contains(icon),
+                "duplicate icon for {:?}",
+                AlertChannel::ALL[i]
             );
         }
     }

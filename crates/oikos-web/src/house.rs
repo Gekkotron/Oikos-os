@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use leptos::prelude::*;
 use oikos_api::{
-    AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView, WsEvent,
+    AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -15,6 +15,8 @@ pub struct House {
     pub devices: RwSignal<Vec<DeviceView>>,
     pub entities: RwSignal<BTreeMap<String, EntityView>>,
     pub ignored: RwSignal<Vec<IgnoredView>>,
+    /// The push alerts, newest first.
+    pub alerts: RwSignal<Vec<AlertView>>,
     /// The last rejected command as `(entity id, reason)`.
     pub command_failed: RwSignal<Option<(String, String)>>,
 }
@@ -28,6 +30,7 @@ impl House {
             devices: RwSignal::new(Vec::new()),
             entities: RwSignal::new(BTreeMap::new()),
             ignored: RwSignal::new(Vec::new()),
+            alerts: RwSignal::new(Vec::new()),
             command_failed: RwSignal::new(None),
         }
     }
@@ -53,6 +56,7 @@ impl House {
                 self.entities
                     .set(s.entities.into_iter().map(|e| (e.id.clone(), e)).collect());
                 self.ignored.set(s.ignored);
+                self.alerts.set(s.alerts);
             }
             WsEvent::EntityUpserted(view) => {
                 self.entities.update(|m| {
@@ -75,7 +79,7 @@ impl House {
             WsEvent::DevicesChanged { devices } => self.devices.set(devices),
             WsEvent::BridgeChanged(bridge) => self.bridge.set(bridge),
             WsEvent::ConnectionChanged(connection) => self.connection.set(connection),
-            WsEvent::AlertsChanged { .. } => {}
+            WsEvent::AlertsChanged { alerts } => self.alerts.set(alerts),
             WsEvent::CommandFailed { id, reason } => self.command_failed.set(Some((id, reason))),
         }
     }

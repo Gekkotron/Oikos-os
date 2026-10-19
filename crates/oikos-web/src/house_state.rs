@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use oikos_api::{
-    AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView, Snapshot, WsEvent,
+    AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView,
+    Snapshot, WsEvent,
 };
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -14,6 +15,8 @@ pub struct HouseState {
     pub devices: Vec<DeviceView>,
     pub entities: BTreeMap<String, EntityView>,
     pub ignored: Vec<IgnoredView>,
+    /// The push alerts, newest first, as the hub sent them.
+    pub alerts: Vec<AlertView>,
     pub generated_at: u64,
 }
 
@@ -30,6 +33,7 @@ impl HouseState {
             devices: s.devices,
             entities: s.entities.into_iter().map(|e| (e.id.clone(), e)).collect(),
             ignored: s.ignored,
+            alerts: s.alerts,
             generated_at: s.generated_at,
         }
     }
@@ -62,8 +66,7 @@ impl HouseState {
             WsEvent::DevicesChanged { devices } => self.devices = devices,
             WsEvent::BridgeChanged(bridge) => self.bridge = bridge,
             WsEvent::ConnectionChanged(connection) => self.connection = connection,
-            // Filled in by the alerts work (Task 5): the web does not keep alerts yet.
-            WsEvent::AlertsChanged { .. } => {}
+            WsEvent::AlertsChanged { alerts } => self.alerts = alerts,
             WsEvent::CommandFailed { .. } => {}
         }
     }
@@ -72,7 +75,7 @@ impl HouseState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oikos_api::{AreaView, DeviceView};
+    use oikos_api::{AlertChannel, AlertSeverity, AlertView, AreaView, DeviceView};
     use oikos_core::model::{
         Availability, Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride,
     };
@@ -256,6 +259,33 @@ mod tests {
             reason: "nope".into(),
         });
         assert_eq!(s, before);
+    }
+
+    #[test]
+    fn alerts_changed_replaces_the_list() {
+        let alert = |id: &str| AlertView {
+            id: id.into(),
+            channel: AlertChannel::Camera,
+            severity: AlertSeverity::Info,
+            title: id.into(),
+            body: String::new(),
+            image_url: None,
+            video_url: None,
+            entity_id: None,
+            actions: vec![],
+            source: None,
+            silent: false,
+            resolved: false,
+            sent_at: 1,
+        };
+        let mut s = state_with(&[]);
+        s.apply(WsEvent::AlertsChanged {
+            alerts: vec![alert("b"), alert("a")],
+        });
+        let ids: Vec<_> = s.alerts.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["b", "a"]);
+        s.apply(WsEvent::Snapshot(snapshot(&[])));
+        assert!(s.alerts.is_empty());
     }
 
     #[test]

@@ -55,6 +55,13 @@ pub async fn send_command(id: &str, cmd: Command) -> Result<CommandResponse, Api
     read_json(response).await
 }
 
+/// Presses alert `id`'s button `action`; the hub forwards it to the producer.
+pub async fn send_alert_action(id: &str, action: &str) -> Result<(), ApiError> {
+    let url = format!("/api/v1/alerts/{id}/actions/{action}");
+    check(Request::post(&url).build(), Some(BROKER_OFFLINE)).await?;
+    Ok(())
+}
+
 pub async fn set_override(id: &str, patch: OverridePatch) -> Result<EntityView, ApiError> {
     let url = format!("/api/v1/entities/{id}/override");
     let response = check(Request::patch(&url).json(&Value::Object(patch)), None).await?;
