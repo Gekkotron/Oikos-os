@@ -5,6 +5,7 @@ mod command;
 mod device;
 mod entity;
 mod kind;
+mod placement;
 mod state;
 pub(crate) mod ui_override;
 
@@ -13,6 +14,7 @@ pub use command::{AlarmMode, Command, Hs};
 pub use device::{BridgeInfo, Device};
 pub use entity::{Bindings, Capabilities, CodeFormat, Entity, EntityCategory};
 pub use kind::{IGNORED_COMPONENTS, Kind};
+pub use placement::{Placement, SensorGroup, SensorSection};
 pub use state::{
     Availability, ClimateState, CoverState, EntityState, LightState, StateValue, VacuumState,
     WaterHeaterState,
