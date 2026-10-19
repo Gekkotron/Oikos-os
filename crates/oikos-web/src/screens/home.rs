@@ -20,11 +20,12 @@ use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::alert_row::RecentAlerts;
 use crate::components::area_chip::AreaChip;
 use crate::components::room_title::RoomTitle;
+use crate::groups::{HomeItem, home_items, members};
 use crate::house::House;
 use crate::nav::HomeRoom;
 
 /// The id of the virtual "Favorites" chip.
-const FAVORITES: &str = "__favorites__";
+pub(crate) const FAVORITES: &str = "__favorites__";
 
 /// True when Home shows `e`: a primary entity that the app's placement rule keeps on Home (an
 /// entity with an energy role or shown on Security leaves Home unless it is pinned).
@@ -77,23 +78,22 @@ fn chips(areas: &[AreaView], favorites: usize, counts: &BTreeMap<String, usize>)
     chips
 }
 
-/// The ids of the primary entities to show under `chip`, in display order: the hub's `order`
-/// override first, then by name.
-fn entity_ids<'a>(entities: impl Iterator<Item = &'a EntityView>, chip: &str) -> Vec<String> {
-    let mut shown: Vec<&EntityView> = entities
-        .filter(|e| shows_on_home(e))
-        .filter(|e| {
-            if chip == FAVORITES {
-                e.ui.favorite
-            } else {
-                e.area == chip
-            }
-        })
-        .collect();
-    shown.sort_by_cached_key(|e| (e.ui.order.unwrap_or(i32::MAX), e.name.to_lowercase()));
-    without_paired_humidity(shown)
+/// The ids of the entities to show under `chip`, in display order. Groups are expanded into
+/// their members: Home keeps showing single cards until it renders group cards.
+fn entity_ids<'a>(
+    entities: impl Iterator<Item = &'a EntityView>,
+    areas: &[AreaView],
+    chip: &str,
+) -> Vec<String> {
+    let all: Vec<&EntityView> = entities.collect();
+    let by_id: BTreeMap<String, EntityView> =
+        all.iter().map(|e| (e.id.clone(), (*e).clone())).collect();
+    home_items(all.into_iter(), areas, chip)
         .into_iter()
-        .map(|e| e.id.clone())
+        .flat_map(|item| match item {
+            HomeItem::Entity(id) => vec![id],
+            HomeItem::Group(key) => members(&by_id, &key).into_iter().map(|e| e.id).collect(),
+        })
         .collect()
 }
 
@@ -103,7 +103,7 @@ fn is_sensor_of_class(e: &EntityView, class: &str) -> bool {
 
 /// `shown` without the humidity sensors whose device's temperature sensor is also in `shown`:
 /// the temperature card carries the humidity reading.
-fn without_paired_humidity(mut shown: Vec<&EntityView>) -> Vec<&EntityView> {
+pub(crate) fn without_paired_humidity(mut shown: Vec<&EntityView>) -> Vec<&EntityView> {
     let with_temperature: HashSet<&str> = shown
         .iter()
         .filter(|e| is_sensor_of_class(e, "temperature"))
@@ -168,7 +168,9 @@ pub fn HomeScreen() -> impl IntoView {
     });
     let ids = Memo::new(move |_| {
         current.get().map_or_else(Vec::new, |chip| {
-            house.entities.with(|m| entity_ids(m.values(), &chip))
+            house
+                .areas
+                .with(|a| house.entities.with(|m| entity_ids(m.values(), a, &chip)))
         })
     });
     let loaded = Memo::new(move |_| {
@@ -250,11 +252,23 @@ pub fn HomeScreen() -> impl IntoView {
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{FAVORITES, chips, entity_ids, home_counts};
+    use super::{FAVORITES, chips, home_counts};
+    use crate::groups::{HomeItem, home_items};
     use oikos_api::{AreaView, EntityView};
     use oikos_core::model::{
         Capabilities, EntityCategory, EntityState, Kind, UNASSIGNED_AREA, UiOverride,
     };
+
+    /// The ids of the single cards `home_items` gives under `chip` (no groups expected).
+    fn entity_ids<'a>(entities: impl Iterator<Item = &'a EntityView>, chip: &str) -> Vec<String> {
+        home_items(entities, &[], chip)
+            .into_iter()
+            .map(|i| match i {
+                HomeItem::Entity(id) => id,
+                HomeItem::Group(k) => panic!("unexpected group {k:?}"),
+            })
+            .collect()
+    }
 
     fn entity(id: &str, kind: Kind, device_class: Option<&str>, ui: UiOverride) -> EntityView {
         EntityView {

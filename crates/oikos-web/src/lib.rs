@@ -9,6 +9,7 @@ pub mod components;
 pub mod energy;
 pub mod flows;
 pub mod format;
+pub mod groups;
 pub mod house;
 pub mod house_state;
 pub mod icons;
