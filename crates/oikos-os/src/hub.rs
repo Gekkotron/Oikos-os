@@ -97,13 +97,20 @@ impl Hub {
             let is_state = matches!(inbound, Inbound::State { .. });
             let changes = reg.apply(inbound);
             let events = events_for(&reg, &changes);
+            // A message on a topic that only carries an entity's availability says nothing
+            // about its state, so it does not count as the entity speaking.
             let seen: Vec<String> = if is_state {
                 changes
                     .iter()
                     .filter_map(|change| match change {
-                        Change::StateChanged(id) | Change::StateReported(id) => Some(id.clone()),
+                        Change::StateChanged(id) | Change::StateReported(id) => Some(id),
                         _ => None,
                     })
+                    .filter(|id| {
+                        reg.entity(id)
+                            .is_some_and(|entity| !entity.bindings.is_availability_only(topic))
+                    })
+                    .cloned()
                     .collect()
             } else {
                 Vec::new()
@@ -194,14 +201,15 @@ impl Hub {
         })
     }
 
-    /// Maps `cmd`, publishes it and waits up to `confirm_timeout_ms` for the entity's state to
-    /// change or for any state message addressed to it (a no-op command is echoed unchanged).
-    /// An unknown or offline entity is rejected before anything is published.
+    /// Maps `cmd`, publishes it and waits up to `confirm_timeout_ms` for the entity's value to
+    /// change or for a report on one of its state topics (a no-op command is echoed
+    /// unchanged). An availability message alone confirms nothing. An unknown or offline
+    /// entity is rejected before anything is published.
     pub async fn send_command(&self, id: &str, cmd: Command) -> Result<CommandResponse, HubError> {
         // Subscribed before publishing, so a fast echo cannot slip between the two.
         let mut events = self.subscribe();
         let mut seen = self.state_seen.subscribe();
-        let publishes = {
+        let (publishes, before) = {
             let reg = self.read();
             let entity = reg
                 .entity(id)
@@ -210,7 +218,10 @@ impl Hub {
             if state.availability == Availability::Offline {
                 return Err(HubError::Rejected("entity is offline".to_owned()));
             }
-            map_command(entity, &state, &cmd, reg.templates())?
+            (
+                map_command(entity, &state, &cmd, reg.templates())?,
+                state.value,
+            )
         };
         for publish in publishes {
             self.publish(publish)?;
@@ -220,7 +231,12 @@ impl Hub {
             loop {
                 tokio::select! {
                     event = events.recv() => match event {
-                        Ok(WsEvent::StateChanged { id: changed, state }) if changed == id => {
+                        // Only a value change counts here: an availability flip is a
+                        // `StateChanged` too, and an echo with the same value comes through
+                        // `state_seen` (which excludes availability-only topics).
+                        Ok(WsEvent::StateChanged { id: changed, state })
+                            if changed == id && state.value != before =>
+                        {
                             return Some(state);
                         }
                         Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}

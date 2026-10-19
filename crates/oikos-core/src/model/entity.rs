@@ -77,6 +77,53 @@ impl Bindings {
     /// The topics to subscribe to for this entity: every top-level `*_topic` string that is not
     /// a command topic, plus every `availability[].topic`.
     pub fn topics(&self) -> BTreeSet<String> {
+        let mut topics = self.data_topics(true);
+        if let Some(availability) = self.config.get("availability").and_then(Value::as_array) {
+            for topic in availability
+                .iter()
+                .filter_map(|entry| entry.get("topic").and_then(Value::as_str))
+            {
+                topics.insert(topic.to_owned());
+            }
+        }
+        topics
+    }
+
+    /// The topics the entity's availability is read from: the `availability[]` list when
+    /// present, else `availability_topic` (Home Assistant treats the two as exclusive).
+    pub fn availability_topics(&self) -> BTreeSet<String> {
+        let listed: BTreeSet<String> = self
+            .config
+            .get("availability")
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.get("topic").and_then(Value::as_str))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !listed.is_empty() {
+            return listed;
+        }
+        self.config
+            .get("availability_topic")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .into_iter()
+            .collect()
+    }
+
+    /// True when `topic` carries only this entity's availability: a message there says
+    /// nothing about its value or attributes.
+    pub fn is_availability_only(&self, topic: &str) -> bool {
+        self.availability_topics().contains(topic) && !self.data_topics(false).contains(topic)
+    }
+
+    /// The top-level `*_topic` strings that are read (not command or write-only topics),
+    /// `availability_topic` included only when `with_availability`.
+    fn data_topics(&self, with_availability: bool) -> BTreeSet<String> {
         let mut topics = BTreeSet::new();
         let Some(config) = self.config.as_object() else {
             return topics;
@@ -86,17 +133,11 @@ impl Bindings {
                 key.ends_with("_topic") || key == "state_topic" || key == "json_attributes_topic";
             let is_command =
                 key.ends_with("command_topic") || WRITE_ONLY_TOPIC_KEYS.contains(&key.as_str());
+            let is_availability = key == "availability_topic";
             if is_topic
                 && !is_command
+                && (with_availability || !is_availability)
                 && let Some(topic) = value.as_str()
-            {
-                topics.insert(topic.to_owned());
-            }
-        }
-        if let Some(availability) = config.get("availability").and_then(Value::as_array) {
-            for topic in availability
-                .iter()
-                .filter_map(|entry| entry.get("topic").and_then(Value::as_str))
             {
                 topics.insert(topic.to_owned());
             }

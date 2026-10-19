@@ -36,8 +36,14 @@ fn config() -> Config {
 }
 
 fn hub() -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    hub_with_timeout(50)
+}
+
+fn hub_with_timeout(confirm_timeout_ms: u64) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.commands.confirm_timeout_ms = confirm_timeout_ms;
     let (tx, rx) = mpsc::channel(64);
-    (Hub::new(&config(), tx), rx)
+    (Hub::new(&cfg, tx), rx)
 }
 
 /// The switch's `state_topic`, from its discovery config.
@@ -352,5 +358,56 @@ async fn send_command_resolves_on_same_state_echo() {
             .try_recv()
             .is_err_and(|err| err == tokio::sync::broadcast::error::TryRecvError::Empty),
         "a report that changed nothing is not broadcast"
+    );
+}
+
+/// Every Z2M entity lists `bridge/state` as an availability topic. A message there within the
+/// window (a retained re-delivery of the same word, or the bridge going offline) says nothing
+/// about the command: only a report on the entity's state topic confirms it.
+#[tokio::test]
+async fn availability_message_does_not_confirm_command() {
+    let (hub, mut publisher) = hub_with_timeout(2_000);
+    feed_switch(&hub);
+    hub.ingest("zigbee2mqtt/bridge/state", br#"{"state":"online"}"#);
+    hub.ingest(&switch_state_topic(), br#"{"state":"OFF"}"#);
+
+    let pending = {
+        let hub = Arc::clone(&hub);
+        tokio::spawn(async move {
+            hub.send_command(
+                SWITCH_ID,
+                Command::TurnOn {
+                    brightness: None,
+                    color: None,
+                    effect: None,
+                },
+            )
+            .await
+        })
+    };
+    let published = tokio::time::timeout(Duration::from_secs(1), publisher.recv())
+        .await
+        .expect("published within 1 s")
+        .expect("the command publish");
+    assert_eq!(published.payload, "ON");
+
+    hub.ingest("zigbee2mqtt/bridge/state", br#"{"state":"online"}"#);
+    hub.ingest("zigbee2mqtt/bridge/state", br#"{"state":"offline"}"#);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !pending.is_finished(),
+        "an availability message must not confirm the command"
+    );
+
+    hub.ingest("zigbee2mqtt/bridge/state", br#"{"state":"online"}"#);
+    hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+    let response = pending
+        .await
+        .expect("command task")
+        .expect("mapped and published");
+    assert!(response.accepted, "{response:?}");
+    assert_eq!(
+        response.state.expect("confirmed state").value,
+        StateValue::OnOff(true)
     );
 }

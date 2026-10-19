@@ -412,6 +412,39 @@ fn bindings_topics_rule() {
             "z/l/availability",
         ]))
     );
+    assert_eq!(
+        bindings.availability_topics(),
+        BTreeSet::from_iter(strings(&["z/bridge/state", "z/l/availability"]))
+    );
+    assert!(bindings.is_availability_only("z/bridge/state"));
+    assert!(!bindings.is_availability_only("z/l"));
+    assert!(!bindings.is_availability_only("z/elsewhere"));
+}
+
+/// `availability_topic` is the single-topic form; a state topic that doubles as the
+/// availability topic is not availability-only.
+#[test]
+fn bindings_availability_topic_rule() {
+    let bindings = Bindings {
+        config: json!({
+            "state_topic": "z/s",
+            "availability_topic": "z/s/availability"
+        }),
+    };
+    assert_eq!(
+        bindings.availability_topics(),
+        BTreeSet::from_iter(strings(&["z/s/availability"]))
+    );
+    assert!(bindings.is_availability_only("z/s/availability"));
+
+    let shared = Bindings {
+        config: json!({"state_topic": "z/s", "availability_topic": "z/s"}),
+    };
+    assert_eq!(
+        shared.availability_topics(),
+        BTreeSet::from_iter(strings(&["z/s"]))
+    );
+    assert!(!shared.is_availability_only("z/s"));
 }
 
 #[test]
