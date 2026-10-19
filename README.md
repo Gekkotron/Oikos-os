@@ -55,7 +55,7 @@ Restart Zigbee2MQTT, then set the Oikos app's discovery prefix to `oikos` as wel
 
 ## HTTP API
 
-The hub listens on `[http] bind` (default `0.0.0.0:8080`), CORS open to any origin, JSON in and out.
+The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 and clear of Zigbee2MQTT on 8080 on the same server), CORS open to any origin, JSON in and out.
 
 | Route | What it does |
 | --- | --- |
@@ -81,7 +81,7 @@ Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` dif
 
 ## MCP
 
-The MCP server at `http://<host>:8080/mcp` (streamable HTTP) offers seventeen tools and one resource:
+The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers seventeen tools and one resource:
 
 - `bridge_info` — the Zigbee2MQTT bridge and the state of the link to the broker.
 - `list_areas` — the rooms, each with its entity count and the count of entities shown by default (`primary_count`).
@@ -107,14 +107,14 @@ A failed tool call answers in-band (`isError: true` with the reason) so the assi
 Claude Code:
 
 ```sh
-claude mcp add --transport http oikos http://<host>:8080/mcp
+claude mcp add --transport http oikos http://<host>:8081/mcp
 ```
 
 Codex CLI, in `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.oikos]
-url = "http://<host>:8080/mcp"
+url = "http://<host>:8081/mcp"
 ```
 
 Claude Desktop only speaks stdio, so it launches `oikos-os mcp-stdio`, a proxy that relays every request to the running hub. In its config JSON, with the path of a built binary (`cargo build --release -p oikos-os`):
@@ -122,7 +122,7 @@ Claude Desktop only speaks stdio, so it launches `oikos-os mcp-stdio`, a proxy t
 ```json
 {
   "mcpServers": {
-    "oikos": {"command": "<path>/oikos-os", "args": ["mcp-stdio", "--server", "http://<host>:8080"]}
+    "oikos": {"command": "<path>/oikos-os", "args": ["mcp-stdio", "--server", "http://<host>:8081"]}
   }
 }
 ```
@@ -138,18 +138,18 @@ Screens:
 - Home: room chips to filter by area, and one card per entity kind.
 - Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor.
 - Devices: the administration view of the Zigbee devices.
-- Settings: the hub status and the theme switch (Auto, Night, Warm).
+- Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night, Warm).
 - Alerts (`/alerts`): the push alerts OikosPush keeps, with channel chips and day groups, and a "Recent alerts" section on Home; the detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". Same screens as the Android app; the body stays in the producer's language.
 - Flows (`/flows`, `/flows/<id>`): the flows list with an enable switch per flow, and a read-only canvas per flow with the last run lit on the graph and the run history below it.
 
 Development runs in two terminals:
 
 ```sh
-cargo run -p oikos-os -- run       # the hub on 8080
+cargo run -p oikos-os -- run       # the hub on 8081
 cd crates/oikos-web && trunk serve # the UI on 127.0.0.1:3000, rebuilt on save
 ```
 
-Open `http://127.0.0.1:3000`. Trunk proxies `/api`, `/ws` and `/mcp` to the hub on 8080.
+Open `http://127.0.0.1:3000`. Trunk proxies `/api`, `/ws` and `/mcp` to the hub on 8081.
 
 Release builds embed the UI, so build it before the hub:
 

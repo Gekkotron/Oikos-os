@@ -32,9 +32,11 @@ wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = [
     "Document",
     "DomRect",
+    "Clipboard",
     "Element",
     "KeyboardEvent",
     "MouseEvent",
+    "Navigator",
     "PointerEvent",
     "ScrollBehavior",
     "ScrollIntoViewOptions",

@@ -18,7 +18,7 @@ enum RawCommand {
     Run,
     /// Serve MCP over stdio, proxying to a running hub.
     McpStdio {
-        /// Base URL of the hub, e.g. http://localhost:8080
+        /// Base URL of the hub, e.g. http://localhost:8081
         #[arg(long)]
         server: String,
     },

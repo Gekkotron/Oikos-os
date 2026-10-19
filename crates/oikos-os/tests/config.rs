@@ -16,7 +16,7 @@ fn defaults_match_spec() {
         assert_eq!(cfg.topics.z2m_base, "zigbee2mqtt");
         assert_eq!(cfg.topics.automation_prefix, "oikos/automation");
         assert_eq!(cfg.automation.runs_kept, 20);
-        assert_eq!(cfg.http.bind, "0.0.0.0:8080");
+        assert_eq!(cfg.http.bind, "0.0.0.0:8081");
         assert_eq!(cfg.commands.confirm_timeout_ms, 5000);
         assert_eq!(cfg.commands.subscription_debounce_ms, 500);
         assert_eq!(cfg.log.level, "info");

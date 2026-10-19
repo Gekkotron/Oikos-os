@@ -1,6 +1,8 @@
-//! Status of the hub and its links, and the theme switch.
+//! Status of the hub and its links, how to connect an AI assistant over MCP, and the theme switch.
 
 use leptos::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use leptos::task::spawn_local;
 use oikos_api::ConnectionStatus;
 
 use crate::house::House;
@@ -47,6 +49,73 @@ fn origin() -> String {
     }
 }
 
+fn claude_code_snippet(origin: &str) -> String {
+    format!("claude mcp add --transport http oikos {origin}/mcp")
+}
+
+fn codex_snippet(origin: &str) -> String {
+    format!("[mcp_servers.oikos]\nurl = \"{origin}/mcp\"")
+}
+
+fn claude_desktop_snippet(origin: &str) -> String {
+    // Written by hand so the keys keep the README's order (`command` before `args`).
+    format!(
+        "{{\n  \"mcpServers\": {{\n    \"oikos\": {{\n      \"command\": \"<path>/oikos-os\",\n      \"args\": [\"mcp-stdio\", \"--server\", {}]\n    }}\n  }}\n}}",
+        serde_json::Value::String(origin.to_owned())
+    )
+}
+
+/// Writes `text` to the clipboard; false when the clipboard API is unavailable or refuses.
+#[cfg(target_arch = "wasm32")]
+async fn write_clipboard(text: &str) -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let navigator = window.navigator();
+    let available = js_sys::Reflect::get(&navigator, &"clipboard".into())
+        .map(|c| !c.is_undefined() && !c.is_null())
+        .unwrap_or(false);
+    if !available {
+        return false;
+    }
+    let promise = navigator.clipboard().write_text(text);
+    wasm_bindgen_futures::JsFuture::from(promise).await.is_ok()
+}
+
+#[component]
+fn CopyButton(text: String) -> impl IntoView {
+    let label = RwSignal::new("Copy");
+    let on_click = move |_| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let text = text.clone();
+            spawn_local(async move {
+                if write_clipboard(&text).await {
+                    label.set("Copied");
+                    gloo_timers::future::TimeoutFuture::new(1500).await;
+                    label.set("Copy");
+                }
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = &text;
+    };
+    view! {
+        <button type="button" class="chip sheet__copy" on:click=on_click>
+            {move || label.get()}
+        </button>
+    }
+}
+
+#[component]
+fn Snippet(title: &'static str, text: String) -> impl IntoView {
+    view! {
+        <h3 class="sheet__subheading">{title}</h3>
+        <pre class="sheet__json">{text.clone()}</pre>
+        <CopyButton text=text />
+    }
+}
+
 #[component]
 fn ThemeSwitch() -> impl IntoView {
     let theme = expect_context::<RwSignal<Theme>>();
@@ -89,6 +158,12 @@ pub fn SettingsScreen() -> impl IntoView {
             .areas
             .with(|areas| areas.iter().map(|a| a.primary_count).sum::<usize>())
     };
+
+    let origin = origin();
+    let endpoint = format!("{origin}/mcp");
+    let claude_code = claude_code_snippet(&origin);
+    let codex = codex_snippet(&origin);
+    let claude_desktop = claude_desktop_snippet(&origin);
 
     view! {
         <div class="sheet">
@@ -137,6 +212,15 @@ pub fn SettingsScreen() -> impl IntoView {
                     <Row label="Ignored topics" value=move || house.ignored.with(Vec::len).to_string() />
                 </dl>
             </Panel>
+            <Panel title="MCP">
+                <dl class="sheet__rows">
+                    <Row label="Endpoint" value=endpoint />
+                    <Row label="Transport" value="Streamable HTTP, no auth (LAN only)" />
+                </dl>
+                <Snippet title="Claude Code" text=claude_code />
+                <Snippet title="Codex CLI (~/.codex/config.toml)" text=codex />
+                <Snippet title="Claude Desktop (stdio proxy)" text=claude_desktop />
+            </Panel>
             <Panel title="Theme">
                 <ThemeSwitch />
             </Panel>
@@ -144,9 +228,41 @@ pub fn SettingsScreen() -> impl IntoView {
                 <dl class="sheet__rows">
                     <Row label="Product" value="Oikos-os" />
                     <Row label="Version" value=concat!("v", env!("CARGO_PKG_VERSION")) />
-                    <Row label="Hub: this page's origin" value=origin() />
+                    <Row label="Hub: this page's origin" value=origin />
                 </dl>
             </Panel>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ORIGIN: &str = "http://192.168.1.10:8081";
+
+    #[test]
+    fn claude_code_snippet_has_endpoint() {
+        let s = claude_code_snippet(ORIGIN);
+        assert_eq!(
+            s,
+            "claude mcp add --transport http oikos http://192.168.1.10:8081/mcp"
+        );
+    }
+
+    #[test]
+    fn codex_snippet_has_endpoint() {
+        let s = codex_snippet(ORIGIN);
+        assert!(s.starts_with("[mcp_servers.oikos]\n"));
+        assert!(s.contains("url = \"http://192.168.1.10:8081/mcp\""));
+    }
+
+    #[test]
+    fn claude_desktop_snippet_is_json_with_origin() {
+        let s = claude_desktop_snippet(ORIGIN);
+        assert!(s.lines().count() > 1);
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["mcpServers"]["oikos"]["args"][2], ORIGIN);
+        assert_eq!(v["mcpServers"]["oikos"]["command"], "<path>/oikos-os");
     }
 }

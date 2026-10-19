@@ -917,6 +917,10 @@ body {
   overflow-wrap: break-word;
 }
 
+.sheet__copy {
+  margin-top: 8px;
+}
+
 .sheet__updated {
   margin: 12px 0 0;
   font: var(--type-label);

@@ -91,7 +91,7 @@ pub struct HttpConfig {
 impl Default for HttpConfig {
     fn default() -> Self {
         Self {
-            bind: "0.0.0.0:8080".into(),
+            bind: "0.0.0.0:8081".into(),
         }
     }
 }

@@ -7,11 +7,11 @@ addresses = ["127.0.0.1"]
 port = 3000
 
 [[proxy]]
-backend = "http://127.0.0.1:8080/api/v1/"
+backend = "http://127.0.0.1:8081/api/v1/"
 
 [[proxy]]
-backend = "ws://127.0.0.1:8080/ws"
+backend = "ws://127.0.0.1:8081/ws"
 ws = true
 
 [[proxy]]
-backend = "http://127.0.0.1:8080/mcp/"
+backend = "http://127.0.0.1:8081/mcp/"

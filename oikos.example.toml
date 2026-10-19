@@ -15,7 +15,7 @@ z2m_base = "zigbee2mqtt"
 automation_prefix = "oikos/automation"
 
 [http]
-bind = "0.0.0.0:8080"
+bind = "0.0.0.0:8081"
 
 [commands]
 confirm_timeout_ms = 5000
