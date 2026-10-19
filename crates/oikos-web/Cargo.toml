@@ -29,7 +29,13 @@ serde_json.workspace = true
 time.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
-web-sys = { workspace = true, features = ["Document", "Element"] }
+web-sys = { workspace = true, features = [
+    "Document",
+    "Element",
+    "ScrollBehavior",
+    "ScrollIntoViewOptions",
+    "ScrollLogicalPosition",
+] }
 
 [dev-dependencies]
 web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventInit", "HtmlElement", "HtmlInputElement", "Node"] }
