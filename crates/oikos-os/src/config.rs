@@ -15,6 +15,7 @@ pub struct Config {
     pub http: HttpConfig,
     pub commands: CommandsConfig,
     pub log: LogConfig,
+    pub push: PushConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -122,6 +123,25 @@ impl Default for LogConfig {
     }
 }
 
+/// Where OikosPush keeps its retained alert history and where the app's replies go. The
+/// defaults match OikosPush today; they become `oikos/history` and `oikos/push/responses`
+/// once the hub takes over push.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PushConfig {
+    pub history_topic: String,
+    pub responses_topic: String,
+}
+
+impl Default for PushConfig {
+    fn default() -> Self {
+        Self {
+            history_topic: "oikos-push/history".into(),
+            responses_topic: "oikos-push/responses".into(),
+        }
+    }
+}
+
 /// Dotted, lowercase keys of string-typed fields. Single source of truth for
 /// both the Env filter (figment's `ignore` sees the key after `split`, i.e.
 /// `mqtt.password`) and the raw-string merge.
@@ -135,6 +155,8 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "topics.z2m_base",
     "http.bind",
     "log.level",
+    "push.history_topic",
+    "push.responses_topic",
 ];
 
 impl Config {

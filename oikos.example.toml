@@ -22,3 +22,10 @@ subscription_debounce_ms = 500
 [log]
 level = "info"
 json = false
+
+# OikosPush's retained alert history (what the web UI shows under Alerts) and the topic the
+# app's reply buttons publish to. These move to "oikos/history" and "oikos/push/responses"
+# when the hub takes over push.
+[push]
+history_topic = "oikos-push/history"
+responses_topic = "oikos-push/responses"

@@ -19,6 +19,8 @@ fn defaults_match_spec() {
         assert_eq!(cfg.commands.subscription_debounce_ms, 500);
         assert_eq!(cfg.log.level, "info");
         assert!(!cfg.log.json);
+        assert_eq!(cfg.push.history_topic, "oikos-push/history");
+        assert_eq!(cfg.push.responses_topic, "oikos-push/responses");
         Ok(())
     });
 }
@@ -79,12 +81,14 @@ fn numeric_looking_env_strings_stay_strings() {
         jail.set_env("OIKOS_TOPICS__Z2M_BASE", "0123");
         jail.set_env("OIKOS_HTTP__BIND", "8080");
         jail.set_env("OIKOS_LOG__LEVEL", "5");
+        jail.set_env("OIKOS_PUSH__HISTORY_TOPIC", "1");
         let cfg = Config::load(None)?;
         assert_eq!(cfg.mqtt.ha_status_topic, "42");
         assert_eq!(cfg.topics.ui_prefix, "7");
         assert_eq!(cfg.topics.z2m_base, "0123");
         assert_eq!(cfg.http.bind, "8080");
         assert_eq!(cfg.log.level, "5");
+        assert_eq!(cfg.push.history_topic, "1");
         assert_eq!(cfg.mqtt.password.as_deref(), Some("123456"));
         assert_eq!(cfg.mqtt.client_id, "1");
         assert_eq!(cfg.mqtt.user.as_deref(), Some("007"));

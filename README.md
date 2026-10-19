@@ -24,6 +24,14 @@ Until Zigbee2MQTT publishes under `oikos`, list the Home Assistant prefix next t
 discovery_prefixes = ["oikos", "homeassistant"]
 ```
 
+The web UI's Alerts screens read OikosPush's retained history, and alert buttons reply where the app replies. Both topics are configuration, with OikosPush's current names as defaults; they become `oikos/history` and `oikos/push/responses` once the hub takes over push:
+
+```toml
+[push]
+history_topic = "oikos-push/history"
+responses_topic = "oikos-push/responses"
+```
+
 ## Zigbee2MQTT
 
 The hub discovers entities under the `oikos` prefix. In Zigbee2MQTT's `configuration.yaml`:
