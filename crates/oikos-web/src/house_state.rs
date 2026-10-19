@@ -142,6 +142,8 @@ mod tests {
             order: None,
             entity_count: 0,
             primary_count: 0,
+            group_names: Default::default(),
+            group_favorites: Default::default(),
         }
     }
 

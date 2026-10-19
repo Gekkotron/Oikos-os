@@ -16,7 +16,7 @@ use oikos_api::{
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{
-    AreasDocument, Availability, Command, PatchError, UNASSIGNED_AREA, UiOverride,
+    AreasDocument, Availability, Command, GroupKind, PatchError, UNASSIGNED_AREA, UiOverride,
 };
 use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
 use tokio::sync::{broadcast, mpsc, watch};
@@ -498,6 +498,11 @@ impl Hub {
         self.write_override(id, &UiOverride::default())
     }
 
+    /// The declared areas document as last retained.
+    pub fn areas_document(&self) -> AreasDocument {
+        self.read().areas_document().clone()
+    }
+
     /// Replaces the declared areas: publishes the document retained and applies it locally.
     pub async fn set_areas(&self, doc: AreasDocument) -> Result<Vec<AreaView>, HubError> {
         let topic = format!("{}/_areas", self.ui_prefix);
@@ -533,6 +538,38 @@ impl Hub {
             reg.areas_document().clone()
         };
         doc.rename(id, name);
+        self.set_areas(doc).await
+    }
+
+    /// Edits the `kind` room group card of area `id` in the declared document: `name` (`None`
+    /// leaves it, `Some(None)` or a blank clears it) and `favorite`, the rest kept.
+    pub async fn set_area_group(
+        &self,
+        id: &str,
+        kind: &str,
+        name: Option<Option<String>>,
+        favorite: Option<bool>,
+    ) -> Result<Vec<AreaView>, HubError> {
+        let kind = GroupKind::from_key(kind)
+            .ok_or_else(|| HubError::Rejected(format!("`{kind}` is not a group kind")))?;
+        if id == UNASSIGNED_AREA {
+            return Err(HubError::Rejected(
+                "`Unassigned` has no room groups".to_owned(),
+            ));
+        }
+        if name.is_none() && favorite.is_none() {
+            return Err(HubError::Rejected(
+                "nothing to change: give a `name` or a `favorite`".to_owned(),
+            ));
+        }
+        let mut doc = {
+            let reg = self.read();
+            if !reg.effective_areas().iter().any(|area| area.id == id) {
+                return Err(HubError::UnknownArea(id.to_owned()));
+            }
+            reg.areas_document().clone()
+        };
+        doc.set_group(id, kind, name.as_ref().map(Option::as_deref), favorite);
         self.set_areas(doc).await
     }
 

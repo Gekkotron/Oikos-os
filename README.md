@@ -65,6 +65,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `PATCH /api/v1/entities/{id}/override` | Changes fields of the entity's `oikos/ui/<id>` override and returns the entity as it now appears. |
 | `DELETE /api/v1/entities/{id}/override` | Removes the override (204). |
 | `PUT /api/v1/areas` | Replaces the declared rooms (`oikos/ui/_areas`) and returns the resulting list. |
+| `PATCH /api/v1/areas/{id}/groups/{kind}` | Sets or clears (`null`) the room group card name and the favourite flag of one kind (`cover` or `light`) in the area, and returns the areas. |
 | `GET /api/v1/ignored` | The discovery topics that did not become an entity, each with the reason. |
 | `GET /ws` | WebSocket: a snapshot first, then every hub event as a JSON text frame. |
 | `GET /api/v1/alerts` | The push alerts OikosPush keeps in its retained history, newest first. |

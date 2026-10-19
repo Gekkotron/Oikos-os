@@ -706,3 +706,31 @@ async fn delete_flow() {
 
     client.cancel().await.expect("close");
 }
+
+#[tokio::test]
+async fn mcp_set_areas_keeps_group_fields() {
+    let mut server = Server::start().await;
+    server.online();
+    server.hub.ingest(
+        "oikos/ui/_areas",
+        br#"{"areas":[{"id":"dehors","name":"Dehors","icon":"tree","groupNames":{"cover":"Volets"},"groupFavorites":["cover"],"newKey":true},{"id":"gone","name":"Gone"}]}"#,
+    );
+    let client = server.client().await;
+
+    let result = call(
+        &client,
+        "set_areas",
+        json!({"areas": [{"id": "dehors", "name": "Outdoor", "order": 3}]}),
+    )
+    .await;
+    json_of("set_areas", &result);
+    let published = server.publisher.try_recv().expect("the areas publish");
+    let doc: Value = serde_json::from_str(&published.payload).expect("json");
+    assert_eq!(
+        doc,
+        json!({"areas": [{
+            "id": "dehors", "name": "Outdoor", "order": 3, "icon": "tree",
+            "groupNames": {"cover": "Volets"}, "groupFavorites": ["cover"], "newKey": true
+        }]})
+    );
+}

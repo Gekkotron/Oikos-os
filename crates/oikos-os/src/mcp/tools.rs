@@ -43,16 +43,36 @@ impl OikosMcp {
     }
 
     /// Replaces the declared rooms (retained on `oikos/ui/_areas`) and returns the resulting
-    /// list.
+    /// list. A room kept by id keeps the `icon`, group names, group favourites and other
+    /// fields you leave out; group names and favourites are changed with
+    /// `PATCH /api/v1/areas/{id}/groups/{kind}`.
     #[tool(name = "set_areas", annotations(idempotent_hint = true))]
     async fn set_areas(
         &self,
         Parameters(params): Parameters<SetAreasParams>,
     ) -> ToolResult<AreaList> {
         log_write("set_areas", &params);
-        let doc = AreasDocument {
-            areas: params.areas,
-        };
+        let current = self.hub.areas_document();
+        let areas = params
+            .areas
+            .into_iter()
+            .map(|mut area| {
+                if let Some(old) = current.areas.iter().find(|a| a.id == area.id) {
+                    area.icon = area.icon.or_else(|| old.icon.clone());
+                    if area.group_names.is_empty() {
+                        area.group_names = old.group_names.clone();
+                    }
+                    if area.group_favorites.is_empty() {
+                        area.group_favorites = old.group_favorites.clone();
+                    }
+                    if area.extra.is_empty() {
+                        area.extra = old.extra.clone();
+                    }
+                }
+                area
+            })
+            .collect();
+        let doc = AreasDocument { areas };
         let areas = self.hub.set_areas(doc).await?;
         Ok(Json(AreaList { areas }))
     }

@@ -1,5 +1,7 @@
 //! Read-only views of the registry's entities, devices, areas, bridge and ignored topics.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use oikos_core::model::{
     Area, Availability, BridgeInfo, Capabilities, Device, Entity, EntityCategory, EntityState,
     Kind, StateValue, UiOverride,
@@ -138,6 +140,12 @@ pub struct AreaView {
     /// The entities the UI shows by default (see [`EntityView::is_primary`]); what a room
     /// chip or card count should display.
     pub primary_count: usize,
+    /// Custom room group card names by kind key (`cover`, `light`).
+    #[serde(default)]
+    pub group_names: BTreeMap<String, String>,
+    /// Kind keys whose room group shows in the Favorites chip on Home.
+    #[serde(default)]
+    pub group_favorites: BTreeSet<String>,
 }
 
 impl AreaView {
@@ -149,6 +157,8 @@ impl AreaView {
             order: area.order,
             entity_count,
             primary_count,
+            group_names: area.group_names.clone(),
+            group_favorites: area.group_favorites.clone(),
         }
     }
 }

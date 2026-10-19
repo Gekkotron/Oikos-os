@@ -54,6 +54,8 @@ fn chips(areas: &[AreaView], favorites: usize, counts: &BTreeMap<String, usize>)
             order: None,
             entity_count: favorites,
             primary_count: favorites,
+            group_names: Default::default(),
+            group_favorites: Default::default(),
         });
     }
     let counted = |a: &AreaView| AreaView {
@@ -428,6 +430,8 @@ mod tests {
             order: None,
             entity_count: 1,
             primary_count: 1,
+            group_names: Default::default(),
+            group_favorites: Default::default(),
         }
     }
 
