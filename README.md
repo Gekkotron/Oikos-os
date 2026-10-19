@@ -4,7 +4,7 @@ Author: Gekkotron
 
 Oikos-os is the Rust home-automation hub that replaces Jeedom. It runs on the home server next to Mosquitto, owns the device registry built from Zigbee2MQTT and Home Assistant MQTT discovery, and is the brain behind the Oikos Android app. It is configured through conversation: an MCP server lets an AI assistant inspect and change the house instead of a rules editor. The MCP server is served at `/mcp` and, like the REST API on the same port, is LAN-trusted with no auth in v1.
 
-Status: v1 hub: registry, API, WebSocket and MCP; web UI next.
+Status: v1 hub with its web UI: registry, API, WebSocket, MCP and the browser app.
 
 ## Run
 
@@ -51,7 +51,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8080`), CORS open to any orig
 | `GET /api/v1/ignored` | The discovery topics that did not become an entity, each with the reason. |
 | `GET /ws` | WebSocket: a snapshot first, then every hub event as a JSON text frame. |
 
-Errors are `{"error": "…"}` with 400 (bad patch), 404 (unknown entity or route), 422 (command refused) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves a placeholder page until the web UI lands.
+Errors are `{"error": "…"}` with 400 (bad patch), 404 (unknown entity or route), 422 (command refused) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 
 ## MCP
 
@@ -97,6 +97,43 @@ Claude Desktop only speaks stdio, so it launches `oikos-os mcp-stdio`, a proxy t
 
 The proxy exits with `cannot reach Oikos-os MCP server at …` when the hub is down; its logs go to stderr, stdout carries the protocol.
 
+## Web UI
+
+The web UI is a Leptos app that runs in the browser as wasm, built with Trunk. The hub embeds its build output, `crates/oikos-web/dist/`, with rust-embed and serves it on the hub's port for every path that is not `/api`, `/ws` or `/mcp`. Unknown paths fall back to `index.html`, so a deep link such as `/entity/<id>` loads the app. `index.html` is never cached; the hashed assets are.
+
+Screens:
+
+- Home: room chips to filter by area, and one card per entity kind.
+- Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor.
+- Devices: the administration view of the Zigbee devices.
+- Settings: the hub status and the theme switch (Auto, Night, Warm).
+
+Development runs in two terminals:
+
+```sh
+cargo run -p oikos-os -- run       # the hub on 8080
+cd crates/oikos-web && trunk serve # the UI on 127.0.0.1:3000, rebuilt on save
+```
+
+Open `http://127.0.0.1:3000`. Trunk proxies `/api`, `/ws` and `/mcp` to the hub on 8080.
+
+Release builds embed the UI, so build it before the hub:
+
+```sh
+cd crates/oikos-web && trunk build --release
+cd ../.. && cargo build --release -p oikos-os
+```
+
+The hub reads `dist/` when it is compiled. Rebuild the hub after every `trunk build`. A binary built before `trunk build` serves a 503 page that says the UI has not been built.
+
+The smoke test mounts the app in headless Chrome and checks the shell:
+
+```sh
+cd crates/oikos-web && wasm-pack test --headless --chrome
+```
+
+Install the tools with `cargo install trunk --locked` and `cargo install wasm-pack --locked`. `wasm-pack` fetches a matching chromedriver on first use; Google Chrome must be installed.
+
 ## Security
 
 There is none yet, and that is deliberate for v1: the hub binds on `0.0.0.0`, answers any origin (CORS `*`) and its MCP endpoint accepts any `Host` header. Any device on the LAN, and any web page open in a browser on the LAN (through DNS rebinding), can therefore read the whole house and send commands, alarm arming and disarming included. Keep the hub off the internet: no port forwarding, no exposure through a reverse proxy without authentication in front of it. `get_entity` and the `bindings` it returns hand out the raw discovery config; for a bridge other than Zigbee2MQTT that config could carry credentials in topics or templates. Authentication and TLS arrive in a later phase.
@@ -109,6 +146,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 cargo check -p oikos-core --target wasm32-unknown-unknown
 cargo check -p oikos-api --target wasm32-unknown-unknown
+cargo check -p oikos-web --target wasm32-unknown-unknown
 ```
 
 The `wasm32-unknown-unknown` target comes with `rust-toolchain.toml`. The tests run against recorded broker messages under `crates/oikos-core/tests/fixtures` and never need a broker; refresh the recording from the house with `MQTT_HOST=<broker> MQTT_USER=… MQTT_PASS=… tools/record-fixtures.sh` (credentials are read from the environment only).
