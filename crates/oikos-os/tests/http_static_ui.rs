@@ -42,9 +42,10 @@ async fn root_returns_the_embedded_index_or_a_missing_page() {
 
 #[tokio::test]
 async fn unknown_path_falls_back_to_index() {
+    let (root_status, _, root_body) = get("/").await;
     let (status, content_type, body) = get("/entity/0xabc").await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("<!doctype html>"), "{body}");
+    assert_eq!(status, root_status);
+    assert_eq!(body, root_body);
     assert!(content_type.is_some_and(|t| t.starts_with("text/html")));
 }
 
