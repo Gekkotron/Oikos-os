@@ -61,9 +61,13 @@ pub fn start(
     if let (Some(user), Some(password)) = (&cfg.user, &cfg.password) {
         options.set_credentials(user, password);
     }
+    // A persistent session: a publish handed to rumqttc just before the link dropped is
+    // retransmitted on reconnect (`session_present`) instead of being discarded with the
+    // request queue, and the broker keeps the QoS 1 messages that arrived meanwhile. Two
+    // hubs must therefore never share a `client_id`.
     options
         .set_keep_alive(KEEP_ALIVE)
-        .set_clean_session(true)
+        .set_clean_session(false)
         .set_max_packet_size(MAX_INCOMING_PACKET, MAX_OUTGOING_PACKET);
     let (client, eventloop) = AsyncClient::new(options, REQUEST_CAPACITY);
     let handle = Handle {
@@ -169,7 +173,8 @@ async fn outbound(
                 // Every change that lands on Online is a (re)connect: the watch coalesces
                 // `Online → Offline → Online` into one change, so the previous flag says nothing.
                 if now_online {
-                    // A clean session: the broker remembers nothing, so subscribe to everything.
+                    // Subscribe to everything, whether or not the broker resumed the session:
+                    // the registry may have moved on while the link was down.
                     subscribed = hub.subscription_topics();
                     let filters: BTreeSet<String> = static_filters(&topics)
                         .into_iter()

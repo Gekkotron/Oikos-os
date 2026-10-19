@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use oikos_api::ConnectionStatus;
 use oikos_core::command::Publish;
 use oikos_os::config::Config;
 use oikos_os::http::router;
@@ -80,6 +81,11 @@ impl Server {
             publisher,
             addr,
         }
+    }
+
+    /// Marks the broker link up, so the hub's writers publish.
+    fn online(&self) {
+        self.hub.set_connection(ConnectionStatus::Online);
     }
 
     /// An initialized MCP client session against `/mcp`.
@@ -238,6 +244,18 @@ async fn set_override_round_trip_through_tool() {
     let mut server = Server::start().await;
     let client = server.client().await;
 
+    // The broker link is still connecting: the write is refused in-band, nothing is queued.
+    let refused = call(
+        &client,
+        "set_override",
+        json!({"id": SWITCH_ID, "patch": {"asLight": true}}),
+    )
+    .await;
+    assert_eq!(refused.is_error, Some(true));
+    assert_eq!(text_of(&refused), "publish: broker offline");
+    assert!(server.publisher.try_recv().is_err());
+    server.online();
+
     let view = json_of(
         "set_override",
         &call(
@@ -393,6 +411,7 @@ async fn send_command_search_areas_and_the_small_tools() {
     server
         .hub
         .ingest("zigbee2mqtt/bridge/state", br#"{"state":"online"}"#);
+    server.online();
     let response = json_of(
         "send_command",
         &call(
@@ -474,7 +493,7 @@ async fn send_command_search_areas_and_the_small_tools() {
         "bridge_info",
         &call(&client, "bridge_info", json!({})).await,
     );
-    assert_eq!(bridge["connection"]["type"], "connecting");
+    assert_eq!(bridge["connection"]["type"], "online");
     assert_eq!(bridge["bridge"]["state"], "online");
 
     let ignored = json_of(

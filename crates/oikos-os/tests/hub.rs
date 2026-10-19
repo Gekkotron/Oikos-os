@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use oikos_api::WsEvent;
+use oikos_api::{ConnectionStatus, WsEvent};
 use oikos_core::command::Publish;
-use oikos_core::model::{Command, Kind, StateValue};
+use oikos_core::model::{Area, AreasDocument, Command, Kind, StateValue};
 use oikos_core::registry::Change;
 use oikos_os::config::Config;
 use oikos_os::hub::{Hub, HubError};
@@ -39,11 +39,14 @@ fn hub() -> (Arc<Hub>, mpsc::Receiver<Publish>) {
     hub_with_timeout(50)
 }
 
+/// A hub whose broker link is up, so its writers publish.
 fn hub_with_timeout(confirm_timeout_ms: u64) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
     let mut cfg = config();
     cfg.commands.confirm_timeout_ms = confirm_timeout_ms;
     let (tx, rx) = mpsc::channel(64);
-    (Hub::new(&cfg, tx), rx)
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    (hub, rx)
 }
 
 /// The switch's `state_topic`, from its discovery config.
@@ -409,5 +412,74 @@ async fn availability_message_does_not_confirm_command() {
     assert_eq!(
         response.state.expect("confirmed state").value,
         StateValue::OnOff(true)
+    );
+}
+
+/// While the broker link is down, every writer refuses with `HubError::Publish` before
+/// anything is queued or applied locally: a write accepted during an outage would show in
+/// the hub, never reach the broker and vanish at the next restart.
+#[tokio::test]
+async fn write_refused_while_offline() {
+    let (hub, mut publisher) = hub();
+    feed_switch(&hub);
+    hub.set_connection(ConnectionStatus::Offline {
+        reason: "connection reset".to_owned(),
+    });
+    let offline = HubError::Publish("broker offline".to_owned());
+
+    let mut patch = serde_json::Map::new();
+    patch.insert("favorite".to_owned(), serde_json::Value::Bool(true));
+    assert_eq!(
+        hub.set_override(SWITCH_ID, &patch).await.err(),
+        Some(offline.clone())
+    );
+    assert!(
+        !hub.entity_view(SWITCH_ID).expect("view").ui.favorite,
+        "a refused override is not applied locally"
+    );
+    assert_eq!(
+        hub.clear_override(SWITCH_ID).await.err(),
+        Some(offline.clone())
+    );
+    assert_eq!(
+        hub.set_areas(AreasDocument {
+            areas: vec![Area {
+                id: "stair".to_owned(),
+                name: "Stair".to_owned(),
+                ..Area::default()
+            }],
+        })
+        .await
+        .err(),
+        Some(offline.clone())
+    );
+    let stair = hub
+        .snapshot()
+        .areas
+        .into_iter()
+        .find(|a| a.id == "stair")
+        .expect("the switch's implicit area");
+    assert_eq!(
+        stair.name, "stair",
+        "still implicit, not declared: {stair:?}"
+    );
+    assert_eq!(
+        hub.send_command(SWITCH_ID, Command::TurnOff).await.err(),
+        Some(offline.clone())
+    );
+    assert!(publisher.try_recv().is_err(), "nothing was queued");
+
+    // Connecting is not online either; once online the same write goes through.
+    hub.set_connection(ConnectionStatus::Connecting);
+    assert_eq!(
+        hub.set_override(SWITCH_ID, &patch).await.err(),
+        Some(offline)
+    );
+    hub.set_connection(ConnectionStatus::Online);
+    let view = hub.set_override(SWITCH_ID, &patch).await.expect("override");
+    assert!(view.ui.favorite);
+    assert_eq!(
+        publisher.try_recv().expect("the override publish").payload,
+        r#"{"favorite":true}"#
     );
 }

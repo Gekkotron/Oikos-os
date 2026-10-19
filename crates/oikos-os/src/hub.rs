@@ -33,7 +33,8 @@ pub enum HubError {
     Patch(#[from] PatchError),
     #[error(transparent)]
     Command(#[from] CommandError),
-    /// The publish could not be handed to the MQTT task.
+    /// The publish was refused (the broker link is down) or could not be handed to the MQTT
+    /// task; nothing was applied locally.
     #[error("publish: {0}")]
     Publish(String),
 }
@@ -204,7 +205,8 @@ impl Hub {
     /// Maps `cmd`, publishes it and waits up to `confirm_timeout_ms` for the entity's value to
     /// change or for a report on one of its state topics (a no-op command is echoed
     /// unchanged). An availability message alone confirms nothing. An unknown or offline
-    /// entity is rejected before anything is published.
+    /// entity is rejected before anything is published, and a broker link that is down is
+    /// [`HubError::Publish`] right away rather than a wait for an echo that cannot come.
     pub async fn send_command(&self, id: &str, cmd: Command) -> Result<CommandResponse, HubError> {
         // Subscribed before publishing, so a fast echo cannot slip between the two.
         let mut events = self.subscribe();
@@ -336,9 +338,14 @@ impl Hub {
             .ok_or_else(|| HubError::UnknownEntity(id.to_owned()))
     }
 
-    /// Hands a publish to the MQTT task without waiting: a full queue (the broker is away and
-    /// 64 publishes are already pending) is an error for the caller, not a hang.
+    /// Hands a publish to the MQTT task without waiting. While the broker link is not
+    /// `Online` the publish is refused: a write accepted during an outage would show in the
+    /// hub, never reach the broker and vanish at the next restart. A full queue (64 publishes
+    /// already pending) is an error for the caller too, not a hang.
     fn publish(&self, publish: Publish) -> Result<(), HubError> {
+        if !matches!(*self.connection.borrow(), ConnectionStatus::Online) {
+            return Err(HubError::Publish("broker offline".to_owned()));
+        }
         self.publisher.try_send(publish).map_err(|err| match err {
             mpsc::error::TrySendError::Full(_) => {
                 HubError::Publish("publish queue is full".to_owned())

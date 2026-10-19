@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use oikos_api::ConnectionStatus;
 use oikos_core::command::Publish;
 use oikos_os::config::Config;
 use oikos_os::http::router;
@@ -60,7 +61,8 @@ struct Server {
 }
 
 impl Server {
-    /// A hub with the switch discovered, served on `127.0.0.1:0`.
+    /// A hub with the switch discovered, served on `127.0.0.1:0`. Its broker link is still
+    /// `Connecting`: a test that writes calls [`Server::online`] first.
     async fn start() -> Server {
         let (tx, publisher) = mpsc::channel(64);
         let hub = Hub::new(&config(), tx);
@@ -74,6 +76,11 @@ impl Server {
             addr,
             client: reqwest::Client::new(),
         }
+    }
+
+    /// Marks the broker link up, so the hub's writers publish.
+    fn online(&self) {
+        self.hub.set_connection(ConnectionStatus::Online);
     }
 
     fn url(&self, path: &str) -> String {
@@ -156,6 +163,7 @@ async fn command_unknown_entity_404() {
 #[tokio::test]
 async fn command_offline_entity_422_and_timeout_200() {
     let mut server = Server::start().await;
+    server.online();
     server
         .hub
         .ingest("zigbee2mqtt/bridge/state", br#"{"state":"offline"}"#);
@@ -194,6 +202,7 @@ async fn command_offline_entity_422_and_timeout_200() {
 #[tokio::test]
 async fn patch_override_then_snapshot_reflects_it() {
     let mut server = Server::start().await;
+    server.online();
 
     let response = server
         .client
@@ -248,6 +257,41 @@ async fn patch_override_then_snapshot_reflects_it() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+/// While the broker link is down (here: still connecting) a write is refused with 503 and
+/// nothing is queued, instead of being accepted and lost.
+#[tokio::test]
+async fn writes_while_broker_offline_503() {
+    let mut server = Server::start().await;
+
+    let response = server
+        .client
+        .patch(server.url(&format!("/api/v1/entities/{SWITCH_ID}/override")))
+        .json(&json!({"favorite": true}))
+        .send()
+        .await
+        .expect("PATCH");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = response.json().await.expect("json");
+    assert_eq!(body["error"], "publish: broker offline");
+
+    let response = server
+        .client
+        .post(server.url(&format!("/api/v1/entities/{SWITCH_ID}/command")))
+        .json(&json!({"type": "turn_on"}))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(server.publisher.try_recv().is_err(), "nothing was queued");
+    let snapshot: Value = server
+        .get("/api/v1/snapshot")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(snapshot["entities"][0]["ui"]["favorite"], Value::Null);
+}
+
 #[tokio::test]
 async fn invalid_patch_400() {
     let server = Server::start().await;
@@ -276,6 +320,7 @@ async fn invalid_patch_400() {
 #[tokio::test]
 async fn put_areas_and_list_ignored() {
     let mut server = Server::start().await;
+    server.online();
 
     let response = server
         .client
