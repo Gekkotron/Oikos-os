@@ -24,6 +24,7 @@ fn defaults_match_spec() {
         assert_eq!(cfg.frigate.url, None);
         assert_eq!(cfg.frigate.user, None);
         assert_eq!(cfg.frigate.password, None);
+        assert_eq!(cfg.frigate.connect_timeout_ms, 5000);
         Ok(())
     });
 }

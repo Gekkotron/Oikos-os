@@ -3,12 +3,14 @@
 //! `/api/v1/media?url=…` and fetches them itself with the `frigate_token` cookie.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use futures_util::TryStreamExt;
 use reqwest::header::{
     ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, COOKIE, RANGE, SET_COOKIE,
 };
+use reqwest::redirect::Policy;
 use tokio::sync::Mutex;
 use url::Url;
 
@@ -17,6 +19,10 @@ use crate::config::FrigateConfig;
 /// The path the web fetches media through; the original URL goes in the `url` query key.
 pub const MEDIA_PATH: &str = "/api/v1/media";
 const COOKIE_NAME: &str = "frigate_token";
+/// The only Frigate files the hub fetches: an event's snapshot, clip and thumbnail.
+const EVENT_FILES: [&str; 3] = ["snapshot.jpg", "clip.mp4", "thumbnail.jpg"];
+/// A login that takes longer than this has failed.
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// `scheme://host[:port]` of an absolute http(s) URL, host lowercased, default port dropped.
 pub fn origin_of(url: &str) -> Option<String> {
@@ -36,6 +42,23 @@ pub fn proxied(url: &str, media_origin: &str) -> Option<String> {
         .append_pair("url", url)
         .finish();
     Some(format!("{MEDIA_PATH}?{query}"))
+}
+
+/// Whether `url` names an event's media (`/api/events/<id>/{snapshot.jpg,clip.mp4,thumbnail.jpg}`,
+/// query allowed). The hub never fetches anything else from Frigate: its login would otherwise
+/// open Frigate's whole API (live frames, recordings, the raw config) to the LAN.
+pub fn is_event_media(url: &str) -> bool {
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    let Some(segments) = parsed.path_segments() else {
+        return false;
+    };
+    let segments: Vec<&str> = segments.collect();
+    matches!(
+        segments.as_slice(),
+        ["api", "events", id, file] if !id.is_empty() && EVENT_FILES.contains(file)
+    )
 }
 
 /// Why a media fetch did not reach Frigate.
@@ -65,6 +88,8 @@ pub struct MediaProxy {
     origin: String,
     login: Option<(String, String)>,
     token: Mutex<Option<String>>,
+    /// The last failure warned about, so a Frigate that stays down is logged once.
+    last_warning: std::sync::Mutex<Option<String>>,
 }
 
 impl MediaProxy {
@@ -78,12 +103,18 @@ impl MediaProxy {
             }
             _ => None,
         };
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(cfg.connect_timeout_ms))
+            .redirect(Policy::none())
+            .build()
+            .ok()?;
         Some(Arc::new(MediaProxy {
-            client: reqwest::Client::new(),
+            client,
             base: raw,
             origin,
             login,
             token: Mutex::new(None),
+            last_warning: std::sync::Mutex::new(None),
         }))
     }
 
@@ -96,7 +127,7 @@ impl MediaProxy {
     /// passing `range` through. A 401 triggers one new login and one retry; a second 401 is
     /// returned as is.
     pub async fn fetch(&self, url: &str, range: Option<&str>) -> Result<Upstream, MediaError> {
-        if origin_of(url).as_deref() != Some(self.origin.as_str()) {
+        if origin_of(url).as_deref() != Some(self.origin.as_str()) || !is_event_media(url) {
             return Err(MediaError::Forbidden);
         }
         let mut retried = false;
@@ -112,10 +143,10 @@ impl MediaProxy {
             if let Some(range) = range {
                 request = request.header(RANGE, range);
             }
-            let response = request
-                .send()
-                .await
-                .map_err(|err| MediaError::Unavailable(err.to_string()))?;
+            let response = request.send().await.map_err(|err| {
+                self.warn_once(format!("media fetch failed: {err}"));
+                MediaError::Unavailable(err.to_string())
+            })?;
             if response.status() == reqwest::StatusCode::UNAUTHORIZED && token.is_some() && !retried
             {
                 retried = true;
@@ -134,9 +165,19 @@ impl MediaProxy {
             return Ok(token.clone());
         }
         let (user, password) = self.login.as_ref().ok_or(MediaError::Forbidden)?;
+        let token = self.login(user, password).await.map_err(|err| {
+            self.warn_once(format!("Frigate {err}"));
+            err
+        })?;
+        *slot = Some(token.clone());
+        Ok(token)
+    }
+
+    async fn login(&self, user: &str, password: &str) -> Result<String, MediaError> {
         let response = self
             .client
             .post(format!("{}/api/login", self.base))
+            .timeout(LOGIN_TIMEOUT)
             .json(&serde_json::json!({ "user": user, "password": password }))
             .send()
             .await
@@ -148,15 +189,25 @@ impl MediaProxy {
                 status.as_u16()
             )));
         }
-        let token = response
+        response
             .headers()
             .get_all(SET_COOKIE)
             .iter()
             .filter_map(|value| value.to_str().ok())
             .find_map(token_in)
-            .ok_or_else(|| MediaError::Unavailable("no token in Frigate's login answer".into()))?;
-        *slot = Some(token.clone());
-        Ok(token)
+            .ok_or_else(|| MediaError::Unavailable("no token in Frigate's login answer".into()))
+    }
+
+    /// Warns about `message` unless it is the same as the last warning.
+    fn warn_once(&self, message: String) {
+        let mut last = self
+            .last_warning
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if last.as_deref() != Some(message.as_str()) {
+            tracing::warn!(frigate = %self.origin, "{message}");
+            *last = Some(message);
+        }
     }
 }
 
@@ -232,12 +283,33 @@ mod tests {
     }
 
     #[test]
+    fn only_event_media_is_fetched() {
+        for ok in [
+            "http://h:8971/api/events/1792401849.2-wg0y/snapshot.jpg",
+            "http://h:8971/api/events/1/clip.mp4",
+            "http://h:8971/api/events/1/thumbnail.jpg?h=112",
+        ] {
+            assert!(is_event_media(ok), "{ok}");
+        }
+        for bad in [
+            "http://h:8971/api/config/raw",
+            "http://h:8971/api/front/latest.jpg",
+            "http://h:8971/api/events/1/snapshot.jpg/../../config/raw",
+            "http://h:8971/api/events//snapshot.jpg",
+            "http://h:8971/api/events/1/other.bin",
+            "http://h:8971/api/events/1",
+            "nope",
+        ] {
+            assert!(!is_event_media(bad), "{bad}");
+        }
+    }
+
+    #[test]
     fn proxy_needs_a_url() {
         assert!(MediaProxy::new(FrigateConfig::default()).is_none());
         let proxy = MediaProxy::new(FrigateConfig {
             url: Some("http://H:8971/".into()),
-            user: None,
-            password: None,
+            ..FrigateConfig::default()
         })
         .expect("a proxy");
         assert_eq!(proxy.origin(), "http://h:8971");

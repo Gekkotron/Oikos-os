@@ -146,12 +146,25 @@ impl Default for PushConfig {
 /// Frigate, for the alert snapshots and clips the browser cannot fetch itself: with `url` set,
 /// media on that origin is served through the hub, which logs in with `user` / `password`
 /// (Frigate's login port, 8971) or fetches anonymously when they are unset.
-#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct FrigateConfig {
     pub url: Option<String>,
     pub user: Option<String>,
     pub password: Option<String>,
+    /// How long a connection to Frigate may take before the media request fails.
+    pub connect_timeout_ms: u64,
+}
+
+impl Default for FrigateConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            user: None,
+            password: None,
+            connect_timeout_ms: 5000,
+        }
+    }
 }
 
 impl fmt::Debug for FrigateConfig {
@@ -161,6 +174,7 @@ impl fmt::Debug for FrigateConfig {
             .field("url", &self.url)
             .field("user", &self.user)
             .field("password", &password)
+            .field("connect_timeout_ms", &self.connect_timeout_ms)
             .finish()
     }
 }

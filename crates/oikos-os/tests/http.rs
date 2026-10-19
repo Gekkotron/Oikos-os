@@ -595,6 +595,7 @@ mod fake_frigate {
         logins: Arc<AtomicUsize>,
         expire_used: bool,
         used: Mutex<Vec<String>>,
+        config_reads: AtomicUsize,
     }
 
     impl Fake {
@@ -604,10 +605,15 @@ mod fake_frigate {
                 logins: Arc::clone(&logins),
                 expire_used,
                 used: Mutex::new(Vec::new()),
+                config_reads: AtomicUsize::new(0),
             });
             let app = Router::new()
                 .route("/api/login", post(login))
                 .route("/api/events/1/snapshot.jpg", get(snapshot))
+                .route("/api/events/1/clip.mp4", get(snapshot))
+                .route("/api/events/1/thumbnail.jpg", get(snapshot))
+                .route("/api/events/redirect/snapshot.jpg", get(redirect_to_config))
+                .route("/api/config/raw", get(config_raw))
                 .with_state(Arc::clone(&state));
             let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let addr = listener.local_addr().expect("addr");
@@ -630,6 +636,24 @@ mod fake_frigate {
         pub async fn tokens_used(&self) -> usize {
             self.state.used.lock().await.len()
         }
+
+        /// How many times `/api/config/raw` was read (it never should be).
+        pub fn config_reads(&self) -> usize {
+            self.state.config_reads.load(Ordering::SeqCst)
+        }
+    }
+
+    async fn redirect_to_config() -> Response {
+        Response::builder()
+            .status(StatusCode::FOUND)
+            .header(header::LOCATION, "/api/config/raw")
+            .body(Body::empty())
+            .expect("response")
+    }
+
+    async fn config_raw(State(state): State<Arc<FakeState>>) -> Response {
+        state.config_reads.fetch_add(1, Ordering::SeqCst);
+        (StatusCode::OK, "mqtt:\n  password: secret\n").into_response()
     }
 
     async fn login(State(state): State<Arc<FakeState>>, body: String) -> Response {
@@ -825,4 +849,75 @@ async fn alerts_carry_proxied_media_urls() {
     let image = alerts[0]["image_url"].as_str().expect("image_url");
     assert!(image.starts_with("/api/v1/media?url="), "{image}");
     assert!(image.contains("snapshot.jpg"), "{image}");
+}
+
+#[tokio::test]
+async fn media_proxy_allows_only_event_media() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(frigate_config(&fake, true)).await;
+
+    for path in [
+        "/api/config/raw",
+        "/api/front/latest.jpg",
+        "/api/events/1/snapshot.jpg/../../config/raw",
+        "/api/events//snapshot.jpg",
+        "/api/events/1/other.bin",
+    ] {
+        let response = server
+            .get(&format!("/api/v1/media?url={}{path}", fake.origin()))
+            .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+    // Still fine: the three event media kinds, with or without a query.
+    for path in [
+        "/api/events/1/snapshot.jpg",
+        "/api/events/1/snapshot.jpg?h=112",
+        "/api/events/1/clip.mp4",
+        "/api/events/1/thumbnail.jpg",
+    ] {
+        let response = server
+            .get(&format!("/api/v1/media?url={}{path}", fake.origin()))
+            .await;
+        assert_ne!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+    assert_eq!(fake.logins.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn media_proxy_does_not_follow_redirects() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(frigate_config(&fake, true)).await;
+
+    // The fake answers this event id with a redirect to its config; the hub must hand the
+    // redirect status back instead of following it.
+    let response = server
+        .get(&format!(
+            "/api/v1/media?url={}/api/events/redirect/snapshot.jpg",
+            fake.origin()
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(fake.config_reads(), 0);
+}
+
+#[tokio::test]
+async fn media_proxy_gives_up_quickly_on_an_unreachable_frigate() {
+    // 10.255.255.1 is unroutable from a LAN: the connect hangs until a timeout fires.
+    let mut cfg = config();
+    cfg.frigate.url = Some("http://10.255.255.1:8971".into());
+    cfg.frigate.user = Some("u".into());
+    cfg.frigate.password = Some("p".into());
+    cfg.frigate.connect_timeout_ms = 300;
+    let server = Server::start_with(cfg).await;
+
+    let started = std::time::Instant::now();
+    let response = server
+        .get("/api/v1/media?url=http://10.255.255.1:8971/api/events/1/snapshot.jpg")
+        .await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "took {:?}",
+        started.elapsed()
+    );
 }
