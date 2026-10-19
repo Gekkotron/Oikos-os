@@ -12,7 +12,7 @@ use crate::icons::kind_icon;
 use crate::override_editor::OverrideEditor;
 use crate::screens::home::card_for;
 
-fn availability_class(availability: Availability) -> &'static str {
+pub(crate) fn availability_class(availability: Availability) -> &'static str {
     match availability {
         Availability::Online => "dot dot--online",
         Availability::Offline => "dot dot--offline",
@@ -20,7 +20,7 @@ fn availability_class(availability: Availability) -> &'static str {
     }
 }
 
-fn availability_word(availability: Availability) -> &'static str {
+pub(crate) fn availability_word(availability: Availability) -> &'static str {
     match availability {
         Availability::Online => "Online",
         Availability::Offline => "Offline",
@@ -29,7 +29,7 @@ fn availability_word(availability: Availability) -> &'static str {
 }
 
 /// "binary_sensor" as "Binary sensor".
-fn kind_word(kind: Kind) -> String {
+pub(crate) fn kind_word(kind: Kind) -> String {
     serde_json::to_value(kind)
         .ok()
         .and_then(|v| v.as_str().map(word))
