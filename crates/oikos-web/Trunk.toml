@@ -1,0 +1,13 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[[proxy]]
+backend = "http://127.0.0.1:8080/api/v1/"
+
+[[proxy]]
+backend = "ws://127.0.0.1:8080/ws"
+ws = true
+
+[[proxy]]
+backend = "http://127.0.0.1:8080/mcp/"
