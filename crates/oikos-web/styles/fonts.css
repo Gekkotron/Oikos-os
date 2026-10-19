@@ -1,0 +1,33 @@
+/*
+ * Bundled static fonts (no third-party font hosts).
+ * Inter 500/600/700: rsms/inter 4.1 release, WOFF2 (SIL OFL 1.1).
+ * Fraunces 500: static wght 500 latin subset (SIL OFL 1.1).
+ */
+@font-face {
+  font-family: "Inter";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("/assets/fonts/Inter-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("/assets/fonts/Inter-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("/assets/fonts/Inter-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Fraunces";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("/assets/fonts/Fraunces-Medium.woff2") format("woff2");
+}
