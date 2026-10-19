@@ -7,7 +7,7 @@ use std::time::Duration;
 use oikos_os::cli::Cli;
 use oikos_os::config::Config;
 use oikos_os::hub::Hub;
-use oikos_os::{http, logging, mqtt};
+use oikos_os::{http, logging, mcp, mqtt};
 use tokio::sync::mpsc;
 
 /// Publishes waiting for the MQTT task before the hub refuses new ones.
@@ -60,8 +60,8 @@ async fn main() -> anyhow::Result<ExitCode> {
             if let Some(e) = load_err {
                 tracing::warn!(error = %e, "ignoring invalid config, using defaults for logging");
             }
-            tracing::error!(%server, "mcp-stdio is not implemented yet");
-            Ok(ExitCode::from(2))
+            mcp::run_stdio_proxy(server).await?;
+            Ok(ExitCode::SUCCESS)
         }
     }
 }

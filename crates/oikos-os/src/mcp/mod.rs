@@ -1,10 +1,11 @@
 //! The MCP server: eleven tools and the `oikos://snapshot` resource over the hub, served at
-//! `/mcp` over streamable HTTP with stateful sessions.
+//! `/mcp` over streamable HTTP with stateful sessions, and the stdio proxy in front of it.
 //!
 //! A failed tool call is answered in-band (`isError: true` with the reason as text) rather
 //! than as a JSON-RPC error, so the assistant reads why and retries with better arguments.
 
 mod params;
+mod stdio_proxy;
 mod tools;
 
 use std::sync::Arc;
@@ -23,6 +24,8 @@ use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{RoleServer, ServerHandler, tool_handler};
 
 use crate::hub::{Hub, HubError};
+
+pub use stdio_proxy::run_stdio_proxy;
 
 /// The resource carrying the whole house as one JSON document.
 pub const SNAPSHOT_URI: &str = "oikos://snapshot";

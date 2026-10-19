@@ -26,7 +26,8 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+assert_cmd.workspace = true
 figment = { workspace = true, features = ["test"] }
 reqwest.workspace = true
-rmcp = { workspace = true, features = ["transport-streamable-http-client-reqwest"] }
+rmcp = { workspace = true, features = ["transport-child-process"] }
 tokio-tungstenite.workspace = true
