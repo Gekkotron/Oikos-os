@@ -29,3 +29,11 @@ json = false
 [push]
 history_topic = "oikos-push/history"
 responses_topic = "oikos-push/responses"
+
+# Frigate, for alert snapshots and clips. With `url` set, media on that origin is served by the
+# hub at /api/v1/media (the browser never sees the login). Needed when alerts point at Frigate's
+# login port (8971); leave `user`/`password` empty for the unauthenticated port (5000).
+[frigate]
+url = ""
+user = ""
+password = ""

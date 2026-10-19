@@ -16,6 +16,7 @@ pub struct Config {
     pub commands: CommandsConfig,
     pub log: LogConfig,
     pub push: PushConfig,
+    pub frigate: FrigateConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -142,6 +143,28 @@ impl Default for PushConfig {
     }
 }
 
+/// Frigate, for the alert snapshots and clips the browser cannot fetch itself: with `url` set,
+/// media on that origin is served through the hub, which logs in with `user` / `password`
+/// (Frigate's login port, 8971) or fetches anonymously when they are unset.
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct FrigateConfig {
+    pub url: Option<String>,
+    pub user: Option<String>,
+    pub password: Option<String>,
+}
+
+impl fmt::Debug for FrigateConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let password = self.password.as_ref().map(|_| "***");
+        f.debug_struct("FrigateConfig")
+            .field("url", &self.url)
+            .field("user", &self.user)
+            .field("password", &password)
+            .finish()
+    }
+}
+
 /// Dotted, lowercase keys of string-typed fields. Single source of truth for
 /// both the Env filter (figment's `ignore` sees the key after `split`, i.e.
 /// `mqtt.password`) and the raw-string merge.
@@ -157,6 +180,9 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "log.level",
     "push.history_topic",
     "push.responses_topic",
+    "frigate.url",
+    "frigate.user",
+    "frigate.password",
 ];
 
 impl Config {

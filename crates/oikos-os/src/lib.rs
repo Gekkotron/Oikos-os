@@ -8,4 +8,5 @@ pub mod http;
 pub mod hub;
 pub mod logging;
 pub mod mcp;
+pub mod media;
 pub mod mqtt;

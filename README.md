@@ -32,6 +32,15 @@ history_topic = "oikos-push/history"
 responses_topic = "oikos-push/responses"
 ```
 
+Alert snapshots and clips are URLs on Frigate. When they point at Frigate's login port (8971) the browser cannot load them, so give the hub the Frigate login and it serves them itself: media on that origin is rewritten to `/api/v1/media?url=…`, and the hub fetches it with Frigate's session cookie (logging in on demand, once more on a 401). Any other origin is refused. Leave `user` and `password` out for the unauthenticated port (5000).
+
+```toml
+[frigate]
+url = "http://192.168.1.20:8971"
+user = "oikos"
+password = "…"
+```
+
 ## Zigbee2MQTT
 
 The hub discovers entities under the `oikos` prefix. In Zigbee2MQTT's `configuration.yaml`:
@@ -60,6 +69,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8080`), CORS open to any orig
 | `GET /ws` | WebSocket: a snapshot first, then every hub event as a JSON text frame. |
 | `GET /api/v1/alerts` | The push alerts OikosPush keeps in its retained history, newest first. |
 | `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on the responses topic); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
+| `GET /api/v1/media?url=…` | A Frigate snapshot or clip fetched by the hub with the Frigate login (`[frigate]`); `Range` is passed through so clips seek. `400` without a valid URL, `403` off the Frigate origin, `502` when Frigate is unreachable. |
 
 Errors are `{"error": "…"}` with 400 (bad patch), 404 (unknown entity or route), 422 (command refused) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 

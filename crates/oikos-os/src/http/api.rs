@@ -4,9 +4,11 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
+use axum::body::Body as HttpBody;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
@@ -17,6 +19,7 @@ use oikos_core::model::{AreasDocument, Command};
 use serde::Serialize;
 
 use crate::hub::{Hub, HubError};
+use crate::media::MediaError;
 
 type HubState = State<Arc<Hub>>;
 
@@ -35,6 +38,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/ignored", get(ignored))
         .route("/alerts", get(alerts))
         .route("/alerts/{id}/actions/{action}", post(alert_action))
+        .route("/media", get(media))
         .fallback(not_found)
 }
 
@@ -145,6 +149,57 @@ async fn ignored(State(hub): HubState) -> Json<Vec<IgnoredView>> {
 
 async fn alerts(State(hub): HubState) -> Json<Vec<AlertView>> {
     Json(hub.alerts())
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct MediaQuery {
+    url: Option<String>,
+}
+
+/// Serves a Frigate snapshot or clip through the hub: the upstream status, the headers a
+/// `<img>` or `<video>` needs and the streamed body. `400` without a valid absolute `url`,
+/// `403` off the Frigate origin or without a `[frigate]` section, `502` when Frigate is out
+/// of reach or refuses the login.
+async fn media(
+    State(hub): HubState,
+    Query(query): Query<MediaQuery>,
+    headers: HeaderMap,
+) -> Result<Response, HttpError> {
+    let url = query
+        .url
+        .filter(|u| crate::media::origin_of(u).is_some())
+        .ok_or(HttpError {
+            status: StatusCode::BAD_REQUEST,
+            error: "missing or invalid `url`".to_owned(),
+        })?;
+    let proxy = hub.media().ok_or(HttpError {
+        status: StatusCode::FORBIDDEN,
+        error: "no Frigate configured".to_owned(),
+    })?;
+    let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+    let upstream = proxy.fetch(&url, range).await.map_err(|err| HttpError {
+        status: match err {
+            MediaError::Forbidden => StatusCode::FORBIDDEN,
+            MediaError::Unavailable(_) => StatusCode::BAD_GATEWAY,
+        },
+        error: err.to_string(),
+    })?;
+    let mut response = Response::new(HttpBody::empty());
+    *response.status_mut() =
+        StatusCode::from_u16(upstream.status).unwrap_or(StatusCode::BAD_GATEWAY);
+    let pairs = [
+        (header::CONTENT_TYPE, upstream.content_type),
+        (header::CONTENT_LENGTH, upstream.content_length),
+        (header::CONTENT_RANGE, upstream.content_range),
+        (header::ACCEPT_RANGES, upstream.accept_ranges),
+    ];
+    for (name, value) in pairs {
+        if let Some(value) = value.as_deref().and_then(|v| HeaderValue::from_str(v).ok()) {
+            response.headers_mut().insert(name, value);
+        }
+    }
+    *response.body_mut() = upstream.body;
+    Ok(response)
 }
 
 /// Publishes the reply for a tapped alert button; `202` once it is handed to the broker task.

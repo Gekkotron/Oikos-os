@@ -68,8 +68,13 @@ impl Server {
     /// A hub with the switch discovered, served on `127.0.0.1:0`. Its broker link is still
     /// `Connecting`: a test that writes calls [`Server::online`] first.
     async fn start() -> Server {
+        Server::start_with(config()).await
+    }
+
+    /// Like [`Server::start`], with its own configuration.
+    async fn start_with(cfg: Config) -> Server {
         let (tx, publisher) = mpsc::channel(64);
-        let hub = Hub::new(&config(), tx);
+        let hub = Hub::new(&cfg, tx);
         hub.ingest(SWITCH_TOPIC, &fixture(SWITCH_FIXTURE));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
@@ -557,4 +562,267 @@ async fn alert_action_refused_offline() {
         .await
         .expect("POST");
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+// ----- Frigate media proxy -----
+
+mod fake_frigate {
+    //! A Frigate stand-in: `/api/login` hands out `frigate_token=tok<N>` for user `u` /
+    //! password `p` (N counts the logins); the snapshot wants the latest token, and when
+    //! `expire_used` is set a token is accepted only once.
+
+    use std::net::SocketAddr;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::Router;
+    use axum::body::Body;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode, header};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::{get, post};
+    use serde_json::Value;
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex;
+
+    pub struct Fake {
+        pub addr: SocketAddr,
+        pub logins: Arc<AtomicUsize>,
+        state: Arc<FakeState>,
+    }
+
+    struct FakeState {
+        logins: Arc<AtomicUsize>,
+        expire_used: bool,
+        used: Mutex<Vec<String>>,
+    }
+
+    impl Fake {
+        pub async fn start(expire_used: bool) -> Fake {
+            let logins = Arc::new(AtomicUsize::new(0));
+            let state = Arc::new(FakeState {
+                logins: Arc::clone(&logins),
+                expire_used,
+                used: Mutex::new(Vec::new()),
+            });
+            let app = Router::new()
+                .route("/api/login", post(login))
+                .route("/api/events/1/snapshot.jpg", get(snapshot))
+                .with_state(Arc::clone(&state));
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+            let addr = listener.local_addr().expect("addr");
+            tokio::spawn(axum::serve(listener, app).into_future());
+            Fake {
+                addr,
+                logins,
+                state,
+            }
+        }
+
+        pub fn origin(&self) -> String {
+            format!("http://{}", self.addr)
+        }
+
+        pub fn snapshot_url(&self) -> String {
+            format!("{}/api/events/1/snapshot.jpg", self.origin())
+        }
+
+        pub async fn tokens_used(&self) -> usize {
+            self.state.used.lock().await.len()
+        }
+    }
+
+    async fn login(State(state): State<Arc<FakeState>>, body: String) -> Response {
+        let value: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+        if value["user"] != "u" || value["password"] != "p" {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        let n = state.logins.fetch_add(1, Ordering::SeqCst) + 1;
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::SET_COOKIE, "other=1; Path=/")
+            .header(
+                header::SET_COOKIE,
+                format!("frigate_token=tok{n}; Path=/; HttpOnly"),
+            )
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .expect("response")
+    }
+
+    async fn snapshot(State(state): State<Arc<FakeState>>, headers: HeaderMap) -> Response {
+        let wanted = format!("tok{}", state.logins.load(Ordering::SeqCst));
+        let cookie = headers
+            .get(header::COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        let presented = cookie
+            .split(';')
+            .map(str::trim)
+            .find_map(|c| c.strip_prefix("frigate_token="))
+            .unwrap_or_default()
+            .to_owned();
+        if presented.is_empty() || presented != wanted {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        {
+            let mut used = state.used.lock().await;
+            if state.expire_used && used.contains(&presented) {
+                return StatusCode::UNAUTHORIZED.into_response();
+            }
+            used.push(presented);
+        }
+        let mut builder = Response::builder()
+            .header(header::CONTENT_TYPE, "image/jpeg")
+            .header(header::ACCEPT_RANGES, "bytes");
+        if headers.contains_key(header::RANGE) {
+            builder = builder
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_RANGE, "bytes 0-3/4");
+        } else {
+            builder = builder.status(StatusCode::OK);
+        }
+        builder.body(Body::from("JPEG")).expect("response")
+    }
+}
+
+fn frigate_config(fake: &fake_frigate::Fake, with_login: bool) -> Config {
+    let mut cfg = config();
+    cfg.frigate.url = Some(fake.origin());
+    if with_login {
+        cfg.frigate.user = Some("u".into());
+        cfg.frigate.password = Some("p".into());
+    }
+    cfg
+}
+
+#[tokio::test]
+async fn media_proxy_logs_in_and_streams() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(frigate_config(&fake, true)).await;
+
+    let response = server
+        .get(&format!("/api/v1/media?url={}", fake.snapshot_url()))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("image/jpeg")
+    );
+    assert_eq!(response.text().await.expect("body"), "JPEG");
+    assert_eq!(fake.logins.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    // A second fetch reuses the cached token.
+    let response = server
+        .get(&format!("/api/v1/media?url={}", fake.snapshot_url()))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(fake.logins.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn media_proxy_passes_range_through() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(frigate_config(&fake, true)).await;
+
+    let response = server
+        .client
+        .get(server.url(&format!("/api/v1/media?url={}", fake.snapshot_url())))
+        .header("range", "bytes=0-3")
+        .send()
+        .await
+        .expect("GET");
+
+    assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok()),
+        Some("bytes 0-3/4")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("accept-ranges")
+            .and_then(|v| v.to_str().ok()),
+        Some("bytes")
+    );
+}
+
+#[tokio::test]
+async fn media_proxy_relogs_once_on_401() {
+    let fake = fake_frigate::Fake::start(true).await;
+    let server = Server::start_with(frigate_config(&fake, true)).await;
+    let path = format!("/api/v1/media?url={}", fake.snapshot_url());
+
+    assert_eq!(server.get(&path).await.status(), StatusCode::OK);
+    // tok1 is now spent: the next fetch gets a 401, the hub logs in again and retries once.
+    assert_eq!(server.get(&path).await.status(), StatusCode::OK);
+    assert_eq!(fake.logins.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(fake.tokens_used().await, 2);
+}
+
+#[tokio::test]
+async fn media_proxy_without_login_sends_no_cookie() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(frigate_config(&fake, false)).await;
+
+    let response = server
+        .get(&format!("/api/v1/media?url={}", fake.snapshot_url()))
+        .await;
+
+    // The fake insists on a cookie, so the upstream 401 is passed through untouched.
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(fake.logins.load(std::sync::atomic::Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn media_proxy_refuses_other_origins_and_missing_url() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(frigate_config(&fake, true)).await;
+
+    let response = server
+        .get("/api/v1/media?url=http://elsewhere:5000/api/events/1/snapshot.jpg")
+        .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let response = server.get("/api/v1/media").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let response = server.get("/api/v1/media?url=nope").await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    // Without a [frigate] section there is nothing to proxy.
+    let plain = Server::start().await;
+    let response = plain
+        .get(&format!("/api/v1/media?url={}", fake.snapshot_url()))
+        .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn alerts_carry_proxied_media_urls() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(frigate_config(&fake, true)).await;
+    let entry = format!(
+        r#"[{{"v":1,"id":"cam","channel":"camera","title":"Front","sent_at":1,"image_url":"{}"}}]"#,
+        fake.snapshot_url()
+    );
+
+    server.hub.ingest(HISTORY_TOPIC, entry.as_bytes());
+
+    let alerts: Value = server
+        .get("/api/v1/alerts")
+        .await
+        .json()
+        .await
+        .expect("json");
+    let image = alerts[0]["image_url"].as_str().expect("image_url");
+    assert!(image.starts_with("/api/v1/media?url="), "{image}");
+    assert!(image.contains("snapshot.jpg"), "{image}");
 }

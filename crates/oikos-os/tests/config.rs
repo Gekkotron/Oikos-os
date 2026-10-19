@@ -21,6 +21,9 @@ fn defaults_match_spec() {
         assert!(!cfg.log.json);
         assert_eq!(cfg.push.history_topic, "oikos-push/history");
         assert_eq!(cfg.push.responses_topic, "oikos-push/responses");
+        assert_eq!(cfg.frigate.url, None);
+        assert_eq!(cfg.frigate.user, None);
+        assert_eq!(cfg.frigate.password, None);
         Ok(())
     });
 }
@@ -82,6 +85,7 @@ fn numeric_looking_env_strings_stay_strings() {
         jail.set_env("OIKOS_HTTP__BIND", "8080");
         jail.set_env("OIKOS_LOG__LEVEL", "5");
         jail.set_env("OIKOS_PUSH__HISTORY_TOPIC", "1");
+        jail.set_env("OIKOS_FRIGATE__PASSWORD", "0042");
         let cfg = Config::load(None)?;
         assert_eq!(cfg.mqtt.ha_status_topic, "42");
         assert_eq!(cfg.topics.ui_prefix, "7");
@@ -89,6 +93,7 @@ fn numeric_looking_env_strings_stay_strings() {
         assert_eq!(cfg.http.bind, "8080");
         assert_eq!(cfg.log.level, "5");
         assert_eq!(cfg.push.history_topic, "1");
+        assert_eq!(cfg.frigate.password.as_deref(), Some("0042"));
         assert_eq!(cfg.mqtt.password.as_deref(), Some("123456"));
         assert_eq!(cfg.mqtt.client_id, "1");
         assert_eq!(cfg.mqtt.user.as_deref(), Some("007"));
@@ -115,6 +120,21 @@ fn env_layer_excludes_string_keys() {
             );
         }
         assert!(env.find_value("mqtt.port").is_ok());
+        Ok(())
+    });
+}
+
+#[test]
+fn debug_redacts_frigate_password() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "oikos.toml",
+            "[frigate]\nurl = \"http://f:8971\"\nuser = \"u\"\npassword = \"hunter2\"\n",
+        )?;
+        let cfg = Config::load(None)?;
+        let text = format!("{cfg:?}");
+        assert!(text.contains("http://f:8971"));
+        assert!(!text.contains("hunter2"), "{text}");
         Ok(())
     });
 }

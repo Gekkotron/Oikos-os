@@ -5,6 +5,8 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use oikos_api::{AlertView, parse_history};
 
+use crate::media::proxied;
+
 /// What applying a history payload did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Applied {
@@ -21,11 +23,21 @@ pub enum Applied {
 pub struct AlertStore {
     list: Vec<AlertView>,
     last_bad_payload: Option<u64>,
+    /// Media on this origin is rewritten to the hub's media route.
+    media_origin: Option<String>,
 }
 
 impl AlertStore {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A store that routes snapshot and clip URLs on `origin` through `/api/v1/media`.
+    pub fn with_media_origin(origin: Option<String>) -> Self {
+        Self {
+            media_origin: origin,
+            ..Self::default()
+        }
     }
 
     /// Applies one history payload. An empty payload (the retained message was cleared)
@@ -35,7 +47,15 @@ impl AlertStore {
             Vec::new()
         } else {
             match parse_history(payload) {
-                Some(list) => list,
+                Some(mut list) => {
+                    if let Some(origin) = &self.media_origin {
+                        for alert in &mut list {
+                            rewrite(&mut alert.image_url, origin);
+                            rewrite(&mut alert.video_url, origin);
+                        }
+                    }
+                    list
+                }
                 None => {
                     let mut hasher = DefaultHasher::new();
                     payload.hash(&mut hasher);
@@ -62,6 +82,12 @@ impl AlertStore {
     }
 }
 
+fn rewrite(url: &mut Option<String>, origin: &str) {
+    if let Some(proxied) = url.as_deref().and_then(|u| proxied(u, origin)) {
+        *url = Some(proxied);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,6 +110,26 @@ mod tests {
         assert_eq!(store.apply(b""), Applied::Changed(vec![]));
         assert!(store.list().is_empty());
         assert_eq!(store.apply(b""), Applied::Unchanged);
+    }
+
+    #[test]
+    fn apply_rewrites_media_on_the_frigate_origin() {
+        let mut store = AlertStore::with_media_origin(Some("http://h:8971".into()));
+        let payload = br#"[{"v":1,"id":"a","title":"A","sent_at":1,"image_url":"http://h:8971/api/events/1/snapshot.jpg","video_url":"http://h:8971/api/events/1/clip.mp4"},{"v":1,"id":"b","title":"B","sent_at":1,"image_url":"http://elsewhere/x.jpg"}]"#;
+        store.apply(payload);
+        let a = store.find("a").expect("a");
+        assert_eq!(
+            a.image_url.as_deref(),
+            Some("/api/v1/media?url=http%3A%2F%2Fh%3A8971%2Fapi%2Fevents%2F1%2Fsnapshot.jpg")
+        );
+        assert_eq!(
+            a.video_url.as_deref(),
+            Some("/api/v1/media?url=http%3A%2F%2Fh%3A8971%2Fapi%2Fevents%2F1%2Fclip.mp4")
+        );
+        assert_eq!(
+            store.find("b").and_then(|b| b.image_url.as_deref()),
+            Some("http://elsewhere/x.jpg")
+        );
     }
 
     #[test]

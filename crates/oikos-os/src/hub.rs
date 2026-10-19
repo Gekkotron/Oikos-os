@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use crate::alerts::{AlertStore, Applied};
+use crate::media::MediaProxy;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
     Snapshot, WsEvent, area_views, device_views, snapshot,
@@ -79,6 +80,8 @@ pub struct Hub {
     history_topic: String,
     responses_topic: String,
     alerts: Mutex<AlertStore>,
+    /// Frigate media served through the hub; `None` without a `[frigate] url`.
+    media: Option<Arc<MediaProxy>>,
     confirm_timeout: Duration,
     subscription_debounce: Duration,
     /// Entities whose template failure was already logged, so each failure is logged once.
@@ -98,6 +101,8 @@ impl Hub {
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let (state_seen, _) = broadcast::channel(EVENT_CAPACITY);
         let (connection, _) = watch::channel(ConnectionStatus::Connecting);
+        let media = MediaProxy::new(cfg.frigate.clone());
+        let alerts = AlertStore::with_media_origin(media.as_ref().map(|m| m.origin().to_owned()));
         Arc::new(Hub {
             registry: RwLock::new(registry),
             events,
@@ -107,7 +112,8 @@ impl Hub {
             ui_prefix: cfg.topics.ui_prefix.clone(),
             history_topic: cfg.push.history_topic.clone(),
             responses_topic: cfg.push.responses_topic.clone(),
-            alerts: Mutex::new(AlertStore::new()),
+            alerts: Mutex::new(alerts),
+            media,
             confirm_timeout: Duration::from_millis(cfg.commands.confirm_timeout_ms),
             subscription_debounce: Duration::from_millis(cfg.commands.subscription_debounce_ms),
             logged_failures: Mutex::new(BTreeSet::new()),
@@ -182,6 +188,11 @@ impl Hub {
         let mut snapshot = snapshot(&self.read(), connection, clock::now());
         snapshot.alerts = self.alerts();
         snapshot
+    }
+
+    /// The Frigate media proxy, when `[frigate] url` is configured.
+    pub fn media(&self) -> Option<Arc<MediaProxy>> {
+        self.media.clone()
     }
 
     /// The push alerts, newest first as OikosPush published them.
