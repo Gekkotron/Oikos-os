@@ -13,6 +13,7 @@ use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
 use crate::screens::devices::DevicesScreen;
 use crate::screens::entity_sheet::EntitySheetScreen;
+use crate::screens::flow_canvas::FlowCanvasScreen;
 use crate::screens::flows::FlowsScreen;
 use crate::screens::home::HomeScreen;
 use crate::screens::settings::SettingsScreen;
@@ -81,6 +82,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
                     <Route path=path!("/flows") view=FlowsScreen />
+                    <Route path=path!("/flows/:id") view=FlowCanvasScreen />
                     <Route path=path!("/devices") view=DevicesScreen />
                     <Route path=path!("/settings") view=SettingsScreen />
                 </Routes>

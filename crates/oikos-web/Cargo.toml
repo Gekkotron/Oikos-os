@@ -42,5 +42,5 @@ web-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
-web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventInit", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "KeyboardEventInit", "Node"] }
+web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventInit", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "KeyboardEventInit", "History", "Node", "NodeList"] }
 wasm-bindgen-test.workspace = true

@@ -1506,3 +1506,228 @@ body {
   cursor: not-allowed;
   opacity: 0.4;
 }
+
+/* Flow canvas */
+.flow-canvas-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.flow-canvas__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.flow-canvas__header .sheet__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.flow-canvas__header .switch {
+  box-sizing: content-box;
+  padding: 11px 0;
+  border: 0;
+  background-clip: content-box;
+  color: inherit;
+  cursor: pointer;
+}
+
+.flow-canvas__header .switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.flow-invalid {
+  padding: 16px;
+  border: 1px solid var(--accent-rose);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--accent-rose) 12%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.flow-invalid p {
+  margin: 6px 0 0;
+}
+
+.flow-canvas-scroll {
+  overflow: auto;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  -webkit-overflow-scrolling: touch;
+}
+
+.flow-canvas {
+  position: relative;
+  background-image: radial-gradient(var(--chip-border) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.flow-wire {
+  fill: none;
+  stroke: var(--chip-border);
+  stroke-width: 2;
+}
+
+.flow-wire--lit {
+  stroke: var(--accent-mint);
+}
+
+.flow-node {
+  --node-accent: var(--accent-amber);
+  position: absolute;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-content: center;
+  column-gap: 8px;
+  box-sizing: border-box;
+  width: 200px;
+  height: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--chip-border);
+  border-left: 4px solid var(--node-accent);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  transition: box-shadow var(--motion-medium), border-color var(--motion-medium);
+}
+
+.flow-node--trigger {
+  --node-accent: var(--accent-amber);
+}
+
+.flow-node--if {
+  --node-accent: var(--accent-violet);
+}
+
+.flow-node--delay {
+  --node-accent: var(--accent-cyan);
+}
+
+.flow-node--command {
+  --node-accent: var(--accent-mint);
+}
+
+.flow-node--lit {
+  border-color: var(--node-accent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--node-accent) 55%, transparent);
+}
+
+.flow-node--failed {
+  --node-accent: var(--accent-rose);
+  border-color: var(--accent-rose);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-rose) 55%, transparent);
+}
+
+.flow-node__icon {
+  display: flex;
+  grid-row: span 3;
+  align-items: center;
+  color: var(--node-accent);
+}
+
+.flow-node__icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.flow-node__title,
+.flow-node__detail,
+.flow-node__step {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-node__title {
+  font: var(--type-label);
+  font-weight: 600;
+}
+
+.flow-node__detail,
+.flow-node__step {
+  font: var(--type-label);
+  opacity: 0.7;
+}
+
+.flow-node__step:empty {
+  display: none;
+}
+
+.flow-node--pending {
+  animation: flow-pulse var(--motion-medium) ease-in-out infinite alternate;
+}
+
+@keyframes flow-pulse {
+  from {
+    box-shadow: 0 0 4px color-mix(in srgb, var(--node-accent) 30%, transparent);
+  }
+
+  to {
+    box-shadow: 0 0 16px color-mix(in srgb, var(--node-accent) 80%, transparent);
+  }
+}
+
+.flow-port {
+  position: absolute;
+  right: 6px;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.7;
+  transform: translateY(-50%);
+}
+
+.run-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run {
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+}
+
+.run summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  cursor: pointer;
+}
+
+.run__status {
+  font-weight: 600;
+}
+
+.run--done .run__status {
+  color: var(--accent-mint);
+}
+
+.run--running .run__status {
+  color: var(--accent-cyan);
+}
+
+.run--failed .run__status {
+  color: var(--accent-rose);
+}
+
+.run__time,
+.run__trigger {
+  overflow-wrap: anywhere;
+  opacity: 0.7;
+}
+
+.run__steps {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font: var(--type-label);
+  overflow-wrap: anywhere;
+}

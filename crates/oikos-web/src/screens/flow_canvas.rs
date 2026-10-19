@@ -1,0 +1,324 @@
+//! One flow drawn read-only like n8n's canvas, with the last run lit, and its run history.
+
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use leptos_router::components::A;
+use leptos_router::hooks::use_params_map;
+use oikos_api::{FlowView, RunView, StepOutcome};
+use oikos_core::flow::{Flow, FlowMode, NodeKind, parse_duration};
+
+use crate::api;
+use crate::components::now::Now;
+use crate::components::toast::Toasts;
+use crate::flows::{
+    NODE_H, NODE_W, canvas_size, highlight, layout, node_detail, node_title, port_offset,
+    status_class, status_word, wire_path,
+};
+use crate::format::{entity_title, format_timestamp};
+use crate::house::House;
+use crate::icons::node_icon;
+
+fn type_class(kind: &NodeKind) -> &'static str {
+    match kind {
+        NodeKind::TriggerState(_) => "flow-node--trigger",
+        NodeKind::If(_) => "flow-node--if",
+        NodeKind::Delay(_) => "flow-node--delay",
+        NodeKind::Command(_) => "flow-node--command",
+    }
+}
+
+/// `m:ss` of a number of seconds.
+fn minutes_seconds(secs: u64) -> String {
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// The wall-clock second a delay step ends at, when `view`'s active run is parked on it:
+/// the step's start plus the node's duration.
+fn pending_deadline(flow: &Flow, view: &FlowView, node_id: &str) -> Option<u64> {
+    let run = view.runs.first()?;
+    if view.active_run.as_deref() != Some(run.id.as_str()) {
+        return None;
+    }
+    let step = run.steps.last().filter(|s| s.node == node_id)?;
+    let NodeKind::Delay(p) = &flow.node(node_id)?.kind else {
+        return None;
+    };
+    let wait = parse_duration(&p.for_).ok()?;
+    Some(step.at + wait.as_secs())
+}
+
+#[component]
+fn FlowSwitch(id: String, name: String, enabled: bool, disabled: bool) -> impl IntoView {
+    let toasts = expect_context::<Toasts>();
+    let label = format!("Enable {name}");
+    let toggle = move |_| {
+        let id = id.clone();
+        spawn_local(async move {
+            if let Err(e) = api::set_flow_enabled(&id, !enabled).await {
+                toasts.push(e.error);
+            }
+        });
+    };
+    view! {
+        <button
+            type="button"
+            role="switch"
+            class="switch"
+            class:switch--on=enabled
+            aria-checked=enabled.to_string()
+            aria-label=label
+            disabled=disabled
+            on:click=toggle
+        >
+            <span class="switch__knob"></span>
+        </button>
+    }
+}
+
+#[component]
+fn Header(view: FlowView) -> impl IntoView {
+    let toasts = expect_context::<Toasts>();
+    let flow = &view.definition;
+    let id = flow.id.clone();
+    let invalid = view.invalid.is_some();
+    let busy = view.active_run.is_some();
+    let mode = match flow.mode {
+        FlowMode::Single => "single",
+        FlowMode::Restart => "restart",
+    };
+    let run_now = {
+        let id = id.clone();
+        move |_| {
+            let id = id.clone();
+            spawn_local(async move {
+                if let Err(e) = api::run_flow(&id).await {
+                    toasts.push(e.error);
+                }
+            });
+        }
+    };
+    view! {
+        <header class="flow-canvas__header">
+            <A href="/flows" attr:class="sheet__back">
+                "←"
+                <span class="sheet__back-label">"Flows"</span>
+            </A>
+            <h1 class="sheet__title">{flow.name.clone()}</h1>
+            <FlowSwitch id=id name=flow.name.clone() enabled=flow.enabled disabled=invalid />
+            <button type="button" class="btn" disabled=invalid || busy on:click=run_now>
+                "Run now"
+            </button>
+            <span class="chip">{mode}</span>
+        </header>
+    }
+}
+
+#[component]
+fn Canvas(view: FlowView) -> impl IntoView {
+    let house = expect_context::<House>();
+    let now = expect_context::<Now>();
+    let flow = view.definition.clone();
+    let placed = layout(&flow);
+    let (width, height) = canvas_size(&placed);
+    let lit = highlight(&flow, view.runs.first());
+    let pos = |id: &str| placed.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
+
+    let wires = flow
+        .edges
+        .iter()
+        .filter_map(|edge| {
+            let (x1, y1) = pos(&edge.from)?;
+            let (x2, y2) = pos(&edge.to)?;
+            let from = flow.node(&edge.from)?;
+            let d = wire_path(
+                x1 + NODE_W,
+                y1 + port_offset(&from.kind, edge.port.as_deref()),
+                x2,
+                y2 + NODE_H / 2.0,
+            );
+            let is_lit =
+                lit.edges
+                    .contains(&(edge.from.clone(), edge.port.clone(), edge.to.clone()));
+            Some(view! { <path class="flow-wire" class:flow-wire--lit=is_lit d=d /> })
+        })
+        .collect_view();
+
+    let nodes = flow
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let (x, y) = pos(&node.id)?;
+            let outcome = lit.nodes.get(&node.id).copied();
+            let failed = outcome == Some(StepOutcome::Failed);
+            let is_lit = outcome.is_some() && !failed;
+            let deadline = pending_deadline(&flow, &view, &node.id);
+            let step_detail = view
+                .runs
+                .first()
+                .and_then(|r| r.steps.iter().rev().find(|s| s.node == node.id))
+                .map(|s| s.detail.clone())
+                .filter(|d| !d.is_empty());
+            let step_line = move || match deadline {
+                Some(at) => Some(format!(
+                    "{} left",
+                    minutes_seconds(at.saturating_sub(now.0.get()))
+                )),
+                None => step_detail.clone(),
+            };
+            let detail = house.entities.with(|e| node_detail(node, e));
+            let ports = matches!(node.kind, NodeKind::If(_)).then(|| {
+                ["true", "false"]
+                    .into_iter()
+                    .map(|port| {
+                        let top = port_offset(&node.kind, Some(port));
+                        view! {
+                            <span class="flow-port" style=format!("top:{top}px")>
+                                {port}
+                            </span>
+                        }
+                    })
+                    .collect_view()
+            });
+            Some(view! {
+                <div
+                    class=format!("flow-node {}", type_class(&node.kind))
+                    class:flow-node--lit=is_lit
+                    class:flow-node--failed=failed
+                    class:flow-node--pending=deadline.is_some()
+                    data-node=node.id.clone()
+                    style=format!("left:{x}px;top:{y}px")
+                >
+                    <span class="flow-node__icon" inner_html=node_icon(&node.kind)></span>
+                    <span class="flow-node__title">{node_title(node)}</span>
+                    <span class="flow-node__detail">{detail}</span>
+                    <span class="flow-node__step">{step_line}</span>
+                    {ports}
+                </div>
+            })
+        })
+        .collect_view();
+
+    view! {
+        <div class="flow-canvas-scroll">
+            <div class="flow-canvas" style=format!("width:{width}px;height:{height}px")>
+                <svg
+                    class="flow-wires"
+                    width=width.to_string()
+                    height=height.to_string()
+                    style="position:absolute;inset:0;pointer-events:none"
+                >
+                    {wires}
+                </svg>
+                {nodes}
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn RunItem(run: RunView, flow: Flow) -> impl IntoView {
+    let house = expect_context::<House>();
+    let trigger = match &run.trigger {
+        None => "manual".to_owned(),
+        Some(t) => {
+            let name = house.entities.with(|e| {
+                e.get(&t.entity)
+                    .map_or_else(|| t.entity.clone(), entity_title)
+            });
+            let value = match &t.value {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            format!("{name} = {value}")
+        }
+    };
+    let steps = run
+        .steps
+        .iter()
+        .map(|s| {
+            let node = flow
+                .node(&s.node)
+                .map_or_else(|| s.node.clone(), node_title);
+            let outcome = match s.outcome {
+                StepOutcome::Ok => "ok",
+                StepOutcome::Failed => "failed",
+                _ => "skipped",
+            };
+            view! { <li>{format!("{node} · {outcome} · {}", s.detail)}</li> }
+        })
+        .collect_view();
+    view! {
+        <li class=format!("run {}", status_class(run.status))>
+            <details>
+                <summary>
+                    <span class="run__status">{status_word(run.status)}</span>
+                    <span class="run__time">{format_timestamp(run.started_at)}</span>
+                    <span class="run__trigger">{trigger}</span>
+                </summary>
+                <ol class="run__steps">{steps}</ol>
+            </details>
+        </li>
+    }
+}
+
+#[component]
+fn FlowBody(view: FlowView) -> impl IntoView {
+    let runs = view.runs.clone();
+    let flow = view.definition.clone();
+    let body = match view.invalid.clone() {
+        Some(reason) => view! {
+            <div class="flow-invalid">
+                <strong>"This flow cannot run"</strong>
+                <p>{reason}</p>
+            </div>
+        }
+        .into_any(),
+        None => view! { <Canvas view=view.clone() /> }.into_any(),
+    };
+    view! {
+        <Header view=view />
+        {body}
+        <ol class="run-list">
+            {runs
+                .into_iter()
+                .map(|run| view! { <RunItem run=run flow=flow.clone() /> })
+                .collect_view()}
+        </ol>
+    }
+}
+
+#[component]
+pub fn FlowCanvasScreen() -> impl IntoView {
+    let house = expect_context::<House>();
+    let params = use_params_map();
+    let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
+    let current = Memo::new(move |_| {
+        let id = id.get();
+        house
+            .flows
+            .with(|flows| flows.iter().find(|f| f.definition.id == id).cloned())
+    });
+    let loaded = Memo::new(move |_| {
+        house.flows.with(|f| !f.is_empty())
+            || matches!(house.connection.get(), oikos_api::ConnectionStatus::Online)
+    });
+    view! {
+        <div class="flow-canvas-screen">
+            {move || match current.get() {
+                Some(flow) => view! { <FlowBody view=flow /> }.into_any(),
+                None if loaded.get() => {
+                    view! {
+                        <div class="flow-invalid">
+                            <strong>"Unknown flow"</strong>
+                            <p>
+                                <A href="/flows">"Back to flows"</A>
+                            </p>
+                        </div>
+                    }
+                        .into_any()
+                }
+                None => ().into_any(),
+            }}
+        </div>
+    }
+}
