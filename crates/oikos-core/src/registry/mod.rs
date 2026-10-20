@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::discovery::DiscoveryTopic;
 use crate::model::{
-    Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, Kind, StateValue,
+    Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, StateValue, SwitchType,
     UNASSIGNED_AREA, UiOverride,
 };
 use crate::state::{Applied, StateError, apply_parts};
@@ -417,11 +417,7 @@ impl Registry {
         for (id, entity) in &mut self.entities {
             let ui = self.overrides.get(id).cloned().unwrap_or_default();
             let area = areas::effective(entity, ui.area.as_deref(), declared);
-            let kind = if entity.protocol_kind == Kind::Switch && ui.as_light {
-                Kind::Light
-            } else {
-                entity.protocol_kind
-            };
+            let kind = SwitchType::effective_kind(entity.protocol_kind, &ui);
             if entity.ui != ui || entity.area != area || entity.kind != kind {
                 entity.ui = ui;
                 entity.area = area;

@@ -76,7 +76,8 @@ pub struct SetOverrideParams {
     /// `area`, `hidden`, `order`, `cardStyle`, `favorite`, `energyRole` (solar, grid,
     /// grid_export, battery, house, consumer, water), `energyInvert`, `securityHidden`,
     /// `energyIcon`, `energyMeter`, `homePinned`, `securityAction`, `securityAsk`, `ungrouped`,
-    /// `asLight`, `lightOnPreset` (white, warm, red, green, blue), `lightOnBrightness` (1 to
+    /// `showAs` (light, door, siren, chime, plug), `lightOnPreset` (white, warm, red, green,
+    /// blue), `lightOnBrightness` (1 to
     /// 255), `climatePresets`.
     pub patch: OverridePatch,
 }
@@ -268,7 +269,7 @@ pub struct Deleted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oikos_core::model::{ENERGY_ROLES, LIGHT_ON_PRESETS};
+    use oikos_core::model::{ENERGY_ROLES, LIGHT_ON_PRESETS, SHOW_AS};
 
     /// The `patch` documentation is written by hand: it must name every app field and value.
     #[test]
@@ -282,6 +283,7 @@ mod tests {
             .iter()
             .chain(ENERGY_ROLES)
             .chain(LIGHT_ON_PRESETS)
+            .chain(SHOW_AS)
         {
             assert!(description.contains(name), "`{name}` is missing");
         }

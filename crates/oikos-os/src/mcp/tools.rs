@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use oikos_api::{CommandResponse, DeviceView, EntityView};
-use oikos_core::model::AreasDocument;
+use oikos_core::model::{AreasDocument, SwitchType};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{tool, tool_router};
 use serde::Serialize;
@@ -296,8 +296,14 @@ fn device_matches(device: &DeviceView, query: &str) -> bool {
 }
 
 /// `query` is already lowercase.
+/// By name, id, or the word of the type a switch is shown as ("siren", "door opener").
 fn entity_matches(entity: &EntityView, query: &str) -> bool {
-    contains_ci(&entity.name, query) || contains_ci(&entity.id, query)
+    let type_word = SwitchType::of(entity.protocol_kind, &entity.ui)
+        .filter(|t| *t != SwitchType::Switch)
+        .map(SwitchType::label);
+    contains_ci(&entity.name, query)
+        || contains_ci(&entity.id, query)
+        || type_word.is_some_and(|w| contains_ci(w, query))
 }
 
 fn contains_ci(haystack: &str, lowercase_needle: &str) -> bool {

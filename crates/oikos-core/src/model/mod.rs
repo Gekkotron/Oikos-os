@@ -8,6 +8,7 @@ mod kind;
 mod placement;
 mod room_groups;
 mod state;
+mod switch_type;
 pub(crate) mod ui_override;
 
 pub use area::{Area, AreasDocument, UNASSIGNED_AREA};
@@ -21,4 +22,5 @@ pub use state::{
     Availability, ClimateState, CoverState, EntityState, LightState, StateValue, VacuumState,
     WaterHeaterState,
 };
-pub use ui_override::{ENERGY_ROLES, LIGHT_ON_PRESETS, PatchError, UiOverride};
+pub use switch_type::SwitchType;
+pub use ui_override::{ENERGY_ROLES, LIGHT_ON_PRESETS, PatchError, SHOW_AS, UiOverride};

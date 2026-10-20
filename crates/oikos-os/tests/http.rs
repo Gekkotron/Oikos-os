@@ -247,7 +247,7 @@ async fn patch_override_then_snapshot_reflects_it() {
     let response = server
         .client
         .patch(server.url(&format!("/api/v1/entities/{SWITCH_ID}/override")))
-        .json(&json!({"asLight": true, "favorite": true}))
+        .json(&json!({"showAs": "light", "favorite": true}))
         .send()
         .await
         .expect("PATCH");

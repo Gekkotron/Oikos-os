@@ -129,7 +129,7 @@ fn overrides_apply() {
 }
 
 #[test]
-fn path_area_and_as_light() {
+fn path_area_and_light_type() {
     let mut registry = load_house();
     let entity = registry.entity(STAIR_LIGHT).expect("stair light");
     assert_eq!(entity.area, "stair");
@@ -140,7 +140,16 @@ fn path_area_and_as_light() {
     let entity = registry.entity(STAIR_LIGHT).expect("stair light");
     assert_eq!(entity.kind, Kind::Light);
     assert_eq!(entity.protocol_kind, Kind::Switch);
-    assert!(entity.ui.as_light);
+    assert_eq!(
+        entity.ui.show_as.as_deref(),
+        Some("light"),
+        "legacy asLight reads as Light"
+    );
+
+    registry.apply(override_payload(STAIR_LIGHT, r#"{"showAs":"light"}"#));
+    assert_eq!(registry.entity(STAIR_LIGHT).unwrap().kind, Kind::Light);
+    registry.apply(override_payload(STAIR_LIGHT, r#"{"showAs":"door"}"#));
+    assert_eq!(registry.entity(STAIR_LIGHT).unwrap().kind, Kind::Switch);
 
     let changes = registry.apply(override_payload(STAIR_LIGHT, ""));
     assert!(changes.contains(&Change::EntityUpserted(STAIR_LIGHT.to_owned())));

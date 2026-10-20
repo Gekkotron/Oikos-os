@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oikos_api::{EntityView, OverridePatch};
-use oikos_core::model::{ENERGY_ROLES, Kind, LIGHT_ON_PRESETS, UiOverride};
+use oikos_core::model::{ENERGY_ROLES, Kind, LIGHT_ON_PRESETS, SHOW_AS, UiOverride};
 use serde_json::json;
 
 use crate::api::{clear_override, set_override};
@@ -40,7 +40,7 @@ pub fn dirty_patch(before: &UiOverride, after: &UiOverride) -> OverridePatch {
         security_action => "securityAction",
         security_ask => "securityAsk",
         ungrouped => "ungrouped",
-        as_light => "asLight",
+        show_as => "showAs",
         light_on_preset => "lightOnPreset",
         light_on_brightness => "lightOnBrightness",
         climate_presets => "climatePresets",
@@ -433,11 +433,12 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 {is_switch
                     .then(|| {
                         view! {
-                            <FlagField
-                                label="Show as a light"
+                            <ChoiceField
+                                label="Show as"
                                 draft=draft
-                                get=|d| d.as_light
-                                set=|d, v| d.as_light = v
+                                options=SHOW_AS
+                                get=|d| d.show_as.clone()
+                                set=|d, v| d.show_as = v
                             />
                         }
                     })}
@@ -596,7 +597,7 @@ mod tests {
             security_action: true,
             security_ask: false,
             ungrouped: true,
-            as_light: true,
+            show_as: Some("door".into()),
             light_on_preset: Some("warm".into()),
             light_on_brightness: Some(9),
             climate_presets: Some("p".into()),

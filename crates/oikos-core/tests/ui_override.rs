@@ -75,8 +75,10 @@ fn patch_sets_clears_and_rejects() {
         ..Default::default()
     };
 
-    let set = base.apply_patch(&patch(json!({"asLight": true}))).unwrap();
-    assert!(set.as_light);
+    let set = base
+        .apply_patch(&patch(json!({"showAs": "light"})))
+        .unwrap();
+    assert_eq!(set.show_as.as_deref(), Some("light"));
     assert_eq!(set.area.as_deref(), Some("living"), "untouched fields stay");
 
     let cleared = base.apply_patch(&patch(json!({"area": null}))).unwrap();
@@ -158,4 +160,65 @@ fn command_json_shape() {
         serde_json::to_string(&Command::SetPosition { position: 40 }).unwrap(),
         r#"{"type":"set_position","position":40}"#
     );
+}
+
+#[test]
+fn legacy_as_light_reads_as_light_type() {
+    let ui = UiOverride::decode(br#"{"name":"Lumiere tv","asLight":true}"#).unwrap();
+    assert_eq!(ui.show_as.as_deref(), Some("light"));
+    assert!(ui.extra.is_empty());
+    let off = UiOverride::decode(br#"{"asLight":false}"#).unwrap();
+    assert_eq!(off.show_as, None);
+    assert!(off.is_default());
+    let both = UiOverride::decode(br#"{"asLight":true,"showAs":"siren"}"#).unwrap();
+    assert_eq!(both.show_as.as_deref(), Some("siren"));
+}
+
+#[test]
+fn encode_writes_as_light_only_next_to_light() {
+    let light = UiOverride {
+        show_as: Some("light".into()),
+        ..UiOverride::default()
+    };
+    let wire: Value = serde_json::from_str(&light.encode()).unwrap();
+    assert_eq!(wire, json!({"showAs": "light", "asLight": true}));
+    let siren = UiOverride {
+        show_as: Some("siren".into()),
+        ..UiOverride::default()
+    };
+    assert_eq!(
+        serde_json::from_str::<Value>(&siren.encode()).unwrap(),
+        json!({"showAs": "siren"})
+    );
+    assert!(!serde_json::to_string(&light).unwrap().contains("asLight"));
+}
+
+#[test]
+fn rename_keeps_legacy_light_on_the_wire() {
+    let stored = UiOverride::decode(br#"{"name":"Lumiere tv","asLight":true}"#).unwrap();
+    let renamed = stored
+        .apply_patch(&patch(json!({"name": "TV light"})))
+        .unwrap();
+    let wire: Value = serde_json::from_str(&renamed.encode()).unwrap();
+    assert_eq!(
+        wire,
+        json!({"name": "TV light", "showAs": "light", "asLight": true})
+    );
+}
+
+#[test]
+fn show_as_patch_is_validated() {
+    let base = UiOverride::default();
+    let door = base.apply_patch(&patch(json!({"showAs": "door"}))).unwrap();
+    assert_eq!(door.show_as.as_deref(), Some("door"));
+    assert!(matches!(
+        base.apply_patch(&patch(json!({"showAs": "fan"}))),
+        Err(PatchError::InvalidValue { .. })
+    ));
+    assert_eq!(
+        base.apply_patch(&patch(json!({"asLight": true}))),
+        Err(PatchError::UnknownField("asLight".into()))
+    );
+    let unknown = UiOverride::decode(br#"{"showAs":"fan"}"#).unwrap();
+    assert_eq!(unknown.show_as.as_deref(), Some("fan"));
 }

@@ -119,15 +119,15 @@ async fn set_override_publishes_retained_and_applies() {
     feed_switch(&hub);
 
     let mut patch = serde_json::Map::new();
-    patch.insert("asLight".to_owned(), serde_json::Value::Bool(true));
+    patch.insert("showAs".to_owned(), serde_json::Value::from("light"));
     let view = hub.set_override(SWITCH_ID, &patch).await.expect("override");
     assert_eq!(view.kind, Kind::Light);
-    assert!(view.ui.as_light);
+    assert_eq!(view.ui.show_as.as_deref(), Some("light"));
     assert_eq!(
         publisher.recv().await.expect("a publish"),
         Publish {
             topic: format!("oikos/ui/{SWITCH_ID}"),
-            payload: r#"{"asLight":true}"#.to_owned(),
+            payload: r#"{"asLight":true,"showAs":"light"}"#.to_owned(),
             retain: true,
         }
     );
@@ -138,7 +138,7 @@ async fn set_override_publishes_retained_and_applies() {
     );
 
     let mut clear = serde_json::Map::new();
-    clear.insert("asLight".to_owned(), serde_json::Value::Null);
+    clear.insert("showAs".to_owned(), serde_json::Value::Null);
     let view = hub.set_override(SWITCH_ID, &clear).await.expect("override");
     assert_eq!(view.kind, Kind::Switch);
     assert_eq!(

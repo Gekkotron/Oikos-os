@@ -271,7 +271,7 @@ async fn set_override_round_trip_through_tool() {
     let refused = call(
         &client,
         "set_override",
-        json!({"id": SWITCH_ID, "patch": {"asLight": true}}),
+        json!({"id": SWITCH_ID, "patch": {"showAs": "light"}}),
     )
     .await;
     assert_eq!(refused.is_error, Some(true));
@@ -284,7 +284,7 @@ async fn set_override_round_trip_through_tool() {
         &call(
             &client,
             "set_override",
-            json!({"id": SWITCH_ID, "patch": {"asLight": true}}),
+            json!({"id": SWITCH_ID, "patch": {"showAs": "light"}}),
         )
         .await,
     );
@@ -300,7 +300,7 @@ async fn set_override_round_trip_through_tool() {
     );
     assert_eq!(detail["id"], SWITCH_ID);
     assert_eq!(detail["kind"], "light");
-    assert_eq!(detail["raw_override"]["asLight"], true);
+    assert_eq!(detail["raw_override"]["showAs"], "light");
     assert_eq!(
         detail["bindings"]["state_topic"],
         "zigbee2mqtt/rooms/stair/light"
@@ -329,6 +329,30 @@ async fn set_override_round_trip_through_tool() {
 }
 
 #[tokio::test]
+async fn set_override_rejects_the_retired_as_light() {
+    let mut server = Server::start().await;
+    server.online();
+    let client = server.client().await;
+
+    let result = call(
+        &client,
+        "set_override",
+        json!({"id": SWITCH_ID, "patch": {"asLight": true}}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true));
+    let message = text_of(&result);
+    assert!(
+        message.contains("unknown override field `asLight`"),
+        "{message}"
+    );
+    assert!(message.contains("showAs"), "{message}");
+    assert!(server.publisher.try_recv().is_err());
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
 async fn set_override_unknown_field_is_a_tool_error_listing_fields() {
     let mut server = Server::start().await;
     let client = server.client().await;
@@ -345,7 +369,7 @@ async fn set_override_unknown_field_is_a_tool_error_listing_fields() {
         message.contains("unknown override field `nope`"),
         "{message}"
     );
-    assert!(message.contains("asLight"), "{message}");
+    assert!(message.contains("showAs"), "{message}");
     assert!(message.contains("lightOnBrightness"), "{message}");
     assert!(server.publisher.try_recv().is_err());
 
@@ -505,6 +529,26 @@ async fn send_command_search_areas_and_the_small_tools() {
         &call(&client, "search", json!({"query": "kitchen"})).await,
     );
     assert_eq!(none["entities"].as_array().map(Vec::len), Some(0));
+
+    // A switch shown as a siren is found by its type word too.
+    call(
+        &client,
+        "set_override",
+        json!({"id": SWITCH_ID, "patch": {"showAs": "siren"}}),
+    )
+    .await;
+    server.publisher.try_recv().expect("the override publish");
+    let sirens = json_of(
+        "search",
+        &call(&client, "search", json!({"query": "Siren"})).await,
+    );
+    let ids: Vec<&str> = sirens["entities"]
+        .as_array()
+        .expect("entities")
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect();
+    assert_eq!(ids, [SWITCH_ID]);
 
     // Once the devices are known, a query matching a device (`rooms/stair/light`) also
     // returns that device's entities, although their names do not contain it.

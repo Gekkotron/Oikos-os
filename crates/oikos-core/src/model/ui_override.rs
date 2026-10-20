@@ -19,6 +19,13 @@ pub const ENERGY_ROLES: &[&str] = &[
 /// Valid `lightOnPreset` values (the app's `LightOnPreset` keys).
 pub const LIGHT_ON_PRESETS: &[&str] = &["white", "warm", "red", "green", "blue"];
 
+/// Valid `showAs` values: what a switch entity drives. Absent means a plain switch.
+pub const SHOW_AS: &[&str] = &["light", "door", "siren", "chime", "plug"];
+
+/// The retired flag a light-typed switch used to carry; read on decode, written next to
+/// `showAs: "light"` until the app reads `showAs` (device sheet spec §10, step 4).
+const LEGACY_AS_LIGHT: &str = "asLight";
+
 /// Retained JSON on `oikos/ui/<unique_id>`.
 ///
 /// Decoding is lenient (unknown keys are kept in [`UiOverride::extra`], nulls read as absent,
@@ -61,8 +68,9 @@ pub struct UiOverride {
     pub security_ask: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub ungrouped: bool,
-    #[serde(skip_serializing_if = "is_false")]
-    pub as_light: bool,
+    /// One of [`SHOW_AS`] when written by this hub; only read on a switch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_as: Option<String>,
     /// One of [`LIGHT_ON_PRESETS`] when written by this hub.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub light_on_preset: Option<String>,
@@ -94,7 +102,7 @@ impl Default for UiOverride {
             security_action: false,
             security_ask: true,
             ungrouped: false,
-            as_light: false,
+            show_as: None,
             light_on_preset: None,
             light_on_brightness: None,
             climate_presets: None,
@@ -123,6 +131,7 @@ enum FieldType {
     Brightness,
     EnergyRole,
     LightOnPreset,
+    ShowAs,
 }
 
 impl FieldType {
@@ -134,6 +143,7 @@ impl FieldType {
             FieldType::Brightness => "an integer between 1 and 255".to_owned(),
             FieldType::EnergyRole => format!("one of {}", ENERGY_ROLES.join(", ")),
             FieldType::LightOnPreset => format!("one of {}", LIGHT_ON_PRESETS.join(", ")),
+            FieldType::ShowAs => format!("one of {}", SHOW_AS.join(", ")),
         }
     }
 
@@ -147,6 +157,7 @@ impl FieldType {
             FieldType::LightOnPreset => value
                 .as_str()
                 .is_some_and(|s| LIGHT_ON_PRESETS.contains(&s)),
+            FieldType::ShowAs => value.as_str().is_some_and(|s| SHOW_AS.contains(&s)),
         }
     }
 }
@@ -168,7 +179,7 @@ const FIELD_TYPES: &[(&str, FieldType)] = &[
     ("securityAction", FieldType::Flag),
     ("securityAsk", FieldType::Flag),
     ("ungrouped", FieldType::Flag),
-    ("asLight", FieldType::Flag),
+    ("showAs", FieldType::ShowAs),
     ("lightOnPreset", FieldType::LightOnPreset),
     ("lightOnBrightness", FieldType::Brightness),
     ("climatePresets", FieldType::Text),
@@ -192,7 +203,7 @@ impl UiOverride {
         "securityAction",
         "securityAsk",
         "ungrouped",
-        "asLight",
+        "showAs",
         "lightOnPreset",
         "lightOnBrightness",
         "climatePresets",
@@ -203,12 +214,29 @@ impl UiOverride {
     pub fn decode(payload: &[u8]) -> Option<UiOverride> {
         let mut value: Value = serde_json::from_slice(payload).ok()?;
         strip_nulls(value.as_object_mut()?);
-        serde_json::from_value(value).ok()
+        let mut ui: UiOverride = serde_json::from_value(value).ok()?;
+        ui.absorb_legacy();
+        Some(ui)
     }
 
     /// Encodes with every default omitted; `{}` for a default override.
     pub fn encode(&self) -> String {
-        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_owned())
+        let Ok(Value::Object(mut map)) = serde_json::to_value(self) else {
+            return "{}".to_owned();
+        };
+        // Compatibility write for apps that only know `asLight`; dropped at step 4 of the
+        // device sheet spec's §10, once the app reads `showAs`.
+        if self.show_as.as_deref() == Some("light") {
+            map.insert(LEGACY_AS_LIGHT.to_owned(), Value::Bool(true));
+        }
+        Value::Object(map).to_string()
+    }
+
+    /// Turns a stored `asLight` (caught by `extra`) into `showAs: "light"` unless `showAs` is set.
+    fn absorb_legacy(&mut self) {
+        if self.extra.remove(LEGACY_AS_LIGHT) == Some(Value::Bool(true)) && self.show_as.is_none() {
+            self.show_as = Some("light".to_owned());
+        }
     }
 
     /// True when nothing differs from the default (and no extra field is carried).
@@ -243,10 +271,14 @@ impl UiOverride {
                 merged.insert(key.clone(), value.clone());
             }
         }
-        serde_json::from_value(Value::Object(merged)).map_err(|e| PatchError::InvalidValue {
-            field: "patch".to_owned(),
-            expected: format!("a valid override ({e})"),
-        })
+        let mut ui: UiOverride = serde_json::from_value(Value::Object(merged)).map_err(|e| {
+            PatchError::InvalidValue {
+                field: "patch".to_owned(),
+                expected: format!("a valid override ({e})"),
+            }
+        })?;
+        ui.absorb_legacy();
+        Ok(ui)
     }
 }
 
