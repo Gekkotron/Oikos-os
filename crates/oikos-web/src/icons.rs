@@ -107,6 +107,9 @@ const NODE_FORK: &str = svg!(
 const NODE_HOURGLASS: &str = svg!(
     r#"<path d="M6 3h12"/><path d="M6 21h12"/><path d="M7 3v3a5 5 0 0 0 2 4l3 2-3 2a5 5 0 0 0-2 4v3"/><path d="M17 3v3a5 5 0 0 1-2 4l-3 2 3 2a5 5 0 0 1 2 4v3"/>"#
 );
+const NODE_CLOCK: &str = svg!(r#"<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>"#);
+const NODE_SWITCH: &str =
+    svg!(r#"<rect x="3" y="8" width="18" height="8" rx="4"/><circle cx="16" cy="12" r="2"/>"#);
 const NODE_PLAY: &str = svg!(r#"<path d="M7 4.5v15l12-7.5z"/>"#);
 
 // Energy and Security glyphs.
@@ -207,15 +210,17 @@ pub fn consumer_icon(icon: Option<oikos_core::energy::ConsumerIcon>) -> &'static
     consumer_glyph(icon.map(oikos_core::energy::ConsumerIcon::key))
 }
 
-/// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, an
-/// hourglass for a delay and a play triangle for a command.
+/// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, a
+/// clock for a schedule, an hourglass for a delay, a play triangle for a command and a toggle
+/// for a flow switch.
 pub fn node_icon(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::TriggerState(_) => NODE_BOLT,
-        NodeKind::TriggerSchedule(_) => NODE_HOURGLASS,
+        NodeKind::TriggerSchedule(_) => NODE_CLOCK,
         NodeKind::If(_) => NODE_FORK,
         NodeKind::Delay(_) => NODE_HOURGLASS,
-        NodeKind::Command(_) | NodeKind::FlowEnable(_) => NODE_PLAY,
+        NodeKind::Command(_) => NODE_PLAY,
+        NodeKind::FlowEnable(_) => NODE_SWITCH,
     }
 }
 

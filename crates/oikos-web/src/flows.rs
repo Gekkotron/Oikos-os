@@ -8,6 +8,7 @@ use oikos_core::command::command_name;
 use oikos_core::flow::{Flow, Node, NodeKind, Op, Position, parse_duration};
 
 use crate::format::entity_title;
+use crate::schedule::describe;
 
 /// Width of a node card on the canvas.
 pub const NODE_W: f64 = 200.0;
@@ -125,7 +126,7 @@ pub fn node_title(node: &Node) -> String {
             NodeKind::If(_) => "If",
             NodeKind::Delay(_) => "Delay",
             NodeKind::Command(_) => "Command",
-            NodeKind::FlowEnable(_) => "Flow",
+            NodeKind::FlowEnable(_) => "Flow switch",
         }
         .into()
     })
@@ -159,7 +160,7 @@ fn op_symbol(op: Op) -> &'static str {
 pub fn node_detail(node: &Node, entities: &BTreeMap<String, EntityView>) -> String {
     match &node.kind {
         NodeKind::TriggerState(p) => entity_label(&p.entity, entities),
-        NodeKind::TriggerSchedule(p) => p.cron.clone(),
+        NodeKind::TriggerSchedule(p) => describe(&p.cron),
         NodeKind::If(p) => {
             let value = match &p.value {
                 serde_json::Value::String(s) => s.clone(),
@@ -168,7 +169,7 @@ pub fn node_detail(node: &Node, entities: &BTreeMap<String, EntityView>) -> Stri
             format!("{} {value}", op_symbol(p.op))
         }
         NodeKind::Delay(p) => p.for_.clone(),
-        NodeKind::FlowEnable(p) => p.flow.clone().unwrap_or_else(|| "this flow".into()),
+        NodeKind::FlowEnable(p) => flow_switch_text(p),
         NodeKind::Command(p) => format!(
             "{} · {}",
             entity_label(&p.entity, entities),
@@ -177,17 +178,26 @@ pub fn node_detail(node: &Node, entities: &BTreeMap<String, EntityView>) -> Stri
     }
 }
 
+/// `Enable <flow>` / `Disable this flow`: what a flow switch does, in words.
+fn flow_switch_text(p: &oikos_core::flow::FlowEnableParams) -> String {
+    format!(
+        "{} {}",
+        if p.enabled { "Enable" } else { "Disable" },
+        p.flow.as_deref().unwrap_or("this flow")
+    )
+}
+
 fn summary_label(node: &Node) -> String {
     if let Some(name) = &node.name {
         return name.clone();
     }
     match &node.kind {
         NodeKind::TriggerState(_) => "Trigger".into(),
-        NodeKind::TriggerSchedule(_) => "Schedule".into(),
+        NodeKind::TriggerSchedule(p) => describe(&p.cron),
         NodeKind::If(_) => "If".into(),
         NodeKind::Delay(p) => format!("Delay {}", p.for_),
         NodeKind::Command(p) => humanise(command_name(&p.command)),
-        NodeKind::FlowEnable(_) => "Flow".into(),
+        NodeKind::FlowEnable(p) => flow_switch_text(p),
     }
 }
 
@@ -236,7 +246,12 @@ pub fn trigger_line(
 pub fn orphans(flow: &Flow) -> BTreeSet<String> {
     flow.nodes
         .iter()
-        .filter(|n| !matches!(n.kind, NodeKind::TriggerState(_)))
+        .filter(|n| {
+            !matches!(
+                n.kind,
+                NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_)
+            )
+        })
         .filter(|n| !flow.edges.iter().any(|e| e.to == n.id))
         .map(|n| n.id.clone())
         .collect()
@@ -572,6 +587,45 @@ mod tests {
         assert!(orphans(&flow).is_empty());
         flow.edges.retain(|e| e.to != "off");
         assert_eq!(orphans(&flow), BTreeSet::from(["off".to_owned()]));
+    }
+
+    fn node(json: &str) -> Node {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn new_nodes_have_titles_and_details() {
+        let entities = BTreeMap::new();
+        let schedule = node(
+            r#"{ "id": "s", "type": "trigger.schedule", "params": { "cron": "*/10 * * * *" } }"#,
+        );
+        assert_eq!(node_title(&schedule), "Schedule");
+        assert_eq!(node_detail(&schedule, &entities), "Every 10 minutes");
+        let this = node(r#"{ "id": "a", "type": "flow.enable", "params": { "enabled": false } }"#);
+        assert_eq!(node_title(&this), "Flow switch");
+        assert_eq!(node_detail(&this, &entities), "Disable this flow");
+        let other = node(
+            r#"{ "id": "b", "type": "flow.enable", "params": { "flow": "force-heating-loop", "enabled": true } }"#,
+        );
+        assert_eq!(node_detail(&other, &entities), "Enable force-heating-loop");
+        assert_eq!(summary_label(&schedule), "Every 10 minutes");
+        assert_eq!(summary_label(&other), "Enable force-heating-loop");
+    }
+
+    #[test]
+    fn schedule_triggers_are_not_orphans() {
+        let flow = Flow::decode(
+            br#"{
+          "id": "f", "name": "F",
+          "nodes": [
+            { "id": "tick", "type": "trigger.schedule", "params": { "cron": "* * * * *" } },
+            { "id": "on", "type": "command", "params": { "entity": "l", "command": { "type": "turn_on" } } }
+          ],
+          "edges": [ { "from": "tick", "to": "on" } ]
+        }"#,
+        )
+        .unwrap();
+        assert!(orphans(&flow).is_empty());
     }
 
     #[test]

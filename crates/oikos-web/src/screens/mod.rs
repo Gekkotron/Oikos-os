@@ -4,6 +4,7 @@ pub mod devices;
 pub mod energy;
 pub mod entity_sheet;
 pub mod flow_canvas;
+pub mod flow_schedule;
 pub mod flows;
 pub mod group_sheet;
 pub mod home;

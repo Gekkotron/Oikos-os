@@ -1,7 +1,9 @@
 //! The hub's REST API. Every failure comes back as an [`ApiError`] whose text is fit for a toast.
 
 use gloo_net::http::{Request, Response};
-use oikos_api::{ApiError, CommandResponse, EntityView, FlowView, OverridePatch, RunView};
+use oikos_api::{
+    ApiError, CommandResponse, EntityView, FlowView, OverridePatch, RunView, SchedulePreview,
+};
 use oikos_core::flow::Flow;
 use oikos_core::model::{AreasDocument, Command};
 use serde::de::DeserializeOwned;
@@ -109,6 +111,14 @@ pub async fn set_flow_enabled(id: &str, enabled: bool) -> Result<FlowView, ApiEr
 pub async fn put_flow(flow: &Flow) -> Result<FlowView, ApiError> {
     let url = format!("/api/v1/flows/{}", encode_id(&flow.id));
     let response = check(Request::put(&url).json(flow), None).await?;
+    read_json(response).await
+}
+
+/// The next three ticks of `cron` in the house time zone; a `422` (the hub's message names what
+/// is wrong with the expression) comes back as an `ApiError`.
+pub async fn schedule_preview(cron: &str) -> Result<SchedulePreview, ApiError> {
+    let url = format!("/api/v1/schedule?cron={}&count=3", encode_id(cron));
+    let response = check(Request::get(&url).build(), None).await?;
     read_json(response).await
 }
 

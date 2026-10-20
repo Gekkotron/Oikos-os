@@ -8,7 +8,7 @@ use leptos::task::spawn_local;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use oikos_api::{FlowView, RunView, StepOutcome};
-use oikos_core::flow::{Flow, FlowMode, NodeKind, Op, Position};
+use oikos_core::flow::{Flow, FlowMode, Missing, NodeKind, Op, Position};
 use wasm_bindgen::JsCast;
 
 use crate::alerts::relative_time;
@@ -24,13 +24,16 @@ use crate::flows::{
 use crate::format::format_timestamp;
 use crate::house::House;
 use crate::icons::{PENCIL, node_icon};
+use crate::screens::flow_schedule::{SaveBlocked, ScheduleField};
 
 fn type_class(kind: &NodeKind) -> &'static str {
     match kind {
-        NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) => "flow-node--trigger",
+        NodeKind::TriggerState(_) => "flow-node--trigger",
+        NodeKind::TriggerSchedule(_) => "flow-node--schedule",
         NodeKind::If(_) => "flow-node--if",
         NodeKind::Delay(_) => "flow-node--delay",
-        NodeKind::Command(_) | NodeKind::FlowEnable(_) => "flow-node--command",
+        NodeKind::Command(_) => "flow-node--command",
+        NodeKind::FlowEnable(_) => "flow-node--flow",
     }
 }
 
@@ -152,13 +155,18 @@ fn EditControls(
     original: Flow,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let blocked = use_context::<SaveBlocked>();
+    let is_blocked = move || blocked.is_some_and(|b| b.0.get());
     let cancel_flow = original.clone();
     let cancel = move |_| {
+        if let Some(b) = blocked {
+            b.0.set(false);
+        }
         draft.set(cancel_flow.clone());
         editing.set(false);
     };
     let save = move |_| {
-        if saving.get_untracked() {
+        if saving.get_untracked() || blocked.is_some_and(|b| b.0.get_untracked()) {
             return;
         }
         saving.set(true);
@@ -186,7 +194,7 @@ fn EditControls(
         <button
             type="button"
             class="btn"
-            disabled=move || saving.get()
+            disabled=move || saving.get() || is_blocked()
             on:click=save
         >
             {move || if saving.get() { "Saving…" } else { "Save" }}
@@ -920,7 +928,7 @@ fn node_editor_body(
         NodeKind::If(_) => "If",
         NodeKind::Delay(_) => "Delay",
         NodeKind::Command(_) => "Command",
-        NodeKind::FlowEnable(_) => "Flow",
+        NodeKind::FlowEnable(_) => "Flow switch",
     };
     let id_display = id.clone();
     let close = move |_: web_sys::MouseEvent| selected.set(None);
@@ -955,6 +963,92 @@ fn node_editor_body(
             />
             {kind_fields}
         </section>
+    }
+}
+
+/// The select value of an `if`'s missing-value choice; absent reads as `fail`.
+fn missing_str(missing: Option<Missing>) -> &'static str {
+    match missing {
+        None | Some(Missing::Fail) => "fail",
+        Some(Missing::True) => "true",
+        Some(Missing::False) => "false",
+    }
+}
+
+/// The choice behind a select value; `fail` is the default so it is stored as absent.
+fn missing_from(value: &str) -> Option<Missing> {
+    match value {
+        "true" => Some(Missing::True),
+        "false" => Some(Missing::False),
+        _ => None,
+    }
+}
+
+/// The `flow.enable` editor: which flow it switches ("This flow" or another by name) and
+/// whether it enables or disables it.
+fn flow_enable_fields(
+    draft: RwSignal<Flow>,
+    id: String,
+    p: oikos_core::flow::FlowEnableParams,
+) -> impl IntoView {
+    let house = expect_context::<House>();
+    let own_id = draft.with_untracked(|f| f.id.clone());
+    let others: Vec<(String, String)> = house.flows.with_untracked(|flows| {
+        flows
+            .iter()
+            .filter(|f| f.definition.id != own_id)
+            .map(|f| (f.definition.id.clone(), f.definition.name.clone()))
+            .collect()
+    });
+    let target = p.flow.clone();
+    let known = target
+        .as_ref()
+        .is_none_or(|t| others.iter().any(|(id, _)| id == t));
+    let target_id = id.clone();
+    let on_target = move |ev: web_sys::Event| {
+        let value = event_target_value(&ev);
+        update_node(draft, &target_id, |n| {
+            if let NodeKind::FlowEnable(ref mut f) = n.kind {
+                f.flow = (!value.is_empty()).then_some(value);
+            }
+        });
+    };
+    let state_id = id;
+    let on_state = move |ev: web_sys::Event| {
+        let enabled = event_target_value(&ev) == "enable";
+        update_node(draft, &state_id, |n| {
+            if let NodeKind::FlowEnable(ref mut f) = n.kind {
+                f.enabled = enabled;
+            }
+        });
+    };
+    let enabled = p.enabled;
+    view! {
+        <label class="node-editor__field">
+            <span class="node-editor__label">"Flow"</span>
+            <select class="field" on:change=on_target>
+                <option value="" selected=target.is_none()>"This flow"</option>
+                {(!known)
+                    .then(|| {
+                        let gone = target.clone().unwrap_or_default();
+                        view! { <option value=gone.clone() selected=true>{gone.clone()}</option> }
+                    })}
+                {others
+                    .into_iter()
+                    .map(|(id, name)| {
+                        let selected = target.as_deref() == Some(id.as_str());
+                        view! { <option value=id selected=selected>{name}</option> }
+                    })
+                    .collect_view()}
+            </select>
+        </label>
+        <label class="node-editor__field">
+            <span class="node-editor__label">"Action"</span>
+            <select class="field" on:change=on_state>
+                <option value="enable" selected=enabled>"Enable"</option>
+                <option value="disable" selected=!enabled>"Disable"</option>
+            </select>
+        </label>
     }
 }
 
@@ -1030,6 +1124,16 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
                     });
                 }
             });
+            let missing_id = id.clone();
+            let current_missing = p.missing;
+            let on_missing = move |ev: web_sys::Event| {
+                let missing = missing_from(&event_target_value(&ev));
+                update_node(draft, &missing_id, |n| {
+                    if let NodeKind::If(ref mut i) = n.kind {
+                        i.missing = missing;
+                    }
+                });
+            };
             let entity_id = id;
             let entity_write = Callback::new(move |value: Option<String>| {
                 update_node(draft, &entity_id, |n| {
@@ -1066,13 +1170,31 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
                     optional=true
                     write=entity_write
                 />
+                <label class="node-editor__field">
+                    <span class="node-editor__label">"When the value is unknown"</span>
+                    <select class="field" on:change=on_missing>
+                        {[
+                            ("fail", "Fail"),
+                            ("true", "Take Yes"),
+                            ("false", "Take No"),
+                        ]
+                            .into_iter()
+                            .map(|(value, label)| {
+                                let selected = missing_str(current_missing) == value;
+                                view! {
+                                    <option value=value selected=selected>{label}</option>
+                                }
+                            })
+                            .collect_view()}
+                    </select>
+                </label>
             }
             .into_any()
         }
-        // Task 7 replaces this with the full schedule field; for now the cron is shown read-only.
-        NodeKind::TriggerSchedule(p) => view! { <p class="flow-node-cron">{p.cron}</p> }.into_any(),
-        // Task 7 adds the flow.enable editor.
-        NodeKind::FlowEnable(_) => ().into_any(),
+        NodeKind::TriggerSchedule(p) => {
+            view! { <ScheduleField draft=draft id=id initial=p.cron /> }.into_any()
+        }
+        NodeKind::FlowEnable(p) => flow_enable_fields(draft, id, p).into_any(),
         NodeKind::Delay(p) => {
             let for_id = id;
             let for_write = Callback::new(move |value: Option<String>| {
@@ -1142,6 +1264,7 @@ fn FlowBody(view: FlowView) -> impl IntoView {
     let editing = RwSignal::new(false);
     let saving = RwSignal::new(false);
     let selected = RwSignal::new(None::<String>);
+    provide_context(SaveBlocked(RwSignal::new(false)));
     let draft = RwSignal::new(flow.clone());
     let zoom = RwSignal::new(1.0_f64);
     // Leaving edit mode drops any selection.

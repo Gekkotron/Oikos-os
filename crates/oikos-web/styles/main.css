@@ -2383,6 +2383,39 @@ p.override__hint {
   opacity: 0.75;
 }
 
+.sched {
+  display: grid;
+  gap: 12px;
+}
+
+.sched-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sched-summary {
+  margin: 0;
+  font: var(--type-body);
+  font-weight: 600;
+}
+
+.sched-next ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font: var(--type-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.node-editor__hint {
+  margin: 0;
+  font: var(--type-label);
+  opacity: 0.65;
+}
+
 .node-editor__error {
   font: var(--type-label);
   color: var(--accent-rose);
@@ -2422,6 +2455,14 @@ p.override__hint {
 
 .flow-node--trigger {
   --node-accent: var(--accent-amber);
+}
+
+.flow-node--schedule {
+  --node-accent: var(--accent-amber);
+}
+
+.flow-node--flow {
+  --node-accent: var(--accent-rose);
 }
 
 .flow-node--if {
