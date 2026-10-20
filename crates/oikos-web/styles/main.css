@@ -906,6 +906,13 @@ a[aria-current="page"] .nav__glyph {
 }
 
 /* Temperature and humidity readouts: a thermometer's two sensors on one card */
+
+/* "thermometer" is one long word: at 14px it breaks mid-word in a phone's two-column grid */
+.card:has(.readout) .card__name {
+  font-size: 12px;
+  line-height: 16px;
+}
+
 .readout {
   display: flex;
   flex: 1;
