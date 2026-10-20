@@ -230,10 +230,56 @@ body {
   -webkit-backdrop-filter: blur(18px) saturate(140%);
 }
 
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.topbar__logo {
+  display: block;
+  border-radius: 8px;
+  user-select: none;
+}
+
+/* The doorbell Easter egg: the house shakes while it rings. */
+.topbar__logo--ringing {
+  animation: doorbell 0.55s ease-in-out 2;
+}
+
+@keyframes doorbell {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+
+  20% {
+    transform: rotate(-9deg);
+  }
+
+  40% {
+    transform: rotate(7deg);
+  }
+
+  60% {
+    transform: rotate(-4deg);
+  }
+
+  80% {
+    transform: rotate(2deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar__logo--ringing {
+    animation: none;
+  }
+}
+
 .topbar__name {
   font: var(--type-display);
   letter-spacing: var(--type-display-spacing);
-  margin-right: auto;
 }
 
 .topbar__nav {

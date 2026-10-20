@@ -4,6 +4,7 @@ pub mod alerts;
 pub mod api;
 pub mod app;
 pub mod cards;
+pub mod chime;
 pub mod commands;
 pub mod components;
 pub mod energy;

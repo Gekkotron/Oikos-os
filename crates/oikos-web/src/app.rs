@@ -79,12 +79,34 @@ pub fn App() -> impl IntoView {
     });
     #[cfg(target_arch = "wasm32")]
     crate::ws::connect("/ws", house);
+    // Easter egg: double-clicking the logo rings the doorbell and gives the house a little shake.
+    let ringing = RwSignal::new(false);
+    let ring = move |_| {
+        crate::chime::ring();
+        ringing.set(true);
+        gloo_timers::callback::Timeout::new(1200, move || {
+            ringing.try_set(false);
+        })
+        .forget();
+    };
 
     view! {
         <Router>
             <TrackReturnPath />
             <header class="topbar">
-                <span class="topbar__name">"Oikos"</span>
+                <span class="topbar__brand">
+                    <img
+                        class="topbar__logo"
+                        class:topbar__logo--ringing=move || ringing.get()
+                        src="/assets/icon.svg"
+                        alt=""
+                        width="28"
+                        height="28"
+                        draggable="false"
+                        on:dblclick=ring
+                    />
+                    <span class="topbar__name">"Oikos"</span>
+                </span>
                 <StatusPill />
                 <button
                     type="button"
