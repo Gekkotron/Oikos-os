@@ -4,11 +4,12 @@
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 
 use crate::alerts::{AlertStore, Applied};
 use crate::flows::FlowStore;
+use crate::history::History;
 use crate::media::MediaProxy;
 use crate::virtual_entities as virtuals;
 use oikos_api::{
@@ -127,6 +128,9 @@ pub struct Hub {
     logged_failures: Mutex<BTreeSet<String>>,
     /// Ignored discovery topics (with their reason) already logged, so each is logged once.
     logged_ignored: Mutex<BTreeSet<(String, String)>>,
+    /// Set once at startup when `[history] url` is configured; receives one [`Incoming`]
+    /// per `Change::StateChanged` emitted by [`Self::ingest`].
+    history: OnceLock<Arc<History>>,
 }
 
 impl Hub {
@@ -176,7 +180,18 @@ impl Hub {
             subscription_debounce: Duration::from_millis(cfg.commands.subscription_debounce_ms),
             logged_failures: Mutex::new(BTreeSet::new()),
             logged_ignored: Mutex::new(BTreeSet::new()),
+            history: OnceLock::new(),
         })
+    }
+
+    /// Hands the recorder to the hub; the second call is a no-op.
+    pub fn set_history(&self, history: Arc<History>) {
+        let _ = self.history.set(history);
+    }
+
+    /// The recorder, when one is configured.
+    pub fn history(&self) -> Option<&Arc<History>> {
+        self.history.get()
     }
 
     /// Routes and applies one broker message, broadcasts the resulting events and reports the
@@ -195,7 +210,9 @@ impl Hub {
             };
         }
         let at = clock::now();
-        let (changes, events, failing, seen, ignored) = {
+        let at_micros = clock::now_micros();
+        let history_feed_enabled = self.history.get().is_some();
+        let (changes, events, failing, seen, ignored, history_feed) = {
             let mut reg = self.write();
             let inbound = reg.route(topic, payload.to_vec(), at);
             let is_state = matches!(inbound, Inbound::State { .. });
@@ -227,14 +244,38 @@ impl Hub {
             } else {
                 Vec::new()
             };
+            let history_feed: Vec<(String, oikos_core::model::EntityState)> =
+                if history_feed_enabled {
+                    changes
+                        .iter()
+                        .filter_map(|change| match change {
+                            Change::StateChanged(id) => reg
+                                .state(id)
+                                .map(|state| (id.clone(), state.clone())),
+                            _ => None,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
             (
                 changes,
                 events,
                 reg.template_failures().clone(),
                 seen,
                 ignored,
+                history_feed,
             )
         };
+        if let Some(history) = self.history.get() {
+            for (id, state) in history_feed {
+                history.offer(oikos_core::history::Incoming {
+                    at: at_micros,
+                    id,
+                    state,
+                });
+            }
+        }
         self.log_new_template_failures(&failing);
         if let Some(ignored) = ignored {
             self.log_new_ignored(&ignored);

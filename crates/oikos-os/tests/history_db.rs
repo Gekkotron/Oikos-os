@@ -12,6 +12,7 @@ use oikos_core::history::buckets::Bucket;
 use oikos_core::history::{AvailabilityRow, Incoming, Rows, ValueRow};
 use oikos_core::model::{Availability, EntityState, StateValue};
 use oikos_os::history::db::Db;
+use oikos_os::history::rollup::rollup_once;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use url::Url;
 
@@ -222,3 +223,109 @@ async fn hourly_carry_takes_latest_before() {
     tdb.drop_db().await;
 }
 
+
+const HOUR: i64 = 3_600_000_000;
+const MINUTE: i64 = 60_000_000;
+
+#[tokio::test]
+async fn replay_after_restart_writes_nothing() {
+    let Some(tdb) = fresh_db().await else { return };
+    tdb.db
+        .insert(&Rows {
+            values: vec![value_row("a", 1_000_000, 20.0)],
+            availability: vec![availability_row("a", 1_000_000, Availability::Online)],
+        })
+        .await
+        .unwrap();
+    let mut lw = tdb.db.load_latest().await.unwrap();
+    let mut rows = Rows::default();
+    lw.diff(
+        &Incoming {
+            at: 2_000_000,
+            id: "a".into(),
+            state: EntityState {
+                value: StateValue::Number(20.0),
+                attributes: serde_json::Map::new(),
+                availability: Availability::Online,
+                last_update: Some(2),
+            },
+        },
+        &mut rows,
+    );
+    assert!(rows.is_empty(), "same state after restart writes nothing");
+
+    let mut rows = Rows::default();
+    lw.diff(
+        &Incoming {
+            at: 3_000_000,
+            id: "a".into(),
+            state: EntityState {
+                value: StateValue::Number(21.0),
+                attributes: serde_json::Map::new(),
+                availability: Availability::Online,
+                last_update: Some(3),
+            },
+        },
+        &mut rows,
+    );
+    assert_eq!(rows.values.len(), 1);
+    assert_eq!(rows.values[0].num, Some(21.0));
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
+async fn rollup_fills_hourly_with_carry() {
+    let Some(tdb) = fresh_db().await else { return };
+    tdb.db
+        .insert(&Rows {
+            values: vec![
+                value_row("a", 15 * MINUTE, 10.0),
+                value_row("a", HOUR + 30 * MINUTE, 20.0),
+            ],
+            availability: vec![],
+        })
+        .await
+        .unwrap();
+
+    rollup_once(&tdb.db, 3 * HOUR, i64::MAX).await.unwrap();
+    let hours = tdb.db.hourly("a", 0, 3 * HOUR).await.unwrap();
+    assert_eq!(hours.len(), 2, "{hours:?}");
+    assert_eq!(hours[1].min, 10.0);
+    assert_eq!(hours[1].max, 20.0);
+    assert_eq!(hours[1].integral, 15.0);
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
+async fn late_rows_recompute_their_hour() {
+    let Some(tdb) = fresh_db().await else { return };
+    tdb.db
+        .insert(&Rows {
+            values: vec![
+                value_row("a", 15 * MINUTE, 10.0),
+                value_row("a", HOUR + 30 * MINUTE, 20.0),
+            ],
+            availability: vec![],
+        })
+        .await
+        .unwrap();
+    rollup_once(&tdb.db, 3 * HOUR, i64::MAX).await.unwrap();
+
+    tdb.db
+        .insert(&Rows {
+            values: vec![value_row("a", HOUR + 45 * MINUTE, 30.0)],
+            availability: vec![],
+        })
+        .await
+        .unwrap();
+    rollup_once(&tdb.db, 3 * HOUR, HOUR).await.unwrap();
+
+    let hours = tdb.db.hourly("a", HOUR, 2 * HOUR).await.unwrap();
+    assert_eq!(hours.len(), 1);
+    assert_eq!(hours[0].max, 30.0);
+    assert_eq!(hours[0].last, 30.0);
+
+    tdb.drop_db().await;
+}

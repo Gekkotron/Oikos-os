@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use oikos_os::cli::Cli;
 use oikos_os::config::Config;
+use oikos_os::history::History;
 use oikos_os::hub::Hub;
 use oikos_os::{http, logging, mcp, mqtt};
 use tokio::sync::mpsc;
@@ -26,6 +27,15 @@ async fn main() -> anyhow::Result<ExitCode> {
 
             let (publish_tx, publish_rx) = mpsc::channel(PUBLISH_QUEUE);
             let hub = Hub::new(&cfg, publish_tx);
+            if cfg.history.enabled() {
+                match History::start(&cfg.history, hub.zone()) {
+                    Ok(history) => hub.set_history(history),
+                    Err(e) => tracing::warn!(
+                        error = %e,
+                        "history disabled: lazy pool could not be built; the house keeps running"
+                    ),
+                }
+            }
             let engine = hub.start_engine();
             let (link, mut link_task) = mqtt::start(
                 cfg.mqtt.clone(),

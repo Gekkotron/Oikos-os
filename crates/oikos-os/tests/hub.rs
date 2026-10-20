@@ -6,9 +6,11 @@ use std::time::Duration;
 
 use oikos_api::{ConnectionStatus, VirtualKind, VirtualSpec, WsEvent};
 use oikos_core::command::Publish;
+use oikos_core::history::Incoming;
 use oikos_core::model::{Area, AreasDocument, Command, Kind, StateValue};
 use oikos_core::registry::Change;
 use oikos_os::config::Config;
+use oikos_os::history::History;
 use oikos_os::hub::{Hub, HubError};
 use tokio::sync::mpsc;
 
@@ -901,4 +903,59 @@ async fn virtual_button_has_no_state_and_no_retain() {
     let published = drain(&mut publisher);
     assert_eq!(published.len(), 1, "{published:?}");
     assert_eq!(published[0].topic, "oikos/button/virtual/boost/config");
+}
+
+#[tokio::test]
+async fn state_change_feeds_history() {
+    let (hub, _publisher) = hub();
+    feed_switch(&hub);
+    let (history, mut rx) = History::detached(8, chrono_tz::UTC);
+    hub.set_history(history);
+
+    hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+    let got = tokio::time::timeout(Duration::from_millis(100), rx.recv())
+        .await
+        .expect("an incoming within 100 ms")
+        .expect("open channel");
+    assert_eq!(got.id, SWITCH_ID);
+    assert_eq!(got.state.value, StateValue::OnOff(true));
+
+    // Second time the same payload yields a StateReported, not StateChanged — no offer.
+    hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+    assert!(matches!(
+        rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn offer_never_blocks_when_full() {
+    let (history, mut rx) = History::detached(1, chrono_tz::UTC);
+
+    fn incoming(at: i64) -> Incoming {
+        Incoming {
+            at,
+            id: "x".into(),
+            state: oikos_core::model::EntityState {
+                value: StateValue::OnOff(true),
+                attributes: serde_json::Map::new(),
+                availability: oikos_core::model::Availability::Online,
+                last_update: Some((at / 1_000_000) as u64),
+            },
+        }
+    }
+
+    tokio::time::timeout(Duration::from_millis(10), async {
+        history.offer(incoming(1));
+        history.offer(incoming(2));
+        history.offer(incoming(3));
+    })
+    .await
+    .expect("offer never blocks");
+
+    assert!(rx.try_recv().is_ok());
+    assert!(matches!(
+        rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
 }
