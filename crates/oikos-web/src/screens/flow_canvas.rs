@@ -1068,25 +1068,8 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
             }
             .into_any()
         }
-        NodeKind::TriggerSchedule(p) => {
-            let cron_write = Callback::new(move |value: Option<String>| {
-                update_node(draft, &id, |n| {
-                    if let NodeKind::TriggerSchedule(ref mut t) = n.kind {
-                        t.cron = value.unwrap_or_default();
-                    }
-                });
-            });
-            view! {
-                <TextField
-                    label="Cron".into()
-                    initial=p.cron
-                    placeholder="*/10 * * * *".into()
-                    optional=false
-                    write=cron_write
-                />
-            }
-            .into_any()
-        }
+        // Task 7 replaces this with the full schedule field; for now the cron is shown read-only.
+        NodeKind::TriggerSchedule(p) => view! { <p class="flow-node-cron">{p.cron}</p> }.into_any(),
         NodeKind::Delay(p) => {
             let for_id = id;
             let for_write = Callback::new(move |value: Option<String>| {

@@ -37,7 +37,7 @@ pub struct Flow {
     /// active run and starts a new one, which is how to express "N minutes after the last event".
     #[serde(default)]
     pub mode: FlowMode,
-    /// The steps; exactly the `trigger.state` nodes start a run.
+    /// The steps; the trigger nodes (`trigger.state`, `trigger.schedule`) start a run.
     #[serde(default)]
     pub nodes: Vec<Node>,
     /// The connections between nodes, followed from a trigger onwards.
