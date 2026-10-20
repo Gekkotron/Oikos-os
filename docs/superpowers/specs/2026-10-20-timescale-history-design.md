@@ -2,7 +2,7 @@
 
 Author: Gekkotron
 Date: 2026-10-20
-Status: in review
+Status: approved in conversation, awaiting plan
 
 ## Why
 
