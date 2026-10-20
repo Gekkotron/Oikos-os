@@ -8,6 +8,7 @@ pub mod chime;
 pub mod commands;
 pub mod components;
 pub mod energy;
+pub mod flow_text;
 pub mod flows;
 pub mod format;
 pub mod groups;

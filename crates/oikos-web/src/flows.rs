@@ -136,7 +136,7 @@ fn entity_label(id: &str, entities: &BTreeMap<String, EntityView>) -> String {
     entities.get(id).map_or_else(|| id.to_owned(), entity_title)
 }
 
-fn humanise(command: &str) -> String {
+pub(crate) fn humanise(command: &str) -> String {
     let spaced = command.replace('_', " ");
     let mut chars = spaced.chars();
     match chars.next() {
