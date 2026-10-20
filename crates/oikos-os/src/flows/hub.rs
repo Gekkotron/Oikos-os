@@ -19,13 +19,20 @@ impl Hub {
     /// Applies a retained flow payload. A change (or removal) is broadcast and tells the engine
     /// to reload; an identical payload or the removal of an unknown flow does nothing.
     pub(crate) fn ingest_flow(&self, id: &str, payload: &[u8]) -> bool {
+        let before = self.watched_button_topics();
         let applied = self.flow_store().apply(id, payload);
+        // A local write applies first and the broker's echo is then `Unchanged`, so the MQTT
+        // task is woken here, whoever wrote the flow, when the watched button topics moved.
+        let moved = |hub: &Hub| hub.watched_button_topics().keys().ne(before.keys());
         match applied {
             StoreApplied::Changed | StoreApplied::Removed => {
                 self.broadcast(WsEvent::FlowsChanged {
                     flows: self.flows(),
                 });
                 self.send_engine(EngineRequest::Reload);
+                if moved(self) {
+                    self.subscriptions_changed.notify_one();
+                }
                 true
             }
             StoreApplied::Unchanged | StoreApplied::NotFound => false,

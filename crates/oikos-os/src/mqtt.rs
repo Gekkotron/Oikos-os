@@ -75,7 +75,7 @@ pub fn start(
         client: client.clone(),
     };
 
-    let resubscribe = Arc::new(Notify::new());
+    let resubscribe = hub.subscriptions_wakeup();
     let outbound = tokio::spawn(outbound(
         client,
         Arc::clone(&hub),

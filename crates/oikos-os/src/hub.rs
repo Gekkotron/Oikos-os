@@ -96,6 +96,9 @@ pub struct Hub {
     /// The ids whose state was reported, changed or not: Zigbee2MQTT echoes the whole device
     /// state on every `/set`, so a no-op command is confirmed by its echo.
     state_seen: broadcast::Sender<StateSeen>,
+    /// Woken when the set of topics to subscribe to may have changed outside a broker message
+    /// (a local flow write); the MQTT task diffs its subscriptions on it.
+    pub(crate) subscriptions_changed: Arc<tokio::sync::Notify>,
     /// Counts the times the broker link left `Online`.
     link_epoch: AtomicU64,
     connection: watch::Sender<ConnectionStatus>,
@@ -149,6 +152,7 @@ impl Hub {
             registry: RwLock::new(registry),
             events,
             state_seen,
+            subscriptions_changed: Arc::new(tokio::sync::Notify::new()),
             link_epoch: AtomicU64::new(0),
             connection,
             publisher,
@@ -381,6 +385,11 @@ impl Hub {
         let mut topics = self.read().subscription_topics().clone();
         topics.extend(self.watched_button_topics().into_keys());
         topics
+    }
+
+    /// The wake-up the MQTT task waits on to re-diff its subscriptions.
+    pub fn subscriptions_wakeup(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.subscriptions_changed)
     }
 
     /// How long the MQTT task waits after a subscription change before diffing.

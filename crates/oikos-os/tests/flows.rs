@@ -1246,3 +1246,30 @@ async fn button_trigger_refuses_to_filter() {
         }
     }
 }
+
+/// Whether the MQTT task's resubscribe wake-up fired (consuming it).
+async fn woken(wakeup: &tokio::sync::Notify) -> bool {
+    tokio::time::timeout(Duration::from_millis(50), wakeup.notified())
+        .await
+        .is_ok()
+}
+
+#[tokio::test]
+async fn local_flow_writes_wake_the_resubscribe() {
+    let (hub, _publisher, _engine) = hub_with_button().await;
+    let wakeup = hub.subscriptions_wakeup();
+    assert!(!woken(&wakeup).await, "nothing watches the button yet");
+
+    let flow = || button_flow(serde_json::json!({ "entity": BUTTON_ID }));
+    hub.set_flow(flow()).await.expect("set_flow");
+    assert!(woken(&wakeup).await, "a new watched button must wake it");
+
+    // The same flow again, and the broker's echo of it, change nothing.
+    hub.set_flow(flow()).await.expect("set_flow again");
+    hub.ingest("oikos/automation/boost", flow().encode().as_bytes());
+    assert!(!woken(&wakeup).await, "an unchanged set must not wake it");
+
+    hub.delete_flow("boost").await.expect("delete");
+    assert!(woken(&wakeup).await, "a dropped watch must wake it");
+    assert!(!hub.subscription_topics().contains(BUTTON_TOPIC));
+}
