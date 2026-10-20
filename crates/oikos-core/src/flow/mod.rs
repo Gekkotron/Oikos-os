@@ -10,8 +10,8 @@ mod validate;
 
 pub use duration::{DurationError, parse_duration};
 pub use model::{
-    CommandParams, DelayParams, Edge, Flow, FlowMode, IfParams, Node, NodeKind, Op, Position,
-    TriggerScheduleParams, TriggerStateParams,
+    CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, Missing, Node,
+    NodeKind, Op, Position, TriggerScheduleParams, TriggerStateParams,
 };
 pub use scalar::{CompareError, Scalar, compare};
 pub use schedule::{Schedule, ScheduleError};

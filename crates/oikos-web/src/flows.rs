@@ -125,6 +125,7 @@ pub fn node_title(node: &Node) -> String {
             NodeKind::If(_) => "If",
             NodeKind::Delay(_) => "Delay",
             NodeKind::Command(_) => "Command",
+            NodeKind::FlowEnable(_) => "Flow",
         }
         .into()
     })
@@ -167,6 +168,7 @@ pub fn node_detail(node: &Node, entities: &BTreeMap<String, EntityView>) -> Stri
             format!("{} {value}", op_symbol(p.op))
         }
         NodeKind::Delay(p) => p.for_.clone(),
+        NodeKind::FlowEnable(p) => p.flow.clone().unwrap_or_else(|| "this flow".into()),
         NodeKind::Command(p) => format!(
             "{} · {}",
             entity_label(&p.entity, entities),
@@ -185,6 +187,7 @@ fn summary_label(node: &Node) -> String {
         NodeKind::If(_) => "If".into(),
         NodeKind::Delay(p) => format!("Delay {}", p.for_),
         NodeKind::Command(p) => humanise(command_name(&p.command)),
+        NodeKind::FlowEnable(_) => "Flow".into(),
     }
 }
 

@@ -30,7 +30,7 @@ fn type_class(kind: &NodeKind) -> &'static str {
         NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) => "flow-node--trigger",
         NodeKind::If(_) => "flow-node--if",
         NodeKind::Delay(_) => "flow-node--delay",
-        NodeKind::Command(_) => "flow-node--command",
+        NodeKind::Command(_) | NodeKind::FlowEnable(_) => "flow-node--command",
     }
 }
 
@@ -920,6 +920,7 @@ fn node_editor_body(
         NodeKind::If(_) => "If",
         NodeKind::Delay(_) => "Delay",
         NodeKind::Command(_) => "Command",
+        NodeKind::FlowEnable(_) => "Flow",
     };
     let id_display = id.clone();
     let close = move |_: web_sys::MouseEvent| selected.set(None);
@@ -1070,6 +1071,8 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
         }
         // Task 7 replaces this with the full schedule field; for now the cron is shown read-only.
         NodeKind::TriggerSchedule(p) => view! { <p class="flow-node-cron">{p.cron}</p> }.into_any(),
+        // Task 7 adds the flow.enable editor.
+        NodeKind::FlowEnable(_) => ().into_any(),
         NodeKind::Delay(p) => {
             let for_id = id;
             let for_write = Callback::new(move |value: Option<String>| {

@@ -215,7 +215,7 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::TriggerSchedule(_) => NODE_HOURGLASS,
         NodeKind::If(_) => NODE_FORK,
         NodeKind::Delay(_) => NODE_HOURGLASS,
-        NodeKind::Command(_) => NODE_PLAY,
+        NodeKind::Command(_) | NodeKind::FlowEnable(_) => NODE_PLAY,
     }
 }
 

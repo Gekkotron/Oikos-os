@@ -427,6 +427,8 @@ async fn run_node(
         }
         // Arming schedules is the engine's next step; a schedule step just passes.
         NodeKind::TriggerSchedule(_) => (StepOutcome::Ok, "schedule".to_owned(), None),
+        // Task 5 gives flow.enable its run-time behaviour; for now it just passes.
+        NodeKind::FlowEnable(_) => (StepOutcome::Ok, "flow.enable".to_owned(), None),
         NodeKind::If(params) => {
             let Some(right) = Scalar::from_json(&params.value) else {
                 return failed("value is not a scalar".to_owned());

@@ -138,6 +138,9 @@ pub enum NodeKind {
     /// Sends a command to an entity.
     #[serde(rename = "command")]
     Command(CommandParams),
+    /// Enables or disables a flow (its own by default).
+    #[serde(rename = "flow.enable")]
+    FlowEnable(FlowEnableParams),
 }
 
 impl NodeKind {
@@ -149,6 +152,7 @@ impl NodeKind {
             NodeKind::If(_) => "if",
             NodeKind::Delay(_) => "delay",
             NodeKind::Command(_) => "command",
+            NodeKind::FlowEnable(_) => "flow.enable",
         }
     }
 
@@ -207,6 +211,35 @@ pub struct IfParams {
     /// The entity whose current value is read; when absent the value that fired the trigger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entity: Option<String>,
+    /// What to do when the value is missing (unknown or unavailable); absent behaves as `fail`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub missing: Option<Missing>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// How an `if` behaves when the compared entity has no value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Missing {
+    /// The step fails (the default).
+    Fail,
+    /// Take the `true` port.
+    True,
+    /// Take the `false` port.
+    False,
+}
+
+/// Params of `flow.enable`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct FlowEnableParams {
+    /// The flow to switch; absent means the flow this node belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow: Option<String>,
+    /// The state to set: `true` enables, `false` disables.
+    pub enabled: bool,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }
@@ -270,6 +303,29 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn flow_enable_defaults_to_self() {
+        let node: Node = serde_json::from_str(
+            r#"{"id":"stop","type":"flow.enable","params":{"enabled":false}}"#,
+        )
+        .unwrap();
+        let NodeKind::FlowEnable(p) = node.kind else {
+            panic!()
+        };
+        assert_eq!((p.flow, p.enabled), (None, false));
+    }
+
+    #[test]
+    fn if_missing_round_trips_and_defaults() {
+        let p: IfParams =
+            serde_json::from_str(r#"{"op":"lt","value":65,"entity":"t","missing":"false"}"#)
+                .unwrap();
+        assert_eq!(p.missing, Some(Missing::False));
+        let p: IfParams = serde_json::from_str(r#"{"op":"lt","value":65}"#).unwrap();
+        assert_eq!(p.missing, None);
+        assert!(serde_json::to_value(&p).unwrap().get("missing").is_none());
+    }
 
     const REFERENCE: &str = r#"{
       "id": "living_led_motion", "name": "Living LED on motion", "enabled": true, "mode": "restart",

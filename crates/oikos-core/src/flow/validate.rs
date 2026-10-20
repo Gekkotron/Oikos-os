@@ -31,6 +31,8 @@ pub enum FlowError {
     BadCron { node: String, reason: String },
     #[error("node `{node}`: an if after a schedule must name an entity")]
     IfNeedsEntity { node: String },
+    #[error("node `{node}`: `{flow}` is not a valid flow id")]
+    BadFlowTarget { node: String, flow: String },
 }
 
 fn is_valid_id(id: &str, max: usize) -> bool {
@@ -82,6 +84,14 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     return Err(FlowError::BadCron {
                         node: node.id.clone(),
                         reason: e.to_string(),
+                    });
+                }
+            }
+            NodeKind::FlowEnable(p) => {
+                if let Some(target) = p.flow.as_deref().filter(|t| !is_valid_flow_id(t)) {
+                    return Err(FlowError::BadFlowTarget {
+                        node: node.id.clone(),
+                        flow: target.to_owned(),
                     });
                 }
             }
@@ -378,6 +388,29 @@ mod tests {
         ));
         f.edges.push(edge("tick", then, None));
         f
+    }
+
+    #[test]
+    fn bad_flow_target_is_rejected() {
+        let mut f = schedule_flow("*/10 * * * *", "act");
+        f.nodes.push(
+            serde_json::from_str(
+                r#"{"id":"stop","type":"flow.enable","params":{"flow":"Bad Id","enabled":false}}"#,
+            )
+            .unwrap(),
+        );
+        let err = validate(&f).unwrap_err();
+        assert_eq!(
+            err,
+            FlowError::BadFlowTarget {
+                node: "stop".into(),
+                flow: "Bad Id".into()
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "node `stop`: `Bad Id` is not a valid flow id"
+        );
     }
 
     #[test]
