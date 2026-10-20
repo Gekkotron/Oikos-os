@@ -203,13 +203,17 @@ pub fn CoverGroupCard(key: GroupKey, members: Vec<String>) -> impl IntoView {
     };
     view! {
         <GroupFrame kind=Kind::Cover key=key view=view label=label>
-            <span class="card__value">{move || summary.with(cover_text)}</span>
-            <div class="group__bars">{bars}</div>
-            <CoverButtons
-                suffix=" all shutters"
-                on_command=Callback::new(move |cmd| view.send(sender, cmd))
-                disabled=Signal::derive(move || summary.with(|s| !s.available))
-            />
+            <div class="group__row">
+                <div class="group__status">
+                    <span class="card__value">{move || summary.with(cover_text)}</span>
+                    <div class="group__bars">{bars}</div>
+                </div>
+                <CoverButtons
+                    suffix=" all shutters"
+                    on_command=Callback::new(move |cmd| view.send(sender, cmd))
+                    disabled=Signal::derive(move || summary.with(|s| !s.available))
+                />
+            </div>
         </GroupFrame>
     }
 }

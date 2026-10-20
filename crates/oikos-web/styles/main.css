@@ -2739,17 +2739,41 @@ p.override__hint {
 
 .group__bars {
   display: flex;
+/* On a wide screen a full-row card stretches its few controls across the window: two columns
+   are enough. */
+@media (min-width: 720px) {
+  .card--wide {
+    grid-column: span 2;
+  }
+}
+
   gap: 4px;
-  height: 24px;
+  height: 20px;
 }
 
 .group__bar {
   position: relative;
-  flex: 1;
-  max-width: 28px;
+  flex: none;
+  width: 8px;
+/* Status on the left, ▲ ■ ▼ on the right; the buttons wrap under on a narrow card. */
+.group__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.group__status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
   overflow: hidden;
-  border-radius: 4px;
-  border: 1px solid var(--chip-border);
+  border-radius: 3px;
+  background: color-mix(in srgb, currentcolor 16%, transparent);
 }
 
 .group__fill {
@@ -2783,7 +2807,6 @@ p.override__hint {
 .group__members {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2804,6 +2827,29 @@ p.override__hint {
   min-width: 0;
   min-height: var(--touch-min);
   padding: 0;
+  padding: 4px 0;
+}
+
+.group__member + .group__member {
+  border-top: 1px solid var(--card-border);
+}
+
+/* A member's switch has no label: it must not take the row from the name. */
+.group__member .power {
+  flex: none;
+  width: auto;
+}
+
+.power__label:empty {
+  display: none;
+}
+
+/* ▲ ■ ▼ keep one size beside a status, instead of stretching or shrinking to their glyph. */
+.group__row .btn--icon,
+.group__line .btn--icon,
+.group__member .btn--icon {
+  flex: none;
+  width: 52px;
   border: 0;
   background: none;
   color: inherit;
@@ -2830,3 +2876,8 @@ p.override__hint {
   gap: 8px;
   min-height: var(--touch-min);
 }
+.group__rename .btn {
+  flex: none;
+  padding: 0 20px;
+}
+
