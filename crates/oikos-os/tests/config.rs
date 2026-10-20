@@ -155,6 +155,49 @@ fn env_overrides_automation_keys() {
 }
 
 #[test]
+fn history_defaults_off() {
+    Jail::expect_with(|_jail| {
+        let cfg = Config::load(None)?;
+        assert!(!cfg.history.enabled());
+        assert_eq!(cfg.history.url, "");
+        assert_eq!(cfg.history.buffer_rows, 100_000);
+        Ok(())
+    });
+}
+
+#[test]
+fn history_url_from_env_stays_a_string() {
+    Jail::expect_with(|jail| {
+        jail.set_env(
+            "OIKOS_HISTORY__URL",
+            "postgres://oikos:s3cret@192.168.1.91:5432/oikos",
+        );
+        let cfg = Config::load(None)?;
+        assert_eq!(
+            cfg.history.url,
+            "postgres://oikos:s3cret@192.168.1.91:5432/oikos"
+        );
+        assert!(cfg.history.enabled());
+        Ok(())
+    });
+}
+
+#[test]
+fn history_debug_masks_password() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "oikos.toml",
+            "[history]\nurl = \"postgres://oikos:s3cret@192.168.1.91:5432/oikos\"\n",
+        )?;
+        let cfg = Config::load(None)?;
+        let text = format!("{:?}", cfg.history);
+        assert!(text.contains("***"), "{text}");
+        assert!(!text.contains("s3cret"), "{text}");
+        Ok(())
+    });
+}
+
+#[test]
 fn flows_timezone_is_read() {
     Jail::expect_with(|jail| {
         assert_eq!(Config::load(None)?.flows.timezone, None);

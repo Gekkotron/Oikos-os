@@ -19,6 +19,7 @@ pub struct Config {
     pub frigate: FrigateConfig,
     pub automation: AutomationConfig,
     pub flows: FlowsConfig,
+    pub history: HistoryConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -207,6 +208,52 @@ pub struct FlowsConfig {
     pub timezone: Option<String>,
 }
 
+/// TimescaleDB connection and the writer's queue size. An empty `url` turns history off
+/// (the house keeps running, the `/api/v1/history/*` routes answer 503).
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct HistoryConfig {
+    pub url: String,
+    pub buffer_rows: usize,
+}
+
+impl Default for HistoryConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            buffer_rows: 100_000,
+        }
+    }
+}
+
+impl HistoryConfig {
+    pub fn enabled(&self) -> bool {
+        !self.url.is_empty()
+    }
+}
+
+impl fmt::Debug for HistoryConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let masked = if self.url.is_empty() {
+            String::new()
+        } else {
+            match url::Url::parse(&self.url) {
+                Ok(mut u) => {
+                    if u.password().is_some() {
+                        let _ = u.set_password(Some("***"));
+                    }
+                    u.to_string()
+                }
+                Err(_) => "<unparsable>".to_string(),
+            }
+        };
+        f.debug_struct("HistoryConfig")
+            .field("url", &masked)
+            .field("buffer_rows", &self.buffer_rows)
+            .finish()
+    }
+}
+
 /// Dotted, lowercase keys of string-typed fields. Single source of truth for
 /// both the Env filter (figment's `ignore` sees the key after `split`, i.e.
 /// `mqtt.password`) and the raw-string merge.
@@ -227,6 +274,7 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "frigate.url",
     "frigate.user",
     "frigate.password",
+    "history.url",
 ];
 
 impl Config {

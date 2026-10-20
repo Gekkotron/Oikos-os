@@ -3,3 +3,4 @@ oikos.toml
 crates/oikos-web/dist
 .DS_Store
 .superpowers/
+deploy/timescaledb/.env

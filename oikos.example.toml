@@ -48,3 +48,11 @@ responses_topic = "oikos-push/responses"
 url = ""
 user = ""
 password = ""
+
+# TimescaleDB connection for the entity-state history. An empty url turns history off (the
+# house keeps running, the /api/v1/history/* routes answer 503). `buffer_rows` is how many
+# pending states the writer keeps when the database is unreachable, before dropping the
+# oldest.
+[history]
+# url = "postgres://oikos:change-me@192.168.1.91:5432/oikos"
+# buffer_rows = 100000

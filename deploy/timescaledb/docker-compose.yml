@@ -1,0 +1,16 @@
+# TimescaleDB for the Oikos-os history. Run on the home server:
+#   cp .env.example .env   # set a real password
+#   docker compose up -d
+services:
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg17
+    container_name: oikos-timescaledb
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - oikos-history:/var/lib/postgresql/data
+volumes:
+  oikos-history:
+    name: oikos-history
