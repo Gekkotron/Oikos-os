@@ -1063,6 +1063,135 @@ a[aria-current="page"] .nav__glyph {
   height: 22px;
 }
 
+/* Vacuum: activity and battery, one primary action, icon buttons, the fan speed pick */
+.vacuum__status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vacuum__state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vacuum__state--busy {
+  color: var(--accent-mint);
+}
+
+.vacuum__state--returning {
+  color: var(--accent-cyan);
+}
+
+.vacuum__state--paused {
+  color: var(--accent-amber);
+}
+
+.vacuum__state--error {
+  color: var(--danger);
+}
+
+.vacuum__battery {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  font: var(--type-label);
+  opacity: 0.8;
+}
+
+.vacuum__battery-glyph {
+  position: relative;
+  box-sizing: border-box;
+  width: 20px;
+  height: 11px;
+  padding: 1.5px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}
+
+.vacuum__battery-glyph::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -4px;
+  width: 2px;
+  height: 4px;
+  border-radius: 0 1px 1px 0;
+  background: currentColor;
+  transform: translateY(-50%);
+}
+
+.vacuum__battery-fill {
+  display: block;
+  height: 100%;
+  border-radius: 1px;
+  background: var(--accent-mint);
+}
+
+.vacuum__battery--low {
+  color: var(--danger);
+  opacity: 1;
+}
+
+.vacuum__battery--low .vacuum__battery-fill {
+  background: var(--danger);
+}
+
+.vacuum__controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.vacuum__primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border-color: color-mix(in srgb, var(--accent-mint) 45%, transparent);
+  background: color-mix(in srgb, var(--accent-mint) 14%, transparent);
+  color: var(--accent-mint);
+  font-weight: 600;
+  transition: background var(--motion-short) var(--ease);
+}
+
+.vacuum__primary:hover {
+  background: color-mix(in srgb, var(--accent-mint) 22%, transparent);
+}
+
+.vacuum__primary--pause {
+  border-color: color-mix(in srgb, var(--accent-amber) 45%, transparent);
+  background: color-mix(in srgb, var(--accent-amber) 14%, transparent);
+  color: var(--accent-amber);
+}
+
+.vacuum__primary--pause:hover {
+  background: color-mix(in srgb, var(--accent-amber) 22%, transparent);
+}
+
+.vacuum__primary-icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+.vacuum__primary-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.vacuum__actions {
+  gap: 8px;
+}
+
 .card__value--long {
   display: -webkit-box;
   -webkit-line-clamp: 2;

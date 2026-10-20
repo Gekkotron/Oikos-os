@@ -73,6 +73,29 @@ pub const CHEVRON_UP: &str = svg!(r#"<path d="m6 15 6-6 6 6"/>"#);
 pub const STOP: &str = svg!(r#"<rect x="7" y="7" width="10" height="10" rx="2"/>"#);
 pub const CHEVRON_DOWN: &str = svg!(r#"<path d="m6 9 6 6 6-6"/>"#);
 
+/// Vacuum action glyphs: pause, locate and spot clean (start is `PLAY`, stop `STOP`, dock `HOUSE`).
+pub const PAUSE: &str = svg!(
+    r#"<rect x="6.5" y="5" width="3.5" height="14" rx="1"/><rect x="14" y="5" width="3.5" height="14" rx="1"/>"#
+);
+const LOCATE: &str = svg!(
+    r#"<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>"#
+);
+const SPOT: &str = svg!(
+    r#"<circle cx="12" cy="12" r="2.5"/><path d="M12 5.5a6.5 6.5 0 1 1-6.5 6.5"/><path d="M12 2a10 10 0 1 1-10 10"/>"#
+);
+/// The glyph for a vacuum action, a generic button for one the hub does not name.
+pub fn vacuum_action_icon(action: &str) -> &'static str {
+    match action {
+        "start" => PLAY,
+        "pause" => PAUSE,
+        "stop" => STOP,
+        "return_to_base" => HOUSE,
+        "locate" => LOCATE,
+        "clean_spot" => SPOT,
+        _ => BUTTON,
+    }
+}
+
 /// The rename button.
 pub const PENCIL: &str =
     svg!(r#"<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/><path d="m14.5 5.5 3 3"/>"#);
