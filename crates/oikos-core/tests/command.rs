@@ -588,6 +588,35 @@ fn button_press_and_switch_payloads() {
 }
 
 #[test]
+fn retain_option_makes_command_publishes_retained() {
+    let switch = common::entity(
+        "switch",
+        json!({
+            "command_topic": "home/virtual/set",
+            "state_topic": "home/virtual",
+            "retain": true
+        }),
+    );
+    let publishes = ok(&switch, &turn_on(None, None, None));
+    assert!(!publishes.is_empty());
+    assert!(publishes.iter().all(|p| p.retain), "{publishes:?}");
+}
+
+#[test]
+fn commands_are_not_retained_without_the_retain_option() {
+    for config in [
+        json!({"command_topic": "home/virtual/set", "state_topic": "home/virtual"}),
+        json!({"command_topic": "home/virtual/set", "state_topic": "home/virtual", "retain": false}),
+        json!({"command_topic": "home/virtual/set", "state_topic": "home/virtual", "retain": "true"}),
+    ] {
+        let switch = common::entity("switch", config);
+        let publishes = ok(&switch, &turn_on(None, None, None));
+        assert!(!publishes.is_empty());
+        assert!(publishes.iter().all(|p| !p.retain), "{publishes:?}");
+    }
+}
+
+#[test]
 fn alarm_arm_requires_code_when_configured() {
     let alarm = common::entity(
         "alarm_control_panel",

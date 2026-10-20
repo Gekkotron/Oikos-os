@@ -2,9 +2,10 @@
 //! following the Home Assistant MQTT field names the entity was discovered with.
 //!
 //! [`map_command`] validates the command against the entity's capabilities, then hands it to
-//! the mapper of its `protocol_kind`. Every `Ok` carries at least one publish, never retained;
-//! a command the kind cannot take is [`CommandError::Unsupported`]. Nothing here panics on a
-//! hostile config: a missing topic or a broken template is an error.
+//! the mapper of its `protocol_kind`. Every `Ok` carries at least one publish, retained only
+//! when the entity's discovery config says `"retain": true` (default `false`); a command the
+//! kind cannot take is [`CommandError::Unsupported`]. Nothing here panics on a hostile config:
+//! a missing topic or a broken template is an error.
 
 mod kinds;
 
@@ -154,10 +155,15 @@ impl Mapper<'_> {
             Some(key) => self.render(key, payload, extra)?,
             None => payload.to_owned(),
         };
+        let retain = self
+            .config
+            .get("retain")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         Ok(Publish {
             topic,
             payload,
-            retain: false,
+            retain,
         })
     }
 }
