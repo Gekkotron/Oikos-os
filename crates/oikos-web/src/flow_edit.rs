@@ -166,26 +166,47 @@ pub fn next_node_id(flow: &Flow, kind: &NodeKind) -> String {
         .expect("an unbounded range always yields a free id")
 }
 
+/// The ASCII spelling of a lowercase accented letter; `None` for any other character.
+fn fold_char(c: char) -> Option<&'static str> {
+    Some(match c {
+        'à' | 'â' | 'ä' => "a",
+        'é' | 'è' | 'ê' | 'ë' => "e",
+        'î' | 'ï' => "i",
+        'ô' | 'ö' => "o",
+        'ù' | 'û' | 'ü' => "u",
+        'ç' => "c",
+        'œ' => "oe",
+        'æ' => "ae",
+        _ => return None,
+    })
+}
+
+/// Lowercases `text` and folds accented letters to ASCII (`Lumière` becomes `lumiere`), for
+/// case- and accent-insensitive matching.
+pub(crate) fn fold_accents(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars().flat_map(char::to_lowercase) {
+        match fold_char(c) {
+            Some(folded) => out.push_str(folded),
+            None => out.push(c),
+        }
+    }
+    out
+}
+
 /// A valid, unreserved, untaken flow id derived from a display name: lowercase ASCII with
 /// accents folded, other characters collapsed to `_`, at most 29 characters, `_2`, `_3`, …
 /// appended when the result is `new` or already taken.
 pub fn slug_id(name: &str, taken: &BTreeSet<String>) -> String {
     let mut slug = String::new();
     for c in name.chars().flat_map(char::to_lowercase) {
-        let folded = match c {
-            'à' | 'â' | 'ä' => "a",
-            'é' | 'è' | 'ê' | 'ë' => "e",
-            'î' | 'ï' => "i",
-            'ô' | 'ö' => "o",
-            'ù' | 'û' | 'ü' => "u",
-            'ç' => "c",
-            'œ' => "oe",
-            'æ' => "ae",
-            c if c.is_ascii_lowercase() || c.is_ascii_digit() => {
+        let folded = match fold_char(c) {
+            Some(folded) => folded,
+            None if c.is_ascii_lowercase() || c.is_ascii_digit() => {
                 slug.push(c);
                 continue;
             }
-            _ => "_",
+            None => "_",
         };
         for f in folded.chars() {
             if f != '_' || !slug.ends_with('_') {
