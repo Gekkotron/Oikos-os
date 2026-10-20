@@ -36,9 +36,13 @@ pub struct RegistryConfig {
 }
 
 impl RegistryConfig {
-    /// The reserved sub-trees under a discovery prefix: `ui` and `automation`.
+    /// The reserved sub-trees under a discovery prefix: `ui`, `automation` and `virtual`.
     pub fn default_reserved() -> Vec<String> {
-        vec!["ui".to_owned(), "automation".to_owned()]
+        vec![
+            "ui".to_owned(),
+            "automation".to_owned(),
+            "virtual".to_owned(),
+        ]
     }
 }
 

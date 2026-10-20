@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use oikos_api::{ConnectionStatus, WsEvent};
+use oikos_api::{ConnectionStatus, VirtualKind, VirtualSpec, WsEvent};
 use oikos_core::command::Publish;
 use oikos_core::model::{Area, AreasDocument, Command, Kind, StateValue};
 use oikos_core::registry::Change;
@@ -705,4 +705,200 @@ async fn reply_rejects_unknown_alert_action_and_offline() {
         hub.reply("frigate-front-1696", "disarm"),
         Err(HubError::Publish(_))
     ));
+}
+
+fn virtual_switch() -> VirtualSpec {
+    VirtualSpec {
+        kind: VirtualKind::Switch,
+        name: "Force heating".to_owned(),
+        min: None,
+        max: None,
+        step: None,
+        unit: None,
+        initial: None,
+    }
+}
+
+const VIRTUAL_STATE: &str = "oikos/virtual/force_heating";
+const VIRTUAL_CONFIG: &str = "oikos/switch/virtual/force_heating/config";
+
+fn drain(publisher: &mut mpsc::Receiver<Publish>) -> Vec<Publish> {
+    let mut out = Vec::new();
+    while let Ok(publish) = publisher.try_recv() {
+        out.push(publish);
+    }
+    out
+}
+
+#[tokio::test]
+async fn creating_publishes_config_and_initial_off() {
+    let (hub, mut publisher) = hub();
+    let view = hub
+        .set_virtual("force_heating", virtual_switch())
+        .await
+        .expect("created");
+    assert_eq!(view.id, "virtual_force_heating");
+    assert_eq!(view.kind, Kind::Switch);
+    assert_eq!(view.state.value, StateValue::OnOff(false));
+
+    let published = drain(&mut publisher);
+    assert_eq!(published.len(), 2, "{published:?}");
+    assert_eq!(published[0].topic, VIRTUAL_CONFIG);
+    assert!(published[0].retain);
+    assert_eq!(published[1].topic, VIRTUAL_STATE);
+    assert_eq!(published[1].payload, "OFF");
+    assert!(published[1].retain);
+}
+
+#[tokio::test]
+async fn recreating_keeps_the_state() {
+    let (hub, mut publisher) = hub();
+    hub.set_virtual("force_heating", virtual_switch())
+        .await
+        .expect("created");
+    hub.ingest(VIRTUAL_STATE, b"ON");
+    drain(&mut publisher);
+
+    let mut renamed = virtual_switch();
+    renamed.name = "Force the heating".to_owned();
+    let view = hub
+        .set_virtual("force_heating", renamed)
+        .await
+        .expect("recreated");
+    assert_eq!(view.label.as_deref(), Some("Force the heating"));
+    assert_eq!(view.state.value, StateValue::OnOff(true));
+    let published = drain(&mut publisher);
+    assert_eq!(published.len(), 1, "{published:?}");
+    assert_eq!(published[0].topic, VIRTUAL_CONFIG);
+}
+
+#[tokio::test]
+async fn number_defaults_and_initial_override() {
+    let (hub, mut publisher) = hub();
+    let spec = VirtualSpec {
+        kind: VirtualKind::Number,
+        name: "Target".to_owned(),
+        min: Some(10.0),
+        max: Some(30.0),
+        step: Some(0.5),
+        unit: Some("°C".to_owned()),
+        initial: None,
+    };
+    let view = hub
+        .set_virtual("target", spec.clone())
+        .await
+        .expect("number");
+    assert_eq!(view.kind, Kind::Number);
+    let published = drain(&mut publisher);
+    assert_eq!(published[0].topic, "oikos/number/virtual/target/config");
+    assert_eq!(published[1].topic, "oikos/virtual/target");
+    assert_eq!(published[1].payload, "10");
+
+    let mut bad = spec.clone();
+    bad.initial = Some(serde_json::json!(99));
+    assert!(matches!(
+        hub.set_virtual("other", bad).await,
+        Err(HubError::Rejected(_))
+    ));
+    assert!(drain(&mut publisher).is_empty());
+}
+
+#[tokio::test]
+async fn bad_virtual_id_is_rejected_without_publish() {
+    let (hub, mut publisher) = hub();
+    for id in ["Force", "", "a/b", &"x".repeat(49)] {
+        assert!(
+            matches!(
+                hub.set_virtual(id, virtual_switch()).await,
+                Err(HubError::Rejected(_))
+            ),
+            "{id}"
+        );
+    }
+    assert!(drain(&mut publisher).is_empty());
+}
+
+#[tokio::test]
+async fn virtual_switch_command_is_accepted_and_retained() {
+    let (hub, mut publisher) = hub_with_timeout(500);
+    hub.set_virtual("force_heating", virtual_switch())
+        .await
+        .expect("created");
+    drain(&mut publisher);
+
+    let echo_hub = Arc::clone(&hub);
+    let echo = tokio::spawn(async move {
+        let published = publisher.recv().await.expect("the command publish");
+        assert_eq!(published.topic, VIRTUAL_STATE);
+        assert_eq!(published.payload, "ON");
+        assert!(published.retain, "a virtual command is retained");
+        echo_hub.ingest(VIRTUAL_STATE, b"ON");
+    });
+    let response = hub
+        .send_command(
+            "virtual_force_heating",
+            Command::TurnOn {
+                brightness: None,
+                color: None,
+                effect: None,
+            },
+        )
+        .await
+        .expect("published");
+    echo.await.expect("echo task");
+    assert_confirmed_on(&response);
+}
+
+#[tokio::test]
+async fn virtual_topics_are_not_ignored_discovery() {
+    let (hub, _publisher) = hub();
+    hub.ingest("oikos/virtual/x", b"ON");
+    hub.ingest("oikos/virtual/x/extra/config", b"{}");
+    assert!(hub.ignored().is_empty(), "{:?}", hub.ignored());
+}
+
+#[tokio::test]
+async fn delete_virtual_clears_both_topics() {
+    let (hub, mut publisher) = hub();
+    hub.set_virtual("force_heating", virtual_switch())
+        .await
+        .expect("created");
+    drain(&mut publisher);
+
+    hub.delete_virtual("force_heating").await.expect("deleted");
+    let published = drain(&mut publisher);
+    let topics: Vec<&str> = published.iter().map(|p| p.topic.as_str()).collect();
+    assert_eq!(topics, [VIRTUAL_CONFIG, VIRTUAL_STATE]);
+    assert!(published.iter().all(|p| p.payload.is_empty() && p.retain));
+    assert!(hub.entity_view("virtual_force_heating").is_none());
+
+    assert!(matches!(
+        hub.delete_virtual("force_heating").await,
+        Err(HubError::UnknownEntity(_))
+    ));
+    // A real device is not a virtual entity.
+    feed_switch(&hub);
+    assert!(matches!(
+        hub.delete_virtual(SWITCH_ID).await,
+        Err(HubError::UnknownEntity(_))
+    ));
+}
+
+#[tokio::test]
+async fn virtual_button_has_no_state_and_no_retain() {
+    let (hub, mut publisher) = hub();
+    let spec = VirtualSpec {
+        kind: VirtualKind::Button,
+        name: "Boost".to_owned(),
+        min: None,
+        max: None,
+        step: None,
+        unit: None,
+        initial: None,
+    };
+    let view = hub.set_virtual("boost", spec).await.expect("button");
+    assert_eq!(view.kind, Kind::Button);
+    let published = drain(&mut publisher);
+    assert_eq!(published.len(), 1, "{published:?}");
+    assert_eq!(published[0].topic, "oikos/button/virtual/boost/config");
 }

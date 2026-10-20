@@ -46,6 +46,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "delete_flow",
     "set_flow_enabled",
     "run_flow",
+    "set_virtual",
+    "delete_virtual",
 ];
 
 const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
@@ -823,6 +825,44 @@ async fn mcp_list_then_set_areas_round_trips() {
     );
     assert!(doc["areas"][0].get("group_names").is_none(), "{doc}");
     assert_eq!(doc["areas"][0]["newKey"], json!(true));
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn mcp_set_virtual_lists_the_entity() {
+    let mut server = Server::start().await;
+    server.online();
+    let client = server.client().await;
+    let view = json_of(
+        "set_virtual",
+        &call(
+            &client,
+            "set_virtual",
+            json!({ "id": "force_heating", "spec": { "kind": "switch", "name": "Force heating" } }),
+        )
+        .await,
+    );
+    assert_eq!(view["id"], "virtual_force_heating");
+
+    let list = json_of(
+        "list_entities",
+        &call(&client, "list_entities", json!({ "query": "force" })).await,
+    );
+    assert_eq!(list["total"], 1);
+
+    while server.publisher.try_recv().is_ok() {}
+    let deleted = json_of(
+        "delete_virtual",
+        &call(&client, "delete_virtual", json!({ "id": "force_heating" })).await,
+    );
+    assert_eq!(deleted, json!({ "id": "force_heating" }));
+    assert_eq!(
+        server.publisher.try_recv().expect("config clear").topic,
+        "oikos/switch/virtual/force_heating/config"
+    );
+    let again = call(&client, "delete_virtual", json!({ "id": "force_heating" })).await;
+    assert_eq!(again.is_error, Some(true));
 
     client.cancel().await.expect("close");
 }

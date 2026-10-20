@@ -1,4 +1,4 @@
-//! The eleven tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
+//! The thirteen tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
 //! await); write tools log their arguments and go through the hub's writers.
 
 use std::collections::BTreeSet;
@@ -11,10 +11,10 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::params::{
-    AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_LIMIT, DEFAULT_SEARCH_LIMIT, DeviceList,
-    EntityDetailView, EntityPage, GetEntityParams, IgnoredList, Include, ListDevicesParams,
-    ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult, SendCommandParams, SetAreasParams,
-    SetOverrideParams,
+    AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_LIMIT, DEFAULT_SEARCH_LIMIT,
+    DeleteVirtualParams, Deleted, DeviceList, EntityDetailView, EntityPage, GetEntityParams,
+    IgnoredList, Include, ListDevicesParams, ListEntitiesParams, MAX_LIMIT, SearchParams,
+    SearchResult, SendCommandParams, SetAreasParams, SetOverrideParams, SetVirtualParams,
 };
 use super::{OikosMcp, ToolError};
 
@@ -239,6 +239,31 @@ impl OikosMcp {
             .take(limit)
             .collect();
         Json(SearchResult { devices, entities })
+    }
+
+    /// Creates or replaces a virtual entity the hub owns: a `switch`, a `number` or a
+    /// `button`, for flows to read and write (a flag, a setpoint, a manual trigger). It is
+    /// saved retained and returned as an entity with the id `virtual_<id>`; a switch or number
+    /// is commanded with `send_command` like any other, and moved to a room with
+    /// `set_override`. Redefining one keeps its state.
+    #[tool(name = "set_virtual", annotations(idempotent_hint = true))]
+    async fn set_virtual(
+        &self,
+        Parameters(params): Parameters<SetVirtualParams>,
+    ) -> ToolResult<EntityView> {
+        log_write("set_virtual", &params);
+        Ok(Json(self.hub.set_virtual(&params.id, params.spec).await?))
+    }
+
+    /// Removes a virtual entity and clears what the broker retained for it.
+    #[tool(name = "delete_virtual", annotations(idempotent_hint = true))]
+    async fn delete_virtual(
+        &self,
+        Parameters(params): Parameters<DeleteVirtualParams>,
+    ) -> ToolResult<Deleted> {
+        log_write("delete_virtual", &params);
+        self.hub.delete_virtual(&params.id).await?;
+        Ok(Json(Deleted { id: params.id }))
     }
 
     /// The discovery topics that did not become an entity, each with the reason.

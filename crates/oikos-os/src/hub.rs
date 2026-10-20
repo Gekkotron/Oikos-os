@@ -10,9 +10,10 @@ use std::time::Duration;
 use crate::alerts::{AlertStore, Applied};
 use crate::flows::FlowStore;
 use crate::media::MediaProxy;
+use crate::virtual_entities as virtuals;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
-    Snapshot, WsEvent, area_views, device_views, snapshot,
+    Snapshot, VirtualSpec, WsEvent, area_views, device_views, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{
@@ -100,6 +101,8 @@ pub struct Hub {
     connection: watch::Sender<ConnectionStatus>,
     publisher: mpsc::Sender<Publish>,
     ui_prefix: String,
+    /// The first discovery prefix: virtual entities are published under it.
+    discovery_prefix: String,
     /// OikosPush's retained history topic and its decoded copy.
     history_topic: String,
     responses_topic: String,
@@ -150,6 +153,12 @@ impl Hub {
             connection,
             publisher,
             ui_prefix: cfg.topics.ui_prefix.clone(),
+            discovery_prefix: cfg
+                .topics
+                .discovery_prefixes
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "oikos".to_owned()),
             history_topic: cfg.push.history_topic.clone(),
             responses_topic: cfg.push.responses_topic.clone(),
             alerts: Mutex::new(alerts),
@@ -579,6 +588,74 @@ impl Hub {
         };
         doc.set_group(id, kind, name.as_ref().map(Option::as_deref), favorite);
         self.set_areas(doc).await
+    }
+
+    /// Creates or replaces virtual entity `id`: publishes its discovery config retained and
+    /// applies it locally. The initial state (`OFF`, the number's `min`, or `initial`) is
+    /// published retained only when the entity did not exist, so redefining one keeps its
+    /// state; a button has none. A changed kind clears the old config topic.
+    pub async fn set_virtual(&self, id: &str, spec: VirtualSpec) -> Result<EntityView, HubError> {
+        virtuals::validate_id(id).map_err(HubError::Rejected)?;
+        let initial = virtuals::initial_state(&spec).map_err(HubError::Rejected)?;
+        let unique_id = virtuals::unique_id(id);
+        let previous = self
+            .read()
+            .entity(&unique_id)
+            .map(|entity| entity.discovery_topic.clone());
+
+        let config_topic = virtuals::config_topic(&self.discovery_prefix, spec.kind, id);
+        let config = virtuals::build_config(&self.discovery_prefix, id, &spec).to_string();
+        self.publish(Publish {
+            topic: config_topic.clone(),
+            payload: config.clone(),
+            retain: true,
+        })?;
+        if let Some(old) = previous.as_deref().filter(|old| {
+            *old != config_topic && virtuals::is_config_topic(&self.discovery_prefix, id, old)
+        }) {
+            self.publish(Publish {
+                topic: old.to_owned(),
+                payload: String::new(),
+                retain: true,
+            })?;
+        }
+        self.ingest(&config_topic, config.as_bytes());
+
+        if let (None, Some(state)) = (previous, initial) {
+            let topic = virtuals::state_topic(&self.discovery_prefix, id);
+            self.publish(Publish {
+                topic: topic.clone(),
+                payload: state.clone(),
+                retain: true,
+            })?;
+            self.ingest(&topic, state.as_bytes());
+        }
+        self.entity_view(&unique_id)
+            .ok_or(HubError::UnknownEntity(unique_id))
+    }
+
+    /// Removes virtual entity `id`: an empty retained payload on its config topic and on its
+    /// state topic, so the broker forgets both. Anything that is not a virtual entity is unknown.
+    pub async fn delete_virtual(&self, id: &str) -> Result<(), HubError> {
+        let unique_id = virtuals::unique_id(id);
+        let config_topic = self
+            .read()
+            .entity(&unique_id)
+            .map(|entity| entity.discovery_topic.clone())
+            .filter(|topic| virtuals::is_config_topic(&self.discovery_prefix, id, topic))
+            .ok_or(HubError::UnknownEntity(unique_id))?;
+        self.publish(Publish {
+            topic: config_topic.clone(),
+            payload: String::new(),
+            retain: true,
+        })?;
+        self.publish(Publish {
+            topic: virtuals::state_topic(&self.discovery_prefix, id),
+            payload: String::new(),
+            retain: true,
+        })?;
+        self.ingest(&config_topic, b"");
+        Ok(())
     }
 
     fn write_override(&self, id: &str, next: &UiOverride) -> Result<EntityView, HubError> {

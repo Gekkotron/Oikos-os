@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
     AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EntityView, FlowView,
-    IgnoredView, OverridePatch, RunView, SchedulePreview, Snapshot,
+    IgnoredView, OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec,
 };
 use oikos_core::flow::{Flow, Schedule};
 use oikos_core::model::{AreasDocument, Command};
@@ -50,6 +50,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         )
         .route("/flows/{id}/enabled", post(set_flow_enabled))
         .route("/flows/{id}/run", post(run_flow))
+        .route("/virtual/{id}", put(put_virtual).delete(delete_virtual))
         .fallback(not_found)
 }
 
@@ -372,4 +373,24 @@ async fn schedule_preview(
         timezone: zone.name().to_owned(),
         next,
     }))
+}
+
+/// Creates or replaces a virtual switch, number or button (`200` with the entity); `422` for
+/// a bad id or spec, `503` while the broker link is down.
+async fn put_virtual(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<VirtualSpec>,
+) -> Result<Json<EntityView>, HttpError> {
+    let Json(spec) = body?;
+    Ok(Json(hub.set_virtual(&id, spec).await?))
+}
+
+/// Removes a virtual entity (204); `404` for an id that is not one.
+async fn delete_virtual(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    hub.delete_virtual(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

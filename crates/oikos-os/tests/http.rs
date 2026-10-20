@@ -1354,3 +1354,72 @@ async fn schedule_preview_rejects_bad_cron() {
     let body: Value = response.json().await.expect("json");
     assert!(body["error"].as_str().is_some_and(|e| !e.is_empty()));
 }
+
+#[tokio::test]
+async fn http_put_virtual_round_trips() {
+    let mut server = Server::start().await;
+    server.online();
+    let url = server.url("/api/v1/virtual/force_heating");
+    let res = server
+        .client
+        .put(&url)
+        .json(&json!({ "kind": "switch", "name": "Force heating" }))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::OK);
+    let view: Value = res.json().await.expect("json");
+    assert_eq!(view["id"], "virtual_force_heating");
+    assert_eq!(view["kind"], "switch");
+    let snapshot: Value = server
+        .get("/api/v1/snapshot")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert!(
+        snapshot["entities"]
+            .as_array()
+            .expect("entities")
+            .iter()
+            .any(|e| e["id"] == "virtual_force_heating")
+    );
+
+    let bad = server
+        .client
+        .put(server.url("/api/v1/virtual/Bad"))
+        .json(&json!({ "kind": "switch", "name": "x" }))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    while server.publisher.try_recv().is_ok() {}
+    let del = server.client.delete(&url).send().await.expect("DELETE");
+    assert_eq!(del.status(), StatusCode::NO_CONTENT);
+    let topics: Vec<String> = std::iter::from_fn(|| server.publisher.try_recv().ok())
+        .map(|p| p.topic)
+        .collect();
+    assert_eq!(
+        topics,
+        [
+            "oikos/switch/virtual/force_heating/config",
+            "oikos/virtual/force_heating"
+        ]
+    );
+    let again = server.client.delete(&url).send().await.expect("DELETE");
+    assert_eq!(again.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn http_put_virtual_offline_is_503() {
+    let server = Server::start().await;
+    let res = server
+        .client
+        .put(server.url("/api/v1/virtual/x"))
+        .json(&json!({ "kind": "button", "name": "x" }))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+}

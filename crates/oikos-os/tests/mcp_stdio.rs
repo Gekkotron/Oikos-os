@@ -41,6 +41,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "delete_flow",
     "set_flow_enabled",
     "run_flow",
+    "set_virtual",
+    "delete_virtual",
 ];
 
 fn fixtures() -> PathBuf {

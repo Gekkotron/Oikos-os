@@ -3,7 +3,7 @@
 
 use oikos_api::{
     AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView, OverridePatch,
-    RunStatus,
+    RunStatus, VirtualSpec,
 };
 use oikos_core::flow::Flow;
 use oikos_core::model::{Area, Command, Kind, UiOverride};
@@ -328,4 +328,21 @@ mod tests {
             assert!(description.contains(needle), "`{needle}` is missing");
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SetVirtualParams {
+    /// The id: 1 to 48 characters of `a-z`, `0-9` and `_`. The entity becomes `virtual_<id>`.
+    pub id: String,
+    /// The definition: `kind` (`switch`, `number` or `button`), `name`, and for a number
+    /// `min` (0), `max` (100), `step` (1) and `unit`. `initial` is the state published when
+    /// the entity is first created (a switch starts off, a number at `min`); it is ignored
+    /// when the entity already exists.
+    pub spec: VirtualSpec,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteVirtualParams {
+    /// The id given to `set_virtual` (without the `virtual_` prefix).
+    pub id: String,
 }

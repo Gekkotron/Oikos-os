@@ -1,4 +1,4 @@
-//! The MCP server: seventeen tools and the `oikos://snapshot` resource over the hub, served at
+//! The MCP server: nineteen tools and the `oikos://snapshot` resource over the hub, served at
 //! `/mcp` over streamable HTTP with stateful sessions, and the stdio proxy in front of it.
 //!
 //! A failed tool call is answered in-band (`isError: true` with the reason as text) rather
@@ -125,7 +125,9 @@ fn instructions() -> String {
          as one JSON document. Automations are flows: `list_flows` and `get_flow` read them, \
          `set_flow` creates or replaces one (validated against the house, saved retained on \
          `oikos/automation/<id>`, the prefix being configurable), `set_flow_enabled` \
-         switches it and `delete_flow` removes it; `run_flow` starts a manual run. A flow is a \
+         switches it and `delete_flow` removes it; `run_flow` starts a manual run. `set_virtual` and `delete_virtual` manage virtual \
+         entities (a `switch`, `number` or `button` the hub owns, as `virtual_<id>`) for flows \
+         to read and write. A flow is a \
          graph of nodes: `trigger.state` (an entity's state changes), `trigger.schedule` (a \
          5-field cron in the house local time; it fires only while the flow is enabled and \
          the first run is at the next tick), `flow.enable` (sets another flow's `enabled`, or its own flow when `flow` is absent; a flow \

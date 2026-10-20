@@ -11,3 +11,4 @@ pub mod logging;
 pub mod mcp;
 pub mod media;
 pub mod mqtt;
+pub mod virtual_entities;

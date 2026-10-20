@@ -171,6 +171,24 @@ Override fields: `name`, `area`, `hidden`, `cardStyle`, `showAs` (a switch shown
 
 Overrides are retained messages under `oikos/ui/<entity id>`. Set them from the web device sheet, `PATCH /api/v1/entities/{id}/override`, or MCP `set_override`.
 
+## Virtual entities
+
+A virtual entity is a switch, a number or a button the hub owns, with no device behind it: a "force heating" flag, a setpoint, a manual trigger for a flow. Create one with `PUT /api/v1/virtual/{id}` (body `{"kind": "switch" | "number" | "button", "name": "…"}`, plus `min`, `max`, `step`, `unit` for a number and `initial` for either state) or MCP `set_virtual`; remove it with `DELETE /api/v1/virtual/{id}` or `delete_virtual`. The id is 1 to 48 characters of `a-z`, `0-9` and `_`, and the entity becomes `virtual_<id>`, on the device `Virtual`.
+
+Under the first discovery prefix `P` (normally `oikos`), the hub publishes, retained:
+
+| What | Topic |
+|---|---|
+| Config | `P/<switch\|number\|button>/virtual/<id>/config` |
+| State and command (switch, number) | `P/virtual/<id>` |
+| Command (button) | `P/virtual/<id>` |
+
+A switch (`ON` / `OFF`) and a number echo on their own topic and are retained (`retain: true` in the config), so a command is its own state and survives a restart. A number takes `min`, `max` and `step` (0, 100 and 1 by default). A button has no state and is not retained: a press is an event, not a value.
+
+The hub publishes the initial state, retained, only the first time the entity is created: `OFF` for a switch, `min` for a number, or `initial`. A flow's trigger needs a known previous value to see a change, so a first tap would otherwise go unnoticed. Calling `PUT` again on an existing entity republishes its config (a rename, other bounds) and keeps its state. `virtual` is a reserved sub-tree: its topics never show in `GET /api/v1/ignored`.
+
+A virtual entity is an ordinary entity otherwise: commands go through `send_command`, and it moves to a room with the usual override (`PATCH /api/v1/entities/virtual_<id>/override`, or the web device sheet).
+
 ## Bridge catalogue
 
 | Bridge | Devices | Repo |

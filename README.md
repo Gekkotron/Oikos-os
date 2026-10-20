@@ -74,6 +74,8 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `DELETE /api/v1/entities/{id}/override` | Removes the override (204). |
 | `PUT /api/v1/areas` | Replaces the declared rooms (`oikos/ui/_areas`) and returns the resulting list. |
 | `PATCH /api/v1/areas/{id}/groups/{kind}` | Sets or clears (`null`) the room group card name and the favourite flag of one kind (`cover` or `light`) in the area. `200` with the area list, `422` for a kind other than `cover`/`light`, `Unassigned` or an empty body, `404` for an unknown area, `503` while the broker link is down. |
+| `PUT /api/v1/virtual/{id}` | Creates or replaces a virtual switch, number or button (`{"kind", "name", …}`) and returns the entity `virtual_<id>`; the initial state is published only when it is new. `422` for a bad id or spec, `503` while the broker link is down. See [Adding a device](docs/adding-a-device.md#virtual-entities). |
+| `DELETE /api/v1/virtual/{id}` | Removes a virtual entity and clears its retained topics (204), or `404`. |
 | `GET /api/v1/ignored` | The discovery topics that did not become an entity, each with the reason. |
 | `GET /ws` | WebSocket: a snapshot first, then every hub event as a JSON text frame. |
 | `GET /api/v1/alerts` | The push alerts OikosPush keeps in its retained history, newest first. |
@@ -86,11 +88,11 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `POST /api/v1/flows/{id}/enabled` | `{"enabled": bool}`; returns the flow. |
 | `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or already running. |
 
-Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` differs from the path: `id mismatch`), 404 (unknown entity, flow or route), 422 (command refused, or a flow that is invalid, disabled or already running) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
+Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` differs from the path: `id mismatch`), 404 (unknown entity, flow, virtual entity or route), 422 (command refused, a bad virtual id or spec, or a flow that is invalid, disabled or already running) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 
 ## MCP
 
-The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers seventeen tools and one resource:
+The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers nineteen tools and one resource:
 
 - `bridge_info` — the Zigbee2MQTT bridge and the state of the link to the broker.
 - `list_areas` — the rooms, each with its entity count and the count of entities shown by default (`primary_count`).
@@ -109,6 +111,8 @@ The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers seventeen to
 - `delete_flow` — removes a flow.
 - `set_flow_enabled` — turns a flow on or off.
 - `run_flow` — starts a manual run of a flow.
+- `set_virtual` — creates or replaces a virtual switch, number or button the hub owns.
+- `delete_virtual` — removes a virtual entity.
 - Resource `oikos://snapshot` — the whole house as one JSON document.
 
 A failed tool call answers in-band (`isError: true` with the reason) so the assistant can retry with better arguments.
