@@ -6,6 +6,7 @@
 
 mod drawer;
 mod graph;
+mod picker;
 mod settings;
 mod toolbar;
 mod viewport;
@@ -300,7 +301,7 @@ fn FlowBody(view: Signal<FlowView>) -> impl IntoView {
     view! {
         <div class="flow-stage" class:flow-stage--drawer=move || drawer.get()>
             {canvas}
-            <Toolbar view=view editing=editing editor=editor saving=saving drawer=drawer />
+            <Toolbar view=view editing=editing editor=editor saving=saving drawer=drawer selection=selection />
             <Drawer
                 open=drawer
                 runs=runs.into()

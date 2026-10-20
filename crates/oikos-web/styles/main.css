@@ -3911,3 +3911,66 @@ html:has(.flow-canvas-screen) {
   gap: 8px;
   min-height: var(--touch-min);
 }
+
+/* "＋ Add" picker */
+.flow-picker-wrap {
+  position: relative;
+}
+
+.flow-picker {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 280px;
+  max-height: min(420px, 70vh);
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-nav);
+  background: var(--flow-glass);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+.flow-picker__search {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.flow-picker__list {
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.flow-picker__header {
+  padding: 8px 8px 4px;
+  font: 600 10px/14px var(--font-body);
+  letter-spacing: 0.08em;
+  opacity: 0.6;
+}
+
+.flow-picker__item {
+  padding: 7px 8px;
+  border-radius: 8px;
+  font: 400 13px/18px var(--font-body);
+  cursor: pointer;
+}
+
+.flow-picker__item--on {
+  background: var(--card-bg);
+  outline: 1px solid var(--accent-mint);
+  outline-offset: -1px;
+}
+
+.flow-picker__empty {
+  padding: 10px 8px;
+  font: 400 13px/18px var(--font-body);
+  opacity: 0.6;
+}

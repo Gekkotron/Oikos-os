@@ -846,3 +846,113 @@ async fn field_edit_is_one_undo_step() {
         .unchecked_into();
     assert_eq!(duration.value(), "5m");
 }
+
+// ---- Picker ---------------------------------------------------------------------------------
+
+/// Opens the picker and types `query` into its search box.
+async fn search(host: &web_sys::Element, query: &str) {
+    click(host, ".flow-picker-wrap > button");
+    tick().await;
+    let input: web_sys::HtmlInputElement = element(host, ".flow-picker__search").unchecked_into();
+    type_into(&input, query, "input");
+    tick().await;
+}
+
+fn table_lamp() -> oikos_api::EntityView {
+    use oikos_core::model::{
+        Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride,
+    };
+    oikos_api::EntityView {
+        id: "light.table".into(),
+        device_id: None,
+        name: "Lumière table".into(),
+        device_name: None,
+        label: None,
+        kind: Kind::Light,
+        protocol_kind: Kind::Light,
+        device_class: None,
+        unit: None,
+        icon: None,
+        category: EntityCategory::Primary,
+        enabled_by_default: true,
+        area: "salon".into(),
+        part_of: None,
+        capabilities: Capabilities::default(),
+        ui: UiOverride::default(),
+        state: EntityState {
+            value: StateValue::OnOff(false),
+            ..Default::default()
+        },
+    }
+}
+
+#[wasm_bindgen_test]
+async fn add_picker_adds_selected_card() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    search(&host, "Wait").await;
+    let focused = web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .active_element();
+    assert_eq!(
+        focused.map(|e| e.class_name()),
+        Some("field flow-picker__search".into()),
+        "the search box takes focus"
+    );
+    press(
+        &element(&host, ".flow-picker__search"),
+        "Enter",
+        false,
+        false,
+    );
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(
+        count(&host, "[data-node=delay_1].flow-node--selected"),
+        1,
+        "{html}"
+    );
+    assert_eq!(count(&host, ".flow-picker"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn picker_groups_entity_results() {
+    let (host, _mounted, house) = editing(reference_view(None, vec![])).await;
+    house
+        .entities
+        .update(|e| drop(e.insert("light.table".into(), table_lamp())));
+    search(&host, "table").await;
+    let headers: Vec<String> = (0..count(&host, ".flow-picker__header"))
+        .map(|i| {
+            host.query_selector_all(".flow-picker__header")
+                .unwrap()
+                .item(i)
+                .unwrap()
+                .text_content()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        headers,
+        ["WHEN · TRIGGER", "AND · CHECK", "THEN · ACTION"],
+        "{}",
+        host.inner_html()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn escape_closes_picker() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    search(&host, "").await;
+    assert_eq!(count(&host, ".flow-picker"), 1);
+    press(
+        &element(&host, ".flow-picker__search"),
+        "Escape",
+        false,
+        false,
+    );
+    tick().await;
+    assert_eq!(count(&host, ".flow-picker"), 0);
+}

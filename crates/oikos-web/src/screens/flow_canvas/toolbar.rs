@@ -6,13 +6,16 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::A;
 use oikos_api::FlowView;
-use oikos_core::flow::{Flow, FlowMode};
+use oikos_core::flow::{Flow, FlowMode, NodeKind};
 
-use super::Editor;
+use super::picker::Picker;
+use super::{Camera, Editor, Selection};
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::toast::Toasts;
-use crate::flow_layout::{tidy, with_resolved_positions};
+use crate::flow_edit::add_node;
+use crate::flow_layout::{NODE_H, NODE_W, Pt, tidy, with_resolved_positions};
+use crate::flow_viewport::visible_world;
 use crate::icons::{CHECK, PENCIL, PLAY, X_MARK};
 use crate::screens::flow_schedule::SaveBlocked;
 
@@ -22,7 +25,22 @@ fn EditControls(
     editor: Editor,
     saving: RwSignal<bool>,
     original: Signal<Flow>,
+    selection: RwSignal<Option<Selection>>,
 ) -> impl IntoView {
+    let camera = expect_context::<Camera>();
+    let picker = RwSignal::new(false);
+    // A picked card lands at the middle of what is on screen, and is selected (which opens its
+    // settings).
+    let add = Callback::new(move |kind: NodeKind| {
+        let (w, h) = camera.size.get_untracked();
+        let seen = visible_world(&camera.view.get_untracked(), w, h);
+        let at = Pt {
+            x: seen.x + (seen.w - NODE_W) / 2.0,
+            y: seen.y + (seen.h - NODE_H) / 2.0,
+        };
+        let id = editor.edit(|f| add_node(f, kind, at));
+        selection.set(Some(Selection::Node(id)));
+    });
     let toasts = expect_context::<Toasts>();
     let blocked = use_context::<SaveBlocked>();
     let is_blocked = move || blocked.is_some_and(|b| b.0.get());
@@ -52,10 +70,19 @@ fn EditControls(
         });
     };
     view! {
-        // The picker that adds cards comes with the next step of the editor.
-        <button type="button" class="btn btn--ghost" aria-label="Add card" title="Add card" disabled>
-            "＋ Add"
-        </button>
+        <div class="flow-picker-wrap">
+            <button
+                type="button"
+                class="btn btn--ghost"
+                aria-label="Add card"
+                title="Add card"
+                aria-expanded=move || picker.get().to_string()
+                on:click=move |_| picker.update(|open| *open = !*open)
+            >
+                "＋ Add"
+            </button>
+            <Picker open=picker on_pick=add />
+        </div>
         <button
             type="button"
             class="btn btn--ghost"
@@ -160,6 +187,7 @@ pub fn Toolbar(
     editor: Editor,
     saving: RwSignal<bool>,
     drawer: RwSignal<bool>,
+    selection: RwSignal<Option<Selection>>,
 ) -> impl IntoView {
     let name = move || {
         if editing.get() {
@@ -188,7 +216,13 @@ pub fn Toolbar(
                 when=move || editing.get()
                 fallback=move || view! { <ReadControls view=view editing=editing editor=editor /> }
             >
-                <EditControls editing=editing editor=editor saving=saving original=original />
+                <EditControls
+                    editing=editing
+                    editor=editor
+                    saving=saving
+                    original=original
+                    selection=selection
+                />
             </Show>
             <button
                 type="button"
