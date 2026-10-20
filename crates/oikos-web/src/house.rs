@@ -91,6 +91,8 @@ impl House {
                     .update(|flows| crate::house_state::upsert_run(flows, &flow_id, run));
             }
             WsEvent::CommandFailed { id, reason } => self.command_failed.set(Some((id, reason))),
+            // A press is an event for the flow engine; the UI has nothing to show for it.
+            WsEvent::ButtonPressed { .. } => {}
         }
     }
 }

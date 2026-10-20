@@ -1,6 +1,7 @@
 //! The flow side of the hub: ingesting retained definitions, the writers behind the REST and
 //! MCP flow tools, and the run bookkeeping the engine reports through.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
@@ -8,7 +9,7 @@ use tokio::task::JoinHandle;
 use oikos_api::{ConnectionStatus, FlowView, RunStatus, RunView, StepView, TriggerInfo, WsEvent};
 use oikos_core::command::{Publish, map_command};
 use oikos_core::flow::{Flow, NodeKind, Scalar, validate};
-use oikos_core::model::Command;
+use oikos_core::model::{Command, Kind};
 
 use super::{EngineRequest, StoreApplied};
 use crate::clock;
@@ -17,7 +18,7 @@ use crate::hub::{Hub, HubError};
 impl Hub {
     /// Applies a retained flow payload. A change (or removal) is broadcast and tells the engine
     /// to reload; an identical payload or the removal of an unknown flow does nothing.
-    pub(crate) fn ingest_flow(&self, id: &str, payload: &[u8]) {
+    pub(crate) fn ingest_flow(&self, id: &str, payload: &[u8]) -> bool {
         let applied = self.flow_store().apply(id, payload);
         match applied {
             StoreApplied::Changed | StoreApplied::Removed => {
@@ -25,9 +26,39 @@ impl Hub {
                     flows: self.flows(),
                 });
                 self.send_engine(EngineRequest::Reload);
+                true
             }
-            StoreApplied::Unchanged | StoreApplied::NotFound => {}
+            StoreApplied::Unchanged | StoreApplied::NotFound => false,
         }
+    }
+
+    /// The `command_topic` of every button some enabled flow triggers on, with its entity id.
+    /// A press is a message on this topic; the hub subscribes to it only while watched.
+    pub(crate) fn watched_button_topics(&self) -> BTreeMap<String, Vec<String>> {
+        let mut watched: BTreeSet<String> = BTreeSet::new();
+        for flow in self.flow_definitions().iter().filter(|flow| flow.enabled) {
+            for node in flow.triggers() {
+                if let NodeKind::TriggerState(params) = &node.kind {
+                    watched.insert(params.entity.clone());
+                }
+            }
+        }
+        let reg = self.read();
+        let mut topics: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for id in watched {
+            let Some(entity) = reg.entity(&id).filter(|e| e.kind == Kind::Button) else {
+                continue;
+            };
+            if let Some(topic) = entity
+                .bindings
+                .config
+                .get("command_topic")
+                .and_then(serde_json::Value::as_str)
+            {
+                topics.entry(topic.to_owned()).or_default().push(id);
+            }
+        }
+        topics
     }
 
     /// Every flow with its runs, valid or not, sorted by id.
@@ -253,6 +284,17 @@ impl Hub {
                     node.id
                 )));
             };
+            if let NodeKind::TriggerState(params) = &node.kind
+                && found.kind == Kind::Button
+                && [&params.to, &params.from]
+                    .into_iter()
+                    .any(|filter| filter.as_ref().is_some_and(|v| !v.is_null()))
+            {
+                return Err(HubError::InvalidFlow(format!(
+                    "node `{}`: a button trigger takes no to/from",
+                    node.id
+                )));
+            }
             if let NodeKind::Command(params) = &node.kind {
                 if matches!(
                     params.command,

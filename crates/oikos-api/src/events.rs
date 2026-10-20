@@ -31,16 +31,40 @@ pub enum ConnectionStatus {
 pub enum WsEvent {
     Snapshot(Snapshot),
     EntityUpserted(EntityView),
-    EntityRemoved { id: String },
-    StateChanged { id: String, state: EntityState },
-    AreasChanged { areas: Vec<AreaView> },
-    DevicesChanged { devices: Vec<DeviceView> },
-    AlertsChanged { alerts: Vec<AlertView> },
-    FlowsChanged { flows: Vec<FlowView> },
-    FlowRunChanged { flow_id: String, run: RunView },
+    EntityRemoved {
+        id: String,
+    },
+    StateChanged {
+        id: String,
+        state: EntityState,
+    },
+    AreasChanged {
+        areas: Vec<AreaView>,
+    },
+    DevicesChanged {
+        devices: Vec<DeviceView>,
+    },
+    AlertsChanged {
+        alerts: Vec<AlertView>,
+    },
+    FlowsChanged {
+        flows: Vec<FlowView>,
+    },
+    FlowRunChanged {
+        flow_id: String,
+        run: RunView,
+    },
     BridgeChanged(BridgeView),
     ConnectionChanged(ConnectionStatus),
-    CommandFailed { id: String, reason: String },
+    CommandFailed {
+        id: String,
+        reason: String,
+    },
+    /// A virtual or discovered button was pressed (a non-retained message on its command
+    /// topic). An event, not a state: nothing is stored.
+    ButtonPressed {
+        id: String,
+    },
 }
 
 /// A partial override: the keys to set (`null` clears one).

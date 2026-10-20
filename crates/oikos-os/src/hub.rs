@@ -183,8 +183,12 @@ impl Hub {
             return Vec::new();
         }
         if let Some(id) = self.flow_id_of(topic) {
-            self.ingest_flow(id, payload);
-            return Vec::new();
+            // A flow may start or stop watching a button, so its command topic may change.
+            return if self.ingest_flow(id, payload) {
+                vec![Change::SubscriptionsChanged]
+            } else {
+                Vec::new()
+            };
         }
         let at = clock::now();
         let (changes, events, failing, seen, ignored) = {
@@ -238,6 +242,42 @@ impl Hub {
             // An error only means no command is waiting right now.
             let epoch = self.link_epoch();
             let _ = self.state_seen.send(StateSeen { id, epoch });
+        }
+        self.with_button_subscriptions(changes)
+    }
+
+    /// [`Self::ingest`] for a message that carries the broker's retain flag. A press is an
+    /// event: a non-retained message on the command topic of a button some flow watches
+    /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.
+    pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
+        if !retain {
+            let pressed = self.watched_button_topics().remove(topic);
+            if let Some(ids) = pressed {
+                for id in ids {
+                    self.broadcast(WsEvent::ButtonPressed { id });
+                }
+                return Vec::new();
+            }
+        }
+        self.ingest(topic, payload)
+    }
+
+    /// A button appearing or any entity vanishing may change the button topics to subscribe to.
+    fn with_button_subscriptions(&self, mut changes: Vec<Change>) -> Vec<Change> {
+        if changes.contains(&Change::SubscriptionsChanged) {
+            return changes;
+        }
+        let reg = self.read();
+        let touches_button = changes.iter().any(|change| match change {
+            Change::EntityUpserted(id) => reg
+                .entity(id)
+                .is_some_and(|entity| entity.kind == oikos_core::model::Kind::Button),
+            Change::EntityRemoved(_) => true,
+            _ => false,
+        });
+        drop(reg);
+        if touches_button {
+            changes.push(Change::SubscriptionsChanged);
         }
         changes
     }
@@ -338,7 +378,9 @@ impl Hub {
 
     /// Every topic some entity reads.
     pub fn subscription_topics(&self) -> BTreeSet<String> {
-        self.read().subscription_topics().clone()
+        let mut topics = self.read().subscription_topics().clone();
+        topics.extend(self.watched_button_topics().into_keys());
+        topics
     }
 
     /// How long the MQTT task waits after a subscription change before diffing.

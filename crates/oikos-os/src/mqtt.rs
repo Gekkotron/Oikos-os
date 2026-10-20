@@ -110,7 +110,7 @@ async fn poll_loop(mut eventloop: EventLoop, cfg: &MqttConfig, hub: &Hub, resubs
                     }
                 }
                 Ok(Event::Incoming(Packet::Publish(publish))) => {
-                    let changes = hub.ingest(&publish.topic, &publish.payload);
+                    let changes = hub.ingest_message(&publish.topic, &publish.payload, publish.retain);
                     if changes.contains(&Change::SubscriptionsChanged) {
                         resubscribe.notify_one();
                     }

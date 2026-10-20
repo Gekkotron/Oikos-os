@@ -1145,3 +1145,104 @@ async fn set_flow_rejects_unknown_target_flow() {
     let flow = Flow::decode(chain_json("a", true, vec![own]).as_bytes()).expect("flow");
     hub.set_flow(flow).await.expect("self target validates");
 }
+
+const BUTTON_ID: &str = "virtual_boost";
+const BUTTON_TOPIC: &str = "oikos/virtual/boost";
+
+fn button_flow(trigger_params: serde_json::Value) -> Flow {
+    Flow::decode(
+        serde_json::json!({
+            "id": "boost", "name": "Boost", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "press", "type": "trigger.state", "params": trigger_params },
+                { "id": "on", "type": "command",
+                  "params": { "entity": LED_ID, "command": { "type": "turn_on" } } }
+            ],
+            "edges": [{ "from": "press", "to": "on" }]
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .expect("button flow")
+}
+
+async fn hub_with_button() -> (
+    Arc<Hub>,
+    mpsc::Receiver<Publish>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (hub, publisher, engine) = engine_hub();
+    let spec = oikos_api::VirtualSpec {
+        kind: oikos_api::VirtualKind::Button,
+        name: "Boost".to_owned(),
+        min: None,
+        max: None,
+        step: None,
+        unit: None,
+        initial: None,
+    };
+    hub.set_virtual("boost", spec).await.expect("button");
+    (hub, publisher, engine)
+}
+
+#[tokio::test]
+async fn button_press_fires_its_flow() {
+    let (hub, publisher, _engine) = hub_with_button().await;
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.set_flow(button_flow(serde_json::json!({ "entity": BUTTON_ID })))
+        .await
+        .expect("set_flow");
+    settle().await;
+    assert!(hub.subscription_topics().contains(BUTTON_TOPIC));
+    let mut events = hub.subscribe();
+
+    hub.ingest_message(BUTTON_TOPIC, b"PRESS", false);
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+
+    assert_eq!(step_nodes(&run), ["press", "on"]);
+    assert_eq!(published(&log).len(), 1, "{log:?}");
+}
+
+#[tokio::test]
+async fn retained_button_message_never_fires() {
+    let (hub, publisher, _engine) = hub_with_button().await;
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.set_flow(button_flow(serde_json::json!({ "entity": BUTTON_ID })))
+        .await
+        .expect("set_flow");
+    settle().await;
+    let mut events = hub.subscribe();
+
+    hub.ingest_message(BUTTON_TOPIC, b"PRESS", true);
+    settle().await;
+
+    assert!(published(&log).is_empty(), "{log:?}");
+    while let Ok(event) = events.try_recv() {
+        assert!(
+            !matches!(
+                event,
+                WsEvent::ButtonPressed { .. } | WsEvent::FlowRunChanged { .. }
+            ),
+            "{event:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn button_trigger_refuses_to_filter() {
+    let (hub, _publisher, _engine) = hub_with_button().await;
+    for params in [
+        serde_json::json!({ "entity": BUTTON_ID, "to": "PRESS" }),
+        serde_json::json!({ "entity": BUTTON_ID, "from": "PRESS" }),
+    ] {
+        match hub.set_flow(button_flow(params)).await {
+            Err(HubError::InvalidFlow(reason)) => {
+                assert!(
+                    reason.contains("a button trigger takes no to/from"),
+                    "{reason}"
+                );
+            }
+            other => panic!("expected InvalidFlow, got {other:?}"),
+        }
+    }
+}

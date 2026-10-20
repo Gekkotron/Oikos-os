@@ -310,12 +310,37 @@ impl Engine {
             WsEvent::StateChanged { id, state } => {
                 self.state_changed(&id, Scalar::of_state(&state.value));
             }
+            WsEvent::ButtonPressed { id } => self.button_pressed(&id),
             // The broker is about to replay retained states: forget what we knew so the replay
             // is only recorded, never acted on.
             WsEvent::ConnectionChanged(status) if status != ConnectionStatus::Online => {
                 self.known.clear();
             }
             _ => {}
+        }
+    }
+
+    /// Fires every trigger on button `id`. A press is an event that is never replayed (the hub
+    /// ignores retained messages on a button topic), so the `known` map is bypassed. A button
+    /// has no value, so the trigger carries the press itself.
+    fn button_pressed(&mut self, id: &str) {
+        let mut fires = Vec::new();
+        for flow in &self.flows {
+            for node in flow.triggers() {
+                if matches!(&node.kind, NodeKind::TriggerState(params) if params.entity == id)
+                    && !fires.iter().any(|(f, _): &(Flow, String)| f.id == flow.id)
+                {
+                    fires.push((flow.clone(), node.id.clone()));
+                }
+            }
+        }
+        let trigger = TriggerInfo {
+            entity: id.to_owned(),
+            value: Value::String("PRESS".to_owned()),
+            previous: Value::Null,
+        };
+        for (flow, node) in fires {
+            self.fire(flow, node, Some(trigger.clone()));
         }
     }
 

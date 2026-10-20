@@ -73,6 +73,7 @@ impl HouseState {
             WsEvent::FlowsChanged { flows } => self.flows = flows,
             WsEvent::FlowRunChanged { flow_id, run } => upsert_run(&mut self.flows, &flow_id, run),
             WsEvent::CommandFailed { .. } => {}
+            WsEvent::ButtonPressed { .. } => {}
         }
     }
 }
