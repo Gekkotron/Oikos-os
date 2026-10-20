@@ -145,6 +145,8 @@ When the stored override has a non-default value for a field the rules hide (for
 
 ## 10. The app (`<app-repo>`), same work
 
+> **Landed 2026-10-20** on branch `feat/showAs-override` (`cbe43a3..fd81376`). See `plans/2026-10-20-device-sheet-app.md`. Step 4 of the order of work is now unblocked.
+
 The app gets the same contract and the same type behaviour:
 
 - `UiOverride.kt`: `showAs: String?` replaces `asLight`, with the same values; decoding still reads a legacy `asLight: true` as `"light"`, encoding never writes it. Update `OverrideDraft`, `UiOverrides` encoding and their tests.
