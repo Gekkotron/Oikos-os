@@ -83,7 +83,12 @@ body {
 
 .confirm__buttons {
   display: flex;
+  flex: none;
   gap: 8px;
+}
+
+.confirm__buttons .btn {
+  white-space: nowrap;
 }
 
 .card--pending {
@@ -1153,6 +1158,34 @@ a[aria-current="page"] .nav__glyph {
 .sheet__heading {
   margin: 0 0 12px;
   font: var(--type-card-value);
+}
+
+.sheet__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--touch-min);
+  margin: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.sheet__summary::-webkit-details-marker {
+  display: none;
+}
+
+.sheet__summary::after {
+  content: "▸";
+  opacity: 0.6;
+  transition: transform var(--motion-short) var(--ease);
+}
+
+.sheet__details[open] > .sheet__summary::after {
+  transform: rotate(90deg);
+}
+
+.sheet__details[open] > .sheet__summary {
+  margin-bottom: 8px;
 }
 
 .sheet__subheading {

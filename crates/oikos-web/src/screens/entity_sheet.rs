@@ -1,4 +1,5 @@
-//! The detail sheet of one entity: controls, device info, raw state and the override editor.
+//! The detail sheet of one entity: controls, the settings that apply to it, and the device info
+//! and raw state folded under "Device & diagnostics".
 
 use leptos::prelude::*;
 use leptos_router::components::A;
@@ -10,9 +11,9 @@ use crate::cards::Sender;
 use crate::cards::light::has_colour;
 use crate::components::hs_wheel::HsWheel;
 
-use crate::format::{format_timestamp, kind_word, list_label, title_suffix, wrap_id};
+use crate::format::{format_timestamp, list_label, title_suffix, type_word, wrap_id};
 use crate::house::House;
-use crate::icons::kind_icon;
+use crate::icons::entity_icon;
 use crate::nav::ReturnPath;
 use crate::override_editor::OverrideEditor;
 use crate::screens::home::card_for;
@@ -150,8 +151,8 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
     let dash = || "—".to_owned();
     Some(
         view! {
-            <Panel title="Device">
-                <dl class="sheet__rows">
+            <h3 class="sheet__subheading">"Device"</h3>
+            <dl class="sheet__rows">
                     <Row label="Name" value=device.friendly_name.clone() />
                     <Row label="Model" value=device.model.clone().unwrap_or_else(dash) />
                     <Row label="Vendor" value=device.vendor.clone().unwrap_or_else(dash) />
@@ -184,7 +185,6 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
                             </ul>
                         }
                     })}
-            </Panel>
         }
         .into_any(),
     )
@@ -198,13 +198,11 @@ fn state_panel(entity: &EntityView) -> impl IntoView + use<> {
         .last_update
         .map_or_else(|| "—".to_owned(), format_timestamp);
     view! {
-        <Panel title="State">
-            <h3 class="sheet__subheading">"Value"</h3>
-            <pre class="sheet__json">{value}</pre>
-            <h3 class="sheet__subheading">"Attributes"</h3>
-            <pre class="sheet__json">{attributes}</pre>
-            <p class="sheet__updated">"Last update: " {updated}</p>
-        </Panel>
+        <h3 class="sheet__subheading">"Value"</h3>
+        <pre class="sheet__json">{value}</pre>
+        <h3 class="sheet__subheading">"Attributes"</h3>
+        <pre class="sheet__json">{attributes}</pre>
+        <p class="sheet__updated">"Last update: " {updated}</p>
     }
 }
 
@@ -236,11 +234,11 @@ pub fn SheetBody(id: String) -> impl IntoView {
                 None => e.name.clone(),
             };
             view! {
-                <span class="sheet__icon" inner_html=kind_icon(e.kind, e.device_class.as_deref())></span>
+                <span class="sheet__icon" inner_html=entity_icon(&e)></span>
                 <div class="sheet__titles">
                     <h1 class="sheet__title">{wrap_id(&title)}</h1>
                     <p class="sheet__subtitle">
-                        {area} " · " {kind_word(e.kind)} " · "
+                        {area} " · " {type_word(&e)} " · "
                         <span class=availability_class(availability)></span>
                         " "
                         {availability_word(availability)}
@@ -262,11 +260,14 @@ pub fn SheetBody(id: String) -> impl IntoView {
             <div class="sheet__controls">{move || entity.get().map(card_for)}</div>
         </Panel>
         <ColourPanel id=id.clone() entity=entity />
-        {move || entity.get().and_then(|e| device_panel(house, &e))}
-        {move || entity.get().map(|e| state_panel(&e))}
-        <Panel title="Override">
+        <Panel title="Settings">
             {initial.map(|e| view! { <OverrideEditor entity=e /> })}
         </Panel>
+        <details class="sheet__panel sheet__details">
+            <summary class="sheet__heading sheet__summary">"Device & diagnostics"</summary>
+            {move || entity.get().and_then(|e| device_panel(house, &e))}
+            {move || entity.get().map(|e| state_panel(&e))}
+        </details>
     }
 }
 
