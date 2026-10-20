@@ -39,7 +39,11 @@ fn EditControls(
         let snapshot = draft.get_untracked();
         spawn_local(async move {
             match api::put_flow(&snapshot).await {
-                Ok(view) => draft.set(view.definition),
+                // Saved: back to the view, which the hub's echo updates.
+                Ok(view) => {
+                    draft.set(view.definition);
+                    editing.set(false);
+                }
                 Err(e) => toasts.push(e.error),
             }
             saving.set(false);

@@ -2769,8 +2769,11 @@ html:has(.flow-canvas-screen) {
   }
 }
 
+/* Above the cards: where hand-placed cards leave a gap narrower than a label, the label
+   stays readable instead of hiding under the next card. */
 .flow-wire-label {
   position: absolute;
+  z-index: 1;
   padding: 0 6px;
   border: 1px solid;
   border-radius: 999px;

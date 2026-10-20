@@ -7,7 +7,7 @@ pub const ZOOM_MIN: f64 = 0.25;
 /// Highest zoom reachable by wheel, pinch or the buttons.
 pub const ZOOM_MAX: f64 = 2.0;
 /// Lowest zoom `fit` picks.
-pub const FIT_MIN: f64 = 0.4;
+pub const FIT_MIN: f64 = 0.3;
 /// Highest zoom `fit` picks, so a single card is not blown up.
 pub const FIT_MAX: f64 = 1.0;
 /// Multiplicative step of the +/− buttons.
@@ -213,6 +213,41 @@ mod tests {
             let s = v.to_screen(p);
             assert!((0.0..=1400.0).contains(&s.x) && (0.0..=800.0).contains(&s.y));
         }
+    }
+
+    #[test]
+    fn fit_frames_a_wide_flow_and_clamps_huge_ones() {
+        // About the size of the 23-node LED flow: it must fit a 1440 × 818 canvas whole.
+        let wide = Rect {
+            x: 40.0,
+            y: 40.0,
+            w: 3850.0,
+            h: 500.0,
+        };
+        let v = fit(wide, 1440.0, 818.0);
+        for p in [
+            Pt {
+                x: wide.x,
+                y: wide.y,
+            },
+            Pt {
+                x: wide.x + wide.w,
+                y: wide.y + wide.h,
+            },
+        ] {
+            let s = v.to_screen(p);
+            assert!(
+                (0.0..=1440.0).contains(&s.x) && (0.0..=818.0).contains(&s.y),
+                "{s:?}"
+            );
+        }
+        let huge = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 50_000.0,
+            h: 500.0,
+        };
+        assert_eq!(fit(huge, 1440.0, 818.0).zoom, FIT_MIN);
     }
 
     #[test]

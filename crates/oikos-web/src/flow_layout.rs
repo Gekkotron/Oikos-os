@@ -32,7 +32,8 @@ pub struct Rect {
     pub h: f64,
 }
 
-/// One drawn wire: its SVG path, where its "yes"/"no" label sits and where its ✕ goes.
+/// One drawn wire: its SVG path, where its "yes"/"no" label sits (just right of its pin, at
+/// the pin's height) and where its ✕ goes (halfway along).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Route {
     pub d: String,
@@ -50,8 +51,9 @@ const SAMPLES: usize = 24;
 /// Widest horizontal run of the curve that takes a wire onto, or off, its lane; kept inside
 /// the gap between two columns.
 const RAMP: f64 = COL_GAP * 0.75;
-/// Distance from a wire's start to its "yes"/"no" label.
-const LABEL_AT: f64 = 28.0;
+/// Horizontal distance from a wire's pin to the centre of its "yes"/"no" label. The label sits
+/// at the pin's own height, so the two labels of an `if` stay as far apart as its two pins.
+const LABEL_DX: f64 = 24.0;
 
 /// Where each card goes: the stored positions when every node has one (a flow arranged by hand
 /// keeps its look), else [`auto_layout`].
@@ -397,7 +399,8 @@ pub fn route(from: Pt, to: Pt, obstacles: &[Rect]) -> Route {
     finish(from, &path)
 }
 
-/// The SVG path of `path`, plus the points at [`LABEL_AT`] along it and halfway along it.
+/// The SVG path of `path`, its label point ([`LABEL_DX`] right of `from`) and the point halfway
+/// along it.
 fn finish(from: Pt, path: &[Seg]) -> Route {
     let mut d = format!("M{:.1} {:.1}", from.x, from.y);
     for seg in path {
@@ -439,7 +442,10 @@ fn finish(from: Pt, path: &[Seg]) -> Route {
     };
     Route {
         d,
-        label_at: along(LABEL_AT.min(total)),
+        label_at: Pt {
+            x: from.x + LABEL_DX,
+            y: from.y,
+        },
         mid: along(total / 2.0),
     }
 }
@@ -748,8 +754,50 @@ mod tests {
     fn clear_route_is_one_cubic_with_label_and_middle() {
         let r = route(Pt { x: 0.0, y: 0.0 }, Pt { x: 400.0, y: 0.0 }, &[]);
         assert_eq!(r.d, "M0.0 0.0 C200.0 0.0, 200.0 0.0, 400.0 0.0");
-        assert!((r.label_at.x - 28.0).abs() < 1.0, "{:?}", r.label_at);
+        assert_eq!(
+            r.label_at,
+            Pt {
+                x: LABEL_DX,
+                y: 0.0
+            }
+        );
         assert!((r.mid.x - 200.0).abs() < 1.0, "{:?}", r.mid);
+    }
+
+    #[test]
+    fn if_labels_stay_apart_when_branches_bend_toward_each_other() {
+        // `true` leaves the upper pin but goes down, `false` leaves the lower pin but goes up:
+        // the two wires cross right after the card.
+        let flow = Flow::decode(
+            br#"{
+          "id": "f", "name": "F",
+          "nodes": [
+            { "id": "check", "type": "if", "params": { "op": "eq", "value": true },
+              "position": { "x": 0, "y": 200 } },
+            { "id": "down", "type": "delay", "params": { "for": "1m" },
+              "position": { "x": 328, "y": 320 } },
+            { "id": "up", "type": "delay", "params": { "for": "1m" },
+              "position": { "x": 328, "y": 80 } }
+          ],
+          "edges": [
+            { "from": "check", "port": "true", "to": "down" },
+            { "from": "check", "port": "false", "to": "up" }
+          ]
+        }"#,
+        )
+        .unwrap();
+        let wires = routes(&flow, &positions(&flow));
+        let label = |port: &str| {
+            wires
+                .iter()
+                .find(|(k, _)| k.1.as_deref() == Some(port))
+                .map(|(_, r)| r.label_at)
+                .unwrap()
+        };
+        let (yes, no) = (label("true"), label("false"));
+        assert!((no.y - yes.y).abs() >= 16.0, "yes {yes:?} no {no:?}");
+        // Each label sits just right of its own pin.
+        assert!(yes.x > NODE_W && yes.x < NODE_W + COL_GAP / 2.0, "{yes:?}");
     }
 
     #[test]

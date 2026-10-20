@@ -408,3 +408,43 @@ async fn edit_mode_selects_a_card_and_opens_its_settings() {
     assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
     assert_eq!(count(&host, ".flow-drawer .node-editor"), 1, "{html}");
 }
+
+/// Answers every `fetch` with `body` as a 200 JSON response, until the returned guard drops.
+struct FakeFetch(wasm_bindgen::JsValue);
+
+impl FakeFetch {
+    fn answer(body: &str) -> Self {
+        let global = js_sys::global();
+        let real = js_sys::Reflect::get(&global, &"fetch".into()).unwrap();
+        let script = format!(
+            "return Promise.resolve(new Response({}, {{ status: 200, headers: {{ 'content-type': 'application/json' }} }}))",
+            serde_json::to_string(body).unwrap()
+        );
+        let fake = js_sys::Function::new_no_args(&script);
+        js_sys::Reflect::set(&global, &"fetch".into(), &fake).unwrap();
+        Self(real)
+    }
+}
+
+impl Drop for FakeFetch {
+    fn drop(&mut self) {
+        js_sys::Reflect::set(&js_sys::global(), &"fetch".into(), &self.0).unwrap();
+    }
+}
+
+#[wasm_bindgen_test]
+async fn save_leaves_edit_mode() {
+    let saved = reference_view(None, vec![]);
+    let host = host();
+    let _mounted = mount(&host, vec![saved.clone()], "/flows/living_led_motion");
+    tick().await;
+    click(&host, ".flow-toolbar__edit");
+    tick().await;
+    assert_eq!(count(&host, ".flow-graph--editing"), 1);
+    let _fetch = FakeFetch::answer(&serde_json::to_string(&saved).unwrap());
+    click(&host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-graph--editing"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-toolbar__edit"), 1, "{html}");
+}
