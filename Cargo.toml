@@ -47,6 +47,7 @@ wasm-bindgen-test = "0.3"
 rust-embed = { version = "8", features = ["debug-embed"] }
 mime_guess = "2"
 time = { version = "0.3", features = ["formatting", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "json", "migrate", "macros"] }
 
 # Keep `target/` small: line tables only for our crates, no debug info and a little
 # optimisation for dependencies (native and wasm). Release builds are untouched.
