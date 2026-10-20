@@ -97,9 +97,10 @@ fn EditControls(
                                 ..Default::default()
                             },
                         );
+                    } else {
+                        editor.reset(view.definition);
+                        editing.set(false);
                     }
-                    editor.reset(view.definition);
-                    editing.set(false);
                 }
                 Err(e) => toasts.push(e.error),
             }

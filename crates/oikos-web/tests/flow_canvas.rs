@@ -387,16 +387,47 @@ async fn cards_have_handles_and_orphans_fade() {
 struct FakeFetch(wasm_bindgen::JsValue);
 
 impl FakeFetch {
+    /// Also records every request as `{url, method, body}` for [`FakeFetch::requests`].
     fn answer(body: &str) -> Self {
         let global = js_sys::global();
         let real = js_sys::Reflect::get(&global, &"fetch".into()).unwrap();
         let script = format!(
-            "return Promise.resolve(new Response({}, {{ status: 200, headers: {{ 'content-type': 'application/json' }} }}))",
+            "return (async () => {{
+                const req = input instanceof Request ? input : null;
+                const url = req ? req.url : String(input);
+                const method = req ? req.method : ((init && init.method) || 'GET');
+                const text = req ? await req.clone().text() : ((init && init.body) || '');
+                (globalThis.__fetches = globalThis.__fetches || []).push({{ url, method, body: text }});
+                return new Response({}, {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
+            }})()",
             serde_json::to_string(body).unwrap()
         );
-        let fake = js_sys::Function::new_no_args(&script);
+        js_sys::Reflect::set(&global, &"__fetches".into(), &js_sys::Array::new()).unwrap();
+        let fake = js_sys::Function::new_with_args("input, init", &script);
         js_sys::Reflect::set(&global, &"fetch".into(), &fake).unwrap();
         Self(real)
+    }
+
+    /// The (method, path, body) of every request made since `answer`.
+    fn requests(&self) -> Vec<(String, String, String)> {
+        let log: js_sys::Array = js_sys::Reflect::get(&js_sys::global(), &"__fetches".into())
+            .unwrap()
+            .unchecked_into();
+        let field = |entry: &wasm_bindgen::JsValue, key: &str| {
+            js_sys::Reflect::get(entry, &key.into())
+                .unwrap()
+                .as_string()
+                .unwrap_or_default()
+        };
+        log.iter()
+            .map(|e| {
+                let url = field(&e, "url");
+                let path = url
+                    .find("/api/")
+                    .map_or(url.clone(), |i| url[i..].to_owned());
+                (field(&e, "method"), path, field(&e, "body"))
+            })
+            .collect()
     }
 }
 
@@ -989,23 +1020,36 @@ async fn rename_updates_draft_name() {
     type_into(&name, "Hall light", "input");
     tick().await;
     assert_eq!(name.value(), "Hall light");
-    // Cancel restores the saved name and leaves the id alone.
-    click(&host, ".flow-toolbar button[aria-label=\"Cancel editing\"]");
+    // Saving sends the new name under the original id.
+    let fetch = FakeFetch::answer(&serde_json::to_string(&reference_view(None, vec![])).unwrap());
+    click(&host, ".flow-toolbar button[aria-label=Save]");
     gloo_timers::future::TimeoutFuture::new(50).await;
+    let requests = fetch.requests();
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert_eq!(requests[0].1, "/api/v1/flows/living_led_motion");
+    let sent: serde_json::Value = serde_json::from_str(&requests[0].2).unwrap();
+    assert_eq!(sent["id"], "living_led_motion");
+    assert_eq!(sent["name"], "Hall light");
+    drop(fetch);
+    // Back in view mode the header shows what the hub holds.
     assert_eq!(
         text(&host, ".flow-toolbar h1.flow-toolbar__name"),
         "Living LED on motion"
     );
 }
 
-#[wasm_bindgen_test]
-async fn saving_a_new_flow_derives_its_id_and_opens_it() {
+/// Saves a new flow called "Nouveau flow" with `existing` already in the house and the hub
+/// answering with `answer_id`; returns the PUT it made and the path the app ended on.
+async fn save_new_flow(
+    existing: Vec<FlowView>,
+    answer_id: &str,
+) -> (Vec<(String, String, String)>, String, String) {
     let host = host();
-    let _mounted = mount(&host, vec![], "/flows/new");
+    let _mounted = mount(&host, existing, "/flows/new");
     gloo_timers::future::TimeoutFuture::new(50).await;
     let saved = FlowView {
         definition: Flow {
-            id: "nouveau_flow".into(),
+            id: answer_id.into(),
             name: "Nouveau flow".into(),
             ..Default::default()
         },
@@ -1016,16 +1060,45 @@ async fn saving_a_new_flow_derives_its_id_and_opens_it() {
     let name: web_sys::HtmlInputElement =
         element(&host, ".flow-toolbar input[aria-label=\"Flow name\"]").unchecked_into();
     type_into(&name, "Nouveau flow", "input");
-    let _fetch = FakeFetch::answer(&serde_json::to_string(&saved).unwrap());
+    let fetch = FakeFetch::answer(&serde_json::to_string(&saved).unwrap());
     click(&host, ".flow-toolbar button[aria-label=Save]");
     gloo_timers::future::TimeoutFuture::new(100).await;
     let path = web_sys::window().unwrap().location().pathname().unwrap();
-    assert_eq!(path, "/flows/nouveau_flow", "{}", host.inner_html());
     assert_eq!(count(&host, ".flow-graph--editing"), 0);
-    assert_eq!(
-        text(&host, ".flow-toolbar h1.flow-toolbar__name"),
-        "Nouveau flow"
-    );
+    (fetch.requests(), path, host.inner_html())
+}
+
+#[wasm_bindgen_test]
+async fn saving_a_new_flow_derives_its_id_and_opens_it() {
+    let (requests, path, html) = save_new_flow(vec![], "nouveau_flow").await;
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    let (method, url, body) = &requests[0];
+    assert_eq!(method, "PUT");
+    assert_eq!(url, "/api/v1/flows/nouveau_flow");
+    let sent: serde_json::Value = serde_json::from_str(body).unwrap();
+    assert_eq!(sent["id"], "nouveau_flow");
+    assert_eq!(sent["enabled"], false);
+    assert_eq!(path, "/flows/nouveau_flow", "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn saving_a_new_flow_avoids_a_taken_id() {
+    let taken = FlowView {
+        definition: Flow {
+            id: "nouveau_flow".into(),
+            name: "Nouveau flow".into(),
+            ..Default::default()
+        },
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let (requests, path, html) = save_new_flow(vec![taken], "nouveau_flow_2").await;
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert_eq!(requests[0].1, "/api/v1/flows/nouveau_flow_2");
+    let sent: serde_json::Value = serde_json::from_str(&requests[0].2).unwrap();
+    assert_eq!(sent["id"], "nouveau_flow_2");
+    assert_eq!(path, "/flows/nouveau_flow_2", "{html}");
 }
 
 #[wasm_bindgen_test]
