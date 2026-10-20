@@ -4,6 +4,7 @@
 
 pub mod energy;
 pub mod flow;
+pub mod history;
 pub mod model;
 
 mod config;
