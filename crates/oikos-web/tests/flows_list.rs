@@ -108,3 +108,14 @@ async fn empty_list_shows_the_empty_state() {
         "{html}"
     );
 }
+
+#[wasm_bindgen_test]
+async fn list_has_new_flow_button() {
+    let host = host();
+    let _mounted = mount(&host, vec![]);
+    tick().await;
+    let link = host
+        .query_selector("a.flows-new[href=\"/flows/new\"]")
+        .unwrap();
+    assert!(link.is_some(), "{}", host.inner_html());
+}

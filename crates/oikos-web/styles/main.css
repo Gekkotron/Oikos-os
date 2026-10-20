@@ -1395,6 +1395,10 @@ a[aria-current="page"] .nav__glyph {
   margin-top: 4px;
 }
 
+.flows .sheet__header {
+  justify-content: space-between;
+}
+
 .sheet__back {
   display: inline-flex;
   flex: none;
@@ -2421,6 +2425,22 @@ html:has(.flow-canvas-screen) {
   white-space: nowrap;
 }
 
+.flow-toolbar__name--input {
+  flex: 1;
+  width: 14ch;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--chip-border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+}
+
+.flow-toolbar__name--input:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 1px;
+}
+
 .flow-toolbar__mode {
   flex: none;
   padding: 1px 8px;
@@ -2626,7 +2646,8 @@ html:has(.flow-canvas-screen) {
 
 /* No editor on a phone or a touch-only screen. */
 @media (max-width: 719px), (hover: none) and (pointer: coarse) {
-  .flow-toolbar__edit {
+  .flow-toolbar__edit,
+  .flows-new {
     display: none;
   }
 }

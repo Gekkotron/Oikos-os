@@ -1,10 +1,13 @@
-//! The floating bars over the canvas: top-left the back link, the flow's name and its mode;
+//! The floating bars over the canvas: top-left the back link, the flow's name (a text field
+//! while editing) and its mode;
 //! top-right the enable switch, Run, Edit and Runs (＋ Add, Tidy, Undo, Cancel and Save while
 //! editing).
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use leptos_router::NavigateOptions;
 use leptos_router::components::A;
+use leptos_router::hooks::use_navigate;
 use oikos_api::FlowView;
 use oikos_core::flow::{Flow, FlowMode, NodeKind};
 
@@ -13,9 +16,10 @@ use super::{Camera, Editor, Selection};
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::toast::Toasts;
-use crate::flow_edit::add_node;
+use crate::flow_edit::{add_node, slug_id};
 use crate::flow_layout::{NODE_H, NODE_W, Pt, tidy, with_resolved_positions};
 use crate::flow_viewport::visible_world;
+use crate::house::House;
 use crate::icons::{CHECK, PENCIL, PLAY, X_MARK};
 use crate::screens::flow_schedule::SaveBlocked;
 
@@ -44,11 +48,20 @@ fn EditControls(
     let toasts = expect_context::<Toasts>();
     let blocked = use_context::<SaveBlocked>();
     let is_blocked = move || blocked.is_some_and(|b| b.0.get());
+    let house = expect_context::<House>();
+    let navigate = use_navigate();
+    let go_back = navigate.clone();
+    // An empty id marks a flow that was never saved: there is nothing to go back to.
     let cancel = move |_| {
         if let Some(b) = blocked {
             b.0.set(false);
         }
-        editor.reset(original.get_untracked());
+        let original = original.get_untracked();
+        if original.id.is_empty() {
+            go_back("/flows", NavigateOptions::default());
+            return;
+        }
+        editor.reset(original);
         editing.set(false);
     };
     let save = move |_| {
@@ -56,11 +69,35 @@ fn EditControls(
             return;
         }
         saving.set(true);
-        let snapshot = editor.draft.get_untracked();
+        let mut snapshot = editor.draft.get_untracked();
+        let is_new = snapshot.id.is_empty();
+        if is_new {
+            let taken = house
+                .flows
+                .with_untracked(|flows| flows.iter().map(|f| f.definition.id.clone()).collect());
+            snapshot.id = slug_id(&snapshot.name, &taken);
+        }
+        let navigate = navigate.clone();
         spawn_local(async move {
             match api::put_flow(&snapshot).await {
-                // Saved: back to the view, which the hub's echo updates.
+                // Saved: back to the view, which the hub's echo updates. A new flow moves to
+                // its own address, and the screen there finds it in the house.
                 Ok(view) => {
+                    if is_new {
+                        let saved = view.clone();
+                        house.flows.update(|flows| {
+                            if !flows.iter().any(|f| f.definition.id == saved.definition.id) {
+                                flows.push(saved);
+                            }
+                        });
+                        navigate(
+                            &format!("/flows/{}", api::encode_id(&view.definition.id)),
+                            NavigateOptions {
+                                replace: true,
+                                ..Default::default()
+                            },
+                        );
+                    }
                     editor.reset(view.definition);
                     editing.set(false);
                 }
@@ -189,12 +226,18 @@ pub fn Toolbar(
     drawer: RwSignal<bool>,
     selection: RwSignal<Option<Selection>>,
 ) -> impl IntoView {
-    let name = move || {
-        if editing.get() {
-            editor.draft.with(|f| f.name.clone())
-        } else {
-            view.with(|v| v.definition.name.clone())
+    let name = move || view.with(|v| v.definition.name.clone());
+    // The first keystroke after focusing the field records one undo step; the rest join it.
+    let armed = StoredValue::new(false);
+    let rename = move |ev: web_sys::Event| {
+        let text = event_target_value(&ev);
+        if armed.get_value() {
+            armed.set_value(false);
+            editor
+                .history
+                .update_value(|h| h.record(editor.draft.get_untracked()));
         }
+        editor.draft.update(|f| f.name = text);
     };
     let mode = move || {
         view.with(|v| match v.definition.mode {
@@ -208,7 +251,21 @@ pub fn Toolbar(
             <A href="/flows" attr:class="flow-toolbar__back" attr:aria-label="Back to flows">
                 "←"
             </A>
-            <h1 class="flow-toolbar__name">{name}</h1>
+            <Show
+                when=move || editing.get()
+                fallback=move || view! { <h1 class="flow-toolbar__name">{name}</h1> }
+            >
+                <input
+                    type="text"
+                    class="flow-toolbar__name flow-toolbar__name--input"
+                    aria-label="Flow name"
+                    spellcheck="false"
+                    autocomplete="off"
+                    prop:value=move || editor.draft.with(|f| f.name.clone())
+                    on:focus=move |_| armed.set_value(true)
+                    on:input=rename
+                />
+            </Show>
             <span class="flow-toolbar__mode">{mode}</span>
         </div>
         <div class="flow-toolbar flow-toolbar--actions">

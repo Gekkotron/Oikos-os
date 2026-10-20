@@ -9,7 +9,7 @@ use oikos_core::flow::{Flow, Position};
 use oikos_web::components::now::install_now;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
-use oikos_web::screens::flow_canvas::FlowCanvasScreen;
+use oikos_web::screens::flow_canvas::{FlowCanvasScreen, NewFlowScreen};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 wasm_bindgen_test_configure!(run_in_browser);
@@ -73,6 +73,7 @@ fn mount_house(
             view! {
                 <Router>
                     <Routes fallback=|| "fallback">
+                        <Route path=path!("/flows/new") view=NewFlowScreen />
                         <Route path=path!("/flows/:id") view=FlowCanvasScreen />
                     </Routes>
                 </Router>
@@ -955,4 +956,85 @@ async fn escape_closes_picker() {
     );
     tick().await;
     assert_eq!(count(&host, ".flow-picker"), 0);
+}
+
+// ---- New flow and renaming ------------------------------------------------------------------
+
+#[wasm_bindgen_test]
+async fn new_flow_starts_in_edit_mode() {
+    let host = host();
+    let _mounted = mount(&host, vec![], "/flows/new");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let name: web_sys::HtmlInputElement =
+        element(&host, ".flow-toolbar input[aria-label=\"Flow name\"]").unchecked_into();
+    assert_eq!(name.value(), "New flow");
+    assert_eq!(count(&host, ".flow-node"), 0);
+    assert_eq!(count(&host, ".flow-switch"), 0);
+    assert_eq!(
+        count(&host, ".flow-graph--editing"),
+        1,
+        "{}",
+        host.inner_html()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn rename_updates_draft_name() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let name: web_sys::HtmlInputElement =
+        element(&host, ".flow-toolbar input[aria-label=\"Flow name\"]").unchecked_into();
+    assert_eq!(name.value(), "Living LED on motion");
+    name.focus().unwrap();
+    type_into(&name, "Hall light", "input");
+    tick().await;
+    assert_eq!(name.value(), "Hall light");
+    // Cancel restores the saved name and leaves the id alone.
+    click(&host, ".flow-toolbar button[aria-label=\"Cancel editing\"]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(
+        text(&host, ".flow-toolbar h1.flow-toolbar__name"),
+        "Living LED on motion"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn saving_a_new_flow_derives_its_id_and_opens_it() {
+    let host = host();
+    let _mounted = mount(&host, vec![], "/flows/new");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let saved = FlowView {
+        definition: Flow {
+            id: "nouveau_flow".into(),
+            name: "Nouveau flow".into(),
+            ..Default::default()
+        },
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let name: web_sys::HtmlInputElement =
+        element(&host, ".flow-toolbar input[aria-label=\"Flow name\"]").unchecked_into();
+    type_into(&name, "Nouveau flow", "input");
+    let _fetch = FakeFetch::answer(&serde_json::to_string(&saved).unwrap());
+    click(&host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(100).await;
+    let path = web_sys::window().unwrap().location().pathname().unwrap();
+    assert_eq!(path, "/flows/nouveau_flow", "{}", host.inner_html());
+    assert_eq!(count(&host, ".flow-graph--editing"), 0);
+    assert_eq!(
+        text(&host, ".flow-toolbar h1.flow-toolbar__name"),
+        "Nouveau flow"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn cancel_on_an_unsaved_flow_goes_to_the_list() {
+    let host = host();
+    let _mounted = mount(&host, vec![], "/flows/new");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    click(&host, ".flow-toolbar button[aria-label=\"Cancel editing\"]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let path = web_sys::window().unwrap().location().pathname().unwrap();
+    assert_eq!(path, "/flows");
 }

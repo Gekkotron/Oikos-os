@@ -18,7 +18,7 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use oikos_api::{FlowView, RunView};
-use oikos_core::flow::Flow;
+use oikos_core::flow::{Flow, FlowMode};
 use wasm_bindgen::JsCast;
 
 pub use drawer::Drawer;
@@ -121,11 +121,16 @@ fn step_times(run: &RunView) -> BTreeMap<String, String> {
 }
 
 #[component]
-fn FlowBody(view: Signal<FlowView>) -> impl IntoView {
+fn FlowBody(
+    view: Signal<FlowView>,
+    /// Starts in edit mode (a flow that was just created).
+    #[prop(optional)]
+    start_editing: bool,
+) -> impl IntoView {
     let flow = Memo::new(move |_| view.with(|v| v.definition.clone()));
     let runs = Memo::new(move |_| view.with(|v| v.runs.clone()));
     let invalid = Memo::new(move |_| view.with(|v| v.invalid.clone()));
-    let editing = RwSignal::new(false);
+    let editing = RwSignal::new(start_editing);
     let saving = RwSignal::new(false);
     let selection = RwSignal::new(None::<Selection>);
     let drawer = RwSignal::new(false);
@@ -374,6 +379,33 @@ pub fn FlowCanvasScreen() -> impl IntoView {
                 }
                 ().into_any()
             }}
+        </div>
+    }
+}
+
+/// A flow that does not exist yet, opened in edit mode. Its empty id marks it unsaved: the first
+/// Save derives the id from the name, and success moves to the flow's own page.
+#[component]
+pub fn NewFlowScreen() -> impl IntoView {
+    let blank = FlowView {
+        definition: Flow {
+            id: String::new(),
+            name: "New flow".into(),
+            enabled: false,
+            mode: FlowMode::Single,
+            ..Default::default()
+        },
+        invalid: None,
+        active_run: None,
+        runs: Vec::new(),
+    };
+    let top = RwSignal::new(0.0_f64);
+    Effect::new(move |_| top.set(top_offset()));
+    let resize = window_event_listener(ev::resize, move |_| top.set(top_offset()));
+    on_cleanup(move || resize.remove());
+    view! {
+        <div class="flow-canvas-screen" style=move || format!("--flow-top:{}px", top.get())>
+            <FlowBody view=Signal::stored(blank) start_editing=true />
         </div>
     }
 }

@@ -96,6 +96,9 @@ pub fn FlowsScreen() -> impl IntoView {
                 <div class="sheet__titles">
                     <h1 class="sheet__title">"Flows"</h1>
                 </div>
+                <A href="/flows/new" attr:class="btn flows-new">
+                    "New flow"
+                </A>
             </header>
             <Show
                 when=move || house.flows.with(|f| !f.is_empty())
