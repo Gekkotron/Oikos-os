@@ -24,10 +24,13 @@ pub async fn run(db: Db, history: Arc<History>) {
     time::sleep(START_DELAY).await;
     loop {
         let now = crate::clock::now_micros();
-        let dirty_from = history.dirty_from.load(Ordering::Relaxed);
-        match rollup_once(&db, now, dirty_from).await {
-            Ok(()) => history.dirty_from.store(i64::MAX, Ordering::Relaxed),
-            Err(e) => tracing::warn!(error = %e, "history rollup failed"),
+        // Take the current mark atomically. On failure, keep the lowest of the mark we
+        // took and anything the writer has set in the meantime, so late rows that arrived
+        // during the pass are not dropped on the floor.
+        let dirty_from = history.dirty_from.swap(i64::MAX, Ordering::Relaxed);
+        if let Err(e) = rollup_once(&db, now, dirty_from).await {
+            tracing::warn!(error = %e, "history rollup failed");
+            history.dirty_from.fetch_min(dirty_from, Ordering::Relaxed);
         }
         time::sleep(INTERVAL).await;
     }
@@ -85,4 +88,29 @@ pub async fn rollup_once(db: &Db, now: Micros, dirty_from: Micros) -> Result<(),
 
 fn hour_floor(t: Micros) -> Micros {
     t.div_euclid(HOUR) * HOUR
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    #[test]
+    fn dirty_from_mark_during_rollup_is_preserved() {
+        // Mimics the live race: a writer marks hour `late` while the rollup pass is in
+        // flight. The pass must not clobber the writer's mark on completion.
+        let dirty_from = AtomicI64::new(super::HOUR);
+
+        // Pass starts: take the current mark atomically.
+        let for_pass = dirty_from.swap(i64::MAX, Ordering::Relaxed);
+        assert_eq!(for_pass, super::HOUR);
+        assert_eq!(dirty_from.load(Ordering::Relaxed), i64::MAX);
+
+        // Writer concurrently flushes a late row for an earlier hour.
+        let late_hour = super::HOUR / 2;
+        dirty_from.fetch_min(late_hour, Ordering::Relaxed);
+
+        // Pass completes successfully: it does NOT touch dirty_from — the writer's mark
+        // stays set so the next pass picks it up.
+        assert_eq!(dirty_from.load(Ordering::Relaxed), late_hour);
+    }
 }

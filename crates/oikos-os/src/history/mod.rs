@@ -88,6 +88,26 @@ impl History {
         })
     }
 
+    /// Starts just the writer task against the given config, returning the handle so a
+    /// test can observe whether the writer survives a database that is down at boot.
+    #[doc(hidden)]
+    pub fn spawn_writer_for_tests(
+        cfg: &HistoryConfig,
+        zone: Tz,
+    ) -> Result<(Arc<Self>, tokio::task::JoinHandle<()>), sqlx::Error> {
+        let db = Db::connect_lazy(&cfg.url)?;
+        let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
+        let history = Arc::new(Self {
+            sender: tx,
+            db: Some(db.clone()),
+            zone,
+            drop_count: AtomicU64::new(0),
+            dirty_from: AtomicI64::new(i64::MAX),
+        });
+        let handle = tokio::spawn(writer::run(db, history.clone(), rx, cfg.buffer_rows));
+        Ok((history, handle))
+    }
+
     /// Builds a History backed by nothing but a channel of `capacity`, for tests.
     pub fn detached(capacity: usize, zone: Tz) -> (Arc<Self>, mpsc::Receiver<Incoming>) {
         let (tx, rx) = mpsc::channel(capacity.max(1));

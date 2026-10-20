@@ -414,3 +414,37 @@ async fn today_power_and_unrecorded() {
 
     tdb.drop_db().await;
 }
+
+#[tokio::test]
+async fn writer_survives_unreachable_database_at_boot() {
+    use std::time::Duration;
+
+    let cfg = oikos_os::config::HistoryConfig {
+        url: "postgres://nouser:nopass@127.0.0.1:1/none".into(),
+        buffer_rows: 100,
+    };
+    let (history, handle) =
+        oikos_os::history::History::spawn_writer_for_tests(&cfg, chrono_tz::UTC)
+            .expect("lazy pool");
+
+    history.offer(Incoming {
+        at: 1_000_000,
+        id: "a".into(),
+        state: EntityState {
+            value: StateValue::OnOff(true),
+            attributes: serde_json::Map::new(),
+            availability: Availability::Online,
+            last_update: Some(1),
+        },
+    });
+
+    // Wait long enough for sqlx's acquire_timeout (5 s) to fire plus a retry tick: the
+    // regressed writer would have called migrate(), timed out, and returned by now.
+    tokio::time::sleep(Duration::from_secs(8)).await;
+    assert!(
+        !handle.is_finished(),
+        "writer must not exit when the database is unreachable at boot"
+    );
+
+    handle.abort();
+}

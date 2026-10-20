@@ -1,6 +1,10 @@
 //! Writer task: drains the writer channel into a bounded [`Pending`] buffer, diffs each
-//! batch against the dedupe cache, and inserts the resulting rows. On a database error the
-//! batch is re-queued at the front and the task backs off exponentially up to 30 s.
+//! batch against the dedupe cache, and inserts the resulting rows.
+//!
+//! The task survives a database that is down at boot or mid-run: migrations and the
+//! initial cache seed are retried on the tick, and until they succeed the loop keeps
+//! draining `rx` into `pending`. On an insert error the batch is re-queued at the front
+//! and the task backs off exponentially up to 30 s.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -9,13 +13,10 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::{self, MissedTickBehavior};
 
-use oikos_core::history::buckets::EnergyKind;
 use oikos_core::history::{HOUR, Incoming, LastWritten, Pending, Rows};
 
 use super::History;
 use super::db::Db;
-
-const _: EnergyKind = EnergyKind::Counter; // keep oikos_core::history::buckets reachable
 
 /// How many pending incoming states trigger an early flush. The 1 s tick covers slow
 /// streams; this covers busy ones.
@@ -30,43 +31,82 @@ pub async fn run(
     mut rx: mpsc::Receiver<Incoming>,
     buffer_rows: usize,
 ) {
-    if let Err(e) = db.migrate().await {
-        tracing::error!(error = %e, "history migrate failed; writer exiting");
-        return;
-    }
-    let mut last_written = match db.load_latest().await {
-        Ok(lw) => lw,
-        Err(e) => {
-            tracing::error!(error = %e, "history load_latest failed; writer exiting");
-            return;
-        }
-    };
     let mut pending = Pending::new(buffer_rows.max(1));
+    let mut last_written: Option<LastWritten> = None;
     let mut backoff = INITIAL_BACKOFF;
     let mut tick = time::interval(FLUSH_INTERVAL);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut pending_drops: u64 = 0;
+    let mut drop_logged = false;
 
     loop {
         tokio::select! {
             maybe = rx.recv() => {
                 let Some(inc) = maybe else {
-                    // Channel closed; try one final flush and exit.
-                    let _ = flush(&db, &mut pending, &mut last_written, &history, &mut backoff).await;
+                    if let Some(ref mut lw) = last_written {
+                        flush(&db, &mut pending, lw, &history, &mut backoff).await;
+                    }
                     return;
                 };
                 if !pending.push(inc) {
-                    tracing::warn!(pending = pending.len(), "history pending buffer full; dropped oldest");
+                    pending_drops += 1;
+                    if !drop_logged {
+                        tracing::warn!("history pending buffer full; dropping oldest states");
+                        drop_logged = true;
+                    }
                 }
-                if pending.len() >= BATCH_THRESHOLD {
-                    flush(&db, &mut pending, &mut last_written, &history, &mut backoff).await;
+                if let Some(lw) = last_written.as_mut()
+                    && pending.len() >= BATCH_THRESHOLD
+                {
+                    flush(&db, &mut pending, lw, &history, &mut backoff).await;
+                    note_pending_resume(&pending, &mut pending_drops, &mut drop_logged);
                 }
             }
             _ = tick.tick() => {
-                if !pending.is_empty() {
-                    flush(&db, &mut pending, &mut last_written, &history, &mut backoff).await;
+                if last_written.is_none() {
+                    match init(&db).await {
+                        Ok(lw) => {
+                            last_written = Some(lw);
+                            backoff = INITIAL_BACKOFF;
+                            tracing::info!("history writer ready");
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "history init failed; will retry");
+                            continue;
+                        }
+                    }
+                }
+                if let Some(lw) = last_written.as_mut()
+                    && !pending.is_empty()
+                {
+                    flush(&db, &mut pending, lw, &history, &mut backoff).await;
+                    note_pending_resume(&pending, &mut pending_drops, &mut drop_logged);
                 }
             }
         }
+    }
+}
+
+/// Migration + initial cache seed. Both must succeed before any insert.
+async fn init(db: &Db) -> Result<LastWritten, InitError> {
+    db.migrate().await.map_err(InitError::Migrate)?;
+    let lw = db.load_latest().await.map_err(InitError::Load)?;
+    Ok(lw)
+}
+
+#[derive(Debug, thiserror::Error)]
+enum InitError {
+    #[error("migrate: {0}")]
+    Migrate(#[from] sqlx::migrate::MigrateError),
+    #[error("load_latest: {0}")]
+    Load(#[from] sqlx::Error),
+}
+
+fn note_pending_resume(pending: &Pending, drops: &mut u64, logged: &mut bool) {
+    if pending.is_empty() && *drops > 0 {
+        tracing::info!(dropped = *drops, "history pending buffer drained");
+        *drops = 0;
+        *logged = false;
     }
 }
 
