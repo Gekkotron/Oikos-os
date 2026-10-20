@@ -2,19 +2,22 @@
 
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
-use oikos_core::model::{GroupKind, Kind, Placement, UNASSIGNED_AREA};
+use oikos_core::model::{GroupKind, Kind, Placement, SwitchType, UNASSIGNED_AREA};
 use std::collections::{BTreeMap, HashSet};
 
 use crate::cards::alarm::AlarmPanelCard;
 use crate::cards::binary_sensor::BinarySensorCard;
 use crate::cards::button::ButtonCard;
+use crate::cards::chime::ChimeCard;
 use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
+use crate::cards::door::DoorCard;
 use crate::cards::group::{CoverGroupCard, LightGroupCard};
 use crate::cards::light::LightCard;
 use crate::cards::number::NumberCard;
 use crate::cards::select::SelectCard;
 use crate::cards::sensor::SensorCard;
+use crate::cards::siren::SirenCard;
 use crate::cards::switch::SwitchCard;
 use crate::cards::vacuum::VacuumCard;
 use crate::cards::water_heater::WaterHeaterCard;
@@ -104,7 +107,12 @@ pub(crate) fn without_paired_humidity(mut shown: Vec<&EntityView>) -> Vec<&Entit
 pub(crate) fn card_for(entity: EntityView) -> AnyView {
     match entity.kind {
         Kind::Light => view! { <LightCard entity=entity /> }.into_any(),
-        Kind::Switch => view! { <SwitchCard entity=entity /> }.into_any(),
+        Kind::Switch => match SwitchType::of(entity.protocol_kind, &entity.ui) {
+            Some(SwitchType::Door) => view! { <DoorCard entity=entity /> }.into_any(),
+            Some(SwitchType::Siren) => view! { <SirenCard entity=entity /> }.into_any(),
+            Some(SwitchType::Chime) => view! { <ChimeCard entity=entity /> }.into_any(),
+            _ => view! { <SwitchCard entity=entity /> }.into_any(),
+        },
         Kind::Cover => view! { <CoverCard entity=entity /> }.into_any(),
         Kind::Climate => view! { <ClimateCard entity=entity /> }.into_any(),
         Kind::Sensor => view! { <SensorCard entity=entity /> }.into_any(),

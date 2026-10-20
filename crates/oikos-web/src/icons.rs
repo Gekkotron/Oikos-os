@@ -3,7 +3,7 @@
 
 use oikos_api::AlertChannel;
 use oikos_core::flow::NodeKind;
-use oikos_core::model::Kind;
+use oikos_core::model::{Kind, SwitchType};
 
 macro_rules! svg {
     ($body:literal) => {
@@ -99,6 +99,12 @@ pub const PLUG: &str = svg!(
     r#"<path d="M9 3v5"/><path d="M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>"#
 );
 pub const PLAY: &str = svg!(r#"<path d="M7 4.5v15l12-7.5z"/>"#);
+const SIREN: &str = svg!(
+    r#"<path d="M7 18v-6a5 5 0 0 1 10 0v6"/><path d="M5 18h14v3H5z"/><path d="M12 2v2M4.2 5.2l1.4 1.4M19.8 5.2l-1.4 1.4"/>"#
+);
+const CHIME: &str = svg!(
+    r#"<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>"#
+);
 pub const WAVES: &str = svg!(
     r#"<path d="M2.5 9c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/><path d="M2.5 15c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/>"#
 );
@@ -220,6 +226,18 @@ pub fn channel_icon(channel: AlertChannel) -> &'static str {
 }
 
 /// The icon for an entity: the device class wins when we draw one, else the kind's.
+/// The icon of an entity card or sheet: the switch type's glyph when a switch is shown as
+/// something else, else [`kind_icon`].
+pub fn entity_icon(entity: &oikos_api::EntityView) -> &'static str {
+    match SwitchType::of(entity.protocol_kind, &entity.ui) {
+        Some(SwitchType::Door) => DOOR,
+        Some(SwitchType::Siren) => SIREN,
+        Some(SwitchType::Chime) => CHIME,
+        Some(SwitchType::Plug) => PLUG,
+        _ => kind_icon(entity.kind, entity.device_class.as_deref()),
+    }
+}
+
 pub fn kind_icon(kind: Kind, device_class: Option<&str>) -> &'static str {
     if let Some(icon) = device_class.and_then(device_class_icon) {
         return icon;
@@ -261,6 +279,49 @@ mod tests {
     use super::{BINARY_SENSOR, PLUG, channel_icon, consumer_glyph, kind_icon, sensor_icon};
     use oikos_api::AlertChannel;
     use oikos_core::model::Kind;
+
+    fn switch(show_as: Option<&str>, kind: Kind) -> oikos_api::EntityView {
+        use oikos_core::model::{Capabilities, EntityCategory, EntityState, UiOverride};
+        oikos_api::EntityView {
+            id: "s".into(),
+            device_id: None,
+            name: "s".into(),
+            device_name: None,
+            label: None,
+            kind,
+            protocol_kind: kind,
+            device_class: None,
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "a".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui: UiOverride {
+                show_as: show_as.map(Into::into),
+                ..UiOverride::default()
+            },
+            state: EntityState::default(),
+        }
+    }
+
+    #[test]
+    fn entity_icon_follows_the_switch_type() {
+        use super::{CHIME, DOOR, LIGHT, SIREN, SWITCH, entity_icon};
+        assert_eq!(entity_icon(&switch(Some("door"), Kind::Switch)), DOOR);
+        assert_eq!(entity_icon(&switch(Some("siren"), Kind::Switch)), SIREN);
+        assert_eq!(entity_icon(&switch(Some("chime"), Kind::Switch)), CHIME);
+        assert_eq!(entity_icon(&switch(Some("plug"), Kind::Switch)), PLUG);
+        assert_eq!(entity_icon(&switch(None, Kind::Switch)), SWITCH);
+        let mut light_typed = switch(Some("light"), Kind::Switch);
+        light_typed.kind = Kind::Light;
+        assert_eq!(entity_icon(&light_typed), LIGHT);
+        assert_eq!(
+            entity_icon(&switch(Some("door"), Kind::Cover)),
+            kind_icon(Kind::Cover, None)
+        );
+    }
 
     #[test]
     fn sensor_icons_cover_every_group() {

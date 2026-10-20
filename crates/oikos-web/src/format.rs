@@ -1,7 +1,7 @@
 //! Human-readable state values for cards.
 
 use oikos_api::EntityView;
-use oikos_core::model::{EntityState, Kind, StateValue};
+use oikos_core::model::{EntityState, Kind, StateValue, SwitchType};
 
 const DASH: &str = "—";
 
@@ -126,6 +126,14 @@ pub fn kind_word(kind: Kind) -> String {
         .ok()
         .and_then(|v| v.as_str().map(word))
         .unwrap_or_default()
+}
+
+/// The word for what an entity is: the type a switch is shown as ("Door opener"), else its kind.
+pub fn type_word(entity: &EntityView) -> String {
+    match SwitchType::of(entity.protocol_kind, &entity.ui) {
+        Some(t) if t != SwitchType::Switch => t.label().to_owned(),
+        _ => kind_word(entity.kind),
+    }
 }
 
 /// What tells an entity apart from its same-named siblings: set when the entity is named exactly
@@ -258,6 +266,21 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn type_word_names_the_switch_type() {
+        let mut door = entity("gate", "gate", Kind::Switch, None);
+        door.ui.show_as = Some("door".into());
+        assert_eq!(super::type_word(&door), "Door opener");
+        assert_eq!(
+            super::type_word(&entity("s", "s", Kind::Switch, None)),
+            "Switch"
+        );
+        assert_eq!(
+            super::type_word(&entity("l", "l", Kind::Light, None)),
+            "Light"
+        );
     }
 
     #[test]

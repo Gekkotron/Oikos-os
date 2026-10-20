@@ -55,8 +55,8 @@ fn ActionTile(row: ActionRow, confirming: RwSignal<Option<String>>) -> impl Into
     let id = row.id.clone();
     let tap = row.tap();
     let is_button = row.kind == Kind::Button;
-    let verb = if is_button { "Press" } else { "Turn on" };
-    let question = format!("{verb} {}?", row.name);
+    let verb = row.verb();
+    let question = row.question();
     let on = row.available && row.on == Some(true);
     let word = row.state_word();
     let tap_label = match word {

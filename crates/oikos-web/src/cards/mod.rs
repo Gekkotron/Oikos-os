@@ -3,13 +3,16 @@
 pub mod alarm;
 pub mod binary_sensor;
 pub mod button;
+pub mod chime;
 pub mod climate;
 pub mod cover;
+pub mod door;
 pub mod group;
 pub mod light;
 pub mod number;
 pub mod select;
 pub mod sensor;
+pub mod siren;
 pub mod switch;
 pub mod vacuum;
 pub mod water_heater;

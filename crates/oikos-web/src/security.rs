@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::model::{
     Availability, Capabilities, Command, Kind, Placement, SensorGroup, SensorSection, StateValue,
-    UNASSIGNED_AREA,
+    SwitchType, UNASSIGNED_AREA,
 };
 
 /// An alarm panel. `state` is the raw alarm state string; `None`: nothing received yet.
@@ -45,6 +45,8 @@ pub struct ActionRow {
     pub name: String,
     pub area_name: Option<String>,
     pub kind: Kind,
+    /// What a switch is shown as; `None` for a button.
+    pub switch_type: Option<SwitchType>,
     pub on: Option<bool>,
     pub available: bool,
     pub ask: bool,
@@ -59,6 +61,18 @@ pub struct ActionTap {
 
 impl ActionRow {
     pub fn tap(&self) -> ActionTap {
+        let turn_on = || ActionTap {
+            command: Command::TurnOn {
+                brightness: None,
+                color: None,
+                effect: None,
+            },
+            confirm: self.ask,
+        };
+        // A door opener or a chime fires each time: there is nothing to turn off.
+        if matches!(self.switch_type, Some(SwitchType::Door | SwitchType::Chime)) {
+            return turn_on();
+        }
         match (self.kind, self.on) {
             (Kind::Switch, Some(true)) => ActionTap {
                 command: Command::TurnOff,
@@ -77,6 +91,22 @@ impl ActionRow {
                 confirm: self.ask,
             },
         }
+    }
+
+    /// The word on the confirm button: what a tap does to this kind of device.
+    pub fn verb(&self) -> &'static str {
+        match (self.kind, self.switch_type) {
+            (Kind::Button, _) => "Press",
+            (_, Some(SwitchType::Door)) => "Open",
+            (_, Some(SwitchType::Siren)) => "Ring",
+            (_, Some(SwitchType::Chime)) => "Play",
+            _ => "Turn on",
+        }
+    }
+
+    /// "Open Gate?": what the tile asks before acting.
+    pub fn question(&self) -> String {
+        format!("{} {}?", self.verb(), self.name)
     }
 
     /// "On" / "Off" / "Unavailable" / "—"; `None` for an available button, which has no state.
@@ -209,6 +239,7 @@ impl SecurityUi {
                 name: e.name.clone(),
                 area_name: area_name(e, &names),
                 kind: e.kind,
+                switch_type: SwitchType::of(e.protocol_kind, &e.ui),
                 on: is_on(e),
                 available: is_available(e),
                 ask: e.ui.security_ask,
@@ -593,6 +624,55 @@ mod tests {
         let mut e = entity("a", kind, None, "garage", value);
         e.ui.security_action = true;
         build(vec![e]).actions.remove(0)
+    }
+
+    fn typed(show_as: &str, name: &str, value: StateValue) -> super::ActionRow {
+        let mut e = entity("a", Kind::Switch, None, "garage", value);
+        e.name = name.into();
+        e.ui.security_action = true;
+        e.ui.show_as = Some(show_as.into());
+        build(vec![e]).actions.remove(0)
+    }
+
+    #[test]
+    fn door_action_always_opens() {
+        let row = typed("door", "Gate", StateValue::OnOff(true));
+        let tap = row.tap();
+        assert!(matches!(tap.command, Command::TurnOn { .. }));
+        assert!(tap.confirm);
+        assert_eq!(row.verb(), "Open");
+        assert_eq!(row.question(), "Open Gate?");
+    }
+
+    #[test]
+    fn chime_action_always_plays() {
+        let row = typed("chime", "Bell", StateValue::OnOff(true));
+        assert!(matches!(row.tap().command, Command::TurnOn { .. }));
+        assert_eq!(row.verb(), "Play");
+    }
+
+    #[test]
+    fn siren_action_toggles() {
+        let on = typed("siren", "Siren", StateValue::OnOff(true));
+        assert_eq!(on.tap().command, Command::TurnOff);
+        assert!(!on.tap().confirm);
+        let off = typed("siren", "Siren", StateValue::OnOff(false));
+        assert!(matches!(off.tap().command, Command::TurnOn { .. }));
+        assert!(off.tap().confirm);
+        assert_eq!(off.question(), "Ring Siren?");
+    }
+
+    #[test]
+    fn plain_verbs() {
+        assert_eq!(
+            action(Kind::Switch, StateValue::OnOff(false)).verb(),
+            "Turn on"
+        );
+        assert_eq!(
+            typed("plug", "P", StateValue::OnOff(false)).verb(),
+            "Turn on"
+        );
+        assert_eq!(action(Kind::Button, StateValue::Unknown).verb(), "Press");
     }
 
     #[test]

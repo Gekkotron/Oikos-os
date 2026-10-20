@@ -54,6 +54,38 @@ body {
   opacity: 0.55;
 }
 
+.card--alert {
+  border-color: var(--danger);
+}
+
+.card--alert .card__icon,
+.card--alert .power__label {
+  color: var(--danger);
+}
+
+.card__note {
+  font: var(--type-label);
+  opacity: 0.7;
+}
+
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.confirm__question {
+  font: var(--type-body);
+  overflow-wrap: anywhere;
+}
+
+.confirm__buttons {
+  display: flex;
+  gap: 8px;
+}
+
 .card--pending {
   cursor: progress;
 }

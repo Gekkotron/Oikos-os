@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use oikos_api::EntityView;
 use oikos_core::model::Availability;
 
-use crate::icons::kind_icon;
+use crate::icons::entity_icon;
 
 fn availability_class(availability: Availability) -> &'static str {
     match availability {
@@ -32,9 +32,12 @@ pub fn CardFrame(
     /// Replaces the title computed from the entity; empty keeps the computed one.
     #[prop(into, optional)]
     title: String,
+    /// Draws the card in the alarm colour (a ringing siren).
+    #[prop(optional)]
+    alert: bool,
     children: Children,
 ) -> impl IntoView {
-    let icon = kind_icon(entity.kind, entity.device_class.as_deref());
+    let icon = entity_icon(&entity);
     let availability = entity.state.availability;
     let is_on = crate::format::is_on(&entity.state);
     let title = if title.is_empty() {
@@ -52,6 +55,7 @@ pub fn CardFrame(
             class:card--on=is_on
             class:card--offline=offline
             class:card--pending=move || pending.get()
+            class:card--alert=alert
         >
             <button type="button" class="card__header" on:click=move |_| on_click.run(())>
                 <span class="card__icon" inner_html=icon></span>
