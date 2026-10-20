@@ -196,7 +196,7 @@ impl Hub {
                 NodeKind::TriggerState(params) => Some(&params.entity),
                 NodeKind::If(params) => params.entity.as_ref(),
                 NodeKind::Command(params) => Some(&params.entity),
-                NodeKind::Delay(_) => None,
+                NodeKind::Delay(_) | NodeKind::TriggerSchedule(_) => None,
             };
             let Some(entity) = entity else { continue };
             let Some(found) = reg.entity(entity) else {

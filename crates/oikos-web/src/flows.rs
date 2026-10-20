@@ -121,6 +121,7 @@ pub fn node_title(node: &Node) -> String {
     node.name.clone().unwrap_or_else(|| {
         match node.kind {
             NodeKind::TriggerState(_) => "Trigger",
+            NodeKind::TriggerSchedule(_) => "Schedule",
             NodeKind::If(_) => "If",
             NodeKind::Delay(_) => "Delay",
             NodeKind::Command(_) => "Command",
@@ -157,6 +158,7 @@ fn op_symbol(op: Op) -> &'static str {
 pub fn node_detail(node: &Node, entities: &BTreeMap<String, EntityView>) -> String {
     match &node.kind {
         NodeKind::TriggerState(p) => entity_label(&p.entity, entities),
+        NodeKind::TriggerSchedule(p) => p.cron.clone(),
         NodeKind::If(p) => {
             let value = match &p.value {
                 serde_json::Value::String(s) => s.clone(),
@@ -179,6 +181,7 @@ fn summary_label(node: &Node) -> String {
     }
     match &node.kind {
         NodeKind::TriggerState(_) => "Trigger".into(),
+        NodeKind::TriggerSchedule(_) => "Schedule".into(),
         NodeKind::If(_) => "If".into(),
         NodeKind::Delay(p) => format!("Delay {}", p.for_),
         NodeKind::Command(p) => humanise(command_name(&p.command)),

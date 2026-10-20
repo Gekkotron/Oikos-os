@@ -126,6 +126,9 @@ pub enum NodeKind {
     /// Starts a run when an entity's state changes.
     #[serde(rename = "trigger.state")]
     TriggerState(TriggerStateParams),
+    /// Starts a run on a cron schedule (five fields, local time).
+    #[serde(rename = "trigger.schedule")]
+    TriggerSchedule(TriggerScheduleParams),
     /// Branches on a comparison of an entity (or the trigger value) with a constant.
     #[serde(rename = "if")]
     If(IfParams),
@@ -142,10 +145,19 @@ impl NodeKind {
     pub fn type_name(&self) -> &'static str {
         match self {
             NodeKind::TriggerState(_) => "trigger.state",
+            NodeKind::TriggerSchedule(_) => "trigger.schedule",
             NodeKind::If(_) => "if",
             NodeKind::Delay(_) => "delay",
             NodeKind::Command(_) => "command",
         }
+    }
+
+    /// Whether this node type starts a run.
+    pub fn is_trigger(&self) -> bool {
+        matches!(
+            self,
+            NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_)
+        )
     }
 
     /// The named output ports: `true` and `false` for `if`, none for the others (which have one
@@ -170,6 +182,16 @@ pub struct TriggerStateParams {
     /// Only trigger when the previous value equalled this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<Value>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `trigger.schedule`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct TriggerScheduleParams {
+    /// Five-field cron expression: minute hour day-of-month month day-of-week.
+    pub cron: String,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }
@@ -268,6 +290,17 @@ mod tests {
         { "from": "wait", "to": "off" }
       ]
     }"#;
+
+    #[test]
+    fn schedule_node_round_trips() {
+        let node: Node = serde_json::from_str(
+            r#"{"id":"tick","type":"trigger.schedule","params":{"cron":"*/10 * * * *","x":1}}"#,
+        )
+        .unwrap();
+        assert!(node.kind.is_trigger());
+        assert_eq!(node.kind.type_name(), "trigger.schedule");
+        assert_eq!(serde_json::to_value(&node).unwrap()["params"]["x"], 1);
+    }
 
     #[test]
     fn decodes_the_reference_flow() {

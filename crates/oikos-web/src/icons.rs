@@ -212,6 +212,7 @@ pub fn consumer_icon(icon: Option<oikos_core::energy::ConsumerIcon>) -> &'static
 pub fn node_icon(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::TriggerState(_) => NODE_BOLT,
+        NodeKind::TriggerSchedule(_) => NODE_HOURGLASS,
         NodeKind::If(_) => NODE_FORK,
         NodeKind::Delay(_) => NODE_HOURGLASS,
         NodeKind::Command(_) => NODE_PLAY,

@@ -425,6 +425,8 @@ async fn run_node(
             };
             (StepOutcome::Ok, detail, None)
         }
+        // Arming schedules is the engine's next step; a schedule step just passes.
+        NodeKind::TriggerSchedule(_) => (StepOutcome::Ok, "schedule".to_owned(), None),
         NodeKind::If(params) => {
             let Some(right) = Scalar::from_json(&params.value) else {
                 return failed("value is not a scalar".to_owned());

@@ -27,6 +27,10 @@ pub enum FlowError {
     BadDuration { node: String, reason: String },
     #[error("node `{node}`: value must be a boolean, a number or a string")]
     BadValue { node: String },
+    #[error("node `{node}`: {reason}")]
+    BadCron { node: String, reason: String },
+    #[error("node `{node}`: an if after a schedule must name an entity")]
+    IfNeedsEntity { node: String },
 }
 
 fn is_valid_id(id: &str, max: usize) -> bool {
@@ -49,7 +53,7 @@ pub fn is_valid_node_id(id: &str) -> bool {
 /// Checks the structure of a flow: ids, edges and ports, params, at least one trigger and no
 /// cycle. It does not look at entities, which only the hub can resolve.
 pub fn validate(flow: &Flow) -> Result<(), FlowError> {
-    use super::{NodeKind, Scalar, parse_duration};
+    use super::{NodeKind, Scalar, Schedule, parse_duration};
 
     if !is_valid_flow_id(&flow.id) {
         return Err(FlowError::BadFlowId(flow.id.clone()));
@@ -68,6 +72,14 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
             NodeKind::Delay(p) => {
                 if let Err(e) = parse_duration(&p.for_) {
                     return Err(FlowError::BadDuration {
+                        node: node.id.clone(),
+                        reason: e.to_string(),
+                    });
+                }
+            }
+            NodeKind::TriggerSchedule(p) => {
+                if let Err(e) = Schedule::parse(&p.cron) {
+                    return Err(FlowError::BadCron {
                         node: node.id.clone(),
                         reason: e.to_string(),
                     });
@@ -117,10 +129,40 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     if flow.triggers().is_empty() {
         return Err(FlowError::NoTrigger);
     }
-    match find_cycle(flow) {
-        Some(path) => Err(FlowError::Cycle(path)),
-        None => Ok(()),
+    if let Some(path) = find_cycle(flow) {
+        return Err(FlowError::Cycle(path));
     }
+    check_ifs_after_schedules(flow)
+}
+
+/// A schedule has no trigger value, so an `if` reachable from one must read an entity.
+fn check_ifs_after_schedules(flow: &Flow) -> Result<(), FlowError> {
+    use super::NodeKind;
+
+    let mut seen = std::collections::HashSet::new();
+    let mut pending: Vec<&super::Node> = flow
+        .nodes
+        .iter()
+        .filter(|n| matches!(n.kind, NodeKind::TriggerSchedule(_)))
+        .collect();
+    while let Some(node) = pending.pop() {
+        if !seen.insert(node.id.as_str()) {
+            continue;
+        }
+        if matches!(&node.kind, NodeKind::If(p) if p.entity.is_none()) {
+            return Err(FlowError::IfNeedsEntity {
+                node: node.id.clone(),
+            });
+        }
+        let ports: &[&str] = match node.kind.ports() {
+            [] => &[""],
+            ports => ports,
+        };
+        for port in ports {
+            pending.extend(flow.successors(&node.id, (!port.is_empty()).then_some(port)));
+        }
+    }
+    Ok(())
 }
 
 /// Iterative DFS with white/grey/black colouring over every edge, whatever its port. Returns the
@@ -311,5 +353,74 @@ mod tests {
         assert!(is_valid_flow_id(&"a".repeat(64)) && !is_valid_flow_id(&"a".repeat(65)));
         assert!(is_valid_node_id(&"a".repeat(32)) && !is_valid_node_id(&"a".repeat(33)));
         assert!(!is_valid_flow_id("") && !is_valid_node_id(""));
+    }
+
+    fn schedule_flow(cron: &str, then: &str) -> Flow {
+        let node = |id: &str, json: &str| -> Node {
+            serde_json::from_str(&format!(r#"{{"id":"{id}",{json}}}"#)).unwrap()
+        };
+        let mut f = Flow {
+            id: "tick_flow".into(),
+            name: "t".into(),
+            ..Flow::default()
+        };
+        f.nodes.push(node(
+            "tick",
+            &format!(r#""type":"trigger.schedule","params":{{"cron":"{cron}"}}"#),
+        ));
+        f.nodes.push(node(
+            "act",
+            r#""type":"command","params":{"entity":"l","command":{"type":"turn_on"}}"#,
+        ));
+        f.nodes.push(node(
+            "check",
+            r#""type":"if","params":{"op":"eq","value":true}"#,
+        ));
+        f.edges.push(edge("tick", then, None));
+        f
+    }
+
+    #[test]
+    fn bad_cron_is_rejected() {
+        let f = schedule_flow("61 * * * *", "act");
+        assert!(matches!(
+            validate(&f),
+            Err(FlowError::BadCron { node, .. }) if node == "tick"
+        ));
+    }
+
+    #[test]
+    fn schedule_alone_is_a_trigger() {
+        assert_eq!(validate(&schedule_flow("*/10 * * * *", "act")), Ok(()));
+    }
+
+    #[test]
+    fn if_without_entity_after_a_schedule_is_rejected() {
+        let mut f = schedule_flow("*/10 * * * *", "check");
+        f.edges.push(edge("check", "act", Some("true")));
+        let err = validate(&f).unwrap_err();
+        assert_eq!(
+            err,
+            FlowError::IfNeedsEntity {
+                node: "check".into()
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "node `check`: an if after a schedule must name an entity"
+        );
+    }
+
+    #[test]
+    fn if_without_entity_reached_only_from_a_state_trigger_is_fine() {
+        let mut f = schedule_flow("*/10 * * * *", "act");
+        let state: Node = serde_json::from_str(
+            r#"{"id":"motion","type":"trigger.state","params":{"entity":"m"}}"#,
+        )
+        .unwrap();
+        f.nodes.push(state);
+        f.edges.push(edge("motion", "check", None));
+        f.edges.push(edge("check", "act", Some("true")));
+        assert_eq!(validate(&f), Ok(()));
     }
 }

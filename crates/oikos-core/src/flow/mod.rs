@@ -5,14 +5,16 @@ mod duration;
 mod graph;
 mod model;
 mod scalar;
+mod schedule;
 mod validate;
 
 pub use duration::{DurationError, parse_duration};
 pub use model::{
     CommandParams, DelayParams, Edge, Flow, FlowMode, IfParams, Node, NodeKind, Op, Position,
-    TriggerStateParams,
+    TriggerScheduleParams, TriggerStateParams,
 };
 pub use scalar::{CompareError, Scalar, compare};
+pub use schedule::{Schedule, ScheduleError};
 pub use validate::{FlowError, is_valid_flow_id, is_valid_node_id, validate};
 
 /// Shared fixture for the flow tests: the reference flow of the design.

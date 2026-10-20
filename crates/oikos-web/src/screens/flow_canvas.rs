@@ -27,7 +27,7 @@ use crate::icons::{PENCIL, node_icon};
 
 fn type_class(kind: &NodeKind) -> &'static str {
     match kind {
-        NodeKind::TriggerState(_) => "flow-node--trigger",
+        NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) => "flow-node--trigger",
         NodeKind::If(_) => "flow-node--if",
         NodeKind::Delay(_) => "flow-node--delay",
         NodeKind::Command(_) => "flow-node--command",
@@ -916,6 +916,7 @@ fn node_editor_body(
 ) -> impl IntoView {
     let kind_label = match &node.kind {
         NodeKind::TriggerState(_) => "Trigger",
+        NodeKind::TriggerSchedule(_) => "Schedule",
         NodeKind::If(_) => "If",
         NodeKind::Delay(_) => "Delay",
         NodeKind::Command(_) => "Command",
@@ -1063,6 +1064,25 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
                     placeholder="entity.id".into()
                     optional=true
                     write=entity_write
+                />
+            }
+            .into_any()
+        }
+        NodeKind::TriggerSchedule(p) => {
+            let cron_write = Callback::new(move |value: Option<String>| {
+                update_node(draft, &id, |n| {
+                    if let NodeKind::TriggerSchedule(ref mut t) = n.kind {
+                        t.cron = value.unwrap_or_default();
+                    }
+                });
+            });
+            view! {
+                <TextField
+                    label="Cron".into()
+                    initial=p.cron
+                    placeholder="*/10 * * * *".into()
+                    optional=false
+                    write=cron_write
                 />
             }
             .into_any()

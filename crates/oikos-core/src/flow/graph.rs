@@ -1,6 +1,6 @@
 //! Read-only graph helpers over a [`Flow`].
 
-use super::{Flow, Node, NodeKind};
+use super::{Flow, Node};
 
 impl Flow {
     /// The node with this id, if any.
@@ -10,10 +10,7 @@ impl Flow {
 
     /// The trigger nodes, in `nodes` order.
     pub fn triggers(&self) -> Vec<&Node> {
-        self.nodes
-            .iter()
-            .filter(|n| matches!(n.kind, NodeKind::TriggerState(_)))
-            .collect()
+        self.nodes.iter().filter(|n| n.kind.is_trigger()).collect()
     }
 
     /// The nodes reached by edges leaving `node`, in edge order. `port` must match the edge's
@@ -34,7 +31,7 @@ impl Flow {
         let mut depth: Vec<Option<usize>> = self
             .nodes
             .iter()
-            .map(|n| matches!(n.kind, NodeKind::TriggerState(_)).then_some(0))
+            .map(|n| n.kind.is_trigger().then_some(0))
             .collect();
         let index = |id: &str| self.nodes.iter().position(|n| n.id == id);
         for _ in 0..self.nodes.len() {
