@@ -329,3 +329,88 @@ async fn late_rows_recompute_their_hour() {
 
     tdb.drop_db().await;
 }
+
+#[tokio::test]
+async fn series_24h_carries_into_quiet_windows() {
+    let Some(tdb) = fresh_db().await else { return };
+    let now = 48 * HOUR; // arbitrary "present"
+    tdb.db
+        .insert(&Rows {
+            values: vec![value_row("a", now - 2 * HOUR, 5.0)],
+            availability: vec![],
+        })
+        .await
+        .unwrap();
+    rollup_once(&tdb.db, now, i64::MAX).await.unwrap();
+
+    let history = oikos_os::history::History::with_db(tdb.db.clone(), chrono_tz::UTC);
+    let series = oikos_os::history::query::series(
+        &history,
+        "a",
+        oikos_api::HistoryRange::Day,
+        now,
+    )
+    .await
+    .expect("series");
+
+    // Points are (t, mean, min, max) with t in unix seconds.
+    assert!(!series.points.is_empty(), "{series:?}");
+    // The first point is at or after now - 2h (no point for the earlier quiet windows).
+    let first_t = series.points[0].0;
+    let two_hours_ago_s = (now - 2 * HOUR) / 1_000_000;
+    assert!(first_t >= two_hours_ago_s - 600, "{first_t} vs {two_hours_ago_s}");
+    // Every point carries 5.0.
+    for p in &series.points {
+        assert_eq!(p.1, 5.0, "mean");
+        assert_eq!(p.2, 5.0, "min");
+        assert_eq!(p.3, 5.0, "max");
+    }
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
+async fn today_power_and_unrecorded() {
+    let Some(tdb) = fresh_db().await else { return };
+    // Reference "now" chosen so UTC midnight is a round micros count. HOUR = 1h.
+    let midnight = 100 * 24 * HOUR;
+    let now = midnight + 3 * HOUR;
+    tdb.db
+        .insert(&Rows {
+            values: vec![value_row("a", midnight + HOUR, 1000.0)],
+            availability: vec![],
+        })
+        .await
+        .unwrap();
+
+    let history = oikos_os::history::History::with_db(tdb.db.clone(), chrono_tz::UTC);
+    let today =
+        oikos_os::history::query::today(&history, "a", oikos_api::EnergyKind::Power, now)
+            .await
+            .expect("today");
+    assert_eq!(today.since, midnight / 1_000_000);
+    assert_eq!(today.kwh, Some(2.0));
+
+    let err = oikos_os::history::query::series(
+        &history,
+        "ghost",
+        oikos_api::HistoryRange::Day,
+        now,
+    )
+    .await
+    .expect_err("not recorded");
+    assert_eq!(err.code(), "not_recorded");
+
+    let changes = oikos_os::history::query::last_change(
+        &history,
+        &["a".into(), "ghost".into()],
+    )
+    .await
+    .expect("last_change");
+    assert_eq!(changes.items.len(), 2);
+    assert!(changes.items[0].recorded);
+    assert!(!changes.items[1].recorded);
+    assert_eq!(changes.items[1].changed_at, None);
+
+    tdb.drop_db().await;
+}

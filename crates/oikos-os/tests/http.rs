@@ -1423,3 +1423,34 @@ async fn http_put_virtual_offline_is_503() {
         .expect("PUT");
     assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
+
+#[tokio::test]
+async fn history_routes_without_history_are_503() {
+    let server = Server::start().await;
+    let res = server
+        .get("/api/v1/history/series?entity=x&range=24h")
+        .await;
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(body, json!({"error": "history_unavailable"}));
+}
+
+#[tokio::test]
+async fn history_bad_params_are_400() {
+    let server = Server::start().await;
+    let (history, _rx) = oikos_os::history::History::detached(8, chrono_tz::UTC);
+    server.hub.set_history(history);
+
+    let res = server.get("/api/v1/history/series?entity=x&range=2d").await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(body, json!({"error": "bad_request"}));
+
+    let res = server.get("/api/v1/history/last_change").await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    let res = server
+        .get("/api/v1/history/daily?entity=x&days=8&kind=power")
+        .await;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}

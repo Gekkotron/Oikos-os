@@ -6,19 +6,21 @@ use axum::Json;
 use axum::Router;
 use axum::body::Body as HttpBody;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query, RawQuery, State};
 use axum::http::StatusCode;
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
-    AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EntityView, FlowView,
-    IgnoredView, OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec,
+    AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EnergyKind, EntityView,
+    FlowView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, IgnoredView, LastChange,
+    OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec,
 };
 use oikos_core::flow::{Flow, Schedule};
 use oikos_core::model::{AreasDocument, Command};
 use serde::Serialize;
 
+use crate::history::{HistoryError, query as history_query};
 use crate::hub::{Hub, HubError};
 use crate::media::MediaError;
 
@@ -51,6 +53,10 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/flows/{id}/enabled", post(set_flow_enabled))
         .route("/flows/{id}/run", post(run_flow))
         .route("/virtual/{id}", put(put_virtual).delete(delete_virtual))
+        .route("/history/series", get(history_series))
+        .route("/history/daily", get(history_daily))
+        .route("/history/today", get(history_today))
+        .route("/history/last_change", get(history_last_change))
         .fallback(not_found)
 }
 
@@ -94,6 +100,68 @@ impl From<JsonRejection> for HttpError {
             error: rejection.body_text(),
         }
     }
+}
+
+impl From<HistoryError> for HttpError {
+    fn from(err: HistoryError) -> Self {
+        let status = match &err {
+            HistoryError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            HistoryError::NotRecorded => StatusCode::NOT_FOUND,
+            HistoryError::BadRequest(_) => StatusCode::BAD_REQUEST,
+        };
+        Self {
+            status,
+            error: err.code().to_owned(),
+        }
+    }
+}
+
+/// A `400 bad_request` reply built from a user-facing reason — the body stays stable.
+fn bad_request() -> HttpError {
+    HttpError {
+        status: StatusCode::BAD_REQUEST,
+        error: "bad_request".to_owned(),
+    }
+}
+
+/// A `503 history_unavailable` reply, used when `[history] url` is not configured.
+fn history_unavailable() -> HttpError {
+    HttpError {
+        status: StatusCode::SERVICE_UNAVAILABLE,
+        error: "history_unavailable".to_owned(),
+    }
+}
+
+/// Parses a `?a=b&c=d` string with repeating keys. Values are percent-decoded.
+fn parse_query(q: Option<&str>) -> Vec<(String, String)> {
+    let Some(q) = q else {
+        return Vec::new();
+    };
+    url::form_urlencoded::parse(q.as_bytes())
+        .into_owned()
+        .collect()
+}
+
+fn get_one<'a>(params: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    params
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+}
+
+fn get_many<'a>(params: &'a [(String, String)], key: &str) -> Vec<&'a str> {
+    params
+        .iter()
+        .filter_map(|(k, v)| (k == key).then_some(v.as_str()))
+        .collect()
+}
+
+fn now_micros() -> i64 {
+    crate::clock::now_micros()
+}
+
+fn require_history(hub: &Hub) -> Result<&std::sync::Arc<crate::history::History>, HttpError> {
+    hub.history().ok_or_else(history_unavailable)
 }
 
 /// The `/health` body.
@@ -393,4 +461,77 @@ async fn delete_virtual(
 ) -> Result<StatusCode, HttpError> {
     hub.delete_virtual(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /history/series?entity=&range=` — 400 for a missing or unknown range, 503 without
+/// history, 404 for an entity that was never recorded.
+async fn history_series(
+    State(hub): HubState,
+    RawQuery(q): RawQuery,
+) -> Result<Json<HistorySeries>, HttpError> {
+    let params = parse_query(q.as_deref());
+    let entity = get_one(&params, "entity").ok_or_else(bad_request)?;
+    let range = get_one(&params, "range")
+        .and_then(HistoryRange::parse)
+        .ok_or_else(bad_request)?;
+    let history = require_history(&hub)?;
+    Ok(Json(
+        history_query::series(history, entity, range, now_micros()).await?,
+    ))
+}
+
+/// `GET /history/daily?entity=&days=&kind=` — `days` must be 7, 30 or 365; `kind` is
+/// counter or power.
+async fn history_daily(
+    State(hub): HubState,
+    RawQuery(q): RawQuery,
+) -> Result<Json<HistoryDaily>, HttpError> {
+    let params = parse_query(q.as_deref());
+    let entity = get_one(&params, "entity").ok_or_else(bad_request)?;
+    let days: u32 = get_one(&params, "days")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(bad_request)?;
+    if !matches!(days, 7 | 30 | 365) {
+        return Err(bad_request());
+    }
+    let kind = get_one(&params, "kind")
+        .and_then(EnergyKind::parse)
+        .ok_or_else(bad_request)?;
+    let history = require_history(&hub)?;
+    Ok(Json(
+        history_query::daily(history, entity, days, kind, now_micros()).await?,
+    ))
+}
+
+/// `GET /history/today?entity=&kind=` — kWh since local midnight for the current day.
+async fn history_today(
+    State(hub): HubState,
+    RawQuery(q): RawQuery,
+) -> Result<Json<HistoryToday>, HttpError> {
+    let params = parse_query(q.as_deref());
+    let entity = get_one(&params, "entity").ok_or_else(bad_request)?;
+    let kind = get_one(&params, "kind")
+        .and_then(EnergyKind::parse)
+        .ok_or_else(bad_request)?;
+    let history = require_history(&hub)?;
+    Ok(Json(
+        history_query::today(history, entity, kind, now_micros()).await?,
+    ))
+}
+
+/// `GET /history/last_change?entity=...&entity=...` — 1 to 50 ids, in request order.
+async fn history_last_change(
+    State(hub): HubState,
+    RawQuery(q): RawQuery,
+) -> Result<Json<LastChange>, HttpError> {
+    let params = parse_query(q.as_deref());
+    let ids: Vec<String> = get_many(&params, "entity")
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    if ids.is_empty() {
+        return Err(bad_request());
+    }
+    let history = require_history(&hub)?;
+    Ok(Json(history_query::last_change(history, &ids).await?))
 }

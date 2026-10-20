@@ -3,6 +3,7 @@
 //! fills `history_hourly` (`rollup`).
 
 pub mod db;
+pub mod query;
 pub mod rollup;
 pub mod writer;
 
@@ -71,6 +72,20 @@ impl History {
         tokio::spawn(writer::run(db.clone(), history.clone(), rx, cfg.buffer_rows));
         tokio::spawn(rollup::run(db, history.clone()));
         Ok(history)
+    }
+
+    /// Builds a History wrapping an existing [`Db`] with no spawned tasks — the caller
+    /// drives the recorder loop. Mostly used by tests on a per-test database.
+    #[doc(hidden)]
+    pub fn with_db(db: Db, zone: Tz) -> Arc<Self> {
+        let (tx, _rx) = mpsc::channel(16);
+        Arc::new(Self {
+            sender: tx,
+            db: Some(db),
+            zone,
+            drop_count: AtomicU64::new(0),
+            dirty_from: AtomicI64::new(i64::MAX),
+        })
     }
 
     /// Builds a History backed by nothing but a channel of `capacity`, for tests.
