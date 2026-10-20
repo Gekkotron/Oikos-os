@@ -6,6 +6,7 @@ use leptos::ev;
 use leptos::html;
 use leptos::prelude::*;
 use oikos_core::flow::Flow;
+use wasm_bindgen::JsCast;
 
 use crate::flow_layout::{NODE_H, NODE_W, Pt, Rect, bounds, positions};
 use crate::flow_text::{Role, role};
@@ -20,6 +21,8 @@ const MINI_H: f64 = 120.0;
 const GRID: f64 = 20.0;
 /// Pixels one wheel "line" scrolls by when the browser reports lines instead of pixels.
 const WHEEL_LINE: f64 = 16.0;
+/// Pointer travel in CSS pixels above which a press on the surface is a pan, not a tap.
+const TAP_SLOP: f64 = 3.0;
 
 /// The canvas camera, shared by the viewport, its controls, the minimap and the graph: the pan
 /// and zoom, and the surface's measured size in CSS pixels (0×0 until it has been laid out).
@@ -74,9 +77,15 @@ fn distance(a: Pt, b: Pt) -> f64 {
 /// The surface: `overflow: hidden`, one inner layer carrying [`View::css_transform`] that the
 /// children (cards and wires, in world coordinates) live in. Drag pans, Ctrl/⌘-wheel and pinch
 /// zoom, plain wheel pans. It measures itself into the [`Camera`] and fits `content` once it has
-/// a size; until the user moves the view, a resize fits again.
+/// a size; until the user moves the view, a resize fits again. A press that does not move is a
+/// tap: `on_tap` gets the element it landed on.
 #[component]
-pub fn Viewport(view: RwSignal<View>, content: Signal<Rect>, children: Children) -> impl IntoView {
+pub fn Viewport(
+    view: RwSignal<View>,
+    content: Signal<Rect>,
+    #[prop(optional)] on_tap: Option<Callback<Option<web_sys::Element>>>,
+    children: Children,
+) -> impl IntoView {
     let camera = expect_context::<Camera>();
     let size = camera.size;
     let surface: NodeRef<html::Div> = NodeRef::new();
@@ -85,6 +94,8 @@ pub fn Viewport(view: RwSignal<View>, content: Signal<Rect>, children: Children)
     let last_fit = StoredValue::new(None::<View>);
     // Active pointers as (pointer id, surface point).
     let pointers = StoredValue::new(Vec::<(i32, Pt)>::new());
+    // A press that may still be a tap: where it started and what it landed on.
+    let tap = StoredValue::new_local(None::<(Pt, Option<web_sys::Element>)>);
 
     // Also runs from an animation frame, which can fire after the canvas is gone.
     let measure = move || {
@@ -131,6 +142,11 @@ pub fn Viewport(view: RwSignal<View>, content: Signal<Rect>, children: Children)
             p.retain(|(id, _)| *id != ev.pointer_id());
             p.push((ev.pointer_id(), at));
         });
+        let first = pointers.with_value(|p| p.len() == 1);
+        let target = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
+        tap.set_value(first.then_some((at, target)));
     };
     let moved = move |ev: web_sys::PointerEvent| {
         let Some(el) = surface.get_untracked() else {
@@ -143,6 +159,11 @@ pub fn Viewport(view: RwSignal<View>, content: Signal<Rect>, children: Children)
         };
         let mut after = before.clone();
         after[i].1 = at;
+        let panned =
+            tap.with_value(|t| t.as_ref().is_some_and(|(s, _)| distance(*s, at) > TAP_SLOP));
+        if panned {
+            tap.set_value(None);
+        }
         match (before.as_slice(), after.as_slice()) {
             ([(_, a)], [(_, b)]) => view.update(|v| *v = v.pan(b.x - a.x, b.y - a.y)),
             ([(_, a0), (_, a1), ..], [(_, b0), (_, b1), ..]) => {
@@ -163,6 +184,12 @@ pub fn Viewport(view: RwSignal<View>, content: Signal<Rect>, children: Children)
     };
     let up = move |ev: web_sys::PointerEvent| {
         pointers.update_value(|p| p.retain(|(id, _)| *id != ev.pointer_id()));
+        let tapped = tap.try_update_value(Option::take).flatten();
+        if let (Some((_, target)), Some(on_tap), "pointerup") =
+            (tapped, on_tap, ev.type_().as_str())
+        {
+            on_tap.run(target);
+        }
     };
     let wheel = move |ev: web_sys::WheelEvent| {
         let Some(el) = surface.get_untracked() else {
@@ -202,7 +229,14 @@ pub fn Viewport(view: RwSignal<View>, content: Signal<Rect>, children: Children)
             on:pointercancel=up
             on:wheel=wheel
         >
-            <div class="flow-world" style=move || format!("transform:{}", view.get().css_transform())>
+            <div
+                class="flow-world"
+                style=move || {
+                    let v = view.get();
+                    // `--flow-zoom` lets controls drawn in the world (the wire ✕) keep their size.
+                    format!("transform:{};--flow-zoom:{}", v.css_transform(), v.zoom)
+                }
+            >
                 {children()}
             </div>
         </div>

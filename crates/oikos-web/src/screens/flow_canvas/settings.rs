@@ -1,12 +1,54 @@
 //! The settings of one card: its name and the fields of its kind (the schedule picker, the
-//! flow switch, raw JSON for values and commands). Edits write straight into the draft.
+//! flow switch, raw JSON for values and commands), and a button that deletes the card. Edits
+//! write into the draft, one undo step per field change.
 
 use leptos::prelude::*;
-use oikos_core::flow::{Flow, Missing, NodeKind, Op};
+use oikos_core::flow::{Missing, Node, NodeKind, Op};
 
+use super::Editor;
 use super::graph::Selection;
+use crate::flow_edit::remove_node;
 use crate::house::House;
 use crate::screens::flow_schedule::ScheduleField;
+
+/// How the form writes into the draft. The first write after the user starts a change (focus
+/// on a field, a click, a committed `change`) records an undo step; the keystrokes that follow
+/// in the same field join it.
+#[derive(Clone, Copy)]
+struct Form {
+    editor: Editor,
+    armed: StoredValue<bool>,
+}
+
+impl Form {
+    /// Applies `mutate` to node `id`; a write that changes nothing is dropped.
+    fn update(self, id: &str, mutate: impl FnOnce(&mut Node)) {
+        let draft = self.editor.draft;
+        let Some(mut node) = draft.with_untracked(|f| f.node(id).cloned()) else {
+            return;
+        };
+        mutate(&mut node);
+        if draft.with_untracked(|f| f.node(id) == Some(&node)) {
+            return;
+        }
+        if self.armed.get_value() {
+            self.armed.set_value(false);
+            self.editor
+                .history
+                .update_value(|h| h.record(draft.get_untracked()));
+        }
+        draft.update(|f| {
+            if let Some(n) = f.nodes.iter_mut().find(|n| n.id == node.id) {
+                *n = node;
+            }
+        });
+    }
+
+    /// The next write starts a new undo step.
+    fn arm(self) {
+        self.armed.set_value(true);
+    }
+}
 
 fn op_str(op: Op) -> &'static str {
     match op {
@@ -127,9 +169,10 @@ fn TextField(
     }
 }
 
-/// The settings of the selected card, or nothing when no card is selected.
+/// The settings of the selected card, or nothing when no card is selected. The form is built
+/// from the draft when the selection changes or undo/redo replace the draft.
 #[component]
-pub fn NodeEditor(draft: RwSignal<Flow>, selected: RwSignal<Option<Selection>>) -> impl IntoView {
+pub fn NodeEditor(editor: Editor, selected: RwSignal<Option<Selection>>) -> impl IntoView {
     let node_id = move || match selected.get() {
         Some(Selection::Node(id)) => Some(id),
         _ => None,
@@ -137,33 +180,26 @@ pub fn NodeEditor(draft: RwSignal<Flow>, selected: RwSignal<Option<Selection>>) 
     view! {
         <Show when=move || node_id().is_some()>
             {move || {
+                editor.restored.track();
                 let Some(id) = node_id() else { return ().into_any(); };
-                let Some(node) = draft.with_untracked(|f| f.node(&id).cloned()) else {
+                let Some(node) = editor.draft.with_untracked(|f| f.node(&id).cloned()) else {
                     return ().into_any();
                 };
-                node_editor_body(draft, selected, id, node).into_any()
+                let form = Form {
+                    editor,
+                    armed: StoredValue::new(false),
+                };
+                node_editor_body(form, selected, id, node).into_any()
             }}
         </Show>
     }
 }
 
-fn update_node<F>(draft: RwSignal<Flow>, id: &str, mutate: F)
-where
-    F: FnOnce(&mut oikos_core::flow::Node),
-{
-    let id = id.to_owned();
-    draft.update(|f| {
-        if let Some(n) = f.nodes.iter_mut().find(|n| n.id == id) {
-            mutate(n);
-        }
-    });
-}
-
 fn node_editor_body(
-    draft: RwSignal<Flow>,
+    form: Form,
     selected: RwSignal<Option<Selection>>,
     id: String,
-    node: oikos_core::flow::Node,
+    node: Node,
 ) -> impl IntoView {
     let kind_label = match &node.kind {
         NodeKind::TriggerState(_) => "Trigger",
@@ -178,11 +214,22 @@ fn node_editor_body(
     let initial_name = node.name.clone().unwrap_or_default();
     let name_id = id.clone();
     let name_write = Callback::new(move |value: Option<String>| {
-        update_node(draft, &name_id, |n| n.name = value);
+        form.update(&name_id, |n| n.name = value);
     });
-    let kind_fields = kind_fields(draft, id.clone(), node.kind);
+    let delete_id = id.clone();
+    let delete = move |_: web_sys::MouseEvent| {
+        form.editor.edit(|f| remove_node(f, &delete_id));
+        selected.set(None);
+    };
+    let kind_fields = kind_fields(form, id.clone(), node.kind);
     view! {
-        <section class="node-editor" aria-label="Node editor">
+        <section
+            class="node-editor"
+            aria-label="Node editor"
+            on:focusin=move |_| form.arm()
+            on:click=move |_| form.arm()
+            on:change=move |_| form.arm()
+        >
             <header class="node-editor__header">
                 <div class="node-editor__title">
                     <span class="chip">{kind_label}</span>
@@ -205,6 +252,17 @@ fn node_editor_body(
                 write=name_write
             />
             {kind_fields}
+            <footer class="node-editor__footer">
+                <button type="button" class="btn btn--ghost node-editor__delete" on:click=delete>
+                    "Delete card"
+                </button>
+                <span class="node-editor__keys">
+                    <kbd>"⌫"</kbd>
+                    " delete · "
+                    <kbd>"⌘D"</kbd>
+                    " duplicate"
+                </span>
+            </footer>
         </section>
     }
 }
@@ -230,12 +288,12 @@ fn missing_from(value: &str) -> Option<Missing> {
 /// The `flow.enable` editor: which flow it switches ("This flow" or another by name) and
 /// whether it enables or disables it.
 fn flow_enable_fields(
-    draft: RwSignal<Flow>,
+    form: Form,
     id: String,
     p: oikos_core::flow::FlowEnableParams,
 ) -> impl IntoView {
     let house = expect_context::<House>();
-    let own_id = draft.with_untracked(|f| f.id.clone());
+    let own_id = form.editor.draft.with_untracked(|f| f.id.clone());
     let others: Vec<(String, String)> = house.flows.with_untracked(|flows| {
         flows
             .iter()
@@ -250,7 +308,7 @@ fn flow_enable_fields(
     let target_id = id.clone();
     let on_target = move |ev: web_sys::Event| {
         let value = event_target_value(&ev);
-        update_node(draft, &target_id, |n| {
+        form.update(&target_id, |n| {
             if let NodeKind::FlowEnable(ref mut f) = n.kind {
                 f.flow = (!value.is_empty()).then_some(value);
             }
@@ -259,7 +317,7 @@ fn flow_enable_fields(
     let state_id = id;
     let on_state = move |ev: web_sys::Event| {
         let enabled = event_target_value(&ev) == "enable";
-        update_node(draft, &state_id, |n| {
+        form.update(&state_id, |n| {
             if let NodeKind::FlowEnable(ref mut f) = n.kind {
                 f.enabled = enabled;
             }
@@ -295,12 +353,12 @@ fn flow_enable_fields(
     }
 }
 
-fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoView {
+fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
     match kind {
         NodeKind::TriggerState(p) => {
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
-                update_node(draft, &entity_id, |n| {
+                form.update(&entity_id, |n| {
                     if let NodeKind::TriggerState(ref mut t) = n.kind {
                         t.entity = value.unwrap_or_default();
                     }
@@ -308,7 +366,7 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
             });
             let to_id = id.clone();
             let to_write = Callback::new(move |value: Option<serde_json::Value>| {
-                update_node(draft, &to_id, |n| {
+                form.update(&to_id, |n| {
                     if let NodeKind::TriggerState(ref mut t) = n.kind {
                         t.to = value;
                     }
@@ -316,7 +374,7 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
             });
             let from_id = id;
             let from_write = Callback::new(move |value: Option<serde_json::Value>| {
-                update_node(draft, &from_id, |n| {
+                form.update(&from_id, |n| {
                     if let NodeKind::TriggerState(ref mut t) = n.kind {
                         t.from = value;
                     }
@@ -349,7 +407,7 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
             let op_id = id.clone();
             let on_op = move |ev: web_sys::Event| {
                 if let Some(op) = op_from(&event_target_value(&ev)) {
-                    update_node(draft, &op_id, |n| {
+                    form.update(&op_id, |n| {
                         if let NodeKind::If(ref mut i) = n.kind {
                             i.op = op;
                         }
@@ -360,7 +418,7 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
             let value_id = id.clone();
             let value_write = Callback::new(move |value: Option<serde_json::Value>| {
                 if let Some(v) = value {
-                    update_node(draft, &value_id, |n| {
+                    form.update(&value_id, |n| {
                         if let NodeKind::If(ref mut i) = n.kind {
                             i.value = v;
                         }
@@ -371,7 +429,7 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
             let current_missing = p.missing;
             let on_missing = move |ev: web_sys::Event| {
                 let missing = missing_from(&event_target_value(&ev));
-                update_node(draft, &missing_id, |n| {
+                form.update(&missing_id, |n| {
                     if let NodeKind::If(ref mut i) = n.kind {
                         i.missing = missing;
                     }
@@ -379,7 +437,7 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
             };
             let entity_id = id;
             let entity_write = Callback::new(move |value: Option<String>| {
-                update_node(draft, &entity_id, |n| {
+                form.update(&entity_id, |n| {
                     if let NodeKind::If(ref mut i) = n.kind {
                         i.entity = value;
                     }
@@ -435,13 +493,20 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
             .into_any()
         }
         NodeKind::TriggerSchedule(p) => {
-            view! { <ScheduleField draft=draft id=id initial=p.cron /> }.into_any()
+            let write = Callback::new(move |cron: String| {
+                form.update(&id, |n| {
+                    if let NodeKind::TriggerSchedule(ref mut s) = n.kind {
+                        s.cron = cron;
+                    }
+                });
+            });
+            view! { <ScheduleField initial=p.cron write=write /> }.into_any()
         }
-        NodeKind::FlowEnable(p) => flow_enable_fields(draft, id, p).into_any(),
+        NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Delay(p) => {
             let for_id = id;
             let for_write = Callback::new(move |value: Option<String>| {
-                update_node(draft, &for_id, |n| {
+                form.update(&for_id, |n| {
                     if let NodeKind::Delay(ref mut d) = n.kind {
                         d.for_ = value.unwrap_or_default();
                     }
@@ -461,7 +526,7 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
         NodeKind::Command(p) => {
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
-                update_node(draft, &entity_id, |n| {
+                form.update(&entity_id, |n| {
                     if let NodeKind::Command(ref mut c) = n.kind {
                         c.entity = value.unwrap_or_default();
                     }
@@ -473,7 +538,7 @@ fn kind_fields(draft: RwSignal<Flow>, id: String, kind: NodeKind) -> impl IntoVi
                 if let Some(v) = value
                     && let Ok(cmd) = serde_json::from_value(v)
                 {
-                    update_node(draft, &cmd_id, |n| {
+                    form.update(&cmd_id, |n| {
                         if let NodeKind::Command(ref mut c) = n.kind {
                             c.command = cmd;
                         }

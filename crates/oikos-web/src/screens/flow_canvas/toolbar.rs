@@ -1,5 +1,6 @@
 //! The floating bars over the canvas: top-left the back link, the flow's name and its mode;
-//! top-right the enable switch, Run, Edit and Runs (Cancel and Save while editing).
+//! top-right the enable switch, Run, Edit and Runs (＋ Add, Tidy, Undo, Cancel and Save while
+//! editing).
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -7,17 +8,18 @@ use leptos_router::components::A;
 use oikos_api::FlowView;
 use oikos_core::flow::{Flow, FlowMode};
 
+use super::Editor;
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::toast::Toasts;
-use crate::flow_layout::with_resolved_positions;
+use crate::flow_layout::{tidy, with_resolved_positions};
 use crate::icons::{CHECK, PENCIL, PLAY, X_MARK};
 use crate::screens::flow_schedule::SaveBlocked;
 
 #[component]
 fn EditControls(
     editing: RwSignal<bool>,
-    draft: RwSignal<Flow>,
+    editor: Editor,
     saving: RwSignal<bool>,
     original: Signal<Flow>,
 ) -> impl IntoView {
@@ -28,7 +30,7 @@ fn EditControls(
         if let Some(b) = blocked {
             b.0.set(false);
         }
-        draft.set(original.get_untracked());
+        editor.reset(original.get_untracked());
         editing.set(false);
     };
     let save = move |_| {
@@ -36,12 +38,12 @@ fn EditControls(
             return;
         }
         saving.set(true);
-        let snapshot = draft.get_untracked();
+        let snapshot = editor.draft.get_untracked();
         spawn_local(async move {
             match api::put_flow(&snapshot).await {
                 // Saved: back to the view, which the hub's echo updates.
                 Ok(view) => {
-                    draft.set(view.definition);
+                    editor.reset(view.definition);
                     editing.set(false);
                 }
                 Err(e) => toasts.push(e.error),
@@ -50,6 +52,31 @@ fn EditControls(
         });
     };
     view! {
+        // The picker that adds cards comes with the next step of the editor.
+        <button type="button" class="btn btn--ghost" aria-label="Add card" title="Add card" disabled>
+            "＋ Add"
+        </button>
+        <button
+            type="button"
+            class="btn btn--ghost"
+            aria-label="Tidy"
+            title="Arrange the cards automatically"
+            on:click=move |_| editor.edit(|f| *f = tidy(f))
+        >
+            "Tidy"
+        </button>
+        <button
+            type="button"
+            class="btn btn--ghost btn--icon flow-toolbar__undo"
+            aria-label="Undo"
+            title="Undo"
+            disabled=move || !editor.can_undo()
+            on:click=move |_| {
+                editor.step(false);
+            }
+        >
+            "↶"
+        </button>
         <button
             type="button"
             class="btn btn--ghost btn--icon"
@@ -72,11 +99,7 @@ fn EditControls(
 }
 
 #[component]
-fn ReadControls(
-    view: Signal<FlowView>,
-    editing: RwSignal<bool>,
-    draft: RwSignal<Flow>,
-) -> impl IntoView {
+fn ReadControls(view: Signal<FlowView>, editing: RwSignal<bool>, editor: Editor) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let invalid = Memo::new(move |_| view.with(|v| v.invalid.is_some()));
     let busy = Memo::new(move |_| view.with(|v| v.active_run.is_some()));
@@ -100,7 +123,7 @@ fn ReadControls(
         });
     };
     let enter_edit = move |_| {
-        draft.set(view.with_untracked(|v| with_resolved_positions(&v.definition)));
+        editor.reset(view.with_untracked(|v| with_resolved_positions(&v.definition)));
         editing.set(true);
     };
     view! {
@@ -134,13 +157,13 @@ fn ReadControls(
 pub fn Toolbar(
     view: Signal<FlowView>,
     editing: RwSignal<bool>,
-    draft: RwSignal<Flow>,
+    editor: Editor,
     saving: RwSignal<bool>,
     drawer: RwSignal<bool>,
 ) -> impl IntoView {
     let name = move || {
         if editing.get() {
-            draft.with(|f| f.name.clone())
+            editor.draft.with(|f| f.name.clone())
         } else {
             view.with(|v| v.definition.name.clone())
         }
@@ -163,9 +186,9 @@ pub fn Toolbar(
         <div class="flow-toolbar flow-toolbar--actions">
             <Show
                 when=move || editing.get()
-                fallback=move || view! { <ReadControls view=view editing=editing draft=draft /> }
+                fallback=move || view! { <ReadControls view=view editing=editing editor=editor /> }
             >
-                <EditControls editing=editing draft=draft saving=saving original=original />
+                <EditControls editing=editing editor=editor saving=saving original=original />
             </Show>
             <button
                 type="button"

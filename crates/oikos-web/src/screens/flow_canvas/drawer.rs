@@ -1,5 +1,5 @@
-//! The right drawer over the canvas: what `children` holds (the selected card's settings
-//! while editing), then the recent runs. Clicking a run replays it on the canvas.
+//! The right drawer over the canvas: the recent runs, or what `children` holds (the selected
+//! card's settings while editing). Clicking a run replays it on the canvas.
 
 use leptos::prelude::*;
 use oikos_api::{RunView, StepOutcome};
@@ -112,13 +112,15 @@ fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl I
 }
 
 /// The drawer, closed by default; it overlays the canvas rather than pushing it. `replay` is
-/// the run whose path the canvas shows.
+/// the run whose path the canvas shows. While `settings` holds, it shows `children` instead
+/// of the runs.
 #[component]
 pub fn Drawer(
     open: RwSignal<bool>,
     runs: Signal<Vec<RunView>>,
     flow: Signal<Flow>,
     replay: RwSignal<Option<String>>,
+    settings: Signal<bool>,
     children: ChildrenFn,
 ) -> impl IntoView {
     let list = move || {
@@ -141,22 +143,24 @@ pub fn Drawer(
         <aside
             class="flow-drawer"
             class:flow-drawer--open=move || open.get()
-            aria-label="Recent runs"
+            aria-label=move || if settings.get() { "Card settings" } else { "Recent runs" }
             inert=move || !open.get()
         >
             {children()}
-            <header class="flow-drawer__header">
-                <h2 class="flow-drawer__title">"Recent runs"</h2>
-                <button
-                    type="button"
-                    class="btn btn--ghost btn--icon flow-drawer__close"
-                    aria-label="Close runs"
-                    title="Close"
-                    on:click=move |_| open.set(false)
-                    inner_html=X_MARK
-                ></button>
-            </header>
-            {list}
+            <Show when=move || !settings.get()>
+                <header class="flow-drawer__header">
+                    <h2 class="flow-drawer__title">"Recent runs"</h2>
+                    <button
+                        type="button"
+                        class="btn btn--ghost btn--icon flow-drawer__close"
+                        aria-label="Close runs"
+                        title="Close"
+                        on:click=move |_| open.set(false)
+                        inner_html=X_MARK
+                    ></button>
+                </header>
+                {list}
+            </Show>
         </aside>
     }
 }

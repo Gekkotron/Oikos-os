@@ -3,7 +3,6 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use oikos_core::flow::{Flow, NodeKind};
 
 use crate::api;
 use crate::schedule::{SchedulePick, WEEK_CHIPS, describe, from_cron, to_cron};
@@ -72,8 +71,10 @@ fn tick_text(rfc3339: &str) -> String {
     }
 }
 
+/// The editor of a schedule starting from the expression `initial`; each change hands the new
+/// expression to `write`.
 #[component]
-pub fn ScheduleField(draft: RwSignal<Flow>, id: String, initial: String) -> impl IntoView {
+pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView {
     let blocked = use_context::<SaveBlocked>();
     let pick = RwSignal::new(from_cron(&initial));
     let ticks = RwSignal::new(Vec::<String>::new());
@@ -81,8 +82,8 @@ pub fn ScheduleField(draft: RwSignal<Flow>, id: String, initial: String) -> impl
     let error = RwSignal::new(None::<String>);
     let generation = RwSignal::new(0_u32);
 
-    // Each change writes the cron into the draft and asks the hub for the next ticks (after a
-    // short pause; a reply for a stale expression is dropped).
+    // Each change writes the cron and asks the hub for the next ticks (after a short pause; a
+    // reply for a stale expression is dropped).
     Effect::new(move |_| {
         let current = pick.get();
         let cron = to_cron(&current);
@@ -95,15 +96,7 @@ pub fn ScheduleField(draft: RwSignal<Flow>, id: String, initial: String) -> impl
             }
             return;
         }
-        let write_id = id.clone();
-        draft.update(|f| {
-            if let Some(n) = f.nodes.iter_mut().find(|n| n.id == write_id)
-                && let NodeKind::TriggerSchedule(ref mut s) = n.kind
-                && s.cron != cron
-            {
-                s.cron = cron.clone();
-            }
-        });
+        write.run(cron.clone());
         let ticket = generation.get_untracked() + 1;
         generation.set(ticket);
         spawn_local(async move {

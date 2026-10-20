@@ -5,7 +5,7 @@ use leptos::task::tick;
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
 use oikos_api::{FlowView, RunStatus, RunView, StepOutcome, StepView};
-use oikos_core::flow::Flow;
+use oikos_core::flow::{Flow, Position};
 use oikos_web::components::now::install_now;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
@@ -46,6 +46,15 @@ fn host() -> web_sys::Element {
 }
 
 fn mount(host: &web_sys::Element, flows: Vec<FlowView>, path: &str) -> Box<dyn std::any::Any> {
+    mount_house(host, flows, path).0
+}
+
+/// Mounts the canvas and also returns its house, for tests that push live updates.
+fn mount_house(
+    host: &web_sys::Element,
+    flows: Vec<FlowView>,
+    path: &str,
+) -> (Box<dyn std::any::Any>, House) {
     web_sys::window()
         .unwrap()
         .history()
@@ -55,7 +64,7 @@ fn mount(host: &web_sys::Element, flows: Vec<FlowView>, path: &str) -> Box<dyn s
     let house = House::new();
     house.flows.set(flows);
     house.connection.set(oikos_api::ConnectionStatus::Online);
-    Box::new(leptos::mount::mount_to(
+    let mounted = Box::new(leptos::mount::mount_to(
         host.clone().unchecked_into(),
         move || {
             provide_context(house);
@@ -69,7 +78,8 @@ fn mount(host: &web_sys::Element, flows: Vec<FlowView>, path: &str) -> Box<dyn s
                 </Router>
             }
         },
-    ))
+    ));
+    (mounted, house)
 }
 
 fn step(node: &str, detail: &str) -> StepView {
@@ -372,43 +382,6 @@ async fn cards_have_handles_and_orphans_fade() {
     );
 }
 
-fn pointer(host: &web_sys::Element, selector: &str, kind: &str) {
-    let init = web_sys::PointerEventInit::new();
-    init.set_bubbles(true);
-    init.set_pointer_id(1);
-    init.set_pointer_type("mouse");
-    host.query_selector(selector)
-        .unwrap()
-        .unwrap_or_else(|| panic!("no {selector}"))
-        .dispatch_event(&web_sys::PointerEvent::new_with_event_init_dict(kind, &init).unwrap())
-        .unwrap();
-}
-
-#[wasm_bindgen_test]
-async fn edit_mode_selects_a_card_and_opens_its_settings() {
-    let host = host();
-    let _mounted = mount(
-        &host,
-        vec![reference_view(None, vec![])],
-        "/flows/living_led_motion",
-    );
-    // Let the page settle in view mode first, as it does in the browser.
-    gloo_timers::future::TimeoutFuture::new(50).await;
-    click(&host, ".flow-toolbar__edit");
-    tick().await;
-    pointer(&host, "[data-node=moving]", "pointerdown");
-    pointer(&host, "[data-node=moving]", "pointerup");
-    tick().await;
-    let html = host.inner_html();
-    assert_eq!(
-        count(&host, "[data-node=moving].flow-node--selected"),
-        1,
-        "{html}"
-    );
-    assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
-    assert_eq!(count(&host, ".flow-drawer .node-editor"), 1, "{html}");
-}
-
 /// Answers every `fetch` with `body` as a 200 JSON response, until the returned guard drops.
 struct FakeFetch(wasm_bindgen::JsValue);
 
@@ -447,4 +420,429 @@ async fn save_leaves_edit_mode() {
     let html = host.inner_html();
     assert_eq!(count(&host, ".flow-graph--editing"), 0, "{html}");
     assert_eq!(count(&host, ".flow-toolbar__edit"), 1, "{html}");
+}
+
+// ---- Editing --------------------------------------------------------------------------------
+
+fn element(host: &web_sys::Element, selector: &str) -> web_sys::Element {
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}"))
+}
+
+/// The centre of `el` on screen, scrolled into view first so a hit test can find it.
+fn centre(el: &web_sys::Element) -> (i32, i32) {
+    el.scroll_into_view();
+    let rect = el.get_bounding_client_rect();
+    (
+        (rect.left() + rect.width() / 2.0) as i32,
+        (rect.top() + rect.height() / 2.0) as i32,
+    )
+}
+
+/// A mouse pointer event of `kind` at client point `at`, dispatched on `target`.
+fn pointer_at(target: &web_sys::Element, kind: &str, at: (i32, i32)) {
+    let init = web_sys::PointerEventInit::new();
+    init.set_bubbles(true);
+    init.set_pointer_id(1);
+    init.set_pointer_type("mouse");
+    init.set_client_x(at.0);
+    init.set_client_y(at.1);
+    target
+        .dispatch_event(&web_sys::PointerEvent::new_with_event_init_dict(kind, &init).unwrap())
+        .unwrap();
+}
+
+/// A bubbling `keydown` of `key` on `target`; `ctrl` stands for the platform modifier.
+fn press(target: &web_sys::EventTarget, key: &str, ctrl: bool, shift: bool) {
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key(key);
+    init.set_ctrl_key(ctrl);
+    init.set_shift_key(shift);
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    target
+        .dispatch_event(
+            &web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap(),
+        )
+        .unwrap();
+}
+
+fn body() -> web_sys::EventTarget {
+    web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .body()
+        .unwrap()
+        .into()
+}
+
+/// A bubbling `click` on `selector` (it works on SVG paths too).
+fn click_any(host: &web_sys::Element, selector: &str) {
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    element(host, selector)
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict("click", &init).unwrap())
+        .unwrap();
+}
+
+fn style(host: &web_sys::Element, selector: &str) -> String {
+    element(host, selector)
+        .get_attribute("style")
+        .unwrap_or_default()
+}
+
+/// Mounts the reference flow (or `view`) and enters edit mode once the page has settled in view
+/// mode, as it does in the browser.
+async fn editing(view: FlowView) -> (web_sys::Element, Box<dyn std::any::Any>, House) {
+    let host = host();
+    let (mounted, house) = mount_house(&host, vec![view], "/flows/living_led_motion");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    click(&host, ".flow-toolbar__edit");
+    tick().await;
+    assert_eq!(count(&host, ".flow-graph--editing"), 1);
+    (host, mounted, house)
+}
+
+/// Clicks the card (a pointerdown and a pointerup without moving).
+async fn select_card(host: &web_sys::Element, id: &str) {
+    let card = element(host, &format!("[data-node={id}]"));
+    let at = centre(&card);
+    pointer_at(&card, "pointerdown", at);
+    pointer_at(&card, "pointerup", at);
+    tick().await;
+}
+
+#[wasm_bindgen_test]
+async fn click_card_opens_settings() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    select_card(&host, "moving").await;
+    let html = host.inner_html();
+    assert_eq!(
+        count(&host, "[data-node=moving].flow-node--selected"),
+        1,
+        "{html}"
+    );
+    assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
+    assert!(count(&host, ".flow-drawer .field") > 0, "{html}");
+    // The drawer shows the settings instead of the runs, with a delete button.
+    assert_eq!(count(&host, ".flow-drawer .run-list"), 0, "{html}");
+    assert_eq!(
+        count(&host, ".flow-drawer .node-editor__delete"),
+        1,
+        "{html}"
+    );
+    // A click on the empty canvas clears the selection.
+    let canvas = element(&host, ".flow-canvas");
+    pointer_at(&canvas, "pointerdown", (1, 1));
+    pointer_at(&canvas, "pointerup", (1, 1));
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-node--selected"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-drawer .field"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn view_mode_click_only_selects() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![done_run()])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    select_card(&host, "moving").await;
+    let html = host.inner_html();
+    assert_eq!(
+        count(&host, "[data-node=moving].flow-node--selected"),
+        1,
+        "{html}"
+    );
+    assert_eq!(count(&host, ".flow-drawer--open"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-drawer .field"), 0, "{html}");
+    // Keys do nothing outside edit mode.
+    press(&body(), "Backspace", false, false);
+    tick().await;
+    assert_eq!(count(&host, "[data-node=moving]"), 1);
+}
+
+#[wasm_bindgen_test]
+async fn delete_key_removes_card_and_wires() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    assert_eq!(count(&host, ".flow-wire"), 4);
+    select_card(&host, "wait").await;
+    press(&body(), "Backspace", false, false);
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=wait]"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-wire"), 2, "{html}");
+    assert_eq!(count(&host, ".flow-node--selected"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn backspace_in_input_keeps_card() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    select_card(&host, "wait").await;
+    let input = element(&host, ".flow-drawer input.field");
+    input
+        .clone()
+        .unchecked_into::<web_sys::HtmlElement>()
+        .focus()
+        .unwrap();
+    press(&input, "Backspace", false, false);
+    press(&input, "Delete", false, false);
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=wait]"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-wire"), 4, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn wire_click_then_cut() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    assert_eq!(count(&host, ".flow-wire-hit"), 4);
+    assert_eq!(count(&host, ".flow-wire-cut"), 0);
+    click_any(&host, ".flow-wire-hit");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-wire--selected"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-wire-cut"), 1, "{html}");
+    click_any(&host, ".flow-wire-cut");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-wire"), 3, "{html}");
+    assert_eq!(count(&host, ".flow-wire-cut"), 0, "{html}");
+}
+
+/// Drags from `[data-node=from]`'s output pin and drops over `[data-node=to]`.
+async fn drag_wire(host: &web_sys::Element, from: &str, to: &str) {
+    let pin = element(host, &format!("[data-node={from}] .flow-node__out"));
+    let start = centre(&pin);
+    pointer_at(&pin, "pointerdown", start);
+    let end = centre(&element(host, &format!("[data-node={to}]")));
+    pointer_at(
+        &pin,
+        "pointermove",
+        ((start.0 + end.0) / 2, (start.1 + end.1) / 2),
+    );
+    tick().await;
+    pointer_at(&pin, "pointermove", end);
+    pointer_at(&pin, "pointerup", end);
+    tick().await;
+}
+
+#[wasm_bindgen_test]
+async fn connect_by_drag() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    let pin = element(&host, "[data-node=on] .flow-node__out");
+    let start = centre(&pin);
+    pointer_at(&pin, "pointerdown", start);
+    pointer_at(&pin, "pointermove", (start.0 + 30, start.1 + 30));
+    tick().await;
+    let html = host.inner_html();
+    // A live preview, and only valid targets highlight.
+    assert_eq!(count(&host, ".flow-wire-preview"), 1, "{html}");
+    assert_eq!(
+        count(&host, "[data-node=off].flow-node--target"),
+        1,
+        "{html}"
+    );
+    assert_eq!(
+        count(&host, "[data-node=motion].flow-node--target"),
+        0,
+        "{html}"
+    );
+    assert_eq!(
+        count(&host, "[data-node=on].flow-node--target"),
+        0,
+        "{html}"
+    );
+    pointer_at(&pin, "pointerup", start);
+    tick().await;
+
+    drag_wire(&host, "on", "off").await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-wire"), 5, "{html}");
+    assert_eq!(count(&host, ".flow-wire-preview"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-node--target"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn connect_into_trigger_refused() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    drag_wire(&host, "on", "motion").await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-wire"), 4, "{html}");
+    // Nothing to undo either.
+    assert!(
+        element(&host, ".flow-toolbar button[aria-label=Undo]").has_attribute("disabled"),
+        "{html}"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn undo_restores() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    let undo = ".flow-toolbar button[aria-label=Undo]";
+    assert!(element(&host, undo).has_attribute("disabled"));
+    select_card(&host, "wait").await;
+    press(&body(), "Delete", false, false);
+    tick().await;
+    assert_eq!(count(&host, "[data-node=wait]"), 0);
+    assert!(!element(&host, undo).has_attribute("disabled"));
+    press(&body(), "z", true, false);
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=wait]"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-wire"), 4, "{html}");
+    assert!(element(&host, undo).has_attribute("disabled"), "{html}");
+    // Shift-Mod-Z redoes.
+    press(&body(), "Z", true, true);
+    tick().await;
+    assert_eq!(count(&host, "[data-node=wait]"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn duplicate_selects_the_copy() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    select_card(&host, "wait").await;
+    press(&body(), "d", true, false);
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-node"), 6, "{html}");
+    assert_eq!(
+        count(&host, "[data-node=delay_1].flow-node--selected"),
+        1,
+        "{html}"
+    );
+    // Unwired.
+    assert_eq!(count(&host, ".flow-wire"), 4, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn drag_is_one_undo_step() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    let selector = "[data-node=on]";
+    let before = style(&host, selector);
+    let card = element(&host, selector);
+    let (x, y) = centre(&card);
+    pointer_at(&card, "pointerdown", (x, y));
+    for dx in [10, 20, 40] {
+        pointer_at(&card, "pointermove", (x + dx, y + dx));
+    }
+    pointer_at(&card, "pointerup", (x + 40, y + 40));
+    tick().await;
+    let moved = style(&host, selector);
+    assert_ne!(moved, before);
+    press(&body(), "z", true, false);
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(style(&host, selector), before, "{html}");
+    assert!(
+        element(&host, ".flow-toolbar button[aria-label=Undo]").has_attribute("disabled"),
+        "{html}"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn ws_update_keeps_draft() {
+    let (host, _mounted, house) = editing(reference_view(None, vec![done_run()])).await;
+    select_card(&host, "on").await;
+    press(&body(), "Backspace", false, false);
+    tick().await;
+    assert_eq!(count(&host, "[data-node=on]"), 0);
+    assert_eq!(count(&host, ".flow-drawer--open"), 1);
+    assert_eq!(count(&host, ".run-list > li"), 1);
+    let mut newer = done_run();
+    newer.id = "r2".into();
+    house
+        .flows
+        .set(vec![reference_view(None, vec![newer, done_run()])]);
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=on]"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-graph--editing"), 1, "{html}");
+    assert_eq!(count(&host, ".run-list > li"), 2, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn tidy_is_undoable() {
+    // Hand-placed positions that the automatic layout would not pick.
+    let mut definition = Flow::decode(REFERENCE.as_bytes()).unwrap();
+    for (i, node) in definition.nodes.iter_mut().enumerate() {
+        node.position = Some(Position {
+            x: 0.0,
+            y: 300.0 * i as f64,
+        });
+    }
+    let view = FlowView {
+        definition,
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let (host, _mounted, _) = editing(view).await;
+    let selector = "[data-node=off]";
+    let before = style(&host, selector);
+    click(&host, ".flow-toolbar button[aria-label=Tidy]");
+    tick().await;
+    assert_ne!(style(&host, selector), before);
+    click(&host, ".flow-toolbar button[aria-label=Undo]");
+    tick().await;
+    assert_eq!(style(&host, selector), before, "{}", host.inner_html());
+}
+
+/// Sets `input`'s value and fires a bubbling `kind` event on it (`input` or `change`).
+fn type_into(input: &web_sys::HtmlInputElement, value: &str, kind: &str) {
+    input.set_value(value);
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    input
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict(kind, &init).unwrap())
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn field_edit_is_one_undo_step() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    select_card(&host, "wait").await;
+    // The delay's fields: its name, then its duration.
+    let duration: web_sys::HtmlInputElement = host
+        .query_selector_all(".flow-drawer input.field")
+        .unwrap()
+        .item(1)
+        .unwrap()
+        .unchecked_into();
+    duration.focus().unwrap();
+    type_into(&duration, "1", "input");
+    type_into(&duration, "10", "input");
+    type_into(&duration, "10m", "input");
+    type_into(&duration, "10m", "change");
+    tick().await;
+    assert_eq!(
+        text(&host, "[data-node=wait] .flow-node__title"),
+        "Wait 10 min"
+    );
+    click(&host, ".flow-toolbar button[aria-label=Undo]");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(
+        text(&host, "[data-node=wait] .flow-node__title"),
+        "Wait 5 min",
+        "{html}"
+    );
+    assert!(
+        element(&host, ".flow-toolbar button[aria-label=Undo]").has_attribute("disabled"),
+        "{html}"
+    );
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    // The form shows the restored value.
+    let duration: web_sys::HtmlInputElement = host
+        .query_selector_all(".flow-drawer input.field")
+        .unwrap()
+        .item(1)
+        .unwrap()
+        .unchecked_into();
+    assert_eq!(duration.value(), "5m");
 }

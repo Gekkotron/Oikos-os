@@ -1,6 +1,7 @@
 //! The flow itself, in world coordinates: one pill per node (role colour, icon, sentence title,
 //! sub-line, pins) and the routed wires between them, with "yes"/"no" labels and the classes a
-//! run lights, dims or animates. Used in view and edit mode alike.
+//! run lights, dims or animates. Used in view and edit mode alike; in edit mode cards drag,
+//! output pins drag out new wires and wires can be selected and cut.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -11,15 +12,15 @@ use oikos_api::StepOutcome;
 use oikos_core::flow::{Flow, NodeKind, Position};
 use wasm_bindgen::JsCast;
 
-use super::Draft;
+use super::Editor;
 use super::viewport::Camera;
 use crate::components::now::Now;
-use crate::flow_edit::EdgeKey;
-use crate::flow_layout::{NODE_H, Pt, out_anchor, positions, routes};
+use crate::flow_edit::{EdgeKey, can_connect, connect, remove_edge};
+use crate::flow_layout::{NODE_H, Pt, out_anchor, positions, route, routes};
 use crate::flow_text::{Ctx, Role, role, subline, title};
 use crate::flows::{Highlight, orphans};
 use crate::house::House;
-use crate::icons::node_icon;
+use crate::icons::{X_MARK, node_icon};
 
 /// Whether the graph is only looked at or edited (cards drag, settings open).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -98,6 +99,25 @@ struct Drag {
 /// click that selects the node.
 const DRAG_THRESHOLD: f64 = 3.0;
 
+/// A wire being dragged out of an output pin: the node and port it leaves from and where the
+/// pointer is, in world coordinates.
+#[derive(Clone, Debug, PartialEq)]
+struct Connecting {
+    from: String,
+    port: Option<&'static str>,
+    to_world: Pt,
+}
+
+/// Points the pointer capture of `ev` at the element its listener sits on.
+fn capture(ev: &web_sys::PointerEvent) {
+    if let Some(target) = ev
+        .current_target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+    {
+        let _ = target.set_pointer_capture(ev.pointer_id());
+    }
+}
+
 /// The signals every card reads.
 #[derive(Clone, Copy)]
 struct Shared {
@@ -113,7 +133,23 @@ struct Shared {
     selection: RwSignal<Option<Selection>>,
     mode: Mode,
     drag: RwSignal<Option<Drag>>,
+    /// The draft as it was when the current drag started; recorded once it really moves.
+    drag_before: StoredValue<Option<Flow>>,
+    connecting: RwSignal<Option<Connecting>>,
+    /// The `(from, port)` of the wire being dragged out, without the pointer position.
+    wiring: Memo<Option<(String, Option<&'static str>)>>,
+    editor: Option<Editor>,
+    camera: Camera,
     layer: NodeRef<html::Div>,
+}
+
+impl Shared {
+    /// The pointer of `ev` in world coordinates.
+    fn world(self, ev: &web_sys::PointerEvent) -> Option<Pt> {
+        let layer = self.layer.get_untracked()?;
+        let (x, y) = pointer_in_canvas(ev, layer.as_ref(), self.camera.view.get_untracked().zoom);
+        Some(Pt { x, y })
+    }
 }
 
 /// The flow as pills and wires. `lit` is the run shown (its cards and wires light up), `dim`
@@ -168,6 +204,8 @@ pub fn Graph(
         }
     });
 
+    let connecting = RwSignal::new(None::<Connecting>);
+    let editor = use_context::<Editor>();
     let shared = Shared {
         flow,
         placed,
@@ -181,6 +219,13 @@ pub fn Graph(
         selection,
         mode,
         drag: RwSignal::new(None),
+        drag_before: StoredValue::new(None),
+        connecting,
+        wiring: Memo::new(move |_| {
+            connecting.with(|w| w.as_ref().map(|w| (w.from.clone(), w.port)))
+        }),
+        editor,
+        camera: expect_context::<Camera>(),
         layer: NodeRef::new(),
     };
 
@@ -212,6 +257,60 @@ pub fn Graph(
                 .collect_view()
         })
     };
+    // Edit mode: a wide invisible stroke per wire takes the click that selects it.
+    let hits = move || {
+        (mode == Mode::Edit).then(|| {
+            wires.with(|w| {
+                w.iter()
+                    .map(|(key, route)| {
+                        let key = key.clone();
+                        view! {
+                            <path
+                                class="flow-wire-hit"
+                                d=route.d.clone()
+                                on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
+                                on:click=move |_| selection.set(Some(Selection::Edge(key.clone())))
+                            />
+                        }
+                    })
+                    .collect_view()
+            })
+        })
+    };
+    // The wire being dragged out, from its pin to the pointer.
+    let preview = move || {
+        let wire = connecting.get()?;
+        let from = flow.with(|f| {
+            let node = f.node(&wire.from)?;
+            let at = placed.with(|p| p.get(&wire.from).copied())?;
+            Some(out_anchor(&node.kind, at, wire.port))
+        })?;
+        let d = route(from, wire.to_world, &[]).d;
+        Some(view! { <path class="flow-wire-preview" d=d /> })
+    };
+    // The ✕ halfway along the selected wire, which cuts it.
+    let cut = move || {
+        let editor = editor.filter(|_| mode == Mode::Edit)?;
+        let Some(Selection::Edge(key)) = selection.get() else {
+            return None;
+        };
+        let mid = wires.with(|w| w.iter().find(|(k, _)| *k == key).map(|(_, r)| r.mid))?;
+        Some(view! {
+            <button
+                type="button"
+                class="flow-wire-cut"
+                aria-label="Delete wire"
+                title="Delete wire"
+                style=format!("left:{}px;top:{}px", mid.x, mid.y)
+                on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
+                on:click=move |_| {
+                    editor.edit(|f| remove_edge(f, &key));
+                    selection.set(None);
+                }
+                inner_html=X_MARK
+            ></button>
+        })
+    };
     let labels = move || {
         let lit = lit.get();
         let dim = dim.get();
@@ -238,12 +337,16 @@ pub fn Graph(
         <div
             class="flow-graph"
             class:flow-graph--editing=mode == Mode::Edit
+            class:flow-graph--connecting=move || connecting.with(Option::is_some)
             node_ref=shared.layer
         >
             <svg class="flow-wires" width="1" height="1" aria-hidden="true">
                 {wire_paths}
+                {hits}
+                {preview}
             </svg>
             {labels}
+            {cut}
             <For
                 each=move || ids.get()
                 key=|id| id.clone()
@@ -300,6 +403,7 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         })
     };
 
+    let pins_id = id.clone();
     let pins = move || {
         kind.get().map(|k| {
             let input = (role(&k) != Role::Trigger).then(|| {
@@ -312,15 +416,7 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
             };
             let outputs = ports
                 .iter()
-                .map(|port| {
-                    view! {
-                        <span
-                            class="flow-node__out"
-                            data-port=*port
-                            style=format!("top:{}px", port_top(&k, *port))
-                        ></span>
-                    }
-                })
+                .map(|port| out_pin(pins_id.clone(), *port, port_top(&k, *port), c))
                 .collect_view();
             view! {
                 {input}
@@ -346,6 +442,15 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         c.selection
             .with(|s| matches!(s, Some(Selection::Node(n)) if *n == selected_id))
     };
+    let target_id = id.clone();
+    let target = move || {
+        c.wiring.with(|w| {
+            w.as_ref().is_some_and(|(from, port)| {
+                c.flow
+                    .with(|f| can_connect(f, from, *port, &target_id).is_ok())
+            })
+        })
+    };
     let step_id = id.clone();
     let step = move || match c.parked.get() {
         Some((node, deadline)) if node == step_id => format!(
@@ -357,10 +462,9 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
             .with(|s| s.get(&step_id).cloned().unwrap_or_default()),
     };
 
-    // Edit mode: the drag code of the first editor, kept until the React Flow-style editor.
+    // Edit mode: a press selects the card, a drag moves it (one undo step per drag).
     let drag = c.drag;
-    let draft = use_context::<Draft>().map(|d| d.0);
-    let camera = expect_context::<Camera>();
+    let draft = c.editor.map(|e| e.draft);
     let id_for_down = id.clone();
     let down = move |ev: web_sys::PointerEvent| {
         if c.mode != Mode::Edit {
@@ -369,28 +473,23 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         if ev.button() != 0 && ev.pointer_type() == "mouse" {
             return;
         }
-        let (Some(layer), Some(draft)) = (c.layer.get_untracked(), draft) else {
+        let (Some(at), Some(draft)) = (c.world(&ev), draft) else {
             return;
         };
-        let (px, py) = pointer_in_canvas(&ev, layer.as_ref(), camera.view.get_untracked().zoom);
         let (nx, ny) = draft.with_untracked(|f| {
             f.node(&id_for_down)
                 .and_then(|n| n.position)
                 .map_or((0.0, 0.0), |p| (p.x, p.y))
         });
-        if let Some(target) = ev
-            .current_target()
-            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-        {
-            let _ = target.set_pointer_capture(ev.pointer_id());
-        }
+        capture(&ev);
         ev.prevent_default();
         // The surface below would pan otherwise.
         ev.stop_propagation();
+        c.drag_before.set_value(Some(draft.get_untracked()));
         drag.set(Some(Drag {
             node: id_for_down.clone(),
-            offset_x: px - nx,
-            offset_y: py - ny,
+            offset_x: at.x - nx,
+            offset_y: at.y - ny,
             moved: false,
         }));
     };
@@ -402,28 +501,34 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         if d.node != id_for_move {
             return;
         }
-        let (Some(layer), Some(draft)) = (c.layer.get_untracked(), draft) else {
+        let (Some(at), Some(editor)) = (c.world(&ev), c.editor) else {
             return;
         };
         ev.stop_propagation();
-        let (px, py) = pointer_in_canvas(&ev, layer.as_ref(), camera.view.get_untracked().zoom);
-        let new_x = (px - d.offset_x).max(0.0);
-        let new_y = (py - d.offset_y).max(0.0);
-        let (nx, ny) = draft.with_untracked(|f| {
-            f.node(&id_for_move)
-                .and_then(|n| n.position)
-                .map_or((new_x, new_y), |p| (p.x, p.y))
-        });
-        if !d.moved && (new_x - nx).hypot(new_y - ny) < DRAG_THRESHOLD {
-            return;
-        }
-        drag.update(|cur| {
-            if let Some(c) = cur {
-                c.moved = true;
+        // The canvas is infinite: a card may go anywhere, negative coordinates included.
+        let new_x = at.x - d.offset_x;
+        let new_y = at.y - d.offset_y;
+        if !d.moved {
+            let (nx, ny) = editor.draft.with_untracked(|f| {
+                f.node(&id_for_move)
+                    .and_then(|n| n.position)
+                    .map_or((new_x, new_y), |p| (p.x, p.y))
+            });
+            if (new_x - nx).hypot(new_y - ny) < DRAG_THRESHOLD {
+                return;
             }
-        });
+            // The press is a drag after all: the state before it is one undo step.
+            if let Some(before) = c.drag_before.try_update_value(Option::take).flatten() {
+                editor.history.update_value(|h| h.record(before));
+            }
+            drag.update(|cur| {
+                if let Some(c) = cur {
+                    c.moved = true;
+                }
+            });
+        }
         let id = id_for_move.clone();
-        draft.update(|f| {
+        editor.draft.update(|f| {
             if let Some(n) = f.nodes.iter_mut().find(|n| n.id == id) {
                 n.position = Some(Position { x: new_x, y: new_y });
             }
@@ -435,6 +540,7 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
             |d| matches!(d, Some(Drag { node, moved: false, .. }) if node == &id_for_up),
         );
         drag.set(None);
+        c.drag_before.set_value(None);
         if was_click {
             c.selection.set(Some(Selection::Node(id_for_up.clone())));
         }
@@ -459,6 +565,7 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
             class:flow-node--orphan=orphan
             class:flow-node--selected=selected
             class:flow-node--dragging=is_dragging
+            class:flow-node--target=target
             data-node=id.clone()
             style=style
             title=title_text
@@ -475,5 +582,69 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
             <span class="flow-node__step">{step}</span>
             {pins}
         </div>
+    }
+}
+
+/// An output pin. In edit mode a drag from it draws a wire that follows the pointer, and the
+/// drop connects to the card under the pointer when the editor allows it (else nothing).
+fn out_pin(id: String, port: Option<&'static str>, top: f64, c: Shared) -> impl IntoView {
+    let down = move |ev: web_sys::PointerEvent| {
+        if c.mode != Mode::Edit || (ev.button() != 0 && ev.pointer_type() == "mouse") {
+            return;
+        }
+        let Some(to_world) = c.world(&ev) else {
+            return;
+        };
+        // Neither the card (drag) nor the surface (pan) takes this press.
+        ev.stop_propagation();
+        ev.prevent_default();
+        capture(&ev);
+        c.connecting.set(Some(Connecting {
+            from: id.clone(),
+            port,
+            to_world,
+        }));
+    };
+    let moved = move |ev: web_sys::PointerEvent| {
+        if c.connecting.with_untracked(Option::is_none) {
+            return;
+        }
+        ev.stop_propagation();
+        if let Some(at) = c.world(&ev) {
+            c.connecting.update(|w| {
+                if let Some(w) = w {
+                    w.to_world = at;
+                }
+            });
+        }
+    };
+    let up = move |ev: web_sys::PointerEvent| {
+        let Some(wire) = c.connecting.try_update(Option::take).flatten() else {
+            return;
+        };
+        ev.stop_propagation();
+        let to = document()
+            .element_from_point(ev.client_x() as f32, ev.client_y() as f32)
+            .and_then(|el| el.closest("[data-node]").ok().flatten())
+            .and_then(|card| card.get_attribute("data-node"));
+        if let (Some(to), Some(editor)) = (to, c.editor)
+            && editor
+                .draft
+                .with_untracked(|f| can_connect(f, &wire.from, wire.port, &to).is_ok())
+        {
+            let _ = editor.edit(|f| connect(f, &wire.from, wire.port, &to));
+        }
+    };
+    let cancel = move |_: web_sys::PointerEvent| c.connecting.set(None);
+    view! {
+        <span
+            class="flow-node__out"
+            data-port=port
+            style=format!("top:{top}px")
+            on:pointerdown=down
+            on:pointermove=moved
+            on:pointerup=up
+            on:pointercancel=cancel
+        ></span>
     }
 }
