@@ -2,7 +2,8 @@
 //! Results are objects (the MCP `structuredContent` must be one), so lists are wrapped.
 
 use oikos_api::{
-    AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, IgnoredView, OverridePatch,
+    AreaView, BridgeView, ConnectionStatus, DeviceView, EnergyKind, EntityView, HistoryDaily,
+    HistoryRange, HistorySeries, HistoryToday, IgnoredView, LastChangeItem, OverridePatch,
     RunStatus, VirtualSpec,
 };
 use oikos_core::flow::Flow;
@@ -345,4 +346,47 @@ pub struct SetVirtualParams {
 pub struct DeleteVirtualParams {
     /// The id given to `set_virtual` (without the `virtual_` prefix).
     pub id: String,
+}
+
+/// Which history slice to return.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryWhat {
+    /// A chart series over a named range (`range` required).
+    Series,
+    /// kWh per calendar day for the last `days` days (`days` and `kind` required).
+    Daily,
+    /// kWh since local midnight (`kind` required).
+    Today,
+    /// The time of the last state change for the entity.
+    LastChange,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetHistoryParams {
+    /// The entity id, as `list_entities` returns it.
+    pub entity: String,
+    /// What to return: `series`, `daily`, `today` or `last_change`.
+    pub what: HistoryWhat,
+    /// `24h`, `7d`, `30d` or `1y`. Required for `what = series`.
+    pub range: Option<HistoryRange>,
+    /// 7, 30 or 365. Required for `what = daily`.
+    pub days: Option<u32>,
+    /// `counter` for a meter reading or `power` for a watt reading. Required for `daily`
+    /// and `today`.
+    pub kind: Option<EnergyKind>,
+}
+
+/// A single-entry object: at most one of `series`, `daily`, `today` or `last_change` is
+/// present, matching the `what` of the request.
+#[derive(Debug, Default, Serialize, Deserialize, JsonSchema)]
+pub struct HistoryAnswer {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series: Option<HistorySeries>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daily: Option<HistoryDaily>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub today: Option<HistoryToday>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_change: Option<LastChangeItem>,
 }

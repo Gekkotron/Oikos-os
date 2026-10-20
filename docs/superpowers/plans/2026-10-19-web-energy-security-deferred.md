@@ -2,11 +2,13 @@
 
 Status: written 2026-10-19 after the implementation wave of `2026-10-19-web-energy-security.md`. Everything here is known, decided and left for a later wave.
 
-## Needs the history service (OikosHistory, LAN :8090)
+## Needs the history service (hub-owned, TimescaleDB)
 
-- **"x.x kWh today"** under each Energy node and card (app history spec §5.4), and the water node's "today" volume. Needs a `[history] url` in the hub config, a read-only proxy `GET /api/v1/history/{today,daily,series,last_change}` (OikosHistory has no CORS and is LAN-only), and a port of the app's `EnergyToday.requests` (which counters to ask, the derived-house subtraction).
-- **Sensor "since"** on Security tiles ("open for 5 min", "unchanged for over 30 days"): the app reads `/v1/last_change` and merges a flip it saw itself. The hub only keeps `last_update`, which Zigbee2MQTT bumps on every link-quality report, so it is not a change time. Either the hub tracks `changed_at` per entity or the proxy above lands first.
-- The app's history detail screens (24 h / 7 d / 30 d charts) for sensors and Energy nodes.
+Hub-side history landed in `2026-10-20-history-hub.md` (TimescaleDB, `/api/v1/history/*` and MCP `get_history`). The following items are now a web-side wave:
+
+- **"x.x kWh today"** under each Energy node and card (app history spec §5.4), and the water node's "today" volume. Reads `GET /api/v1/history/today?entity=&kind=counter|power` (same shape as before); the derived-house subtraction and "which counters to ask" port from the app's `EnergyToday.requests`.
+- **Sensor "since"** on Security tiles ("open for 5 min", "unchanged for over 30 days"). Reads `GET /api/v1/history/last_change?entity=…` (now a batch-of-ids route) and merges a flip the web saw itself. `changed_at` on the hub is the time of a `StateChanged`, not a link-quality bump.
+- The history detail screens (24 h / 7 d / 30 d / 1 y charts) for sensors and Energy nodes. Reads `GET /api/v1/history/series?entity=&range=…` and renders a step-line chart (the hub stores values as held until the next row).
 
 ## Web-only differences kept on purpose
 

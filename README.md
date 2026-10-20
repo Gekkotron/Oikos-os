@@ -88,12 +88,16 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `DELETE /api/v1/flows/{id}` | Removes the flow (204), or `404`. |
 | `POST /api/v1/flows/{id}/enabled` | `{"enabled": bool}`; returns the flow. |
 | `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or already running. |
+| `GET /api/v1/history/series?entity=&range=` | A chart series over `24h`, `7d`, `30d` or `1y`: `{window, points:[[t,mean,min,max],…]}`. See [History](#history). |
+| `GET /api/v1/history/daily?entity=&days=&kind=` | kWh per calendar day for the last `days` days (7, 30 or 365), with `kind` (`counter` or `power`). |
+| `GET /api/v1/history/today?entity=&kind=` | kWh since local midnight: `{kwh, since}`. |
+| `GET /api/v1/history/last_change?entity=&entity=…` | Last change time of 1 to 50 entities, in request order. |
 
 Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` differs from the path: `id mismatch`), 404 (unknown entity, flow, virtual entity or route), 422 (command refused, a bad virtual id or spec, or a flow that is invalid, disabled or already running) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 
 ## MCP
 
-The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers nineteen tools and one resource:
+The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers twenty tools and one resource:
 
 - `bridge_info` — the Zigbee2MQTT bridge and the state of the link to the broker.
 - `list_areas` — the rooms, each with its entity count and the count of entities shown by default (`primary_count`).
@@ -114,6 +118,7 @@ The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers nineteen too
 - `run_flow` — starts a manual run of a flow.
 - `set_virtual` — creates or replaces a virtual switch, number or button the hub owns.
 - `delete_virtual` — removes a virtual entity.
+- `get_history` — one slice of an entity's history: a chart `series` over a `range`, kWh per `daily` with `days` and `kind`, kWh `today` with `kind`, or `last_change`. Available only when `[history] url` is set.
 - Resource `oikos://snapshot` — the whole house as one JSON document.
 
 A failed tool call answers in-band (`isError: true` with the reason) so the assistant can retry with better arguments.
@@ -227,6 +232,34 @@ The scalar is the one value of a state that triggers and `if` compare: the on/of
 Two config keys: `[topics] automation_prefix` (default `oikos/automation`) and `[automation] runs_kept` (recent runs remembered per flow, default 20). Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker.
 
 The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `run_flow` and friends), and the web UI shows them at `/flows` with the last run lit on the canvas. See [HTTP API](#http-api) for the REST routes.
+
+## History
+
+The hub records every entity state change in TimescaleDB for years, so the web UI and MCP can answer "what did this sensor read" and "how much energy today". History is off by default; add `[history]` to the hub config to turn it on. Run the database with the compose file:
+
+```sh
+cd deploy/timescaledb
+cp .env.example .env       # set a real password
+docker compose up -d
+```
+
+Then in `oikos.toml`:
+
+```toml
+[history]
+url = "postgres://oikos:<password>@192.168.1.91:5432/oikos"
+buffer_rows = 100000       # states queued when the database is down
+```
+
+The hub applies the schema migrations at startup, writes every state change inline from `Hub::ingest` (never on the hot MQTT path — the writer runs in a bounded, try-send queue) and rolls each hour up into `history_hourly` every five minutes. A down database never blocks the house: up to `buffer_rows` states wait, past that the oldest are dropped with one warning per outage.
+
+Routes under `/api/v1/history/*` (see the table above): `series` for charts, `daily` for kWh per day over 7, 30 or 365 days, `today` for kWh since local midnight, and `last_change` for 1 to 50 entities. Errors are `400 bad_request`, `404 not_recorded` (the entity has no rows) and `503 history_unavailable` (`[history] url` not set, or the database is down). MCP exposes the same through `get_history`.
+
+Back up with `pg_dump` on the host where the container runs:
+
+```sh
+docker exec oikos-timescaledb pg_dump -U oikos -Fc oikos > oikos-history-$(date +%F).dump
+```
 
 ## Security
 

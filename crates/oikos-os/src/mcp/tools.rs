@@ -1,4 +1,4 @@
-//! The thirteen tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
+//! The fourteen tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
 //! await); write tools log their arguments and go through the hub's writers.
 
 use std::collections::BTreeSet;
@@ -13,10 +13,12 @@ use serde_json::Value;
 use super::params::{
     AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_LIMIT, DEFAULT_SEARCH_LIMIT,
     DeleteVirtualParams, Deleted, DeviceList, EntityDetailView, EntityPage, GetEntityParams,
-    IgnoredList, Include, ListDevicesParams, ListEntitiesParams, MAX_LIMIT, SearchParams,
-    SearchResult, SendCommandParams, SetAreasParams, SetOverrideParams, SetVirtualParams,
+    GetHistoryParams, HistoryAnswer, HistoryWhat, IgnoredList, Include, ListDevicesParams,
+    ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult, SendCommandParams, SetAreasParams,
+    SetOverrideParams, SetVirtualParams,
 };
 use super::{OikosMcp, ToolError};
+use crate::history::query as history_query;
 
 pub(super) type ToolResult<T> = Result<Json<T>, ToolError>;
 
@@ -272,6 +274,74 @@ impl OikosMcp {
         Json(IgnoredList {
             ignored: self.hub.ignored(),
         })
+    }
+
+    /// Returns one slice of an entity's history: `series` (chart over `range`), `daily`
+    /// (kWh per day over `days` with `kind`), `today` (kWh since local midnight with
+    /// `kind`), or `last_change` (when the entity last changed). The reply is always a
+    /// one-field object: the field matches `what`. 503 `history_unavailable` when
+    /// `[history] url` is not set; 404 `not_recorded` when the entity has no rows.
+    #[tool(name = "get_history", annotations(read_only_hint = true))]
+    async fn get_history(
+        &self,
+        Parameters(params): Parameters<GetHistoryParams>,
+    ) -> ToolResult<HistoryAnswer> {
+        let history = self.hub.history().ok_or_else(|| {
+            ToolError("history_unavailable: `[history] url` is not set".into())
+        })?;
+        let now = crate::clock::now_micros();
+        match params.what {
+            HistoryWhat::Series => {
+                let range = params
+                    .range
+                    .ok_or_else(|| ToolError("series requires `range`".into()))?;
+                let series = history_query::series(history, &params.entity, range, now)
+                    .await
+                    .map_err(|e| ToolError(format!("{}: {e}", e.code())))?;
+                Ok(Json(HistoryAnswer {
+                    series: Some(series),
+                    ..HistoryAnswer::default()
+                }))
+            }
+            HistoryWhat::Daily => {
+                let days = params
+                    .days
+                    .ok_or_else(|| ToolError("daily requires `days`".into()))?;
+                let kind = params
+                    .kind
+                    .ok_or_else(|| ToolError("daily requires `kind`".into()))?;
+                let daily =
+                    history_query::daily(history, &params.entity, days, kind, now)
+                        .await
+                        .map_err(|e| ToolError(format!("{}: {e}", e.code())))?;
+                Ok(Json(HistoryAnswer {
+                    daily: Some(daily),
+                    ..HistoryAnswer::default()
+                }))
+            }
+            HistoryWhat::Today => {
+                let kind = params
+                    .kind
+                    .ok_or_else(|| ToolError("today requires `kind`".into()))?;
+                let today = history_query::today(history, &params.entity, kind, now)
+                    .await
+                    .map_err(|e| ToolError(format!("{}: {e}", e.code())))?;
+                Ok(Json(HistoryAnswer {
+                    today: Some(today),
+                    ..HistoryAnswer::default()
+                }))
+            }
+            HistoryWhat::LastChange => {
+                let ids = std::slice::from_ref(&params.entity);
+                let mut items = history_query::last_change(history, ids)
+                    .await
+                    .map_err(|e| ToolError(format!("{}: {e}", e.code())))?;
+                Ok(Json(HistoryAnswer {
+                    last_change: items.items.pop(),
+                    ..HistoryAnswer::default()
+                }))
+            }
+        }
     }
 }
 

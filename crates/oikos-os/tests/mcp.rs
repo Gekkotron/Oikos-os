@@ -48,6 +48,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "run_flow",
     "set_virtual",
     "delete_virtual",
+    "get_history",
 ];
 
 const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
@@ -863,6 +864,42 @@ async fn mcp_set_virtual_lists_the_entity() {
     );
     let again = call(&client, "delete_virtual", json!({ "id": "force_heating" })).await;
     assert_eq!(again.is_error, Some(true));
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn get_history_without_history_reports_unavailable() {
+    let server = Server::start().await;
+    let client = server.client().await;
+
+    let result = call(
+        &client,
+        "get_history",
+        json!({ "entity": "x", "what": "series", "range": "24h" }),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true));
+    let text = text_of(&result);
+    assert!(text.contains("history_unavailable"), "{text}");
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn get_history_is_listed() {
+    let server = Server::start().await;
+    let client = server.client().await;
+
+    let tools = client.list_all_tools().await.expect("list tools");
+    let tool = tools
+        .iter()
+        .find(|tool| tool.name == "get_history")
+        .expect("get_history is listed");
+    assert_eq!(
+        tool.annotations.as_ref().and_then(|a| a.read_only_hint),
+        Some(true)
+    );
 
     client.cancel().await.expect("close");
 }

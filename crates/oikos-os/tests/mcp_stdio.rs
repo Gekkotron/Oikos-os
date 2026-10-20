@@ -43,6 +43,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "run_flow",
     "set_virtual",
     "delete_virtual",
+    "get_history",
 ];
 
 fn fixtures() -> PathBuf {

@@ -1,4 +1,4 @@
-//! The MCP server: nineteen tools and the `oikos://snapshot` resource over the hub, served at
+//! The MCP server: twenty tools and the `oikos://snapshot` resource over the hub, served at
 //! `/mcp` over streamable HTTP with stateful sessions, and the stdio proxy in front of it.
 //!
 //! A failed tool call is answered in-band (`isError: true` with the reason as text) rather
@@ -137,7 +137,10 @@ fn instructions() -> String {
          and `command` (the same JSON as `send_command`). Entity ids come from `search` or \
          `list_entities`. For \"N minutes after the last motion\" use `mode: restart`, so \
          every new trigger restarts the wait; the default `single` ignores triggers while a \
-         run is active.",
+         run is active. `get_history` returns one slice of an entity's history — a chart \
+         series (`what: series` with `range`), kWh per day (`daily` with `days` and \
+         `kind`), kWh since midnight (`today` with `kind`), or `last_change` — when \
+         `[history] url` is set in the hub's config.",
         fields = UiOverride::FIELDS.join(", ")
     )
 }
