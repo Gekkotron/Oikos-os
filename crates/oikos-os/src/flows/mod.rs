@@ -15,4 +15,7 @@ pub enum EngineRequest {
     Reload,
     /// Execute a run the hub already created (a manual run).
     Run { flow_id: String, run_id: String },
+    /// The run is about to disable its own flow (a `flow.enable` node): let it survive the
+    /// reload that follows and finish its remaining steps.
+    KeepRun { flow_id: String, run_id: String },
 }

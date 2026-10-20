@@ -84,6 +84,24 @@ impl Hub {
         self.write_flow(&flow)
     }
 
+    /// [`Self::set_flow_enabled`] for a `flow.enable` node of run `run_id`. A run disabling its
+    /// own flow is announced to the engine first (before the write's reload) so it finishes
+    /// its remaining steps instead of being cancelled with the flow.
+    pub(crate) async fn set_flow_enabled_by_run(
+        &self,
+        id: &str,
+        enabled: bool,
+        run_id: &str,
+    ) -> Result<FlowView, HubError> {
+        if !enabled && self.flow_store().active_run(id).as_deref() == Some(run_id) {
+            self.send_engine(EngineRequest::KeepRun {
+                flow_id: id.to_owned(),
+                run_id: run_id.to_owned(),
+            });
+        }
+        self.set_flow_enabled(id, enabled).await
+    }
+
     /// Starts a manual run: creates it and asks the engine to execute it. Refused while the broker
     /// link is down, like the other writers: the run's commands could not be published.
     pub fn run_flow(&self, id: &str) -> Result<RunView, HubError> {
@@ -214,7 +232,19 @@ impl Hub {
                 NodeKind::TriggerState(params) => Some(&params.entity),
                 NodeKind::If(params) => params.entity.as_ref(),
                 NodeKind::Command(params) => Some(&params.entity),
-                NodeKind::Delay(_) | NodeKind::TriggerSchedule(_) | NodeKind::FlowEnable(_) => None,
+                NodeKind::FlowEnable(params) => {
+                    if let Some(target) = &params.flow
+                        && *target != flow.id
+                        && !self.flow_store().exists(target)
+                    {
+                        return Err(HubError::InvalidFlow(format!(
+                            "unknown flow `{target}` in node `{}`",
+                            node.id
+                        )));
+                    }
+                    None
+                }
+                NodeKind::Delay(_) | NodeKind::TriggerSchedule(_) => None,
             };
             let Some(entity) = entity else { continue };
             let Some(found) = reg.entity(entity) else {

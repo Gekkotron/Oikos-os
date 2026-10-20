@@ -128,7 +128,10 @@ fn instructions() -> String {
          switches it and `delete_flow` removes it; `run_flow` starts a manual run. A flow is a \
          graph of nodes: `trigger.state` (an entity's state changes), `trigger.schedule` (a \
          5-field cron in the house local time; it fires only while the flow is enabled and \
-         the first run is at the next tick), `if` (compares a value; edges leaving it name the port `true` or `false`), `delay` (`5m`, `1h30m`) \
+         the first run is at the next tick), `flow.enable` (sets another flow's `enabled`, or its own flow when `flow` is absent; a flow \
+         that disables itself still finishes the current run), `if` (compares a value; edges \
+         leaving it name the port `true` or `false`; `missing` is `fail` (the default), `true` \
+         or `false` and picks that port when the value is unknown), `delay` (`5m`, `1h30m`) \
          and `command` (the same JSON as `send_command`). Entity ids come from `search` or \
          `list_entities`. For \"N minutes after the last motion\" use `mode: restart`, so \
          every new trigger restarts the wait; the default `single` ignores triggers while a \

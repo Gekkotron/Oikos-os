@@ -1012,3 +1012,136 @@ async fn tick_while_offline_is_skipped() {
     next_run_event(&mut events, RunStatus::Done).await;
     assert_eq!(published(&log).len(), 1);
 }
+
+/// A manual-run flow `id`: a state trigger, then `nodes` chained in order (no ports).
+fn chain_json(id: &str, enabled: bool, nodes: Vec<serde_json::Value>) -> String {
+    let mut all = vec![serde_json::json!(
+        { "id": "t", "type": "trigger.state", "params": { "entity": MOTION_ID } }
+    )];
+    all.extend(nodes);
+    let edges: Vec<_> = all
+        .windows(2)
+        .map(|pair| serde_json::json!({ "from": pair[0]["id"], "to": pair[1]["id"] }))
+        .collect();
+    serde_json::json!({
+        "id": id, "name": id, "enabled": enabled, "mode": "single",
+        "nodes": all, "edges": edges
+    })
+    .to_string()
+}
+
+fn turn(id: &str, command: &str) -> serde_json::Value {
+    serde_json::json!({ "id": id, "type": "command",
+        "params": { "entity": LED_ID, "command": { "type": command } } })
+}
+
+#[tokio::test]
+async fn flow_enable_enables_another_flow() {
+    let (hub, _publisher, _engine) = engine_hub();
+    let flow_enable = serde_json::json!({ "id": "e", "type": "flow.enable",
+        "params": { "flow": "b", "enabled": true } });
+    hub.ingest(
+        "oikos/automation/a",
+        chain_json("a", true, vec![flow_enable]).as_bytes(),
+    );
+    hub.ingest(
+        "oikos/automation/b",
+        chain_json("b", false, vec![turn("on", "turn_on")]).as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+    hub.run_flow("a").expect("run");
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(run.steps.last().expect("step").detail, "enabled b");
+    assert!(hub.flow("b").expect("b").definition.enabled);
+}
+
+#[tokio::test]
+async fn self_disable_keeps_the_running_run() {
+    let (hub, publisher, _engine) = engine_hub();
+    let log = echo(publisher, Arc::clone(&hub));
+    let flow_enable = serde_json::json!({ "id": "e", "type": "flow.enable",
+        "params": { "enabled": false } });
+    hub.ingest(
+        "oikos/automation/a",
+        chain_json("a", true, vec![flow_enable, turn("on", "turn_on")]).as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+    hub.run_flow("a").expect("run");
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(step_nodes(&run), ["t", "e", "on"]);
+    assert_eq!(run.steps[1].detail, "disabled a");
+    assert!(published(&log).iter().any(|p| p.contains("ON")), "{log:?}");
+    assert!(!hub.flow("a").expect("a").definition.enabled);
+}
+
+fn missing_flow(missing: Option<&str>) -> String {
+    let mut params = serde_json::json!({ "op": "eq", "value": "ON", "entity": LED_ID });
+    if let Some(missing) = missing {
+        params["missing"] = missing.into();
+    }
+    let check = serde_json::json!({ "id": "chk", "type": "if", "params": params });
+    let mut value: serde_json::Value =
+        serde_json::from_str(&chain_json("a", true, vec![check, turn("on", "turn_on")]))
+            .expect("json");
+    value["nodes"]
+        .as_array_mut()
+        .expect("nodes")
+        .push(turn("off", "turn_off"));
+    value["edges"] = serde_json::json!([
+        { "from": "t", "to": "chk" },
+        { "from": "chk", "port": "true", "to": "on" },
+        { "from": "chk", "port": "false", "to": "off" }
+    ]);
+    value.to_string()
+}
+
+#[tokio::test]
+async fn if_missing_false_takes_false() {
+    let (hub, publisher, _engine) = engine_hub();
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.ingest("oikos/automation/a", missing_flow(Some("false")).as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+    hub.run_flow("a").expect("run");
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(run.steps[1].detail, "missing → false");
+    let sent = published(&log);
+    assert!(sent.len() == 1 && sent[0].contains("OFF"), "{sent:?}");
+}
+
+#[tokio::test]
+async fn if_missing_default_still_fails() {
+    let (hub, publisher, _engine) = engine_hub();
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.ingest("oikos/automation/a", missing_flow(None).as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+    hub.run_flow("a").expect("run");
+    // Without `missing` the step behaves exactly as before: `compare` of a missing value is
+    // plain false, with no "missing →" note.
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(run.steps[1].detail, "false");
+    let sent = published(&log);
+    assert!(sent.len() == 1 && sent[0].contains("OFF"), "{sent:?}");
+}
+
+#[tokio::test]
+async fn set_flow_rejects_unknown_target_flow() {
+    let (hub, _publisher) = hub_with_entities();
+    let flow_enable = serde_json::json!({ "id": "e", "type": "flow.enable",
+        "params": { "flow": "nope", "enabled": true } });
+    let flow = Flow::decode(chain_json("a", true, vec![flow_enable]).as_bytes()).expect("flow");
+    match hub.set_flow(flow).await {
+        Err(HubError::InvalidFlow(reason)) => {
+            assert!(reason.contains("unknown flow `nope`"), "{reason}");
+        }
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+    // Targeting itself or an existing flow validates.
+    let own = serde_json::json!({ "id": "e", "type": "flow.enable",
+        "params": { "flow": "a", "enabled": true } });
+    let flow = Flow::decode(chain_json("a", true, vec![own]).as_bytes()).expect("flow");
+    hub.set_flow(flow).await.expect("self target validates");
+}

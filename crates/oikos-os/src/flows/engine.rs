@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
-use oikos_core::flow::{Flow, Node, NodeKind, Scalar, Schedule, compare, parse_duration};
+use oikos_core::flow::{Flow, Missing, Node, NodeKind, Scalar, Schedule, compare, parse_duration};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, JoinSet};
@@ -57,6 +57,7 @@ pub(super) async fn run_with(
         known: BTreeMap::new(),
         watched: BTreeSet::new(),
         active: BTreeMap::new(),
+        keep: BTreeSet::new(),
         tasks: JoinSet::new(),
         zone: hub.zone(),
         now: timer_clock(),
@@ -135,6 +136,9 @@ struct Engine {
     /// unseeded until the broker's replay shows them, not be re-seeded from stale values.
     watched: BTreeSet<String>,
     active: BTreeMap<String, Active>,
+    /// `(flow, run)` pairs whose run disabled its own flow with a `flow.enable` node: that run
+    /// survives the reload the disable causes. Forgotten when the run ends.
+    keep: BTreeSet<(String, String)>,
     tasks: JoinSet<Finished>,
 }
 
@@ -143,6 +147,9 @@ impl Engine {
         match request {
             EngineRequest::Reload => self.reload(),
             EngineRequest::Run { flow_id, run_id } => self.run_manual(&flow_id, run_id),
+            EngineRequest::KeepRun { flow_id, run_id } => {
+                self.keep.insert((flow_id, run_id));
+            }
         }
     }
 
@@ -150,11 +157,11 @@ impl Engine {
     /// flow written while the entity already has a value fires on its very next change) and
     /// cancels runs whose flow was removed, disabled or edited.
     fn reload(&mut self) {
-        self.flows = self
-            .hub
-            .flow_definitions()
-            .into_iter()
+        let definitions = self.hub.flow_definitions();
+        self.flows = definitions
+            .iter()
             .filter(|flow| flow.enabled)
+            .cloned()
             .collect();
         let watched = self.watched_entities();
         self.known.retain(|id, _| watched.contains(id));
@@ -171,13 +178,31 @@ impl Engine {
         let stale: Vec<String> = self
             .active
             .iter()
-            .filter(|(id, active)| !self.flows.iter().any(|f| f.id == **id && *f == active.flow))
+            .filter(|(id, active)| {
+                let unchanged = self.flows.iter().any(|f| f.id == **id && *f == active.flow);
+                !(unchanged || self.survives_self_disable(id, active, &definitions))
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in stale {
             self.cancel(&id);
         }
         self.arm_schedules();
+    }
+
+    /// Whether `active` is a run that disabled its own flow (announced by `KeepRun`) and whose
+    /// flow differs from the definition it started with in nothing but `enabled`.
+    fn survives_self_disable(&self, id: &str, active: &Active, definitions: &[Flow]) -> bool {
+        if !self.keep.contains(&(id.to_owned(), active.run_id.clone())) {
+            return false;
+        }
+        let normalised = |flow: &Flow| Flow {
+            enabled: true,
+            ..flow.clone()
+        };
+        definitions
+            .iter()
+            .any(|f| f.id == id && normalised(f) == normalised(&active.flow))
     }
 
     /// Arms every schedule node of an enabled flow that is not armed with the same expression
@@ -418,6 +443,7 @@ impl Engine {
     /// Aborts a flow's active run and ends it `Cancelled`.
     fn cancel(&mut self, flow_id: &str) {
         if let Some(active) = self.active.remove(flow_id) {
+            self.keep.retain(|(flow, _)| flow != flow_id);
             active.abort.abort();
             self.hub
                 .end_run(flow_id, &active.run_id, RunStatus::Cancelled);
@@ -438,6 +464,7 @@ impl Engine {
                     .is_some_and(|active| active.run_id == run_id)
                 {
                     self.active.remove(&flow_id);
+                    self.keep.retain(|(flow, _)| *flow != flow_id);
                     self.hub.end_run(&flow_id, &run_id, status);
                 }
             }
@@ -453,6 +480,7 @@ impl Engine {
                 if let Some(flow_id) = flow_id
                     && let Some(active) = self.active.remove(&flow_id)
                 {
+                    self.keep.retain(|(flow, _)| *flow != flow_id);
                     let failure = step("engine", StepOutcome::Failed, "run panicked".to_owned());
                     self.hub.record_step(&flow_id, &active.run_id, failure);
                     self.hub
@@ -493,7 +521,8 @@ pub(super) async fn execute(
             }
             return RunStatus::Failed;
         };
-        let (outcome, detail, port) = run_node(&hub, node, trigger.as_ref()).await;
+        let (outcome, detail, port) =
+            run_node(&hub, &flow.id, &run_id, node, trigger.as_ref()).await;
         if !hub.record_step(&flow.id, &run_id, step(&node.id, outcome, detail)) {
             return RunStatus::Cancelled;
         }
@@ -522,6 +551,8 @@ fn step(node: &str, outcome: StepOutcome, detail: String) -> StepView {
 /// Runs one node: its outcome, the detail to record and the output port to follow.
 async fn run_node(
     hub: &Hub,
+    flow_id: &str,
+    run_id: &str,
     node: &Node,
     trigger: Option<&TriggerInfo>,
 ) -> (StepOutcome, String, Option<&'static str>) {
@@ -537,8 +568,29 @@ async fn run_node(
         NodeKind::TriggerSchedule(params) => {
             (StepOutcome::Ok, format!("schedule {}", params.cron), None)
         }
-        // Task 5 gives flow.enable its run-time behaviour; for now it just passes.
-        NodeKind::FlowEnable(_) => (StepOutcome::Ok, "flow.enable".to_owned(), None),
+        NodeKind::FlowEnable(params) => {
+            let target = params.flow.as_deref().unwrap_or(flow_id);
+            if hub.flow(target).is_none() {
+                return failed(format!("unknown flow `{target}`"));
+            }
+            let result = if target == flow_id {
+                hub.set_flow_enabled_by_run(target, params.enabled, run_id)
+                    .await
+            } else {
+                hub.set_flow_enabled(target, params.enabled).await
+            };
+            match result {
+                Ok(_) => {
+                    let verb = if params.enabled {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    };
+                    (StepOutcome::Ok, format!("{verb} {target}"), None)
+                }
+                Err(err) => failed(err.to_string()),
+            }
+        }
         NodeKind::If(params) => {
             let Some(right) = Scalar::from_json(&params.value) else {
                 return failed("value is not a scalar".to_owned());
@@ -548,6 +600,15 @@ async fn run_node(
                 (None, Some(trigger)) => hub.entity_scalar(&trigger.entity),
                 (None, None) => return failed("no triggering entity".to_owned()),
             };
+            match (&left, params.missing) {
+                (None, Some(Missing::True)) => {
+                    return (StepOutcome::Ok, "missing → true".to_owned(), Some("true"));
+                }
+                (None, Some(Missing::False)) => {
+                    return (StepOutcome::Ok, "missing → false".to_owned(), Some("false"));
+                }
+                _ => {}
+            }
             match compare(left.as_ref(), params.op, &right) {
                 Ok(true) => (StepOutcome::Ok, "true".to_owned(), Some("true")),
                 Ok(false) => (StepOutcome::Ok, "false".to_owned(), Some("false")),
