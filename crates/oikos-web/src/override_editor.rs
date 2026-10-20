@@ -1,14 +1,19 @@
-//! The override editor: one input per field of the hub's `UiOverride`, saved as a partial patch.
+//! The settings form of the device sheet: only the controls that apply to the entity (see
+//! [`crate::settings_rules`]), saved as a partial patch of the hub's `UiOverride`.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oikos_api::{EntityView, OverridePatch};
-use oikos_core::model::{ENERGY_ROLES, Kind, LIGHT_ON_PRESETS, SHOW_AS, UiOverride};
+use oikos_core::energy::{ConsumerIcon, EnergyMeters};
+use oikos_core::model::{ENERGY_ROLES, Kind, LIGHT_ON_PRESETS, SwitchType, UiOverride};
 use serde_json::json;
 
 use crate::api::{clear_override, set_override};
 use crate::components::toast::Toasts;
+use crate::energy::energy_entities;
 use crate::house::House;
+use crate::icons::consumer_icon;
+use crate::settings_rules::{Shown, clear_field, order_valid, other_saved, set_type, shown};
 
 /// The fields of `after` that differ from `before`, as a patch the hub accepts: camelCase keys,
 /// a cleared `Option` as `null`, flags as booleans, `order` and the brightness as numbers.
@@ -62,6 +67,7 @@ fn TextField(
     draft: Draft,
     get: fn(&UiOverride) -> Text,
     set: fn(&mut UiOverride, Text),
+    #[prop(optional)] hint: Option<&'static str>,
 ) -> impl IntoView {
     view! {
         <label class="override__field">
@@ -75,35 +81,53 @@ fn TextField(
                     draft.update(|d| set(d, value));
                 }
             />
+            {hint.map(|h| view! { <span class="override__hint">{h}</span> })}
         </label>
     }
 }
 
+/// The position (`order`): free text so a typo can be shown and blocks Save instead of being
+/// dropped. `valid` is false while the text is not empty or a whole number from 0 to 9999.
 #[component]
-fn IntField(
-    label: &'static str,
-    draft: Draft,
-    get: fn(&UiOverride) -> Option<i32>,
-    set: fn(&mut UiOverride, Option<i32>),
-) -> impl IntoView {
+fn PositionField(draft: Draft, valid: RwSignal<bool>) -> impl IntoView {
+    let text =
+        RwSignal::new(draft.with_untracked(|d| d.order.map(|n| n.to_string()).unwrap_or_default()));
+    // Follow an outside change (the draft taking over a newer stored override).
+    Effect::new(move |_| {
+        let order = draft.with(|d| d.order);
+        let shown = text.with_untracked(|t| t.trim().parse::<i32>().ok());
+        if shown != order && valid.get_untracked() {
+            text.set(order.map(|n| n.to_string()).unwrap_or_default());
+        }
+    });
     view! {
         <label class="override__field">
-            <span class="override__label">{label}</span>
+            <span class="override__label">"Position"</span>
             <input
                 class="field"
-                type="number"
-                step="1"
-                prop:value=move || draft.with(|d| get(d).map(|n| n.to_string()).unwrap_or_default())
+                type="text"
+                inputmode="numeric"
+                prop:value=move || text.get()
                 on:input=move |ev| {
                     let raw = event_target_value(&ev);
-                    let raw = raw.trim();
-                    if raw.is_empty() {
-                        draft.update(|d| set(d, None));
-                    } else if let Ok(n) = raw.parse::<i32>() {
-                        draft.update(|d| set(d, Some(n)));
+                    let ok = order_valid(&raw);
+                    valid.set(ok);
+                    if ok {
+                        let order = raw.trim().parse::<i32>().ok();
+                        draft.update(|d| d.order = order);
                     }
+                    text.set(raw);
                 }
             />
+            <span class="override__hint" class:override__hint--error=move || !valid.get()>
+                {move || {
+                    if valid.get() {
+                        "Lower numbers come first. Leave empty for automatic."
+                    } else {
+                        "Enter a whole number from 0 to 9999."
+                    }
+                }}
+            </span>
         </label>
     }
 }
@@ -136,44 +160,73 @@ fn FlagField(
     }
 }
 
-/// A `<select>` over a fixed list of values, with "Default" for none. A stored value outside the
-/// list (a role a newer app wrote) stays selectable.
+/// One chip of a [`ChipField`]: its text, the value it stands for (`None`: the field's default)
+/// and an optional glyph shown before the text.
+#[derive(Clone, Copy)]
+struct ChipOption {
+    label: &'static str,
+    value: Option<&'static str>,
+    glyph: Option<&'static str>,
+}
+
+const fn chip(label: &'static str, value: Option<&'static str>) -> ChipOption {
+    ChipOption {
+        label,
+        value,
+        glyph: None,
+    }
+}
+
+/// A row of single-choice chips. A stored value outside `options` (written by a newer app or by
+/// hand) shows as one more selected chip with its raw text, so it is never silently replaced.
 #[component]
-fn ChoiceField(
+fn ChipField(
     label: &'static str,
     draft: Draft,
-    options: &'static [&'static str],
+    options: Vec<ChipOption>,
     get: fn(&UiOverride) -> Text,
-    set: fn(&mut UiOverride, Text),
+    on_pick: fn(&mut UiOverride, Option<&'static str>),
 ) -> impl IntoView {
-    let unknown = move || draft.with(get).filter(|v| !options.contains(&v.as_str()));
+    let known: Vec<Option<&'static str>> = options.iter().map(|o| o.value).collect();
+    let unknown = move || {
+        draft
+            .with(get)
+            .filter(|v| !known.contains(&Some(v.as_str())))
+    };
     view! {
-        <label class="override__field">
+        <div class="override__field" role="group" aria-label=label>
             <span class="override__label">{label}</span>
-            <select
-                class="select"
-                on:change=move |ev| {
-                    let value = non_blank(event_target_value(&ev));
-                    draft.update(|d| set(d, value));
-                }
-            >
-                <option value="" prop:selected=move || draft.with(get).is_none()>"Default"</option>
+            <div class="override__chips">
                 {options
-                    .iter()
+                    .into_iter()
                     .map(|o| {
+                        let selected = move || draft.with(get).as_deref() == o.value;
                         view! {
-                            <option value=*o prop:selected=move || draft.with(get).as_deref() == Some(*o)>
-                                {*o}
-                            </option>
+                            <button
+                                type="button"
+                                class="chip"
+                                class:chip--selected=selected
+                                aria-pressed=move || selected().to_string()
+                                on:click=move |_| draft.update(|d| on_pick(d, o.value))
+                            >
+                                {o.glyph.map(|g| view! { <span class="chip__glyph" inner_html=g></span> })}
+                                {o.label}
+                            </button>
                         }
                     })
                     .collect_view()}
                 {move || {
                     unknown()
-                        .map(|v| view! { <option value=v.clone() selected>{v.clone()}</option> })
+                        .map(|v| {
+                            view! {
+                                <button type="button" class="chip chip--selected" aria-pressed="true">
+                                    {v}
+                                </button>
+                            }
+                        })
                 }}
-            </select>
-        </label>
+            </div>
+        </div>
     }
 }
 
@@ -195,7 +248,7 @@ fn AreaField(draft: Draft) -> impl IntoView {
     const OTHER: &str = "__other__";
     view! {
         <div class="override__field">
-            <label class="override__label" for="override-area">"Area"</label>
+            <label class="override__label" for="override-area">"Room"</label>
             <select
                 id="override-area"
                 class="select"
@@ -229,7 +282,7 @@ fn AreaField(draft: Draft) -> impl IntoView {
                 <input
                     class="field"
                     type="text"
-                    aria-label="Area name"
+                    aria-label="Room name"
                     prop:value=move || draft.with(|d| d.area.clone().unwrap_or_default())
                     on:input=move |ev| {
                         let area = non_blank(event_target_value(&ev));
@@ -241,19 +294,68 @@ fn AreaField(draft: Draft) -> impl IntoView {
     }
 }
 
+/// The energy counter shown on a power sensor's card: "Automatic" or one of the house's
+/// counters. A stored id that no longer names a counter stays selected under its raw id.
+#[component]
+fn CounterField(draft: Draft) -> impl IntoView {
+    let house = expect_context::<House>();
+    let counters = Memo::new(move |_| {
+        let all = house.entities.with(energy_entities);
+        let mut list: Vec<(String, String)> = EnergyMeters::counters(&all)
+            .into_iter()
+            .map(|e| (e.id.clone(), e.name.clone()))
+            .collect();
+        list.sort_by_cached_key(|(id, name)| (name.to_lowercase(), id.clone()));
+        list
+    });
+    let current = move || draft.with(|d| d.energy_meter.clone());
+    let unknown =
+        move || current().filter(|id| counters.with(|c| !c.iter().any(|(known, _)| known == id)));
+    view! {
+        <label class="override__field">
+            <span class="override__label">"Energy counter"</span>
+            <select
+                class="select"
+                on:change=move |ev| {
+                    let value = non_blank(event_target_value(&ev));
+                    draft.update(|d| d.energy_meter = value);
+                }
+            >
+                <option value="" prop:selected=move || current().is_none()>"Automatic"</option>
+                <For
+                    each=move || counters.get()
+                    key=|(id, name)| (id.clone(), name.clone())
+                    children=move |(id, name)| {
+                        let value = id.clone();
+                        view! {
+                            <option
+                                value=value
+                                prop:selected=move || current().as_deref() == Some(id.as_str())
+                            >
+                                {name}
+                            </option>
+                        }
+                    }
+                />
+                {move || unknown().map(|v| view! { <option value=v.clone() selected>{v.clone()}</option> })}
+            </select>
+        </label>
+    }
+}
+
 /// The light-on brightness slider (1..=255, the hub rejects 0) with a reset to "Default".
 #[component]
 fn BrightnessField(draft: Draft) -> impl IntoView {
     view! {
         <div class="override__field">
-            <span class="override__label">"Light-on brightness"</span>
+            <span class="override__label">"Brightness"</span>
             <div class="override__slider">
                 <input
                     class="slider"
                     type="range"
                     min="1"
                     max="255"
-                    aria-label="Light-on brightness"
+                    aria-label="Brightness when turned on"
                     prop:value=move || {
                         draft.with(|d| d.light_on_brightness.unwrap_or(255)).to_string()
                     }
@@ -283,27 +385,138 @@ fn BrightnessField(draft: Draft) -> impl IntoView {
     }
 }
 
+/// A titled block of the form, left out entirely while it has nothing to show.
 #[component]
-fn Group(title: &'static str, children: Children) -> impl IntoView {
+fn Section(
+    title: &'static str,
+    #[prop(into)] when: Signal<bool>,
+    children: ChildrenFn,
+) -> impl IntoView {
     view! {
-        <fieldset class="override__group">
-            <legend class="override__legend">{title}</legend>
-            {children()}
-        </fieldset>
+        <Show when=move || when.get()>
+            <fieldset class="override__group">
+                <legend class="override__legend">{title}</legend>
+                {children()}
+            </fieldset>
+        </Show>
     }
 }
 
-/// The form for `entity`'s override. The draft starts as `entity.ui`; "Save" sends only what
-/// changed, a rejected save shows the hub's message and keeps the draft.
+/// Values set for controls the form does not show, each with a button that clears it.
+#[component]
+fn OtherSaved(draft: Draft, shown: Memo<Shown>) -> impl IntoView {
+    let entries = Memo::new(move |_| draft.with(|d| shown.with(|s| other_saved(d, s))));
+    view! {
+        <Show when=move || entries.with(|e| !e.is_empty())>
+            <div class="override__field">
+                <span class="override__label">"Other saved settings"</span>
+                <ul class="override__saved">
+                    <For
+                        each=move || entries.get()
+                        key=|(key, value)| (*key, value.clone())
+                        children=move |(key, value)| {
+                            view! {
+                                <li class="override__saved-row">
+                                    <span>{format!("{key}: {value}")}</span>
+                                    <button
+                                        type="button"
+                                        class="btn btn--compact"
+                                        aria-label=format!("Clear {key}")
+                                        on:click=move |_| draft.update(|d| clear_field(d, key))
+                                    >
+                                        "×"
+                                    </button>
+                                </li>
+                            }
+                        }
+                    />
+                </ul>
+            </div>
+        </Show>
+    }
+}
+
+fn energy_role_label(role: &str) -> &'static str {
+    match role {
+        "solar" => "Solar",
+        "grid" => "Grid",
+        "grid_export" => "Grid export",
+        "battery" => "Battery",
+        "house" => "House",
+        "consumer" => "Consumer",
+        "water" => "Water",
+        _ => "Unknown",
+    }
+}
+
+fn light_on_label(preset: &str) -> &'static str {
+    match preset {
+        "white" => "White",
+        "warm" => "Warm",
+        "red" => "Red",
+        "green" => "Green",
+        "blue" => "Blue",
+        _ => "Unknown",
+    }
+}
+
+/// The consumer icons, in the app's order, with their labels.
+const CONSUMER_ICONS: [(&str, &str); 7] = [
+    ("water_heater", "Water heater"),
+    ("heat_pump", "Heat pump"),
+    ("oven", "Oven"),
+    ("fridge", "Fridge"),
+    ("washer", "Washer"),
+    ("dryer", "Dryer"),
+    ("dishwasher", "Dishwasher"),
+];
+
+fn type_options() -> Vec<ChipOption> {
+    SwitchType::ALL
+        .into_iter()
+        .map(|t| chip(t.label(), t.key()))
+        .collect()
+}
+
+fn light_on_options() -> Vec<ChipOption> {
+    std::iter::once(chip("Last state", None))
+        .chain(
+            LIGHT_ON_PRESETS
+                .iter()
+                .map(|p| chip(light_on_label(p), Some(*p))),
+        )
+        .collect()
+}
+
+fn energy_role_options() -> Vec<ChipOption> {
+    std::iter::once(chip("None", None))
+        .chain(
+            ENERGY_ROLES
+                .iter()
+                .map(|r| chip(energy_role_label(r), Some(*r))),
+        )
+        .collect()
+}
+
+fn icon_options() -> Vec<ChipOption> {
+    std::iter::once(ChipOption {
+        label: "Plug",
+        value: None,
+        glyph: Some(consumer_icon(None)),
+    })
+    .chain(CONSUMER_ICONS.iter().map(|(key, label)| ChipOption {
+        label,
+        value: Some(*key),
+        glyph: Some(consumer_icon(ConsumerIcon::parse(key))),
+    }))
+    .collect()
+}
+
 #[component]
 pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
     let id = entity.id.clone();
-    let is_switch = entity.protocol_kind == Kind::Switch;
-    // The light-on options only mean something for lights, and for switches that can be shown
-    // as one.
-    let has_light = is_switch || entity.protocol_kind == Kind::Light;
 
     // What the hub currently has; follows changes from outside (the app, MCP).
     let stored = {
@@ -315,7 +528,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 .unwrap_or_default()
         })
     };
-    let draft: Draft = RwSignal::new(entity.ui);
+    let draft: Draft = RwSignal::new(entity.ui.clone());
     let patch = Memo::new(move |_| stored.with(|s| draft.with(|d| dirty_patch(s, d))));
     let dirty = Memo::new(move |_| patch.with(|p| !p.is_empty()));
     let error = RwSignal::new(None::<String>);
@@ -386,127 +599,177 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
         }
     };
 
+    let rules_entity = entity.clone();
+    let shown = Memo::new(move |_| draft.with(|d| shown(&rules_entity, d)));
+    let order_ok = RwSignal::new(true);
+    let group_label = if entity.protocol_kind == Kind::Cover {
+        "Group with the other shutters in this room"
+    } else {
+        "Group with the other lights in this room"
+    };
+    let on = move |pick: fn(&Shown) -> bool| Signal::derive(move || shown.with(pick));
+
     view! {
         <form class="override" on:submit=|ev| ev.prevent_default()>
-            <Group title="Display">
+            <fieldset class="override__group">
+                <legend class="override__legend">"General"</legend>
                 <TextField
                     label="Name"
                     draft=draft
                     get=|d| d.name.clone()
                     set=|d, v| d.name = v
+                    hint="Leave empty to use the device's own name."
                 />
                 <AreaField draft=draft />
-                <FlagField label="Hidden" draft=draft get=|d| d.hidden set=|d, v| d.hidden = v />
-                <FlagField
-                    label="Favorite"
-                    draft=draft
-                    get=|d| d.favorite
-                    set=|d, v| d.favorite = v
-                />
-                <IntField
-                    label="Order"
-                    draft=draft
-                    get=|d| d.order
-                    set=|d, v| d.order = v
-                />
-                <TextField
-                    label="Card style"
-                    draft=draft
-                    get=|d| d.card_style.clone()
-                    set=|d, v| d.card_style = v
-                />
-                <FlagField
-                    label="Pinned on Home"
-                    draft=draft
-                    get=|d| d.home_pinned
-                    set=|d, v| d.home_pinned = v
-                />
-                <FlagField
-                    label="Ungrouped"
-                    draft=draft
-                    get=|d| d.ungrouped
-                    set=|d, v| d.ungrouped = v
-                />
-            </Group>
-            {has_light.then(|| view! {
-            <Group title="Light">
-                {is_switch
-                    .then(|| {
+                <FlagField label="Favorite" draft=draft get=|d| d.favorite set=|d, v| d.favorite = v />
+                <PositionField draft=draft valid=order_ok />
+                <Show
+                    when=move || shown.with(|s| s.show_on_home)
+                    fallback=move || {
                         view! {
-                            <ChoiceField
-                                label="Show as"
+                            <FlagField
+                                label="Hide from Home"
                                 draft=draft
-                                options=SHOW_AS
-                                get=|d| d.show_as.clone()
-                                set=|d, v| d.show_as = v
+                                get=|d| d.hidden
+                                set=|d, v| d.hidden = v
                             />
                         }
-                    })}
-                <ChoiceField
-                    label="Light-on preset"
+                    }
+                >
+                    <FlagField
+                        label="Show on Home"
+                        draft=draft
+                        get=|d| d.home_pinned && !d.hidden
+                        set=|d, v| {
+                            d.home_pinned = v;
+                            if v {
+                                d.hidden = false;
+                            }
+                        }
+                    />
+                </Show>
+            </fieldset>
+            <Section title="Type" when=on(|s| s.show_as)>
+                <ChipField
+                    label="Show as"
                     draft=draft
-                    options=LIGHT_ON_PRESETS
-                    get=|d| d.light_on_preset.clone()
-                    set=|d, v| d.light_on_preset = v
+                    options=type_options()
+                    get=|d| d.show_as.clone()
+                    on_pick=|d, v| {
+                        let t = SwitchType::ALL
+                            .into_iter()
+                            .find(|t| t.key() == v)
+                            .unwrap_or(SwitchType::Switch);
+                        set_type(d, t);
+                    }
                 />
-                <BrightnessField draft=draft />
-            </Group>
-            })}
-            <Group title="Energy">
-                <ChoiceField
-                    label="Energy role"
-                    draft=draft
-                    options=ENERGY_ROLES
-                    get=|d| d.energy_role.clone()
-                    set=|d, v| d.energy_role = v
-                />
-                <FlagField
-                    label="Invert"
-                    draft=draft
-                    get=|d| d.energy_invert
-                    set=|d, v| d.energy_invert = v
-                />
+            </Section>
+            <Section title="Light" when=on(|s| s.group_with_room || s.light_on)>
+                <Show when=move || shown.with(|s| s.group_with_room)>
+                    <FlagField
+                        label=group_label
+                        draft=draft
+                        get=|d| !d.ungrouped
+                        set=|d, v| d.ungrouped = !v
+                    />
+                </Show>
+                <Show when=move || shown.with(|s| s.light_on)>
+                    <ChipField
+                        label="Turn on in"
+                        draft=draft
+                        options=light_on_options()
+                        get=|d| d.light_on_preset.clone()
+                        on_pick=|d, v| {
+                            d.light_on_preset = v.map(str::to_owned);
+                            if v.is_none() {
+                                d.light_on_brightness = None;
+                            }
+                        }
+                    />
+                </Show>
+                <Show when=move || shown.with(|s| s.light_on_brightness)>
+                    <BrightnessField draft=draft />
+                </Show>
+            </Section>
+            <Section title="Security" when=on(|s| s.security_shown || s.security_action)>
+                <Show when=move || shown.with(|s| s.security_shown)>
+                    <FlagField
+                        label="Show on Security"
+                        draft=draft
+                        get=|d| !d.security_hidden
+                        set=|d, v| d.security_hidden = !v
+                    />
+                </Show>
+                <Show when=move || shown.with(|s| s.security_action)>
+                    <FlagField
+                        label="Show on Security"
+                        draft=draft
+                        get=|d| d.security_action
+                        set=|d, v| d.security_action = v
+                    />
+                </Show>
+                <Show when=move || shown.with(|s| s.security_ask)>
+                    <FlagField
+                        label="Ask before acting"
+                        draft=draft
+                        get=|d| d.security_ask
+                        set=|d, v| d.security_ask = v
+                    />
+                </Show>
+            </Section>
+            <Section title="Display and energy" when=on(|s| s.card_style || s.energy_role)>
+                <Show when=move || shown.with(|s| s.card_style)>
+                    <ChipField
+                        label="Card style"
+                        draft=draft
+                        options=vec![chip("Standard", None), chip("Header temperature", Some("hero_weather"))]
+                        get=|d| d.card_style.clone()
+                        on_pick=|d, v| d.card_style = v.map(str::to_owned)
+                    />
+                </Show>
+                <Show when=move || shown.with(|s| s.energy_role)>
+                    <ChipField
+                        label="Energy role"
+                        draft=draft
+                        options=energy_role_options()
+                        get=|d| d.energy_role.clone()
+                        on_pick=|d, v| d.energy_role = v.map(str::to_owned)
+                    />
+                </Show>
+                <Show when=move || shown.with(|s| s.unit_warning)>
+                    <p class="override__hint override__hint--error">"Needs a power unit (W, kW)"</p>
+                </Show>
+                <Show when=move || shown.with(|s| s.energy_invert)>
+                    <FlagField
+                        label="Invert sign"
+                        draft=draft
+                        get=|d| d.energy_invert
+                        set=|d, v| d.energy_invert = v
+                    />
+                </Show>
+                <Show when=move || shown.with(|s| s.energy_icon)>
+                    <ChipField
+                        label="Icon"
+                        draft=draft
+                        options=icon_options()
+                        get=|d| d.energy_icon.clone()
+                        on_pick=|d, v| d.energy_icon = v.map(str::to_owned)
+                    />
+                </Show>
+                <Show when=move || shown.with(|s| s.energy_meter)>
+                    <CounterField draft=draft />
+                </Show>
+            </Section>
+            <Section title="Climate" when=on(|s| s.climate_presets)>
                 <TextField
-                    label="Icon"
-                    draft=draft
-                    get=|d| d.energy_icon.clone()
-                    set=|d, v| d.energy_icon = v
-                />
-                <TextField
-                    label="Meter"
-                    draft=draft
-                    get=|d| d.energy_meter.clone()
-                    set=|d, v| d.energy_meter = v
-                />
-            </Group>
-            <Group title="Security">
-                <FlagField
-                    label="Hidden from security"
-                    draft=draft
-                    get=|d| d.security_hidden
-                    set=|d, v| d.security_hidden = v
-                />
-                <FlagField
-                    label="Security action"
-                    draft=draft
-                    get=|d| d.security_action
-                    set=|d, v| d.security_action = v
-                />
-                <FlagField
-                    label="Ask before acting"
-                    draft=draft
-                    get=|d| d.security_ask
-                    set=|d, v| d.security_ask = v
-                />
-            </Group>
-            <Group title="Climate">
-                <TextField
-                    label="Presets"
+                    label="Target presets (°C)"
                     draft=draft
                     get=|d| d.climate_presets.clone()
                     set=|d, v| d.climate_presets = v
+                    hint="Comma-separated, e.g. 19, 21, 23. Up to 6 chips."
                 />
-            </Group>
+            </Section>
+            <OtherSaved draft=draft shown=shown />
             <p class="override__error" role="alert" hidden=move || error.with(Option::is_none)>
                 {move || error.get().unwrap_or_default()}
             </p>
@@ -514,7 +777,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 <button
                     type="button"
                     class="btn override__save"
-                    disabled=move || !dirty.get() || busy.get()
+                    disabled=move || !dirty.get() || busy.get() || !order_ok.get()
                     on:click=save
                 >
                     "Save"
@@ -525,7 +788,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     disabled=move || busy.get()
                     on:click=clear
                 >
-                    "Clear override"
+                    "Reset to defaults"
                 </button>
             </div>
         </form>

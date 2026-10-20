@@ -1329,6 +1329,56 @@ a[aria-current="page"] .nav__glyph {
   box-sizing: border-box;
 }
 
+.override__hint {
+  font: var(--type-label);
+  opacity: 0.6;
+}
+
+.override__hint--error {
+  color: var(--offline);
+  opacity: 1;
+}
+
+p.override__hint {
+  margin: 0;
+}
+
+/* Chips in a form wrap instead of scrolling: every choice stays visible on a phone. */
+.override__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip__glyph {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+.chip__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+.override__saved {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.override__saved-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font: var(--type-body);
+  overflow-wrap: anywhere;
+}
+
 /* Devices */
 .devices {
   box-sizing: border-box;
