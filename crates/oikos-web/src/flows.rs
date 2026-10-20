@@ -1,42 +1,15 @@
-//! Pure helpers behind the flow screens: labels, zoom, the run highlight and run times
-//! (geometry lives in `flow_layout`). No leptos and no browser types, so everything here is
-//! tested natively.
+//! Pure helpers behind the flow screens: labels, the run highlight and run times (geometry
+//! lives in `flow_layout`, sentences in `flow_text`, pan and zoom in `flow_viewport`). No
+//! leptos and no browser types, so everything here is tested natively.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use oikos_api::{EntityView, RunStatus, RunView, StepOutcome, TriggerInfo};
 use oikos_core::command::command_name;
-use oikos_core::flow::{Flow, Node, NodeKind, Op, parse_duration};
+use oikos_core::flow::{Flow, Node, NodeKind, parse_duration};
 
 use crate::format::entity_title;
 use crate::schedule::describe;
-
-/// Lowest zoom the canvas allows.
-pub const ZOOM_MIN: f64 = 0.4;
-/// Highest zoom the canvas allows.
-pub const ZOOM_MAX: f64 = 2.0;
-/// What `+` / `−` buttons change the zoom by.
-pub const ZOOM_STEP: f64 = 0.1;
-
-/// `zoom` kept inside `[ZOOM_MIN, ZOOM_MAX]`, rounded to the hundredth so the readout is stable.
-pub fn clamp_zoom(zoom: f64) -> f64 {
-    (zoom.clamp(ZOOM_MIN, ZOOM_MAX) * 100.0).round() / 100.0
-}
-
-/// The card title: the node's name, else its type in words.
-pub fn node_title(node: &Node) -> String {
-    node.name.clone().unwrap_or_else(|| {
-        match node.kind {
-            NodeKind::TriggerState(_) => "Trigger",
-            NodeKind::TriggerSchedule(_) => "Schedule",
-            NodeKind::If(_) => "If",
-            NodeKind::Delay(_) => "Delay",
-            NodeKind::Command(_) => "Command",
-            NodeKind::FlowEnable(_) => "Flow switch",
-        }
-        .into()
-    })
-}
 
 fn entity_label(id: &str, entities: &BTreeMap<String, EntityView>) -> String {
     entities.get(id).map_or_else(|| id.to_owned(), entity_title)
@@ -48,39 +21,6 @@ pub(crate) fn humanise(command: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().chain(chars).collect(),
         None => String::new(),
-    }
-}
-
-fn op_symbol(op: Op) -> &'static str {
-    match op {
-        Op::Eq => "=",
-        Op::Ne => "≠",
-        Op::Gt => ">",
-        Op::Lt => "<",
-        Op::Gte => "≥",
-        Op::Lte => "≤",
-    }
-}
-
-/// The card's second line: the entity, the comparison, the delay or the command.
-pub fn node_detail(node: &Node, entities: &BTreeMap<String, EntityView>) -> String {
-    match &node.kind {
-        NodeKind::TriggerState(p) => entity_label(&p.entity, entities),
-        NodeKind::TriggerSchedule(p) => describe(&p.cron),
-        NodeKind::If(p) => {
-            let value = match &p.value {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            format!("{} {value}", op_symbol(p.op))
-        }
-        NodeKind::Delay(p) => p.for_.clone(),
-        NodeKind::FlowEnable(p) => flow_switch_text(p),
-        NodeKind::Command(p) => format!(
-            "{} · {}",
-            entity_label(&p.entity, entities),
-            command_name(&p.command).replace('_', " ")
-        ),
     }
 }
 
@@ -113,8 +53,11 @@ pub fn trigger_summary(flow: &Flow, entities: &BTreeMap<String, EntityView>) -> 
     let parts: Vec<String> = flow
         .nodes
         .iter()
-        .filter(|n| n.kind.is_trigger())
-        .map(|n| node_detail(n, entities))
+        .filter_map(|n| match &n.kind {
+            NodeKind::TriggerState(p) => Some(entity_label(&p.entity, entities)),
+            NodeKind::TriggerSchedule(p) => Some(describe(&p.cron)),
+            _ => None,
+        })
         .collect();
     if parts.is_empty() {
         "No trigger".to_owned()
@@ -326,18 +269,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn titles_and_details() {
-        let flow = reference();
-        let none = BTreeMap::new();
-        assert_eq!(node_title(flow.node("motion").unwrap()), "Motion");
-        assert_eq!(node_title(flow.node("moving").unwrap()), "If");
-        assert_eq!(node_detail(flow.node("motion").unwrap(), &none), "m");
-        assert_eq!(node_detail(flow.node("moving").unwrap(), &none), "= true");
-        assert_eq!(node_detail(flow.node("wait").unwrap(), &none), "5m");
-        assert_eq!(node_detail(flow.node("on").unwrap(), &none), "l · turn on");
-    }
-
     fn step(node: &str, outcome: StepOutcome, detail: &str) -> StepView {
         StepView {
             node: node.into(),
@@ -457,22 +388,30 @@ mod tests {
     }
 
     #[test]
-    fn new_nodes_have_titles_and_details() {
-        let entities = BTreeMap::new();
+    fn new_nodes_have_summary_labels() {
         let schedule = node(
             r#"{ "id": "s", "type": "trigger.schedule", "params": { "cron": "*/10 * * * *" } }"#,
         );
-        assert_eq!(node_title(&schedule), "Schedule");
-        assert_eq!(node_detail(&schedule, &entities), "Every 10 minutes");
         let this = node(r#"{ "id": "a", "type": "flow.enable", "params": { "enabled": false } }"#);
-        assert_eq!(node_title(&this), "Flow switch");
-        assert_eq!(node_detail(&this, &entities), "Disable this flow");
         let other = node(
             r#"{ "id": "b", "type": "flow.enable", "params": { "flow": "force-heating-loop", "enabled": true } }"#,
         );
-        assert_eq!(node_detail(&other, &entities), "Enable force-heating-loop");
         assert_eq!(summary_label(&schedule), "Every 10 minutes");
+        assert_eq!(summary_label(&this), "Disable this flow");
         assert_eq!(summary_label(&other), "Enable force-heating-loop");
+    }
+
+    #[test]
+    fn trigger_summary_joins_every_trigger() {
+        let entities = BTreeMap::new();
+        let mut flow = reference();
+        assert_eq!(trigger_summary(&flow, &entities), "m");
+        flow.nodes.push(node(
+            r#"{ "id": "s", "type": "trigger.schedule", "params": { "cron": "*/10 * * * *" } }"#,
+        ));
+        assert_eq!(trigger_summary(&flow, &entities), "m · Every 10 minutes");
+        flow.nodes.retain(|n| !n.kind.is_trigger());
+        assert_eq!(trigger_summary(&flow, &entities), "No trigger");
     }
 
     #[test]
@@ -496,14 +435,6 @@ mod tests {
         assert_eq!(status_word(RunStatus::Cancelled), "Cancelled");
         assert_eq!(status_class(RunStatus::Running), "run--running");
         assert_eq!(status_class(RunStatus::Skipped), "run--skipped");
-    }
-
-    #[test]
-    fn zoom_is_clamped_and_rounded() {
-        assert_eq!(clamp_zoom(1.0), 1.0);
-        assert_eq!(clamp_zoom(0.1), ZOOM_MIN);
-        assert_eq!(clamp_zoom(5.0), ZOOM_MAX);
-        assert_eq!(clamp_zoom(1.237), 1.24);
     }
 
     #[test]

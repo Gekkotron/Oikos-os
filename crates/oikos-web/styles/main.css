@@ -2268,43 +2268,41 @@ p.override__hint {
   opacity: 0.4;
 }
 
-/* Flow canvas */
+/* Flow canvas: full-bleed under the top bar, with floating bars, controls, minimap, drawer */
 .flow-canvas-screen {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  --role-trigger: var(--accent-amber);
+  --role-check: var(--accent-violet);
+  --role-action: var(--accent-mint);
+  --role-wait: color-mix(in srgb, var(--accent-cyan) 25%, color-mix(in srgb, var(--ink) 60%, var(--bg)));
+  --wire-yes: var(--accent-mint);
+  --wire-no: var(--accent-rose);
+  --flow-glass: color-mix(in srgb, var(--bg) 80%, transparent);
+  --drawer-w: 360px;
+  position: fixed;
+  inset: var(--flow-top, 0px) 0 0;
+  overflow: hidden;
 }
 
-.flow-canvas__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
+/* The canvas pans instead: the page itself never scrolls under it. */
+html:has(.flow-canvas-screen) {
+  overflow: hidden;
 }
 
-.flow-canvas__header .sheet__title {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
+.flow-canvas-screen > .flow-invalid {
+  margin: 12px;
 }
 
-.flow-canvas__mode {
-  margin-left: 10px;
-  font-weight: 400;
-  font-size: 0.65em;
-  opacity: 0.5;
-  letter-spacing: 0.02em;
-  vertical-align: middle;
+.flow-stage {
+  position: absolute;
+  inset: 0;
 }
 
-.flow-canvas__header .btn {
-  flex: none;
-}
-
-@media (max-width: 600px) {
-  .flow-canvas__header .sheet__title {
-    flex: 1 1 100%;
-  }
+.flow-stage > .flow-invalid {
+  position: absolute;
+  top: 72px;
+  left: 12px;
+  right: 12px;
+  max-width: 640px;
 }
 
 .flow-invalid {
@@ -2319,51 +2317,322 @@ p.override__hint {
   margin: 6px 0 0;
 }
 
-.flow-canvas-scroll {
-  overflow: auto;
+/* Glass shared by everything that floats over the canvas. */
+.flow-toolbar,
+.flow-controls,
+.flow-minimap,
+.flow-drawer {
   border: 1px solid var(--card-border);
-  border-radius: var(--radius-card);
-  background: var(--card-bg);
-  -webkit-overflow-scrolling: touch;
+  background: var(--flow-glass);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
 }
 
-.flow-canvas-scroll--editing {
-  cursor: crosshair;
-}
-
-.flow-canvas-viewport {
-  position: relative;
-}
-
+/* The surface: pans and zooms; the dotted grid follows the view (set inline). */
 .flow-canvas {
-  position: relative;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
   background-image: radial-gradient(var(--chip-border) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-
-.flow-canvas--editing {
+  cursor: grab;
+  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
 
-.flow-node--editing {
-  cursor: grab;
-  touch-action: none;
-}
-
-.flow-node--editing:active,
-.flow-node--dragging {
+.flow-canvas:active {
   cursor: grabbing;
 }
 
-.flow-node--dragging {
-  z-index: 2;
-  box-shadow: 0 4px 20px color-mix(in srgb, var(--node-accent) 60%, transparent);
+.flow-world,
+.flow-graph,
+.flow-wires {
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
-.flow-node--selected {
-  border-color: var(--node-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-accent) 60%, transparent);
+.flow-world {
+  transform-origin: 0 0;
+}
+
+.flow-graph {
+  width: 0;
+  height: 0;
+}
+
+.flow-wires {
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Floating bars */
+.flow-toolbar {
+  position: absolute;
+  top: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 48px;
+  padding: 4px 6px;
+  border-radius: var(--radius-nav);
+}
+
+.flow-toolbar--title {
+  left: 12px;
+  max-width: calc(100% - 360px);
+  padding-right: 14px;
+}
+
+.flow-toolbar--actions {
+  right: 12px;
+}
+
+.flow-toolbar__back {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: inherit;
+  font-size: 18px;
+  text-decoration: none;
+}
+
+.flow-toolbar__back:hover {
+  background: var(--card-bg);
+}
+
+.flow-toolbar__back:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: -2px;
+}
+
+.flow-toolbar__name {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font: 600 15px/20px var(--font-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-toolbar__mode {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--chip-border);
+  border-radius: 999px;
+  font: var(--type-label);
+  opacity: 0.7;
+}
+
+.flow-toolbar .btn {
+  flex: none;
+  min-height: 38px;
+}
+
+.flow-toolbar .btn--icon {
+  width: 38px;
+}
+
+.flow-toolbar .btn--icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.flow-toolbar .flow-switch {
+  margin: 0 6px;
+}
+
+.flow-toolbar__runs--open {
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
+}
+
+/* Zoom in / out / fit, bottom-left */
+.flow-controls {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 14px;
+}
+
+.flow-controls__btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: 600 18px/1 var(--font-body);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.flow-controls__btn:hover {
+  background: var(--card-bg);
+}
+
+.flow-controls__btn:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: -2px;
+}
+
+/* Minimap, bottom-right; moves left of the open drawer */
+.flow-minimap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  border-radius: 12px;
+  cursor: pointer;
+  touch-action: none;
+  transition: right var(--motion-medium) var(--ease);
+}
+
+.flow-stage--drawer .flow-minimap {
+  right: calc(var(--drawer-w) + 24px);
+}
+
+.flow-minimap__node {
+  fill: var(--role-action);
+  opacity: 0.85;
+}
+
+.flow-minimap__node--trigger {
+  fill: var(--role-trigger);
+}
+
+.flow-minimap__node--check {
+  fill: var(--role-check);
+}
+
+.flow-minimap__node--wait {
+  fill: var(--role-wait);
+}
+
+.flow-minimap__view {
+  fill: color-mix(in srgb, var(--accent-amber) 8%, transparent);
+  stroke: var(--accent-amber);
+  stroke-width: 1.25;
+}
+
+/* Runs drawer: overlays the canvas from the right */
+.flow-drawer {
+  position: absolute;
+  top: 72px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  width: min(var(--drawer-w), calc(100% - 24px));
+  padding: 12px;
+  overflow-y: auto;
+  border-radius: var(--radius-card);
+  transform: translateX(calc(100% + 24px));
+  visibility: hidden;
+  transition:
+    transform var(--motion-medium) var(--ease),
+    visibility 0s linear var(--motion-medium);
+}
+
+.flow-drawer--open {
+  transform: none;
+  visibility: visible;
+  transition: transform var(--motion-medium) var(--ease);
+}
+
+.flow-drawer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.flow-drawer__title {
+  margin: 0;
+  font: var(--type-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+
+.flow-drawer .flow-drawer__close {
+  flex: none;
+  width: 36px;
+  min-height: 36px;
+}
+
+.flow-drawer__close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.flow-drawer__empty {
+  margin: 0;
+  opacity: 0.6;
+}
+
+.flow-drawer .node-editor {
+  margin-top: 0;
+}
+
+.flow-drawer .run {
+  cursor: pointer;
+}
+
+.run--replayed {
+  border-color: var(--accent-amber);
+  box-shadow: inset 0 0 0 1px var(--accent-amber);
+}
+
+@media (max-width: 719px) {
+  .flow-toolbar--title {
+    right: 12px;
+    max-width: none;
+  }
+
+  .flow-toolbar--actions {
+    top: 68px;
+  }
+
+  .flow-drawer {
+    top: 124px;
+  }
+
+  .flow-stage > .flow-invalid {
+    top: 124px;
+  }
+}
+
+/* No editor on a phone or a touch-only screen. */
+@media (max-width: 719px), (hover: none) and (pointer: coarse) {
+  .flow-toolbar__edit {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-drawer,
+  .flow-drawer--open,
+  .flow-minimap {
+    transition: none;
+  }
 }
 
 .node-editor {
@@ -2450,61 +2719,179 @@ p.override__hint {
   border-color: var(--accent-rose);
 }
 
+/* Wires: neutral grey, green "yes" and red "no" out of an if */
 .flow-wire {
   fill: none;
   stroke: var(--wire);
-  stroke-width: 2;
+  stroke-width: 1.75;
+  transition: opacity var(--motion-medium) var(--ease);
+}
+
+.flow-wire--yes {
+  stroke: color-mix(in srgb, var(--wire-yes) 75%, transparent);
+}
+
+.flow-wire--no {
+  stroke: color-mix(in srgb, var(--wire-no) 75%, transparent);
 }
 
 .flow-wire--lit {
-  stroke: var(--accent-mint);
+  stroke: var(--ink);
+  stroke-width: 3;
 }
 
-.flow-node {
-  --node-accent: var(--accent-amber);
+.flow-wire--lit.flow-wire--yes {
+  stroke: var(--wire-yes);
+}
+
+.flow-wire--lit.flow-wire--no {
+  stroke: var(--wire-no);
+}
+
+.flow-wire--dim {
+  opacity: 0.2;
+}
+
+.flow-wire--selected {
+  stroke: var(--accent-amber);
+  stroke-width: 3;
+}
+
+/* A running run's path: dashes travelling along the wire. */
+.flow-wire--live {
+  stroke-dasharray: 8 6;
+  animation: flow-wire-run 0.9s linear infinite;
+}
+
+@keyframes flow-wire-run {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+.flow-wire-label {
   position: absolute;
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  align-content: center;
-  column-gap: 8px;
+  padding: 0 6px;
+  border: 1px solid;
+  border-radius: 999px;
+  background: var(--bg);
+  font: 700 10px/15px var(--font-body);
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.flow-wire-label--yes {
+  border-color: color-mix(in srgb, var(--wire-yes) 45%, transparent);
+  color: var(--wire-yes);
+}
+
+.flow-wire-label--no {
+  border-color: color-mix(in srgb, var(--wire-no) 45%, transparent);
+  color: var(--wire-no);
+}
+
+.flow-wire-label--dim {
+  opacity: 0.3;
+}
+
+/* Cards: compact pills sized exactly NODE_W × NODE_H (flow_layout.rs) so the pins line up
+   with the wire anchors. The ring is an inset shadow, not a border, for the same reason. */
+.flow-node {
+  --node-accent: var(--role-action);
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   box-sizing: border-box;
-  width: 200px;
-  height: 72px;
-  padding: 8px 10px;
-  border: 1px solid var(--chip-border);
-  border-left: 4px solid var(--node-accent);
-  border-radius: var(--radius-card);
-  background: var(--card-bg);
-  transition: box-shadow var(--motion-medium), border-color var(--motion-medium);
+  width: 232px;
+  height: 52px;
+  padding: 0 14px 0 10px;
+  border-radius: 16px;
+  background-color: var(--bg);
+  background-image: linear-gradient(
+    color-mix(in srgb, var(--node-accent) 9%, var(--card-bg)),
+    color-mix(in srgb, var(--node-accent) 9%, var(--card-bg))
+  );
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--chip-border),
+    var(--shadow);
+  transition:
+    box-shadow var(--motion-short) var(--ease),
+    opacity var(--motion-medium) var(--ease);
 }
 
 .flow-node--trigger {
-  --node-accent: var(--accent-amber);
+  --node-accent: var(--role-trigger);
 }
 
-.flow-node--schedule {
-  --node-accent: var(--accent-amber);
+.flow-node--check {
+  --node-accent: var(--role-check);
 }
 
-.flow-node--flow {
-  --node-accent: var(--accent-rose);
+.flow-node--action {
+  --node-accent: var(--role-action);
 }
 
-.flow-node--if {
-  --node-accent: var(--accent-violet);
-  padding-right: 40px;
+.flow-node--wait {
+  --node-accent: var(--role-wait);
 }
 
-.flow-node--delay {
-  --node-accent: var(--accent-cyan);
+.flow-node__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--node-accent);
+  color: var(--bg);
 }
 
-.flow-node--command {
-  --node-accent: var(--accent-mint);
+.flow-node__icon svg {
+  width: 17px;
+  height: 17px;
 }
 
-.flow-node--orphan {
-  opacity: 0.5;
+.flow-node__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.flow-node__title,
+.flow-node__sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-node__title {
+  font: 600 13px/17px var(--font-body);
+}
+
+.flow-node__sub {
+  font: 400 11px/14px var(--font-body);
+  opacity: 0.6;
+}
+
+/* Step time of a replayed run, or the countdown of a parked delay, on the top edge. */
+.flow-node__step {
+  position: absolute;
+  top: -9px;
+  right: 14px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--node-accent) 60%, transparent);
+  color: var(--node-accent);
+  font: 600 10.5px/16px var(--font-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-node__step:empty {
+  display: none;
 }
 
 .flow-node__in,
@@ -2515,172 +2902,99 @@ p.override__hint {
   height: 10px;
   border: 2px solid var(--wire);
   border-radius: 50%;
-  background: var(--card-bg);
-}
-
-/* Centred on the card's outer edge: the 4 px left border sits outside the padding box. */
-.flow-node__in {
-  left: -4px;
+  background: var(--bg);
   transform: translate(-50%, -50%);
 }
 
+.flow-node__in {
+  left: 0;
+}
+
 .flow-node__out {
-  right: -1px;
-  transform: translate(50%, -50%);
+  left: 100%;
+}
+
+.flow-node__out[data-port="true"] {
+  border-color: var(--wire-yes);
+}
+
+.flow-node__out[data-port="false"] {
+  border-color: var(--wire-no);
 }
 
 .flow-node--lit {
-  border-color: var(--node-accent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--node-accent) 55%, transparent);
+  box-shadow:
+    inset 0 0 0 1.5px var(--node-accent),
+    0 0 18px color-mix(in srgb, var(--node-accent) 45%, transparent);
 }
 
 .flow-node--failed {
   --node-accent: var(--accent-rose);
-  border-color: var(--accent-rose);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-rose) 55%, transparent);
+  box-shadow:
+    inset 0 0 0 1.5px var(--accent-rose),
+    0 0 18px color-mix(in srgb, var(--accent-rose) 50%, transparent);
 }
 
-.flow-node__icon {
-  display: flex;
-  grid-row: span 3;
-  align-items: center;
-  color: var(--node-accent);
+.flow-node--orphan {
+  opacity: 0.5;
 }
 
-.flow-node__icon svg {
-  width: 20px;
-  height: 20px;
+.flow-node--dim {
+  opacity: 0.35;
 }
 
-.flow-node__title,
-.flow-node__detail,
-.flow-node__step {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Edit mode: a card drags, the selected one gets an amber ring. */
+.flow-node--editing {
+  cursor: grab;
+  touch-action: none;
 }
 
-.flow-node__title {
-  font: var(--type-label);
-  font-weight: 600;
+.flow-node--editing:active,
+.flow-node--dragging {
+  cursor: grabbing;
 }
 
-.flow-node__detail,
-.flow-node__step {
-  font: var(--type-label);
-  opacity: 0.7;
+.flow-node--dragging {
+  z-index: 2;
+  box-shadow:
+    inset 0 0 0 1px var(--chip-border),
+    0 6px 24px color-mix(in srgb, var(--node-accent) 50%, transparent);
 }
 
-.flow-node__step:empty {
-  display: none;
+.flow-node--selected {
+  box-shadow:
+    inset 0 0 0 1px var(--chip-border),
+    0 0 0 2px var(--accent-amber),
+    var(--shadow);
 }
 
 .flow-node--pending {
   animation: flow-pulse var(--motion-medium) ease-in-out infinite alternate;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .flow-node--pending {
-    animation: none;
-  }
-}
-
 @keyframes flow-pulse {
   from {
-    box-shadow: 0 0 4px color-mix(in srgb, var(--node-accent) 30%, transparent);
+    box-shadow:
+      inset 0 0 0 1.5px var(--node-accent),
+      0 0 4px color-mix(in srgb, var(--node-accent) 30%, transparent);
   }
 
   to {
-    box-shadow: 0 0 16px color-mix(in srgb, var(--node-accent) 80%, transparent);
+    box-shadow:
+      inset 0 0 0 1.5px var(--node-accent),
+      0 0 20px color-mix(in srgb, var(--node-accent) 80%, transparent);
   }
 }
 
-.flow-port {
-  position: absolute;
-  right: 6px;
-  font-size: 10px;
-  line-height: 1;
-  opacity: 0.7;
-  transform: translateY(-50%);
-}
+@media (prefers-reduced-motion: reduce) {
+  .flow-node--pending,
+  .flow-wire--live {
+    animation: none;
+  }
 
-.flow-port--taken {
-  color: var(--accent-mint);
-  font-weight: 700;
-  opacity: 1;
-}
-
-.flow-canvas-runs {
-  padding: 12px;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-card);
-  background: var(--card-bg);
-}
-
-.flow-canvas-runs__title {
-  margin: 0 0 10px;
-  font: var(--type-label);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  opacity: 0.7;
-}
-
-.flow-canvas-runs__empty {
-  margin: 0;
-  opacity: 0.6;
-}
-
-.flow-canvas-stage {
-  position: relative;
-  min-width: 0;
-}
-
-.flow-loupe {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--card-border);
-  border-radius: 999px;
-  background: var(--card-bg);
-  color: inherit;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  font: var(--type-label);
-}
-
-.flow-loupe:hover,
-.flow-loupe:focus-visible {
-  background: color-mix(in srgb, var(--card-bg) 92%, var(--text) 8%);
-}
-
-.flow-loupe__icon {
-  display: inline-flex;
-  width: 18px;
-  height: 18px;
-}
-
-.flow-loupe__readout {
-  font-variant-numeric: tabular-nums;
-  min-width: 3ch;
-  text-align: center;
-}
-
-.btn--icon {
-  min-width: 36px;
-  padding: 6px 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn--icon svg {
-  width: 18px;
-  height: 18px;
+  .flow-wire--live {
+    stroke-dasharray: none;
+  }
 }
 
 .run-list {

@@ -104,8 +104,6 @@ pub const PENCIL: &str =
 pub const CHECK: &str = svg!(r#"<path d="m5 12 5 5 9-11"/>"#);
 /// Cancel / close (X).
 pub const X_MARK: &str = svg!(r#"<path d="M6 6l12 12"/><path d="M18 6 6 18"/>"#);
-/// Zoom loupe (magnifier) for the flow canvas.
-pub const LOUPE: &str = svg!(r#"<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>"#);
 
 const NODE_BOLT: &str = svg!(r#"<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>"#);
 const NODE_FORK: &str = svg!(

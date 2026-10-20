@@ -85,9 +85,9 @@ fn count(host: &web_sys::Element, selector: &str) -> u32 {
     host.query_selector_all(selector).unwrap().length()
 }
 
-#[wasm_bindgen_test]
-async fn canvas_lights_the_last_run() {
-    let run = RunView {
+/// The run that went motion → moving (false) → wait → off.
+fn done_run() -> RunView {
+    RunView {
         id: "r1".into(),
         flow_id: "living_led_motion".into(),
         status: RunStatus::Done,
@@ -100,32 +100,178 @@ async fn canvas_lights_the_last_run() {
             step("wait", "waited 5m"),
             step("off", "accepted"),
         ],
-    };
-    let flow = FlowView {
+    }
+}
+
+fn reference_view(active_run: Option<&str>, runs: Vec<RunView>) -> FlowView {
+    FlowView {
         definition: Flow::decode(REFERENCE.as_bytes()).unwrap(),
         invalid: None,
-        active_run: None,
-        runs: vec![run],
-    };
+        active_run: active_run.map(Into::into),
+        runs,
+    }
+}
+
+fn text(host: &web_sys::Element, selector: &str) -> String {
+    host.query_selector(selector)
+        .unwrap()
+        .and_then(|e| e.text_content())
+        .unwrap_or_default()
+}
+
+fn click(host: &web_sys::Element, selector: &str) {
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}"))
+        .unchecked_into::<web_sys::HtmlElement>()
+        .click();
+}
+
+#[wasm_bindgen_test]
+async fn canvas_lights_the_active_run() {
     let host = host();
-    let _mounted = mount(&host, vec![flow], "/flows/living_led_motion");
+    let _mounted = mount(
+        &host,
+        vec![reference_view(Some("r1"), vec![done_run()])],
+        "/flows/living_led_motion",
+    );
     tick().await;
     let html = host.inner_html();
     assert_eq!(count(&host, ".flow-node"), 5, "{html}");
     assert_eq!(count(&host, ".flow-wire"), 4, "{html}");
     assert_eq!(count(&host, ".flow-wire--lit"), 3, "{html}");
+    assert_eq!(count(&host, ".flow-wire--live"), 3, "{html}");
     assert_eq!(count(&host, "[data-node=wait].flow-node--lit"), 1, "{html}");
     assert_eq!(count(&host, "[data-node=on].flow-node--lit"), 0, "{html}");
-    assert_eq!(count(&host, ".flow-port"), 2, "{html}");
-    assert!(
-        host.query_selector(".run-list")
-            .unwrap()
-            .unwrap()
-            .text_content()
-            .unwrap()
-            .contains("Done"),
+    assert_eq!(count(&host, ".flow-node--dim"), 0, "{html}");
+    assert!(text(&host, ".run-list").contains("Done"), "{html}");
+    drop(_mounted);
+
+    // A finished run is not lit by default.
+    let host = self::host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![done_run()])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-wire--lit"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-node--lit"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn replay_dims_the_rest() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![done_run()])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    assert_eq!(text(&host, "[data-node=wait] .flow-node__step"), "");
+    assert_eq!(count(&host, ".flow-drawer--open"), 0);
+    click(&host, ".flow-toolbar__runs");
+    tick().await;
+    assert_eq!(count(&host, ".flow-drawer--open"), 1);
+    click(&host, ".run-list li:first-child");
+    tick().await;
+    let html = host.inner_html();
+    // Four of the five cards were visited; `on` is dimmed.
+    assert_eq!(count(&host, ".flow-node--dim"), 1, "{html}");
+    assert_eq!(count(&host, "[data-node=on].flow-node--dim"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-wire--lit"), 3, "{html}");
+    assert_eq!(count(&host, ".flow-wire--live"), 0, "{html}");
+    assert_eq!(
+        text(&host, "[data-node=wait] .flow-node__step"),
+        "+0s",
         "{html}"
     );
+    click(&host, ".run-list li:first-child");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-node--dim"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-wire--lit"), 0, "{html}");
+    assert_eq!(
+        text(&host, "[data-node=wait] .flow-node__step"),
+        "",
+        "{html}"
+    );
+    // Esc stops a replay too.
+    click(&host, ".run-list li:first-child");
+    tick().await;
+    assert_eq!(count(&host, ".flow-node--dim"), 1);
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key("Escape");
+    let escape =
+        web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    web_sys::window().unwrap().dispatch_event(&escape).unwrap();
+    tick().await;
+    assert_eq!(count(&host, ".flow-node--dim"), 0, "{}", host.inner_html());
+}
+
+#[wasm_bindgen_test]
+async fn pills_read_as_sentences() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(
+        text(&host, "[data-node=wait] .flow-node__title"),
+        "Wait 5 min",
+        "{html}"
+    );
+    assert_eq!(count(&host, ".flow-node--wait"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-node--check"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-node--trigger"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-node--action"), 2, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn yes_no_labels_on_wires() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-wire-label"), 2, "{html}");
+    assert_eq!(count(&host, ".flow-wire--yes"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-wire--no"), 1, "{html}");
+    let labels: Vec<String> = (0..2)
+        .map(|i| {
+            host.query_selector_all(".flow-wire-label")
+                .unwrap()
+                .item(i)
+                .and_then(|n| n.text_content())
+                .unwrap_or_default()
+        })
+        .collect();
+    assert!(labels.contains(&"yes".to_owned()), "{html}");
+    assert!(labels.contains(&"no".to_owned()), "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn controls_and_minimap_present() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-controls button"), 3, "{html}");
+    assert_eq!(count(&host, ".flow-minimap"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-toolbar__edit"), 1, "{html}");
+    // One minimap rect per card.
+    assert_eq!(count(&host, ".flow-minimap__node"), 5, "{html}");
 }
 
 #[wasm_bindgen_test]
@@ -196,8 +342,9 @@ async fn parked_delay_counts_down() {
     assert!(html.contains("disabled"), "{html}");
     // The wire into the parked delay is lit.
     assert_eq!(count(&host, ".flow-wire--lit"), 2, "{html}");
-    // The if card lights the port it took instead of repeating it on a second line.
-    assert_eq!(count(&host, ".flow-port--taken"), 1, "{html}");
+    // The branch the if took is the lit one.
+    assert_eq!(count(&host, ".flow-wire--lit.flow-wire--no"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-wire--lit.flow-wire--yes"), 0, "{html}");
 }
 
 #[wasm_bindgen_test]
@@ -214,7 +361,7 @@ async fn cards_have_handles_and_orphans_fade() {
     let _mounted = mount(&host, vec![flow], "/flows/living_led_motion");
     tick().await;
     let html = host.inner_html();
-    // Every node but the trigger has an input; every node has an output (two for the if).
+    // Every node but the trigger has an input; every node has one output, the if two.
     assert_eq!(count(&host, ".flow-node__in"), 4, "{html}");
     assert_eq!(count(&host, ".flow-node__out"), 6, "{html}");
     assert_eq!(count(&host, ".flow-node--orphan"), 1, "{html}");
@@ -223,4 +370,41 @@ async fn cards_have_handles_and_orphans_fade() {
         1,
         "{html}"
     );
+}
+
+fn pointer(host: &web_sys::Element, selector: &str, kind: &str) {
+    let init = web_sys::PointerEventInit::new();
+    init.set_bubbles(true);
+    init.set_pointer_id(1);
+    init.set_pointer_type("mouse");
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}"))
+        .dispatch_event(&web_sys::PointerEvent::new_with_event_init_dict(kind, &init).unwrap())
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn edit_mode_selects_a_card_and_opens_its_settings() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    // Let the page settle in view mode first, as it does in the browser.
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    click(&host, ".flow-toolbar__edit");
+    tick().await;
+    pointer(&host, "[data-node=moving]", "pointerdown");
+    pointer(&host, "[data-node=moving]", "pointerup");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(
+        count(&host, "[data-node=moving].flow-node--selected"),
+        1,
+        "{html}"
+    );
+    assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-drawer .node-editor"), 1, "{html}");
 }
