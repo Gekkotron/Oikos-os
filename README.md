@@ -161,7 +161,7 @@ Screens:
 - Devices: the administration view of the Zigbee devices.
 - Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night, Warm).
 - Alerts (`/alerts`): the push alerts OikosPush keeps, with channel chips and day groups, and a "Recent alerts" section on Home; the detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". Same screens as the Android app; the body stays in the producer's language.
-- Flows (`/flows`, `/flows/<id>`): the flows list with an enable switch per flow, and a read-only canvas per flow with the last run lit on the graph and the run history below it.
+- Flows (`/flows`, `/flows/<id>`): the flows list with an enable switch per flow and a **New flow** button, and a full-bleed canvas per flow (see [Flows](#flows)).
 
 Development runs in two terminals:
 
@@ -231,7 +231,9 @@ The scalar is the one value of a state that triggers and `if` compare: the on/of
 
 Two config keys: `[topics] automation_prefix` (default `oikos/automation`) and `[automation] runs_kept` (recent runs remembered per flow, default 20). Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker.
 
-The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `run_flow` and friends), and the web UI shows them at `/flows` with the last run lit on the canvas. See [HTTP API](#http-api) for the REST routes.
+The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `run_flow` and friends), and the web UI shows them at `/flows`. See [HTTP API](#http-api) for the REST routes.
+
+The flow page (`/flows/<id>`) is a full-bleed canvas: each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of a check. The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live. The **Edit** button switches to a React Flow-style editor: click a card to select it (amber ring) and edit its settings in the drawer, drag it to move it, drag from an output pin onto another card to wire it, click a wire for its ✕, press ⌫ to delete the selection and ⌘/Ctrl-Z to undo. **＋ Add** opens a searchable picker grouped WHEN / AND / THEN / WAIT / FLOW (type an entity name to list its triggers, checks and actions), **Tidy** re-lays the graph out, and nothing reaches the hub until **Save** (**Cancel** discards the draft). **New flow** on `/flows` opens an unsaved draft in edit mode; its first Save creates the flow, disabled, under a slug of its name. On a phone (narrow or touch-only screens) the canvas is view-only: Edit and New flow are hidden, while pan, pinch-zoom, the drawer, the switch and Run still work.
 
 ## History
 
