@@ -41,7 +41,11 @@ fn minutes_seconds(secs: u64) -> String {
 
 /// Where the pointer sits inside the untransformed canvas, from a client-coord pointer event
 /// on an element inside the scaled canvas. `canvas` is the `.flow-canvas` div with the scale.
-fn pointer_in_canvas(ev: &web_sys::PointerEvent, canvas: &web_sys::Element, zoom: f64) -> (f64, f64) {
+fn pointer_in_canvas(
+    ev: &web_sys::PointerEvent,
+    canvas: &web_sys::Element,
+    zoom: f64,
+) -> (f64, f64) {
     let rect = canvas.get_bounding_client_rect();
     let z = if zoom.abs() < f64::EPSILON { 1.0 } else { zoom };
     (
@@ -68,11 +72,7 @@ const DRAG_THRESHOLD: f64 = 3.0;
 /// Handles Ctrl/⌘ + wheel on the scroll container: zooms around the cursor by rebalancing scroll
 /// offsets so the point under the pointer stays put. Plain wheel is left to the browser so the
 /// container keeps scrolling naturally.
-fn wheel_zoom(
-    ev: web_sys::WheelEvent,
-    scroll: NodeRef<html::Div>,
-    zoom: RwSignal<f64>,
-) {
+fn wheel_zoom(ev: web_sys::WheelEvent, scroll: NodeRef<html::Div>, zoom: RwSignal<f64>) {
     if !(ev.ctrl_key() || ev.meta_key()) {
         return;
     }
@@ -411,8 +411,13 @@ fn Canvas(view: FlowView, zoom: RwSignal<f64>) -> impl IntoView {
         })
         .collect_view();
 
-    let viewport_style =
-        move || format!("width:{}px;height:{}px", width * zoom.get(), height * zoom.get());
+    let viewport_style = move || {
+        format!(
+            "width:{}px;height:{}px",
+            width * zoom.get(),
+            height * zoom.get()
+        )
+    };
     let canvas_style = move || {
         format!(
             "width:{width}px;height:{height}px;transform:scale({});transform-origin:0 0",
@@ -576,13 +581,15 @@ fn edit_node(
     };
     let id_for_detail = id.clone();
     let detail_text = move || {
-        draft.with(|f| {
-            f.node(&id_for_detail).map(|n| {
-                let d = node_detail(n, &std::collections::BTreeMap::new());
-                let t = node_title(n);
-                if d == t { String::new() } else { d }
+        draft
+            .with(|f| {
+                f.node(&id_for_detail).map(|n| {
+                    let d = node_detail(n, &std::collections::BTreeMap::new());
+                    let t = node_title(n);
+                    if d == t { String::new() } else { d }
+                })
             })
-        }).unwrap_or_default()
+            .unwrap_or_default()
     };
 
     let id_for_down = id.clone();
@@ -649,7 +656,9 @@ fn edit_node(
     };
     let id_for_up = id.clone();
     let up = std::rc::Rc::new(move |_ev: web_sys::PointerEvent| {
-        let was_click = drag.with_untracked(|d| matches!(d, Some(Drag { node, moved: false, .. }) if node == &id_for_up));
+        let was_click = drag.with_untracked(
+            |d| matches!(d, Some(Drag { node, moved: false, .. }) if node == &id_for_up),
+        );
         drag.set(None);
         if was_click {
             selected.set(Some(id_for_up.clone()));
@@ -662,7 +671,9 @@ fn edit_node(
     let up_on_cancel = move |ev: web_sys::PointerEvent| up(ev);
 
     let id_for_class = id.clone();
-    let is_dragging = move || drag.with(|d| matches!(d, Some(Drag { node, moved: true, .. }) if node == &id_for_class));
+    let is_dragging = move || {
+        drag.with(|d| matches!(d, Some(Drag { node, moved: true, .. }) if node == &id_for_class))
+    };
     let id_for_sel = id.clone();
     let is_selected = move || selected.with(|s| s.as_deref() == Some(id_for_sel.as_str()));
 
