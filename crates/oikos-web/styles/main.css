@@ -47,7 +47,7 @@ body {
 .card--on {
   background: var(--card-on-bg);
   color: var(--card-on-ink);
-  border-color: color-mix(in srgb, var(--accent-amber) 45%, transparent);
+  border-color: color-mix(in srgb, var(--accent-amber) 35%, transparent);
 }
 
 .card--offline {
@@ -2576,7 +2576,10 @@ p.override__hint {
   stroke: var(--solar);
 }
 
-.energy-edge--grid,
+.energy-edge--grid {
+  stroke: var(--accent-violet);
+}
+
 .energy-edge--water {
   stroke: var(--accent-cyan);
 }
@@ -2586,7 +2589,7 @@ p.override__hint {
 }
 
 .energy-edge--consumer {
-  stroke: var(--accent-violet);
+  stroke: var(--accent-rose);
 }
 
 .energy-edge--out {
@@ -2614,7 +2617,10 @@ p.override__hint {
   --node: var(--solar);
 }
 
-.energy-node--grid,
+.energy-node--grid {
+  --node: var(--accent-violet);
+}
+
 .energy-node--water {
   --node: var(--accent-cyan);
 }
@@ -2624,7 +2630,7 @@ p.override__hint {
 }
 
 .energy-node--consumer {
-  --node: var(--accent-violet);
+  --node: var(--accent-rose);
 }
 
 .energy-node--click {
@@ -2649,7 +2655,7 @@ p.override__hint {
   display: flex;
   width: 20px;
   height: 20px;
-  color: var(--node);
+  color: var(--ink);
 }
 
 .energy-node__glyph svg {
@@ -2672,6 +2678,10 @@ p.override__hint {
   flex: none;
   align-self: center;
   padding: 0 16px;
+}
+
+.energy-card .card__icon {
+  color: inherit;
 }
 
 .energy-card__total {
@@ -2729,16 +2739,6 @@ p.override__hint {
   grid-column: 1 / -1;
 }
 
-.group__count {
-  flex: none;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--chip-border);
-  font: var(--type-label);
-}
-
-.group__bars {
-  display: flex;
 /* On a wide screen a full-row card stretches its few controls across the window: two columns
    are enough. */
 @media (min-width: 720px) {
@@ -2747,14 +2747,14 @@ p.override__hint {
   }
 }
 
-  gap: 4px;
-  height: 20px;
+.group__count {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-border);
+  font: var(--type-label);
 }
 
-.group__bar {
-  position: relative;
-  flex: none;
-  width: 8px;
 /* Status on the left, ▲ ■ ▼ on the right; the buttons wrap under on a narrow card. */
 .group__row {
   display: flex;
@@ -2771,6 +2771,16 @@ p.override__hint {
   min-width: 0;
 }
 
+.group__bars {
+  display: flex;
+  gap: 4px;
+  height: 20px;
+}
+
+.group__bar {
+  position: relative;
+  flex: none;
+  width: 8px;
   overflow: hidden;
   border-radius: 3px;
   background: color-mix(in srgb, currentcolor 16%, transparent);
@@ -2817,16 +2827,6 @@ p.override__hint {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.group__member-name {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 0;
-  min-height: var(--touch-min);
-  padding: 0;
   padding: 4px 0;
 }
 
@@ -2850,6 +2850,16 @@ p.override__hint {
 .group__member .btn--icon {
   flex: none;
   width: 52px;
+}
+
+.group__member-name {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  min-height: var(--touch-min);
+  padding: 0;
   border: 0;
   background: none;
   color: inherit;
@@ -2870,14 +2880,14 @@ p.override__hint {
   margin-bottom: 12px;
 }
 
+.group__rename .btn {
+  flex: none;
+  padding: 0 20px;
+}
+
 .group__check {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: var(--touch-min);
 }
-.group__rename .btn {
-  flex: none;
-  padding: 0 20px;
-}
-

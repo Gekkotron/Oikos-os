@@ -153,10 +153,11 @@ fn DiagramNode(
                     inner_html=move || node.get().map(|n| glyph(&n)).unwrap_or_default()
                 ></span>
             </foreignObject>
-            <text class="energy-node__label" y=NODE_R + 11.0 text-anchor="middle">
+            // The app's order: the value under the disc, the name under the value.
+            <text class="energy-node__label" y=NODE_R + 23.0 text-anchor="middle">
                 {move || node.get().map(|n| short(node_label(&n))).unwrap_or_default()}
             </text>
-            <text class="energy-node__value" y=NODE_R + 23.0 text-anchor="middle">
+            <text class="energy-node__value" y=NODE_R + 11.0 text-anchor="middle">
                 {move || {
                     node.get()
                         .map(|n| {

@@ -8,7 +8,7 @@
   --ink: #e8ecff;
   --card-bg: rgb(255 255 255 / 6%);
   --card-border: rgb(255 255 255 / 9%);
-  --card-on-bg: linear-gradient(145deg, rgb(255 196 87 / 28%), rgb(255 196 87 / 10%));
+  --card-on-bg: linear-gradient(145deg, rgb(255 196 87 / 28%), rgb(255 196 87 / 6%));
   --card-on-ink: #fff4dc;
   --chip-border: rgb(255 255 255 / 14%);
   --wire: rgb(255 255 255 / 28%);
