@@ -2,6 +2,8 @@
 //! edit mode lets each node be dragged to a new position and saved. Zoom controls scale the
 //! canvas in both modes.
 
+use std::collections::BTreeMap;
+
 use leptos::html;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -16,10 +18,12 @@ use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::now::Now;
 use crate::components::toast::Toasts;
+use crate::flow_layout::{
+    NODE_H, PAD, Pt, bounds, out_anchor, positions, routes, with_resolved_positions,
+};
 use crate::flows::{
-    NODE_H, NODE_W, canvas_size, clamp_zoom, highlight, layout, node_detail, node_title, orphans,
-    parked_deadline, parked_node, port_offset, run_duration, status_class, status_word,
-    step_offset, trigger_line, wire_path, with_resolved_positions,
+    clamp_zoom, highlight, node_detail, node_title, orphans, parked_deadline, parked_node,
+    run_duration, status_class, status_word, step_offset, trigger_line,
 };
 use crate::format::format_timestamp;
 use crate::house::House;
@@ -35,6 +39,17 @@ fn type_class(kind: &NodeKind) -> &'static str {
         NodeKind::Command(_) => "flow-node--command",
         NodeKind::FlowEnable(_) => "flow-node--flow",
     }
+}
+
+/// The height, from a card's top, of the pin an output `port` leaves by.
+fn port_top(kind: &NodeKind, port: Option<&str>) -> f64 {
+    out_anchor(kind, Pt { x: 0.0, y: 0.0 }, port).y
+}
+
+/// The scrolling canvas's size: every card plus the margin, measured from the origin.
+fn canvas_size(pos: &BTreeMap<String, Pt>) -> (f64, f64) {
+    let b = bounds(pos);
+    (b.x + b.w + PAD, b.y + b.h + PAD)
 }
 
 /// `m:ss` of a number of seconds.
@@ -305,7 +320,7 @@ fn Canvas(view: FlowView, zoom: RwSignal<f64>) -> impl IntoView {
     let house = expect_context::<House>();
     let now = expect_context::<Now>();
     let flow = view.definition.clone();
-    let placed = layout(&flow);
+    let placed = positions(&flow);
     let (width, height) = canvas_size(&placed);
     let lit = highlight(&flow, view.runs.first());
     let orphaned = orphans(&flow);
@@ -314,25 +329,13 @@ fn Canvas(view: FlowView, zoom: RwSignal<f64>) -> impl IntoView {
         .first()
         .filter(|r| view.active_run.as_deref() == Some(r.id.as_str()))
         .and_then(|r| parked_node(&flow, r));
-    let pos = |id: &str| placed.iter().find(|p| p.id == id).map(|p| (p.x, p.y));
+    let pos = |id: &str| placed.get(id).map(|p| (p.x, p.y));
 
-    let wires = flow
-        .edges
-        .iter()
-        .filter_map(|edge| {
-            let (x1, y1) = pos(&edge.from)?;
-            let (x2, y2) = pos(&edge.to)?;
-            let from = flow.node(&edge.from)?;
-            let d = wire_path(
-                x1 + NODE_W,
-                y1 + port_offset(&from.kind, edge.port.as_deref()),
-                x2,
-                y2 + NODE_H / 2.0,
-            );
-            let is_lit =
-                lit.edges
-                    .contains(&(edge.from.clone(), edge.port.clone(), edge.to.clone()));
-            Some(view! { <path class="flow-wire" class:flow-wire--lit=is_lit d=d /> })
+    let wires = routes(&flow, &placed)
+        .into_iter()
+        .map(|(key, route)| {
+            let is_lit = lit.edges.contains(&key);
+            view! { <path class="flow-wire" class:flow-wire--lit=is_lit d=route.d /> }
         })
         .collect_view();
 
@@ -378,7 +381,7 @@ fn Canvas(view: FlowView, zoom: RwSignal<f64>) -> impl IntoView {
                 ["true", "false"]
                     .into_iter()
                     .map(|port| {
-                        let top = port_offset(&node.kind, Some(port));
+                        let top = port_top(&node.kind, Some(port));
                         view! {
                             <span
                                 class="flow-port"
@@ -393,11 +396,11 @@ fn Canvas(view: FlowView, zoom: RwSignal<f64>) -> impl IntoView {
                     .collect_view()
             });
             let out_dot = (!is_if).then(|| {
-                let top = port_offset(&node.kind, None);
+                let top = port_top(&node.kind, None);
                 view! { <span class="flow-node__out" style=format!("top:{top}px")></span> }
             });
             let in_dot = (!is_trigger).then(|| {
-                let top = port_offset(&node.kind, None);
+                let top = NODE_H / 2.0;
                 view! { <span class="flow-node__in" style=format!("top:{top}px")></span> }
             });
             Some(view! {
@@ -465,12 +468,7 @@ fn EditCanvas(
     let drag = RwSignal::new(None::<Drag>);
     let canvas_ref: NodeRef<html::Div> = NodeRef::new();
 
-    let size = Memo::new(move |_| {
-        draft.with(|f| {
-            let placed = layout(f);
-            canvas_size(&placed)
-        })
-    });
+    let size = Memo::new(move |_| draft.with(|f| canvas_size(&positions(f))));
     let width = Memo::new(move |_| size.get().0);
     let height = Memo::new(move |_| size.get().1);
 
@@ -479,20 +477,9 @@ fn EditCanvas(
     });
     let wires = move || {
         draft.with(|f| {
-            f.edges
-                .iter()
-                .filter_map(|edge| {
-                    let from = f.node(&edge.from)?;
-                    let (fx, fy) = from.position.map(|p| (p.x, p.y))?;
-                    let (tx, ty) = f.node(&edge.to)?.position.map(|p| (p.x, p.y))?;
-                    let d = wire_path(
-                        fx + NODE_W,
-                        fy + port_offset(&from.kind, edge.port.as_deref()),
-                        tx,
-                        ty + NODE_H / 2.0,
-                    );
-                    Some(view! { <path class="flow-wire" d=d /> })
-                })
+            routes(f, &positions(f))
+                .into_iter()
+                .map(|(_, route)| view! { <path class="flow-wire" d=route.d /> })
                 .collect_view()
         })
     };
@@ -560,12 +547,12 @@ fn edit_node(
         let node = f.node(&id).expect("node from draft");
         let is_if = matches!(node.kind, NodeKind::If(_));
         let is_trigger = matches!(node.kind, NodeKind::TriggerState(_));
-        let in_top = (!is_trigger).then(|| port_offset(&node.kind, None));
-        let out_top = (!is_if).then(|| port_offset(&node.kind, None));
+        let in_top = (!is_trigger).then_some(NODE_H / 2.0);
+        let out_top = (!is_if).then(|| port_top(&node.kind, None));
         let ports: Vec<(String, f64)> = if is_if {
             ["true", "false"]
                 .into_iter()
-                .map(|p| (p.to_owned(), port_offset(&node.kind, Some(p))))
+                .map(|p| (p.to_owned(), port_top(&node.kind, Some(p))))
                 .collect()
         } else {
             Vec::new()
@@ -595,7 +582,7 @@ fn edit_node(
         draft
             .with(|f| {
                 f.node(&id_for_detail).map(|n| {
-                    let d = node_detail(n, &std::collections::BTreeMap::new());
+                    let d = node_detail(n, &BTreeMap::new());
                     let t = node_title(n);
                     if d == t { String::new() } else { d }
                 })

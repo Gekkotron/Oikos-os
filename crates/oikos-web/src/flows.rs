@@ -1,25 +1,15 @@
-//! Pure helpers behind the flow screens: canvas layout, wire geometry, labels and the run
-//! highlight. No leptos and no browser types, so everything here is tested natively.
+//! Pure helpers behind the flow screens: labels, zoom, the run highlight and run times
+//! (geometry lives in `flow_layout`). No leptos and no browser types, so everything here is
+//! tested natively.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use oikos_api::{EntityView, RunStatus, RunView, StepOutcome, TriggerInfo};
 use oikos_core::command::command_name;
-use oikos_core::flow::{Flow, Node, NodeKind, Op, Position, parse_duration};
+use oikos_core::flow::{Flow, Node, NodeKind, Op, parse_duration};
 
 use crate::format::entity_title;
 use crate::schedule::describe;
-
-/// Width of a node card on the canvas.
-pub const NODE_W: f64 = 200.0;
-/// Height of a node card on the canvas.
-pub const NODE_H: f64 = 72.0;
-/// Horizontal space between two columns.
-pub const COL_GAP: f64 = 56.0;
-/// Vertical space between two rows.
-pub const ROW_GAP: f64 = 40.0;
-/// Margin around the whole graph.
-pub const PAD: f64 = 24.0;
 
 /// Lowest zoom the canvas allows.
 pub const ZOOM_MIN: f64 = 0.4;
@@ -31,90 +21,6 @@ pub const ZOOM_STEP: f64 = 0.1;
 /// `zoom` kept inside `[ZOOM_MIN, ZOOM_MAX]`, rounded to the hundredth so the readout is stable.
 pub fn clamp_zoom(zoom: f64) -> f64 {
     (zoom.clamp(ZOOM_MIN, ZOOM_MAX) * 100.0).round() / 100.0
-}
-
-/// `flow` with every node's `position` set, either kept as-is or filled from the auto layout.
-/// Used to start edit mode from the same coordinates the canvas is drawing.
-pub fn with_resolved_positions(flow: &Flow) -> Flow {
-    let placed = layout(flow);
-    let mut out = flow.clone();
-    for node in &mut out.nodes {
-        if node.position.is_none()
-            && let Some(p) = placed.iter().find(|p| p.id == node.id)
-        {
-            node.position = Some(Position { x: p.x, y: p.y });
-        }
-    }
-    out
-}
-
-/// A node's top-left corner on the canvas.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Placed {
-    pub id: String,
-    pub x: f64,
-    pub y: f64,
-}
-
-/// Where each node goes: the stored positions when every node has one (a flow edited elsewhere
-/// keeps its look), else the layers laid out left to right, one row per sibling.
-pub fn layout(flow: &Flow) -> Vec<Placed> {
-    if !flow.nodes.is_empty() && flow.nodes.iter().all(|n| n.position.is_some()) {
-        return flow
-            .nodes
-            .iter()
-            .filter_map(|n| {
-                n.position.map(|p| Placed {
-                    id: n.id.clone(),
-                    x: p.x,
-                    y: p.y,
-                })
-            })
-            .collect();
-    }
-    flow.layers()
-        .into_iter()
-        .enumerate()
-        .flat_map(|(col, ids)| {
-            ids.into_iter().enumerate().map(move |(row, id)| Placed {
-                id,
-                x: PAD + col as f64 * (NODE_W + COL_GAP),
-                y: PAD + row as f64 * (NODE_H + ROW_GAP),
-            })
-        })
-        .collect()
-}
-
-/// The canvas size that holds every node plus the margin.
-pub fn canvas_size(placed: &[Placed]) -> (f64, f64) {
-    let right = placed.iter().map(|p| p.x + NODE_W).fold(0.0, f64::max);
-    let bottom = placed.iter().map(|p| p.y + NODE_H).fold(0.0, f64::max);
-    (right + PAD, bottom + PAD)
-}
-
-/// The height, from a node's top, at which an output port sits: the middle for a single
-/// output, a third and two thirds down for the `true` and `false` ports of an `if`.
-pub fn port_offset(kind: &NodeKind, port: Option<&str>) -> f64 {
-    match (kind, port) {
-        (NodeKind::If(_), Some("true")) => NODE_H * 0.33,
-        (NodeKind::If(_), Some("false")) => NODE_H * 0.67,
-        _ => NODE_H / 2.0,
-    }
-}
-
-/// The SVG path of a wire: a cubic that leaves and enters horizontally.
-pub fn wire_path(x1: f64, y1: f64, x2: f64, y2: f64) -> String {
-    format!(
-        "M{:.1} {:.1} C{:.1} {:.1}, {:.1} {:.1}, {:.1} {:.1}",
-        x1,
-        y1,
-        x1 + 60.0,
-        y1,
-        x2 - 60.0,
-        y2,
-        x2,
-        y2
-    )
 }
 
 /// The card title: the node's name, else its type in words.
@@ -389,7 +295,6 @@ pub fn status_class(status: RunStatus) -> &'static str {
 mod tests {
     use super::*;
     use oikos_api::StepView;
-    use oikos_core::flow::Position;
 
     fn reference() -> Flow {
         Flow::decode(
@@ -411,64 +316,6 @@ mod tests {
     }"#,
         )
         .unwrap()
-    }
-
-    fn at(placed: &[Placed], id: &str) -> (f64, f64) {
-        let p = placed.iter().find(|p| p.id == id).unwrap();
-        (p.x, p.y)
-    }
-
-    #[test]
-    fn auto_layout_of_reference_flow() {
-        let placed = layout(&reference());
-        let col = |c: f64| PAD + c * (NODE_W + COL_GAP);
-        let row = |r: f64| PAD + r * (NODE_H + ROW_GAP);
-        assert_eq!(at(&placed, "motion"), (col(0.0), row(0.0)));
-        assert_eq!(at(&placed, "moving"), (col(1.0), row(0.0)));
-        assert_eq!(at(&placed, "on"), (col(2.0), row(0.0)));
-        assert_eq!(at(&placed, "wait"), (col(2.0), row(1.0)));
-        assert_eq!(at(&placed, "off"), (col(3.0), row(0.0)));
-        assert_eq!(
-            canvas_size(&placed),
-            (
-                24.0 + 3.0 * 256.0 + 200.0 + 24.0,
-                24.0 + 112.0 + 72.0 + 24.0
-            )
-        );
-    }
-
-    #[test]
-    fn stored_positions_win() {
-        let mut flow = reference();
-        for (i, n) in flow.nodes.iter_mut().enumerate() {
-            n.position = Some(Position {
-                x: 10.0 * i as f64,
-                y: 5.0,
-            });
-        }
-        let placed = layout(&flow);
-        assert_eq!(at(&placed, "wait"), (30.0, 5.0));
-        // One missing position falls back to the auto layout.
-        flow.nodes[0].position = None;
-        assert_eq!(at(&layout(&flow), "motion"), (PAD, PAD));
-    }
-
-    #[test]
-    fn if_ports_have_two_heights() {
-        let flow = reference();
-        let kind = |id: &str| &flow.node(id).unwrap().kind;
-        assert_eq!(port_offset(kind("moving"), Some("true")), NODE_H * 0.33);
-        assert_eq!(port_offset(kind("moving"), Some("false")), NODE_H * 0.67);
-        assert_eq!(port_offset(kind("wait"), None), 36.0);
-        assert_eq!(port_offset(kind("motion"), None), 36.0);
-    }
-
-    #[test]
-    fn wire_path_is_a_cubic() {
-        assert_eq!(
-            wire_path(224.0, 60.0, 280.0, 100.5),
-            "M224.0 60.0 C284.0 60.0, 220.0 100.5, 280.0 100.5"
-        );
     }
 
     #[test]
@@ -670,24 +517,5 @@ mod tests {
         assert_eq!(run_duration(1_000, Some(1_045)), Some("45s".into()));
         assert_eq!(run_duration(1_000, Some(1_130)), Some("2m 10s".into()));
         assert_eq!(run_duration(1_000, None), None);
-    }
-
-    #[test]
-    fn resolve_positions_fills_the_missing_ones() {
-        let flow = reference();
-        let resolved = with_resolved_positions(&flow);
-        for n in &resolved.nodes {
-            assert!(n.position.is_some(), "{} has no position", n.id);
-        }
-        let motion = resolved.node("motion").unwrap().position.unwrap();
-        assert_eq!((motion.x, motion.y), (PAD, PAD));
-        // Stored positions are kept.
-        let mut mixed = flow.clone();
-        mixed.nodes[0].position = Some(Position { x: 10.0, y: 20.0 });
-        let resolved = with_resolved_positions(&mixed);
-        assert_eq!(
-            resolved.node("motion").unwrap().position,
-            Some(Position { x: 10.0, y: 20.0 })
-        );
     }
 }

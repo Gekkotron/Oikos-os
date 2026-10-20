@@ -1,0 +1,353 @@
+{
+  "id": "living_led_motion",
+  "name": "Living LED on motion",
+  "description": "LED on at motion unless a ceiling light is on or there is daylight (a shutter open and a motion sensor above 16 lx); off 5 min after the last motion or as soon as a ceiling light comes on. Lux is only read while the LED is off, since the LED itself lights the sensors.",
+  "enabled": false,
+  "mode": "restart",
+  "nodes": [
+    {
+      "id": "motion_entree",
+      "name": "Entrée",
+      "type": "trigger.state",
+      "params": {
+        "entity": "0x00158d00044c4d4c_occupancy_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "motion_north",
+      "name": "Motion north",
+      "type": "trigger.state",
+      "params": {
+        "entity": "0x00158d008b5a2d65_occupancy_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "motion_corridor",
+      "name": "Motion corridor",
+      "type": "trigger.state",
+      "params": {
+        "entity": "0x00158d008b360144_occupancy_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "light_tv",
+      "name": "Lumière tv on",
+      "type": "trigger.state",
+      "params": {
+        "entity": "0x3425b4fffefe0c80_switch_l1_zigbee2mqtt",
+        "to": true
+      }
+    },
+    {
+      "id": "light_table",
+      "name": "Lumière table on",
+      "type": "trigger.state",
+      "params": {
+        "entity": "0x3425b4fffefe0c80_switch_l2_zigbee2mqtt",
+        "to": true
+      }
+    },
+    {
+      "id": "tv_on",
+      "name": "Lumière tv is on",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": true,
+        "entity": "0x3425b4fffefe0c80_switch_l1_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "table_on",
+      "name": "Lumière table is on",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": true,
+        "entity": "0x3425b4fffefe0c80_switch_l2_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "led_is_on",
+      "name": "LED is on",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": true,
+        "entity": "0x60a423fffe94d1c6_light_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "off_now",
+      "name": "Off now",
+      "type": "command",
+      "params": {
+        "entity": "0x60a423fffe94d1c6_light_zigbee2mqtt",
+        "command": {
+          "type": "turn_off"
+        }
+      }
+    },
+    {
+      "id": "moving",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": true
+      }
+    },
+    {
+      "id": "led_already_on",
+      "name": "LED already on",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": true,
+        "entity": "0x60a423fffe94d1c6_light_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "shutter_north_open",
+      "name": "Volet nord open",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": "open",
+        "entity": "0x5c0272fffeae8c39_cover_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "shutter_south_open",
+      "name": "Volet sud open",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": "open",
+        "entity": "0x847127fffe08106c_cover_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "shutter_tv_open",
+      "name": "Volet tv open",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": "open",
+        "entity": "0x847127fffe0561c7_cover_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "bright_entree",
+      "name": "Entrée > 16 lx",
+      "type": "if",
+      "params": {
+        "op": "gt",
+        "value": 16,
+        "entity": "0x00158d00044c4d4c_illuminance_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "bright_north",
+      "name": "North > 16 lx",
+      "type": "if",
+      "params": {
+        "op": "gt",
+        "value": 16,
+        "entity": "0x00158d008b5a2d65_illuminance_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "bright_corridor",
+      "name": "Corridor > 16 lx",
+      "type": "if",
+      "params": {
+        "op": "gt",
+        "value": 16,
+        "entity": "0x00158d008b360144_illuminance_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "on",
+      "type": "command",
+      "params": {
+        "entity": "0x60a423fffe94d1c6_light_zigbee2mqtt",
+        "command": {
+          "type": "turn_on"
+        }
+      }
+    },
+    {
+      "id": "clear_entree",
+      "name": "Entrée clear",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": false,
+        "entity": "0x00158d00044c4d4c_occupancy_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "clear_north",
+      "name": "North clear",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": false,
+        "entity": "0x00158d008b5a2d65_occupancy_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "clear_corridor",
+      "name": "Corridor clear",
+      "type": "if",
+      "params": {
+        "op": "eq",
+        "value": false,
+        "entity": "0x00158d008b360144_occupancy_zigbee2mqtt"
+      }
+    },
+    {
+      "id": "wait",
+      "type": "delay",
+      "params": {
+        "for": "5m"
+      }
+    },
+    {
+      "id": "off",
+      "type": "command",
+      "params": {
+        "entity": "0x60a423fffe94d1c6_light_zigbee2mqtt",
+        "command": {
+          "type": "turn_off"
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "motion_entree",
+      "to": "tv_on"
+    },
+    {
+      "from": "motion_north",
+      "to": "tv_on"
+    },
+    {
+      "from": "motion_corridor",
+      "to": "tv_on"
+    },
+    {
+      "from": "light_tv",
+      "to": "tv_on"
+    },
+    {
+      "from": "light_table",
+      "to": "tv_on"
+    },
+    {
+      "from": "tv_on",
+      "to": "led_is_on",
+      "port": "true"
+    },
+    {
+      "from": "tv_on",
+      "to": "table_on",
+      "port": "false"
+    },
+    {
+      "from": "table_on",
+      "to": "led_is_on",
+      "port": "true"
+    },
+    {
+      "from": "table_on",
+      "to": "moving",
+      "port": "false"
+    },
+    {
+      "from": "led_is_on",
+      "to": "off_now",
+      "port": "true"
+    },
+    {
+      "from": "moving",
+      "to": "led_already_on",
+      "port": "true"
+    },
+    {
+      "from": "led_already_on",
+      "to": "shutter_north_open",
+      "port": "false"
+    },
+    {
+      "from": "shutter_north_open",
+      "to": "bright_entree",
+      "port": "true"
+    },
+    {
+      "from": "shutter_north_open",
+      "to": "shutter_south_open",
+      "port": "false"
+    },
+    {
+      "from": "shutter_south_open",
+      "to": "bright_entree",
+      "port": "true"
+    },
+    {
+      "from": "shutter_south_open",
+      "to": "shutter_tv_open",
+      "port": "false"
+    },
+    {
+      "from": "shutter_tv_open",
+      "to": "bright_entree",
+      "port": "true"
+    },
+    {
+      "from": "shutter_tv_open",
+      "to": "on",
+      "port": "false"
+    },
+    {
+      "from": "bright_entree",
+      "to": "bright_north",
+      "port": "false"
+    },
+    {
+      "from": "bright_north",
+      "to": "bright_corridor",
+      "port": "false"
+    },
+    {
+      "from": "bright_corridor",
+      "to": "on",
+      "port": "false"
+    },
+    {
+      "from": "moving",
+      "to": "clear_entree",
+      "port": "false"
+    },
+    {
+      "from": "clear_entree",
+      "to": "clear_north",
+      "port": "true"
+    },
+    {
+      "from": "clear_north",
+      "to": "clear_corridor",
+      "port": "true"
+    },
+    {
+      "from": "clear_corridor",
+      "to": "wait",
+      "port": "true"
+    },
+    {
+      "from": "wait",
+      "to": "off"
+    }
+  ]
+}
