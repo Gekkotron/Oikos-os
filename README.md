@@ -53,6 +53,8 @@ homeassistant:
 
 Restart Zigbee2MQTT, then set the Oikos app's discovery prefix to `oikos` as well.
 
+Devices that Zigbee2MQTT does not cover reach the hub through a bridge publishing the same discovery: see [Adding a device](docs/adding-a-device.md).
+
 ## HTTP API
 
 The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 and clear of Zigbee2MQTT on 8080 on the same server), CORS open to any origin, JSON in and out.

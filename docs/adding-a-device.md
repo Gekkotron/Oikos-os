@@ -1,0 +1,172 @@
+# Adding a device
+
+The hub speaks Home Assistant MQTT discovery. It holds no per-device code. Each device reaches the hub as discovery configs on the MQTT broker, and each discovered component becomes an entity of a `Kind`. MQTT discovery is the plugin API, so adding a device usually means changing whatever publishes its discovery, not the hub.
+
+## Which path?
+
+| Situation | Path | Where the change goes |
+|---|---|---|
+| A Zigbee device Zigbee2MQTT does not know | [Fix it in Zigbee2MQTT](#zigbee-devices-unknown-to-zigbee2mqtt) | External converter, then upstream PR. Not an Oikos change. |
+| The device is not Zigbee (cloud API, Wi-Fi, vendor protocol) | [Write a bridge](#writing-a-bridge) | Separate process, any language, own repo. It publishes discovery to the broker. |
+| The device publishes discovery for a component Oikos ignores (`GET /api/v1/ignored` reports `ignored component <name>`) | [Add a kind](#adding-a-component-kind-to-oikos) | PR to Oikos. One PR per component, never per device. |
+| The device works but looks wrong (wrong room, wrong name, a relay that is really a heater or light) | [Override](#overrides) | No code. Web device sheet, `PATCH /api/v1/entities/{id}/override`, or MCP `set_override`. |
+
+Some firmwares already publish discovery when their MQTT discovery option is on, Tasmota, ESPHome and Valetudo among them. Those devices need no bridge.
+
+## Zigbee devices unknown to Zigbee2MQTT
+
+Zigbee2MQTT (Z2M) holds the per-device code for thousands of Zigbee devices. When Z2M does not know a device:
+
+1. Write an external converter for local use. It is a JavaScript file referenced in Z2M's configuration.
+2. Contribute it upstream to `Koenkk/zigbee-herdsman-converters` so every user gets it.
+
+Z2M publishes discovery under the `oikos` prefix. Once Z2M exposes the device, Oikos picks it up with no change. See the README section "Zigbee2MQTT".
+
+## Writing a bridge
+
+A bridge is a separate process. It reads a non-Zigbee device and publishes that device's discovery and state to the MQTT broker. The bridge can be written in any language and lives in its own repository. The hub needs no change.
+
+### The contract
+
+Discovery topic:
+
+```
+<prefix>/<component>/[<node_id>/]<object_id>/config
+```
+
+Between the component and `config` there is one or two segments. None may be empty. The default prefix is `oikos`.
+
+A bridge that publishes under `homeassistant` works once the hub lists that prefix:
+
+```toml
+[topics]
+discovery_prefixes = ["oikos", "homeassistant"]
+```
+
+Rules:
+
+- Publish the config **retained**, as a UTF-8 JSON object.
+- The hub expands Home Assistant abbreviations (`stat_t`, `cmd_t`, `dev`, `~`, and so on).
+- Device-based discovery is supported: component `device` with a `cmps` or `components` map, one entry per entity, each with a `platform`.
+- Remove an entity by publishing an empty retained payload on its config topic.
+- `ui` and `automation` directly under the prefix are reserved. `oikos/ui/<id>` holds overrides and `oikos/automation/<id>` holds flows. Never publish discovery there.
+
+Supported components (each becomes an entity):
+
+`light`, `switch`, `cover`, `climate`, `sensor`, `binary_sensor`, `alarm_control_panel`, `number`, `select`, `button`, `vacuum`, `water_heater`.
+
+Recognised but ignored today (listed under `GET /api/v1/ignored`):
+
+`device_automation`, `update`, `device_tracker`, `text`, `event`, `scene`, `siren`, `lock`, `fan`, `humidifier`, `camera`, `image`, `lawn_mower`, `notify`, `tag`, `valve`.
+
+### Fields the hub reads
+
+| Field | What the hub does with it |
+|---|---|
+| `unique_id` | The entity id. Set it and keep it stable. Without it the hub uses `<component>.<node_id>.<object_id>`. |
+| `device.identifiers` | The first string is the entity's `device_id`. Entities sharing it form one device. |
+| `device.name` | The device part of the display name. |
+| `name` | The entity label. `null` makes the entity the device itself, named after the device. |
+| `device.suggested_area` | The room. |
+| `state_topic` | Required for `sensor` and `binary_sensor`. The config is rejected without it. Publish state retained so the hub has a value after a restart. |
+| `availability_topic` | Online and offline payloads come from `payload_available` and `payload_not_available` (defaults `online` and `offline`). |
+| `availability` | A list of topics, combined by `availability_mode` (`all`, `any` or `latest`). |
+| `entity_category` | `diagnostic` or `config` hides the entity from the default entity list. |
+| `enabled_by_default` | `false` hides the entity from the default entity list. |
+| `device_class`, `unit_of_measurement`, `icon` | Passed through to the UI. |
+
+Display name: `<device name> <label>`. A `device.name` with three or more `/` segments, such as `rooms/kitchen/kettle`, gives the short name `kettle` and the room `kitchen`.
+
+Room priority: user override, then `suggested_area`, then the room from the `/` path, then Unassigned.
+
+Without an availability topic, availability stays `unknown`. Pair `availability_topic` with an MQTT last will so the hub shows the device offline when the bridge dies.
+
+### Worked example: Roborock2Mqtt
+
+Roborock2Mqtt (https://github.com/Gekkotron/Roborock2Mqtt) talks to an S5 vacuum and publishes this config (as the hub stores it):
+
+```json
+{
+  "unique_id": "roborock_40313ca8b964",
+  "object_id": "roborock_40313ca8b964",
+  "name": null,
+  "device": {
+    "identifiers": ["roborock_40313ca8b964"],
+    "manufacturer": "Roborock",
+    "model": "roborock.vacuum.s5",
+    "name": "Roborock",
+    "sw_version": "3.5.8_002034"
+  },
+  "availability_topic": "roborock/alive",
+  "payload_available": "1",
+  "payload_not_available": "0",
+  "state_topic": "roborock/ha/state",
+  "command_topic": "roborock/ha/command",
+  "set_fan_speed_topic": "roborock/ha/fan_speed/set",
+  "fan_speed_list": ["Silent", "Standard", "Medium", "Turbo", "Gentle", "Auto"],
+  "supported_features": ["start", "pause", "stop", "return_home", "locate", "fan_speed", "battery", "status"]
+}
+```
+
+- `name: null` makes the entity "Roborock".
+- `supported_features` and `fan_speed_list` tell the hub which actions and fan speeds exist.
+- `roborock/alive` with `1` and `0` drives online and offline.
+- The hub has no Roborock code.
+
+Vacuum wire format:
+
+- `state_topic` carries JSON `{"state", "battery_level", "fan_speed"}`. `state` is one of `cleaning`, `docked`, `paused`, `idle`, `returning`, `error`.
+- Commands are published on `command_topic` as `start`, `pause`, `stop`, `return_to_base` or `locate`. Each payload can be overridden (`payload_start` and so on).
+- A fan speed is published as the plain speed name on `set_fan_speed_topic`.
+
+A second example is Suez2Mqtt (https://github.com/Gekkotron/Suez2Mqtt). It reads a water meter from the Suez cloud and publishes `sensor` entities with `device_class: water`. It publishes no availability topic, so its availability shows `unknown`.
+
+### Restarts
+
+With `[mqtt] send_ha_birth = true` (off by default), the hub publishes `online` (not retained) on `[mqtt] ha_status_topic` (default `homeassistant/status`) each time it connects. A bridge subscribes to that topic and re-publishes its discovery and state when it sees `online`.
+
+Retained configs cover most restarts. The birth message covers a broker that lost its retained messages.
+
+### Checking it
+
+- `GET /api/v1/ignored`: every discovery topic that did not become an entity, with the reason (bad JSON, `sensor without state_topic`, ignored component, and so on).
+- `GET /api/v1/snapshot`: the entity under `entities`, with state and availability. The snapshot's `devices` list holds Zigbee2MQTT devices only. A bridge's device appears through its entities' `device_id`.
+- MCP `get_entity`: the entity with its `bindings` (the expanded discovery config). Use it to confirm abbreviations expanded as expected.
+
+Security: bindings are readable by anything on the LAN. Never put credentials in topics or templates.
+
+## Adding a component kind to Oikos
+
+Base the PR on how `water_heater` was added. A kind touches these files:
+
+| File | Change |
+|---|---|
+| `crates/oikos-core/src/model/kind.rs` | Add the `Kind` variant, its component name and `Kind::ALL`. Remove the name from `IGNORED_COMPONENTS`. |
+| `crates/oikos-core/src/discovery/capabilities.rs` | What the kind can do, read from the config. |
+| `crates/oikos-core/src/model/state.rs` | State model for the kind. |
+| `crates/oikos-core/src/state/kinds/<kind>.rs`, `state/kinds/mod.rs` | Reading the kind's state. |
+| `crates/oikos-core/src/command/kinds.rs` | Mapping commands to publishes. |
+| `crates/oikos-core/src/flow/scalar.rs` | The kind's scalar for flows. |
+| `crates/oikos-core/src/energy/units.rs` | Only if the kind reports energy. |
+| `crates/oikos-web/src/cards/<kind>.rs`, `icons.rs`, `format.rs`, `screens/home.rs` | Web card. |
+
+The Android app needs the matching card.
+
+Tests run against recorded broker messages in `crates/oikos-core/tests/fixtures`. Add cases to `crates/oikos-core/tests/state.rs`.
+
+Before opening the PR, run the commands in the README section "Development": `cargo test`, `clippy -D warnings`, `fmt --check`, and the wasm32 checks for `oikos-core`, `oikos-api` and `oikos-web`.
+
+## Overrides
+
+Override fields: `name`, `area`, `hidden`, `cardStyle`, `showAs` (a switch shown as another type), `favorite` and `energyRole`.
+
+Overrides are retained messages under `oikos/ui/<entity id>`. Set them from the web device sheet, `PATCH /api/v1/entities/{id}/override`, or MCP `set_override`.
+
+## Bridge catalogue
+
+| Bridge | Devices | Repo |
+|---|---|---|
+| Suez2Mqtt | Suez water meter (cloud) | https://github.com/Gekkotron/Suez2Mqtt |
+| Roborock2Mqtt | Roborock vacuums (S5 tested) | https://github.com/Gekkotron/Roborock2Mqtt |
+
+To list a bridge, open a PR that adds one row. The bridge's code stays in its own repository.
