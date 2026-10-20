@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oikos_api::{EntityView, RunStatus, RunView, StepOutcome, TriggerInfo};
 use oikos_core::command::command_name;
-use oikos_core::flow::{Flow, Node, NodeKind, Op, parse_duration};
+use oikos_core::flow::{Flow, Node, NodeKind, Op, Position, parse_duration};
 
 use crate::format::entity_title;
 
@@ -19,6 +19,33 @@ pub const COL_GAP: f64 = 56.0;
 pub const ROW_GAP: f64 = 40.0;
 /// Margin around the whole graph.
 pub const PAD: f64 = 24.0;
+
+/// Lowest zoom the canvas allows.
+pub const ZOOM_MIN: f64 = 0.4;
+/// Highest zoom the canvas allows.
+pub const ZOOM_MAX: f64 = 2.0;
+/// What `+` / `−` buttons change the zoom by.
+pub const ZOOM_STEP: f64 = 0.1;
+
+/// `zoom` kept inside `[ZOOM_MIN, ZOOM_MAX]`, rounded to the hundredth so the readout is stable.
+pub fn clamp_zoom(zoom: f64) -> f64 {
+    (zoom.clamp(ZOOM_MIN, ZOOM_MAX) * 100.0).round() / 100.0
+}
+
+/// `flow` with every node's `position` set, either kept as-is or filled from the auto layout.
+/// Used to start edit mode from the same coordinates the canvas is drawing.
+pub fn with_resolved_positions(flow: &Flow) -> Flow {
+    let placed = layout(flow);
+    let mut out = flow.clone();
+    for node in &mut out.nodes {
+        if node.position.is_none()
+            && let Some(p) = placed.iter().find(|p| p.id == node.id)
+        {
+            node.position = Some(Position { x: p.x, y: p.y });
+        }
+    }
+    out
+}
 
 /// A node's top-left corner on the canvas.
 #[derive(Clone, Debug, PartialEq)]
@@ -283,6 +310,33 @@ pub fn status_word(status: RunStatus) -> &'static str {
     }
 }
 
+/// `at - start` as a short log offset: `+0s`, `+45s`, `+2m 10s`, `+1h 03m`. A step whose
+/// timestamp is before the run's start reads `+0s` (clock skew should not go backwards here,
+/// but we clamp instead of printing a negative).
+pub fn step_offset(at: u64, start: u64) -> String {
+    let secs = at.saturating_sub(start);
+    if secs < 60 {
+        format!("+{secs}s")
+    } else if secs < 3_600 {
+        format!("+{}m {:02}s", secs / 60, secs % 60)
+    } else {
+        format!("+{}h {:02}m", secs / 3_600, (secs % 3_600) / 60)
+    }
+}
+
+/// `end - start` as a short run duration (same scale as [`step_offset`] without the `+`), or
+/// `None` when the run is still running.
+pub fn run_duration(start: u64, end: Option<u64>) -> Option<String> {
+    let secs = end?.saturating_sub(start);
+    if secs < 60 {
+        Some(format!("{secs}s"))
+    } else if secs < 3_600 {
+        Some(format!("{}m {:02}s", secs / 60, secs % 60))
+    } else {
+        Some(format!("{}h {:02}m", secs / 3_600, (secs % 3_600) / 60))
+    }
+}
+
 /// The CSS class of a run's badge.
 pub fn status_class(status: RunStatus) -> &'static str {
     match status {
@@ -519,5 +573,45 @@ mod tests {
         assert_eq!(status_word(RunStatus::Cancelled), "Cancelled");
         assert_eq!(status_class(RunStatus::Running), "run--running");
         assert_eq!(status_class(RunStatus::Skipped), "run--skipped");
+    }
+
+    #[test]
+    fn zoom_is_clamped_and_rounded() {
+        assert_eq!(clamp_zoom(1.0), 1.0);
+        assert_eq!(clamp_zoom(0.1), ZOOM_MIN);
+        assert_eq!(clamp_zoom(5.0), ZOOM_MAX);
+        assert_eq!(clamp_zoom(1.237), 1.24);
+    }
+
+    #[test]
+    fn step_offsets_and_run_durations_read_as_short_log_times() {
+        assert_eq!(step_offset(1_000, 1_000), "+0s");
+        assert_eq!(step_offset(1_045, 1_000), "+45s");
+        assert_eq!(step_offset(1_130, 1_000), "+2m 10s");
+        assert_eq!(step_offset(1_000 + 3_600 + 180, 1_000), "+1h 03m");
+        // Clock skew does not print a negative.
+        assert_eq!(step_offset(100, 500), "+0s");
+        assert_eq!(run_duration(1_000, Some(1_045)), Some("45s".into()));
+        assert_eq!(run_duration(1_000, Some(1_130)), Some("2m 10s".into()));
+        assert_eq!(run_duration(1_000, None), None);
+    }
+
+    #[test]
+    fn resolve_positions_fills_the_missing_ones() {
+        let flow = reference();
+        let resolved = with_resolved_positions(&flow);
+        for n in &resolved.nodes {
+            assert!(n.position.is_some(), "{} has no position", n.id);
+        }
+        let motion = resolved.node("motion").unwrap().position.unwrap();
+        assert_eq!((motion.x, motion.y), (PAD, PAD));
+        // Stored positions are kept.
+        let mut mixed = flow.clone();
+        mixed.nodes[0].position = Some(Position { x: 10.0, y: 20.0 });
+        let resolved = with_resolved_positions(&mixed);
+        assert_eq!(
+            resolved.node("motion").unwrap().position,
+            Some(Position { x: 10.0, y: 20.0 })
+        );
     }
 }

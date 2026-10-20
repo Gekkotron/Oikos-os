@@ -2,6 +2,7 @@
 
 use gloo_net::http::{Request, Response};
 use oikos_api::{ApiError, CommandResponse, EntityView, FlowView, OverridePatch, RunView};
+use oikos_core::flow::Flow;
 use oikos_core::model::{AreasDocument, Command};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -101,6 +102,13 @@ pub async fn set_flow_enabled(id: &str, enabled: bool) -> Result<FlowView, ApiEr
     let url = format!("/api/v1/flows/{}/enabled", encode_id(id));
     let body = serde_json::json!({ "enabled": enabled });
     let response = check(Request::post(&url).json(&body), None).await?;
+    read_json(response).await
+}
+
+/// Replaces flow `id`'s definition on the hub. The id in `flow` must match the path.
+pub async fn put_flow(flow: &Flow) -> Result<FlowView, ApiError> {
+    let url = format!("/api/v1/flows/{}", encode_id(&flow.id));
+    let response = check(Request::put(&url).json(flow), None).await?;
     read_json(response).await
 }
 

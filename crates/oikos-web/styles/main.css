@@ -854,6 +854,133 @@ a[aria-current="page"] .nav__glyph {
   display: none;
 }
 
+/* Water heater: a tank picture beside the reading, the activity chip and the inlet line */
+.heater {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.heater__main {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  min-width: 0;
+}
+
+.heater__tank {
+  position: relative;
+  flex: none;
+  width: 34px;
+  min-height: 84px;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1.5px solid var(--chip-border);
+  border-radius: 12px;
+  background: linear-gradient(to top, #3b82f6 0%, #8b7fd6 45%, #ff7a3d 100%);
+  filter: saturate(0.35);
+  opacity: 0.75;
+  transition: filter 0.3s var(--ease), opacity 0.3s var(--ease);
+}
+
+.heater__tank--heating {
+  filter: saturate(1.2);
+  opacity: 1;
+}
+
+.heater__element {
+  position: absolute;
+  inset: auto 0 0;
+  height: 28%;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgb(255 255 255 / 0%) 0 5px,
+    rgb(255 255 255 / 35%) 5px 7px
+  );
+  opacity: 0;
+}
+
+.heater__tank--heating .heater__element {
+  background-color: rgb(255 150 60 / 45%);
+  box-shadow: 0 -6px 14px rgb(255 140 50 / 70%);
+  opacity: 1;
+  animation: heater-glow 2.4s ease-in-out infinite alternate;
+}
+
+@keyframes heater-glow {
+  from {
+    filter: brightness(0.85);
+  }
+  to {
+    filter: brightness(1.25);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heater__tank,
+  .heater__tank--heating .heater__element {
+    animation: none;
+    transition: none;
+  }
+}
+
+.heater__info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.heater__reading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.heater__caption {
+  font: var(--type-label);
+  opacity: 0.65;
+}
+
+.heater__now {
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.heater__chip {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgb(128 128 128 / 18%);
+  font: var(--type-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.heater__chip--heating {
+  background: color-mix(in srgb, var(--accent-amber) 22%, transparent);
+  color: var(--accent-amber);
+  opacity: 1;
+}
+
+.heater__inlet {
+  color: var(--accent-cyan);
+  font: var(--type-label);
+  white-space: nowrap;
+}
+
 /* A select with its caption above the value, both inside one pill */
 .pick {
   position: relative;
@@ -2109,10 +2236,114 @@ p.override__hint {
   -webkit-overflow-scrolling: touch;
 }
 
+.flow-canvas-scroll--editing {
+  cursor: crosshair;
+}
+
+.flow-canvas-viewport {
+  position: relative;
+}
+
 .flow-canvas {
   position: relative;
   background-image: radial-gradient(var(--chip-border) 1px, transparent 1px);
   background-size: 20px 20px;
+}
+
+.flow-canvas--editing {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.flow-zoom {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+}
+
+.flow-zoom__btn {
+  min-width: 32px;
+  padding: 2px 8px;
+  font: var(--type-label);
+}
+
+.flow-zoom__btn--readout {
+  min-width: 56px;
+  font-variant-numeric: tabular-nums;
+}
+
+.flow-node--editing {
+  cursor: grab;
+  touch-action: none;
+}
+
+.flow-node--editing:active,
+.flow-node--dragging {
+  cursor: grabbing;
+}
+
+.flow-node--dragging {
+  z-index: 2;
+  box-shadow: 0 4px 20px color-mix(in srgb, var(--node-accent) 60%, transparent);
+}
+
+.flow-node--selected {
+  border-color: var(--node-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-accent) 60%, transparent);
+}
+
+.node-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  margin-top: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+}
+
+.node-editor__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.node-editor__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.node-editor__id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.65;
+  font: var(--type-label);
+}
+
+.node-editor__field {
+  display: grid;
+  gap: 4px;
+}
+
+.node-editor__label {
+  font: var(--type-label);
+  opacity: 0.75;
+}
+
+.node-editor__error {
+  font: var(--type-label);
+  color: var(--accent-rose);
+}
+
+.node-editor .field[aria-invalid="true"] {
+  border-color: var(--accent-rose);
 }
 
 .flow-wire {
@@ -2307,15 +2538,67 @@ p.override__hint {
 }
 
 .run__time,
+.run__duration,
 .run__trigger {
   overflow-wrap: anywhere;
   opacity: 0.7;
 }
 
+.run__duration {
+  font-variant-numeric: tabular-nums;
+}
+
 .run__steps {
   margin: 8px 0 0;
-  padding-left: 20px;
+  padding: 8px 0 0;
+  list-style: none;
   font: var(--type-label);
+  overflow-wrap: anywhere;
+  border-top: 1px dashed var(--chip-border);
+}
+
+.step {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  column-gap: 10px;
+  padding: 2px 0;
+}
+
+.step__at {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  opacity: 0.6;
+}
+
+.step__node {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step__outcome {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  align-self: center;
+}
+
+.step__outcome--ok {
+  color: var(--accent-mint);
+}
+
+.step__outcome--failed {
+  color: var(--accent-rose);
+}
+
+.step__outcome--skipped {
+  opacity: 0.6;
+}
+
+.step__detail {
+  grid-column: 2 / span 2;
+  opacity: 0.7;
   overflow-wrap: anywhere;
 }
 

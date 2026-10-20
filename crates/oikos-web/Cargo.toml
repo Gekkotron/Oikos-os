@@ -34,6 +34,7 @@ web-sys = { workspace = true, features = [
     "DomRect",
     "Clipboard",
     "Element",
+    "HtmlElement",
     "KeyboardEvent",
     "MouseEvent",
     "Navigator",
@@ -41,6 +42,7 @@ web-sys = { workspace = true, features = [
     "ScrollBehavior",
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
+    "WheelEvent",
 ] }
 
 [dev-dependencies]
