@@ -6,13 +6,13 @@ use oikos_api::EntityView;
 use super::light::{power_command, read_on, with_on};
 use super::{PowerToggle, Sender};
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::components::confirm::ConfirmBar;
+use crate::components::confirm::{ConfirmBar, Confirming};
 use crate::format::display_value;
 
 #[component]
 pub fn SirenCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let asking = RwSignal::new(false);
+    let confirming = expect_context::<Confirming>();
     let on = read_on(&entity.state).unwrap_or(false);
     let label = if on {
         "Ringing".to_owned()
@@ -24,24 +24,29 @@ pub fn SirenCard(entity: EntityView) -> impl IntoView {
         let id = entity.id.clone();
         let state = entity.state.clone();
         Callback::new(move |next: bool| {
-            asking.set(false);
+            confirming.clear();
             sender.send(&id, power_command(next), with_on(&state, next));
         })
     };
     let ask = entity.ui.security_ask;
+    let ask_id = entity.id.clone();
     let toggle = Callback::new(move |()| {
         if !on && ask {
-            asking.set(true);
+            confirming.ask(&ask_id);
         } else {
             send.run(!on);
         }
     });
+    let asking = {
+        let id = entity.id.clone();
+        move || confirming.is_asking(&id)
+    };
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending alert=on>
             <Show
-                when=move || asking.get()
+                when=asking
                 fallback=move || {
                     view! { <PowerToggle on=on label=label.clone() on_toggle=toggle /> }
                 }
@@ -50,7 +55,7 @@ pub fn SirenCard(entity: EntityView) -> impl IntoView {
                     question=question.clone()
                     yes="Ring"
                     on_yes=Callback::new(move |()| send.run(true))
-                    on_cancel=Callback::new(move |()| asking.set(false))
+                    on_cancel=Callback::new(move |()| confirming.clear())
                 />
             </Show>
         </CardFrame>

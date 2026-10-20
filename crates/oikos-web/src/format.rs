@@ -130,10 +130,14 @@ pub fn kind_word(kind: Kind) -> String {
 
 /// The word for what an entity is: the type a switch is shown as ("Door opener"), else its kind.
 pub fn type_word(entity: &EntityView) -> String {
-    match SwitchType::of(entity.protocol_kind, &entity.ui) {
-        Some(t) if t != SwitchType::Switch => t.label().to_owned(),
-        _ => kind_word(entity.kind),
-    }
+    shown_type(entity).map_or_else(|| kind_word(entity.kind), str::to_owned)
+}
+
+/// The label of the type a switch is shown as, unless it is a plain switch.
+fn shown_type(entity: &EntityView) -> Option<&'static str> {
+    SwitchType::of(entity.protocol_kind, &entity.ui)
+        .filter(|t| *t != SwitchType::Switch)
+        .map(SwitchType::label)
 }
 
 /// What tells an entity apart from its same-named siblings: set when the entity is named exactly
@@ -143,6 +147,9 @@ pub fn title_suffix(entity: &EntityView) -> Option<String> {
     let device = entity.device_name.as_deref().filter(|d| !d.is_empty())?;
     if !entity.name.eq_ignore_ascii_case(device) {
         return None;
+    }
+    if let Some(shown) = shown_type(entity) {
+        return Some(shown.to_owned());
     }
     Some(
         entity
@@ -166,7 +173,7 @@ pub fn entity_title(entity: &EntityView) -> String {
 /// same-named entity stands in for the kind.
 pub fn list_label(entity: &EntityView) -> String {
     let short = short_name(&entity.name, entity.device_name.as_deref());
-    let tail = title_suffix(entity).unwrap_or_else(|| kind_word(entity.kind));
+    let tail = title_suffix(entity).unwrap_or_else(|| type_word(entity));
     format!("{short} · {tail}")
 }
 
@@ -266,6 +273,19 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn unnamed_relay_titles_follow_the_type() {
+        let mut gate = entity("gate", "gate", Kind::Switch, Some("outlet"));
+        gate.ui.show_as = Some("door".into());
+        assert_eq!(entity_title(&gate), "gate · Door opener");
+        assert_eq!(list_label(&gate), "gate · Door opener");
+        let mut named = entity("Gate relay", "gate", Kind::Switch, None);
+        named.ui.show_as = Some("siren".into());
+        assert_eq!(list_label(&named), "Relay · Siren");
+        let plain = entity("gate", "gate", Kind::Switch, Some("outlet"));
+        assert_eq!(entity_title(&plain), "gate · Outlet");
     }
 
     #[test]

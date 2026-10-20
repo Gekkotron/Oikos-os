@@ -6,6 +6,7 @@ use leptos_router::path;
 use oikos_core::model::{Kind, StateValue};
 
 use crate::commands::Pending;
+use crate::components::confirm::Confirming;
 use crate::components::now::install_now;
 use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
@@ -52,6 +53,7 @@ pub fn App() -> impl IntoView {
     let toasts = Toasts::new();
     provide_context(toasts);
     provide_context(Pending::new());
+    provide_context(Confirming::new());
     provide_context(install_now());
     install_nav();
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
