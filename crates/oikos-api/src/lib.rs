@@ -5,6 +5,7 @@
 mod alerts;
 mod events;
 mod flows;
+mod history;
 mod snapshot;
 mod views;
 mod virtual_entities;
@@ -13,6 +14,10 @@ pub use alerts::{AlertAction, AlertChannel, AlertSeverity, AlertView, parse_hist
 pub use events::{ApiError, CommandResponse, ConnectionStatus, OverridePatch, WsEvent};
 pub use flows::{
     FlowView, RunStatus, RunView, SchedulePreview, StepOutcome, StepView, TriggerInfo,
+};
+pub use history::{
+    EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange,
+    LastChangeItem,
 };
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView};
