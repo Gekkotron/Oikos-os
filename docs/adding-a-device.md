@@ -121,6 +121,15 @@ Vacuum wire format:
 
 A second example is Suez2Mqtt (https://github.com/Gekkotron/Suez2Mqtt). It reads a water meter from the Suez cloud and publishes `sensor` entities with `device_class: water`. It publishes no availability topic, so its availability shows `unknown`.
 
+A device whose firmware already speaks MQTT but publishes no discovery needs no bridge at all: publish its discovery once, retained, by hand. WaterHeaterController (https://github.com/Gekkotron/WaterHeaterController) works this way; the README section "Zigbee2MQTT" holds its one-line `mosquitto_pub`. Its `water_heater` entity derives everything from the firmware's `water-heater/data` JSON with templates: the tank temperature, a mode of `heat` or `off`, and the card attributes below.
+
+Water heater card attributes, read from `json_attributes_topic` (after `json_attributes_template`) when present:
+
+- `power`: the heating power, 0 to 100 %. The card shows "Heating · N %" when it is above 0 and "Idle" otherwise.
+- `inlet_temperature`: the cold-water inlet in °C, shown under the tank temperature.
+
+Without them the card falls back to the mode. The target stepper appears only with a target temperature, and the mode picker only with `modes`.
+
 ### Restarts
 
 With `[mqtt] send_ha_birth = true` (off by default), the hub publishes `online` (not retained) on `[mqtt] ha_status_topic` (default `homeassistant/status`) each time it connects. A bridge subscribes to that topic and re-publishes its discovery and state when it sees `online`.

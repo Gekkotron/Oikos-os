@@ -142,22 +142,22 @@ fn shown_type(entity: &EntityView) -> Option<&'static str> {
 
 /// What tells an entity apart from its same-named siblings: set when the entity is named exactly
 /// like its device (a siren whose four entities are all "door_siren"), then its device class
-/// ("Siren"), else its kind ("Binary sensor"). `None` for an entity with a name of its own.
+/// ("Siren"), else its kind ("Binary sensor"). `None` for an entity with a name of its own, and
+/// when the suffix would repeat the name (a "Water heater" device's water heater).
 pub fn title_suffix(entity: &EntityView) -> Option<String> {
     let device = entity.device_name.as_deref().filter(|d| !d.is_empty())?;
     if !entity.name.eq_ignore_ascii_case(device) {
         return None;
     }
-    if let Some(shown) = shown_type(entity) {
-        return Some(shown.to_owned());
-    }
-    Some(
-        entity
+    let suffix = match shown_type(entity) {
+        Some(shown) => shown.to_owned(),
+        None => entity
             .device_class
             .as_deref()
             .filter(|c| !c.is_empty())
             .map_or_else(|| kind_word(entity.kind), word),
-    )
+    };
+    (!suffix.eq_ignore_ascii_case(&entity.name)).then_some(suffix)
 }
 
 /// The card title: [`short_name`] plus the [`title_suffix`] when there is one.
@@ -174,6 +174,9 @@ pub fn entity_title(entity: &EntityView) -> String {
 pub fn list_label(entity: &EntityView) -> String {
     let short = short_name(&entity.name, entity.device_name.as_deref());
     let tail = title_suffix(entity).unwrap_or_else(|| type_word(entity));
+    if tail.eq_ignore_ascii_case(&short) {
+        return short;
+    }
     format!("{short} · {tail}")
 }
 
@@ -321,6 +324,13 @@ mod tests {
         assert_eq!(list_label(&siren), "door_siren · Tamper");
         let plain = entity("door_siren", "Door_Siren", Kind::Switch, None);
         assert_eq!(entity_title(&plain), "door_siren · Switch");
+    }
+
+    #[test]
+    fn suffix_that_repeats_the_name_is_dropped() {
+        let heater = entity("Water heater", "Water heater", Kind::WaterHeater, None);
+        assert_eq!(entity_title(&heater), "Water heater");
+        assert_eq!(list_label(&heater), "Water heater");
     }
 
     #[test]
