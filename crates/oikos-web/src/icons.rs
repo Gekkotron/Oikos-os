@@ -100,6 +100,13 @@ pub fn vacuum_action_icon(action: &str) -> &'static str {
 pub const PENCIL: &str =
     svg!(r#"<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z"/><path d="m14.5 5.5 3 3"/>"#);
 
+/// Save confirm (check mark).
+pub const CHECK: &str = svg!(r#"<path d="m5 12 5 5 9-11"/>"#);
+/// Cancel / close (X).
+pub const X_MARK: &str = svg!(r#"<path d="M6 6l12 12"/><path d="M18 6 6 18"/>"#);
+/// Zoom loupe (magnifier) for the flow canvas.
+pub const LOUPE: &str = svg!(r#"<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>"#);
+
 const NODE_BOLT: &str = svg!(r#"<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>"#);
 const NODE_FORK: &str = svg!(
     r#"<circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M6 7v3a3 3 0 0 0 3 3h6a3 3 0 0 1 3 3v1"/><path d="M18 7v3"/>"#

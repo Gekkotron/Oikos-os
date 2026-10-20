@@ -201,6 +201,22 @@ fn summary_label(node: &Node) -> String {
     }
 }
 
+/// Just the trigger node(s) in words: "Every 10 minutes" for a schedule, the entity label
+/// for a state trigger. Multiple triggers are joined by " · ".
+pub fn trigger_summary(flow: &Flow, entities: &BTreeMap<String, EntityView>) -> String {
+    let parts: Vec<String> = flow
+        .nodes
+        .iter()
+        .filter(|n| n.kind.is_trigger())
+        .map(|n| node_detail(n, entities))
+        .collect();
+    if parts.is_empty() {
+        "No trigger".to_owned()
+    } else {
+        parts.join(" · ")
+    }
+}
+
 /// One line for the flow list: the layers joined by ` → `, siblings by ` / `.
 pub fn summary(flow: &Flow) -> String {
     flow.layers()

@@ -17,13 +17,13 @@ use crate::components::flow_switch::FlowSwitch;
 use crate::components::now::Now;
 use crate::components::toast::Toasts;
 use crate::flows::{
-    NODE_H, NODE_W, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, canvas_size, clamp_zoom, highlight, layout,
-    node_detail, node_title, orphans, parked_deadline, parked_node, port_offset, run_duration,
-    status_class, status_word, step_offset, trigger_line, wire_path, with_resolved_positions,
+    NODE_H, NODE_W, canvas_size, clamp_zoom, highlight, layout, node_detail, node_title, orphans,
+    parked_deadline, parked_node, port_offset, run_duration, status_class, status_word,
+    step_offset, trigger_line, wire_path, with_resolved_positions,
 };
 use crate::format::format_timestamp;
 use crate::house::House;
-use crate::icons::{PENCIL, node_icon};
+use crate::icons::{CHECK, LOUPE, PENCIL, PLAY, X_MARK, node_icon};
 use crate::screens::flow_schedule::{SaveBlocked, ScheduleField};
 
 fn type_class(kind: &NodeKind) -> &'static str {
@@ -107,43 +107,41 @@ fn wheel_zoom(ev: web_sys::WheelEvent, scroll: NodeRef<html::Div>, zoom: RwSigna
     el.set_scroll_top(new_st);
 }
 
+/// Zoom presets the loupe cycles through, from most zoomed-out to most zoomed-in; a click
+/// steps to the next and wraps.
+const ZOOM_PRESETS: &[f64] = &[0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+
 #[component]
-fn ZoomBar(zoom: RwSignal<f64>) -> impl IntoView {
-    let zoom_out = move |_: web_sys::MouseEvent| zoom.update(|z| *z = clamp_zoom(*z - ZOOM_STEP));
-    let zoom_in = move |_: web_sys::MouseEvent| zoom.update(|z| *z = clamp_zoom(*z + ZOOM_STEP));
-    let fit = move |_: web_sys::MouseEvent| zoom.set(1.0);
+fn ZoomLoupe(zoom: RwSignal<f64>) -> impl IntoView {
+    let cycle = move |_: web_sys::MouseEvent| {
+        zoom.update(|z| {
+            let i = ZOOM_PRESETS
+                .iter()
+                .position(|p| (p - *z).abs() < 1e-3)
+                .unwrap_or_else(|| {
+                    ZOOM_PRESETS
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, a), (_, b)| {
+                            (**a - *z).abs().partial_cmp(&(**b - *z).abs()).unwrap()
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(2)
+                });
+            *z = clamp_zoom(ZOOM_PRESETS[(i + 1) % ZOOM_PRESETS.len()]);
+        });
+    };
     let readout = move || format!("{}%", (zoom.get() * 100.0).round() as i64);
-    let out_min = move || zoom.get() <= ZOOM_MIN + f64::EPSILON;
-    let in_max = move || zoom.get() >= ZOOM_MAX - f64::EPSILON;
     view! {
-        <div class="flow-zoom" role="group" aria-label="Zoom">
-            <button
-                type="button"
-                class="btn btn--ghost flow-zoom__btn"
-                aria-label="Zoom out"
-                disabled=out_min
-                on:click=zoom_out
-            >
-                "−"
-            </button>
-            <button
-                type="button"
-                class="btn btn--ghost flow-zoom__btn flow-zoom__btn--readout"
-                aria-label="Reset zoom"
-                on:click=fit
-            >
-                {readout}
-            </button>
-            <button
-                type="button"
-                class="btn btn--ghost flow-zoom__btn"
-                aria-label="Zoom in"
-                disabled=in_max
-                on:click=zoom_in
-            >
-                "+"
-            </button>
-        </div>
+        <button
+            type="button"
+            class="flow-loupe"
+            aria-label="Zoom"
+            on:click=cycle
+        >
+            <span class="flow-loupe__icon" inner_html=LOUPE></span>
+            <span class="flow-loupe__readout">{readout}</span>
+        </button>
     }
 }
 
@@ -173,10 +171,7 @@ fn EditControls(
         let snapshot = draft.get_untracked();
         spawn_local(async move {
             match api::put_flow(&snapshot).await {
-                Ok(view) => {
-                    draft.set(view.definition);
-                    editing.set(false);
-                }
+                Ok(view) => draft.set(view.definition),
                 Err(e) => toasts.push(e.error),
             }
             saving.set(false);
@@ -185,20 +180,22 @@ fn EditControls(
     view! {
         <button
             type="button"
-            class="btn btn--ghost"
+            class="btn btn--ghost btn--icon"
+            aria-label="Cancel editing"
+            title="Cancel"
             disabled=move || saving.get()
             on:click=cancel
-        >
-            "Cancel"
-        </button>
+            inner_html=X_MARK
+        ></button>
         <button
             type="button"
-            class="btn"
+            class="btn btn--icon"
+            aria-label=move || if saving.get() { "Saving".to_string() } else { "Save".to_string() }
+            title=move || if saving.get() { "Saving…".to_string() } else { "Save".to_string() }
             disabled=move || saving.get() || is_blocked()
             on:click=save
-        >
-            {move || if saving.get() { "Saving…" } else { "Save" }}
-        </button>
+            inner_html=CHECK
+        ></button>
     }
 }
 
@@ -211,10 +208,6 @@ fn ReadControls(
     draft: RwSignal<Flow>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
-    let mode = match flow.mode {
-        FlowMode::Single => "single",
-        FlowMode::Restart => "restart",
-    };
     let id = flow.id.clone();
     let name = flow.name.clone();
     let enabled = flow.enabled;
@@ -234,9 +227,15 @@ fn ReadControls(
     };
     view! {
         <FlowSwitch id=id name=name enabled=enabled invalid=invalid />
-        <button type="button" class="btn" disabled=invalid || busy on:click=run_now>
-            "Run now"
-        </button>
+        <button
+            type="button"
+            class="btn btn--icon"
+            aria-label="Run now"
+            title="Run now"
+            disabled=invalid || busy
+            on:click=run_now
+            inner_html=PLAY
+        ></button>
         <button
             type="button"
             class="btn btn--ghost btn--icon"
@@ -246,7 +245,6 @@ fn ReadControls(
             on:click=enter_edit
             inner_html=PENCIL
         ></button>
-        <span class="chip">{mode}</span>
     }
 }
 
@@ -255,13 +253,16 @@ fn Header(
     view: FlowView,
     editing: RwSignal<bool>,
     draft: RwSignal<Flow>,
-    zoom: RwSignal<f64>,
     saving: RwSignal<bool>,
 ) -> impl IntoView {
     let flow = view.definition.clone();
     let invalid = view.invalid.is_some();
     let busy = view.active_run.is_some();
     let name = flow.name.clone();
+    let mode = match flow.mode {
+        FlowMode::Single => "single",
+        FlowMode::Restart => "restart",
+    };
     let edit_flow = flow.clone();
     let read_flow = flow.clone();
     view! {
@@ -270,8 +271,10 @@ fn Header(
                 "←"
                 <span class="sheet__back-label">"Flows"</span>
             </A>
-            <h1 class="sheet__title flow-canvas__title">{name}</h1>
-            <ZoomBar zoom=zoom />
+            <h1 class="sheet__title flow-canvas__title">
+                {name}
+                <span class="flow-canvas__mode">{mode}</span>
+            </h1>
             <Show
                 when=move || editing.get()
                 fallback=move || {
@@ -1295,15 +1298,29 @@ fn FlowBody(view: FlowView) -> impl IntoView {
         }
         .into_any(),
     };
+    let has_runs = !runs.is_empty();
     view! {
-        <Header view=view editing=editing draft=draft zoom=zoom saving=saving />
-        {body}
-        <ol class="run-list">
-            {runs
-                .into_iter()
-                .map(|run| view! { <RunItem run=run flow=flow.clone() /> })
-                .collect_view()}
-        </ol>
+        <Header view=view editing=editing draft=draft saving=saving />
+        <section class="flow-canvas-runs" aria-label="Recent runs">
+            <h2 class="flow-canvas-runs__title">"Recent runs"</h2>
+            {if has_runs {
+                view! {
+                    <ol class="run-list">
+                        {runs
+                            .into_iter()
+                            .map(|run| view! { <RunItem run=run flow=flow.clone() /> })
+                            .collect_view()}
+                    </ol>
+                }
+                .into_any()
+            } else {
+                view! { <p class="flow-canvas-runs__empty">"No runs yet."</p> }.into_any()
+            }}
+        </section>
+        <div class="flow-canvas-stage">
+            {body}
+            <ZoomLoupe zoom=zoom />
+        </div>
     }
 }
 

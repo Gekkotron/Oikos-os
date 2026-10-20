@@ -2146,8 +2146,8 @@ p.override__hint {
 .flow-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin: 0;
+  gap: 10px;
+  margin: 24px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -2158,47 +2158,83 @@ p.override__hint {
   text-align: center;
 }
 
-.flow-row {
+.flow-card {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 12px;
   box-sizing: border-box;
-  min-height: 48px;
-  padding: 10px 12px;
+  padding: 14px 16px;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-card);
   background: var(--card-bg);
 }
 
-.flow-row__main {
-  display: flex;
+.flow-card--invalid {
+  border-color: color-mix(in srgb, var(--accent-rose) 55%, var(--card-border));
+}
+
+.flow-card__title-link {
   flex: 1;
-  flex-direction: column;
-  gap: 2px;
   min-width: 0;
-}
-
-.flow-row__name {
-  overflow: hidden;
-  color: var(--ink);
-  font: var(--type-body);
-  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: inherit;
   text-decoration: none;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.flow-row__summary,
-.flow-row__run {
-  overflow: hidden;
+.flow-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.flow-card__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: var(--type-body);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.flow-card__mode {
+  margin-left: 8px;
+  font-weight: 400;
+  font-size: 0.85em;
+  opacity: 0.5;
+  letter-spacing: 0.02em;
+}
+
+.flow-card__meta {
+  display: grid;
+  grid-template-columns: minmax(80px, auto) 1fr;
+  column-gap: 16px;
+  row-gap: 4px;
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--card-border);
   font: var(--type-label);
-  opacity: 0.75;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.flow-row__run {
+.flow-card__meta-row {
+  display: contents;
+}
+
+.flow-card__meta dt {
   opacity: 0.55;
+}
+
+.flow-card__meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.flow-card__switch {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
 }
 
 .badge--invalid {
@@ -2252,6 +2288,15 @@ p.override__hint {
   margin: 0;
 }
 
+.flow-canvas__mode {
+  margin-left: 10px;
+  font-weight: 400;
+  font-size: 0.65em;
+  opacity: 0.5;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
 .flow-canvas__header .btn {
   flex: none;
 }
@@ -2299,26 +2344,6 @@ p.override__hint {
 .flow-canvas--editing {
   user-select: none;
   -webkit-user-select: none;
-}
-
-.flow-zoom {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--chip-border);
-  border-radius: var(--radius-card);
-  background: var(--card-bg);
-}
-
-.flow-zoom__btn {
-  min-width: 32px;
-  padding: 2px 8px;
-  font: var(--type-label);
-}
-
-.flow-zoom__btn--readout {
-  min-width: 56px;
-  font-variant-numeric: tabular-nums;
 }
 
 .flow-node--editing {
@@ -2583,6 +2608,79 @@ p.override__hint {
   color: var(--accent-mint);
   font-weight: 700;
   opacity: 1;
+}
+
+.flow-canvas-runs {
+  padding: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+}
+
+.flow-canvas-runs__title {
+  margin: 0 0 10px;
+  font: var(--type-label);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+}
+
+.flow-canvas-runs__empty {
+  margin: 0;
+  opacity: 0.6;
+}
+
+.flow-canvas-stage {
+  position: relative;
+  min-width: 0;
+}
+
+.flow-loupe {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--card-bg);
+  color: inherit;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  font: var(--type-label);
+}
+
+.flow-loupe:hover,
+.flow-loupe:focus-visible {
+  background: color-mix(in srgb, var(--card-bg) 92%, var(--text) 8%);
+}
+
+.flow-loupe__icon {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+}
+
+.flow-loupe__readout {
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: center;
+}
+
+.btn--icon {
+  min-width: 36px;
+  padding: 6px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn--icon svg {
+  width: 18px;
+  height: 18px;
 }
 
 .run-list {
