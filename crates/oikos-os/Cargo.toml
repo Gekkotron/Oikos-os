@@ -9,9 +9,12 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 axum.workspace = true
+chrono = { workspace = true, features = ["clock"] }
+chrono-tz = "0.10"
 clap.workspace = true
 figment.workspace = true
 futures-util.workspace = true
+iana-time-zone = "0.1"
 mime_guess.workspace = true
 oikos-api = { path = "../oikos-api" }
 oikos-core = { path = "../oikos-core", features = ["schemars"] }

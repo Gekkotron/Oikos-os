@@ -918,3 +918,97 @@ async fn if_without_entity_reads_the_registry() {
     assert_eq!(run.trigger.expect("trigger").value, serde_json::json!(true));
     assert_eq!(run.steps.last().expect("step").detail, "false");
 }
+
+/// A flow that sends `turn_on` to the LED on a cron schedule.
+fn schedule_json(enabled: bool) -> String {
+    serde_json::json!({
+        "id": "tick", "name": "Every ten minutes", "enabled": enabled, "mode": "single",
+        "nodes": [
+            { "id": "clock", "type": "trigger.schedule", "params": { "cron": "*/10 * * * *" } },
+            { "id": "on", "type": "command",
+              "params": { "entity": LED_ID, "command": { "type": "turn_on" } } }
+        ],
+        "edges": [ { "from": "clock", "to": "on" } ]
+    })
+    .to_string()
+}
+
+/// Seconds from now to the next `*/10` tick, as the engine sees it.
+fn until_next_ten_minutes() -> Duration {
+    let now = chrono::Utc::now().timestamp();
+    Duration::from_secs((600 - now.rem_euclid(600)) as u64)
+}
+
+#[tokio::test(start_paused = true)]
+async fn schedule_fires_each_tick_while_enabled() {
+    let (hub, publisher, _engine) = engine_hub();
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.ingest("oikos/automation/tick", schedule_json(true).as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    tokio::time::advance(until_next_ten_minutes() + Duration::from_secs(1)).await;
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(step_nodes(&run), ["clock", "on"]);
+    assert_eq!(run.steps[0].detail, "schedule */10 * * * *");
+    assert!(run.trigger.is_none());
+    assert_eq!(published(&log).len(), 1);
+
+    tokio::time::advance(Duration::from_secs(10 * 60)).await;
+    next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(published(&log).len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn schedule_never_fires_on_enable() {
+    let (hub, publisher, _engine) = engine_hub();
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.ingest("oikos/automation/tick", schedule_json(true).as_bytes());
+    settle().await;
+    assert!(published(&log).is_empty());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    settle().await;
+    assert!(published(&log).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn disabled_schedule_never_fires() {
+    let (hub, publisher, _engine) = engine_hub();
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.ingest("oikos/automation/tick", schedule_json(true).as_bytes());
+    settle().await;
+    hub.set_flow_enabled("tick", false).await.expect("disable");
+    settle().await;
+    tokio::time::advance(Duration::from_secs(30 * 60)).await;
+    settle().await;
+    assert!(published(&log).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn tick_while_offline_is_skipped() {
+    let (hub, publisher, _engine) = engine_hub();
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.ingest("oikos/automation/tick", schedule_json(true).as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+    settle().await;
+    tokio::time::advance(until_next_ten_minutes() + Duration::from_secs(1)).await;
+    let skipped = next_run_event(&mut events, RunStatus::Skipped).await;
+    assert_eq!(skipped.steps[0].node, "clock");
+    assert!(
+        skipped.steps[0].detail.contains("offline"),
+        "{:?}",
+        skipped.steps[0]
+    );
+    assert!(published(&log).is_empty());
+
+    hub.set_connection(ConnectionStatus::Online);
+    settle().await;
+    tokio::time::advance(Duration::from_secs(10 * 60)).await;
+    next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(published(&log).len(), 1);
+}

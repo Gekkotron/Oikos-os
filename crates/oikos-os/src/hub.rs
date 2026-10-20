@@ -108,6 +108,8 @@ pub struct Hub {
     flow_store: Mutex<FlowStore>,
     /// The topic prefix flows are retained under, one topic per flow id.
     automation_prefix: String,
+    /// The time zone schedules and their preview run in.
+    zone: chrono_tz::Tz,
     /// Requests for the flow engine; the engine takes the receiving end once.
     engine_tx: mpsc::UnboundedSender<EngineRequest>,
     engine_rx: Mutex<Option<mpsc::UnboundedReceiver<EngineRequest>>>,
@@ -122,6 +124,11 @@ pub struct Hub {
 }
 
 impl Hub {
+    /// The house time zone, `[flows] timezone`.
+    pub fn zone(&self) -> chrono_tz::Tz {
+        self.zone
+    }
+
     pub fn new(cfg: &Config, publisher: mpsc::Sender<Publish>) -> Arc<Hub> {
         let registry = Registry::new(RegistryConfig {
             discovery_prefixes: cfg.topics.discovery_prefixes.clone(),
@@ -148,6 +155,7 @@ impl Hub {
             alerts: Mutex::new(alerts),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             automation_prefix: cfg.topics.automation_prefix.clone(),
+            zone: crate::flows::house_zone(&cfg.flows),
             engine_tx,
             engine_rx: Mutex::new(Some(engine_rx)),
             media,

@@ -10,6 +10,8 @@ mod views;
 
 pub use alerts::{AlertAction, AlertChannel, AlertSeverity, AlertView, parse_history};
 pub use events::{ApiError, CommandResponse, ConnectionStatus, OverridePatch, WsEvent};
-pub use flows::{FlowView, RunStatus, RunView, StepOutcome, StepView, TriggerInfo};
+pub use flows::{
+    FlowView, RunStatus, RunView, SchedulePreview, StepOutcome, StepView, TriggerInfo,
+};
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView};

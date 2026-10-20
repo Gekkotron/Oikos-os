@@ -2,8 +2,10 @@
 
 pub mod engine;
 mod hub;
+pub mod schedule;
 mod store;
 
+pub use schedule::house_zone;
 pub use store::{FlowStore, StoreApplied};
 
 /// What the hub asks of the flow engine.

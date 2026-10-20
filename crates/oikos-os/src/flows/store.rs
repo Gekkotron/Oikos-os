@@ -222,6 +222,18 @@ impl FlowStore {
         trigger: Option<TriggerInfo>,
         at: u64,
     ) -> Option<RunView> {
+        self.add_skipped_run_because(flow_id, trigger_node, trigger, at, "a run is active")
+    }
+
+    /// [`Self::add_skipped_run`] with the reason the trigger was dropped.
+    pub fn add_skipped_run_because(
+        &mut self,
+        flow_id: &str,
+        trigger_node: &str,
+        trigger: Option<TriggerInfo>,
+        at: u64,
+        reason: &str,
+    ) -> Option<RunView> {
         if !self.is_valid(flow_id) {
             return None;
         }
@@ -236,7 +248,7 @@ impl FlowStore {
                 node: trigger_node.to_owned(),
                 at,
                 outcome: StepOutcome::Skipped,
-                detail: "a run is active".to_owned(),
+                detail: reason.to_owned(),
             }],
         };
         self.push_run(flow_id, run.clone());

@@ -1321,3 +1321,36 @@ async fn ws_carries_flows_changed() {
 
     ws.close(None).await.expect("close");
 }
+
+#[tokio::test]
+async fn schedule_preview_lists_three_ticks() {
+    let server = Server::start().await;
+    let response = server
+        .get("/api/v1/schedule?cron=*/10%20*%20*%20*%20*")
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = response.json().await.expect("json");
+    assert!(body["timezone"].as_str().is_some_and(|z| !z.is_empty()));
+    let next = body["next"].as_array().expect("next");
+    assert_eq!(next.len(), 3);
+    for tick in next {
+        let tick = tick.as_str().expect("string");
+        chrono::DateTime::parse_from_rfc3339(tick).expect("RFC 3339 with offset");
+    }
+    let capped: Value = server
+        .get("/api/v1/schedule?cron=*/10%20*%20*%20*%20*&count=50")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(capped["next"].as_array().expect("next").len(), 10);
+}
+
+#[tokio::test]
+async fn schedule_preview_rejects_bad_cron() {
+    let server = Server::start().await;
+    let response = server.get("/api/v1/schedule?cron=61%20*%20*%20*%20*").await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = response.json().await.expect("json");
+    assert!(body["error"].as_str().is_some_and(|e| !e.is_empty()));
+}

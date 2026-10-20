@@ -13,9 +13,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
     AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EntityView, FlowView,
-    IgnoredView, OverridePatch, RunView, Snapshot,
+    IgnoredView, OverridePatch, RunView, SchedulePreview, Snapshot,
 };
-use oikos_core::flow::Flow;
+use oikos_core::flow::{Flow, Schedule};
 use oikos_core::model::{AreasDocument, Command};
 use serde::Serialize;
 
@@ -43,6 +43,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/alerts/{id}/actions/{action}", post(alert_action))
         .route("/media", get(media))
         .route("/flows", get(flows))
+        .route("/schedule", get(schedule_preview))
         .route(
             "/flows/{id}",
             get(get_flow).put(put_flow).delete(delete_flow),
@@ -339,4 +340,36 @@ async fn run_flow(
     Path(id): Path<String>,
 ) -> Result<(StatusCode, Json<RunView>), HttpError> {
     Ok((StatusCode::ACCEPTED, Json(hub.run_flow(&id)?)))
+}
+
+#[derive(serde::Deserialize)]
+struct ScheduleQuery {
+    cron: String,
+    count: Option<usize>,
+}
+
+/// The next ticks of a cron expression in the house time zone: `count` of them (default 3,
+/// at most 10). `422` for an expression that does not parse.
+async fn schedule_preview(
+    State(hub): HubState,
+    Query(query): Query<ScheduleQuery>,
+) -> Result<Json<SchedulePreview>, HttpError> {
+    let schedule = Schedule::parse(&query.cron).map_err(|err| HttpError {
+        status: StatusCode::UNPROCESSABLE_ENTITY,
+        error: err.to_string(),
+    })?;
+    let zone = hub.zone();
+    let mut at = chrono::Utc::now().with_timezone(&zone);
+    let mut next = Vec::new();
+    for _ in 0..query.count.unwrap_or(3).clamp(1, 10) {
+        let Some(tick) = schedule.next_after(&at) else {
+            break;
+        };
+        next.push(tick.to_rfc3339());
+        at = tick;
+    }
+    Ok(Json(SchedulePreview {
+        timezone: zone.name().to_owned(),
+        next,
+    }))
 }

@@ -12,12 +12,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
-use oikos_core::flow::{Flow, Node, NodeKind, Scalar, compare, parse_duration};
+use oikos_core::flow::{Flow, Node, NodeKind, Scalar, Schedule, compare, parse_duration};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, JoinSet};
 
 use super::EngineRequest;
+use super::schedule::{Armed, Now, now_in, rearm, timer_clock};
 use crate::clock;
 use crate::hub::{Hub, StateSeen};
 use oikos_api::ConnectionStatus;
@@ -51,15 +52,19 @@ pub(super) async fn run_with(
     mut requests: mpsc::UnboundedReceiver<EngineRequest>,
 ) {
     let mut engine = Engine {
-        hub,
+        hub: Arc::clone(&hub),
         flows: Vec::new(),
         known: BTreeMap::new(),
         watched: BTreeSet::new(),
         active: BTreeMap::new(),
         tasks: JoinSet::new(),
+        zone: hub.zone(),
+        now: timer_clock(),
+        schedules: BTreeMap::new(),
     };
     engine.reload();
     loop {
+        let deadline = engine.next_deadline();
         // Requests first: a flow saved before the state it watches changes must be armed
         // before that change is looked at. Finished runs before events: a run that is over must
         // not count as active for a trigger in the same iteration.
@@ -83,6 +88,8 @@ pub(super) async fn run_with(
             Some(joined) = engine.tasks.join_next_with_id(), if !engine.tasks.is_empty() => {
                 engine.run_finished(joined);
             }
+            // Before the events: a tick that is due is not held back by a busy event stream.
+            () = sleep_until_deadline(deadline), if deadline.is_some() => engine.tick(),
             event = events.recv() => match event {
                 Ok(event) => engine.handle_event(event),
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
@@ -103,8 +110,21 @@ pub(super) async fn run_with(
     }
 }
 
+/// Sleeps until `deadline`; never completes without one (the select branch is disabled then).
+async fn sleep_until_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
 struct Engine {
     hub: Arc<Hub>,
+    /// The house time zone schedules run in.
+    zone: chrono_tz::Tz,
+    now: Now,
+    /// Armed schedule nodes, keyed `"{flow}/{node}"`.
+    schedules: BTreeMap<String, Armed>,
     /// Valid and enabled flows.
     flows: Vec<Flow>,
     /// The last value seen for every entity a trigger watches; `None` inside means the entity
@@ -156,6 +176,95 @@ impl Engine {
             .collect();
         for id in stale {
             self.cancel(&id);
+        }
+        self.arm_schedules();
+    }
+
+    /// Arms every schedule node of an enabled flow that is not armed with the same expression
+    /// yet, from now (never immediately), and disarms the rest: disabled, removed or edited.
+    fn arm_schedules(&mut self) {
+        let now = now_in(&self.now, self.zone);
+        let mut wanted = BTreeMap::new();
+        for flow in &self.flows {
+            for node in flow.triggers() {
+                let NodeKind::TriggerSchedule(params) = &node.kind else {
+                    continue;
+                };
+                wanted.insert(
+                    format!("{}/{}", flow.id, node.id),
+                    (node.id.clone(), params.cron.clone()),
+                );
+            }
+        }
+        self.schedules.retain(|key, armed| {
+            wanted
+                .get(key)
+                .is_some_and(|(node, cron)| *node == armed.node && *cron == armed.cron)
+        });
+        for (key, (node, cron)) in wanted {
+            if self.schedules.contains_key(&key) {
+                continue;
+            }
+            // The definition was validated when the flow was stored.
+            let Ok(schedule) = Schedule::parse(&cron) else {
+                continue;
+            };
+            if let Some(at) = schedule.next_after(&now) {
+                self.schedules.insert(
+                    key,
+                    Armed {
+                        node,
+                        at,
+                        schedule,
+                        cron,
+                    },
+                );
+            }
+        }
+    }
+
+    /// When the timer branch should wake: the earliest armed tick, as a tokio instant.
+    fn next_deadline(&self) -> Option<tokio::time::Instant> {
+        let at = self.schedules.values().map(|armed| armed.at).min()?;
+        let wait = (at.to_utc() - (self.now)())
+            .to_std()
+            .unwrap_or(std::time::Duration::ZERO);
+        Some(tokio::time::Instant::now() + wait)
+    }
+
+    /// Fires every schedule whose tick is due and re-arms it for the next one. A tick while the
+    /// broker link is not online is recorded as skipped instead: commands could not go out.
+    fn tick(&mut self) {
+        let now = now_in(&self.now, self.zone);
+        let due: Vec<String> = self
+            .schedules
+            .iter()
+            .filter(|(_, armed)| armed.at <= now)
+            .map(|(key, _)| key.clone())
+            .collect();
+        let online = *self.hub.connection().borrow() == ConnectionStatus::Online;
+        for key in due {
+            let Some(armed) = self.schedules.get_mut(&key) else {
+                continue;
+            };
+            let node = armed.node.clone();
+            let next = rearm(&armed.schedule, armed.at, now);
+            match next {
+                Some(at) => armed.at = at,
+                None => {
+                    self.schedules.remove(&key);
+                }
+            }
+            let flow_id = key.split('/').next().unwrap_or_default();
+            let Some(flow) = self.flows.iter().find(|f| f.id == flow_id).cloned() else {
+                continue;
+            };
+            if online {
+                self.fire(flow, node, None);
+            } else {
+                self.hub
+                    .add_skipped_run_because(&flow.id, &node, "the broker link is offline");
+            }
         }
     }
 
@@ -242,29 +351,29 @@ impl Engine {
             previous: previous.to_json(),
         };
         for (flow, node) in fires {
-            self.fire(flow, node, trigger.clone());
+            self.fire(flow, node, Some(trigger.clone()));
         }
     }
 
     /// Starts a run for a satisfied trigger, honouring the flow's mode when one is active.
-    fn fire(&mut self, flow: Flow, node_id: String, trigger: TriggerInfo) {
+    fn fire(&mut self, flow: Flow, node_id: String, trigger: Option<TriggerInfo>) {
         if self.active.contains_key(&flow.id) {
             match flow.mode {
                 oikos_core::flow::FlowMode::Single => {
-                    self.hub.add_skipped_run(&flow.id, &node_id, Some(trigger));
+                    self.hub.add_skipped_run(&flow.id, &node_id, trigger);
                     return;
                 }
                 oikos_core::flow::FlowMode::Restart => self.cancel(&flow.id),
             }
         }
-        let run = match self.hub.begin_run(&flow.id, Some(trigger.clone())) {
+        let run = match self.hub.begin_run(&flow.id, trigger.clone()) {
             Ok(run) => run,
             Err(err) => {
                 tracing::warn!(flow = %flow.id, error = %err, "could not begin a run");
                 return;
             }
         };
-        self.spawn(flow, run.id, node_id, Some(trigger));
+        self.spawn(flow, run.id, node_id, trigger);
     }
 
     /// Executes a run the hub created for a manual request, from the flow's first trigger.
@@ -425,8 +534,9 @@ async fn run_node(
             };
             (StepOutcome::Ok, detail, None)
         }
-        // Arming schedules is the engine's next step; a schedule step just passes.
-        NodeKind::TriggerSchedule(_) => (StepOutcome::Ok, "schedule".to_owned(), None),
+        NodeKind::TriggerSchedule(params) => {
+            (StepOutcome::Ok, format!("schedule {}", params.cron), None)
+        }
         // Task 5 gives flow.enable its run-time behaviour; for now it just passes.
         NodeKind::FlowEnable(_) => (StepOutcome::Ok, "flow.enable".to_owned(), None),
         NodeKind::If(params) => {

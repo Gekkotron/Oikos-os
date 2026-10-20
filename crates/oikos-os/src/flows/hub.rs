@@ -144,6 +144,24 @@ impl Hub {
         Some(run)
     }
 
+    /// Records a scheduled tick that could not run, with the reason.
+    pub fn add_skipped_run_because(
+        &self,
+        flow_id: &str,
+        trigger_node: &str,
+        reason: &str,
+    ) -> Option<RunView> {
+        let run = self.flow_store().add_skipped_run_because(
+            flow_id,
+            trigger_node,
+            None,
+            clock::now(),
+            reason,
+        )?;
+        self.broadcast_run(flow_id, &run);
+        Some(run)
+    }
+
     /// Appends a step to a run, but only while it is the flow's active run (checked under the
     /// store lock). Returns whether it was: `false` means the run was cancelled, ended or its
     /// flow deleted, and the caller must stop acting.

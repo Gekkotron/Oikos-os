@@ -18,6 +18,7 @@ pub struct Config {
     pub push: PushConfig,
     pub frigate: FrigateConfig,
     pub automation: AutomationConfig,
+    pub flows: FlowsConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -197,6 +198,15 @@ impl Default for AutomationConfig {
     }
 }
 
+/// Flow scheduling.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct FlowsConfig {
+    /// IANA time zone the schedules run in (`Europe/Paris`). Absent: the system's zone;
+    /// unparseable: UTC, with a warning.
+    pub timezone: Option<String>,
+}
+
 /// Dotted, lowercase keys of string-typed fields. Single source of truth for
 /// both the Env filter (figment's `ignore` sees the key after `split`, i.e.
 /// `mqtt.password`) and the raw-string merge.
@@ -213,6 +223,7 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "log.level",
     "push.history_topic",
     "push.responses_topic",
+    "flows.timezone",
     "frigate.url",
     "frigate.user",
     "frigate.password",

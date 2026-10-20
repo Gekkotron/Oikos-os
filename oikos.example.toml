@@ -25,6 +25,11 @@ subscription_debounce_ms = 500
 [automation]
 runs_kept = 20
 
+# Flow schedules (`trigger.schedule`) run in this IANA time zone. Leave it out to use the
+# system's zone; an unknown name falls back to UTC.
+[flows]
+# timezone = "Europe/Paris"
+
 [log]
 level = "info"
 json = false

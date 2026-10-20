@@ -153,3 +153,18 @@ fn env_overrides_automation_keys() {
         Ok(())
     });
 }
+
+#[test]
+fn flows_timezone_is_read() {
+    Jail::expect_with(|jail| {
+        assert_eq!(Config::load(None)?.flows.timezone, None);
+        jail.create_file("oikos.toml", "[flows]\ntimezone = \"Europe/Paris\"\n")?;
+        assert_eq!(
+            Config::load(None)?.flows.timezone.as_deref(),
+            Some("Europe/Paris")
+        );
+        jail.set_env("OIKOS_FLOWS__TIMEZONE", "UTC");
+        assert_eq!(Config::load(None)?.flows.timezone.as_deref(), Some("UTC"));
+        Ok(())
+    });
+}

@@ -19,6 +19,15 @@ pub struct FlowView {
     pub runs: Vec<RunView>,
 }
 
+/// The next ticks of a cron expression, for the schedule editor's preview.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SchedulePreview {
+    /// The house time zone the expression is read in (an IANA name).
+    pub timezone: String,
+    /// The next ticks, soonest first, as RFC 3339 with the zone's offset.
+    pub next: Vec<String>,
+}
+
 /// One execution of a flow.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RunView {
