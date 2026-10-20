@@ -81,6 +81,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `GET /api/v1/alerts` | The push alerts OikosPush keeps in its retained history, newest first. |
 | `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on the responses topic); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
 | `GET /api/v1/media?url=…` | A Frigate snapshot or clip fetched by the hub with the Frigate login (`[frigate]`); `Range` is passed through so clips seek. `400` without a valid URL, `403` off the Frigate origin, `502` when Frigate is unreachable. |
+| `GET /api/v1/schedule?cron=…&count=…` | Previews a 5-field cron in the house local time: the next `count` ticks. `200` with the preview, `422` for a bad cron. |
 | `GET /api/v1/flows` | Every flow with its engine state: definition, why it is invalid, the active run and the recent runs. |
 | `GET /api/v1/flows/{id}` | One flow; `404` for an unknown id. |
 | `PUT /api/v1/flows/{id}` | Creates or replaces a flow (`oikos/automation/<id>`). The path id wins: a body without `id` takes it, another one is `400 id mismatch`. `422` for a flow that does not validate, `503` while the broker link is down. |
@@ -107,7 +108,7 @@ The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers nineteen too
 - `list_ignored` — the discovery topics that did not become an entity, with the reason.
 - `list_flows` — the automations (flows) with name, enabled state, node count and latest run.
 - `get_flow` — one flow with its definition and recent runs.
-- `set_flow` — creates or replaces a flow (`trigger.state`, `if`, `delay` and `command` nodes; `mode: restart` for "N minutes after the last …"), validated against the house.
+- `set_flow` — creates or replaces a flow (`trigger.state`, `trigger.schedule`, `flow.enable`, `if`, `delay` and `command` nodes; `mode: restart` for "N minutes after the last …"), validated against the house. A `trigger.schedule` fires only while the flow is enabled; `flow.enable` turns another flow (or its own) on or off.
 - `delete_flow` — removes a flow.
 - `set_flow_enabled` — turns a flow on or off.
 - `run_flow` — starts a manual run of a flow.
@@ -211,7 +212,9 @@ A flow is an n8n-style automation: a small graph of nodes stored as one retained
 | Type | Params | Outputs | Behaviour |
 | --- | --- | --- | --- |
 | `trigger.state` | `entity` (id), optional `to`, optional `from` | one | Starts a run when the entity's scalar changes to a different value. `to`/`from` filter on the new/previous scalar. The replayed value after boot or reconnect arms the entity silently; it never fires on that replay, on an availability-only change, or on an equal-value report. |
-| `if` | `op` one of `eq ne gt lt gte lte`, `value` (bool, number or string), optional `entity` | `true`, `false` | Compares the scalar of `entity` (default: the entity that triggered the run, read live) to `value`. `gt lt gte lte` need both sides numeric, otherwise the node fails. |
+| `trigger.schedule` | `cron` (5 fields, house local time) | one | Starts a run at each wall-clock tick while the flow is enabled; the first run is at the next tick. |
+| `flow.enable` | optional `flow` (id), `enabled` (bool) | one | Enables or disables the target flow, its own by default. A flow that disables itself still finishes the current run. |
+| `if` | `op` one of `eq ne gt lt gte lte`, `value` (bool, number or string), optional `entity`, optional `missing` (`fail`, `true` or `false`) | `true`, `false` | Compares the scalar of `entity` (default: the entity that triggered the run, read live) to `value`. `gt lt gte lte` need both sides numeric, otherwise the node fails. When the value is unknown, `missing` picks that port; the default `fail` fails the node. |
 | `delay` | `for`: `"90s"`, `"5m"`, `"1h30m"` | one | Pauses the run. Cancelled with the run. |
 | `command` | `entity` (id), `command` (the API's `Command` JSON) | one | Sends the command through the hub's command path, confirmed by the entity's state echo within `confirm_timeout_ms`, exactly like the API's `send_command`. No echo, a rejection or an offline entity fails the node. |
 
