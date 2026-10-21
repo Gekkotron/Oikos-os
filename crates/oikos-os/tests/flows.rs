@@ -1402,3 +1402,59 @@ async fn state_trigger_on_a_remote_is_rejected() {
         other => panic!("expected InvalidFlow, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn repeated_signal_records_last_and_at_every_time() {
+    let (hub, _publisher) = hub_with_entities();
+    add_remote(&hub);
+    let mut events = hub.subscribe();
+
+    hub.ingest_message(REMOTE_TOPIC, b"on", false);
+    hub.ingest_message(REMOTE_TOPIC, b"on", false);
+
+    let (mut changed, mut signals) = (0, 0);
+    while let Ok(event) = events.try_recv() {
+        match event {
+            WsEvent::StateChanged { id, .. } if id == REMOTE_ID => changed += 1,
+            WsEvent::SignalReceived { .. } => signals += 1,
+            _ => {}
+        }
+    }
+    assert_eq!((changed, signals), (2, 2));
+    let state = remote_state(&hub);
+    let oikos_core::model::StateValue::Generic(generic) = state.value else {
+        panic!("not generic: {state:?}");
+    };
+    assert_eq!(
+        generic.fields["last"],
+        oikos_core::model::GenericValue::Text("on".to_owned())
+    );
+    assert!(matches!(
+        generic.fields["at"],
+        oikos_core::model::GenericValue::Number(_)
+    ));
+
+    // A retained replay neither signals nor touches the state.
+    let before = generic.fields["at"].clone();
+    hub.ingest_message(REMOTE_TOPIC, b"on", true);
+    while let Ok(event) = events.try_recv() {
+        assert!(
+            !matches!(event, WsEvent::SignalReceived { .. }),
+            "{event:?}"
+        );
+    }
+    let state = remote_state(&hub);
+    let oikos_core::model::StateValue::Generic(generic) = state.value else {
+        panic!()
+    };
+    assert_eq!(generic.fields["at"], before);
+}
+
+fn remote_state(hub: &Hub) -> oikos_core::model::EntityState {
+    hub.snapshot()
+        .entities
+        .into_iter()
+        .find(|e| e.id == REMOTE_ID)
+        .map(|e| e.state)
+        .expect("remote state")
+}

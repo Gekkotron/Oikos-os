@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::discovery::DiscoveryTopic;
 use crate::model::{
-    Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, StateValue, SwitchType,
-    UNASSIGNED_AREA, UiOverride,
+    Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, GenericState, GenericValue,
+    StateValue, SwitchType, UNASSIGNED_AREA, UiOverride,
 };
 use crate::state::{Applied, StateError, apply_parts};
 use crate::template::Templates;
@@ -204,6 +204,34 @@ impl Registry {
         changes.sort();
         changes.dedup();
         changes
+    }
+
+    /// Records a signal (a remote press, an event, a tag scan) on a signal-placed entity: its
+    /// `last` field becomes `signal` and its `at` field the time in milliseconds, so a repeated
+    /// signal still changes the state. `at_ms` is kept strictly increasing per entity.
+    pub fn record_signal(&mut self, unique_id: &str, signal: &str, at_ms: u64) -> Vec<Change> {
+        let Some(state) = self.states.get_mut(unique_id) else {
+            return Vec::new();
+        };
+        if !matches!(state.value, StateValue::Generic(_)) {
+            state.value = StateValue::Generic(GenericState::default());
+        }
+        let StateValue::Generic(generic) = &mut state.value else {
+            return Vec::new();
+        };
+        let previous = match generic.fields.get("at") {
+            Some(GenericValue::Number(n)) => *n,
+            _ => 0.0,
+        };
+        let at = (at_ms as f64).max(previous + 1.0);
+        generic
+            .fields
+            .insert("last".to_owned(), GenericValue::Text(signal.to_owned()));
+        generic
+            .fields
+            .insert("at".to_owned(), GenericValue::Number(at));
+        state.last_update = Some(at_ms / 1000);
+        vec![Change::StateChanged(unique_id.to_owned())]
     }
 
     pub fn entity(&self, unique_id: &str) -> Option<&Entity> {

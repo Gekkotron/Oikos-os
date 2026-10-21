@@ -334,10 +334,25 @@ impl Hub {
                 return Vec::new();
             }
             for (id, signal) in self.signals_of(topic, payload) {
+                self.record_signal(&id, &signal);
                 self.broadcast(WsEvent::SignalReceived { id, signal });
             }
         }
         self.ingest(topic, payload)
+    }
+
+    /// Stores the signal as the entity's `last` and `at` (ms) and announces the state change,
+    /// so the sheet shows it and a repeated signal still counts.
+    fn record_signal(&self, id: &str, signal: &str) {
+        let at_ms = clock::now_micros().max(0) as u64 / 1000;
+        let events = {
+            let mut reg = self.write();
+            let changes = reg.record_signal(id, signal, at_ms);
+            events_for(&reg, &changes)
+        };
+        for event in events {
+            self.broadcast(event);
+        }
     }
 
     /// The signals a message carries: one per signal-placed entity (remote, event, tag) it
