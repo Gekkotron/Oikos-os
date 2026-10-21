@@ -7,6 +7,7 @@ use oikos_core::flow::{Missing, Node, NodeKind, Op};
 
 use super::Editor;
 use super::graph::Selection;
+use super::sun::{FallbackBadge, sun_sheet};
 use crate::flow_edit::remove_node;
 use crate::house::House;
 use crate::screens::flow_schedule::ScheduleField;
@@ -408,16 +409,25 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
         }
         NodeKind::If(p) => {
             let op_id = id.clone();
+            let current_op = p.op;
+            let op_signal = RwSignal::new(current_op);
             let on_op = move |ev: web_sys::Event| {
                 if let Some(op) = op_from(&event_target_value(&ev)) {
+                    op_signal.set(op);
                     form.update(&op_id, |n| {
                         if let NodeKind::If(ref mut i) = n.kind {
                             i.op = op;
+                            // `is_dark` reads the sun: the validator rejects any operand.
+                            if op == Op::IsDark {
+                                i.value = None;
+                                i.entity = None;
+                                i.missing = None;
+                            }
                         }
                     });
                 }
             };
-            let current_op = p.op;
+            let not_dark = move || op_signal.get() != Op::IsDark;
             let value_id = id.clone();
             let value_write = Callback::new(move |value: Option<serde_json::Value>| {
                 if let Some(v) = value {
@@ -430,14 +440,14 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             });
             let missing_id = id.clone();
             let current_missing = p.missing;
-            let on_missing = move |ev: web_sys::Event| {
+            let on_missing = Callback::new(move |ev: web_sys::Event| {
                 let missing = missing_from(&event_target_value(&ev));
                 form.update(&missing_id, |n| {
                     if let NodeKind::If(ref mut i) = n.kind {
                         i.missing = missing;
                     }
                 });
-            };
+            });
             let entity_id = id;
             let entity_write = Callback::new(move |value: Option<String>| {
                 form.update(&entity_id, |n| {
@@ -446,11 +456,14 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     }
                 });
             });
+            let initial_value = p.value.unwrap_or(serde_json::Value::Null);
+            let initial_entity = p.entity.unwrap_or_default();
+            let cfg = Signal::from(expect_context::<House>().flows_config);
             view! {
                 <label class="node-editor__field">
                     <span class="node-editor__label">"Compare"</span>
                     <select class="field" on:change=on_op>
-                        {["eq", "ne", "gt", "lt", "gte", "lte"]
+                        {["eq", "ne", "gt", "lt", "gte", "lte", "is_dark"]
                             .into_iter()
                             .map(|o| {
                                 let selected = op_str(current_op) == o;
@@ -461,37 +474,45 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                             .collect_view()}
                     </select>
                 </label>
-                <JsonField
-                    label="Value (JSON)".into()
-                    initial=p.value.unwrap_or(serde_json::Value::Null)
-                    optional=false
-                    write=value_write
-                />
-                <TextField
-                    label="Entity (defaults to trigger value)".into()
-                    initial=p.entity.unwrap_or_default()
-                    placeholder="entity.id".into()
-                    optional=true
-                    write=entity_write
-                />
-                <label class="node-editor__field">
-                    <span class="node-editor__label">"When the value is unknown"</span>
-                    <select class="field" on:change=on_missing>
-                        {[
-                            ("fail", "Fail"),
-                            ("true", "Take Yes"),
-                            ("false", "Take No"),
-                        ]
-                            .into_iter()
-                            .map(|(value, label)| {
-                                let selected = missing_str(current_missing) == value;
-                                view! {
-                                    <option value=value selected=selected>{label}</option>
-                                }
-                            })
-                            .collect_view()}
-                    </select>
-                </label>
+                <Show
+                    when=not_dark
+                    fallback=move || view! {
+                        <p class="node-editor__hint">"Is it dark now? (sun below -6°)"</p>
+                        <FallbackBadge cfg=cfg />
+                    }
+                >
+                    <JsonField
+                        label="Value (JSON)".into()
+                        initial=initial_value.clone()
+                        optional=false
+                        write=value_write
+                    />
+                    <TextField
+                        label="Entity (defaults to trigger value)".into()
+                        initial=initial_entity.clone()
+                        placeholder="entity.id".into()
+                        optional=true
+                        write=entity_write
+                    />
+                    <label class="node-editor__field">
+                        <span class="node-editor__label">"When the value is unknown"</span>
+                        <select class="field" on:change=move |ev| on_missing.run(ev)>
+                            {[
+                                ("fail", "Fail"),
+                                ("true", "Take Yes"),
+                                ("false", "Take No"),
+                            ]
+                                .into_iter()
+                                .map(|(value, label)| {
+                                    let selected = missing_str(current_missing) == value;
+                                    view! {
+                                        <option value=value selected=selected>{label}</option>
+                                    }
+                                })
+                                .collect_view()}
+                        </select>
+                    </label>
+                </Show>
             }
             .into_any()
         }
@@ -505,7 +526,24 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             });
             view! { <ScheduleField initial=p.cron write=write /> }.into_any()
         }
-        NodeKind::TriggerSun(_) => ().into_any(),
+        NodeKind::TriggerSun(params) => {
+            let node = RwSignal::new(oikos_core::flow::Node {
+                id: id.clone(),
+                name: None,
+                position: None,
+                kind: NodeKind::TriggerSun(params),
+                extra: Default::default(),
+            });
+            // The sheet edits its own copy of the node; each change goes into the draft.
+            Effect::new(move |prev: Option<()>| {
+                let kind = node.with(|n| n.kind.clone());
+                if prev.is_some() {
+                    form.update(&id, |n| n.kind = kind);
+                }
+            });
+            let cfg = Signal::from(expect_context::<House>().flows_config);
+            sun_sheet(node, cfg).into_any()
+        }
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Delay(p) => {
             let for_id = id;

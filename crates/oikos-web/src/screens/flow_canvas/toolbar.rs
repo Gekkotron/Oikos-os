@@ -82,7 +82,7 @@ fn EditControls(
             match api::put_flow(&snapshot).await {
                 // Saved: back to the view, which the hub's echo updates. A new flow moves to
                 // its own address, and the screen there finds it in the house.
-                Ok(view) => {
+                Ok((view, warning)) => {
                     if is_new {
                         let saved = view.clone();
                         house.flows.update(|flows| {
@@ -101,6 +101,10 @@ fn EditControls(
                         editor.reset(view.definition);
                         editing.set(false);
                     }
+                    if let Some(warning) = warning {
+                        toasts.push(warning);
+                    }
+                    house.refresh_flows_config();
                 }
                 Err(e) => toasts.push(e.error),
             }

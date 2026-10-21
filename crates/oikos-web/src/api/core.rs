@@ -2,8 +2,8 @@
 
 use gloo_net::http::{Request, Response};
 use oikos_api::{
-    ApiError, CommandResponse, EntityView, FlowView, FlowWriteOutcome, OverridePatch, RunView,
-    SchedulePreview,
+    ApiError, CommandResponse, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView,
+    OverridePatch, RunView, SchedulePreview,
 };
 use oikos_core::flow::Flow;
 use oikos_core::model::{AreasDocument, Command};
@@ -108,12 +108,19 @@ pub async fn set_flow_enabled(id: &str, enabled: bool) -> Result<FlowView, ApiEr
     read_json(response).await
 }
 
-/// Replaces flow `id`'s definition on the hub. The id in `flow` must match the path.
-pub async fn put_flow(flow: &Flow) -> Result<FlowView, ApiError> {
+/// Replaces flow `id`'s definition on the hub. The id in `flow` must match the path. The reply
+/// is the flow as stored and the hub's warning, when it has one (the Paris sun fallback).
+pub async fn put_flow(flow: &Flow) -> Result<(FlowView, Option<String>), ApiError> {
     let url = format!("/api/v1/flows/{}", encode_id(&flow.id));
     let response = check(Request::put(&url).json(flow), None).await?;
     let outcome: FlowWriteOutcome = read_json(response).await?;
-    Ok(outcome.flow)
+    Ok((outcome.flow, outcome.warning))
+}
+
+/// The `[flows]` settings: the house point, the time zone and whether the Paris fallback is on.
+pub async fn get_flows_config() -> Result<FlowsConfigView, ApiError> {
+    let response = check(Request::get("/api/v1/config/flows").build(), None).await?;
+    read_json(response).await
 }
 
 /// The next three ticks of `cron` in the house time zone; a `422` (the hub's message names what

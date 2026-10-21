@@ -8,6 +8,7 @@ mod drawer;
 mod graph;
 mod picker;
 mod settings;
+pub(crate) mod sun;
 mod toolbar;
 mod viewport;
 

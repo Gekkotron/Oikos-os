@@ -81,6 +81,8 @@ pub fn App() -> impl IntoView {
     });
     #[cfg(target_arch = "wasm32")]
     crate::ws::connect("/ws", house);
+    #[cfg(target_arch = "wasm32")]
+    house.refresh_flows_config();
     // Easter egg: double-clicking the logo rings the doorbell and gives the house a little shake.
     let ringing = RwSignal::new(false);
     let ring = move |_| {

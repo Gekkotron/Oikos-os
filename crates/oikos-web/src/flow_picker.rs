@@ -1,7 +1,7 @@
 //! Entries of the "Add" picker: what a query offers to put on the canvas. Pure, tested natively.
 
 use oikos_core::flow::{
-    CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, Op, Scalar,
+    CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, Op, Scalar, SunWhich,
     TriggerScheduleParams, TriggerStateParams,
 };
 use oikos_core::model::{Command, Kind};
@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::flow_edit::fold_accents;
 use crate::flow_text::{Ctx, sentence};
 use crate::format::entity_title;
+use crate::screens::flow_canvas::sun::sun_params_from_preset;
 
 /// Most entities a query lists, so the popover stays short.
 const MAX_ENTITIES: usize = 8;
@@ -94,6 +95,22 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 ..Default::default()
             }),
             Some("Schedule"),
+        ),
+        (
+            Group::When,
+            NodeKind::TriggerSun(sun_params_from_preset(SunWhich::Sunset, None)),
+            Some("Sun event"),
+        ),
+        (
+            Group::And,
+            NodeKind::If(IfParams {
+                op: Op::IsDark,
+                value: None,
+                entity: None,
+                missing: None,
+                extra: Default::default(),
+            }),
+            Some("When it's dark"),
         ),
         (
             Group::Wait,
@@ -233,6 +250,8 @@ mod tests {
             labels,
             [
                 (Group::When, "Schedule"),
+                (Group::When, "Sun event"),
+                (Group::And, "When it's dark"),
                 (Group::Wait, "Wait"),
                 (Group::Flow, "Disable this flow"),
                 (Group::Flow, "Enable a flow"),
@@ -242,7 +261,7 @@ mod tests {
             &got[0].kind,
             NodeKind::TriggerSchedule(p) if p.cron == "0 * * * *"
         ));
-        assert!(matches!(&got[1].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+        assert!(matches!(&got[3].kind, NodeKind::Delay(p) if p.for_ == "5m"));
     }
 
     #[test]

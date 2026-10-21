@@ -1,0 +1,347 @@
+//! The `trigger.sun` settings sheet and the helpers the canvas shares for sun cards: the summary
+//! line, the next fire times and the "Paris fallback" badge.
+
+use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono_tz::Tz;
+use leptos::prelude::*;
+use oikos_api::FlowsConfigView;
+use oikos_core::flow::sun::sun_events;
+use oikos_core::flow::{Node, NodeKind, SunWhich, TriggerSunParams};
+
+/// The house point used when the hub reports no coordinates (matches the hub's fallback).
+const PARIS: (f64, f64) = (48.8566, 2.3522);
+/// Largest offset the chips offer, in minutes.
+const MAX_CHIP_MINUTES: i32 = 720;
+/// Minutes a freshly chosen "Before" or "After" chip starts at.
+const DEFAULT_OFFSET: i32 = 15;
+/// How many days after the current one are searched for the next event.
+const SEARCH_DAYS: i64 = 7;
+
+/// The params of a sun trigger for `which` shifted by `offset_minutes`.
+pub fn sun_params_from_preset(which: SunWhich, offset_minutes: Option<i32>) -> TriggerSunParams {
+    TriggerSunParams {
+        which,
+        offset_minutes,
+        extra: Default::default(),
+    }
+}
+
+fn event_name(which: SunWhich) -> &'static str {
+    match which {
+        SunWhich::Sunrise => "sunrise",
+        SunWhich::Sunset => "sunset",
+        SunWhich::Dusk => "civil dusk",
+        SunWhich::Dawn => "civil dawn",
+    }
+}
+
+/// The card's sentence: "At sunset", "15 min after sunrise", "15 min before civil dusk".
+pub fn sun_summary(which: SunWhich, offset_minutes: i32) -> String {
+    let name = event_name(which);
+    match offset_minutes {
+        0 => format!("At {name}"),
+        n if n > 0 => format!("{n} min after {name}"),
+        n => format!("{} min before {name}", n.unsigned_abs()),
+    }
+}
+
+/// The first fire of `which` (shifted by `offset_minutes`) strictly after `now`, from the UTC
+/// day before `now` through the next seven; the same search the hub's engine runs.
+fn next_fire(
+    lat: f64,
+    lon: f64,
+    zone: Tz,
+    which: SunWhich,
+    offset_minutes: i32,
+    now: DateTime<Utc>,
+) -> Option<DateTime<Tz>> {
+    let first = now.date_naive();
+    let limit = now + Duration::days(SEARCH_DAYS);
+    (-1..=SEARCH_DAYS)
+        .filter_map(|days| {
+            let events = sun_events(lat, lon, first + Duration::days(days));
+            let event = match which {
+                SunWhich::Sunrise => events.sunrise,
+                SunWhich::Sunset => events.sunset,
+                SunWhich::Dusk => events.dusk,
+                SunWhich::Dawn => events.dawn,
+            }?;
+            event.checked_add_signed(Duration::minutes(i64::from(offset_minutes)))
+        })
+        .filter(|at| *at > now && *at <= limit)
+        .min()
+        .map(|at| at.with_timezone(&zone))
+}
+
+/// The next three times the trigger fires, soonest first, in `zone`.
+pub fn next_three_fires(
+    lat: f64,
+    lon: f64,
+    zone: Tz,
+    which: SunWhich,
+    offset_minutes: i32,
+    mut now: DateTime<Utc>,
+) -> Vec<DateTime<Tz>> {
+    let mut out = Vec::new();
+    for _ in 0..3 {
+        let Some(at) = next_fire(lat, lon, zone, which, offset_minutes, now) else {
+            break;
+        };
+        out.push(at);
+        now = at.with_timezone(&Utc) + Duration::seconds(1);
+    }
+    out
+}
+
+/// Whether sun cards carry the "Paris fallback" badge.
+pub fn fallback_badge_visible(cfg: &FlowsConfigView) -> bool {
+    cfg.fallback_active
+}
+
+/// The house point and zone a preview is computed for: the configured ones, Paris otherwise.
+fn house_place(cfg: Option<&FlowsConfigView>) -> ((f64, f64), Tz) {
+    let zone = cfg
+        .and_then(|c| c.timezone.parse::<Tz>().ok())
+        .unwrap_or(chrono_tz::Europe::Paris);
+    let point = match cfg {
+        Some(FlowsConfigView {
+            latitude: Some(lat),
+            longitude: Some(lon),
+            fallback_active: false,
+            ..
+        }) => (*lat, *lon),
+        _ => PARIS,
+    };
+    (point, zone)
+}
+
+fn now_utc() -> DateTime<Utc> {
+    Utc.timestamp_millis_opt(js_sys::Date::now() as i64)
+        .single()
+        .unwrap_or_default()
+}
+
+/// The small pill telling that sun flows run against Paris.
+#[component]
+pub fn FallbackBadge(cfg: Signal<Option<FlowsConfigView>>) -> impl IntoView {
+    view! {
+        <Show when=move || cfg.with(|c| c.as_ref().is_some_and(fallback_badge_visible))>
+            <span class="badge-fallback" title="No latitude/longitude in [flows]: using Paris">
+                "Paris fallback"
+            </span>
+        </Show>
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Timing {
+    At,
+    Before,
+    After,
+}
+
+fn timing_of(offset: i32) -> Timing {
+    match offset {
+        0 => Timing::At,
+        n if n < 0 => Timing::Before,
+        _ => Timing::After,
+    }
+}
+
+/// The editor of a `trigger.sun` node: event, timing chips, summary and next fire times.
+pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> impl IntoView {
+    let params = move || {
+        node.with(|n| match &n.kind {
+            NodeKind::TriggerSun(p) => p.clone(),
+            _ => TriggerSunParams::default(),
+        })
+    };
+    let write = move |which: Option<SunWhich>, offset: Option<Option<i32>>| {
+        node.update(|n| {
+            if let NodeKind::TriggerSun(ref mut p) = n.kind {
+                if let Some(w) = which {
+                    p.which = w;
+                }
+                if let Some(o) = offset {
+                    p.offset_minutes = o;
+                }
+            }
+        });
+    };
+    let which = Memo::new(move |_| params().which);
+    let offset = Memo::new(move |_| params().offset());
+    let timing = RwSignal::new(timing_of(offset.get_untracked()));
+    let minutes = Memo::new(move |_| offset.get().unsigned_abs());
+
+    let set_timing = move |t: Timing| {
+        timing.set(t);
+        let m = match minutes.get_untracked() {
+            0 => DEFAULT_OFFSET,
+            m => (m as i32).min(MAX_CHIP_MINUTES),
+        };
+        let signed = match t {
+            Timing::At => None,
+            Timing::Before => Some(-m),
+            Timing::After => Some(m),
+        };
+        write(None, Some(signed));
+    };
+    let on_minutes = move |ev: web_sys::Event| {
+        let Ok(m) = event_target_value(&ev).trim().parse::<i32>() else {
+            return;
+        };
+        let m = m.clamp(0, MAX_CHIP_MINUTES);
+        let signed = match timing.get_untracked() {
+            Timing::At => return,
+            Timing::Before => -m,
+            Timing::After => m,
+        };
+        write(None, Some((signed != 0).then_some(signed)));
+    };
+
+    let events = [
+        (SunWhich::Sunrise, "Sunrise"),
+        (SunWhich::Sunset, "Sunset"),
+        (SunWhich::Dawn, "Dawn"),
+        (SunWhich::Dusk, "Dusk"),
+    ];
+    let timings = [
+        (Timing::At, "At the event"),
+        (Timing::Before, "Before"),
+        (Timing::After, "After"),
+    ];
+    let fires = Memo::new(move |_| {
+        let ((lat, lon), zone) = cfg.with(|c| house_place(c.as_ref()));
+        next_three_fires(lat, lon, zone, which.get(), offset.get(), now_utc())
+    });
+
+    view! {
+        <div class="node-editor__field">
+            <span class="node-editor__label">"Solar event"</span>
+            <div class="segmented" role="group" aria-label="Solar event">
+                {events
+                    .into_iter()
+                    .map(|(w, label)| {
+                        view! {
+                            <button
+                                type="button"
+                                class="chip segmented__option"
+                                class:chip--selected=move || which.get() == w
+                                on:click=move |_| write(Some(w), None)
+                            >
+                                {label}
+                            </button>
+                        }
+                    })
+                    .collect_view()}
+            </div>
+        </div>
+        <div class="node-editor__field">
+            <span class="node-editor__label">"Timing"</span>
+            <div class="segmented" role="group" aria-label="Timing">
+                {timings
+                    .into_iter()
+                    .map(|(t, label)| {
+                        view! {
+                            <button
+                                type="button"
+                                class="chip segmented__option"
+                                class:chip--selected=move || timing.get() == t
+                                on:click=move |_| set_timing(t)
+                            >
+                                {label}
+                            </button>
+                        }
+                    })
+                    .collect_view()}
+            </div>
+        </div>
+        <Show when=move || timing.get() != Timing::At>
+            <label class="node-editor__field">
+                <span class="node-editor__label">"Minutes"</span>
+                <input
+                    type="number"
+                    class="field"
+                    min="0"
+                    max=MAX_CHIP_MINUTES.to_string()
+                    prop:value=move || minutes.get().to_string()
+                    on:input=on_minutes
+                />
+            </label>
+        </Show>
+        <p class="node-editor__hint">{move || sun_summary(which.get(), offset.get())}</p>
+        <FallbackBadge cfg=cfg />
+        <div class="node-editor__field">
+            <span class="node-editor__label">"Next fires"</span>
+            <ul class="node-editor__fires">
+                {move || {
+                    let list = fires.get();
+                    if list.is_empty() {
+                        return view! { <li>"No event in the next week"</li> }.into_any();
+                    }
+                    list.into_iter()
+                        .map(|at| view! { <li>{at.format("%a %d %b, %H:%M").to_string()}</li> })
+                        .collect_view()
+                        .into_any()
+                }}
+            </ul>
+        </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+    use oikos_api::FlowsConfigView;
+    use oikos_core::flow::SunWhich;
+
+    use super::*;
+
+    #[test]
+    fn preset_sunset_with_minus_30_builds_the_expected_params() {
+        let p = sun_params_from_preset(SunWhich::Sunset, Some(-30));
+        assert_eq!(p.which, SunWhich::Sunset);
+        assert_eq!(p.offset(), -30);
+    }
+
+    #[test]
+    fn summary_line_renders_expected_string() {
+        assert_eq!(sun_summary(SunWhich::Sunset, 0), "At sunset");
+        assert_eq!(sun_summary(SunWhich::Sunrise, 15), "15 min after sunrise");
+        assert_eq!(sun_summary(SunWhich::Dusk, -15), "15 min before civil dusk");
+        assert_eq!(sun_summary(SunWhich::Dawn, 0), "At civil dawn");
+    }
+
+    #[test]
+    fn next_three_fire_times_derive_from_shared_sun_events() {
+        let now = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 6, 0, 0).unwrap();
+        let times = next_three_fires(
+            45.75,
+            4.85,
+            chrono_tz::Europe::Paris,
+            SunWhich::Sunset,
+            0,
+            now,
+        );
+        assert_eq!(times.len(), 3);
+        assert!(times[0] < times[1] && times[1] < times[2]);
+    }
+
+    #[test]
+    fn fallback_badge_tracks_flows_config() {
+        let cfg = FlowsConfigView {
+            latitude: None,
+            longitude: None,
+            timezone: "Europe/Paris".into(),
+            fallback_active: true,
+        };
+        assert!(fallback_badge_visible(&cfg));
+        let cfg = FlowsConfigView {
+            latitude: Some(45.75),
+            longitude: Some(4.85),
+            timezone: "Europe/Paris".into(),
+            fallback_active: false,
+        };
+        assert!(!fallback_badge_visible(&cfg));
+    }
+}

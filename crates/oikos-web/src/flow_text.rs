@@ -11,6 +11,7 @@ use serde_json::Value;
 use crate::flows::{humanise, value_text};
 use crate::format::entity_title;
 use crate::schedule::describe;
+use crate::screens::flow_canvas::sun::sun_summary;
 
 /// What a card does in a flow; drives its colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,7 +135,8 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             }
         }
         NodeKind::TriggerSchedule(p) => describe(&p.cron),
-        NodeKind::TriggerSun(_) => "At a solar event".to_owned(),
+        NodeKind::TriggerSun(p) => sun_summary(p.which, p.offset()),
+        NodeKind::If(p) if p.op == Op::IsDark => "Is it dark now? (sun below -6°)".to_owned(),
         NodeKind::If(p) => {
             let (e, unit) = match &p.entity {
                 Some(id) => (entity_text(id, ctx), unit_of(id, ctx)),
@@ -291,6 +293,15 @@ mod tests {
                 flows: &flows,
             },
         )
+    }
+
+    #[test]
+    fn sun_and_is_dark_cards_read_as_sentences() {
+        let sun =
+            r#"{"id":"s","type":"trigger.sun","params":{"which":"dusk","offset_minutes":-15}}"#;
+        assert_eq!(text(sun), "15 min before civil dusk");
+        let dark = r#"{"id":"d","type":"if","params":{"op":"is_dark"}}"#;
+        assert_eq!(text(dark), "Is it dark now? (sun below -6°)");
     }
 
     #[test]

@@ -113,6 +113,7 @@ const NODE_HOURGLASS: &str = svg!(
     r#"<path d="M6 3h12"/><path d="M6 21h12"/><path d="M7 3v3a5 5 0 0 0 2 4l3 2-3 2a5 5 0 0 0-2 4v3"/><path d="M17 3v3a5 5 0 0 1-2 4l-3 2 3 2a5 5 0 0 1 2 4v3"/>"#
 );
 const NODE_CLOCK: &str = svg!(r#"<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>"#);
+const NODE_MOON: &str = svg!(r#"<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>"#);
 const NODE_SWITCH: &str =
     svg!(r#"<rect x="3" y="8" width="18" height="8" rx="4"/><circle cx="16" cy="12" r="2"/>"#);
 const NODE_PLAY: &str = svg!(r#"<path d="M7 4.5v15l12-7.5z"/>"#);
@@ -216,12 +217,14 @@ pub fn consumer_icon(icon: Option<oikos_core::energy::ConsumerIcon>) -> &'static
 }
 
 /// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, a
-/// clock for a schedule, an hourglass for a delay, a play triangle for a command and a toggle
+/// clock for a schedule, a sun for a solar event, a moon for an `if` on darkness, an hourglass for a delay, a play triangle for a command and a toggle
 /// for a flow switch.
 pub fn node_icon(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::TriggerState(_) => NODE_BOLT,
-        NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_) => NODE_CLOCK,
+        NodeKind::TriggerSchedule(_) => NODE_CLOCK,
+        NodeKind::TriggerSun(_) => SUN,
+        NodeKind::If(p) if p.op == oikos_core::flow::Op::IsDark => NODE_MOON,
         NodeKind::If(_) => NODE_FORK,
         NodeKind::Delay(_) => NODE_HOURGLASS,
         NodeKind::Command(_) => NODE_PLAY,

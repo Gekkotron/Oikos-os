@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use leptos::prelude::*;
 use oikos_api::{
     AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, FlowView,
-    IgnoredView, WsEvent,
+    FlowsConfigView, IgnoredView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -20,6 +20,8 @@ pub struct House {
     pub alerts: RwSignal<Vec<AlertView>>,
     /// The flows with their recent runs.
     pub flows: RwSignal<Vec<FlowView>>,
+    /// The hub's `[flows]` settings; `None` until the first fetch answers.
+    pub flows_config: RwSignal<Option<FlowsConfigView>>,
     /// The last rejected command as `(entity id, reason)`.
     pub command_failed: RwSignal<Option<(String, String)>>,
 }
@@ -35,8 +37,20 @@ impl House {
             ignored: RwSignal::new(Vec::new()),
             alerts: RwSignal::new(Vec::new()),
             flows: RwSignal::new(Vec::new()),
+            flows_config: RwSignal::new(None),
             command_failed: RwSignal::new(None),
         }
+    }
+
+    /// Fetches the `[flows]` settings into [`House::flows_config`]; a failure leaves the last
+    /// value (the badge simply stays hidden).
+    pub fn refresh_flows_config(&self) {
+        let flows_config = self.flows_config;
+        leptos::task::spawn_local(async move {
+            if let Ok(cfg) = crate::api::get_flows_config().await {
+                flows_config.set(Some(cfg));
+            }
+        });
     }
 
     /// The entities folded into `parent_id` through `part_of`, read without subscribing.

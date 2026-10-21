@@ -9,10 +9,11 @@ use std::time::Duration;
 use leptos::html;
 use leptos::prelude::*;
 use oikos_api::StepOutcome;
-use oikos_core::flow::{Flow, NodeKind, Position};
+use oikos_core::flow::{Flow, NodeKind, Op, Position};
 use wasm_bindgen::JsCast;
 
 use super::Editor;
+use super::sun::fallback_badge_visible;
 use super::viewport::Camera;
 use crate::components::now::Now;
 use crate::flow_edit::{EdgeKey, can_connect, connect, remove_edge};
@@ -393,6 +394,18 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         })
     };
     let icon = move || kind.with(|k| k.as_ref().map(node_icon).unwrap_or_default());
+    // Sun cards (and `if` on darkness) read the sun against Paris when the hub has no coordinates.
+    let fallback = Memo::new(move |_| {
+        let reads_sun = kind.with(|k| match k {
+            Some(NodeKind::TriggerSun(_)) => true,
+            Some(NodeKind::If(p)) => p.op == Op::IsDark,
+            _ => false,
+        });
+        reads_sun
+            && house
+                .flows_config
+                .with(|c| c.as_ref().is_some_and(fallback_badge_visible))
+    });
 
     let node_id = id.clone();
     let style = move || {
@@ -580,6 +593,9 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
                 {move || sub_text().map(|s| view! { <span class="flow-node__sub">{s}</span> })}
             </span>
             <span class="flow-node__step">{step}</span>
+            <Show when=move || fallback.get()>
+                <span class="flow-node__fallback">"Paris fallback"</span>
+            </Show>
             {pins}
         </div>
     }
