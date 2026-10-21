@@ -19,7 +19,7 @@ Today's Home page is a comprehensive tour of every room and entity. It is useful
 - Column-based grid layout that adapts phone ↔ desktop.
 - Built-in widget types for every entity type the Oikos web already renders.
 - An edit mode on each user-authored dashboard: drag, resize (span), add, remove, rename, reorder.
-- Persistence in the hub DB alongside flows and area overrides.
+- Persistence as MQTT retained payloads under a per-dashboard topic, same shape as flows and areas.
 
 ## Non-goals
 
@@ -31,7 +31,7 @@ Today's Home page is a comprehensive tour of every room and entity. It is useful
 ## Anti-goals
 
 - The House dashboard must not be editable or deletable. Someone trimming it loses the catalog guarantee that every room and entity shows somewhere.
-- Dashboards must not live in `oikos.toml`. Config holds configuration; user state belongs in the hub DB.
+- Dashboards must not live in `oikos.toml`. Config holds configuration; user state belongs on the broker, like flows and areas.
 - Adding a dashboard must not require a hub restart.
 
 ## Constraints
@@ -69,7 +69,7 @@ Dashboard {
 
 House is **synthesized on read** from the current entity/area state. The hub never stores a House record; the client cannot `PUT` or `DELETE` it. All other dashboards are persisted.
 
-**House rendering.** `GET /api/v1/dashboards` returns House as `{ id: "house", name: "House", order: 0, widgets: [] }`. The Leptos client detects `id == "house"` and renders it with the **existing rooms-overview renderer** (today's `house.rs`), not the generic dashboard grid. The widget list is empty on purpose — House is not built from widgets; it is the comprehensive catalog, kept verbatim. (Per "stay in app, but renamed".)
+**House rendering.** `GET /api/v1/dashboards` returns House as `{ id: "house", name: "House", order: 0, widgets: [] }`. The Leptos client detects `id == "house"` and renders it with the **existing rooms-overview renderer** (today's `screens::home::HomeScreen` in the web crate), not the generic dashboard grid. The widget list is empty on purpose — House is not built from widgets; it is the comprehensive catalog, kept verbatim. (Per "stay in app, but renamed".)
 
 **Dashboard order.** House has fixed `order = 0`, not writable. Authored dashboards use integer `order ≥ 1`; the hub normalizes to contiguous 1-based integers on write. `＋ New dashboard` creates at `max(order) + 1`.
 
@@ -152,7 +152,7 @@ Carries the flow canvas pattern:
 
 ### Persistence (hub)
 
-Alongside flows and area overrides in the hub's existing SQLite-backed store.
+Dashboards persist as MQTT **retained payloads**, same shape as flows and areas. One topic per dashboard id under `<ui_prefix>/dashboards/<id>`. The hub keeps a `DashboardStore` (in-memory decoded copy of the retained payloads, mirroring `FlowStore`); the broker is the source of truth, so a hub restart replays the retained payloads and the store rebuilds.
 
 ```
 GET    /api/v1/dashboards          → Dashboard[]                 // includes House at index 0
@@ -164,8 +164,8 @@ POST   /api/v1/dashboards/order    ← [id, id, …]                 // reorder 
 
 - `GET /api/v1/dashboards` returns the ordered list, with House synthesized at index 0 and all authored dashboards after it.
 - `PUT` or `DELETE` on `id = "house"` returns 403.
-- `POST /api/v1/dashboards/order` takes the full ordered id list of authored dashboards; the hub rewrites `order` fields in one transaction. This is the single reorder endpoint; the client never issues N `PUT`s for a reorder.
-- The storage schema (one row per dashboard, JSON `widgets` column, or a child table of widget rows) is the builder's call; the surface above is what the client depends on.
+- `POST /api/v1/dashboards/order` takes the full ordered id list of authored dashboards; the hub rewrites `order` on each affected dashboard and republishes them retained in one batch. This is the single reorder endpoint; the client never issues N `PUT`s for a reorder.
+- The retained payload shape is the serialized `Dashboard` struct. Deleting a dashboard means publishing an empty retained payload on its topic (same convention as flows).
 
 ### Opening the app
 
@@ -190,7 +190,7 @@ POST   /api/v1/dashboards/order    ← [id, id, …]                 // reorder 
 - The resize interaction detail (corner-handle cycling spans vs an eight-way handle). Cycle is the recommended default.
 - Picker UI (dropdown vs side sheet) once the dashboard list grows long.
 - The config sheet UI for each widget kind — follow the device-sheet pattern already in the app.
-- The SQLite schema for the `dashboards` table (one row with JSON widgets, or parent/child rows).
+- The exact MQTT topic prefix (`<ui_prefix>/dashboards/`) — follow the config convention used for flows.
 - The widget `id` generation scheme (ULID, UUID, or hash-based).
 - The exact Leptos routing update for `/` → first dashboard, and link-preserving redirects.
 - Any migration from existing bookmarks of `/` (soft: the redirect handles it).
