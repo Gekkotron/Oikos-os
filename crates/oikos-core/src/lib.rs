@@ -10,6 +10,7 @@ pub mod model;
 mod config;
 
 pub mod command;
+pub mod dashboard;
 pub mod discovery;
 pub mod registry;
 pub mod state;
