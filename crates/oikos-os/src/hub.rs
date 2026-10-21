@@ -18,7 +18,7 @@ use crate::virtual_entities as virtuals;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, GroupMemberView, GroupSpec,
     GroupView, IgnoredView, OverridePatch, Snapshot, VirtualSpec, WsEvent, area_views,
-    device_views, snapshot,
+    device_views, entity_views, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{
@@ -100,6 +100,15 @@ pub struct StateSeen {
     /// [`Hub::link_epoch`] when the report arrived; a report from before the latest link drop
     /// is stale and must not seed anything.
     pub epoch: u64,
+}
+
+/// What [`Hub::run_group_migration_once`] did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MigrationOutcome {
+    /// The ids of the groups created.
+    pub created: Vec<String>,
+    /// Why nothing was attempted; `None` when the migration ran.
+    pub skipped_reason: Option<&'static str>,
 }
 
 pub struct Hub {
@@ -1102,6 +1111,58 @@ impl Hub {
         self.ingest(&definition_topic, b"");
         self.ingest(&config_topic, b"");
         Ok(())
+    }
+
+    /// Turns the derived room groups into hand-made groups once: refused while the switch is
+    /// off, once the retained marker is set, or while the house is still empty (the retained
+    /// sync has not settled, and a marker published now would lock the migration out).
+    /// A group that fails to be created is logged and skipped.
+    pub async fn run_group_migration_once(&self) -> MigrationOutcome {
+        let skipped = |reason| MigrationOutcome {
+            created: Vec::new(),
+            skipped_reason: Some(reason),
+        };
+        if !self.groups_enabled {
+            return skipped("groups disabled");
+        }
+        if self.group_store().migrated() {
+            return skipped("already migrated");
+        }
+        let (entities, areas) = {
+            let reg = self.read();
+            if reg.entities().next().is_none() {
+                return skipped("house empty, retained sync not settled");
+            }
+            let entities: std::collections::BTreeMap<String, EntityView> = entity_views(&reg)
+                .into_iter()
+                .map(|view| (view.id.clone(), view))
+                .collect();
+            (entities, area_views(&reg))
+        };
+        let mut created = Vec::new();
+        for (id, spec) in groups::migrate::plan(&entities, &areas) {
+            match self.set_group(&id, spec).await {
+                Ok(_) => created.push(id),
+                Err(err) => tracing::warn!(group = %id, %err, "group migration skipped a group"),
+            }
+        }
+        let marker = Publish {
+            topic: groups::topics::migration_marker_topic(&self.discovery_prefix),
+            payload: "1".to_owned(),
+            retain: true,
+        };
+        if let Err(err) = self.publish(marker) {
+            tracing::warn!(%err, "group migration marker not published; it will run again");
+            return MigrationOutcome {
+                created,
+                skipped_reason: None,
+            };
+        }
+        self.group_store().mark_migrated();
+        MigrationOutcome {
+            created,
+            skipped_reason: None,
+        }
     }
 
     /// Every stored group that has its entity, with its members and the flows that use it,

@@ -47,6 +47,7 @@ async fn main() -> anyhow::Result<ExitCode> {
                 Arc::clone(&hub),
                 publish_rx,
             );
+            tokio::spawn(oikos_os::groups::migrate::spawn(Arc::clone(&hub)));
             let http_task = http::serve(&cfg.http, http::router(Arc::clone(&hub))).await?;
 
             tokio::signal::ctrl_c().await?;

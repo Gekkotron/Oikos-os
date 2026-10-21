@@ -4,6 +4,7 @@
 
 pub mod discovery;
 pub mod fanout;
+pub mod migrate;
 pub mod state;
 pub mod store;
 pub mod topics;

@@ -1325,3 +1325,132 @@ async fn group_command_is_accepted_once_every_member_echoes() {
     echo.await.expect("echo task");
     assert!(response.accepted, "{response:?}");
 }
+
+/// A recorded light or cover config made into entity `n`, placed in area `area` by override.
+async fn feed_member(hub: &Hub, kind: Kind, n: u8, area: &str) -> String {
+    let (fixture_name, old_id, old_path, component) = match kind {
+        Kind::Light => (
+            "discovery/light__0x00124b000b1355e6__light_3.json",
+            "0x00124b000b1355e6",
+            "miscellaneous/heater_mobile/3",
+            "light",
+        ),
+        _ => (
+            "discovery/cover__0x000d6ffffe9d44e4__cover.json",
+            "0x000d6ffffe9d44e4",
+            "rooms/office/shutter",
+            "cover",
+        ),
+    };
+    let hw = format!("0xbbbb00000000000{n}");
+    let text = String::from_utf8(fixture(fixture_name))
+        .expect("utf8")
+        .replace(old_id, &hw)
+        .replace(old_path, &format!("rooms/{area}/{component}{n}"));
+    hub.ingest(
+        &format!("oikos/{component}/{hw}/{component}/config"),
+        text.as_bytes(),
+    );
+    let id = hub
+        .snapshot()
+        .entities
+        .into_iter()
+        .find(|e| e.id.starts_with(&hw))
+        .expect("entity")
+        .id;
+    let mut patch = serde_json::Map::new();
+    patch.insert("area".to_owned(), serde_json::Value::from(area));
+    hub.set_override(&id, &patch).await.expect("area override");
+    id
+}
+
+fn migration_hub(enabled: bool) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.groups.enabled = enabled;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    (hub, rx)
+}
+
+async fn feed_living(hub: &Hub) {
+    for n in 1..=2 {
+        feed_member(hub, Kind::Light, n, "living").await;
+        feed_member(hub, Kind::Cover, n + 2, "living").await;
+    }
+}
+
+#[tokio::test]
+async fn migration_on_empty_registry_defers_and_leaves_no_marker() {
+    let (hub, mut rx) = migration_hub(true);
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(
+        outcome.skipped_reason,
+        Some("house empty, retained sync not settled")
+    );
+    assert!(outcome.created.is_empty());
+    assert!(drain(&mut rx).is_empty(), "no marker published");
+    assert!(!hub.read_group_store().migrated());
+}
+
+#[tokio::test]
+async fn migration_builds_light_and_cover_groups_once_marker_absent() {
+    let (hub, mut rx) = migration_hub(true);
+    feed_living(&hub).await;
+    drain(&mut rx);
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(outcome.skipped_reason, None);
+    assert_eq!(outcome.created, ["cover_living", "light_living"]);
+    let published = drain(&mut rx);
+    let marker = published
+        .iter()
+        .find(|p| p.topic == "oikos/group/_migrated")
+        .expect("marker");
+    assert!(marker.retain && !marker.payload.is_empty());
+    assert!(hub.read_group_store().migrated());
+    let views = hub.list_groups().expect("enabled");
+    assert_eq!(views.len(), 2);
+    for view in &views {
+        let spec = hub.read_group_store().get(&view.id).cloned().expect("spec");
+        assert!(spec.hide_members);
+        assert_eq!(view.members.len(), 2);
+    }
+    let names: Vec<&str> = views.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(names, ["Shutters", "Lights"]);
+}
+
+#[tokio::test]
+async fn migration_is_a_no_op_when_already_migrated() {
+    let (hub, mut rx) = migration_hub(true);
+    feed_living(&hub).await;
+    hub.ingest("oikos/group/_migrated", b"1");
+    drain(&mut rx);
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(outcome.skipped_reason, Some("already migrated"));
+    assert!(outcome.created.is_empty());
+    assert!(drain(&mut rx).is_empty(), "nothing published");
+}
+
+#[tokio::test]
+async fn migration_refuses_when_switch_is_off() {
+    let (hub, mut rx) = migration_hub(false);
+    feed_living(&hub).await;
+    drain(&mut rx);
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(outcome.skipped_reason, Some("groups disabled"));
+    assert!(drain(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn migration_honours_group_names() {
+    let (hub, _rx) = migration_hub(true);
+    feed_member(&hub, Kind::Light, 1, "living").await;
+    feed_member(&hub, Kind::Light, 2, "living").await;
+    hub.set_area_group("living", "light", Some(Some("Main lamps".to_owned())), None)
+        .await
+        .expect("area group name");
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(outcome.created, ["light_living"]);
+    let views = hub.list_groups().expect("enabled");
+    assert_eq!(views[0].name, "Main lamps");
+}
