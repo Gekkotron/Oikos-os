@@ -169,9 +169,9 @@ pub fn validate_widget(w: &Widget) -> Result<(), String> {
         | WidgetKind::Climate
         | WidgetKind::Lock
         | WidgetKind::Sensor
-        | WidgetKind::FlowButton
         | WidgetKind::WaterHeater
         | WidgetKind::Camera => matches!(w.config, WidgetConfig::Entity { .. }),
+        WidgetKind::FlowButton => matches!(w.config, WidgetConfig::Flow { .. }),
         WidgetKind::RoomGroup => matches!(w.config, WidgetConfig::Area { .. }),
         WidgetKind::EnergyStat => matches!(w.config, WidgetConfig::Energy { .. }),
         WidgetKind::HistoryChart => matches!(w.config, WidgetConfig::History { .. }),
@@ -280,6 +280,18 @@ mod tests {
         );
         assert!(validate_widget(&widget(WidgetKind::RoomGroup, Span::X1x1, area)).is_ok());
         assert!(validate_widget(&widget(WidgetKind::Camera, Span::X2x1, entity_config())).is_ok());
+    }
+
+    #[test]
+    fn flow_button_requires_flow_config() {
+        let flow = WidgetConfig::Flow {
+            flow_id: "morning".into(),
+            title: None,
+        };
+        assert!(validate_widget(&widget(WidgetKind::FlowButton, Span::X1x1, flow)).is_ok());
+        assert!(
+            validate_widget(&widget(WidgetKind::FlowButton, Span::X1x1, entity_config())).is_err()
+        );
     }
 
     #[test]
