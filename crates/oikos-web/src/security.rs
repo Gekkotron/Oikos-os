@@ -186,6 +186,7 @@ impl SecurityUi {
             .values()
             .filter(|e| {
                 e.part_of.is_none()
+                    && !e.id.starts_with("group_")
                     && Placement::on_security(e.kind, e.device_class.as_deref(), &e.ui)
             })
             .collect();
@@ -479,6 +480,16 @@ mod tests {
         assert_eq!(ids, ["hidden_door"]);
         let actions: Vec<_> = ui.actions.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(actions, ["siren"]);
+    }
+
+    #[test]
+    fn group_entities_are_dropped() {
+        let ui = build(vec![
+            door("front", "hall", false),
+            door("group_doors", "hall", false),
+        ]);
+        let ids: Vec<_> = ui.sensors.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["front"]);
     }
 
     #[test]

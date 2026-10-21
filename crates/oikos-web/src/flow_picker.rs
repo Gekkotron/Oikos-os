@@ -49,6 +49,13 @@ fn entry(group: Group, kind: NodeKind, ctx: &Ctx) -> Entry {
     }
 }
 
+/// What the picker appends to a card that targets a group entity.
+const GROUP_SUFFIX: &str = " (Group)";
+
+fn is_group_id(entity_id: &str) -> bool {
+    entity_id.starts_with("group_")
+}
+
 fn command(entity: &str, command: Command) -> NodeKind {
     NodeKind::Command(CommandParams {
         entity: entity.to_owned(),
@@ -163,6 +170,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
         matches.sort_by(|a, b| a.0.cmp(&b.0));
         matches.truncate(MAX_ENTITIES);
         for (_, e) in matches {
+            let first = out.len();
             let current = Scalar::of_state(&e.state.value);
             out.push(entry(
                 Group::When,
@@ -185,6 +193,11 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             ));
             for c in commands(e.kind, current.as_ref()) {
                 out.push(entry(Group::Then, command(&e.id, c), ctx));
+            }
+            if is_group_id(&e.id) {
+                for entry in &mut out[first..] {
+                    entry.label.push_str(GROUP_SUFFIX);
+                }
             }
         }
     }
@@ -308,6 +321,26 @@ mod tests {
         let got = run("lampe", &house(list));
         assert_eq!(count(&got, Group::When), 8);
         assert_eq!(count(&got, Group::Then), 24);
+    }
+
+    #[test]
+    fn group_entries_carry_the_group_tag() {
+        let entities = house(vec![
+            ent("group_living", "Living lights", Kind::Light),
+            ent("l1", "Living lamp", Kind::Light),
+        ]);
+        let got = run("living", &entities);
+        let tagged = |e: &Entry| e.label.ends_with(" (Group)");
+        let group_entries: Vec<_> = got
+            .iter()
+            .filter(|e| e.label.contains("Living lights"))
+            .collect();
+        assert!(!group_entries.is_empty() && group_entries.iter().all(|e| tagged(e)));
+        assert!(
+            got.iter()
+                .filter(|e| e.label.contains("Living lamp"))
+                .all(|e| !tagged(e))
+        );
     }
 
     #[test]
