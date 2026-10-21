@@ -2,3 +2,6 @@
 
 pub mod format;
 pub mod geom;
+pub mod view;
+
+pub use view::{Flavor, HistoryChart};
