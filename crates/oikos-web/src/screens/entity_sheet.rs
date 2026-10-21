@@ -16,6 +16,7 @@ use crate::house::House;
 use crate::icons::entity_icon;
 use crate::nav::ReturnPath;
 use crate::override_editor::OverrideEditor;
+use crate::screens::generic_panel::GenericPanel;
 use crate::screens::home::card_for;
 
 pub(crate) fn availability_class(availability: Availability) -> &'static str {
@@ -264,6 +265,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
             </A>
         </Panel>
         <ColourPanel id=id.clone() entity=entity />
+        <GenericPanel entity=entity />
         <Panel title="Settings">
             {initial.map(|e| view! { <OverrideEditor entity=e /> })}
         </Panel>

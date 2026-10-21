@@ -6,6 +6,7 @@ pub mod entity_sheet;
 pub mod flow_canvas;
 pub mod flow_schedule;
 pub mod flows;
+pub mod generic_panel;
 pub mod group_sheet;
 pub mod history_detail;
 pub mod home;

@@ -4,7 +4,11 @@ use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::Router;
 use oikos_api::{EntityView, WsEvent};
-use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride};
+use oikos_core::model::{
+    Capabilities, EntityCategory, EntityState, GenericState, GenericValue, Kind, StateValue,
+    UiOverride,
+};
+use oikos_core::types::GenericCaps;
 use oikos_web::commands::Pending;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
@@ -58,6 +62,7 @@ async fn state_echo_keeps_the_override_draft() {
     house.apply(WsEvent::EntityUpserted(sensor(1.0)));
     let _mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         provide_context(house);
+        oikos_web::nav::install_nav();
         provide_context(Toasts::new());
         provide_context(Pending::new());
         view! {
@@ -116,4 +121,116 @@ async fn state_echo_keeps_the_override_draft() {
         .unchecked_into();
     assert_eq!(error.text_content().unwrap_or_default(), message);
     assert!(input.is_same_node(Some(&rebuilt)));
+}
+
+fn generic(
+    component: &str,
+    controls: &[&str],
+    secret: bool,
+    fields: &[(&str, GenericValue)],
+) -> EntityView {
+    let mut e = sensor(0.0);
+    e.id = format!("{component}.x");
+    e.kind = Kind::Generic;
+    e.protocol_kind = Kind::Generic;
+    e.component = component.into();
+    e.capabilities = Capabilities {
+        generic: Some(GenericCaps {
+            controls: controls.iter().map(|s| s.to_string()).collect(),
+            secret,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let mut g = GenericState::default();
+    for (k, v) in fields {
+        g.fields.insert((*k).into(), v.clone());
+    }
+    e.state.value = StateValue::Generic(g);
+    e
+}
+
+async fn sheet_text(entity: EntityView) -> web_sys::Element {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let id = entity.id.clone();
+    let house = House::new();
+    house.apply(WsEvent::EntityUpserted(entity));
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(house);
+            oikos_web::nav::install_nav();
+            provide_context(Toasts::new());
+            provide_context(Pending::new());
+            view! {
+                <Router>
+                    <SheetBody id=id.clone() />
+                </Router>
+            }
+        },
+    ));
+    tick().await;
+    host
+}
+
+#[wasm_bindgen_test]
+async fn fan_sheet_lists_power_speed_and_preset() {
+    let host = sheet_text(generic(
+        "fan",
+        &["power", "percentage", "preset"],
+        false,
+        &[],
+    ))
+    .await;
+    let text = host.text_content().unwrap();
+    for label in ["Power", "Percentage", "Preset"] {
+        assert!(text.contains(label), "{label} missing in {text}");
+    }
+}
+
+#[wasm_bindgen_test]
+async fn secret_text_uses_a_password_field() {
+    let host = sheet_text(generic("text", &["value"], true, &[])).await;
+    assert!(
+        host.query_selector("input[type=password]")
+            .unwrap()
+            .is_some(),
+        "password input"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn remote_sheet_shows_last_press() {
+    let host = sheet_text(generic(
+        "device_automation",
+        &[],
+        false,
+        &[
+            ("last", GenericValue::Text("on".into())),
+            ("at", GenericValue::Number(1_000_000_000.0)),
+        ],
+    ))
+    .await;
+    let text = host.text_content().unwrap();
+    assert!(text.contains("Last: On"), "{text}");
+    assert!(text.contains("ago"), "{text}");
+}
+
+#[wasm_bindgen_test]
+async fn update_sheet_shows_available_version() {
+    let host = sheet_text(generic(
+        "update",
+        &[],
+        false,
+        &[
+            ("installed", GenericValue::Text("1.0".into())),
+            ("latest", GenericValue::Text("1.1".into())),
+        ],
+    ))
+    .await;
+    let text = host.text_content().unwrap();
+    assert!(text.contains("Firmware 1.0 → 1.1"), "{text}");
+    assert!(text.contains("Update available"), "{text}");
 }

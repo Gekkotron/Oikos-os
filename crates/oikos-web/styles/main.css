@@ -4176,3 +4176,31 @@ html:has(.flow-canvas-screen) {
   height: 32px;
   opacity: 0.6;
 }
+
+.sheet__generic {
+  display: grid;
+  gap: 12px;
+}
+
+.sheet__generic__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.sheet__generic__label {
+  font: var(--type-label);
+}
+
+.sheet__generic__last {
+  margin: 0;
+}
+
+.sheet__generic__picture {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}

@@ -67,7 +67,7 @@ fn picture(entity: &EntityView) -> AnyView {
 }
 
 /// The main control widget, chosen by the control's shape.
-fn control_view(
+pub(crate) fn control_view(
     entity: &EntityView,
     def: &'static TypeDef,
     caps: &GenericCaps,
