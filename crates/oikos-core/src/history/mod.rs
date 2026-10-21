@@ -203,8 +203,8 @@ impl Pending {
 mod tests {
     use super::*;
     use crate::model::{
-        Availability, ClimateState, CoverState, EntityState, LightState, StateValue,
-        VacuumState, WaterHeaterState,
+        Availability, ClimateState, CoverState, EntityState, LightState, StateValue, VacuumState,
+        WaterHeaterState,
     };
 
     fn incoming(id: &str, at: Micros, value: StateValue, availability: Availability) -> Incoming {
@@ -396,10 +396,7 @@ mod tests {
         );
         assert_eq!(num_of(&StateValue::Text("hello".into())), None);
         assert_eq!(num_of(&StateValue::Alarm("armed".into())), None);
-        assert_eq!(
-            num_of(&StateValue::Vacuum(VacuumState::default())),
-            None
-        );
+        assert_eq!(num_of(&StateValue::Vacuum(VacuumState::default())), None);
         assert_eq!(num_of(&StateValue::Number(f64::NAN)), None);
         assert_eq!(num_of(&StateValue::Number(f64::INFINITY)), None);
     }

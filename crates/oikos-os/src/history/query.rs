@@ -28,8 +28,8 @@ fn unavailable(e: sqlx::Error) -> HistoryError {
 /// Returns `days + 1` boundaries: local midnight of (today − days + 1), …, local midnight
 /// of today, then `now` as the closing boundary. DST-safe for whole-hour offsets.
 pub fn day_starts(zone: Tz, now: Micros, days: u32) -> Vec<Micros> {
-    let now_utc: DateTime<Utc> = DateTime::<Utc>::from_timestamp_micros(now)
-        .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
+    let now_utc: DateTime<Utc> =
+        DateTime::<Utc>::from_timestamp_micros(now).unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
     let now_local = now_utc.with_timezone(&zone);
     let today = now_local.date_naive();
 
@@ -64,9 +64,7 @@ async fn series_carry_at(
             return Ok(Some(last.num));
         }
     }
-    let carries = db
-        .hourly_carry(hour_start, &[entity.to_string()])
-        .await?;
+    let carries = db.hourly_carry(hour_start, &[entity.to_string()]).await?;
     Ok(carries.get(entity).copied())
 }
 

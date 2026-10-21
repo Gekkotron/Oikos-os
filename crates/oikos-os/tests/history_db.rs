@@ -151,7 +151,10 @@ async fn last_changes_and_recorded() {
     let Some(tdb) = fresh_db().await else { return };
     tdb.db
         .insert(&Rows {
-            values: vec![value_row("a", 1_000_000, 1.0), value_row("a", 2_000_000, 2.0)],
+            values: vec![
+                value_row("a", 1_000_000, 1.0),
+                value_row("a", 2_000_000, 2.0),
+            ],
             availability: vec![],
         })
         .await
@@ -181,19 +184,12 @@ async fn hourly_upsert_replaces() {
         increase: 2.0,
         ..first.clone()
     };
-    tdb.db
-        .upsert_hourly(&[("a".into(), first)])
-        .await
-        .unwrap();
+    tdb.db.upsert_hourly(&[("a".into(), first)]).await.unwrap();
     tdb.db
         .upsert_hourly(&[("a".into(), second.clone())])
         .await
         .unwrap();
-    let hours = tdb
-        .db
-        .hourly("a", 0, 3_600_000_000)
-        .await
-        .unwrap();
+    let hours = tdb.db.hourly("a", 0, 3_600_000_000).await.unwrap();
     assert_eq!(hours.len(), 1);
     assert_eq!(hours[0].last, 5.0);
     assert_eq!(hours[0].max, 5.0);
@@ -213,16 +209,11 @@ async fn hourly_carry_takes_latest_before() {
         ])
         .await
         .unwrap();
-    let carry = tdb
-        .db
-        .hourly_carry(2 * hour, &["a".into()])
-        .await
-        .unwrap();
+    let carry = tdb.db.hourly_carry(2 * hour, &["a".into()]).await.unwrap();
     assert_eq!(carry.get("a"), Some(&1.0));
 
     tdb.drop_db().await;
 }
-
 
 const HOUR: i64 = 3_600_000_000;
 const MINUTE: i64 = 60_000_000;
@@ -344,21 +335,19 @@ async fn series_24h_carries_into_quiet_windows() {
     rollup_once(&tdb.db, now, i64::MAX).await.unwrap();
 
     let history = oikos_os::history::History::with_db(tdb.db.clone(), chrono_tz::UTC);
-    let series = oikos_os::history::query::series(
-        &history,
-        "a",
-        oikos_api::HistoryRange::Day,
-        now,
-    )
-    .await
-    .expect("series");
+    let series = oikos_os::history::query::series(&history, "a", oikos_api::HistoryRange::Day, now)
+        .await
+        .expect("series");
 
     // Points are (t, mean, min, max) with t in unix seconds.
     assert!(!series.points.is_empty(), "{series:?}");
     // The first point is at or after now - 2h (no point for the earlier quiet windows).
     let first_t = series.points[0].0;
     let two_hours_ago_s = (now - 2 * HOUR) / 1_000_000;
-    assert!(first_t >= two_hours_ago_s - 600, "{first_t} vs {two_hours_ago_s}");
+    assert!(
+        first_t >= two_hours_ago_s - 600,
+        "{first_t} vs {two_hours_ago_s}"
+    );
     // Every point carries 5.0.
     for p in &series.points {
         assert_eq!(p.1, 5.0, "mean");
@@ -384,29 +373,21 @@ async fn today_power_and_unrecorded() {
         .unwrap();
 
     let history = oikos_os::history::History::with_db(tdb.db.clone(), chrono_tz::UTC);
-    let today =
-        oikos_os::history::query::today(&history, "a", oikos_api::EnergyKind::Power, now)
-            .await
-            .expect("today");
+    let today = oikos_os::history::query::today(&history, "a", oikos_api::EnergyKind::Power, now)
+        .await
+        .expect("today");
     assert_eq!(today.since, midnight / 1_000_000);
     assert_eq!(today.kwh, Some(2.0));
 
-    let err = oikos_os::history::query::series(
-        &history,
-        "ghost",
-        oikos_api::HistoryRange::Day,
-        now,
-    )
-    .await
-    .expect_err("not recorded");
+    let err =
+        oikos_os::history::query::series(&history, "ghost", oikos_api::HistoryRange::Day, now)
+            .await
+            .expect_err("not recorded");
     assert_eq!(err.code(), "not_recorded");
 
-    let changes = oikos_os::history::query::last_change(
-        &history,
-        &["a".into(), "ghost".into()],
-    )
-    .await
-    .expect("last_change");
+    let changes = oikos_os::history::query::last_change(&history, &["a".into(), "ghost".into()])
+        .await
+        .expect("last_change");
     assert_eq!(changes.items.len(), 2);
     assert!(changes.items[0].recorded);
     assert!(!changes.items[1].recorded);

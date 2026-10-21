@@ -286,9 +286,10 @@ impl OikosMcp {
         &self,
         Parameters(params): Parameters<GetHistoryParams>,
     ) -> ToolResult<HistoryAnswer> {
-        let history = self.hub.history().ok_or_else(|| {
-            ToolError("history_unavailable: `[history] url` is not set".into())
-        })?;
+        let history = self
+            .hub
+            .history()
+            .ok_or_else(|| ToolError("history_unavailable: `[history] url` is not set".into()))?;
         let now = crate::clock::now_micros();
         match params.what {
             HistoryWhat::Series => {
@@ -310,10 +311,9 @@ impl OikosMcp {
                 let kind = params
                     .kind
                     .ok_or_else(|| ToolError("daily requires `kind`".into()))?;
-                let daily =
-                    history_query::daily(history, &params.entity, days, kind, now)
-                        .await
-                        .map_err(|e| ToolError(format!("{}: {e}", e.code())))?;
+                let daily = history_query::daily(history, &params.entity, days, kind, now)
+                    .await
+                    .map_err(|e| ToolError(format!("{}: {e}", e.code())))?;
                 Ok(Json(HistoryAnswer {
                     daily: Some(daily),
                     ..HistoryAnswer::default()

@@ -16,8 +16,7 @@ pub use flows::{
     FlowView, RunStatus, RunView, SchedulePreview, StepOutcome, StepView, TriggerInfo,
 };
 pub use history::{
-    EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange,
-    LastChangeItem,
+    EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange, LastChangeItem,
 };
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView};

@@ -280,7 +280,13 @@ mod tests {
 
     #[test]
     fn hour_with_carry_and_two_samples() {
-        let b = rollup(Some(10.0), &[s(15 * M, 20.0), s(45 * M, 0.0)], 0, HOUR, HOUR);
+        let b = rollup(
+            Some(10.0),
+            &[s(15 * M, 20.0), s(45 * M, 0.0)],
+            0,
+            HOUR,
+            HOUR,
+        );
         assert_eq!(b.len(), 1);
         assert_eq!((b[0].integral, b[0].covered), (12.5, HOUR));
         assert_eq!(
@@ -293,7 +299,10 @@ mod tests {
     #[test]
     fn first_sample_without_carry_covers_from_the_sample() {
         let b = rollup(None, &[s(30 * M, 4.0)], 0, HOUR, HOUR);
-        assert_eq!((b[0].covered, b[0].integral, b[0].mean()), (30 * M, 2.0, 4.0));
+        assert_eq!(
+            (b[0].covered, b[0].integral, b[0].mean()),
+            (30 * M, 2.0, 4.0)
+        );
     }
 
     #[test]

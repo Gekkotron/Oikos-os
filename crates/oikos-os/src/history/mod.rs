@@ -69,7 +69,12 @@ impl History {
             drop_count: AtomicU64::new(0),
             dirty_from: AtomicI64::new(i64::MAX),
         });
-        tokio::spawn(writer::run(db.clone(), history.clone(), rx, cfg.buffer_rows));
+        tokio::spawn(writer::run(
+            db.clone(),
+            history.clone(),
+            rx,
+            cfg.buffer_rows,
+        ));
         tokio::spawn(rollup::run(db, history.clone()));
         Ok(history)
     }
