@@ -59,7 +59,11 @@ impl Hub {
         if id == HOUSE_ID {
             return Err(reserved());
         }
-        if self.dashboard_store().get(id).is_none() {
+        let known = {
+            let store = self.dashboard_store();
+            store.get(id).is_some() || store.invalid_reason(id).is_some()
+        };
+        if !known {
             return Err(HubError::UnknownDashboard(id.to_owned()));
         }
         self.publish(Publish {
