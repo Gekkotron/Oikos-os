@@ -133,7 +133,7 @@ pub fn FallbackBadge(cfg: Signal<Option<FlowsConfigView>>) -> impl IntoView {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Timing {
     At,
     Before,
@@ -145,6 +145,15 @@ fn timing_of(offset: i32) -> Timing {
         0 => Timing::At,
         n if n < 0 => Timing::Before,
         _ => Timing::After,
+    }
+}
+
+/// The stored offset for a timing chip and a minutes count; zero minutes is no offset.
+fn offset_for(timing: Timing, minutes: i32) -> Option<i32> {
+    match timing {
+        Timing::At => None,
+        Timing::Before => (minutes != 0).then_some(-minutes),
+        Timing::After => (minutes != 0).then_some(minutes),
     }
 }
 
@@ -179,24 +188,20 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
             0 => DEFAULT_OFFSET,
             m => (m as i32).min(MAX_CHIP_MINUTES),
         };
-        let signed = match t {
-            Timing::At => None,
-            Timing::Before => Some(-m),
-            Timing::After => Some(m),
-        };
-        write(None, Some(signed));
+        write(None, Some(offset_for(t, m)));
     };
     let on_minutes = move |ev: web_sys::Event| {
         let Ok(m) = event_target_value(&ev).trim().parse::<i32>() else {
             return;
         };
         let m = m.clamp(0, MAX_CHIP_MINUTES);
-        let signed = match timing.get_untracked() {
-            Timing::At => return,
-            Timing::Before => -m,
-            Timing::After => m,
-        };
-        write(None, Some((signed != 0).then_some(signed)));
+        let current = timing.get_untracked();
+        if current == Timing::At {
+            return;
+        }
+        // Zero minutes is "at the event": the chip follows the stored offset.
+        timing.set(timing_of(offset_for(current, m).unwrap_or(0)));
+        write(None, Some(offset_for(current, m)));
     };
 
     let events = [
@@ -302,6 +307,18 @@ mod tests {
         let p = sun_params_from_preset(SunWhich::Sunset, Some(-30));
         assert_eq!(p.which, SunWhich::Sunset);
         assert_eq!(p.offset(), -30);
+    }
+
+    #[test]
+    fn zero_minutes_snaps_the_chip_back_to_the_event() {
+        assert_eq!(offset_for(Timing::Before, 0), None);
+        assert_eq!(
+            timing_of(offset_for(Timing::Before, 0).unwrap_or(0)),
+            Timing::At
+        );
+        assert_eq!(offset_for(Timing::Before, 20), Some(-20));
+        assert_eq!(offset_for(Timing::After, 20), Some(20));
+        assert_eq!(timing_of(-20), Timing::Before);
     }
 
     #[test]

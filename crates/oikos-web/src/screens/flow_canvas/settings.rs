@@ -3,7 +3,7 @@
 //! write into the draft, one undo step per field change.
 
 use leptos::prelude::*;
-use oikos_core::flow::{Missing, Node, NodeKind, Op};
+use oikos_core::flow::{IfParams, Missing, Node, NodeKind, Op};
 
 use super::Editor;
 use super::graph::Selection;
@@ -197,6 +197,34 @@ pub fn NodeEditor(editor: Editor, selected: RwSignal<Option<Selection>>) -> impl
         </Show>
     }
 }
+
+/// What an `if` held before it switched to `is_dark`, put back when it switches away so the
+/// fields on screen and the draft agree.
+#[derive(Default)]
+struct IfStash {
+    value: Option<serde_json::Value>,
+    entity: Option<String>,
+    missing: Option<Missing>,
+}
+
+/// Changes an `if`'s op. `is_dark` reads the sun, so the validator rejects any operand: they
+/// are set aside on the way in and restored on the way out.
+fn switch_op(i: &mut IfParams, op: Op, stash: &mut IfStash) {
+    let was_dark = i.op == Op::IsDark;
+    if op == Op::IsDark && !was_dark {
+        *stash = IfStash {
+            value: i.value.take(),
+            entity: i.entity.take(),
+            missing: i.missing.take(),
+        };
+    } else if was_dark && op != Op::IsDark {
+        i.value = stash.value.take();
+        i.entity = stash.entity.take();
+        i.missing = stash.missing.take();
+    }
+    i.op = op;
+}
+
 
 fn node_editor_body(
     form: Form,
@@ -411,18 +439,13 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             let op_id = id.clone();
             let current_op = p.op;
             let op_signal = RwSignal::new(current_op);
+            let stash = StoredValue::new(IfStash::default());
             let on_op = move |ev: web_sys::Event| {
                 if let Some(op) = op_from(&event_target_value(&ev)) {
                     op_signal.set(op);
                     form.update(&op_id, |n| {
                         if let NodeKind::If(ref mut i) = n.kind {
-                            i.op = op;
-                            // `is_dark` reads the sun: the validator rejects any operand.
-                            if op == Op::IsDark {
-                                i.value = None;
-                                i.entity = None;
-                                i.missing = None;
-                            }
+                            stash.update_value(|s| switch_op(i, op, s));
                         }
                     });
                 }
@@ -439,7 +462,6 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 }
             });
             let missing_id = id.clone();
-            let current_missing = p.missing;
             let on_missing = Callback::new(move |ev: web_sys::Event| {
                 let missing = missing_from(&event_target_value(&ev));
                 form.update(&missing_id, |n| {
@@ -447,6 +469,14 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         i.missing = missing;
                     }
                 });
+            });
+            let live_id = id.clone();
+            // The fields re-mount when leaving `is_dark`: they read the draft as it is then.
+            let live = Callback::new(move |()| {
+                form.editor.draft.with_untracked(|f| match f.node(&live_id).map(|n| &n.kind) {
+                    Some(NodeKind::If(i)) => Some(i.clone()),
+                    _ => None,
+                })
             });
             let entity_id = id;
             let entity_write = Callback::new(move |value: Option<String>| {
@@ -456,8 +486,6 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     }
                 });
             });
-            let initial_value = p.value.unwrap_or(serde_json::Value::Null);
-            let initial_entity = p.entity.unwrap_or_default();
             let cfg = Signal::from(expect_context::<House>().flows_config);
             view! {
                 <label class="node-editor__field">
@@ -483,13 +511,13 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 >
                     <JsonField
                         label="Value (JSON)".into()
-                        initial=initial_value.clone()
+                        initial=live.run(()).and_then(|i| i.value).unwrap_or(serde_json::Value::Null)
                         optional=false
                         write=value_write
                     />
                     <TextField
                         label="Entity (defaults to trigger value)".into()
-                        initial=initial_entity.clone()
+                        initial=live.run(()).and_then(|i| i.entity).unwrap_or_default()
                         placeholder="entity.id".into()
                         optional=true
                         write=entity_write
@@ -504,7 +532,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                             ]
                                 .into_iter()
                                 .map(|(value, label)| {
-                                    let selected = missing_str(current_missing) == value;
+                                    let selected = missing_str(live.run(()).and_then(|i| i.missing)) == value;
                                     view! {
                                         <option value=value selected=selected>{label}</option>
                                     }
@@ -604,5 +632,47 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             }
             .into_any()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn flipping_to_is_dark_and_back_keeps_the_operands() {
+        let mut i = IfParams {
+            op: Op::Eq,
+            value: Some(json!(true)),
+            entity: Some("x".into()),
+            missing: Some(Missing::True),
+            extra: Default::default(),
+        };
+        let mut stash = IfStash::default();
+        switch_op(&mut i, Op::IsDark, &mut stash);
+        assert_eq!(
+            (i.value.clone(), i.entity.clone(), i.missing),
+            (None, None, None)
+        );
+        switch_op(&mut i, Op::Eq, &mut stash);
+        assert_eq!(i.op, Op::Eq);
+        assert_eq!(i.value, Some(json!(true)));
+        assert_eq!(i.entity.as_deref(), Some("x"));
+        assert_eq!(i.missing, Some(Missing::True));
+    }
+
+    #[test]
+    fn switching_between_comparisons_leaves_operands_alone() {
+        let mut i = IfParams {
+            op: Op::Eq,
+            value: Some(json!(1)),
+            entity: None,
+            missing: None,
+            extra: Default::default(),
+        };
+        switch_op(&mut i, Op::Gt, &mut IfStash::default());
+        assert_eq!((i.op, i.value), (Op::Gt, Some(json!(1))));
     }
 }
