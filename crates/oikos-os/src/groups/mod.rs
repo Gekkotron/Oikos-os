@@ -3,6 +3,7 @@
 //! the hub publishes what they build.
 
 pub mod discovery;
+pub mod fanout;
 pub mod state;
 pub mod store;
 pub mod topics;

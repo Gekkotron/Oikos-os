@@ -4,7 +4,9 @@
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{
+    Arc, Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
+};
 use std::time::Duration;
 
 use crate::alerts::{AlertStore, Applied};
@@ -62,6 +64,13 @@ pub enum HubError {
     InvalidFlow(String),
 }
 
+/// A message on a group's command topic that is a command: a JSON object with a `type`.
+fn parse_group_command(payload: &[u8]) -> Option<Command> {
+    let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    value.get("type")?;
+    serde_json::from_value(value).ok()
+}
+
 /// The `install_id` the web sends in a reply; the app sends its own install id.
 const WEB_INSTALL_ID: &str = "oikos-web";
 
@@ -94,6 +103,8 @@ pub struct StateSeen {
 }
 
 pub struct Hub {
+    /// The hub's own `Arc`, so a message handler can spawn work that outlives its `&self`.
+    me: Weak<Hub>,
     registry: RwLock<Registry>,
     events: broadcast::Sender<WsEvent>,
     /// The ids whose state was reported, changed or not: Zigbee2MQTT echoes the whole device
@@ -183,7 +194,8 @@ impl Hub {
         let media = MediaProxy::new(cfg.frigate.clone());
         let alerts = AlertStore::with_media_origin(media.as_ref().map(|m| m.origin().to_owned()));
         let (engine_tx, engine_rx) = mpsc::unbounded_channel();
-        Arc::new(Hub {
+        Arc::new_cyclic(|me| Hub {
+            me: me.clone(),
             registry: RwLock::new(registry),
             events,
             state_seen,
@@ -322,10 +334,22 @@ impl Hub {
         for event in events {
             self.broadcast(event);
         }
+        // A member whose value or availability changed, or that reported, moves its groups.
+        let mut touched: BTreeSet<String> = changes
+            .iter()
+            .filter_map(|change| match change {
+                Change::StateChanged(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
         for id in seen {
+            touched.insert(id.clone());
             // An error only means no command is waiting right now.
             let epoch = self.link_epoch();
             let _ = self.state_seen.send(StateSeen { id, epoch });
+        }
+        for id in &touched {
+            self.on_member_state_change(id);
         }
         self.with_button_subscriptions(changes)
     }
@@ -342,8 +366,29 @@ impl Hub {
                 }
                 return Vec::new();
             }
+            if let Some(group_id) = self.group_command_id(topic)
+                && let Some(cmd) = parse_group_command(payload)
+                && let Some(hub) = self.me.upgrade()
+                && tokio::runtime::Handle::try_current().is_ok()
+            {
+                tokio::spawn(async move {
+                    let _ = hub.on_group_command(&group_id, cmd).await;
+                });
+                return Vec::new();
+            }
         }
         self.ingest(topic, payload)
+    }
+
+    /// The id of the group whose command topic `topic` is, when the definition is known.
+    fn group_command_id(&self, topic: &str) -> Option<String> {
+        let id = topic
+            .strip_prefix(self.discovery_prefix.as_str())?
+            .strip_prefix("/group/")?;
+        if id.is_empty() || id.contains('/') {
+            return None;
+        }
+        self.group_store().get(id).is_some().then(|| id.to_owned())
     }
 
     /// A button appearing or any entity vanishing may change the button topics to subscribe to.
@@ -539,6 +584,9 @@ impl Hub {
     /// entity is rejected before anything is published, and a broker link that is down is
     /// [`HubError::Publish`] right away rather than a wait for an echo that cannot come.
     pub async fn send_command(&self, id: &str, cmd: Command) -> Result<CommandResponse, HubError> {
+        if let Some(group_id) = id.strip_prefix("group_") {
+            return Ok(self.on_group_command(group_id, cmd).await);
+        }
         // Subscribed before publishing, so a fast echo cannot slip between the two.
         let mut events = self.subscribe();
         let mut seen = self.state_seen.subscribe();
@@ -610,6 +658,159 @@ impl Hub {
                     state: None,
                 })
             }
+        }
+    }
+
+    /// The present members of `spec`, as views.
+    fn group_member_views(&self, spec: &GroupSpec) -> Vec<EntityView> {
+        let reg = self.read();
+        spec.members
+            .iter()
+            .filter_map(|member| {
+                let entity = reg.entity(member)?;
+                let state = reg.state(member).cloned().unwrap_or_default();
+                Some(EntityView::from(entity, &state))
+            })
+            .collect()
+    }
+
+    /// Fans `cmd` out to the reachable members of group `id` and waits up to two seconds for
+    /// each of them to report. The group's own state is not published here: it follows the
+    /// members' echoes ([`Self::on_member_state_change`]).
+    pub async fn on_group_command(&self, id: &str, cmd: Command) -> CommandResponse {
+        let reject = |reason: String| CommandResponse {
+            accepted: false,
+            reason: Some(reason),
+            state: None,
+        };
+        let Some(spec) = self.group_store().get(id).cloned() else {
+            return reject("unknown group".to_owned());
+        };
+        // Subscribed before publishing, so a fast echo cannot slip between the two.
+        let mut seen = self.state_seen.subscribe();
+        let members = self.group_member_views(&spec);
+        let mut expected = BTreeSet::new();
+        let mut publishes = Vec::new();
+        {
+            let reg = self.read();
+            for target in groups::fanout::targets(&spec, &members) {
+                let Some(member) = members.iter().find(|m| m.id == target) else {
+                    continue;
+                };
+                let Some(member_cmd) = groups::fanout::translate(&spec, &cmd, member) else {
+                    continue;
+                };
+                let (Some(entity), Some(state)) = (reg.entity(&target), reg.state(&target)) else {
+                    continue;
+                };
+                match map_command(entity, state, &member_cmd, reg.templates()) {
+                    Ok(mapped) => {
+                        publishes.extend(mapped);
+                        expected.insert(target);
+                    }
+                    Err(err) => {
+                        tracing::warn!(group = %id, member = %target, %err, "group member skipped")
+                    }
+                }
+            }
+        }
+        if expected.is_empty() {
+            return reject("no reachable member".to_owned());
+        }
+        for publish in publishes {
+            if let Err(err) = self.publish(publish) {
+                return reject(err.to_string());
+            }
+        }
+        let mut waiting = expected;
+        let window = Duration::from_millis(2000);
+        let _ = tokio::time::timeout(window, async {
+            while !waiting.is_empty() {
+                match seen.recv().await {
+                    Ok(report) => {
+                        waiting.remove(&report.id);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+        .await;
+        if waiting.is_empty() {
+            return CommandResponse {
+                accepted: true,
+                reason: None,
+                state: None,
+            };
+        }
+        let missing: Vec<String> = waiting.into_iter().collect();
+        let reason = format!("{}: no echo", missing.join(", "));
+        self.broadcast(WsEvent::CommandFailed {
+            id: groups::topics::unique_id(id),
+            reason: reason.clone(),
+        });
+        reject(reason)
+    }
+
+    /// Recomputes and republishes every group that lists `member_id`: the combined state when
+    /// it changed, and the availability (online while any targeted member is reachable). A
+    /// group is never a member of a group, so group ids are ignored, which also keeps the
+    /// group's own state echoes from looping back here.
+    pub fn on_member_state_change(&self, member_id: &str) {
+        if member_id.starts_with("group_") {
+            return;
+        }
+        let affected: Vec<(String, GroupSpec)> = self
+            .group_store()
+            .all()
+            .iter()
+            .filter(|(_, spec)| spec.members.iter().any(|m| m == member_id))
+            .map(|(id, spec)| (id.clone(), spec.clone()))
+            .collect();
+        let prefix = &self.discovery_prefix;
+        for (group_id, spec) in affected {
+            let Some(group) = self.entity_view(&groups::topics::unique_id(&group_id)) else {
+                continue;
+            };
+            let members = self.group_member_views(&spec);
+            let reachable = !groups::fanout::targets(&spec, &members).is_empty();
+            let matching: Vec<EntityView> = members
+                .into_iter()
+                .filter(|m| m.kind == spec.kind)
+                .collect();
+
+            if let Some(state) = groups::state::combine(spec.kind, &matching) {
+                let topic = groups::topics::state_topic(prefix, &group_id);
+                let payload = groups::state::encode(&state);
+                self.ingest(&topic, payload.as_bytes());
+                let changed = self
+                    .entity_view(&group.id)
+                    .is_some_and(|now| now.state.value != group.state.value);
+                if changed {
+                    self.republish(topic, payload);
+                }
+            }
+
+            let topic = groups::topics::availability_topic(prefix, &group_id);
+            let payload = if reachable { "online" } else { "offline" };
+            self.ingest(&topic, payload.as_bytes());
+            let flipped = self
+                .entity_view(&group.id)
+                .is_some_and(|now| now.state.availability != group.state.availability);
+            if flipped {
+                self.republish(topic, payload.to_owned());
+            }
+        }
+    }
+
+    /// Publishes a group topic retained; a refused publish is logged, the local copy stays.
+    fn republish(&self, topic: String, payload: String) {
+        if let Err(err) = self.publish(Publish {
+            topic: topic.clone(),
+            payload,
+            retain: true,
+        }) {
+            tracing::warn!(%topic, %err, "group publish refused");
         }
     }
 

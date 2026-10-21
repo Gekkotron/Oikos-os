@@ -98,7 +98,7 @@ fn switch(config: &mut Map<String, Value>) {
     set(
         config,
         &[
-            ("state_value_template", json!("{{ value_json.state }}")),
+            ("value_template", json!("{{ value_json.state }}")),
             ("state_on", json!("ON")),
             ("state_off", json!("OFF")),
             ("payload_on", json!(r#"{"type":"turn_on"}"#)),
@@ -114,7 +114,7 @@ fn cover(config: &mut Map<String, Value>, topic: &str, members: &[EntityView]) {
             ("payload_open", json!(r#"{"type":"open"}"#)),
             ("payload_close", json!(r#"{"type":"close"}"#)),
             ("payload_stop", json!(r#"{"type":"stop"}"#)),
-            ("state_value_template", json!("{{ value_json.state }}")),
+            ("value_template", json!("{{ value_json.state }}")),
         ],
     );
     if shared(members, |c| c.position) {
