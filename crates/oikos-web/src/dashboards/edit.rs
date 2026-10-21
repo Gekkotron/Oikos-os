@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use oikos_core::dashboard::{allowed_spans, Dashboard};
+use oikos_core::dashboard::{allowed_spans, Dashboard, Widget};
 
 use crate::api;
 
@@ -56,6 +56,13 @@ impl EditState {
     pub fn discard(&self) {
         self.draft.set(self.original.get_untracked());
     }
+}
+
+/// Appends a picked widget to the draft; the hub validates it on Save.
+pub fn add_widget_handler(state: EditState) -> Callback<Widget> {
+    Callback::new(move |widget: Widget| {
+        state.draft.update(|d| d.widgets.push(widget));
+    })
 }
 
 /// The pencil / Discard / Save bar shown on authored dashboards.
