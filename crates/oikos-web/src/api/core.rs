@@ -2,7 +2,8 @@
 
 use gloo_net::http::{Request, Response};
 use oikos_api::{
-    ApiError, CommandResponse, EntityView, FlowView, OverridePatch, RunView, SchedulePreview,
+    ApiError, CommandResponse, EntityView, FlowView, FlowWriteOutcome, OverridePatch, RunView,
+    SchedulePreview,
 };
 use oikos_core::flow::Flow;
 use oikos_core::model::{AreasDocument, Command};
@@ -111,7 +112,8 @@ pub async fn set_flow_enabled(id: &str, enabled: bool) -> Result<FlowView, ApiEr
 pub async fn put_flow(flow: &Flow) -> Result<FlowView, ApiError> {
     let url = format!("/api/v1/flows/{}", encode_id(&flow.id));
     let response = check(Request::put(&url).json(flow), None).await?;
-    read_json(response).await
+    let outcome: FlowWriteOutcome = read_json(response).await?;
+    Ok(outcome.flow)
 }
 
 /// The next three ticks of `cron` in the house time zone; a `422` (the hub's message names what

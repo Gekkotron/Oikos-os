@@ -63,6 +63,15 @@ impl Default for Flow {
     }
 }
 
+/// True when the flow reads the sun: it has a `trigger.sun` node or an `if` with `op: is_dark`.
+pub fn uses_sun_or_is_dark(flow: &Flow) -> bool {
+    flow.nodes.iter().any(|node| match &node.kind {
+        NodeKind::TriggerSun(_) => true,
+        NodeKind::If(params) => params.op == Op::IsDark,
+        _ => false,
+    })
+}
+
 impl Flow {
     /// Decodes a retained payload leniently: nulls read as absent (at the top level, on each node
     /// and in each node's params), unknown keys are kept. The error is serde's message.

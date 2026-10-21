@@ -121,6 +121,8 @@ pub struct Hub {
     house_point: (f64, f64),
     /// Whether `house_point` is the Paris fallback, latched at startup.
     fallback_active: bool,
+    /// The `[flows]` section as configured.
+    flows_config: crate::config::FlowsConfig,
     /// Requests for the flow engine; the engine takes the receiving end once.
     engine_tx: mpsc::UnboundedSender<EngineRequest>,
     engine_rx: Mutex<Option<mpsc::UnboundedReceiver<EngineRequest>>>,
@@ -146,6 +148,16 @@ impl Hub {
     /// The house (latitude, longitude), `[flows] latitude`/`longitude` or Paris.
     pub fn house_point(&self) -> (f64, f64) {
         self.house_point
+    }
+
+    /// The `[flows]` settings as the UI reads them.
+    pub fn flows_config_view(&self) -> oikos_api::FlowsConfigView {
+        oikos_api::FlowsConfigView {
+            latitude: self.flows_config.latitude,
+            longitude: self.flows_config.longitude,
+            timezone: self.zone.name().to_owned(),
+            fallback_active: self.fallback_active,
+        }
     }
 
     /// True when `house_point` is the Paris fallback.
@@ -189,6 +201,7 @@ impl Hub {
             zone: crate::flows::house_zone(&cfg.flows),
             house_point: cfg.flows.house_point(),
             fallback_active: cfg.flows.fallback_active(),
+            flows_config: cfg.flows.clone(),
             engine_tx,
             engine_rx: Mutex::new(Some(engine_rx)),
             media,

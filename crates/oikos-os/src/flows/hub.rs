@@ -6,14 +6,20 @@ use std::sync::Arc;
 
 use tokio::task::JoinHandle;
 
-use oikos_api::{ConnectionStatus, FlowView, RunStatus, RunView, StepView, TriggerInfo, WsEvent};
+use oikos_api::{
+    ConnectionStatus, FlowView, FlowWriteOutcome, RunStatus, RunView, StepView, TriggerInfo,
+    WsEvent,
+};
 use oikos_core::command::{Publish, map_command};
-use oikos_core::flow::{Flow, NodeKind, Scalar, validate};
+use oikos_core::flow::{Flow, NodeKind, Scalar, uses_sun_or_is_dark, validate};
 use oikos_core::model::{Command, Kind};
 
 use super::{EngineRequest, StoreApplied};
 use crate::clock;
 use crate::hub::{Hub, HubError};
+
+/// The warning attached to a sun flow written while the house point is the Paris fallback.
+const PARIS_FALLBACK_WARNING: &str = "Running sun flows against the Paris fallback. Set `[flows] latitude` and `[flows] longitude` in `oikos.toml` to use your house's point.";
 
 impl Hub {
     /// Applies a retained flow payload. A change (or removal) is broadcast and tells the engine
@@ -87,10 +93,15 @@ impl Hub {
     /// returned view already reflects it. Every entity a node names must exist and every
     /// `command` node must map for that entity, so a flow that could never work is refused now
     /// rather than failing at 3 a.m.
-    pub async fn set_flow(&self, flow: Flow) -> Result<FlowView, HubError> {
+    /// The outcome carries a warning when the flow reads the sun while the house point is the
+    /// Paris fallback.
+    pub async fn set_flow(&self, flow: Flow) -> Result<FlowWriteOutcome, HubError> {
         validate(&flow).map_err(|err| HubError::InvalidFlow(err.to_string()))?;
         self.check_house(&flow)?;
-        self.write_flow(&flow)
+        let warning = (self.fallback_active() && uses_sun_or_is_dark(&flow))
+            .then(|| PARIS_FALLBACK_WARNING.to_owned());
+        let flow = self.write_flow(&flow)?;
+        Ok(FlowWriteOutcome { flow, warning })
     }
 
     /// Removes a flow, valid or not: publishes an empty retained payload and applies it.

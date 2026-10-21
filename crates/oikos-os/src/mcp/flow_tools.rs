@@ -46,7 +46,7 @@ impl OikosMcp {
         Parameters(params): Parameters<SetFlowParams>,
     ) -> ToolResult<FlowView> {
         log_write("set_flow", &params);
-        Ok(Json(self.hub.set_flow(params.flow).await?))
+        Ok(Json(self.hub.set_flow(params.flow).await?.flow))
     }
 
     /// Removes a flow, valid or not, by clearing its retained definition.

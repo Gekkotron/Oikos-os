@@ -13,8 +13,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
     AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EnergyKind, EntityView,
-    FlowView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, IgnoredView, LastChange,
-    OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec,
+    FlowView, FlowWriteOutcome, FlowsConfigView, HistoryDaily, HistoryRange, HistorySeries,
+    HistoryToday, IgnoredView, LastChange, OverridePatch, RunView, SchedulePreview, Snapshot,
+    VirtualSpec,
 };
 use oikos_core::flow::{Flow, Schedule};
 use oikos_core::model::{AreasDocument, Command};
@@ -46,6 +47,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/media", get(media))
         .route("/flows", get(flows))
         .route("/schedule", get(schedule_preview))
+        .route("/config/flows", get(flows_config))
         .route(
             "/flows/{id}",
             get(get_flow).put(put_flow).delete(delete_flow),
@@ -355,7 +357,7 @@ async fn put_flow(
     State(hub): HubState,
     Path(id): Path<String>,
     body: Body<serde_json::Value>,
-) -> Result<Json<FlowView>, HttpError> {
+) -> Result<Json<FlowWriteOutcome>, HttpError> {
     let Json(mut value) = body?;
     if let Some(object) = value.as_object_mut() {
         match object.get("id").and_then(|v| v.as_str()) {
@@ -376,6 +378,12 @@ async fn put_flow(
         error,
     })?;
     Ok(Json(hub.set_flow(flow).await?))
+}
+
+/// The `[flows]` settings: the configured house point, the zone and whether the Paris fallback
+/// is active.
+async fn flows_config(State(hub): HubState) -> Json<FlowsConfigView> {
+    Json(hub.flows_config_view())
 }
 
 /// Removes a flow (204); `404` for an unknown id.

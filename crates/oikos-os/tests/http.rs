@@ -1158,7 +1158,7 @@ async fn put_flow_then_get_and_list() {
         .expect("PUT");
     assert_eq!(put.status(), StatusCode::OK);
     let put: Value = put.json().await.expect("json");
-    assert_eq!(put["definition"]["name"], "Living LED on motion");
+    assert_eq!(put["flow"]["definition"]["name"], "Living LED on motion");
 
     let one = server.get("/api/v1/flows/living").await;
     assert_eq!(one.status(), StatusCode::OK);
@@ -1217,7 +1217,7 @@ async fn put_flow_invalid_422_and_id_mismatch_400() {
         .expect("PUT");
     assert_eq!(res.status(), StatusCode::OK);
     let res: Value = res.json().await.expect("json");
-    assert_eq!(res["definition"]["id"], "living");
+    assert_eq!(res["flow"]["definition"]["id"], "living");
 }
 
 #[tokio::test]

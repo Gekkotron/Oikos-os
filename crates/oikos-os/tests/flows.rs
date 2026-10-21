@@ -117,7 +117,7 @@ async fn retained_flow_is_listed_and_broadcast() {
 async fn set_flow_publishes_retained_and_lists() {
     let (hub, mut publisher) = hub_with_entities();
     let view = hub.set_flow(reference_flow()).await.expect("set_flow");
-    assert_eq!(view.definition.id, "living");
+    assert_eq!(view.flow.definition.id, "living");
 
     let publish = publisher.try_recv().expect("a publish");
     assert_eq!(publish.topic, FLOW_TOPIC);

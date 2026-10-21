@@ -19,6 +19,25 @@ pub struct FlowView {
     pub runs: Vec<RunView>,
 }
 
+/// The answer to a flow write: the stored flow and, when the flow reads the sun against the
+/// Paris fallback, a warning. `warning` is always on the wire (`null` when there is none).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FlowWriteOutcome {
+    pub flow: FlowView,
+    pub warning: Option<String>,
+}
+
+/// The `[flows]` settings the UI needs: the house point as configured, the time zone and
+/// whether sun flows run against the Paris fallback.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FlowsConfigView {
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    /// The house time zone (an IANA name).
+    pub timezone: String,
+    pub fallback_active: bool,
+}
+
 /// The next ticks of a cron expression, for the schedule editor's preview.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SchedulePreview {

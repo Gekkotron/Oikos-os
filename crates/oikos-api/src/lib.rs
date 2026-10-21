@@ -13,7 +13,8 @@ mod virtual_entities;
 pub use alerts::{AlertAction, AlertChannel, AlertSeverity, AlertView, parse_history};
 pub use events::{ApiError, CommandResponse, ConnectionStatus, OverridePatch, WsEvent};
 pub use flows::{
-    FlowView, RunStatus, RunView, SchedulePreview, StepOutcome, StepView, TriggerInfo,
+    FlowView, FlowWriteOutcome, FlowsConfigView, RunStatus, RunView, SchedulePreview, StepOutcome,
+    StepView, TriggerInfo,
 };
 pub use history::{
     EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange, LastChangeItem,
