@@ -67,17 +67,33 @@ impl DashboardStore {
     fn decode(id: &str, payload: &[u8]) -> Entry {
         if id == HOUSE_ID {
             return Entry::Invalid {
-                reason: "reserved id".to_owned(),
+                reason: format!("`{HOUSE_ID}` is a reserved dashboard id"),
             };
         }
         // `decode_dashboard` drops unknown widget kinds; plain serde would reject the payload.
-        let dashboard = serde_json::from_slice(payload)
+        let dashboard = serde_json::from_slice::<serde_json::Value>(payload)
             .map_err(|err| err.to_string())
-            .and_then(|value| decode_dashboard(value).map_err(|err| err.to_string()));
+            .and_then(|mut value| {
+                // A dashboard published without an id means "the topic's id".
+                if let Some(object) = value.as_object_mut()
+                    && object.get("id").is_none_or(|v| v.is_null())
+                {
+                    object.insert("id".to_owned(), serde_json::Value::String(id.to_owned()));
+                }
+                decode_dashboard(value).map_err(|err| err.to_string())
+            });
         let dashboard = match dashboard {
             Ok(dashboard) => dashboard,
             Err(reason) => return Entry::Invalid { reason },
         };
+        if dashboard.id != id {
+            return Entry::Invalid {
+                reason: format!(
+                    "id mismatch: payload says `{}`, topic says `{id}`",
+                    dashboard.id
+                ),
+            };
+        }
         for widget in &dashboard.widgets {
             if let Err(problem) = validate_widget(widget) {
                 return Entry::Invalid {
@@ -293,7 +309,7 @@ mod tests {
             StoreApplied::Changed
         );
         match store.entries.get("house") {
-            Some(Entry::Invalid { reason }) => assert_eq!(reason, "reserved id"),
+            Some(Entry::Invalid { reason }) => assert!(reason.contains("house"), "{reason}"),
             _ => panic!("expected an invalid entry"),
         }
         assert!(store.get("house").is_none());
@@ -313,5 +329,26 @@ mod tests {
         assert_eq!(dashboard.widgets.len(), 1);
         assert_eq!(dashboard.widgets[0].id, "w1");
         assert_eq!(store.list().len(), 1);
+    }
+
+    #[test]
+    fn apply_fills_missing_id_from_topic() {
+        let mut store = DashboardStore::new();
+        let bytes = br#"{"name":"X","order":1,"widgets":[]}"#;
+        assert_eq!(store.apply("morning", bytes), StoreApplied::Changed);
+        assert_eq!(store.get("morning").expect("valid").id, "morning");
+    }
+
+    #[test]
+    fn apply_rejects_payload_with_mismatched_id() {
+        let mut store = DashboardStore::new();
+        let bytes = br#"{"id":"other","name":"X","order":1,"widgets":[]}"#;
+        store.apply("morning", bytes);
+        let reason = store.invalid_reason("morning").expect("invalid");
+        assert!(
+            reason.contains("other") && reason.contains("morning"),
+            "{reason}"
+        );
+        assert!(store.get("morning").is_none());
     }
 }
