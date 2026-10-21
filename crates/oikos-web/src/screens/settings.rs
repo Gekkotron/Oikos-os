@@ -3,7 +3,8 @@
 use leptos::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use leptos::task::spawn_local;
-use oikos_api::ConnectionStatus;
+use leptos_router::components::A;
+use oikos_api::{ConnectionStatus, DeviceView, UpdateView};
 
 use crate::house::House;
 use crate::screens::entity_sheet::{availability_class, availability_word};
@@ -211,6 +212,47 @@ pub fn SettingsScreen() -> impl IntoView {
                     <Row label="Areas" value=move || house.areas.with(Vec::len).to_string() />
                     <Row label="Ignored topics" value=move || house.ignored.with(Vec::len).to_string() />
                 </dl>
+            </Panel>
+            <Panel title="Updates available">
+                {move || {
+                    let pending: Vec<(DeviceView, UpdateView)> = house
+                        .devices
+                        .with(|ds| {
+                            ds.iter()
+                                .filter_map(|d| {
+                                    let u = d.update.clone().filter(|u| u.available)?;
+                                    Some((d.clone(), u))
+                                })
+                                .collect()
+                        });
+                    if pending.is_empty() {
+                        view! { <p class="settings__empty">"All devices are up to date"</p> }
+                            .into_any()
+                    } else {
+                        view! {
+                            <ul class="settings__updates">
+                                {pending
+                                    .into_iter()
+                                    .map(|(d, u)| {
+                                        view! {
+                                            <li>
+                                                <A href="/devices">{d.friendly_name.clone()}</A>
+                                                <span>
+                                                    {format!(
+                                                        "{} → {}",
+                                                        u.installed.unwrap_or_default(),
+                                                        u.latest.unwrap_or_default(),
+                                                    )}
+                                                </span>
+                                            </li>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </ul>
+                        }
+                            .into_any()
+                    }
+                }}
             </Panel>
             <Panel title="MCP">
                 <dl class="sheet__rows">

@@ -4204,3 +4204,22 @@ html:has(.flow-canvas-screen) {
   height: auto;
   border-radius: 8px;
 }
+
+.settings__updates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.settings__updates li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+}
+.settings__empty {
+  margin: 0;
+  opacity: 0.7;
+}
+.device__update-badge {
+  color: var(--accent, inherit);
+}
