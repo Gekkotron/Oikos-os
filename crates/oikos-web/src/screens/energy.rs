@@ -293,15 +293,12 @@ fn today_for_card(
     }
     let mut sum = 0.0;
     for c in &counters {
-        match map.get(&c.id).copied().flatten() {
-            Some(v) => sum += v,
-            None => return None,
-        }
+        sum += map.get(&c.id).copied().flatten()?;
     }
     Some(sum)
 }
 
-fn by_role<'a>(all: &'a [EnergyEntity]) -> BTreeMap<EnergyRole, Vec<&'a EnergyEntity>> {
+fn by_role(all: &[EnergyEntity]) -> BTreeMap<EnergyRole, Vec<&EnergyEntity>> {
     let mut m: BTreeMap<EnergyRole, Vec<&EnergyEntity>> = BTreeMap::new();
     for e in all {
         if let Some(r) = e.role {

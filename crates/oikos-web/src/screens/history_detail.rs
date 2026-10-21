@@ -57,10 +57,8 @@ pub fn HistoryDetailScreen() -> impl IntoView {
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
     let range = Memo::new(move |_| parse_range(query.read().get("range")));
 
-    let entity: Memo<Option<EntityView>> = {
-        let id = id;
-        Memo::new(move |_| house.entities.with(|m| m.get(&id.get()).cloned()))
-    };
+    let entity: Memo<Option<EntityView>> =
+        Memo::new(move |_| house.entities.with(|m| m.get(&id.get()).cloned()));
 
     let kind_str: Memo<String> = Memo::new(move |_| {
         entity

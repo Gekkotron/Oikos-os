@@ -71,7 +71,7 @@ pub(crate) fn last_change_url(ids: &[&str]) -> String {
     out
 }
 
-pub(crate) fn chunk_ids<'a>(ids: &'a [String], max: usize) -> Vec<Vec<&'a str>> {
+pub(crate) fn chunk_ids(ids: &[String], max: usize) -> Vec<Vec<&str>> {
     ids.chunks(max)
         .map(|c| c.iter().map(String::as_str).collect())
         .collect()
