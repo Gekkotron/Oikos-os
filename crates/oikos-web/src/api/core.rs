@@ -191,7 +191,11 @@ pub async fn fetch_dashboard(id: &str) -> Result<DashboardView, ApiError> {
 pub async fn put_dashboard(d: &Dashboard) -> Result<Dashboard, ApiError> {
     let url = format!("/api/v1/dashboards/{}", encode_id(&d.id));
     let response = check(Request::put(&url).json(d), None).await?;
-    read_json(response).await
+    // Plain serde would reject widget kinds this build does not know; decode_dashboard drops them.
+    let value: Value = read_json(response).await?;
+    oikos_api::decode_dashboard(value).map_err(|e| ApiError {
+        error: format!("decode dashboard: {e}"),
+    })
 }
 
 /// House cannot be deleted (the hub answers 403), so the client hides its delete UI.
