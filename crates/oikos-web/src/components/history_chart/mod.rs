@@ -4,4 +4,5 @@ pub mod format;
 pub mod geom;
 pub mod view;
 
+pub use format::paris_offset;
 pub use view::{Flavor, HistoryChart};

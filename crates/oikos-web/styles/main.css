@@ -4127,3 +4127,8 @@ html:has(.flow-canvas-screen) {
   font: 400 11px/14px var(--font-body);
   opacity: 0.7;
 }
+
+.security-since {
+  font: 400 11px/14px var(--font-body);
+  opacity: 0.6;
+}

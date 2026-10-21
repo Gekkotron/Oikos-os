@@ -1,15 +1,62 @@
 //! The Security screen: alarm panels, actions, the summary line and the sensor sections.
 
+use std::collections::BTreeMap;
+
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use leptos_router::components::A;
 use oikos_core::model::Kind;
+use time::{OffsetDateTime, UtcOffset};
 
+use crate::api::history::fetch_last_change;
 use crate::cards::Sender;
 use crate::components::alarm_hero::AlarmHero;
 use crate::components::alert_row::RecentAlerts;
+use crate::components::history_chart::paris_offset;
+use crate::components::now::Now;
 use crate::house::House;
 use crate::icons::{PLAY, PLUG, sensor_icon};
 use crate::security::{ActionRow, SecurityUi, SensorRow};
+
+/// Shared per-screen map `sensor id → last-change unix seconds (None if the hub has no row)`.
+#[derive(Clone, Copy)]
+struct SinceMap(RwSignal<BTreeMap<String, Option<i64>>>);
+
+fn local_dt(unix: i64) -> OffsetDateTime {
+    let off = paris_offset(unix);
+    let offset = UtcOffset::from_whole_seconds(off).unwrap_or(UtcOffset::UTC);
+    OffsetDateTime::from_unix_timestamp(unix)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+        .to_offset(offset)
+}
+
+/// Natural-language time since `changed_at`. `""` when the sensor has no row.
+pub fn since_label(now_secs: i64, changed_at: Option<i64>) -> String {
+    let Some(t) = changed_at else {
+        return String::new();
+    };
+    let delta = now_secs - t;
+    if delta < 0 {
+        return String::new();
+    }
+    if delta < 60 {
+        return "just now".into();
+    }
+    if delta < 3600 {
+        return format!("{} min ago", delta / 60);
+    }
+    let now = local_dt(now_secs);
+    let then = local_dt(t);
+    let hhmm = format!("{:02}:{:02}", then.hour(), then.minute());
+    let days = (now.date().to_julian_day() - then.date().to_julian_day()) as i64;
+    if days == 0 {
+        hhmm
+    } else if days == 1 {
+        format!("yesterday {hhmm}")
+    } else {
+        format!("{days} days ago")
+    }
+}
 
 fn entity_href(id: &str) -> String {
     format!("/entity/{}", crate::api::encode_id(id))
@@ -33,6 +80,17 @@ fn SensorTile(row: SensorRow) -> impl IntoView {
     );
     let label = row.aria_label();
     let icon = sensor_icon(row.device_class.as_deref());
+    let since_map = use_context::<SinceMap>();
+    let now = use_context::<Now>();
+    let id_for_since = row.id.clone();
+    let since = move || match (since_map, now) {
+        (Some(SinceMap(m)), Some(now)) => {
+            let changed_at = m.with(|m| m.get(&id_for_since).copied().flatten());
+            let now_secs = now.0.get() / 1000;
+            since_label(now_secs as i64, changed_at)
+        }
+        _ => String::new(),
+    };
     view! {
         <A href=entity_href(&row.id) attr:class=class attr:aria-label=label>
             <span class="tile__line">
@@ -45,6 +103,7 @@ fn SensorTile(row: SensorRow) -> impl IntoView {
                 </span>
                 <span class="tile__state">{row.state_word()}</span>
             </span>
+            <span class="tile__line security-since">{since}</span>
         </A>
     }
 }
@@ -154,6 +213,33 @@ pub fn SecurityScreen() -> impl IntoView {
             .entities
             .with(|m| house.areas.with(|a| SecurityUi::build(m, a)))
     });
+
+    // Provide the shared `since X` map, populated by one batched /last_change on screen entry.
+    let since_map = SinceMap(RwSignal::new(BTreeMap::new()));
+    provide_context(since_map);
+    Effect::new(move |_| {
+        let ids: Vec<String> = ui.with(|u| {
+            u.sensors.iter().map(|r| r.id.clone()).collect()
+        });
+        if ids.is_empty() {
+            return;
+        }
+        spawn_local(async move {
+            let ordered_ids = ids.clone();
+            match fetch_last_change(&ordered_ids).await {
+                Ok(reply) => {
+                    let mut m = BTreeMap::new();
+                    for (id, item) in ordered_ids.iter().zip(reply.items.iter()) {
+                        m.insert(id.clone(), item.changed_at);
+                    }
+                    since_map.0.set(m);
+                }
+                Err(_) => {
+                    // leave the map as-is; the tiles show no `since` line until a later fetch succeeds
+                }
+            }
+        });
+    });
     let loaded = Memo::new(move |_| {
         house.areas.with(|a| !a.is_empty())
             || house.entities.with(|m| !m.is_empty())
@@ -171,6 +257,9 @@ pub fn SecurityScreen() -> impl IntoView {
             }
         }
     });
+
+    // Silence unused imports when the fetch module is only used in the effect above.
+    let _ = &since_map;
 
     let panels = move || ui.with(|u| u.panels.clone());
     let actions = move || ui.with(|u| u.actions.clone());
@@ -258,3 +347,32 @@ pub fn SecurityScreen() -> impl IntoView {
         </Show>
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::since_label;
+
+    #[test]
+    fn since_label_covers_the_natural_language_scale() {
+        let now = 1_792_497_600;
+        assert_eq!(since_label(now, None), "");
+        assert_eq!(since_label(now, Some(now - 30)), "just now");
+        assert_eq!(since_label(now, Some(now - 180)), "3 min ago");
+        // Same-day: just HH:MM in local time.
+        let same_day = since_label(now, Some(now - 3_600));
+        assert_eq!(same_day.len(), 5);
+        assert!(same_day.chars().nth(2) == Some(':'));
+        // Yesterday
+        let yesterday = now - 86_400;
+        assert!(since_label(now, Some(yesterday)).starts_with("yesterday"));
+        // Beyond
+        assert_eq!(since_label(now, Some(now - 3 * 86_400)), "3 days ago");
+    }
+
+    #[test]
+    fn since_label_ignores_future_timestamps() {
+        let now = 1_792_497_600;
+        assert_eq!(since_label(now, Some(now + 60)), "");
+    }
+}
+

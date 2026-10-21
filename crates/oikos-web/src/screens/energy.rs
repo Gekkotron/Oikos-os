@@ -256,6 +256,7 @@ fn EnergyCard(
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 const TODAY_INTERVAL_MS: u32 = 300_000;
 
 /// Fetch `/today?kind=counter` for every energy counter on screen entry and every 5 min,
