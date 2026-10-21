@@ -14,11 +14,12 @@ use crate::media::MediaProxy;
 use crate::virtual_entities as virtuals;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
-    Snapshot, VirtualSpec, WsEvent, area_views, device_views, snapshot,
+    Snapshot, VirtualSpec, WsEvent, area_views, device_views, mask_secret, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{
-    AreasDocument, Availability, Command, GroupKind, Kind, PatchError, UNASSIGNED_AREA, UiOverride,
+    AreasDocument, Availability, Command, Entity, GroupKind, Kind, PatchError, StateValue,
+    UNASSIGNED_AREA, UiOverride,
 };
 use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
 use oikos_core::types::command::expects_echo;
@@ -274,13 +275,25 @@ impl Hub {
             } else {
                 Vec::new()
             };
-            let history_feed: Vec<(String, oikos_core::model::EntityState)> =
+            let history_feed: Vec<(String, oikos_core::model::EntityState, Option<f64>)> =
                 if history_feed_enabled {
                     changes
                         .iter()
                         .filter_map(|change| match change {
                             Change::StateChanged(id) => {
-                                reg.state(id).map(|state| (id.clone(), state.clone()))
+                                let entity = reg.entity(id)?;
+                                // A secret is never offered to history.
+                                if entity
+                                    .capabilities
+                                    .generic
+                                    .as_ref()
+                                    .is_some_and(|g| g.secret)
+                                {
+                                    return None;
+                                }
+                                let state = reg.state(id)?;
+                                let num = history_num_of(entity, &state.value);
+                                Some((id.clone(), state.clone(), num))
                             }
                             _ => None,
                         })
@@ -298,11 +311,12 @@ impl Hub {
             )
         };
         if let Some(history) = self.history.get() {
-            for (id, state) in history_feed {
+            for (id, state, num) in history_feed {
                 history.offer(oikos_core::history::Incoming {
                     at: at_micros,
                     id,
                     state,
+                    num,
                 });
             }
         }
@@ -633,11 +647,16 @@ impl Hub {
         .flatten();
 
         match confirmed {
-            Some(state) => Ok(CommandResponse {
-                accepted: true,
-                reason: None,
-                state: Some(state),
-            }),
+            Some(mut state) => {
+                if let Some(entity) = self.read().entity(id) {
+                    mask_secret(entity, &mut state);
+                }
+                Ok(CommandResponse {
+                    accepted: true,
+                    reason: None,
+                    state: Some(state),
+                })
+            }
             None => {
                 let reason = format!(
                     "no state change within {} ms",
@@ -958,6 +977,16 @@ impl Hub {
     }
 }
 
+/// The number history plots for a state: the type table's mapping for a generic entity,
+/// the kind's own for the others.
+fn history_num_of(entity: &Entity, value: &StateValue) -> Option<f64> {
+    match value {
+        StateValue::Generic(gs) => oikos_core::types::type_def(&entity.component)
+            .and_then(|def| oikos_core::types::history_num(def, gs)),
+        other => oikos_core::history::num_of(other),
+    }
+}
+
 /// The WebSocket events for `changes`, built from the registry right after they were applied.
 /// `IgnoredChanged` and `SubscriptionsChanged` are internal and produce none.
 fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
@@ -969,9 +998,15 @@ fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
                 WsEvent::EntityUpserted(EntityView::from(entity, &state))
             }),
             Change::EntityRemoved(id) => Some(WsEvent::EntityRemoved { id: id.clone() }),
-            Change::StateChanged(id) => reg.state(id).map(|state| WsEvent::StateChanged {
-                id: id.clone(),
-                state: state.clone(),
+            Change::StateChanged(id) => reg.state(id).map(|state| {
+                let mut state = state.clone();
+                if let Some(entity) = reg.entity(id) {
+                    mask_secret(entity, &mut state);
+                }
+                WsEvent::StateChanged {
+                    id: id.clone(),
+                    state,
+                }
             }),
             Change::AreasChanged => Some(WsEvent::AreasChanged {
                 areas: area_views(reg),

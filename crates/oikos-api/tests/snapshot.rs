@@ -165,3 +165,29 @@ fn snapshot_has_a_json_schema() {
     assert!(schema.as_value().is_object());
     let _ = schemars::schema_for!(WsEvent);
 }
+
+#[test]
+fn secret_text_is_masked_in_the_snapshot() {
+    use oikos_core::model::{GenericValue, StateValue};
+    let mut registry = load_house();
+    feed(
+        &mut registry,
+        "oikos/text/u1/main/config",
+        br#"{"name":"Code","unique_id":"u1","mode":"password","state_topic":"t/s","command_topic":"t/set"}"#
+            .to_vec(),
+    );
+    feed(&mut registry, "t/s", b"hunter2".to_vec());
+    let snap = snapshot(&registry, ConnectionStatus::Online, AT);
+    let view = snap
+        .entities
+        .iter()
+        .find(|e| e.component == "text" && e.name == "Code")
+        .expect("text entity");
+    let StateValue::Generic(gs) = &view.state.value else {
+        panic!("generic state: {:?}", view.state.value);
+    };
+    assert_eq!(
+        gs.fields.get("value"),
+        Some(&GenericValue::Text("••••".to_owned()))
+    );
+}

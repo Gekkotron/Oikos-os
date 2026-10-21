@@ -945,6 +945,7 @@ async fn offer_never_blocks_when_full() {
                 availability: oikos_core::model::Availability::Online,
                 last_update: Some((at / 1_000_000) as u64),
             },
+            num: None,
         }
     }
 
@@ -1018,4 +1019,45 @@ async fn lock_command_waits_for_echo() {
         .await
         .expect("mapped");
     assert!(!response.accepted);
+}
+
+fn secret_text_config() -> serde_json::Value {
+    serde_json::json!({"name": "Code", "unique_id": "u1", "mode": "password",
+                       "state_topic": "t/s", "command_topic": "t/set"})
+}
+
+#[tokio::test]
+async fn secret_text_is_masked_in_state_changed_events() {
+    let (hub, _publisher) = hub();
+    let id = feed_generic(&hub, "text", secret_text_config());
+    let mut events = hub.subscribe();
+    hub.ingest("t/s", b"hunter2");
+    loop {
+        match next_event(&mut events).await {
+            WsEvent::StateChanged { id: changed, state } if changed == id => {
+                let StateValue::Generic(gs) = state.value else {
+                    panic!("generic state");
+                };
+                assert_eq!(
+                    gs.fields.get("value"),
+                    Some(&oikos_core::model::GenericValue::Text("••••".to_owned()))
+                );
+                break;
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn secret_text_never_reaches_history() {
+    let (hub, _publisher) = hub();
+    let (history, mut rx) = History::detached(8, chrono_tz::UTC);
+    hub.set_history(history);
+    feed_generic(&hub, "text", secret_text_config());
+    hub.ingest("t/s", b"hunter2");
+    assert!(matches!(
+        rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
 }

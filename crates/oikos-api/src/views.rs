@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oikos_core::model::{
     Area, Availability, BridgeInfo, Capabilities, Device, Entity, EntityCategory, EntityState,
-    Kind, StateValue, UiOverride,
+    GenericValue, Kind, StateValue, UiOverride,
 };
 use oikos_core::registry::Ignored;
 use schemars::JsonSchema;
@@ -47,6 +47,8 @@ impl EntityView {
     }
 
     pub fn from(entity: &Entity, state: &EntityState) -> Self {
+        let mut masked = state.clone();
+        mask_secret(entity, &mut masked);
         let name = match entity.ui.name.as_deref() {
             Some(name) if !name.trim().is_empty() => name.to_owned(),
             _ => entity.name.clone(),
@@ -69,7 +71,28 @@ impl EntityView {
             part_of: entity.part_of.clone(),
             capabilities: entity.capabilities.clone(),
             ui: entity.ui.clone(),
-            state: state.clone(),
+            state: masked,
+        }
+    }
+}
+
+/// What a secret entity shows in place of its value.
+const MASK: &str = "\u{2022}\u{2022}\u{2022}\u{2022}";
+
+/// Blanks every field of a secret entity's generic state (a password-mode text), for any
+/// copy of the state that leaves the hub. A no-op for every other entity.
+pub fn mask_secret(entity: &Entity, state: &mut EntityState) {
+    if !entity
+        .capabilities
+        .generic
+        .as_ref()
+        .is_some_and(|g| g.secret)
+    {
+        return;
+    }
+    if let StateValue::Generic(gs) = &mut state.value {
+        for value in gs.fields.values_mut() {
+            *value = GenericValue::Text(MASK.to_owned());
         }
     }
 }
