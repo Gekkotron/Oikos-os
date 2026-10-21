@@ -117,6 +117,10 @@ pub struct Hub {
     automation_prefix: String,
     /// The time zone schedules and their preview run in.
     zone: chrono_tz::Tz,
+    /// The house (latitude, longitude), Paris when `[flows]` sets none.
+    house_point: (f64, f64),
+    /// Whether `house_point` is the Paris fallback, latched at startup.
+    fallback_active: bool,
     /// Requests for the flow engine; the engine takes the receiving end once.
     engine_tx: mpsc::UnboundedSender<EngineRequest>,
     engine_rx: Mutex<Option<mpsc::UnboundedReceiver<EngineRequest>>>,
@@ -137,6 +141,16 @@ impl Hub {
     /// The house time zone, `[flows] timezone`.
     pub fn zone(&self) -> chrono_tz::Tz {
         self.zone
+    }
+
+    /// The house (latitude, longitude), `[flows] latitude`/`longitude` or Paris.
+    pub fn house_point(&self) -> (f64, f64) {
+        self.house_point
+    }
+
+    /// True when `house_point` is the Paris fallback.
+    pub fn fallback_active(&self) -> bool {
+        self.fallback_active
     }
 
     pub fn new(cfg: &Config, publisher: mpsc::Sender<Publish>) -> Arc<Hub> {
@@ -173,6 +187,8 @@ impl Hub {
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
+            house_point: cfg.flows.house_point(),
+            fallback_active: cfg.flows.fallback_active(),
             engine_tx,
             engine_rx: Mutex::new(Some(engine_rx)),
             media,
@@ -249,9 +265,9 @@ impl Hub {
                     changes
                         .iter()
                         .filter_map(|change| match change {
-                            Change::StateChanged(id) => reg
-                                .state(id)
-                                .map(|state| (id.clone(), state.clone())),
+                            Change::StateChanged(id) => {
+                                reg.state(id).map(|state| (id.clone(), state.clone()))
+                            }
                             _ => None,
                         })
                         .collect()

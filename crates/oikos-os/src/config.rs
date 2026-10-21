@@ -206,6 +206,48 @@ pub struct FlowsConfig {
     /// IANA time zone the schedules run in (`Europe/Paris`). Absent: the system's zone;
     /// unparseable: UTC, with a warning.
     pub timezone: Option<String>,
+    /// House latitude in degrees, north positive. Set together with `longitude`; absent
+    /// (both): Paris.
+    pub latitude: Option<f64>,
+    /// House longitude in degrees, east positive. Set together with `latitude`.
+    pub longitude: Option<f64>,
+}
+
+impl FlowsConfig {
+    /// Rejects a lone coordinate and coordinates outside the globe.
+    pub fn validate(&self) -> Result<(), String> {
+        match (self.latitude, self.longitude) {
+            (None, None) => Ok(()),
+            (Some(_), None) => Err(
+                "[flows] latitude is set but longitude is missing: set both or neither".to_owned(),
+            ),
+            (None, Some(_)) => Err(
+                "[flows] longitude is set but latitude is missing: set both or neither".to_owned(),
+            ),
+            (Some(lat), Some(lon)) => {
+                if !(-90.0..=90.0).contains(&lat) {
+                    return Err(format!("[flows] latitude {lat} is outside -90..=90"));
+                }
+                if !(-180.0..=180.0).contains(&lon) {
+                    return Err(format!("[flows] longitude {lon} is outside -180..=180"));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The house (latitude, longitude), Paris when neither is configured.
+    pub fn house_point(&self) -> (f64, f64) {
+        match (self.latitude, self.longitude) {
+            (Some(lat), Some(lon)) => (lat, lon),
+            _ => (48.8566, 2.3522),
+        }
+    }
+
+    /// True when the house point is the Paris fallback.
+    pub fn fallback_active(&self) -> bool {
+        !(self.latitude.is_some() && self.longitude.is_some())
+    }
 }
 
 /// TimescaleDB connection and the writer's queue size. An empty `url` turns history off
@@ -302,5 +344,40 @@ impl Config {
             }
         }
         figment.extract()
+    }
+}
+
+#[cfg(test)]
+mod flows_config_tests {
+    use super::*;
+
+    #[test]
+    fn flows_config_both_coords_required_together() {
+        let only_lat: FlowsConfig = toml::from_str("latitude = 45.75").unwrap();
+        assert!(only_lat.validate().is_err());
+        let only_lon: FlowsConfig = toml::from_str("longitude = 4.85").unwrap();
+        assert!(only_lon.validate().is_err());
+        let both: FlowsConfig = toml::from_str("latitude = 45.75\nlongitude = 4.85").unwrap();
+        assert_eq!(both.validate(), Ok(()));
+        let neither = FlowsConfig::default();
+        assert_eq!(neither.validate(), Ok(()));
+    }
+
+    #[test]
+    fn flows_config_coord_ranges_enforced() {
+        let bad_lat: FlowsConfig = toml::from_str("latitude = 91.0\nlongitude = 4.85").unwrap();
+        assert!(bad_lat.validate().is_err());
+        let bad_lon: FlowsConfig = toml::from_str("latitude = 45.75\nlongitude = 181.0").unwrap();
+        assert!(bad_lon.validate().is_err());
+    }
+
+    #[test]
+    fn flows_config_house_point_falls_back_to_paris() {
+        let cfg = FlowsConfig::default();
+        assert_eq!(cfg.house_point(), (48.8566, 2.3522));
+        assert!(cfg.fallback_active());
+        let configured: FlowsConfig = toml::from_str("latitude = 45.75\nlongitude = 4.85").unwrap();
+        assert_eq!(configured.house_point(), (45.75, 4.85));
+        assert!(!configured.fallback_active());
     }
 }
