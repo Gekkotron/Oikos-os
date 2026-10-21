@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use leptos_router::hooks::use_params_map;
 use oikos_api::HOUSE_ID;
 
+use crate::dashboards::grid::Grid;
 use crate::house::House;
 use crate::screens::home::HomeScreen;
 
@@ -25,17 +26,8 @@ pub fn DashboardScreen() -> impl IntoView {
                 house.dashboards.track();
                 match house.dashboard(&current_id) {
                     Some(view) => {
-                        // TODO(Task 10): render the widget grid for `view.dashboard.widgets`
-                        // in place of this marker.
-                        view! {
-                            <div
-                                class="dashboard-grid-placeholder"
-                                data-dashboard-id=view.dashboard.id.clone()
-                            >
-                                {format!("Dashboard: {}", view.dashboard.name)}
-                            </div>
-                        }
-                            .into_any()
+                        let widgets = Signal::derive(move || view.dashboard.widgets.clone());
+                        view! { <Grid widgets=widgets /> }.into_any()
                     }
                     None => {
                         view! {

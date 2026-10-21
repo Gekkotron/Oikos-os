@@ -4223,3 +4223,36 @@ html:has(.flow-canvas-screen) {
 .device__update-badge {
   color: var(--accent, inherit);
 }
+
+/* Dashboard grid: 2 columns on phones, 4 on tablets, 6 on desktop. Spans that exceed the
+   column count would create implicit columns, so they are clamped to the full row. */
+.dashboard-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 12px;
+}
+@media (min-width: 600px) {
+  .dashboard-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1200px) {
+  .dashboard-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+.widget-span-1x1 { grid-column: span 1; grid-row: span 1; }
+.widget-span-2x1 { grid-column: span 2; grid-row: span 1; }
+.widget-span-2x2 { grid-column: span 2; grid-row: span 2; }
+.widget-span-1x2 { grid-column: span 1; grid-row: span 2; }
+
+.widget-unavailable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--card-min-height);
+  padding: var(--card-padding);
+  border: 1px dashed var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  color: var(--ink);
+  opacity: 0.5;
+}
+.widget-unavailable-label { overflow-wrap: anywhere; }
