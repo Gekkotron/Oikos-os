@@ -137,7 +137,11 @@ fn instructions() -> String {
          and `command` (the same JSON as `send_command`). Entity ids come from `search` or \
          `list_entities`. For \"N minutes after the last motion\" use `mode: restart`, so \
          every new trigger restarts the wait; the default `single` ignores triggers while a \
-         run is active. `get_history` returns one slice of an entity's history — a chart \
+         run is active. Sun events use `trigger.sun` with `which` one of `sunrise`, `sunset`, \
+         `dusk` (civil), `dawn` (civil), and an optional `offset_minutes` in [-720, 720]. `if` \
+         with `op: is_dark` is true between civil dusk and civil dawn at the configured point. \
+         Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`; the hub falls back to \
+         Paris otherwise and reports a warning on save. `get_history` returns one slice of an entity's history — a chart \
          series (`what: series` with `range`), kWh per day (`daily` with `days` and \
          `kind`), kWh since midnight (`today` with `kind`), or `last_change` — when \
          `[history] url` is set in the hub's config.",
@@ -224,6 +228,14 @@ mod tests {
         }
         assert!(text.contains("lightOnBrightness"));
         assert!(text.contains(SNAPSHOT_URI));
+    }
+
+    #[test]
+    fn mcp_instructions_mention_trigger_sun_and_is_dark() {
+        let instr = instructions();
+        assert!(instr.contains("trigger.sun"));
+        assert!(instr.contains("is_dark"));
+        assert!(instr.contains("Paris"));
     }
 
     #[test]

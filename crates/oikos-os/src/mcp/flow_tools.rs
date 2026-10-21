@@ -2,7 +2,7 @@
 //! in [`OikosMcp::new`], and share their conventions: lists are wrapped in objects, write tools
 //! go through `log_write`, and a refusal is answered in-band.
 
-use oikos_api::{FlowView, RunView};
+use oikos_api::{FlowView, FlowWriteOutcome, RunView};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{tool, tool_router};
 
@@ -44,9 +44,9 @@ impl OikosMcp {
     async fn set_flow(
         &self,
         Parameters(params): Parameters<SetFlowParams>,
-    ) -> ToolResult<FlowView> {
+    ) -> ToolResult<FlowWriteOutcome> {
         log_write("set_flow", &params);
-        Ok(Json(self.hub.set_flow(params.flow).await?.flow))
+        Ok(Json(self.hub.set_flow(params.flow).await?))
     }
 
     /// Removes a flow, valid or not, by clearing its retained definition.

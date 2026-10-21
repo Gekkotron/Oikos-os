@@ -633,8 +633,8 @@ async fn set_flow_then_get_and_list() {
         "set_flow",
         &call(&client, "set_flow", json!({ "flow": reference_flow() })).await,
     );
-    assert_eq!(set["definition"]["id"], "living");
-    assert_eq!(set["invalid"], Value::Null);
+    assert_eq!(set["flow"]["definition"]["id"], "living");
+    assert_eq!(set["flow"]["invalid"], Value::Null);
 
     let got = json_of(
         "get_flow",
@@ -657,6 +657,29 @@ async fn set_flow_then_get_and_list() {
         "{}",
         text_of(&missing)
     );
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn mcp_set_flow_returns_wrapper_and_warning() {
+    let server = Server::start_with_flows().await;
+    let client = server.client().await;
+
+    let flow = json!({ "id": "s", "name": "S", "nodes": [{
+        "id": "ev", "type": "trigger.sun", "params": { "which": "sunset" }
+    }] });
+    let out = json_of(
+        "set_flow",
+        &call(&client, "set_flow", json!({ "flow": flow })).await,
+    );
+    assert!(
+        out["warning"]
+            .as_str()
+            .is_some_and(|w| w.contains("Paris fallback")),
+        "{out}"
+    );
+    assert_eq!(out["flow"]["definition"]["id"], "s");
 
     client.cancel().await.expect("close");
 }
