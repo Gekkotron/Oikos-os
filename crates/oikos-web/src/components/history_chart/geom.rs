@@ -120,7 +120,11 @@ pub fn daily_bars(days: &[(i64, f64)], view_w: f64, view_h: f64) -> Vec<Bar> {
         return Vec::new();
     }
     let slot = view_w / days.len() as f64;
-    let max = days.iter().map(|d| d.1).fold(0.0f64, f64::max).max(f64::EPSILON);
+    let max = days
+        .iter()
+        .map(|d| d.1)
+        .fold(0.0f64, f64::max)
+        .max(f64::EPSILON);
     let bar_w = slot * 0.8;
     days.iter()
         .enumerate()

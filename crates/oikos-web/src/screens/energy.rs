@@ -15,9 +15,9 @@ use oikos_core::energy::{
 
 use crate::api::history::fetch_today;
 use crate::energy::{
-    CLEARANCE, HouseTodayParts, NODE_R, VIEW_H, VIEW_W, aria_sentence, derived_house_today,
-    edge, energy_entities, energy_text, meter_text, node_label, node_value_text, now_ms,
-    plus_minus_ids, positions, power_text, should_fire_mount, speed, stroke,
+    CLEARANCE, HouseTodayParts, NODE_R, VIEW_H, VIEW_W, aria_sentence, derived_house_today, edge,
+    energy_entities, energy_text, meter_text, node_label, node_value_text, now_ms, plus_minus_ids,
+    positions, power_text, should_fire_mount, speed, stroke,
 };
 use crate::house::House;
 use crate::icons::{consumer_icon, role_icon};
@@ -277,8 +277,14 @@ fn today_for_card(
         let by_role = by_role(&all);
         let (plus_ids, minus_ids) = plus_minus_ids(&by_role, &all)?;
         let parts = HouseTodayParts {
-            plus: plus_ids.iter().map(|id| map.get(id).copied().flatten()).collect(),
-            minus: minus_ids.iter().map(|id| map.get(id).copied().flatten()).collect(),
+            plus: plus_ids
+                .iter()
+                .map(|id| map.get(id).copied().flatten())
+                .collect(),
+            minus: minus_ids
+                .iter()
+                .map(|id| map.get(id).copied().flatten())
+                .collect(),
         };
         return derived_house_today(&parts);
     }

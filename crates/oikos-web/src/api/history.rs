@@ -79,12 +79,14 @@ pub(crate) fn chunk_ids(ids: &[String], max: usize) -> Vec<Vec<&str>> {
 
 pub(crate) fn classify_status(status: u16, body: &str) -> HistoryApiError {
     match status {
-        400 => HistoryApiError::BadRequest(error_message(body).unwrap_or_else(|| "bad_request".into())),
+        400 => {
+            HistoryApiError::BadRequest(error_message(body).unwrap_or_else(|| "bad_request".into()))
+        }
         404 => HistoryApiError::NotRecorded,
         503 => HistoryApiError::Unavailable,
-        _ => HistoryApiError::Other(
-            error_message(body).unwrap_or_else(|| format!("HTTP {status}")),
-        ),
+        _ => {
+            HistoryApiError::Other(error_message(body).unwrap_or_else(|| format!("HTTP {status}")))
+        }
     }
 }
 
@@ -195,10 +197,22 @@ mod tests {
             classify_status(400, r#"{"error":"not a 24h"}"#),
             HistoryApiError::BadRequest(ref s) if s == "not a 24h"
         ));
-        assert!(matches!(classify_status(400, ""), HistoryApiError::BadRequest(_)));
-        assert!(matches!(classify_status(404, ""), HistoryApiError::NotRecorded));
-        assert!(matches!(classify_status(503, ""), HistoryApiError::Unavailable));
-        assert!(matches!(classify_status(500, "oops"), HistoryApiError::Other(_)));
+        assert!(matches!(
+            classify_status(400, ""),
+            HistoryApiError::BadRequest(_)
+        ));
+        assert!(matches!(
+            classify_status(404, ""),
+            HistoryApiError::NotRecorded
+        ));
+        assert!(matches!(
+            classify_status(503, ""),
+            HistoryApiError::Unavailable
+        ));
+        assert!(matches!(
+            classify_status(500, "oops"),
+            HistoryApiError::Other(_)
+        ));
     }
 
     #[test]

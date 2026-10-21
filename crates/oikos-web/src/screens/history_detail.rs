@@ -67,8 +67,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
             .unwrap_or_default()
     });
     let unit_opt: Memo<Option<String>> = Memo::new(move |_| entity.get().and_then(|e| e.unit));
-    let flavor_sig: Memo<Flavor> =
-        Memo::new(move |_| flavor_for_unit(unit_opt.get().as_deref()));
+    let flavor_sig: Memo<Flavor> = Memo::new(move |_| flavor_for_unit(unit_opt.get().as_deref()));
 
     // For a counter, resolve its paired power sensor from the live entity map.
     let power_pair: Memo<Option<String>> = Memo::new(move |_| {
@@ -132,14 +131,10 @@ pub fn HistoryDetailScreen() -> impl IntoView {
         }
     };
 
-    let known =
-        Memo::new(move |_| house.entities.with(|m| m.contains_key(&id.get())));
+    let known = Memo::new(move |_| house.entities.with(|m| m.contains_key(&id.get())));
     let loaded = Memo::new(move |_| {
         house.entities.with(|m| !m.is_empty())
-            || matches!(
-                house.connection.get(),
-                oikos_api::ConnectionStatus::Online
-            )
+            || matches!(house.connection.get(), oikos_api::ConnectionStatus::Online)
     });
 
     view! {

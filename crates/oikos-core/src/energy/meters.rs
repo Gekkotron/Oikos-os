@@ -530,10 +530,7 @@ mod tests {
         let mut all = all;
         all[0].label = Some("Power".into());
         all[2].label = Some("Energy".into());
-        assert_eq!(
-            id(EnergyMeters::counter_power(&all[2], &all)),
-            Some("p1")
-        );
+        assert_eq!(id(EnergyMeters::counter_power(&all[2], &all)), Some("p1"));
     }
 
     fn water(id: &str, unit: &str, device: Option<&str>) -> EnergyEntity {

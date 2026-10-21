@@ -63,8 +63,8 @@ fn day_ticks(now_secs: i64) -> Vec<(f64, String)> {
         for days_back in 0..=1i64 {
             let probe = now_secs - days_back * 86_400;
             let dt = local(probe);
-            let offset = UtcOffset::from_whole_seconds(paris_offset(probe))
-                .unwrap_or(UtcOffset::UTC);
+            let offset =
+                UtcOffset::from_whole_seconds(paris_offset(probe)).unwrap_or(UtcOffset::UTC);
             let t = PrimitiveDateTime::new(dt.date(), Time::from_hms(h, 0, 0).unwrap())
                 .assume_offset(offset)
                 .unix_timestamp();
