@@ -58,6 +58,7 @@ fn op_str(op: Op) -> &'static str {
         Op::Lt => "lt",
         Op::Gte => "gte",
         Op::Lte => "lte",
+        Op::IsDark => "is_dark",
     }
 }
 
@@ -69,6 +70,7 @@ fn op_from(s: &str) -> Option<Op> {
         "lt" => Some(Op::Lt),
         "gte" => Some(Op::Gte),
         "lte" => Some(Op::Lte),
+        "is_dark" => Some(Op::IsDark),
         _ => None,
     }
 }
@@ -204,6 +206,7 @@ fn node_editor_body(
     let kind_label = match &node.kind {
         NodeKind::TriggerState(_) => "Trigger",
         NodeKind::TriggerSchedule(_) => "Schedule",
+        NodeKind::TriggerSun(_) => "Sun",
         NodeKind::If(_) => "If",
         NodeKind::Delay(_) => "Delay",
         NodeKind::Command(_) => "Command",
@@ -420,7 +423,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 if let Some(v) = value {
                     form.update(&value_id, |n| {
                         if let NodeKind::If(ref mut i) = n.kind {
-                            i.value = v;
+                            i.value = Some(v);
                         }
                     });
                 }
@@ -460,7 +463,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 </label>
                 <JsonField
                     label="Value (JSON)".into()
-                    initial=p.value
+                    initial=p.value.unwrap_or(serde_json::Value::Null)
                     optional=false
                     write=value_write
                 />
@@ -502,6 +505,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             });
             view! { <ScheduleField initial=p.cron write=write /> }.into_any()
         }
+        NodeKind::TriggerSun(_) => ().into_any(),
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Delay(p) => {
             let for_id = id;

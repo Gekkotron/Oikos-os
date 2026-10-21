@@ -129,6 +129,9 @@ pub enum NodeKind {
     /// Starts a run on a cron schedule (five fields, local time).
     #[serde(rename = "trigger.schedule")]
     TriggerSchedule(TriggerScheduleParams),
+    /// Starts a run at a solar event (sunrise, sunset, dusk or dawn), with an optional offset.
+    #[serde(rename = "trigger.sun")]
+    TriggerSun(TriggerSunParams),
     /// Branches on a comparison of an entity (or the trigger value) with a constant.
     #[serde(rename = "if")]
     If(IfParams),
@@ -149,6 +152,7 @@ impl NodeKind {
         match self {
             NodeKind::TriggerState(_) => "trigger.state",
             NodeKind::TriggerSchedule(_) => "trigger.schedule",
+            NodeKind::TriggerSun(_) => "trigger.sun",
             NodeKind::If(_) => "if",
             NodeKind::Delay(_) => "delay",
             NodeKind::Command(_) => "command",
@@ -160,7 +164,7 @@ impl NodeKind {
     pub fn is_trigger(&self) -> bool {
         matches!(
             self,
-            NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_)
+            NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_)
         )
     }
 
@@ -200,6 +204,38 @@ pub struct TriggerScheduleParams {
     pub extra: BTreeMap<String, Value>,
 }
 
+/// Which solar event a `trigger.sun` fires on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum SunWhich {
+    Sunrise,
+    #[default]
+    Sunset,
+    Dusk,
+    Dawn,
+}
+
+/// Params of `trigger.sun`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct TriggerSunParams {
+    /// The solar event to fire on.
+    pub which: SunWhich,
+    /// Minutes added to the event time (negative fires earlier); absent means 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_minutes: Option<i32>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+impl TriggerSunParams {
+    /// The offset in minutes, 0 when absent.
+    pub fn offset(&self) -> i32 {
+        self.offset_minutes.unwrap_or(0)
+    }
+}
+
 /// Params of `if`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -207,7 +243,8 @@ pub struct IfParams {
     /// How the value is compared with `value`: `eq`, `ne`, `gt`, `lt`, `gte` or `lte`.
     pub op: Op,
     /// The constant the value is compared with.
-    pub value: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
     /// The entity whose current value is read; when absent the value that fired the trigger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entity: Option<String>,
@@ -292,6 +329,7 @@ pub enum Op {
     Lt,
     Gte,
     Lte,
+    IsDark,
 }
 
 fn default_true() -> bool {
@@ -314,6 +352,64 @@ mod tests {
             panic!()
         };
         assert_eq!((p.flow, p.enabled), (None, false));
+    }
+
+    #[test]
+    fn trigger_sun_round_trips_with_offset_and_extra() {
+        let node: Node = serde_json::from_str(
+            r#"{"id":"ev","type":"trigger.sun","params":{"which":"sunset","offset_minutes":-30,"note":"n"}}"#,
+        )
+        .unwrap();
+        assert!(node.kind.is_trigger());
+        assert_eq!(node.kind.type_name(), "trigger.sun");
+        match &node.kind {
+            NodeKind::TriggerSun(p) => {
+                assert_eq!(p.which, SunWhich::Sunset);
+                assert_eq!(p.offset(), -30);
+                assert_eq!(p.extra.get("note"), Some(&json!("n")));
+            }
+            other => panic!("expected trigger.sun, got {other:?}"),
+        }
+        let again: Node = serde_json::from_value(serde_json::to_value(&node).unwrap()).unwrap();
+        assert_eq!(again, node);
+    }
+
+    #[test]
+    fn trigger_sun_offset_defaults_to_zero_and_is_omitted_from_wire() {
+        let node: Node =
+            serde_json::from_str(r#"{"id":"dawn","type":"trigger.sun","params":{"which":"dawn"}}"#)
+                .unwrap();
+        match &node.kind {
+            NodeKind::TriggerSun(p) => assert_eq!(p.offset(), 0),
+            other => panic!("{other:?}"),
+        }
+        let wire = serde_json::to_value(&node).unwrap();
+        assert!(wire["params"].get("offset_minutes").is_none());
+    }
+
+    #[test]
+    fn if_is_dark_round_trips_without_value_entity_or_missing() {
+        let node: Node =
+            serde_json::from_str(r#"{"id":"dark","type":"if","params":{"op":"is_dark"}}"#).unwrap();
+        match &node.kind {
+            NodeKind::If(p) => {
+                assert_eq!(p.op, Op::IsDark);
+                assert!(p.value.is_none());
+                assert!(p.entity.is_none());
+                assert!(p.missing.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        let wire = serde_json::to_value(&node).unwrap();
+        assert_eq!(wire["params"]["op"], json!("is_dark"));
+        assert!(wire["params"].get("value").is_none());
+    }
+
+    #[test]
+    fn existing_if_round_trips_with_value_present() {
+        let p: IfParams = serde_json::from_str(r#"{"op":"lt","value":65,"entity":"t"}"#).unwrap();
+        assert_eq!(p.value, Some(json!(65)));
+        assert_eq!(p.op, Op::Lt);
     }
 
     #[test]
@@ -369,7 +465,7 @@ mod tests {
         match &flow.nodes[1].kind {
             NodeKind::If(p) => {
                 assert_eq!(p.op, Op::Eq);
-                assert_eq!(p.value, json!(true));
+                assert_eq!(p.value, Some(json!(true)));
                 assert_eq!(p.entity, None);
             }
             other => panic!("expected if, got {other:?}"),

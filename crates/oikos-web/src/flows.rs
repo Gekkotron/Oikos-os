@@ -40,6 +40,7 @@ fn summary_label(node: &Node) -> String {
     match &node.kind {
         NodeKind::TriggerState(_) => "Trigger".into(),
         NodeKind::TriggerSchedule(p) => describe(&p.cron),
+        NodeKind::TriggerSun(_) => "Sun".into(),
         NodeKind::If(_) => "If".into(),
         NodeKind::Delay(p) => format!("Delay {}", p.for_),
         NodeKind::Command(p) => humanise(command_name(&p.command)),

@@ -155,6 +155,7 @@ pub fn next_node_id(flow: &Flow, kind: &NodeKind) -> String {
     let prefix = match kind {
         NodeKind::TriggerState(_) => "trigger",
         NodeKind::TriggerSchedule(_) => "schedule",
+        NodeKind::TriggerSun(_) => "sun",
         NodeKind::If(_) => "if",
         NodeKind::Delay(_) => "delay",
         NodeKind::Command(_) => "command",
@@ -311,7 +312,7 @@ mod tests {
     fn if_kind() -> NodeKind {
         NodeKind::If(IfParams {
             op: Op::Eq,
-            value: json!(true),
+            value: Some(json!(true)),
             entity: None,
             missing: None,
             extra: Default::default(),

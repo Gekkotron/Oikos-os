@@ -24,7 +24,9 @@ pub enum Role {
 /// The role of a node type.
 pub fn role(kind: &NodeKind) -> Role {
     match kind {
-        NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) => Role::Trigger,
+        NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_) => {
+            Role::Trigger
+        }
         NodeKind::If(_) => Role::Check,
         NodeKind::Command(_) | NodeKind::FlowEnable(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
@@ -111,7 +113,7 @@ fn op_words(op: Op) -> &'static str {
         Op::Lt => "<",
         Op::Gte => "≥",
         Op::Lte => "≤",
-        Op::Eq | Op::Ne => "",
+        Op::Eq | Op::Ne | Op::IsDark => "",
     }
 }
 
@@ -132,12 +134,13 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             }
         }
         NodeKind::TriggerSchedule(p) => describe(&p.cron),
+        NodeKind::TriggerSun(_) => "At a solar event".to_owned(),
         NodeKind::If(p) => {
             let (e, unit) = match &p.entity {
                 Some(id) => (entity_text(id, ctx), unit_of(id, ctx)),
                 None => ("Trigger value".to_owned(), None),
             };
-            let v = value_words(&p.value, unit);
+            let v = value_words(p.value.as_ref().unwrap_or(&Value::Null), unit);
             match p.op {
                 Op::Eq => format!("{e} is {v}?"),
                 Op::Ne => format!("{e} is not {v}?"),

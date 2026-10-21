@@ -593,6 +593,7 @@ async fn run_node(
         NodeKind::TriggerSchedule(params) => {
             (StepOutcome::Ok, format!("schedule {}", params.cron), None)
         }
+        NodeKind::TriggerSun(_) => (StepOutcome::Ok, "sun".to_owned(), None),
         NodeKind::FlowEnable(params) => {
             let target = params.flow.as_deref().unwrap_or(flow_id);
             if hub.flow(target).is_none() {
@@ -617,7 +618,8 @@ async fn run_node(
             }
         }
         NodeKind::If(params) => {
-            let Some(right) = Scalar::from_json(&params.value) else {
+            let Some(right) = Scalar::from_json(params.value.as_ref().unwrap_or(&Value::Null))
+            else {
                 return failed("value is not a scalar".to_owned());
             };
             let left = match (&params.entity, trigger) {

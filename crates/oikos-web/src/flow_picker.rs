@@ -160,7 +160,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 NodeKind::If(IfParams {
                     entity: Some(e.id.clone()),
                     op: Op::Eq,
-                    value: current.as_ref().map_or(Value::Bool(true), Scalar::to_json),
+                    value: Some(current.as_ref().map_or(Value::Bool(true), Scalar::to_json)),
                     missing: None,
                     extra: Default::default(),
                 }),

@@ -282,7 +282,7 @@ impl Hub {
                     }
                     None
                 }
-                NodeKind::Delay(_) | NodeKind::TriggerSchedule(_) => None,
+                NodeKind::Delay(_) | NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_) => None,
             };
             let Some(entity) = entity else { continue };
             let Some(found) = reg.entity(entity) else {

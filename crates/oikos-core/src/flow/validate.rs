@@ -95,7 +95,10 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     });
                 }
             }
-            NodeKind::If(p) if Scalar::from_json(&p.value).is_none() => {
+            NodeKind::If(p)
+                if Scalar::from_json(p.value.as_ref().unwrap_or(&serde_json::Value::Null))
+                    .is_none() =>
+            {
                 return Err(FlowError::BadValue {
                     node: node.id.clone(),
                 });
@@ -333,7 +336,7 @@ mod tests {
         ));
         let mut f = reference_flow();
         if let NodeKind::If(p) = &mut f.nodes[1].kind {
-            p.value = serde_json::json!([1]);
+            p.value = Some(serde_json::json!([1]));
         }
         let err = validate(&f).unwrap_err();
         assert_eq!(
