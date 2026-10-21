@@ -7,6 +7,7 @@ pub mod flow_canvas;
 pub mod flow_schedule;
 pub mod flows;
 pub mod group_sheet;
+pub mod history_detail;
 pub mod home;
 pub mod security;
 pub mod settings;

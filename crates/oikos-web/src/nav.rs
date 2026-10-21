@@ -67,6 +67,14 @@ mod tests {
     }
 
     #[test]
+    fn history_detail_is_a_return_target() {
+        assert_eq!(
+            return_target("/history/sensor.living_temp", "range=24h").as_deref(),
+            Some("/history/sensor.living_temp?range=24h")
+        );
+    }
+
+    #[test]
     fn sheets_are_not() {
         assert_eq!(return_target("/entity/lamp", ""), None);
         assert_eq!(return_target("/entity/a%2Fb", "x=1"), None);

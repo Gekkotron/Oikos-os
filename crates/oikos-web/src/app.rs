@@ -21,6 +21,7 @@ use crate::screens::entity_sheet::EntitySheetScreen;
 use crate::screens::flow_canvas::{FlowCanvasScreen, NewFlowScreen};
 use crate::screens::flows::FlowsScreen;
 use crate::screens::group_sheet::GroupSheetScreen;
+use crate::screens::history_detail::HistoryDetailScreen;
 use crate::screens::home::HomeScreen;
 use crate::screens::security::SecurityScreen;
 use crate::screens::settings::SettingsScreen;
@@ -144,6 +145,7 @@ pub fn App() -> impl IntoView {
                 <Routes fallback=HomeScreen>
                     <Route path=path!("/") view=HomeScreen />
                     <Route path=path!("/entity/:id") view=EntitySheetScreen />
+                    <Route path=path!("/history/:id") view=HistoryDetailScreen />
                     <Route path=path!("/group/:area/:kind") view=GroupSheetScreen />
                     <Route path=path!("/energy") view=EnergyScreen />
                     <Route path=path!("/security") view=SecurityScreen />

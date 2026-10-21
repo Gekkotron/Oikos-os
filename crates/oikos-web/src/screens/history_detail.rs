@@ -1,0 +1,233 @@
+//! The full-screen `/history/:id?range=…` page: chrome row, range chips, and a `HistoryChart`.
+
+use leptos::prelude::*;
+use leptos_router::NavigateOptions;
+use leptos_router::components::A;
+use leptos_router::hooks::{use_navigate, use_params_map, use_query_map};
+use oikos_api::{EntityView, HistoryRange};
+use oikos_core::energy::{EnergyMeters, EnergyUnits};
+
+use crate::components::history_chart::{Flavor, HistoryChart};
+use crate::energy::{energy_entities, energy_entity};
+use crate::format::{title_suffix, type_word, wrap_id};
+use crate::house::House;
+use crate::nav::ReturnPath;
+use crate::screens::entity_sheet::{availability_class, availability_word};
+
+/// Classify a unit as the counter flavour (energy totals: Wh/kWh/MWh) or the series flavour.
+pub fn flavor_for_unit(unit: Option<&str>) -> Flavor {
+    if EnergyUnits::factor(unit).is_some() {
+        Flavor::Counter
+    } else {
+        Flavor::Series
+    }
+}
+
+/// Parse the `range` query parameter (`24h`, `7d`, `30d`, `1y`); default `24h`.
+pub fn parse_range(raw: Option<String>) -> HistoryRange {
+    raw.as_deref()
+        .and_then(HistoryRange::parse)
+        .unwrap_or(HistoryRange::Day)
+}
+
+fn range_slug(r: HistoryRange) -> &'static str {
+    match r {
+        HistoryRange::Day => "24h",
+        HistoryRange::Week => "7d",
+        HistoryRange::Month => "30d",
+        HistoryRange::Year => "1y",
+    }
+}
+
+const RANGES: [HistoryRange; 4] = [
+    HistoryRange::Day,
+    HistoryRange::Week,
+    HistoryRange::Month,
+    HistoryRange::Year,
+];
+
+#[component]
+pub fn HistoryDetailScreen() -> impl IntoView {
+    let house = expect_context::<House>();
+    let return_path = expect_context::<ReturnPath>();
+    let params = use_params_map();
+    let query = use_query_map();
+    let navigate = use_navigate();
+
+    let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
+    let range = Memo::new(move |_| parse_range(query.read().get("range")));
+
+    let entity: Memo<Option<EntityView>> = {
+        let id = id;
+        Memo::new(move |_| house.entities.with(|m| m.get(&id.get()).cloned()))
+    };
+
+    let kind_str: Memo<String> = Memo::new(move |_| {
+        entity
+            .get()
+            .map(|e| format!("{:?}", e.kind))
+            .unwrap_or_default()
+    });
+    let unit_opt: Memo<Option<String>> = Memo::new(move |_| entity.get().and_then(|e| e.unit));
+    let flavor_sig: Memo<Flavor> =
+        Memo::new(move |_| flavor_for_unit(unit_opt.get().as_deref()));
+
+    // For a counter, resolve its paired power sensor from the live entity map.
+    let power_pair: Memo<Option<String>> = Memo::new(move |_| {
+        if flavor_sig.get() != Flavor::Counter {
+            return None;
+        }
+        let id = id.get();
+        house.entities.with(|m| {
+            let all = energy_entities(m);
+            let me = m.get(&id)?;
+            let ee = energy_entity(me);
+            EnergyMeters::counter_power(&ee, &all).map(|p| p.id.clone())
+        })
+    });
+
+    let header = move || {
+        entity.get().map(|e| {
+            let area = house.areas.with(|areas| {
+                areas
+                    .iter()
+                    .find(|a| a.id == e.area)
+                    .map_or_else(|| e.area.clone(), |a| a.name.clone())
+            });
+            let availability = e.state.availability;
+            let title = match title_suffix(&e) {
+                Some(suffix) => format!("{} · {suffix}", e.name),
+                None => e.name.clone(),
+            };
+            view! {
+                <div class="sheet__titles">
+                    <h1 class="sheet__title">{wrap_id(&title)}</h1>
+                    <p class="sheet__subtitle">
+                        {area} " · " {type_word(&e)} " · "
+                        <span class=availability_class(availability)></span>
+                        " "
+                        {availability_word(availability)}
+                    </p>
+                </div>
+            }
+        })
+    };
+
+    // Range chips update the `range` query param via replace-navigation so Back works.
+    let id_for_nav = id;
+    let navigate = navigate.clone();
+    let on_range = {
+        let navigate = navigate.clone();
+        move |r: HistoryRange| {
+            let path = format!(
+                "/history/{}?range={}",
+                crate::api::encode_id(&id_for_nav.get()),
+                range_slug(r)
+            );
+            navigate(
+                &path,
+                NavigateOptions {
+                    replace: true,
+                    ..Default::default()
+                },
+            );
+        }
+    };
+
+    let known =
+        Memo::new(move |_| house.entities.with(|m| m.contains_key(&id.get())));
+    let loaded = Memo::new(move |_| {
+        house.entities.with(|m| !m.is_empty())
+            || matches!(
+                house.connection.get(),
+                oikos_api::ConnectionStatus::Online
+            )
+    });
+
+    view! {
+        <div class="sheet history-detail">
+            <header class="sheet__header">
+                <A href=move || return_path.0.get() attr:class="sheet__back">
+                    "←"
+                    <span class="sheet__back-label">"Back"</span>
+                </A>
+                {header}
+            </header>
+            {move || {
+                if known.get() {
+                    let on_range = on_range.clone();
+                    view! {
+                        <section class="sheet__panel">
+                            <div class="chips history-detail__chips">
+                                {RANGES.iter().map(|r| {
+                                    let r = *r;
+                                    let on_range = on_range.clone();
+                                    view! {
+                                        <button
+                                            type="button"
+                                            class="chip"
+                                            class:chip--selected=move || range.get() == r
+                                            aria-pressed=move || (range.get() == r).to_string()
+                                            on:click=move |_| on_range(r)
+                                        >
+                                            {range_slug(r)}
+                                        </button>
+                                    }
+                                }).collect_view()}
+                            </div>
+                            <HistoryChart
+                                entity_id=Signal::derive(move || id.get())
+                                range=Signal::derive(move || range.get())
+                                flavor=Signal::derive(move || flavor_sig.get())
+                                kind=Signal::derive(move || kind_str.get())
+                                unit=Signal::derive(move || unit_opt.get())
+                                power_pair=Signal::derive(move || power_pair.get())
+                            />
+                        </section>
+                    }.into_any()
+                } else if loaded.get() {
+                    view! {
+                        <section class="sheet__panel history-detail__unknown">
+                            <p>"Unknown entity"</p>
+                            <p class="sheet__subtitle">{move || wrap_id(&id.get())}</p>
+                        </section>
+                    }.into_any()
+                } else {
+                    view! { <div class="card card--skeleton" aria-busy="true"></div> }.into_any()
+                }
+            }}
+        </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flavor_for_entity_is_counter_for_energy_units() {
+        assert_eq!(flavor_for_unit(Some("kWh")), Flavor::Counter);
+        assert_eq!(flavor_for_unit(Some("Wh")), Flavor::Counter);
+        assert_eq!(flavor_for_unit(Some("W")), Flavor::Series);
+        assert_eq!(flavor_for_unit(Some("°C")), Flavor::Series);
+        assert_eq!(flavor_for_unit(None), Flavor::Series);
+    }
+
+    #[test]
+    fn range_parses_wire_names_and_defaults_to_day() {
+        assert_eq!(parse_range(Some("24h".into())), HistoryRange::Day);
+        assert_eq!(parse_range(Some("7d".into())), HistoryRange::Week);
+        assert_eq!(parse_range(Some("30d".into())), HistoryRange::Month);
+        assert_eq!(parse_range(Some("1y".into())), HistoryRange::Year);
+        assert_eq!(parse_range(Some("junk".into())), HistoryRange::Day);
+        assert_eq!(parse_range(None), HistoryRange::Day);
+    }
+
+    #[test]
+    fn range_slugs_match_history_range_wire_names() {
+        assert_eq!(range_slug(HistoryRange::Day), "24h");
+        assert_eq!(range_slug(HistoryRange::Week), "7d");
+        assert_eq!(range_slug(HistoryRange::Month), "30d");
+        assert_eq!(range_slug(HistoryRange::Year), "1y");
+    }
+}
