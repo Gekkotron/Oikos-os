@@ -57,6 +57,13 @@ pub fn App() -> impl IntoView {
     provide_context(Pending::new());
     provide_context(Confirming::new());
     provide_context(install_now());
+    // Dashboards are not pushed over the socket, so the shell fetches them once at start-up.
+    leptos::task::spawn_local(async move {
+        match crate::api::fetch_dashboards().await {
+            Ok(list) => house.dashboards.set(list),
+            Err(err) => toasts.push(format!("Could not load dashboards: {}", err.error)),
+        }
+    });
     install_nav();
     install_history_refresh(house);
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
