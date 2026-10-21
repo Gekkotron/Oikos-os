@@ -4312,3 +4312,26 @@ html:has(.flow-canvas-screen) {
   margin-top: 4px;
   padding-top: 4px;
 }
+
+/* Edit mode: toolbar sits above the grid; per-tile tools overlay the tile's top-right corner. */
+.dashboard-edit-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+.dashboard-edit-toolbar button {
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+}
+.dashboard-edit-toolbar__pencil[aria-pressed="true"] { font-weight: bold; }
+.widget { position: relative; }
+.widget__tools {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 4px;
+  z-index: 2;
+}
+.widget__tools button { min-height: 32px; min-width: 32px; }
