@@ -2,8 +2,8 @@
 
 use gloo_net::http::{Request, Response};
 use oikos_api::{
-    ApiError, CommandResponse, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView,
-    OverridePatch, RunView, SchedulePreview,
+    ApiError, CommandResponse, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec,
+    GroupView, OverridePatch, RunView, SchedulePreview,
 };
 use oikos_core::flow::Flow;
 use oikos_core::model::{AreasDocument, Command};
@@ -121,6 +121,26 @@ pub async fn put_flow(flow: &Flow) -> Result<(FlowView, Option<String>), ApiErro
 pub async fn get_flows_config() -> Result<FlowsConfigView, ApiError> {
     let response = check(Request::get("/api/v1/config/flows").build(), None).await?;
     read_json(response).await
+}
+
+/// Every hand-made group the hub holds.
+pub async fn list_groups() -> Result<Vec<GroupView>, ApiError> {
+    let response = check(Request::get("/api/v1/groups").build(), None).await?;
+    read_json(response).await
+}
+
+/// Creates or replaces group `id` from `spec`; the reply is the group as the hub now has it.
+pub async fn set_group(id: &str, spec: &GroupSpec) -> Result<GroupView, ApiError> {
+    let url = format!("/api/v1/groups/{}", encode_id(id));
+    let response = check(Request::put(&url).json(spec), None).await?;
+    read_json(response).await
+}
+
+/// Deletes group `id` on the hub.
+pub async fn delete_group(id: &str) -> Result<(), ApiError> {
+    let url = format!("/api/v1/groups/{}", encode_id(id));
+    check(Request::delete(&url).build(), None).await?;
+    Ok(())
 }
 
 /// The next three ticks of `cron` in the house time zone; a `422` (the hub's message names what
