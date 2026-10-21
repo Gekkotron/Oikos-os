@@ -29,8 +29,11 @@ pub(super) fn next_sun_fire(
     offset_minutes: i32,
     now: DateTime<Tz>,
 ) -> Option<DateTime<Tz>> {
+    // One UTC day earlier: an event of the previous day plus a positive offset can still lie
+    // after `now`.
     let first = now.with_timezone(&Utc).date_naive();
-    (0..=SEARCH_DAYS)
+    let limit = now + Duration::days(SEARCH_DAYS);
+    (-1..=SEARCH_DAYS)
         .filter_map(|days| {
             let events = sun_events(lat, lon, first + Duration::days(days));
             let event = match which {
@@ -39,9 +42,11 @@ pub(super) fn next_sun_fire(
                 SunWhich::Dusk => events.dusk,
                 SunWhich::Dawn => events.dawn,
             }?;
-            Some((event + Duration::minutes(i64::from(offset_minutes))).with_timezone(&zone))
+            let at = event.checked_add_signed(Duration::minutes(i64::from(offset_minutes)))?;
+            Some(at.with_timezone(&zone))
         })
-        .find(|at| *at > now)
+        .filter(|at| *at > now && *at <= limit)
+        .min()
 }
 
 #[cfg(test)]
@@ -86,5 +91,19 @@ mod tests {
             next_sun_fire(78.22, 15.65, zone, SunWhich::Sunrise, 0, now),
             None
         );
+    }
+
+    #[test]
+    fn next_sun_fire_finds_previous_utc_day_event_pushed_past_midnight() {
+        let zone = chrono_tz::UTC;
+        let (lat, lon) = (48.8566, 2.3522);
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let sunset = sun_events(lat, lon, date).sunset.unwrap();
+        // Sunset of Jan 1 (~16:04 UTC) + 600m lands at ~02:04 UTC on Jan 2.
+        let expected = (sunset + Duration::minutes(600)).with_timezone(&zone);
+        let now = expected - Duration::minutes(10);
+        assert_eq!(now.date_naive(), expected.date_naive());
+        let at = next_sun_fire(lat, lon, zone, SunWhich::Sunset, 600, now).unwrap();
+        assert_eq!(at, expected);
     }
 }

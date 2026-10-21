@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{NaiveDate, Utc};
+use chrono::Utc;
 use oikos_api::{ConnectionStatus, RunStatus, RunView, WsEvent};
 use oikos_core::command::Publish;
-use oikos_core::flow::sun::{is_dark_at, sun_events};
+use oikos_core::flow::sun::is_dark_at;
 use oikos_os::config::Config;
 use oikos_os::hub::Hub;
 use tokio::sync::mpsc;
@@ -151,38 +151,6 @@ async fn sun_trigger_fires_at_dusk_and_rearms() {
         .expect("disable");
     settle().await;
     tokio::time::advance(Duration::from_secs(48 * 3600)).await;
-    settle().await;
-    no_run_event(&mut events).await;
-}
-
-#[tokio::test(start_paused = true)]
-async fn seven_day_cap_leaves_polar_flow_disarmed_until_toggle() {
-    // Pick a pole that has no sunrise for the next eight UTC days, whatever today is.
-    let today = Utc::now().date_naive();
-    let has_sunrise = |lat: f64| {
-        (0..=8).any(|d| {
-            let date: NaiveDate = today + chrono::Duration::days(d);
-            sun_events(lat, 0.0, date).sunrise.is_some()
-        })
-    };
-    let Some(lat) = [85.0, -85.0].into_iter().find(|lat| !has_sunrise(*lat)) else {
-        eprintln!("skipped: both poles have a sunrise this week (around an equinox)");
-        return;
-    };
-    let hub = test_hub_with_point(lat, 0.0, "UTC");
-    settle().await;
-    publish_flow(&hub, "polar", &sun_flow("polar", "sunrise", 0));
-    settle().await;
-    let mut events = hub.subscribe();
-
-    tokio::time::advance(Duration::from_secs(7 * 24 * 3600)).await;
-    settle().await;
-    no_run_event(&mut events).await;
-
-    hub.set_flow_enabled("polar", false).await.expect("disable");
-    hub.set_flow_enabled("polar", true).await.expect("enable");
-    settle().await;
-    tokio::time::advance(Duration::from_secs(24 * 3600)).await;
     settle().await;
     no_run_event(&mut events).await;
 }

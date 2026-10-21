@@ -790,3 +790,71 @@ async fn run_node(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use oikos_core::command::Publish;
+
+    fn sun_flow(id: &str, enabled: bool) -> String {
+        serde_json::json!({
+            "id": id, "name": id, "enabled": enabled, "mode": "single",
+            "nodes": [{ "id": "sun", "type": "trigger.sun", "params": { "which": "sunrise" } }],
+            "edges": []
+        })
+        .to_string()
+    }
+
+    /// An engine whose clock reads 2026-01-01 00:00 UTC, on a hub at (`lat`, `lon`).
+    fn engine_at(lat: f64, lon: f64, zone: &str) -> Engine {
+        let mut cfg = crate::config::Config::default();
+        cfg.flows.timezone = Some(zone.to_owned());
+        cfg.flows.latitude = Some(lat);
+        cfg.flows.longitude = Some(lon);
+        let (tx, _rx) = mpsc::channel::<Publish>(8);
+        let hub = Hub::new(&cfg, tx);
+        let fixed = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        Engine {
+            zone: hub.zone(),
+            hub,
+            flows: Vec::new(),
+            known: BTreeMap::new(),
+            watched: BTreeSet::new(),
+            active: BTreeMap::new(),
+            keep: BTreeSet::new(),
+            tasks: JoinSet::new(),
+            now: Arc::new(move || fixed),
+            schedules: BTreeMap::new(),
+            sun_timers: BTreeMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn polar_night_flow_stays_disarmed_across_a_toggle() {
+        let mut engine = engine_at(78.22, 15.65, "Europe/Oslo");
+        for enabled in [true, false, true] {
+            engine.hub.ingest(
+                "oikos/automation/polar",
+                sun_flow("polar", enabled).as_bytes(),
+            );
+            engine.reload();
+            assert!(engine.sun_timers.is_empty(), "enabled={enabled}");
+        }
+    }
+
+    #[tokio::test]
+    async fn temperate_flow_arms_on_the_same_date_and_disarms_when_disabled() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine
+            .hub
+            .ingest("oikos/automation/day", sun_flow("day", true).as_bytes());
+        engine.reload();
+        assert_eq!(engine.sun_timers.keys().collect::<Vec<_>>(), ["day/sun"]);
+        engine
+            .hub
+            .ingest("oikos/automation/day", sun_flow("day", false).as_bytes());
+        engine.reload();
+        assert!(engine.sun_timers.is_empty());
+    }
+}
