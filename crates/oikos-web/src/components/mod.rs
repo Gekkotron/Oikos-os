@@ -4,6 +4,7 @@ pub mod area_chip;
 pub mod card_frame;
 pub mod confirm;
 pub mod flow_switch;
+pub mod history_chart;
 pub mod hs_wheel;
 pub mod now;
 pub mod room_title;
