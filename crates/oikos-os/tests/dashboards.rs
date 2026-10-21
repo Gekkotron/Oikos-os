@@ -140,6 +140,19 @@ async fn put_dashboard_rejects_house() {
 }
 
 #[tokio::test]
+async fn put_house_with_malformed_body_still_returns_403() {
+    let server = Server::start().await;
+    let response = server
+        .client
+        .put(server.url("/dashboards/house"))
+        .body(&b"not-json"[..])
+        .send()
+        .await
+        .expect("put");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn put_dashboard_rejects_bad_span() {
     let server = Server::start().await;
     let body = json!({

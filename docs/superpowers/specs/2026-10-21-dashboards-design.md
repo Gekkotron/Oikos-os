@@ -44,6 +44,14 @@ Today's Home page is a comprehensive tour of every room and entity. It is useful
 
 ## How — the decisions
 
+### v1 widget renderer coverage
+
+**Rich cards shipped in v1**: `light`, `cover`, `climate`, `sensor`, `water-heater`. These dispatch to the existing per-entity card components.
+
+**Deferred to a follow-up**: `lock`, `camera`, `room-group`, `flow-button`, `energy-stat`, `history-chart` — in v1 these render the greyed `Unavailable` placeholder tile with the widget kind as label. The widget kinds are defined, persisted, and accepted by the hub validator; only the client-side rendering is deferred.
+
+**Add-widget picker coverage**: `lock` and `camera` groups are additionally hidden from the add-widget picker in v1, because `oikos-core::model::Kind` has no `Lock` or `Camera` variants yet. The other four kinds are selectable in the picker and persist correctly; they will light up when their renderers land.
+
 ### Top nav
 
 Replace the current Home tab with a `Dashboards ▾` picker:
@@ -86,19 +94,19 @@ Widget {
 
 Widget kinds for v1 (one per entity/role the Oikos web already renders):
 
-| kind            | config                     | behavior on click                     |
-|-----------------|----------------------------|---------------------------------------|
-| `light`         | `{ entity_id, title? }`    | toggle (same as rooms overview)       |
-| `cover`         | `{ entity_id, title? }`    | open device sheet                     |
-| `climate`       | `{ entity_id, title? }`    | open device sheet                     |
-| `lock`          | `{ entity_id, title? }`    | open device sheet                     |
-| `sensor`        | `{ entity_id, title? }`    | display only                          |
-| `room-group`    | `{ area_id, title? }`      | act on the group (existing contract)  |
-| `flow-button`   | `{ flow_id, title? }`      | trigger the flow                      |
-| `energy-stat`   | `{ metric, title? }`       | display only                          |
-| `history-chart` | `{ entity_id, range }`     | display only                          |
-| `camera`        | `{ entity_id }`            | open the live stream                  |
-| `water-heater`  | `{ entity_id, title? }`    | open device sheet                     |
+| kind            | config                     | behavior on click                     | v1 status    |
+|-----------------|----------------------------|---------------------------------------|--------------|
+| `light`         | `{ entity_id, title? }`    | toggle (same as rooms overview)       | `rich`       |
+| `cover`         | `{ entity_id, title? }`    | open device sheet                     | `rich`       |
+| `climate`       | `{ entity_id, title? }`    | open device sheet                     | `rich`       |
+| `lock`          | `{ entity_id, title? }`    | open device sheet                     | `placeholder`|
+| `sensor`        | `{ entity_id, title? }`    | display only                          | `rich`       |
+| `room-group`    | `{ area_id, title? }`      | act on the group (existing contract)  | `placeholder`|
+| `flow-button`   | `{ flow_id, title? }`      | trigger the flow                      | `placeholder`|
+| `energy-stat`   | `{ metric, title? }`       | display only                          | `placeholder`|
+| `history-chart` | `{ entity_id, range }`     | display only                          | `placeholder`|
+| `camera`        | `{ entity_id }`            | open the live stream                  | `placeholder`|
+| `water-heater`  | `{ entity_id, title? }`    | open device sheet                     | `rich`       |
 
 Widget runtime behavior mirrors how the entity already renders in the rooms overview and device sheet; dashboards do not introduce a second interaction model.
 

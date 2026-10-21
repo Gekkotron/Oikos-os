@@ -4232,10 +4232,10 @@ html:has(.flow-canvas-screen) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   padding: 12px;
 }
-@media (min-width: 600px) {
+@media (min-width: 601px) {
   .dashboard-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
-@media (min-width: 1200px) {
+@media (min-width: 1201px) {
   .dashboard-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
 .widget-span-1x1 { grid-column: span 1; grid-row: span 1; }
@@ -4284,8 +4284,8 @@ html:has(.flow-canvas-screen) {
   padding: 4px;
   list-style: none;
   min-width: 180px;
-  background: var(--surface, Canvas);
-  border: 1px solid var(--border, currentColor);
+  background: var(--card-bg, Canvas);
+  border: 1px solid var(--card-border, currentColor);
   border-radius: var(--radius-nav);
 }
 
@@ -4308,7 +4308,7 @@ html:has(.flow-canvas-screen) {
 }
 
 .dashboards-picker__new {
-  border-top: 1px solid var(--border, currentColor);
+  border-top: 1px solid var(--card-border, currentColor);
   margin-top: 4px;
   padding-top: 4px;
 }
@@ -4346,7 +4346,7 @@ html:has(.flow-canvas-screen) {
   position: absolute; bottom: 100%; left: 0; z-index: 20;
   width: min(20rem, 85vw); max-height: 60vh; overflow-y: auto;
   padding: 0.75rem; border-radius: 0.75rem;
-  background: var(--surface, #1e1e1e); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  background: var(--card-bg, #1e1e1e); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 .dashboard-add-picker__group h4 { margin: 0.5rem 0 0.25rem; font-size: 0.8rem; opacity: 0.7; }
 .dashboard-add-picker__group ul { list-style: none; margin: 0; padding: 0; }

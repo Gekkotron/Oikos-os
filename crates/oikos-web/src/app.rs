@@ -36,7 +36,7 @@ fn HouseRedirect() -> impl IntoView {
     let navigate = use_navigate();
     Effect::new(move |_| {
         navigate(
-            "/dashboards/house",
+            &format!("/dashboards/{}", oikos_api::HOUSE_ID),
             leptos_router::NavigateOptions { replace: true, ..Default::default() },
         );
     });

@@ -481,8 +481,8 @@ async fn put_dashboard(
     Path(id): Path<String>,
     body: Body<Dashboard>,
 ) -> Result<Json<Dashboard>, HttpError> {
-    let Json(dashboard) = body?;
     reject_house(&id)?;
+    let Json(dashboard) = body?;
     if dashboard.id != id {
         return Err(HttpError {
             status: StatusCode::UNPROCESSABLE_ENTITY,
