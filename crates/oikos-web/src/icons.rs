@@ -143,6 +143,22 @@ pub const WAVES: &str = svg!(
 pub const LOCK_OPEN: &str = svg!(
     r#"<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.6-1.7"/><circle cx="12" cy="16" r="1.2"/>"#
 );
+const LOCK: &str = svg!(
+    r#"<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><circle cx="12" cy="16" r="1.2"/>"#
+);
+const FAN: &str = svg!(
+    r#"<circle cx="12" cy="12" r="1.8"/><path d="M12 10.2C12 6 10 3 8 4s-1 5 2.4 6.4M13.8 12c4.2 0 7.2-2 6.2-4s-5-1-6.4 2.4M12 13.8C12 18 14 21 16 20s1-5-2.4-6.4M10.2 12C6 12 3 14 4 16s5 1 6.4-2.4"/>"#
+);
+const VALVE: &str = svg!(
+    r#"<path d="M3 12h4m10 0h4"/><path d="M7 8v8l5-4zM17 8v8l-5-4z"/><path d="M12 12V5m-3 0h6"/>"#
+);
+const IMAGE: &str = svg!(
+    r#"<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m4 18 5-5 4 4 3-3 4 4"/>"#
+);
+const SCENE: &str =
+    svg!(r#"<path d="m12 3 2.1 5.4L20 9l-4.5 3.8L17 19l-5-3.2L7 19l1.5-6.2L4 9l5.9-.6z"/>"#);
+const TAG: &str = svg!(r#"<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.2"/>"#);
+const UPDATE: &str = svg!(r#"<path d="M12 4v11m-4-4 4 4 4-4"/><path d="M5 20h14"/>"#);
 pub const SHIELD: &str = CHANNEL_SECURITY;
 pub const BOLT: &str = CHANNEL_ENERGY;
 pub const DROP: &str = HUMIDITY;
@@ -284,7 +300,17 @@ pub fn entity_icon(entity: &oikos_api::EntityView) -> &'static str {
 fn generic_icon(component: &str) -> &'static str {
     let name = oikos_core::types::type_def(component).map(|d| d.icon.as_str());
     match name {
-        Some("lock") => LOCK_OPEN,
+        Some("lock") => LOCK,
+        Some("fan") => FAN,
+        Some("valve") => VALVE,
+        Some("image") => IMAGE,
+        Some("scene") => SCENE,
+        Some("tag") => TAG,
+        Some("tracker") => OCCUPANCY,
+        Some("notify") => CHIME,
+        Some("update") => UPDATE,
+        Some("text") => SELECT,
+        Some("lawn_mower") => VACUUM,
         Some("siren") => SIREN,
         Some("humidifier") => HUMIDITY,
         Some("camera") => CHANNEL_CAMERA,

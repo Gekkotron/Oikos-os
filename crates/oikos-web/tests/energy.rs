@@ -21,6 +21,7 @@ fn sensor(id: &str, name: &str, unit: &str, value: f64, ui: UiOverride) -> Entit
         label: None,
         kind: Kind::Sensor,
         protocol_kind: Kind::Sensor,
+        component: Kind::Sensor.component().to_string(),
         device_class: None,
         unit: Some(unit.into()),
         icon: None,

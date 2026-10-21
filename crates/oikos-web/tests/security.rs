@@ -26,6 +26,7 @@ fn entity(id: &str, name: &str, kind: Kind, class: Option<&str>, value: StateVal
         label: None,
         kind,
         protocol_kind: kind,
+        component: kind.component().to_string(),
         device_class: class.map(Into::into),
         unit: None,
         icon: None,

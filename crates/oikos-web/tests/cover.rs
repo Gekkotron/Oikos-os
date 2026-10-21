@@ -30,6 +30,7 @@ fn entity(
         label: None,
         kind,
         protocol_kind: kind,
+        component: kind.component().to_string(),
         device_class: None,
         unit: None,
         icon: None,

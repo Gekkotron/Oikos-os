@@ -902,6 +902,7 @@ fn table_lamp() -> oikos_api::EntityView {
         label: None,
         kind: Kind::Light,
         protocol_kind: Kind::Light,
+        component: Kind::Light.component().to_string(),
         device_class: None,
         unit: None,
         icon: None,

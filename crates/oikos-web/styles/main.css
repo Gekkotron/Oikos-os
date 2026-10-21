@@ -4162,3 +4162,17 @@ html:has(.flow-canvas-screen) {
   font: 400 11px/14px var(--font-body);
   opacity: 0.6;
 }
+
+.generic__picture {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+
+.generic__glyph {
+  display: block;
+  width: 32px;
+  height: 32px;
+  opacity: 0.6;
+}

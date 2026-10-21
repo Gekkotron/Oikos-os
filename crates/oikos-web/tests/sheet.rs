@@ -23,6 +23,7 @@ fn sensor(value: f64) -> EntityView {
         label: None,
         kind: Kind::Sensor,
         protocol_kind: Kind::Sensor,
+        component: Kind::Sensor.component().to_string(),
         device_class: None,
         unit: None,
         icon: None,
