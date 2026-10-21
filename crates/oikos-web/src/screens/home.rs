@@ -12,7 +12,11 @@ use crate::cards::chime::ChimeCard;
 use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
 use crate::cards::door::DoorCard;
-use crate::cards::group::{CoverGroupCard, LightGroupCard};
+use crate::cards::group::{
+    ButtonGroupCard, ClimateGroupCard, CoverGroupCard, CoverGroupEntityCard, LightGroupCard,
+    LightGroupEntityCard, NumberGroupCard, SelectGroupCard, SwitchGroupCard, VacuumGroupCard,
+    WaterHeaterGroupCard,
+};
 use crate::cards::light::LightCard;
 use crate::cards::number::NumberCard;
 use crate::cards::select::SelectCard;
@@ -23,6 +27,7 @@ use crate::cards::vacuum::VacuumCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::alert_row::RecentAlerts;
 use crate::components::area_chip::AreaChip;
+use crate::components::card_frame::GROUP_PREFIX;
 use crate::components::room_title::RoomTitle;
 use crate::groups::{HomeItem, favorites_count, home_items};
 use crate::house::House;
@@ -105,6 +110,22 @@ pub(crate) fn without_paired_humidity(mut shown: Vec<&EntityView>) -> Vec<&Entit
 
 /// The card component for an entity's kind.
 pub(crate) fn card_for(entity: EntityView) -> AnyView {
+    if entity.id.starts_with(GROUP_PREFIX) {
+        match entity.kind {
+            Kind::Switch => return view! { <SwitchGroupCard entity=entity /> }.into_any(),
+            Kind::Climate => return view! { <ClimateGroupCard entity=entity /> }.into_any(),
+            Kind::WaterHeater => {
+                return view! { <WaterHeaterGroupCard entity=entity /> }.into_any();
+            }
+            Kind::Number => return view! { <NumberGroupCard entity=entity /> }.into_any(),
+            Kind::Select => return view! { <SelectGroupCard entity=entity /> }.into_any(),
+            Kind::Button => return view! { <ButtonGroupCard entity=entity /> }.into_any(),
+            Kind::Vacuum => return view! { <VacuumGroupCard entity=entity /> }.into_any(),
+            Kind::Light => return view! { <LightGroupEntityCard entity=entity /> }.into_any(),
+            Kind::Cover => return view! { <CoverGroupEntityCard entity=entity /> }.into_any(),
+            _ => {}
+        }
+    }
     match entity.kind {
         Kind::Light => view! { <LightCard entity=entity /> }.into_any(),
         Kind::Switch => match SwitchType::of(entity.protocol_kind, &entity.ui) {
@@ -138,6 +159,19 @@ pub fn HomeScreen() -> impl IntoView {
             .with(|a| house.entities.with(|m| favorites_count(m.values(), a)))
     });
     let counts = Memo::new(move |_| house.entities.with(|m| home_counts(m.values())));
+    // The groups' member counts: fetched on mount and again when a group appears or goes.
+    let group_ids = Memo::new(move |_| {
+        house.entities.with(|m| {
+            m.keys()
+                .filter(|id| id.starts_with(GROUP_PREFIX))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    });
+    Effect::new(move |_| {
+        group_ids.track();
+        house.refresh_groups();
+    });
     let chip_list = Memo::new(move |_| {
         house
             .areas

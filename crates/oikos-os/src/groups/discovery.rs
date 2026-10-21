@@ -155,6 +155,8 @@ fn thermostat(config: &mut Map<String, Value>, topic: &str, members: &[EntityVie
             ),
             ("mode_state_topic", json!(topic)),
             ("mode_state_template", json!("{{ value_json.mode }}")),
+            // Lets the UI read the members' target `range` from the same payload.
+            ("json_attributes_topic", json!(topic)),
             ("modes", json!(common(members, |c| &c.hvac_modes))),
         ],
     );

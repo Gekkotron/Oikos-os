@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use leptos::prelude::*;
 use oikos_api::{
     AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, FlowView,
-    FlowsConfigView, IgnoredView, WsEvent,
+    FlowsConfigView, GroupView, IgnoredView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -22,6 +22,8 @@ pub struct House {
     pub flows: RwSignal<Vec<FlowView>>,
     /// The hub's `[flows]` settings; `None` until the first fetch answers.
     pub flows_config: RwSignal<Option<FlowsConfigView>>,
+    /// The hand-made groups by id (without the `group_` prefix), for the member counts on Home.
+    pub groups: RwSignal<BTreeMap<String, GroupView>>,
     /// The last rejected command as `(entity id, reason)`.
     pub command_failed: RwSignal<Option<(String, String)>>,
 }
@@ -38,8 +40,20 @@ impl House {
             alerts: RwSignal::new(Vec::new()),
             flows: RwSignal::new(Vec::new()),
             flows_config: RwSignal::new(None),
+            groups: RwSignal::new(BTreeMap::new()),
             command_failed: RwSignal::new(None),
         }
+    }
+
+    /// Fetches the groups into [`House::groups`]; a failure leaves the last value (the `×N`
+    /// badge simply stays hidden).
+    pub fn refresh_groups(&self) {
+        let groups = self.groups;
+        leptos::task::spawn_local(async move {
+            if let Ok(list) = crate::api::list_groups().await {
+                groups.set(list.into_iter().map(|g| (g.id.clone(), g)).collect());
+            }
+        });
     }
 
     /// Fetches the `[flows]` settings into [`House::flows_config`]; a failure leaves the last
