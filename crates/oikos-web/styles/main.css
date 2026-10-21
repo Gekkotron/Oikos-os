@@ -4355,3 +4355,30 @@ html:has(.flow-canvas-screen) {
   background: transparent; border: 0; color: inherit; cursor: pointer; border-radius: 0.4rem;
 }
 .dashboard-add-picker__group li button:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* Edit-mode side sheets: right-anchored over the grid. */
+.widget-config-sheet,
+.dashboard-settings-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 100vw;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface, #fff);
+  color: inherit;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.2);
+  z-index: 50;
+}
+.widget-config-sheet label,
+.dashboard-settings-sheet label { display: flex; flex-direction: column; gap: 4px; }
+.widget-config-sheet button,
+.dashboard-settings-sheet button { min-height: var(--touch-min); }
+.widget-config-sheet__delete { color: #c0392b; }
+.dashboard-settings-sheet__reorder { display: flex; gap: 8px; }
+.dashboard-settings-sheet__reorder button { flex: 1; }

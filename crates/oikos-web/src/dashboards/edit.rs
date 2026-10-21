@@ -14,6 +14,9 @@ pub struct EditState {
     pub draft: RwSignal<Dashboard>,
     /// Last-saved baseline; Save replaces it with the hub's reply.
     pub original: RwSignal<Dashboard>,
+    /// Index of the widget whose config sheet is open.
+    pub selected_widget: RwSignal<Option<usize>>,
+    pub settings_open: RwSignal<bool>,
 }
 
 impl EditState {
@@ -22,6 +25,8 @@ impl EditState {
             active: RwSignal::new(active),
             draft: RwSignal::new(initial.clone()),
             original: RwSignal::new(initial),
+            selected_widget: RwSignal::new(None),
+            settings_open: RwSignal::new(false),
         }
     }
 
@@ -80,6 +85,14 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                 "✎"
             </button>
             <Show when=move || state.active.get()>
+                <button
+                    type="button"
+                    class="dashboard-edit-toolbar__gear"
+                    aria-label="Dashboard settings"
+                    on:click=move |_| state.settings_open.update(|o| *o = !*o)
+                >
+                    "⚙"
+                </button>
                 <button
                     type="button"
                     class="dashboard-edit-toolbar__discard"

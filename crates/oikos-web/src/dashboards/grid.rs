@@ -46,7 +46,9 @@ pub fn Grid(
                     let tools = edit.map(|state| {
                         view! {
                             <Show when=active>
-                                <div class="widget__tools">
+                                // Stop bubbling so the tile's open-config click does not fire
+                                // for the move/resize buttons.
+                                <div class="widget__tools" on:click=|ev| ev.stop_propagation()>
                                     <button
                                         type="button"
                                         class="widget__move"
@@ -90,7 +92,16 @@ pub fn Grid(
                         }
                     });
                     view! {
-                        <div class=class>
+                        <div
+                            class=class
+                            on:click=move |_| {
+                                if let (Some(state), true) = (edit, active()) {
+                                    if let Some(i) = position.run(()) {
+                                        state.selected_widget.set(Some(i));
+                                    }
+                                }
+                            }
+                        >
                             <WidgetView widget=w />
                             {tools}
                         </div>

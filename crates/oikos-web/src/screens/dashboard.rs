@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use leptos_router::hooks::{use_params_map, use_query_map};
 use oikos_api::HOUSE_ID;
 
+use crate::dashboards::config_sheet::{DashboardSettingsSheet, WidgetConfigSheet};
 use crate::dashboards::edit::{EditState, EditToolbar};
 use crate::dashboards::grid::Grid;
 use crate::house::House;
@@ -35,6 +36,22 @@ pub fn DashboardScreen() -> impl IntoView {
                         view! {
                             <EditToolbar state=edit />
                             <Grid widgets=widgets edit=edit />
+                            // Rebuilt per selected index so the sheet never shows a stale widget.
+                            {move || {
+                                edit.selected_widget.get().map(|index| view! {
+                                    <WidgetConfigSheet
+                                        state=edit
+                                        index=index
+                                        on_close=Callback::new(move |_| edit.selected_widget.set(None))
+                                    />
+                                })
+                            }}
+                            <Show when=move || edit.settings_open.get()>
+                                <DashboardSettingsSheet
+                                    state=edit
+                                    on_close=Callback::new(move |_| edit.settings_open.set(false))
+                                />
+                            </Show>
                         }
                             .into_any()
                     }
