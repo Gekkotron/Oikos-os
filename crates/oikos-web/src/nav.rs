@@ -32,6 +32,11 @@ fn return_target(path: &str, search: &str) -> Option<String> {
     }
 }
 
+/// The Home room to select when a group sheet in `area` goes Back; `None` for a group with no room.
+pub fn home_room_for(area: &str) -> Option<String> {
+    (!area.is_empty()).then(|| area.to_owned())
+}
+
 /// Keeps [`ReturnPath`] on the current page. Render it inside the router.
 #[component]
 pub fn TrackReturnPath() -> impl IntoView {
@@ -46,7 +51,13 @@ pub fn TrackReturnPath() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::return_target;
+    use super::{home_room_for, return_target};
+
+    #[test]
+    fn group_back_selects_its_room() {
+        assert_eq!(home_room_for("living").as_deref(), Some("living"));
+        assert_eq!(home_room_for(""), None);
+    }
 
     #[test]
     fn screens_are_return_targets() {
