@@ -2,7 +2,7 @@
 
 Author: Gekkotron
 Date: 2026-10-21
-Status: brainstormed, awaiting user approval
+Status: approved by the user 2026-10-21
 
 ## Why
 
