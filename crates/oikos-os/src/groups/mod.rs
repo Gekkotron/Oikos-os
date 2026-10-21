@@ -4,4 +4,7 @@
 
 pub mod discovery;
 pub mod state;
+pub mod store;
 pub mod topics;
+
+pub use store::{ApplyOutcome, GroupStore};

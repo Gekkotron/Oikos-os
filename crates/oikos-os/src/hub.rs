@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::alerts::{AlertStore, Applied};
 use crate::flows::FlowStore;
+use crate::groups::{self, ApplyOutcome, GroupStore};
 use crate::history::History;
 use crate::media::MediaProxy;
 use crate::virtual_entities as virtuals;
@@ -113,6 +114,7 @@ pub struct Hub {
     alerts: Mutex<AlertStore>,
     /// The retained flow definitions and their runs.
     flow_store: Mutex<FlowStore>,
+    group_store: Mutex<GroupStore>,
     /// The topic prefix flows are retained under, one topic per flow id.
     automation_prefix: String,
     /// The time zone schedules and their preview run in.
@@ -197,6 +199,7 @@ impl Hub {
             responses_topic: cfg.push.responses_topic.clone(),
             alerts: Mutex::new(alerts),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
+            group_store: Mutex::new(GroupStore::default()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
             house_point: cfg.flows.house_point(),
@@ -237,6 +240,9 @@ impl Hub {
             } else {
                 Vec::new()
             };
+        }
+        if self.ingest_group(topic, payload) {
+            return Vec::new();
         }
         let at = clock::now();
         let at_micros = clock::now_micros();
@@ -860,6 +866,49 @@ impl Hub {
         self.flow_store
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The group store, taken as it is when a thread panicked while holding it.
+    pub(crate) fn group_store(&self) -> MutexGuard<'_, GroupStore> {
+        self.group_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Read access to the group store, for tests and diagnostics.
+    pub fn read_group_store(&self) -> MutexGuard<'_, GroupStore> {
+        self.group_store()
+    }
+
+    /// Feeds a group definition or the migration marker to the store; false when `topic` is
+    /// neither, so state and availability topics fall through to the registry.
+    fn ingest_group(&self, topic: &str, payload: &[u8]) -> bool {
+        let id = if topic == groups::topics::migration_marker_topic(&self.discovery_prefix) {
+            "_migrated"
+        } else {
+            let Some(id) = topic
+                .strip_prefix(self.discovery_prefix.as_str())
+                .and_then(|rest| rest.strip_prefix("/group/"))
+                .and_then(|rest| rest.strip_suffix("/definition"))
+            else {
+                return false;
+            };
+            if id.is_empty() || id.contains('/') {
+                return false;
+            }
+            id
+        };
+        let outcome = self.group_store().apply(id, payload);
+        match &outcome {
+            ApplyOutcome::Rejected(reason) => {
+                tracing::warn!(%id, %reason, "group definition rejected");
+            }
+            ApplyOutcome::Created | ApplyOutcome::Replaced | ApplyOutcome::Deleted => {
+                tracing::info!(%id, ?outcome, "group definition applied");
+            }
+            ApplyOutcome::Marker | ApplyOutcome::Unchanged => {}
+        }
+        true
     }
 
     /// Asks the flow engine to do something; nobody listening is fine (no engine started).

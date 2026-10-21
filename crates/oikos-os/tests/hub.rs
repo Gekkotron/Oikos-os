@@ -959,3 +959,16 @@ async fn offer_never_blocks_when_full() {
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
     ));
 }
+
+#[tokio::test]
+async fn retained_group_definition_is_loaded() {
+    let (hub, _rx) = hub();
+    let changes = hub.ingest(
+        "oikos/group/living/definition",
+        br#"{"name":"Living lights","kind":"light","members":[]}"#,
+    );
+    assert!(changes.is_empty());
+    assert!(hub.read_group_store().get("living").is_some());
+    hub.ingest("oikos/group/_migrated", b"1");
+    assert!(hub.read_group_store().migrated());
+}
