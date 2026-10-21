@@ -2,9 +2,9 @@
 //! Results are objects (the MCP `structuredContent` must be one), so lists are wrapped.
 
 use oikos_api::{
-    AreaView, BridgeView, ConnectionStatus, DeviceView, EnergyKind, EntityView, HistoryDaily,
-    HistoryRange, HistorySeries, HistoryToday, IgnoredView, LastChangeItem, OverridePatch,
-    RunStatus, VirtualSpec,
+    AreaView, BridgeView, ConnectionStatus, DeviceView, EnergyKind, EntityView, GroupSpec,
+    GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, IgnoredView,
+    LastChangeItem, OverridePatch, RunStatus, VirtualSpec,
 };
 use oikos_core::flow::Flow;
 use oikos_core::model::{Area, Command, Kind, UiOverride};
@@ -346,6 +346,29 @@ pub struct SetVirtualParams {
 pub struct DeleteVirtualParams {
     /// The id given to `set_virtual` (without the `virtual_` prefix).
     pub id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetGroupParams {
+    /// The id: 1 to 48 characters of `a-z`, `0-9` and `_`. The entity becomes `group_<id>`.
+    pub id: String,
+    /// The definition: `kind` (the kind the group presents itself as), `name`, `members` (the
+    /// entity ids it controls, not other groups) and `hideMembers` (true by default).
+    pub spec: GroupSpec,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteGroupParams {
+    /// The id given to `set_group` (without the `group_` prefix).
+    pub id: String,
+}
+
+/// The groups, one entry each with its members and the flows that use it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GroupList {
+    pub groups: Vec<GroupView>,
 }
 
 /// Which history slice to return.

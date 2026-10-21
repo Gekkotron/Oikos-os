@@ -127,7 +127,11 @@ fn instructions() -> String {
          `oikos/automation/<id>`, the prefix being configurable), `set_flow_enabled` \
          switches it and `delete_flow` removes it; `run_flow` starts a manual run. `set_virtual` and `delete_virtual` manage virtual \
          entities (a `switch`, `number` or `button` the hub owns, as `virtual_<id>`) for flows \
-         to read and write. A flow is a \
+         to read and write. `list_groups`, `set_group` and `delete_group` manage flexible \
+         groups (hub-published entities as `group_<id>` whose definition — kind, members, \
+         hideMembers — is retained at `oikos/group/<id>/definition`); the hub fans group \
+         commands out to member entities and republishes the combined state as members \
+         change. A flow is a \
          graph of nodes: `trigger.state` (an entity's state changes), `trigger.schedule` (a \
          5-field cron in the house local time; it fires only while the flow is enabled and \
          the first run is at the next tick), `flow.enable` (sets another flow's `enabled`, or its own flow when `flow` is absent; a flow \

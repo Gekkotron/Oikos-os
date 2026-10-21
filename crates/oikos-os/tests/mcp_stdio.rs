@@ -43,6 +43,9 @@ const EXPECTED_TOOLS: &[&str] = &[
     "run_flow",
     "set_virtual",
     "delete_virtual",
+    "list_groups",
+    "set_group",
+    "delete_group",
     "get_history",
 ];
 

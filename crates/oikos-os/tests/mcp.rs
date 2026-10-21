@@ -48,6 +48,9 @@ const EXPECTED_TOOLS: &[&str] = &[
     "run_flow",
     "set_virtual",
     "delete_virtual",
+    "list_groups",
+    "set_group",
+    "delete_group",
     "get_history",
 ];
 
@@ -85,8 +88,13 @@ struct Server {
 impl Server {
     /// A hub with the switch and its linkquality sensor discovered, served on `127.0.0.1:0`.
     async fn start() -> Server {
+        Server::start_with(config()).await
+    }
+
+    /// [`Server::start`] with the given config.
+    async fn start_with(cfg: Config) -> Server {
         let (tx, publisher) = mpsc::channel(64);
-        let hub = Hub::new(&config(), tx);
+        let hub = Hub::new(&cfg, tx);
         hub.ingest(SWITCH_TOPIC, &fixture(SWITCH_FIXTURE));
         hub.ingest(LINKQUALITY_TOPIC, &fixture(LINKQUALITY_FIXTURE));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -887,6 +895,70 @@ async fn mcp_set_virtual_lists_the_entity() {
     );
     let again = call(&client, "delete_virtual", json!({ "id": "force_heating" })).await;
     assert_eq!(again.is_error, Some(true));
+
+    client.cancel().await.expect("close");
+}
+
+/// Flexible groups switched on, with the broker link up so the group writers publish.
+async fn start_with_groups() -> Server {
+    let mut cfg = config();
+    cfg.groups.enabled = true;
+    let server = Server::start_with(cfg).await;
+    server.online();
+    server
+}
+
+fn switch_group_spec() -> Value {
+    json!({ "kind": "switch", "name": "Stair", "members": [SWITCH_ID], "hideMembers": true })
+}
+
+#[tokio::test]
+async fn mcp_list_groups_is_empty_before_any_set_group() {
+    let server = start_with_groups().await;
+    let client = server.client().await;
+
+    let list = json_of(
+        "list_groups",
+        &call(&client, "list_groups", json!({})).await,
+    );
+    assert_eq!(list, json!({ "groups": [] }));
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn mcp_set_group_round_trips_to_the_hub() {
+    let server = start_with_groups().await;
+    let client = server.client().await;
+
+    let view = json_of(
+        "set_group",
+        &call(
+            &client,
+            "set_group",
+            json!({ "id": "stair", "spec": switch_group_spec() }),
+        )
+        .await,
+    );
+    assert_eq!(view["id"], "stair");
+    assert_eq!(view["entity"]["id"], "group_stair");
+    assert_eq!(view["members"].as_array().map(Vec::len), Some(1));
+
+    let stored = server.hub.list_groups().expect("groups");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].id, "stair");
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn mcp_delete_group_unknown_id_is_a_tool_error() {
+    let server = start_with_groups().await;
+    let client = server.client().await;
+
+    let result = call(&client, "delete_group", json!({ "id": "nope" })).await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(text_of(&result).contains("unknown"), "{}", text_of(&result));
 
     client.cancel().await.expect("close");
 }
