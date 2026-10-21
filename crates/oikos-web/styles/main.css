@@ -4112,3 +4112,11 @@ html:has(.flow-canvas-screen) {
 .history-chart__err button {
   margin-top: 10px;
 }
+
+.sheet__history {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10px;
+  text-decoration: none;
+  color: inherit;
+}

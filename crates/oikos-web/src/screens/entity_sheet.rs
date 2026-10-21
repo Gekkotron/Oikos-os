@@ -248,6 +248,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
         })
     };
 
+    let history_href = format!("/history/{}", crate::api::encode_id(&id));
     view! {
         <header class="sheet__header">
             <A href=move || return_path.0.get() attr:class="sheet__back">
@@ -258,6 +259,9 @@ pub fn SheetBody(id: String) -> impl IntoView {
         </header>
         <Panel title="Controls">
             <div class="sheet__controls">{move || entity.get().map(card_for)}</div>
+            <A href=history_href attr:class="chip sheet__history">
+                "View history →"
+            </A>
         </Panel>
         <ColourPanel id=id.clone() entity=entity />
         <Panel title="Settings">
