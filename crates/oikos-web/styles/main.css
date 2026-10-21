@@ -4256,3 +4256,59 @@ html:has(.flow-canvas-screen) {
   opacity: 0.5;
 }
 .widget-unavailable-label { overflow-wrap: anywhere; }
+
+/* The dashboards picker replaces the Home tab. The menu is position: fixed with no offsets so it
+   sits at its static position yet escapes the nav's overflow-x clipping. */
+.dashboards-picker {
+  flex: 1 0 auto;
+  display: flex;
+}
+
+.dashboards-picker__trigger {
+  flex: 1 0 auto;
+  min-height: var(--touch-min);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-nav);
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dashboards-picker__menu {
+  position: fixed;
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  min-width: 180px;
+  background: var(--surface, Canvas);
+  border: 1px solid var(--border, currentColor);
+  border-radius: var(--radius-nav);
+}
+
+.dashboards-picker__menu li {
+  display: flex;
+}
+
+.dashboards-picker__menu a,
+.dashboards-picker__new button {
+  flex: 1;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 0 12px;
+  min-height: var(--touch-min);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  cursor: pointer;
+}
+
+.dashboards-picker__new {
+  border-top: 1px solid var(--border, currentColor);
+  margin-top: 4px;
+  padding-top: 4px;
+}
