@@ -225,7 +225,6 @@ fn switch_op(i: &mut IfParams, op: Op, stash: &mut IfStash) {
     i.op = op;
 }
 
-
 fn node_editor_body(
     form: Form,
     selected: RwSignal<Option<Selection>>,
@@ -473,10 +472,12 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             let live_id = id.clone();
             // The fields re-mount when leaving `is_dark`: they read the draft as it is then.
             let live = Callback::new(move |()| {
-                form.editor.draft.with_untracked(|f| match f.node(&live_id).map(|n| &n.kind) {
-                    Some(NodeKind::If(i)) => Some(i.clone()),
-                    _ => None,
-                })
+                form.editor
+                    .draft
+                    .with_untracked(|f| match f.node(&live_id).map(|n| &n.kind) {
+                        Some(NodeKind::If(i)) => Some(i.clone()),
+                        _ => None,
+                    })
             });
             let entity_id = id;
             let entity_write = Callback::new(move |value: Option<String>| {

@@ -8,8 +8,8 @@ use leptos::prelude::*;
 use oikos_api::{EnergyKind, HistoryDaily, HistoryRange, HistorySeries};
 
 use super::format::{state_axis_labels, tick_labels};
-use super::geom::{daily_bars, step_path, y_scale, Bar, StepPath, YScale};
-use crate::api::history::{fetch_daily, fetch_series, HistoryApiError};
+use super::geom::{Bar, StepPath, YScale, daily_bars, step_path, y_scale};
+use crate::api::history::{HistoryApiError, fetch_daily, fetch_series};
 
 /// Which shape of chart the entity needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -175,7 +175,12 @@ fn map_error(err: HistoryApiError) -> State {
 const VIEW_W: f64 = 400.0;
 const VIEW_H: f64 = 220.0;
 
-fn render_series(s: HistorySeries, range: HistoryRange, kind: String, unit: Option<String>) -> impl IntoView {
+fn render_series(
+    s: HistorySeries,
+    range: HistoryRange,
+    kind: String,
+    unit: Option<String>,
+) -> impl IntoView {
     let scale = y_scale(&s.points);
     let StepPath { d, band_d } = step_path(&s.points, scale, VIEW_W, VIEW_H);
     let (y_lo, y_hi) = y_labels(&scale, &kind, unit.as_deref());
@@ -226,11 +231,19 @@ fn render_bars(d: HistoryDaily, range: HistoryRange) -> impl IntoView {
 fn series_min_max(points: &[(i64, f64, f64, f64)]) -> (f64, f64) {
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for p in points {
-        if p.2 < lo { lo = p.2; }
-        if p.3 > hi { hi = p.3; }
+        if p.2 < lo {
+            lo = p.2;
+        }
+        if p.3 > hi {
+            hi = p.3;
+        }
     }
-    if !lo.is_finite() { lo = 0.0; }
-    if !hi.is_finite() { hi = 0.0; }
+    if !lo.is_finite() {
+        lo = 0.0;
+    }
+    if !hi.is_finite() {
+        hi = 0.0;
+    }
     (lo, hi)
 }
 
@@ -285,7 +298,12 @@ mod tests {
 
     #[test]
     fn plan_fetch_series_flavor_uses_entity_series_for_every_range() {
-        for r in [HistoryRange::Day, HistoryRange::Week, HistoryRange::Month, HistoryRange::Year] {
+        for r in [
+            HistoryRange::Day,
+            HistoryRange::Week,
+            HistoryRange::Month,
+            HistoryRange::Year,
+        ] {
             assert_eq!(
                 plan_fetch("sensor.temp", r, Flavor::Series, None),
                 FetchPlan::Series("sensor.temp".into())

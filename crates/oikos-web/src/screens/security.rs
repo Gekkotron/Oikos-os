@@ -369,4 +369,3 @@ mod tests {
         assert_eq!(since_label(now, Some(now + 60)), "");
     }
 }
-
