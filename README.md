@@ -72,6 +72,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `POST /api/v1/entities/{id}/command` | Sends a command (`{"type": "turn_on", …}`) and reports whether the device confirmed it. |
 | `PATCH /api/v1/entities/{id}/override` | Changes fields of the entity's `oikos/ui/<id>` override and returns the entity as it now appears. |
 | `DELETE /api/v1/entities/{id}/override` | Removes the override (204). |
+| `GET /api/v1/entities/{id}/picture` | The picture of a camera or image entity: the stored bytes, or a redirect to its URL. The hub's own fetch of a URL is capped at 5 MiB and 10 s and follows no redirects. See [Entity types](#entity-types). |
 | `PUT /api/v1/areas` | Replaces the declared rooms (`oikos/ui/_areas`) and returns the resulting list. |
 | `PATCH /api/v1/areas/{id}/groups/{kind}` | Sets or clears (`null`) the room group card name and the favourite flag of one kind (`cover` or `light`) in the area. `200` with the area list, `422` for a kind other than `cover`/`light`, `Unassigned` or an empty body, `404` for an unknown area, `503` while the broker link is down. |
 | `PUT /api/v1/virtual/{id}` | Creates or replaces a virtual switch, number or button (`{"kind", "name", …}`) and returns the entity `virtual_<id>`; the initial state is published only when it is new. `422` for a bad id or spec, `503` while the broker link is down. See [Adding a device](docs/adding-a-device.md#virtual-entities). |
@@ -190,6 +191,19 @@ cd crates/oikos-web && wasm-pack test --headless --chrome
 ```
 
 Install the tools with `cargo install trunk --locked` and `cargo install wasm-pack --locked`. `wasm-pack` fetches a matching chromedriver on first use; Google Chrome must be installed.
+
+## Entity types
+
+Components beyond the hand-written kinds are described by a JSON type table, `crates/oikos-core/src/types/table.json`, compiled into the hub. Each entry says where the entity shows (`placement`), which field is its primary state, which controls it offers, what puts it in alert style and how its history is charted. Sixteen components are covered: `camera`, `device_automation`, `device_tracker`, `event`, `fan`, `humidifier`, `image`, `lawn_mower`, `lock`, `notify`, `scene`, `siren`, `tag`, `text`, `update` and `valve`. Only `device` (device-based discovery) is folded by routing; any other component the table does not describe is reported as `ignored component <name>` under `GET /api/v1/ignored`.
+
+Some behaviour to know about:
+
+- Secret text (`mode: password`) is masked as `••••` on every state path out of the hub, and it is left out of history.
+- Several `device_automation` configs for one device fold into a single remote entity, whose `capabilities.generic.signals` lists their payloads. `trigger.signal` in a flow fires on those remotes, on events and on tags.
+- A per-entity override `mainControl` names one announced control, or `"none"` to hide the main control.
+- `update` entities feed the firmware marks (`installed`, `latest`, `available`) that the device view shows.
+
+The hub publishes the table retained on `oikos/ui/_types` (`{ui_prefix}/_types`) on every connection, next to `oikos/ui/_areas` and the per-entity `oikos/ui/<id>` overrides, so the Android app can read it. Its own echo is ignored. The table's vocabulary is explained in [Adding a device](docs/adding-a-device.md#a-type-table-entry-json-no-rust).
 
 ## Flows
 

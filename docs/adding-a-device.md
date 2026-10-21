@@ -8,7 +8,8 @@ The hub speaks Home Assistant MQTT discovery. It holds no per-device code. Each 
 |---|---|---|
 | A Zigbee device Zigbee2MQTT does not know | [Fix it in Zigbee2MQTT](#zigbee-devices-unknown-to-zigbee2mqtt) | External converter, then upstream PR. Not an Oikos change. |
 | The device is not Zigbee (cloud API, Wi-Fi, vendor protocol) | [Write a bridge](#writing-a-bridge) | Separate process, any language, own repo. It publishes discovery to the broker. |
-| The device publishes discovery for a component Oikos ignores (`GET /api/v1/ignored` reports `ignored component <name>`) | [Add a kind](#adding-a-component-kind-to-oikos) | PR to Oikos. One PR per component, never per device. |
+| The device publishes discovery for a component Oikos ignores (`GET /api/v1/ignored` reports `ignored component <name>`) | [Add a type or a kind](#adding-a-component-kind-to-oikos) | Usually a JSON entry in `crates/oikos-core/src/types/table.json`. A Rust kind only when the table cannot describe it. PR to Oikos, one per component, never per device. |
+| The device is a type Oikos describes but reports no state for the primary field | [Type table](#a-type-table-entry-json-no-rust) | Bridge or firmware: publish the state topic of the primary field, retained. A `requires_state` type is rejected without it. |
 | The device works but looks wrong (wrong room, wrong name, a relay that is really a heater or light) | [Override](#overrides) | No code. Web device sheet, `PATCH /api/v1/entities/{id}/override`, or MCP `set_override`. |
 
 Some firmwares already publish discovery when their MQTT discovery option is on, Tasmota, ESPHome and Valetudo among them. Those devices need no bridge.
@@ -51,13 +52,15 @@ Rules:
 - Remove an entity by publishing an empty retained payload on its config topic.
 - `ui` and `automation` directly under the prefix are reserved. `oikos/ui/<id>` holds overrides and `oikos/automation/<id>` holds flows. Never publish discovery there.
 
-Supported components (each becomes an entity):
+Hand-written kinds (each becomes an entity):
 
 `light`, `switch`, `cover`, `climate`, `sensor`, `binary_sensor`, `alarm_control_panel`, `number`, `select`, `button`, `vacuum`, `water_heater`.
 
-Recognised but ignored today (listed under `GET /api/v1/ignored`):
+Type-table components (each becomes an entity from its table entry, no Rust needed):
 
-`device_automation`, `update`, `device_tracker`, `text`, `event`, `scene`, `siren`, `lock`, `fan`, `humidifier`, `camera`, `image`, `lawn_mower`, `notify`, `tag`, `valve`.
+`camera`, `device_automation`, `device_tracker`, `event`, `fan`, `humidifier`, `image`, `lawn_mower`, `lock`, `notify`, `scene`, `siren`, `tag`, `text`, `update`, `valve`.
+
+Any other component is listed under `GET /api/v1/ignored` as `ignored component <name>`.
 
 ### Fields the hub reads
 
@@ -146,6 +149,53 @@ Security: bindings are readable by anything on the LAN. Never put credentials in
 
 ## Adding a component kind to Oikos
 
+Two routes. Most components need only a type-table entry. Write a Rust kind only when the component needs behaviour the table cannot express: a new state model, a command mapping of its own, or energy reporting.
+
+### A type-table entry (JSON, no Rust)
+
+Find or add the entry in `crates/oikos-core/src/types/table.json`. Each entry is keyed by component name:
+
+| Key | Meaning |
+|---|---|
+| `placement` | Where the entity shows: `card` (Home), `signal` (a trigger for flows), `target` (something flows can send to) or `update` (a firmware mark). |
+| `icon` | A glyph name for the card. |
+| `primary` | The field name shown on the card, or `null`. |
+| `requires_state` | When `true`, discovery is rejected without the primary field's topic. |
+| `fields` | A map of `field_name` to `{ shape, topic, template?, values?, options?, range?, on? }`. `shape` is `on_off`, `number`, `choice`, `text`, `picture` or `version`. `topic` is the config key holding the state topic, `template` the config key holding its value template. `values` lists the allowed values, each with the config `key` that may override its payload and the Home Assistant `default`. `options` names a list in the config (such as `preset_modes`). `range` is `{min, max, step}`. `on` is the value that counts as on. |
+| `controls` | A map of `control_name` to `{ shape, topic, template?, field?, press?, payload?, payload_on?, payload_off?, json_key?, requires?, labels? }`. `topic` is the config key of the command topic. `press: true` makes a button, which has no state. `payload` is `{value, default}`. `field` ties the control to a field it changes. |
+| `main` | The default main control, in preference order. |
+| `alerts` | `[{field, any_of}]`: field values that put the card in alert style. |
+| `history` | `{field, map}`. `map` turns the field's text values into numbers, such as `{"on": 1.0, "off": 0.0}`. An empty `map` keeps a number as it is. |
+
+A short example, the `device_tracker` entry:
+
+```json
+"device_tracker": {
+  "placement": "card",
+  "icon": "tracker",
+  "primary": "state",
+  "requires_state": true,
+  "fields": {
+    "state": {
+      "shape": "choice",
+      "topic": "state_topic",
+      "template": "value_template",
+      "values": [
+        {"value": "home", "key": "payload_home", "default": "home"},
+        {"value": "not_home", "key": "payload_not_home", "default": "not_home"}
+      ]
+    }
+  },
+  "history": {"field": "state", "map": {"home": 1.0, "not_home": 0.0}}
+}
+```
+
+The hub publishes the whole table retained on `oikos/ui/_types` (`{ui_prefix}/_types`) on every connection, so the Android app reads the same vocabulary. Its own echo is ignored. Camera and image entities carry their picture in the `picture` field. `GET /api/v1/entities/{id}/picture` serves the stored bytes or redirects to the URL.
+
+Check it with `GET /api/v1/ignored` (the component must no longer appear there) and `GET /api/v1/snapshot` (the entity must show its primary field).
+
+### A hand-written kind (Rust)
+
 Base the PR on how `water_heater` was added. A kind touches these files:
 
 | File | Change |
@@ -167,7 +217,7 @@ Before opening the PR, run the commands in the README section "Development": `ca
 
 ## Overrides
 
-Override fields: `name`, `area`, `hidden`, `cardStyle`, `showAs` (a switch shown as another type), `favorite` and `energyRole`.
+Override fields: `name`, `area`, `hidden`, `cardStyle`, `showAs` (a switch shown as another type), `favorite`, `energyRole` and `mainControl` (the name of an announced control, or `"none"` to hide the main control).
 
 Overrides are retained messages under `oikos/ui/<entity id>`. Set them from the web device sheet, `PATCH /api/v1/entities/{id}/override`, or MCP `set_override`.
 
