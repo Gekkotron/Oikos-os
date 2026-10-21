@@ -1454,3 +1454,59 @@ async fn history_bad_params_are_400() {
         .await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+fn groups_config() -> Config {
+    let mut cfg = config();
+    cfg.groups.enabled = true;
+    cfg
+}
+
+#[tokio::test]
+async fn http_groups_list_is_empty_then_503_when_off() {
+    let server = Server::start_with(groups_config()).await;
+    let res = server.get("/api/v1/groups").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.json::<Value>().await.expect("json"), json!([]));
+
+    let off = Server::start().await;
+    assert_eq!(
+        off.get("/api/v1/groups").await.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn http_put_and_delete_group() {
+    let server = Server::start_with(groups_config()).await;
+    server.online();
+    let url = server.url("/api/v1/groups/living");
+    let res = server
+        .client
+        .put(&url)
+        .json(&json!({ "kind": "switch", "name": "Living", "members": [] }))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::OK);
+    let view: Value = res.json().await.expect("json");
+    assert_eq!(view["id"], "living");
+    assert_eq!(view["hideMembers"], true);
+    assert_eq!(view["usedByFlows"], json!([]));
+
+    let bad = server
+        .client
+        .put(server.url("/api/v1/groups/BAD-id"))
+        .json(&json!({ "kind": "switch", "name": "x", "members": [] }))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let missing = server
+        .client
+        .delete(server.url("/api/v1/groups/ghost"))
+        .send()
+        .await
+        .expect("DELETE");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}

@@ -13,9 +13,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
     AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EnergyKind, EntityView,
-    FlowView, FlowWriteOutcome, FlowsConfigView, HistoryDaily, HistoryRange, HistorySeries,
-    HistoryToday, IgnoredView, LastChange, OverridePatch, RunView, SchedulePreview, Snapshot,
-    VirtualSpec,
+    FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec, GroupView, HistoryDaily, HistoryRange,
+    HistorySeries, HistoryToday, IgnoredView, LastChange, OverridePatch, RunView, SchedulePreview,
+    Snapshot, VirtualSpec,
 };
 use oikos_core::flow::{Flow, Schedule};
 use oikos_core::model::{AreasDocument, Command};
@@ -54,6 +54,8 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         )
         .route("/flows/{id}/enabled", post(set_flow_enabled))
         .route("/flows/{id}/run", post(run_flow))
+        .route("/groups", get(list_groups))
+        .route("/groups/{id}", put(put_group).delete(delete_group))
         .route("/virtual/{id}", put(put_virtual).delete(delete_virtual))
         .route("/history/series", get(history_series))
         .route("/history/daily", get(history_daily))
@@ -449,6 +451,31 @@ async fn schedule_preview(
         timezone: zone.name().to_owned(),
         next,
     }))
+}
+
+/// The stored groups (`200`); `503` while `[groups] enabled` is false.
+async fn list_groups(State(hub): HubState) -> Result<Json<Vec<GroupView>>, HttpError> {
+    Ok(Json(hub.list_groups()?))
+}
+
+/// Creates or replaces a group (`200` with its view); `422` for a bad id or spec, `503` while
+/// groups are off or the broker link is down.
+async fn put_group(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<GroupSpec>,
+) -> Result<Json<GroupView>, HttpError> {
+    let Json(spec) = body?;
+    Ok(Json(hub.set_group(&id, spec).await?))
+}
+
+/// Removes a group (204); `404` for an id that is not one.
+async fn delete_group(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    hub.delete_group(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Creates or replaces a virtual switch, number or button (`200` with the entity); `422` for

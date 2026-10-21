@@ -17,7 +17,7 @@ pub use flows::{
     FlowView, FlowWriteOutcome, FlowsConfigView, RunStatus, RunView, SchedulePreview, StepOutcome,
     StepView, TriggerInfo,
 };
-pub use groups::GroupSpec;
+pub use groups::{GroupMemberView, GroupSpec, GroupView};
 pub use history::{
     EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange, LastChangeItem,
 };

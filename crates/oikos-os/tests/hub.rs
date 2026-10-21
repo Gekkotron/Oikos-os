@@ -972,3 +972,190 @@ async fn retained_group_definition_is_loaded() {
     hub.ingest("oikos/group/_migrated", b"1");
     assert!(hub.read_group_store().migrated());
 }
+
+fn groups_hub() -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.groups.enabled = true;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    feed_switch(&hub);
+    (hub, rx)
+}
+
+fn switch_group() -> oikos_api::GroupSpec {
+    oikos_api::GroupSpec {
+        kind: Kind::Switch,
+        name: "Stair".to_owned(),
+        members: vec![SWITCH_ID.to_owned()],
+        hide_members: true,
+    }
+}
+
+#[tokio::test]
+async fn set_group_with_the_switch_off_is_refused_without_publish() {
+    let (hub, mut rx) = hub();
+    feed_switch(&hub);
+    assert!(matches!(
+        hub.set_group("stair", switch_group()).await,
+        Err(HubError::Publish(_))
+    ));
+    assert!(drain(&mut rx).is_empty());
+    assert!(matches!(hub.list_groups(), Err(HubError::Publish(_))));
+    assert!(matches!(
+        hub.delete_group("stair").await,
+        Err(HubError::Publish(_))
+    ));
+}
+
+#[tokio::test]
+async fn set_group_rejects_bad_specs_without_publish() {
+    let (hub, mut rx) = groups_hub();
+    let mut sensor = switch_group();
+    sensor.kind = Kind::Sensor;
+    assert!(matches!(
+        hub.set_group("stair", sensor).await,
+        Err(HubError::Rejected(_))
+    ));
+    let mut nested = switch_group();
+    nested.members = vec!["group_other".to_owned()];
+    assert!(matches!(
+        hub.set_group("stair", nested).await,
+        Err(HubError::Rejected(_))
+    ));
+    let mut wrong_kind = switch_group();
+    wrong_kind.kind = Kind::Light;
+    assert!(matches!(
+        hub.set_group("stair", wrong_kind).await,
+        Err(HubError::Rejected(_))
+    ));
+    assert!(matches!(
+        hub.set_group("BAD-id", switch_group()).await,
+        Err(HubError::Rejected(_))
+    ));
+    assert!(drain(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn set_group_publishes_definition_config_availability_and_state() {
+    let (hub, mut rx) = groups_hub();
+    let view = hub
+        .set_group("stair", switch_group())
+        .await
+        .expect("created");
+    assert_eq!(view.id, "stair");
+    assert_eq!(view.entity.id, "group_stair");
+    assert_eq!(view.members.len(), 1);
+    assert!(view.members[0].present && !view.members[0].mismatch);
+    let published = drain(&mut rx);
+    let topics: Vec<&str> = published.iter().map(|p| p.topic.as_str()).collect();
+    assert_eq!(
+        topics,
+        [
+            "oikos/switch/group/stair/config",
+            "oikos/group/stair/avail",
+            "oikos/group/stair/definition",
+            "oikos/group/stair",
+        ]
+    );
+    assert!(published.iter().all(|p| p.retain));
+    assert_eq!(published[1].payload, "online");
+
+    let again = hub
+        .set_group("stair", switch_group())
+        .await
+        .expect("replaced");
+    assert_eq!(again.id, "stair");
+    let topics: Vec<String> = drain(&mut rx).into_iter().map(|p| p.topic).collect();
+    assert!(
+        !topics.contains(&"oikos/group/stair".to_owned()),
+        "{topics:?}"
+    );
+}
+
+#[tokio::test]
+async fn changing_the_kind_clears_the_old_config_topic() {
+    let (hub, mut rx) = groups_hub();
+    let mut spec = switch_group();
+    spec.members.clear();
+    hub.set_group("stair", spec.clone()).await.expect("created");
+    drain(&mut rx);
+    spec.kind = Kind::Light;
+    hub.set_group("stair", spec).await.expect("replaced");
+    let published = drain(&mut rx);
+    assert!(
+        published
+            .iter()
+            .any(|p| p.topic == "oikos/switch/group/stair/config"
+                && p.payload.is_empty()
+                && p.retain),
+        "{published:?}"
+    );
+    assert!(
+        published
+            .iter()
+            .any(|p| p.topic == "oikos/light/group/stair/config" && !p.payload.is_empty())
+    );
+}
+
+#[tokio::test]
+async fn delete_group_clears_the_four_topics_in_order() {
+    let (hub, mut rx) = groups_hub();
+    let spec = switch_group();
+    hub.set_group("stair", spec.clone()).await.expect("created");
+    drain(&mut rx);
+    hub.delete_group("stair").await.expect("deleted");
+    let published = drain(&mut rx);
+    let topics: Vec<&str> = published.iter().map(|p| p.topic.as_str()).collect();
+    assert_eq!(
+        topics,
+        [
+            "oikos/group/stair/definition",
+            "oikos/switch/group/stair/config",
+            "oikos/group/stair",
+            "oikos/group/stair/avail",
+        ]
+    );
+    assert!(published.iter().all(|p| p.payload.is_empty() && p.retain));
+    assert!(hub.entity_view("group_stair").is_none());
+    assert!(matches!(
+        hub.delete_group("nope").await,
+        Err(HubError::UnknownEntity(_))
+    ));
+}
+
+#[tokio::test]
+async fn list_groups_names_the_flows_that_use_each_group() {
+    let (hub, _rx) = groups_hub();
+    let spec = switch_group();
+    hub.set_group("stair", spec.clone()).await.expect("created");
+    hub.ingest(
+        "oikos/automation/lamp",
+        br#"{"id":"lamp","name":"Stair lamp","enabled":true,"nodes":[
+            {"id":"t","type":"trigger.state","params":{"entity":"group_stair"}}],"edges":[]}"#,
+    );
+    hub.ingest(
+        "oikos/automation/other",
+        br#"{"id":"other","name":"Other","enabled":true,"nodes":[
+            {"id":"t","type":"trigger.state","params":{"entity":"somebody_else"}}],"edges":[]}"#,
+    );
+    let views = hub.list_groups().expect("enabled");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].used_by_flows, ["Stair lamp"]);
+    assert_eq!(views[0].name, "Stair");
+}
+
+#[tokio::test]
+async fn list_groups_skips_groups_without_entities() {
+    let (hub, _rx) = groups_hub();
+    hub.ingest(
+        "oikos/group/ghost/definition",
+        br#"{"name":"Ghost","kind":"switch","members":[]}"#,
+    );
+    let mut living = switch_group();
+    living.members.clear();
+    hub.set_group("living", living).await.expect("created");
+    let views = hub.list_groups().expect("enabled");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].id, "living");
+}

@@ -14,8 +14,9 @@ use crate::history::History;
 use crate::media::MediaProxy;
 use crate::virtual_entities as virtuals;
 use oikos_api::{
-    AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
-    Snapshot, VirtualSpec, WsEvent, area_views, device_views, snapshot,
+    AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, GroupMemberView, GroupSpec,
+    GroupView, IgnoredView, OverridePatch, Snapshot, VirtualSpec, WsEvent, area_views,
+    device_views, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{
@@ -115,6 +116,8 @@ pub struct Hub {
     /// The retained flow definitions and their runs.
     flow_store: Mutex<FlowStore>,
     group_store: Mutex<GroupStore>,
+    /// `[groups] enabled`: group writes and listing are refused while it is false.
+    groups_enabled: bool,
     /// The topic prefix flows are retained under, one topic per flow id.
     automation_prefix: String,
     /// The time zone schedules and their preview run in.
@@ -200,6 +203,7 @@ impl Hub {
             alerts: Mutex::new(alerts),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             group_store: Mutex::new(GroupStore::default()),
+            groups_enabled: cfg.groups.enabled,
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
             house_point: cfg.flows.house_point(),
@@ -785,6 +789,183 @@ impl Hub {
         Ok(())
     }
 
+    /// Fails with a `Publish` error (503 over HTTP) while `[groups] enabled` is false.
+    fn require_groups(&self) -> Result<(), HubError> {
+        if self.groups_enabled {
+            Ok(())
+        } else {
+            Err(HubError::Publish("groups disabled".to_owned()))
+        }
+    }
+
+    /// Creates or replaces group `id`: validates everything first, then publishes the
+    /// discovery config, availability and definition retained, and the combined state only
+    /// when the group is new. A changed component clears the old config topic.
+    pub async fn set_group(&self, id: &str, spec: GroupSpec) -> Result<GroupView, HubError> {
+        self.require_groups()?;
+        groups::topics::validate_id(id).map_err(HubError::Rejected)?;
+        groups::topics::component_for(spec.kind).map_err(HubError::Rejected)?;
+        if let Some(nested) = spec.members.iter().find(|m| m.starts_with("group_")) {
+            return Err(HubError::Rejected(format!(
+                "members cannot be groups: {nested}"
+            )));
+        }
+        let previous = self.group_store().get(id).cloned();
+        let mut members = Vec::new();
+        for member in &spec.members {
+            let Some(view) = self.entity_view(member) else {
+                continue;
+            };
+            if view.kind == spec.kind {
+                members.push(view);
+            } else if !previous
+                .as_ref()
+                .is_some_and(|p| p.members.contains(member))
+            {
+                return Err(HubError::Rejected(format!(
+                    "member kind does not match: {member}"
+                )));
+            }
+        }
+
+        let prefix = &self.discovery_prefix;
+        let config_topic = groups::topics::config_topic(prefix, spec.kind, id);
+        let config = groups::discovery::build_config(prefix, id, &spec, &members).to_string();
+        let definition = serde_json::to_string(&spec)
+            .map_err(|err| HubError::Rejected(format!("cannot encode the group: {err}")))?;
+        self.publish(Publish {
+            topic: config_topic.clone(),
+            payload: config.clone(),
+            retain: true,
+        })?;
+        self.publish(Publish {
+            topic: groups::topics::availability_topic(prefix, id),
+            payload: "online".to_owned(),
+            retain: true,
+        })?;
+        let definition_topic = groups::topics::definition_topic(prefix, id);
+        self.publish(Publish {
+            topic: definition_topic.clone(),
+            payload: definition.clone(),
+            retain: true,
+        })?;
+        match &previous {
+            None => {
+                let payload = groups::state::combine(spec.kind, &members)
+                    .map(|state| groups::state::encode(&state))
+                    .unwrap_or_default();
+                self.publish(Publish {
+                    topic: groups::topics::state_topic(prefix, id),
+                    payload,
+                    retain: true,
+                })?;
+            }
+            Some(old) if old.kind != spec.kind => {
+                self.publish(Publish {
+                    topic: groups::topics::config_topic(prefix, old.kind, id),
+                    payload: String::new(),
+                    retain: true,
+                })?;
+            }
+            Some(_) => {}
+        }
+        self.ingest(&definition_topic, definition.as_bytes());
+        self.ingest(&config_topic, config.as_bytes());
+        self.group_view(id, &spec)
+    }
+
+    /// Removes group `id`: empty retained payloads on its definition, config, state and
+    /// availability topics. The UI override is left in place.
+    pub async fn delete_group(&self, id: &str) -> Result<(), HubError> {
+        self.require_groups()?;
+        let spec = self
+            .group_store()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| HubError::UnknownEntity(groups::topics::unique_id(id)))?;
+        let prefix = &self.discovery_prefix;
+        let config_topic = groups::topics::config_topic(prefix, spec.kind, id);
+        let definition_topic = groups::topics::definition_topic(prefix, id);
+        for topic in [
+            definition_topic.clone(),
+            config_topic.clone(),
+            groups::topics::state_topic(prefix, id),
+            groups::topics::availability_topic(prefix, id),
+        ] {
+            self.publish(Publish {
+                topic,
+                payload: String::new(),
+                retain: true,
+            })?;
+        }
+        self.ingest(&definition_topic, b"");
+        self.ingest(&config_topic, b"");
+        Ok(())
+    }
+
+    /// Every stored group that has its entity, with its members and the flows that use it,
+    /// sorted by id.
+    pub fn list_groups(&self) -> Result<Vec<GroupView>, HubError> {
+        self.require_groups()?;
+        let stored: Vec<(String, GroupSpec)> = self
+            .group_store()
+            .all()
+            .iter()
+            .map(|(id, spec)| (id.clone(), spec.clone()))
+            .collect();
+        // A definition without its discovery entity (not loaded yet, or lost) is skipped
+        // rather than failing the whole listing.
+        Ok(stored
+            .iter()
+            .filter_map(|(id, spec)| self.group_view(id, spec).ok())
+            .collect())
+    }
+
+    fn group_view(&self, id: &str, spec: &GroupSpec) -> Result<GroupView, HubError> {
+        let unique_id = groups::topics::unique_id(id);
+        let entity = self
+            .entity_view(&unique_id)
+            .ok_or_else(|| HubError::UnknownEntity(unique_id.clone()))?;
+        let members = spec
+            .members
+            .iter()
+            .map(|member| match self.entity_view(member) {
+                Some(view) => GroupMemberView {
+                    id: member.clone(),
+                    name: view.name,
+                    present: true,
+                    mismatch: view.kind != spec.kind,
+                },
+                None => GroupMemberView {
+                    id: member.clone(),
+                    name: member.clone(),
+                    present: false,
+                    mismatch: false,
+                },
+            })
+            .collect();
+        let used_by_flows = self
+            .flow_store()
+            .flows()
+            .iter()
+            .filter(|flow| {
+                flow.nodes
+                    .iter()
+                    .any(|node| node_entity(&node.kind) == Some(unique_id.as_str()))
+            })
+            .map(|flow| flow.name.clone())
+            .collect();
+        Ok(GroupView {
+            id: id.to_owned(),
+            name: spec.name.clone(),
+            kind: spec.kind,
+            members,
+            hide_members: spec.hide_members,
+            entity,
+            used_by_flows,
+        })
+    }
+
     fn write_override(&self, id: &str, next: &UiOverride) -> Result<EntityView, HubError> {
         let topic = format!("{}/{id}", self.ui_prefix);
         let payload = if next.is_default() {
@@ -982,4 +1163,15 @@ fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
             }
         })
         .collect()
+}
+
+/// The entity id a flow node refers to, when its type carries one.
+fn node_entity(kind: &oikos_core::flow::NodeKind) -> Option<&str> {
+    use oikos_core::flow::NodeKind;
+    match kind {
+        NodeKind::TriggerState(params) => Some(params.entity.as_str()),
+        NodeKind::Command(params) => Some(params.entity.as_str()),
+        NodeKind::If(params) => params.entity.as_deref(),
+        _ => None,
+    }
 }
