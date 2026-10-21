@@ -33,6 +33,10 @@ pub enum FlowError {
     IfNeedsEntity { node: String },
     #[error("node `{node}`: `{flow}` is not a valid flow id")]
     BadFlowTarget { node: String, flow: String },
+    #[error("node `{node}`: offset_minutes {offset_minutes} is outside [-720, 720]")]
+    BadSunOffset { node: String, offset_minutes: i32 },
+    #[error("node `{node}`: {reason}")]
+    BadOperand { node: String, reason: String },
 }
 
 fn is_valid_id(id: &str, max: usize) -> bool {
@@ -55,7 +59,7 @@ pub fn is_valid_node_id(id: &str) -> bool {
 /// Checks the structure of a flow: ids, edges and ports, params, at least one trigger and no
 /// cycle. It does not look at entities, which only the hub can resolve.
 pub fn validate(flow: &Flow) -> Result<(), FlowError> {
-    use super::{NodeKind, Scalar, Schedule, parse_duration};
+    use super::{NodeKind, Op, Scalar, Schedule, parse_duration};
 
     if !is_valid_flow_id(&flow.id) {
         return Err(FlowError::BadFlowId(flow.id.clone()));
@@ -95,14 +99,45 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     });
                 }
             }
-            NodeKind::If(p)
-                if Scalar::from_json(p.value.as_ref().unwrap_or(&serde_json::Value::Null))
-                    .is_none() =>
-            {
-                return Err(FlowError::BadValue {
-                    node: node.id.clone(),
-                });
+            NodeKind::TriggerSun(p) => {
+                if !(-720..=720).contains(&p.offset()) {
+                    return Err(FlowError::BadSunOffset {
+                        node: node.id.clone(),
+                        offset_minutes: p.offset(),
+                    });
+                }
             }
+            NodeKind::If(p) if p.op == Op::IsDark => {
+                let offending = if p.value.is_some() {
+                    Some("value")
+                } else if p.entity.is_some() {
+                    Some("entity")
+                } else if p.missing.is_some() {
+                    Some("missing")
+                } else {
+                    None
+                };
+                if let Some(field) = offending {
+                    return Err(FlowError::BadOperand {
+                        node: node.id.clone(),
+                        reason: format!("{field} is not allowed with op: is_dark"),
+                    });
+                }
+            }
+            NodeKind::If(p) => match &p.value {
+                None => {
+                    return Err(FlowError::BadOperand {
+                        node: node.id.clone(),
+                        reason: format!("value is required for op {:?}", p.op),
+                    });
+                }
+                Some(value) if Scalar::from_json(value).is_none() => {
+                    return Err(FlowError::BadValue {
+                        node: node.id.clone(),
+                    });
+                }
+                Some(_) => {}
+            },
             _ => {}
         }
     }
@@ -145,24 +180,30 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     if let Some(path) = find_cycle(flow) {
         return Err(FlowError::Cycle(path));
     }
-    check_ifs_after_schedules(flow)
+    check_ifs_after_valueless_triggers(flow)
 }
 
-/// A schedule has no trigger value, so an `if` reachable from one must read an entity.
-fn check_ifs_after_schedules(flow: &Flow) -> Result<(), FlowError> {
-    use super::NodeKind;
+/// A schedule or a sun event has no trigger value, so an `if` reachable from one must read an
+/// entity, unless it is `op: is_dark`, which reads the sun.
+fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
+    use super::{NodeKind, Op};
 
     let mut seen = std::collections::HashSet::new();
     let mut pending: Vec<&super::Node> = flow
         .nodes
         .iter()
-        .filter(|n| matches!(n.kind, NodeKind::TriggerSchedule(_)))
+        .filter(|n| {
+            matches!(
+                n.kind,
+                NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_)
+            )
+        })
         .collect();
     while let Some(node) = pending.pop() {
         if !seen.insert(node.id.as_str()) {
             continue;
         }
-        if matches!(&node.kind, NodeKind::If(p) if p.entity.is_none()) {
+        if matches!(&node.kind, NodeKind::If(p) if p.entity.is_none() && p.op != Op::IsDark) {
             return Err(FlowError::IfNeedsEntity {
                 node: node.id.clone(),
             });
@@ -458,5 +499,128 @@ mod tests {
         f.edges.push(edge("motion", "check", None));
         f.edges.push(edge("check", "act", Some("true")));
         assert_eq!(validate(&f), Ok(()));
+    }
+
+    fn decode_flow(nodes: serde_json::Value, edges: serde_json::Value) -> Flow {
+        let json = serde_json::json!({
+            "id": "sun_flow",
+            "name": "t",
+            "nodes": nodes,
+            "edges": edges,
+        });
+        Flow::decode(json.to_string().as_bytes()).unwrap()
+    }
+
+    fn sun_flow(id: &str, which: crate::flow::model::SunWhich, offset: Option<i32>) -> Flow {
+        let mut params = serde_json::json!({ "which": which });
+        if let Some(offset) = offset {
+            params["offset_minutes"] = offset.into();
+        }
+        decode_flow(
+            serde_json::json!([{ "id": id, "type": "trigger.sun", "params": params }]),
+            serde_json::json!([]),
+        )
+    }
+
+    fn flow_with_if_params_json(params_json: &str) -> Flow {
+        let params: serde_json::Value = serde_json::from_str(params_json).unwrap();
+        decode_flow(
+            serde_json::json!([
+                { "id": "ev", "type": "trigger.state", "params": { "entity": "t" } },
+                { "id": "chk", "type": "if", "params": params },
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([
+                { "from": "ev", "to": "chk" },
+                { "from": "chk", "to": "act", "port": "true" },
+            ]),
+        )
+    }
+
+    fn sun_then_if_flow(if_params: serde_json::Value) -> Flow {
+        decode_flow(
+            serde_json::json!([
+                { "id": "ev", "type": "trigger.sun", "params": { "which": "sunset" } },
+                { "id": "chk", "type": "if", "params": if_params },
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([
+                { "from": "ev", "to": "chk" },
+                { "from": "chk", "to": "act", "port": "true" },
+            ]),
+        )
+    }
+
+    fn sun_then_is_dark_flow() -> Flow {
+        sun_then_if_flow(serde_json::json!({ "op": "is_dark" }))
+    }
+
+    fn sun_then_plain_if_flow() -> Flow {
+        sun_then_if_flow(serde_json::json!({ "op": "lt", "value": 1, "missing": "false" }))
+    }
+
+    #[test]
+    fn trigger_sun_offset_boundary() {
+        use crate::flow::model::SunWhich;
+        assert_eq!(
+            validate(&sun_flow("ev", SunWhich::Sunset, Some(720))),
+            Ok(())
+        );
+        assert_eq!(
+            validate(&sun_flow("ev", SunWhich::Sunset, Some(-720))),
+            Ok(())
+        );
+        assert!(matches!(
+            validate(&sun_flow("ev", SunWhich::Sunset, Some(721))),
+            Err(FlowError::BadSunOffset {
+                offset_minutes: 721,
+                ..
+            })
+        ));
+        assert!(matches!(
+            validate(&sun_flow("ev", SunWhich::Sunset, Some(-721))),
+            Err(FlowError::BadSunOffset {
+                offset_minutes: -721,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn op_is_dark_rejects_entity_value_and_missing() {
+        for (field, patch) in [
+            ("value", r#"{"op":"is_dark","value":1}"#),
+            ("entity", r#"{"op":"is_dark","entity":"e"}"#),
+            ("missing", r#"{"op":"is_dark","missing":"true"}"#),
+        ] {
+            let err = validate(&flow_with_if_params_json(patch)).unwrap_err();
+            assert!(
+                matches!(err, FlowError::BadOperand { ref reason, .. } if reason.contains(field)),
+                "{field}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_is_dark_op_requires_value() {
+        let err = validate(&flow_with_if_params_json(r#"{"op":"lt","entity":"t"}"#)).unwrap_err();
+        assert!(
+            matches!(err, FlowError::BadOperand { ref reason, .. } if reason.contains("value"))
+        );
+    }
+
+    #[test]
+    fn if_is_dark_is_valid_right_after_trigger_sun() {
+        assert_eq!(validate(&sun_then_is_dark_flow()), Ok(()));
+    }
+
+    #[test]
+    fn plain_if_without_entity_after_trigger_sun_is_still_rejected() {
+        assert_eq!(
+            validate(&sun_then_plain_if_flow()),
+            Err(FlowError::IfNeedsEntity { node: "chk".into() })
+        );
     }
 }
