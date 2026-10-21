@@ -72,7 +72,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `POST /api/v1/entities/{id}/command` | Sends a command (`{"type": "turn_on", …}`) and reports whether the device confirmed it. |
 | `PATCH /api/v1/entities/{id}/override` | Changes fields of the entity's `oikos/ui/<id>` override and returns the entity as it now appears. |
 | `DELETE /api/v1/entities/{id}/override` | Removes the override (204). |
-| `GET /api/v1/entities/{id}/picture` | The picture of a camera or image entity: the stored bytes, or a redirect to its URL. The hub's own fetch of a URL is capped at 5 MiB and 10 s and follows no redirects. See [Entity types](#entity-types). |
+| `GET /api/v1/entities/{id}/picture` | The picture of a camera or image entity: the stored bytes, or the bytes of its URL fetched by the hub now (10 s timeout, 5 MiB cap, no redirects followed). See [Entity types](#entity-types). |
 | `PUT /api/v1/areas` | Replaces the declared rooms (`oikos/ui/_areas`) and returns the resulting list. |
 | `PATCH /api/v1/areas/{id}/groups/{kind}` | Sets or clears (`null`) the room group card name and the favourite flag of one kind (`cover` or `light`) in the area. `200` with the area list, `422` for a kind other than `cover`/`light`, `Unassigned` or an empty body, `404` for an unknown area, `503` while the broker link is down. |
 | `PUT /api/v1/virtual/{id}` | Creates or replaces a virtual switch, number or button (`{"kind", "name", …}`) and returns the entity `virtual_<id>`; the initial state is published only when it is new. `422` for a bad id or spec, `503` while the broker link is down. See [Adding a device](docs/adding-a-device.md#virtual-entities). |

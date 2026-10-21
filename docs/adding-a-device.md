@@ -153,7 +153,7 @@ Two routes. Most components need only a type-table entry. Write a Rust kind only
 
 ### A type-table entry (JSON, no Rust)
 
-Find or add the entry in `crates/oikos-core/src/types/table.json`. Each entry is keyed by component name:
+Find or add the entry in `crates/oikos-core/src/types/table.json`. Entries sit under the top-level `types` object, keyed by component name, inside a file shaped `{"version": 1, "types": {"<component>": {...}}}`:
 
 | Key | Meaning |
 |---|---|
@@ -162,7 +162,7 @@ Find or add the entry in `crates/oikos-core/src/types/table.json`. Each entry is
 | `primary` | The field name shown on the card, or `null`. |
 | `requires_state` | When `true`, discovery is rejected without the primary field's topic. |
 | `fields` | A map of `field_name` to `{ shape, topic, template?, values?, options?, range?, on? }`. `shape` is `on_off`, `number`, `choice`, `text`, `picture` or `version`. `topic` is the config key holding the state topic, `template` the config key holding its value template. `values` lists the allowed values, each with the config `key` that may override its payload and the Home Assistant `default`. `options` names a list in the config (such as `preset_modes`). `range` is `{min, max, step}`. `on` is the value that counts as on. |
-| `controls` | A map of `control_name` to `{ shape, topic, template?, field?, press?, payload?, payload_on?, payload_off?, json_key?, requires?, labels? }`. `topic` is the config key of the command topic. `press: true` makes a button, which has no state. `payload` is `{value, default}`. `field` ties the control to a field it changes. |
+| `controls` | A map of `control_name` to `{ shape, topic, template?, field?, press?, payload?, payload_on?, payload_off?, json_key?, requires?, labels? }`. `topic` is the config key of the command topic. `press: true` makes a button, which has no state. `payload` is a WordDef `{value, default}`, which may also carry an optional `key` as the other WordDefs do. `field` ties the control to a field it changes. |
 | `main` | The default main control, in preference order. |
 | `alerts` | `[{field, any_of}]`: field values that put the card in alert style. |
 | `history` | `{field, map}`. `map` turns the field's text values into numbers, such as `{"on": 1.0, "off": 0.0}`. An empty `map` keeps a number as it is. |
@@ -190,7 +190,7 @@ A short example, the `device_tracker` entry:
 }
 ```
 
-The hub publishes the whole table retained on `oikos/ui/_types` (`{ui_prefix}/_types`) on every connection, so the Android app reads the same vocabulary. Its own echo is ignored. Camera and image entities carry their picture in the `picture` field. `GET /api/v1/entities/{id}/picture` serves the stored bytes or redirects to the URL.
+The hub publishes the whole table retained on `oikos/ui/_types` (`{ui_prefix}/_types`) on every connection, so the Android app reads the same vocabulary. Its own echo is ignored. Camera and image entities carry their picture in the `picture` field. `GET /api/v1/entities/{id}/picture` serves the stored bytes, or the bytes of its URL fetched by the hub now (10 s timeout, 5 MiB cap, no redirects followed).
 
 Check it with `GET /api/v1/ignored` (the component must no longer appear there) and `GET /api/v1/snapshot` (the entity must show its primary field).
 
