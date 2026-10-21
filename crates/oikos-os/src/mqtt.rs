@@ -193,6 +193,9 @@ async fn outbound(
                     {
                         tracing::warn!(error = %err, "could not publish the birth message");
                     }
+                    if let Err(err) = hub.publish_types().await {
+                        tracing::warn!(error = %err, "could not publish the type table");
+                    }
                 }
                 online = now_online;
             }

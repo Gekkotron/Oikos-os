@@ -696,6 +696,7 @@ fn route_classifies_every_topic_kind() {
     let registry = load_house();
     let route = |topic: &str| registry.route(topic, b"x".to_vec(), AT);
     assert!(matches!(route("oikos/ui/_areas"), Inbound::Areas(_)));
+    assert!(matches!(route("oikos/ui/_types"), Inbound::Ignored));
     assert!(matches!(
         route("oikos/ui/some_id"),
         Inbound::Override { unique_id, .. } if unique_id == "some_id"

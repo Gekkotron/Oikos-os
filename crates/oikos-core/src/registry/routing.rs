@@ -16,6 +16,9 @@ pub(super) fn route(registry: &Registry, topic: &str, payload: Vec<u8>, at: u64)
         if rest == "_areas" {
             return Inbound::Areas(payload);
         }
+        if rest == "_types" {
+            return Inbound::Ignored;
+        }
         if !rest.is_empty() {
             return Inbound::Override {
                 unique_id: rest.to_owned(),

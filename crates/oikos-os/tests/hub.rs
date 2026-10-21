@@ -1061,3 +1061,24 @@ async fn secret_text_never_reaches_history() {
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
     ));
 }
+
+#[tokio::test]
+async fn type_table_is_published_retained_on_connect() {
+    let (hub, mut publisher) = hub();
+    hub.publish_types().await.expect("publish");
+    let sent = publisher.try_recv().expect("a publish");
+    assert_eq!(sent.topic, "oikos/ui/_types");
+    assert!(sent.retain);
+    assert_eq!(sent.payload, oikos_core::types::table_json());
+}
+
+#[tokio::test]
+async fn type_table_echo_is_not_an_override() {
+    let (hub, _publisher) = hub();
+    let before = hub.snapshot();
+    hub.ingest(
+        "oikos/ui/_types",
+        oikos_core::types::table_json().as_bytes(),
+    );
+    assert_eq!(hub.snapshot(), before);
+}

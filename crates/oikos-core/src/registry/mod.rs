@@ -67,6 +67,8 @@ pub enum Inbound {
         payload: Vec<u8>,
     },
     Areas(Vec<u8>),
+    /// A message the hub itself publishes (the `_types` table): nothing to apply.
+    Ignored,
     Z2mDevices(Vec<u8>),
     Z2mBridgeInfo(Vec<u8>),
     Z2mBridgeState(Vec<u8>),
@@ -179,6 +181,7 @@ impl Registry {
                 self.apply_override(unique_id, payload, &mut changes);
             }
             Inbound::Areas(payload) => self.apply_areas(&payload, &mut changes),
+            Inbound::Ignored => {}
             Inbound::Z2mDevices(payload) => {
                 if let Ok(devices) = Device::parse_list(&payload)
                     && devices != self.devices

@@ -826,6 +826,15 @@ impl Hub {
         Ok(area_views(&self.read()))
     }
 
+    /// Publishes the entity type table retained on `<ui_prefix>/_types`, for the app.
+    pub async fn publish_types(&self) -> Result<(), HubError> {
+        self.publish(Publish {
+            topic: format!("{}/_types", self.ui_prefix),
+            payload: oikos_core::types::table_json().to_owned(),
+            retain: true,
+        })
+    }
+
     /// Renames area `id` in the declared document, the app's other fields kept; an implicit
     /// area (carried only by entities) becomes declared. `Unassigned` cannot be renamed.
     pub async fn rename_area(&self, id: &str, name: &str) -> Result<Vec<AreaView>, HubError> {
