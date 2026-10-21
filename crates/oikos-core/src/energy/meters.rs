@@ -167,6 +167,19 @@ impl EnergyMeters {
         }
     }
 
+    /// The power sensor whose [`meter_for`](Self::meter_for) pairs with `counter`. Scans in
+    /// registration order, so the first power wins when more than one would pair to the same
+    /// counter. `None` when no power sensor pairs to it.
+    pub fn counter_power<'a>(
+        counter: &EnergyEntity,
+        all: &'a [EnergyEntity],
+    ) -> Option<&'a EnergyEntity> {
+        all.iter().find(|p| {
+            PowerUnits::factor(p.unit.as_deref()).is_some()
+                && Self::meter_for(p, all).map(|c| c.id.as_str()) == Some(counter.id.as_str())
+        })
+    }
+
     /// A node's lifetime meters: the paired counters of its power `sensors`, each counted once.
     pub fn node_meters<'a>(
         sensors: &[&EnergyEntity],
@@ -480,6 +493,47 @@ mod tests {
         assert_eq!(replace_power_token("mypower_a", "x"), "mypower_a");
         assert_eq!(replace_power_token("p_power", "x"), "p_x");
         assert_eq!(replace_power_token("power2_power", "x"), "x2_x");
+    }
+
+    #[test]
+    fn counter_power_pairs_back() {
+        let all = house();
+        let counter = by_id(&all, "0xa4c13898428fae3a_energy_a_zigbee2mqtt");
+        assert_eq!(
+            id(EnergyMeters::counter_power(counter, &all)),
+            Some("0xa4c13898428fae3a_power_a_zigbee2mqtt")
+        );
+    }
+
+    #[test]
+    fn counter_power_is_none_when_no_power_pairs() {
+        let all = vec![EnergyEntity {
+            unit: Some("kWh".into()),
+            ..e("c")
+        }];
+        assert_eq!(EnergyMeters::counter_power(&all[0], &all), None);
+    }
+
+    #[test]
+    fn counter_power_first_registered_wins_on_ties() {
+        let mk = |i: &str, unit: &str, dev: &str| EnergyEntity {
+            device_id: Some(dev.into()),
+            unit: Some(unit.into()),
+            ..e(i)
+        };
+        let all = vec![mk("p1", "W", "d"), mk("p2", "W", "d"), mk("c", "kWh", "d")];
+        // Two powers + one counter: auto-pairing refuses the ambiguity, so neither power maps to c
+        // and counter_power(c) is None.
+        assert_eq!(EnergyMeters::counter_power(&all[2], &all), None);
+
+        // Labelled match for p1 only; counter_power must then find p1 (first-registered wins).
+        let mut all = all;
+        all[0].label = Some("Power".into());
+        all[2].label = Some("Energy".into());
+        assert_eq!(
+            id(EnergyMeters::counter_power(&all[2], &all)),
+            Some("p1")
+        );
     }
 
     fn water(id: &str, unit: &str, device: Option<&str>) -> EnergyEntity {
