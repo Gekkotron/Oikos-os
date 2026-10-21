@@ -38,6 +38,8 @@ impl EditState {
 
     /// Moves the widget at `from` so it ends up at index `to`.
     pub fn reorder(&self, from: usize, to: usize) {
+        // Selection is positional, so any reorder invalidates it.
+        self.selected_widget.set(None);
         self.draft.update(|d| {
             if from < d.widgets.len() && to < d.widgets.len() && from != to {
                 let w = d.widgets.remove(from);
@@ -59,6 +61,7 @@ impl EditState {
     }
 
     pub fn discard(&self) {
+        self.selected_widget.set(None);
         self.draft.set(self.original.get_untracked());
     }
 }
@@ -80,7 +83,14 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                 type="button"
                 class="dashboard-edit-toolbar__pencil"
                 aria-pressed=move || state.active.get().to_string()
-                on:click=move |_| state.active.update(|a| *a = !*a)
+                on:click=move |_| {
+                    let now_active = !state.active.get_untracked();
+                    state.active.set(now_active);
+                    if !now_active {
+                        state.selected_widget.set(None);
+                        state.settings_open.set(false);
+                    }
+                }
             >
                 "✎"
             </button>
@@ -108,6 +118,8 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                         let d = state.draft.get_untracked();
                         spawn_local(async move {
                             if let Ok(saved) = api::put_dashboard(&d).await {
+                                // The hub may normalize widget order, invalidating the selection.
+                                state.selected_widget.set(None);
                                 state.original.set(saved.clone());
                                 state.draft.set(saved);
                             }

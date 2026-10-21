@@ -92,17 +92,23 @@ pub fn Grid(
                         }
                     });
                     view! {
-                        <div
-                            class=class
-                            on:click=move |_| {
-                                if let (Some(state), true) = (edit, active()) {
-                                    if let Some(i) = position.run(()) {
-                                        state.selected_widget.set(Some(i));
-                                    }
-                                }
-                            }
-                        >
+                        <div class=class>
                             <WidgetView widget=w />
+                            // An overlay (not a tile click handler) so the inner card's own
+                            // controls, e.g. a light toggle, cannot fire while editing. It sits
+                            // above the card and below `.widget__tools` (z-index 2).
+                            {edit.map(|state| view! {
+                                <Show when=active>
+                                    <div
+                                        class="widget__edit-overlay"
+                                        on:click=move |_| {
+                                            if let Some(i) = position.run(()) {
+                                                state.selected_widget.set(Some(i));
+                                            }
+                                        }
+                                    />
+                                </Show>
+                            })}
                             {tools}
                         </div>
                     }

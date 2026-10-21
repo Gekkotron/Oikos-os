@@ -4382,3 +4382,4 @@ html:has(.flow-canvas-screen) {
 .widget-config-sheet__delete { color: #c0392b; }
 .dashboard-settings-sheet__reorder { display: flex; gap: 8px; }
 .dashboard-settings-sheet__reorder button { flex: 1; }
+.widget__edit-overlay { position: absolute; inset: 0; z-index: 1; cursor: pointer; pointer-events: auto; }
