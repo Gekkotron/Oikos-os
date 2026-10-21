@@ -5,6 +5,7 @@
 //! (retained MQTT, REST responses from a newer/older peer): it errors on unknown widget
 //! kinds. Use `decode_dashboard` or `DashboardView` instead.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -29,8 +30,7 @@ pub fn decode_dashboard(mut value: Value) -> Result<Dashboard, serde_json::Error
     serde_json::from_value(value)
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[derive(Serialize, JsonSchema, Clone, Debug, PartialEq)]
 pub struct DashboardView {
     pub dashboard: Dashboard,
     pub synthesized: bool,
@@ -52,8 +52,7 @@ impl<'de> Deserialize<'de> for DashboardView {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[derive(Serialize, Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 pub struct DashboardReorder {
     pub order: Vec<String>,
 }
