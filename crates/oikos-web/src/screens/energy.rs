@@ -17,7 +17,7 @@ use crate::api::history::fetch_today;
 use crate::energy::{
     CLEARANCE, HouseTodayParts, NODE_R, VIEW_H, VIEW_W, aria_sentence, derived_house_today,
     edge, energy_entities, energy_text, meter_text, node_label, node_value_text, now_ms,
-    plus_minus_ids, positions, power_text, speed, stroke,
+    plus_minus_ids, positions, power_text, should_fire_mount, speed, stroke,
 };
 use crate::house::House;
 use crate::icons::{consumer_icon, role_icon};
@@ -256,82 +256,12 @@ fn EnergyCard(
     }
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
-const TODAY_INTERVAL_MS: u32 = 300_000;
-
-/// Fetch `/today?kind=counter` for every energy counter on screen entry and every 5 min,
-/// paused when the tab is hidden and refreshed once on `visibilitychange` → visible.
-fn install_today_refresh(house: House, kwh_today: RwSignal<BTreeMap<String, Option<f64>>>) {
-    let fire = move || {
-        let ids: Vec<String> = house.entities.with(|m| {
-            let all = energy_entities(m);
-            EnergyMeters::counters(&all)
-                .into_iter()
-                .map(|e| e.id.clone())
-                .collect()
-        });
-        for id in ids {
-            let id_c = id.clone();
-            spawn_local(async move {
-                let value = fetch_today(&id_c, EnergyKind::Counter)
-                    .await
-                    .ok()
-                    .and_then(|t| t.kwh);
-                kwh_today.update(|m| {
-                    m.insert(id_c, value);
-                });
-            });
-        }
-    };
-
-    // First fetch after the entity map is populated.
-    Effect::new(move |_| {
-        let n = house.entities.with(|m| m.len());
-        if n > 0 {
-            fire();
-        }
-    });
-
-    // 5-min visibility-aware tick.
-    #[cfg(target_arch = "wasm32")]
-    {
-        use wasm_bindgen::JsCast;
-        let hidden = move || {
-            web_sys::window()
-                .and_then(|w| w.document())
-                .is_some_and(|d| d.hidden())
-        };
-        let fire_tick = fire.clone();
-        let _interval = gloo_timers::callback::Interval::new(TODAY_INTERVAL_MS, move || {
-            if !hidden() {
-                fire_tick();
-            }
-        });
-        _interval.forget();
-
-        // Immediate refresh on visibilitychange → visible.
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            let fire_vis = fire;
-            let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
-                if !web_sys::window()
-                    .and_then(|w| w.document())
-                    .is_some_and(|d| d.hidden())
-                {
-                    fire_vis();
-                }
-            }) as Box<dyn Fn()>);
-            let _ = doc.add_event_listener_with_callback(
-                "visibilitychange",
-                closure.as_ref().unchecked_ref(),
-            );
-            closure.forget();
-        }
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let _ = fire;
-    }
-}
+/// Shared, app-scoped kWh-today map: counter id → kWh since local midnight (`None` while
+/// loading or on error). Installed once in `install_history_refresh` from `app.rs`; the Energy
+/// screen reads it from context, so navigating between screens never re-arms the timer or
+/// stacks another visibilitychange listener on top of the old one.
+#[derive(Clone, Copy)]
+pub struct KwhToday(pub RwSignal<BTreeMap<String, Option<f64>>>);
 
 /// kWh today for one card, from the kwh_today map built by `install_today_refresh`.
 fn today_for_card(
@@ -379,6 +309,84 @@ fn by_role<'a>(all: &'a [EnergyEntity]) -> BTreeMap<EnergyRole, Vec<&'a EnergyEn
         }
     }
     m
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+const TODAY_INTERVAL_MS: u32 = 300_000;
+
+/// Install the shared `KwhToday` map and keep it fresh: fetch once as soon as the entity map is
+/// loaded, then every 5 min while the tab is visible, plus one extra refresh on
+/// `visibilitychange` → visible. Call this once from `App` so there is exactly one timer and
+/// one listener for the whole page lifetime.
+pub fn install_history_refresh(house: House) {
+    let kwh = KwhToday(RwSignal::new(BTreeMap::new()));
+    provide_context(kwh);
+
+    let fire: std::rc::Rc<dyn Fn()> = std::rc::Rc::new(move || {
+        let ids: Vec<String> = house.entities.with(|m| {
+            let all = energy_entities(m);
+            EnergyMeters::counters(&all)
+                .into_iter()
+                .map(|e| e.id.clone())
+                .collect()
+        });
+        for id in ids {
+            let id_c = id.clone();
+            spawn_local(async move {
+                let value = fetch_today(&id_c, EnergyKind::Counter)
+                    .await
+                    .ok()
+                    .and_then(|t| t.kwh);
+                kwh.0.update(|m| {
+                    m.insert(id_c, value);
+                });
+            });
+        }
+    });
+
+    let fire_mount = fire.clone();
+    Effect::new(move |prev: Option<bool>| {
+        let has = house.entities.with(|m| !m.is_empty());
+        if should_fire_mount(prev, has) {
+            fire_mount();
+        }
+        has
+    });
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        fn is_hidden() -> bool {
+            web_sys::window()
+                .and_then(|w| w.document())
+                .is_some_and(|d| d.hidden())
+        }
+        let fire_tick = fire.clone();
+        let interval = gloo_timers::callback::Interval::new(TODAY_INTERVAL_MS, move || {
+            if !is_hidden() {
+                fire_tick();
+            }
+        });
+        interval.forget();
+
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            let fire_vis = fire;
+            let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+                if !is_hidden() {
+                    fire_vis();
+                }
+            }) as Box<dyn Fn()>);
+            let _ = doc.add_event_listener_with_callback(
+                "visibilitychange",
+                closure.as_ref().unchecked_ref(),
+            );
+            closure.forget();
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = fire;
+    }
 }
 
 #[component]
@@ -433,9 +441,8 @@ pub fn EnergyScreen() -> impl IntoView {
     let description = move || ui.with(aria_sentence);
     let folded = move || ui.with(|u| u.consumers.len() > ARC_SLOTS);
 
-    // kWh-today per counter entity id. `None` while loading or on error.
-    let kwh_today: RwSignal<BTreeMap<String, Option<f64>>> = RwSignal::new(BTreeMap::new());
-    install_today_refresh(house, kwh_today);
+    // Shared KwhToday map, installed once by App::install_history_refresh.
+    let kwh_today = expect_context::<KwhToday>().0;
 
     view! {
         <section class="energy">

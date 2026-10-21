@@ -16,7 +16,7 @@ use crate::nav::{TrackReturnPath, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
 use crate::screens::devices::DevicesScreen;
-use crate::screens::energy::EnergyScreen;
+use crate::screens::energy::{EnergyScreen, install_history_refresh};
 use crate::screens::entity_sheet::EntitySheetScreen;
 use crate::screens::flow_canvas::{FlowCanvasScreen, NewFlowScreen};
 use crate::screens::flows::FlowsScreen;
@@ -57,6 +57,7 @@ pub fn App() -> impl IntoView {
     provide_context(Confirming::new());
     provide_context(install_now());
     install_nav();
+    install_history_refresh(house);
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
     Effect::new(move |_| {
         if let Some((id, reason)) = house.command_failed.get() {

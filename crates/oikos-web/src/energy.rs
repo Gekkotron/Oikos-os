@@ -373,6 +373,13 @@ pub fn next_fire_delay(hidden: bool, interval_ms: u32) -> Option<u32> {
     if hidden { None } else { Some(interval_ms) }
 }
 
+/// Whether a mount-edge Effect should fire this run. Returns true only on the first run where
+/// `has_now` is true and the previous run (if any) was `false` — the transition from "empty" to
+/// "loaded", once. Steady-state re-runs (entity map tick, same loaded-ness) are no-ops.
+pub fn should_fire_mount(prev: Option<bool>, has_now: bool) -> bool {
+    has_now && !prev.unwrap_or(false)
+}
+
 /// The derived house's `plus` and `minus` counter ids. `None` when the house has no derived
 /// total (no solar or grid, or the inputs are not fully meter-paired).
 pub fn plus_minus_ids(
@@ -560,6 +567,14 @@ mod tests {
     fn next_fire_delay_pauses_when_hidden() {
         assert_eq!(next_fire_delay(false, 300_000), Some(300_000));
         assert_eq!(next_fire_delay(true, 300_000), None);
+    }
+
+    #[test]
+    fn should_fire_mount_fires_on_loaded_edge_only() {
+        assert!(should_fire_mount(None, true));
+        assert!(!should_fire_mount(None, false));
+        assert!(!should_fire_mount(Some(true), true));
+        assert!(should_fire_mount(Some(false), true));
     }
 
     #[test]

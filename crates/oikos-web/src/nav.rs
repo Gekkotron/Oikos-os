@@ -23,7 +23,7 @@ pub fn install_nav() {
 /// The page a sheet's Back should return to when the app is at `path` with query `search`
 /// (without its `?`), or `None` for an entity sheet, which is never a return target.
 fn return_target(path: &str, search: &str) -> Option<String> {
-    if path.starts_with("/entity/") {
+    if path.starts_with("/entity/") || path.starts_with("/history/") {
         None
     } else if search.is_empty() {
         Some(path.to_owned())
@@ -67,10 +67,12 @@ mod tests {
     }
 
     #[test]
-    fn history_detail_is_a_return_target() {
+    fn history_detail_is_not_a_return_target() {
+        // When the user is on /history/..., ReturnPath keeps pointing at the pre-history page
+        // so the Back arrow actually leaves instead of self-looping (reviewer finding #1).
         assert_eq!(
-            return_target("/history/sensor.living_temp", "range=24h").as_deref(),
-            Some("/history/sensor.living_temp?range=24h")
+            return_target("/history/sensor.living_temp", "range=24h"),
+            None
         );
     }
 

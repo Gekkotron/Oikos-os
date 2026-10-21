@@ -7,7 +7,7 @@ use std::rc::Rc;
 use leptos::prelude::*;
 use oikos_api::{EnergyKind, HistoryDaily, HistoryRange, HistorySeries};
 
-use super::format::{paris_offset, state_axis_labels, tick_labels, tooltip_time};
+use super::format::{state_axis_labels, tick_labels};
 use super::geom::{daily_bars, step_path, y_scale, Bar, StepPath, YScale};
 use crate::api::history::{fetch_daily, fetch_series, HistoryApiError};
 
@@ -122,21 +122,45 @@ enum FetchResult {
     Daily(Result<HistoryDaily, HistoryApiError>),
 }
 
+/// Which endpoint to call, with its arguments; pure routing decision for the current chart
+/// state. Extracted from `fetch_for` so it is natively testable — the Review Focus items
+/// (text-entity 404, counter without power pair on 24h) are branches here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FetchPlan {
+    /// Call `/history/series?entity={0}&range={range}`.
+    Series(String),
+    /// Call `/history/daily?entity={0}&days={1}&kind=counter`.
+    Daily(String, u16),
+}
+
+/// Decide which endpoint to fetch for the current `(flavor, range, power_pair)` triple.
+pub fn plan_fetch(
+    entity: &str,
+    range: HistoryRange,
+    flavor: Flavor,
+    power_pair: Option<&str>,
+) -> FetchPlan {
+    match (flavor, range) {
+        (Flavor::Series, _) => FetchPlan::Series(entity.to_owned()),
+        (Flavor::Counter, HistoryRange::Day) => match power_pair {
+            Some(pid) => FetchPlan::Series(pid.to_owned()),
+            None => FetchPlan::Daily(entity.to_owned(), 1),
+        },
+        (Flavor::Counter, _) => FetchPlan::Daily(entity.to_owned(), daily_days_for(range)),
+    }
+}
+
 async fn fetch_for(
     entity: &str,
     range: HistoryRange,
     flavor: Flavor,
     power_pair: Option<&str>,
 ) -> FetchResult {
-    match (flavor, range) {
-        (Flavor::Series, _) => FetchResult::Series(fetch_series(entity, range).await),
-        (Flavor::Counter, HistoryRange::Day) => match power_pair {
-            Some(pid) => FetchResult::Series(fetch_series(pid, range).await),
-            None => FetchResult::Daily(fetch_daily(entity, 1, EnergyKind::Counter).await),
-        },
-        (Flavor::Counter, _) => FetchResult::Daily(
-            fetch_daily(entity, daily_days_for(range), EnergyKind::Counter).await,
-        ),
+    match plan_fetch(entity, range, flavor, power_pair) {
+        FetchPlan::Series(id) => FetchResult::Series(fetch_series(&id, range).await),
+        FetchPlan::Daily(id, days) => {
+            FetchResult::Daily(fetch_daily(&id, days, EnergyKind::Counter).await)
+        }
     }
 }
 
@@ -161,8 +185,7 @@ fn render_series(s: HistorySeries, range: HistoryRange, kind: String, unit: Opti
     let unit_str = unit.unwrap_or_default();
 
     view! {
-        <svg class="history-chart__svg" viewBox=format!("0 0 {VIEW_W} {VIEW_H}") preserveAspectRatio="none" role="img">
-            // horizontal mid gridline
+        <svg class="history-chart__svg" viewBox=format!("0 0 {VIEW_W} {VIEW_H}") preserveAspectRatio="xMidYMid meet" role="img">
             <line x1="0" y1=format!("{}", VIEW_H / 2.0) x2=format!("{}", VIEW_W) y2=format!("{}", VIEW_H / 2.0) class="history-chart__grid" />
             <path d=band_d class="history-chart__band" />
             <path d=d class="history-chart__line" fill="none" />
@@ -172,7 +195,9 @@ fn render_series(s: HistorySeries, range: HistoryRange, kind: String, unit: Opti
             <span>{y_lo}</span>
         </div>
         <div class="history-chart__axis-x">
-            {xticks.into_iter().map(|(_, l)| view! { <span>{l}</span> }).collect::<Vec<_>>()}
+            {xticks.into_iter().map(|(pos, l)| view! {
+                <span style=format!("left: {}%", pos * 100.0)>{l}</span>
+            }).collect::<Vec<_>>()}
         </div>
         <div class="history-chart__legend">
             <span>{legend_left_series(range)}</span>
@@ -186,7 +211,7 @@ fn render_bars(d: HistoryDaily, range: HistoryRange) -> impl IntoView {
     let total: f64 = d.days.iter().map(|d| d.1).sum();
 
     view! {
-        <svg class="history-chart__svg" viewBox=format!("0 0 {VIEW_W} {VIEW_H}") preserveAspectRatio="none" role="img">
+        <svg class="history-chart__svg" viewBox=format!("0 0 {VIEW_W} {VIEW_H}") preserveAspectRatio="xMidYMid meet" role="img">
             {bars.into_iter().map(|Bar { x, y, w, h, .. }| view! {
                 <rect x=format!("{x}") y=format!("{y}") width=format!("{w}") height=format!("{h}") class="history-chart__bar" />
             }).collect::<Vec<_>>()}
@@ -238,13 +263,6 @@ fn legend_left_counter(r: HistoryRange) -> String {
     format!("{} · daily total", range_name(r))
 }
 
-// Keep the imports warning-free for cases where only part of the superset is used.
-#[allow(dead_code)]
-fn _hint_signatures() {
-    let _ = paris_offset(0);
-    let _ = tooltip_time(HistoryRange::Day, 0, 0);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,10 +284,72 @@ mod tests {
     }
 
     #[test]
-    fn fetch_for_counter_24h_falls_back_to_daily_without_power_pair() {
-        // We can't easily await inside `cargo test` natively because fetch_* hits network;
-        // instead, the branch logic is self-evident from source, so we only type-check it here.
-        // See the integration smoke in the browser for the full path.
+    fn plan_fetch_series_flavor_uses_entity_series_for_every_range() {
+        for r in [HistoryRange::Day, HistoryRange::Week, HistoryRange::Month, HistoryRange::Year] {
+            assert_eq!(
+                plan_fetch("sensor.temp", r, Flavor::Series, None),
+                FetchPlan::Series("sensor.temp".into())
+            );
+        }
+    }
+
+    #[test]
+    fn plan_fetch_counter_24h_uses_paired_power_series_when_present() {
+        assert_eq!(
+            plan_fetch(
+                "counter.e",
+                HistoryRange::Day,
+                Flavor::Counter,
+                Some("sensor.power"),
+            ),
+            FetchPlan::Series("sensor.power".into())
+        );
+    }
+
+    #[test]
+    fn plan_fetch_counter_24h_falls_back_to_single_day_bar_without_power() {
+        // Review Focus #2.
+        assert_eq!(
+            plan_fetch("counter.e", HistoryRange::Day, Flavor::Counter, None),
+            FetchPlan::Daily("counter.e".into(), 1)
+        );
+    }
+
+    #[test]
+    fn plan_fetch_counter_long_ranges_use_daily_with_right_days() {
+        assert_eq!(
+            plan_fetch("counter.e", HistoryRange::Week, Flavor::Counter, None),
+            FetchPlan::Daily("counter.e".into(), 7)
+        );
+        assert_eq!(
+            plan_fetch("counter.e", HistoryRange::Month, Flavor::Counter, None),
+            FetchPlan::Daily("counter.e".into(), 30)
+        );
+        assert_eq!(
+            plan_fetch("counter.e", HistoryRange::Year, Flavor::Counter, None),
+            FetchPlan::Daily("counter.e".into(), 365)
+        );
+    }
+
+    #[test]
+    fn map_error_routes_each_variant_to_its_state() {
+        // Review Focus #1: a 404 on a text/alarm/vacuum entity renders the empty copy.
+        assert!(matches!(
+            map_error(HistoryApiError::NotRecorded),
+            State::NotRecorded
+        ));
+        assert!(matches!(
+            map_error(HistoryApiError::Unavailable),
+            State::Unavailable
+        ));
+        assert!(matches!(
+            map_error(HistoryApiError::BadRequest("bad".into())),
+            State::Error(_)
+        ));
+        assert!(matches!(
+            map_error(HistoryApiError::Other("boom".into())),
+            State::Error(_)
+        ));
     }
 
     #[test]

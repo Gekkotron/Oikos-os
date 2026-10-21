@@ -214,30 +214,27 @@ pub fn SecurityScreen() -> impl IntoView {
             .with(|m| house.areas.with(|a| SecurityUi::build(m, a)))
     });
 
-    // Provide the shared `since X` map, populated by one batched /last_change on screen entry.
+    // Provide the shared `since X` map, populated by one batched /last_change when the set of
+    // visible sensor ids changes (not on every UI recompute — reviewer finding #4).
     let since_map = SinceMap(RwSignal::new(BTreeMap::new()));
     provide_context(since_map);
+    let visible_ids: Memo<Vec<String>> =
+        Memo::new(move |_| ui.with(|u| u.sensors.iter().map(|r| r.id.clone()).collect()));
     Effect::new(move |_| {
-        let ids: Vec<String> = ui.with(|u| {
-            u.sensors.iter().map(|r| r.id.clone()).collect()
-        });
+        let ids = visible_ids.get();
         if ids.is_empty() {
             return;
         }
         spawn_local(async move {
             let ordered_ids = ids.clone();
-            match fetch_last_change(&ordered_ids).await {
-                Ok(reply) => {
-                    let mut m = BTreeMap::new();
-                    for (id, item) in ordered_ids.iter().zip(reply.items.iter()) {
-                        m.insert(id.clone(), item.changed_at);
-                    }
-                    since_map.0.set(m);
+            if let Ok(reply) = fetch_last_change(&ordered_ids).await {
+                let mut m = BTreeMap::new();
+                for (id, item) in ordered_ids.iter().zip(reply.items.iter()) {
+                    m.insert(id.clone(), item.changed_at);
                 }
-                Err(_) => {
-                    // leave the map as-is; the tiles show no `since` line until a later fetch succeeds
-                }
+                since_map.0.set(m);
             }
+            // On error: leave the map as-is; the tiles show no `since` line.
         });
     });
     let loaded = Memo::new(move |_| {
@@ -257,9 +254,6 @@ pub fn SecurityScreen() -> impl IntoView {
             }
         }
     });
-
-    // Silence unused imports when the fetch module is only used in the effect above.
-    let _ = &since_map;
 
     let panels = move || ui.with(|u| u.panels.clone());
     let actions = move || ui.with(|u| u.actions.clone());

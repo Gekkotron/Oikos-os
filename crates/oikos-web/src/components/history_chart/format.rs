@@ -55,17 +55,25 @@ pub fn tick_labels(range: HistoryRange, now_secs: i64) -> Vec<(f64, String)> {
 
 fn day_ticks(now_secs: i64) -> Vec<(f64, String)> {
     let start = now_secs - 86_400;
-    let mut out = Vec::new();
-    // Each candidate wall-clock hour at 0, 6, 12, 18 that falls in the window.
-    for h in [0, 6, 12, 18] {
-        let local_now = local(now_secs);
-        let today = PrimitiveDateTime::new(local_now.date(), Time::from_hms(h, 0, 0).unwrap())
-            .assume_offset(local_now.offset())
-            .unix_timestamp();
-        for candidate in [today, today - 86_400] {
-            if (start..now_secs).contains(&candidate) {
-                let pos = (candidate - start) as f64 / 86_400.0;
-                out.push((pos, format!("{h:02}:00")));
+    let mut out: Vec<(f64, String)> = Vec::new();
+    // Each candidate wall-clock hour at 00/06/12/18 in the window. Compute the offset at each
+    // candidate's own local date so DST transitions don't misplace a candidate by one hour
+    // (reviewer finding #9).
+    for h in [0u8, 6, 12, 18] {
+        for days_back in 0..=1i64 {
+            let probe = now_secs - days_back * 86_400;
+            let dt = local(probe);
+            let offset = UtcOffset::from_whole_seconds(paris_offset(probe))
+                .unwrap_or(UtcOffset::UTC);
+            let t = PrimitiveDateTime::new(dt.date(), Time::from_hms(h, 0, 0).unwrap())
+                .assume_offset(offset)
+                .unix_timestamp();
+            if (start..now_secs).contains(&t) {
+                let pos = (t - start) as f64 / 86_400.0;
+                let label = format!("{h:02}:00");
+                if !out.iter().any(|(_, l)| *l == label) {
+                    out.push((pos, label));
+                }
             }
         }
     }
@@ -119,19 +127,18 @@ fn month_ticks(now_secs: i64) -> Vec<(f64, String)> {
 }
 
 fn year_ticks(now_secs: i64) -> Vec<(f64, String)> {
-    // Twelve month labels across the year window.
-    let span = 365.0 * 86_400.0;
-    let start = now_secs - span as i64;
+    // Twelve month labels ending at the month that contains `now`, walking back one month per
+    // slot. Earlier code labelled every slot Jan..Dec regardless of the window, so October's
+    // data was read as if it were January (reviewer finding #7).
+    let end_month = local(now_secs).month() as i32;
     let mut out = Vec::new();
-    for m in 1..=12u8 {
-        // Nothing to localise — just emit month short names at even positions.
-        let pos = (m as f64 - 0.5) / 12.0;
-        let month = Month::try_from(m).unwrap_or(Month::January);
+    for i in 0..12i32 {
+        let m_num = ((end_month - 12 + i).rem_euclid(12) + 1) as u8;
+        let month = Month::try_from(m_num).unwrap_or(Month::January);
+        let pos = (i as f64 + 0.5) / 12.0;
         out.push((pos, short_month(month).to_owned()));
     }
     out.push((1.0, "now".into()));
-    // Keep `start` referenced to catch misuse at compile time.
-    let _ = start;
     out
 }
 
@@ -229,6 +236,35 @@ mod tests {
         let out = tick_labels(HistoryRange::Week, 1_792_497_600);
         assert_eq!(out.len(), 7);
         assert_eq!(out.last().unwrap().1, "now");
+    }
+
+    #[test]
+    fn tick_labels_for_1y_end_at_current_month_not_december() {
+        // 2026-10-20 12:00 UTC → October in Europe/Paris. Reviewer finding #7.
+        let out = tick_labels(HistoryRange::Year, 1_792_497_600);
+        // Last entry is "now", penultimate is the current month.
+        assert_eq!(out.last().unwrap().1, "now");
+        assert_eq!(out[out.len() - 2].1, "Oct");
+        // 11 months before current month = November of the prior year.
+        assert_eq!(out[0].1, "Nov");
+    }
+
+    #[test]
+    fn day_ticks_still_produce_four_hour_labels_on_a_dst_day() {
+        // 2026-10-26 10:00 UTC — the day after the autumn DST transition (Oct 25).
+        let now = 1_792_015_200 + 86_400;
+        let out = tick_labels(HistoryRange::Day, now);
+        let hour_labels: Vec<&String> = out
+            .iter()
+            .map(|(_, s)| s)
+            .filter(|s| s.ends_with(":00") && !s.starts_with(|c: char| c.is_alphabetic()))
+            .collect();
+        // At most one of each of 00/06/12/18 must appear (deduped) and all four should fit a
+        // 24-hour window.
+        assert!(hour_labels.len() >= 3 && hour_labels.len() <= 4);
+        for h in ["00:00", "06:00", "12:00", "18:00"] {
+            assert_eq!(hour_labels.iter().filter(|l| **l == h).count(), 1);
+        }
     }
 
     #[test]

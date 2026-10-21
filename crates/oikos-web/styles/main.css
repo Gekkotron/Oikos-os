@@ -4025,7 +4025,7 @@ html:has(.flow-canvas-screen) {
   min-height: 240px;
   max-height: 460px;
   aspect-ratio: 400 / 220;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--card-bg);
   border-radius: 8px;
 }
 
@@ -4064,8 +4064,8 @@ html:has(.flow-canvas-screen) {
 }
 
 .history-chart__axis-x {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
+  height: 14px;
   margin-top: 6px;
   padding: 0 2px;
   font: 400 10px/12px var(--font-body);
@@ -4073,7 +4073,9 @@ html:has(.flow-canvas-screen) {
 }
 
 .history-chart__axis-x > span {
-  flex: 0 0 auto;
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .history-chart__legend {
