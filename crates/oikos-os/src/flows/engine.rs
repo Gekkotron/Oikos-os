@@ -12,13 +12,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
-use oikos_core::flow::{Flow, Missing, Node, NodeKind, Scalar, Schedule, compare, parse_duration};
+use oikos_core::flow::sun::is_dark_at;
+use oikos_core::flow::{
+    Flow, Missing, Node, NodeKind, Op, Scalar, Schedule, compare, parse_duration,
+};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, JoinSet};
 
 use super::EngineRequest;
 use super::schedule::{Armed, Now, now_in, rearm, timer_clock};
+use super::sun::{ArmedSun, next_sun_fire};
 use crate::clock;
 use crate::hub::{Hub, StateSeen};
 use oikos_api::ConnectionStatus;
@@ -62,6 +66,7 @@ pub(super) async fn run_with(
         zone: hub.zone(),
         now: timer_clock(),
         schedules: BTreeMap::new(),
+        sun_timers: BTreeMap::new(),
     };
     engine.reload();
     loop {
@@ -90,7 +95,10 @@ pub(super) async fn run_with(
                 engine.run_finished(joined);
             }
             // Before the events: a tick that is due is not held back by a busy event stream.
-            () = sleep_until_deadline(deadline), if deadline.is_some() => engine.tick(),
+            () = sleep_until_deadline(deadline), if deadline.is_some() => {
+                engine.tick();
+                engine.tick_suns();
+            }
             event = events.recv() => match event {
                 Ok(event) => engine.handle_event(event),
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
@@ -126,6 +134,8 @@ struct Engine {
     now: Now,
     /// Armed schedule nodes, keyed `"{flow}/{node}"`.
     schedules: BTreeMap<String, Armed>,
+    /// Armed sun nodes, keyed `"{flow}/{node}"`.
+    sun_timers: BTreeMap<String, ArmedSun>,
     /// Valid and enabled flows.
     flows: Vec<Flow>,
     /// The last value seen for every entity a trigger watches; `None` inside means the entity
@@ -188,6 +198,7 @@ impl Engine {
             self.cancel(&id);
         }
         self.arm_schedules();
+        self.arm_suns();
     }
 
     /// Whether `active` is a run that disabled its own flow (announced by `KeepRun`) and whose
@@ -248,9 +259,68 @@ impl Engine {
         }
     }
 
-    /// When the timer branch should wake: the earliest armed tick, as a tokio instant.
+    /// Arms every sun node of an enabled flow that is not armed for the same event and offset
+    /// yet, and disarms the rest: disabled, removed or edited. A node whose next event is more
+    /// than seven days out (polar night, midnight sun) stays disarmed until the next reload.
+    fn arm_suns(&mut self) {
+        let now = now_in(&self.now, self.zone);
+        let (lat, lon) = self.hub.house_point();
+        let mut wanted = BTreeMap::new();
+        for flow in &self.flows {
+            for node in flow.triggers() {
+                let NodeKind::TriggerSun(params) = &node.kind else {
+                    continue;
+                };
+                wanted.insert(
+                    format!("{}/{}", flow.id, node.id),
+                    (
+                        flow.id.clone(),
+                        node.id.clone(),
+                        params.which,
+                        params.offset(),
+                    ),
+                );
+            }
+        }
+        self.sun_timers.retain(|key, armed| {
+            wanted.get(key).is_some_and(|(_, node, which, offset)| {
+                *node == armed.node && *which == armed.which && *offset == armed.offset_minutes
+            })
+        });
+        for (key, (flow, node, which, offset)) in wanted {
+            if self.sun_timers.contains_key(&key) {
+                continue;
+            }
+            match next_sun_fire(lat, lon, self.zone, which, offset, now) {
+                Some(at) => {
+                    self.sun_timers.insert(
+                        key,
+                        ArmedSun {
+                            node,
+                            at,
+                            which,
+                            offset_minutes: offset,
+                        },
+                    );
+                }
+                None => tracing::warn!(
+                    flow = %flow,
+                    node = %node,
+                    "sun flow disarmed: next event more than 7 days out or does not exist"
+                ),
+            }
+        }
+    }
+
+    /// When the timer branch should wake: the earliest armed tick or sun event, as a tokio
+    /// instant.
     fn next_deadline(&self) -> Option<tokio::time::Instant> {
-        let at = self.schedules.values().map(|armed| armed.at).min()?;
+        let at = self
+            .schedules
+            .values()
+            .map(|armed| armed.at)
+            .chain(self.sun_timers.values().map(|armed| armed.at))
+            .min()?;
         let wait = (at.to_utc() - (self.now)())
             .to_std()
             .unwrap_or(std::time::Duration::ZERO);
@@ -278,6 +348,44 @@ impl Engine {
                 Some(at) => armed.at = at,
                 None => {
                     self.schedules.remove(&key);
+                }
+            }
+            let flow_id = key.split('/').next().unwrap_or_default();
+            let Some(flow) = self.flows.iter().find(|f| f.id == flow_id).cloned() else {
+                continue;
+            };
+            if online {
+                self.fire(flow, node, None);
+            } else {
+                self.hub
+                    .add_skipped_run_because(&flow.id, &node, "the broker link is offline");
+            }
+        }
+    }
+
+    /// Fires every sun node whose event is due and re-arms it for the next one, skipping while
+    /// the broker link is not online like `tick`. Events missed while the hub was busy are
+    /// never replayed: the next one is searched from now.
+    fn tick_suns(&mut self) {
+        let now = now_in(&self.now, self.zone);
+        let (lat, lon) = self.hub.house_point();
+        let due: Vec<String> = self
+            .sun_timers
+            .iter()
+            .filter(|(_, armed)| armed.at <= now)
+            .map(|(key, _)| key.clone())
+            .collect();
+        let online = *self.hub.connection().borrow() == ConnectionStatus::Online;
+        for key in due {
+            let Some(armed) = self.sun_timers.get_mut(&key) else {
+                continue;
+            };
+            let node = armed.node.clone();
+            let next = next_sun_fire(lat, lon, self.zone, armed.which, armed.offset_minutes, now);
+            match next {
+                Some(at) => armed.at = at,
+                None => {
+                    self.sun_timers.remove(&key);
                 }
             }
             let flow_id = key.split('/').next().unwrap_or_default();
@@ -449,9 +557,10 @@ impl Engine {
 
     fn spawn(&mut self, flow: Flow, run_id: String, start: String, trigger: Option<TriggerInfo>) {
         let hub = Arc::clone(&self.hub);
+        let now = Arc::clone(&self.now);
         let (flow_id, task_flow, task_run) = (flow.id.clone(), flow.clone(), run_id.clone());
         let abort = self.tasks.spawn(async move {
-            let status = execute(hub, task_flow, task_run.clone(), start, trigger).await;
+            let status = execute(hub, now, task_flow, task_run.clone(), start, trigger).await;
             (flow_id, task_run, status)
         });
         self.active.insert(
@@ -532,6 +641,7 @@ fn filter_matches(filter: Option<&Value>, actual: &Scalar) -> bool {
 /// `send_command` (no `.await` in between) is accepted.
 pub(super) async fn execute(
     hub: Arc<Hub>,
+    now: Now,
     flow: Flow,
     run_id: String,
     start: String,
@@ -547,7 +657,7 @@ pub(super) async fn execute(
             return RunStatus::Failed;
         };
         let (outcome, detail, port) =
-            run_node(&hub, &flow.id, &run_id, node, trigger.as_ref()).await;
+            run_node(&hub, &now, &flow.id, &run_id, node, trigger.as_ref()).await;
         if !hub.record_step(&flow.id, &run_id, step(&node.id, outcome, detail)) {
             return RunStatus::Cancelled;
         }
@@ -576,6 +686,7 @@ fn step(node: &str, outcome: StepOutcome, detail: String) -> StepView {
 /// Runs one node: its outcome, the detail to record and the output port to follow.
 async fn run_node(
     hub: &Hub,
+    now: &Now,
     flow_id: &str,
     run_id: &str,
     node: &Node,
@@ -593,7 +704,15 @@ async fn run_node(
         NodeKind::TriggerSchedule(params) => {
             (StepOutcome::Ok, format!("schedule {}", params.cron), None)
         }
-        NodeKind::TriggerSun(_) => (StepOutcome::Ok, "sun".to_owned(), None),
+        NodeKind::TriggerSun(params) => (
+            StepOutcome::Ok,
+            format!(
+                "sun {} {:+}m",
+                format!("{:?}", params.which).to_lowercase(),
+                params.offset()
+            ),
+            None,
+        ),
         NodeKind::FlowEnable(params) => {
             let target = params.flow.as_deref().unwrap_or(flow_id);
             if hub.flow(target).is_none() {
@@ -618,6 +737,12 @@ async fn run_node(
             }
         }
         NodeKind::If(params) => {
+            if params.op == Op::IsDark {
+                let (lat, lon) = hub.house_point();
+                let dark = is_dark_at(lat, lon, now());
+                let port = if dark { "true" } else { "false" };
+                return (StepOutcome::Ok, format!("is_dark → {dark}"), Some(port));
+            }
             let Some(right) = Scalar::from_json(params.value.as_ref().unwrap_or(&Value::Null))
             else {
                 return failed("value is not a scalar".to_owned());

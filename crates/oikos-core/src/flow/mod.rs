@@ -12,7 +12,7 @@ mod validate;
 pub use duration::{DurationError, parse_duration};
 pub use model::{
     CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, Missing, Node,
-    NodeKind, Op, Position, TriggerScheduleParams, TriggerStateParams,
+    NodeKind, Op, Position, SunWhich, TriggerScheduleParams, TriggerStateParams, TriggerSunParams,
 };
 pub use scalar::{CompareError, Scalar, compare};
 pub use schedule::{Schedule, ScheduleError};

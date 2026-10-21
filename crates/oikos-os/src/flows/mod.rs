@@ -4,6 +4,7 @@ pub mod engine;
 mod hub;
 pub mod schedule;
 mod store;
+mod sun;
 
 pub use schedule::house_zone;
 pub use store::{FlowStore, StoreApplied};
