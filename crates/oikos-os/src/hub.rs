@@ -11,6 +11,7 @@ use crate::alerts::{AlertStore, Applied};
 use crate::flows::FlowStore;
 use crate::history::History;
 use crate::media::MediaProxy;
+use crate::pictures::{MAX_PICTURE_BYTES, Picture, Pictures};
 use crate::virtual_entities as virtuals;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
@@ -130,6 +131,8 @@ pub struct Hub {
     engine_rx: Mutex<Option<mpsc::UnboundedReceiver<EngineRequest>>>,
     /// Frigate media served through the hub; `None` without a `[frigate] url`.
     media: Option<Arc<MediaProxy>>,
+    /// The latest picture of each camera or image entity.
+    pictures: Arc<Pictures>,
     confirm_timeout: Duration,
     subscription_debounce: Duration,
     /// Entities whose template failure was already logged, so each failure is logged once.
@@ -207,6 +210,7 @@ impl Hub {
             engine_tx,
             engine_rx: Mutex::new(Some(engine_rx)),
             media,
+            pictures: Arc::new(Pictures::new()),
             confirm_timeout: Duration::from_millis(cfg.commands.confirm_timeout_ms),
             subscription_debounce: Duration::from_millis(cfg.commands.subscription_debounce_ms),
             logged_failures: Mutex::new(BTreeSet::new()),
@@ -339,6 +343,7 @@ impl Hub {
     /// event: a non-retained message on the command topic of a button some flow watches
     /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.
     pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
+        self.capture_pictures(topic, payload);
         if !retain {
             let pressed = self.watched_button_topics().remove(topic);
             if let Some(ids) = pressed {
@@ -353,6 +358,86 @@ impl Hub {
             }
         }
         self.ingest(topic, payload)
+    }
+
+    /// The in-memory pictures the route serves.
+    pub fn pictures(&self) -> &Arc<Pictures> {
+        &self.pictures
+    }
+
+    /// Keeps what a message says about the picture of the camera and image entities reading
+    /// `topic`: the bytes (decoded from base64 when `image_encoding` says so) or a URL.
+    fn capture_pictures(&self, topic: &str, payload: &[u8]) {
+        use base64::Engine as _;
+        use oikos_core::types::{Shape, type_def};
+        let mut found = Vec::new();
+        {
+            let reg = self.read();
+            for id in reg.entities_on_topic(topic) {
+                let Some(entity) = reg.entity(id) else {
+                    continue;
+                };
+                let Some(field) = type_def(&entity.component)
+                    .filter(|def| def.primary.as_deref() == Some("picture"))
+                    .and_then(|def| def.fields.get("picture"))
+                    .filter(|field| field.shape == Shape::Picture)
+                else {
+                    continue;
+                };
+                let cfg = &entity.bindings.config;
+                let is = |key: &str| cfg.get(key).and_then(|v| v.as_str()) == Some(topic);
+                if is(&field.topic) {
+                    let body = if cfg.get("image_encoding").and_then(|v| v.as_str()) == Some("b64")
+                    {
+                        let text = String::from_utf8_lossy(payload);
+                        match base64::engine::general_purpose::STANDARD.decode(text.trim()) {
+                            Ok(body) => body,
+                            Err(err) => {
+                                tracing::warn!(%id, %err, "picture is not valid base64");
+                                continue;
+                            }
+                        }
+                    } else {
+                        payload.to_vec()
+                    };
+                    if body.len() > MAX_PICTURE_BYTES {
+                        tracing::warn!(%id, size = body.len(), "picture over 5 MiB dropped");
+                        continue;
+                    }
+                    let content_type = cfg
+                        .get("content_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("image/jpeg")
+                        .to_owned();
+                    found.push((
+                        id.clone(),
+                        Picture::Bytes {
+                            content_type,
+                            body: body.into(),
+                        },
+                    ));
+                } else if is("url_topic") {
+                    let text = String::from_utf8_lossy(payload);
+                    let url = match cfg.get("url_template").and_then(|v| v.as_str()) {
+                        Some(template) => match reg.templates().render(template, &text) {
+                            Ok(url) => url,
+                            Err(err) => {
+                                tracing::warn!(%id, %err, "picture url template failed");
+                                continue;
+                            }
+                        },
+                        None => text.into_owned(),
+                    };
+                    let url = url.trim().to_owned();
+                    if !url.is_empty() {
+                        found.push((id.clone(), Picture::Url(url)));
+                    }
+                }
+            }
+        }
+        for (id, picture) in found {
+            self.pictures.put(&id, picture);
+        }
     }
 
     /// Stores the signal as the entity's `last` and `at` (ms) and announces the state change,

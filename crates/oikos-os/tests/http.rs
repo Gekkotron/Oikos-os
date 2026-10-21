@@ -1495,3 +1495,60 @@ async fn main_control_patch_rejects_unknown_control() {
         .expect("PATCH");
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+const CAMERA_TOPIC: &str = "oikos/camera/porch/config";
+const CAMERA_ID: &str = "porch_camera";
+
+fn camera_config() -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "unique_id": CAMERA_ID,
+        "name": "Porch",
+        "topic": "cam/stream",
+    }))
+    .expect("json")
+}
+
+#[tokio::test]
+async fn camera_bytes_are_served_by_the_picture_route() {
+    let server = Server::start().await;
+    server.hub.ingest(CAMERA_TOPIC, &camera_config());
+    server
+        .hub
+        .ingest_message("cam/stream", &[0xFF, 0xD8, 1, 2, 3], false);
+
+    let response = server
+        .get(&format!("/api/v1/entities/{CAMERA_ID}/picture"))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("image/jpeg")
+    );
+    assert_eq!(
+        response.bytes().await.expect("body").as_ref(),
+        &[0xFF, 0xD8, 1, 2, 3]
+    );
+}
+
+#[tokio::test]
+async fn unknown_entity_picture_is_404() {
+    let server = Server::start().await;
+    let response = server.get("/api/v1/entities/no_such_id/picture").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn oversized_picture_is_dropped() {
+    let server = Server::start().await;
+    server.hub.ingest(CAMERA_TOPIC, &camera_config());
+    let big = vec![0u8; 6 * 1024 * 1024];
+    server.hub.ingest_message("cam/stream", &big, false);
+
+    let response = server
+        .get(&format!("/api/v1/entities/{CAMERA_ID}/picture"))
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
