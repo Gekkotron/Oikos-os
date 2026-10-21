@@ -1326,6 +1326,47 @@ async fn group_command_is_accepted_once_every_member_echoes() {
     assert!(response.accepted, "{response:?}");
 }
 
+#[tokio::test(start_paused = true)]
+async fn group_command_timeout_lists_missing_members_in_definition_order() {
+    let (hub, mut rx) = groups_hub();
+    feed_hall_switch(&hub);
+    let spec = oikos_api::GroupSpec {
+        members: vec![HALL_ID.to_owned(), SWITCH_ID.to_owned()],
+        ..two_switch_group()
+    };
+    hub.set_group("living", spec).await.expect("created");
+    drain(&mut rx);
+
+    let response = hub
+        .send_command("group_living", Command::TurnOff)
+        .await
+        .expect("a response");
+    assert!(!response.accepted);
+    assert_eq!(
+        response.reason,
+        Some(format!("{HALL_ID}, {SWITCH_ID}: no echo"))
+    );
+}
+
+#[tokio::test]
+async fn group_command_refused_when_switch_is_off() {
+    let (hub, mut rx) = hub();
+    feed_switch(&hub);
+    let spec = serde_json::to_vec(&switch_group()).expect("json");
+    hub.ingest("oikos/group/stair/definition", &spec);
+    assert!(hub.read_group_store().get("stair").is_some());
+    drain(&mut rx);
+
+    let response = hub
+        .send_command("group_stair", Command::TurnOff)
+        .await
+        .expect("a response");
+    assert!(!response.accepted);
+    assert_eq!(response.reason, Some("groups disabled".to_owned()));
+    assert!(response.state.is_none());
+    assert!(drain(&mut rx).is_empty(), "nothing reaches the members");
+}
+
 /// A recorded light or cover config made into entity `n`, placed in area `area` by override.
 async fn feed_member(hub: &Hub, kind: Kind, n: u8, area: &str) -> String {
     let (fixture_name, old_id, old_path, component) = match kind {

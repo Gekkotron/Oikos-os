@@ -594,6 +594,13 @@ impl Hub {
     /// [`HubError::Publish`] right away rather than a wait for an echo that cannot come.
     pub async fn send_command(&self, id: &str, cmd: Command) -> Result<CommandResponse, HubError> {
         if let Some(group_id) = id.strip_prefix("group_") {
+            if !self.groups_enabled {
+                return Ok(CommandResponse {
+                    accepted: false,
+                    reason: Some("groups disabled".to_owned()),
+                    state: None,
+                });
+            }
             return Ok(self.on_group_command(group_id, cmd).await);
         }
         // Subscribed before publishing, so a fast echo cannot slip between the two.
@@ -692,13 +699,16 @@ impl Hub {
             reason: Some(reason),
             state: None,
         };
+        if !self.groups_enabled {
+            return reject("groups disabled".to_owned());
+        }
         let Some(spec) = self.group_store().get(id).cloned() else {
             return reject("unknown group".to_owned());
         };
         // Subscribed before publishing, so a fast echo cannot slip between the two.
         let mut seen = self.state_seen.subscribe();
         let members = self.group_member_views(&spec);
-        let mut expected = BTreeSet::new();
+        let mut targeted = BTreeSet::new();
         let mut publishes = Vec::new();
         {
             let reg = self.read();
@@ -715,7 +725,7 @@ impl Hub {
                 match map_command(entity, state, &member_cmd, reg.templates()) {
                     Ok(mapped) => {
                         publishes.extend(mapped);
-                        expected.insert(target);
+                        targeted.insert(target);
                     }
                     Err(err) => {
                         tracing::warn!(group = %id, member = %target, %err, "group member skipped")
@@ -723,7 +733,13 @@ impl Hub {
                 }
             }
         }
-        if expected.is_empty() {
+        let mut waiting: Vec<String> = spec
+            .members
+            .iter()
+            .filter(|m| targeted.contains(*m))
+            .cloned()
+            .collect();
+        if waiting.is_empty() {
             return reject("no reachable member".to_owned());
         }
         for publish in publishes {
@@ -731,13 +747,12 @@ impl Hub {
                 return reject(err.to_string());
             }
         }
-        let mut waiting = expected;
         let window = Duration::from_millis(2000);
         let _ = tokio::time::timeout(window, async {
             while !waiting.is_empty() {
                 match seen.recv().await {
                     Ok(report) => {
-                        waiting.remove(&report.id);
+                        waiting.retain(|m| *m != report.id);
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {}
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -752,8 +767,7 @@ impl Hub {
                 state: None,
             };
         }
-        let missing: Vec<String> = waiting.into_iter().collect();
-        let reason = format!("{}: no echo", missing.join(", "));
+        let reason = format!("{}: no echo", waiting.join(", "));
         self.broadcast(WsEvent::CommandFailed {
             id: groups::topics::unique_id(id),
             reason: reason.clone(),
