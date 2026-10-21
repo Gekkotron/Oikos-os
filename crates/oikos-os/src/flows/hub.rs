@@ -13,6 +13,7 @@ use oikos_api::{
 use oikos_core::command::{Publish, map_command};
 use oikos_core::flow::{Flow, NodeKind, Scalar, uses_sun_or_is_dark, validate};
 use oikos_core::model::{Command, Kind};
+use oikos_core::types::{Placement, type_def};
 
 use super::{EngineRequest, StoreApplied};
 use crate::clock;
@@ -279,6 +280,7 @@ impl Hub {
         for node in &flow.nodes {
             let entity = match &node.kind {
                 NodeKind::TriggerState(params) => Some(&params.entity),
+                NodeKind::TriggerSignal(params) => Some(&params.entity),
                 NodeKind::If(params) => params.entity.as_ref(),
                 NodeKind::Command(params) => Some(&params.entity),
                 NodeKind::FlowEnable(params) => {
@@ -302,6 +304,33 @@ impl Hub {
                     node.id
                 )));
             };
+            let signal_source =
+                type_def(&found.component).is_some_and(|def| def.placement == Placement::Signal);
+            match &node.kind {
+                NodeKind::TriggerState(_) if signal_source => {
+                    return Err(HubError::InvalidFlow(format!(
+                        "node `{}`: `{entity}` sends signals, trigger on them with trigger.signal",
+                        node.id
+                    )));
+                }
+                NodeKind::TriggerSignal(params) => {
+                    if !signal_source {
+                        return Err(HubError::InvalidFlow(format!(
+                            "node `{}`: `{entity}` sends no signals, use trigger.state",
+                            node.id
+                        )));
+                    }
+                    if let Some(signal) = &params.signal
+                        && !announced_signals(found).contains(signal)
+                    {
+                        return Err(HubError::InvalidFlow(format!(
+                            "node `{}`: `{entity}` does not announce the signal `{signal}`",
+                            node.id
+                        )));
+                    }
+                }
+                _ => {}
+            }
             if let NodeKind::TriggerState(params) = &node.kind
                 && found.kind == Kind::Button
                 && [&params.to, &params.from]
@@ -364,4 +393,16 @@ impl Hub {
             requests,
         ))
     }
+}
+
+/// The signal names an entity announces: its `signals`, else (an `event`) the options of `last`.
+fn announced_signals(entity: &oikos_core::model::Entity) -> Vec<String> {
+    let Some(generic) = &entity.capabilities.generic else {
+        return Vec::new();
+    };
+    let mut names = generic.signals.clone();
+    if let Some(options) = generic.options.get("last") {
+        names.extend(options.iter().cloned());
+    }
+    names
 }

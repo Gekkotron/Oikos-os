@@ -25,9 +25,10 @@ pub enum Role {
 /// The role of a node type.
 pub fn role(kind: &NodeKind) -> Role {
     match kind {
-        NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_) => {
-            Role::Trigger
-        }
+        NodeKind::TriggerState(_)
+        | NodeKind::TriggerSchedule(_)
+        | NodeKind::TriggerSun(_)
+        | NodeKind::TriggerSignal(_) => Role::Trigger,
         NodeKind::If(_) => Role::Check,
         NodeKind::Command(_) | NodeKind::FlowEnable(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
@@ -134,6 +135,10 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
                 ),
             }
         }
+        NodeKind::TriggerSignal(p) => match &p.signal {
+            Some(signal) => format!("When {} sends {signal}", entity_text(&p.entity, ctx)),
+            None => format!("When {} sends a signal", entity_text(&p.entity, ctx)),
+        },
         NodeKind::TriggerSchedule(p) => describe(&p.cron),
         NodeKind::TriggerSun(p) => sun_summary(p.which, p.offset()),
         NodeKind::If(p) if p.op == Op::IsDark => "Is it dark now? (sun below -6°)".to_owned(),
@@ -178,6 +183,7 @@ pub fn title(node: &Node, ctx: &Ctx) -> String {
 fn entity_id(node: &Node) -> Option<&str> {
     match &node.kind {
         NodeKind::TriggerState(p) => Some(&p.entity),
+        NodeKind::TriggerSignal(p) => Some(&p.entity),
         NodeKind::If(p) => p.entity.as_deref(),
         NodeKind::Command(p) => Some(&p.entity),
         _ => None,

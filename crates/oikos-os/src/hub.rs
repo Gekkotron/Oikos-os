@@ -333,8 +333,28 @@ impl Hub {
                 }
                 return Vec::new();
             }
+            for (id, signal) in self.signals_of(topic, payload) {
+                self.broadcast(WsEvent::SignalReceived { id, signal });
+            }
         }
         self.ingest(topic, payload)
+    }
+
+    /// The signals a message carries: one per signal-placed entity (remote, event, tag) it
+    /// belongs to.
+    fn signals_of(&self, topic: &str, payload: &[u8]) -> Vec<(String, String)> {
+        use oikos_core::types::{Placement, signals::signal_of, type_def};
+        let reg = self.read();
+        reg.entities_on_topic(topic)
+            .iter()
+            .filter_map(|id| reg.entity(id))
+            .filter_map(|entity| {
+                let def =
+                    type_def(&entity.component).filter(|d| d.placement == Placement::Signal)?;
+                let signal = signal_of(entity, def, topic, payload, reg.templates())?;
+                Some((entity.unique_id.clone(), signal))
+            })
+            .collect()
     }
 
     /// A button appearing or any entity vanishing may change the button topics to subscribe to.

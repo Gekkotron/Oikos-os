@@ -224,6 +224,7 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::TriggerState(_) => NODE_BOLT,
         NodeKind::TriggerSchedule(_) => NODE_CLOCK,
         NodeKind::TriggerSun(_) => SUN,
+        NodeKind::TriggerSignal(_) => NODE_BOLT,
         NodeKind::If(p) if p.op == oikos_core::flow::Op::IsDark => NODE_MOON,
         NodeKind::If(_) => NODE_FORK,
         NodeKind::Delay(_) => NODE_HOURGLASS,

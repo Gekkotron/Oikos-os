@@ -10,6 +10,7 @@ use crate::model::{GenericState, GenericValue};
 
 pub mod caps;
 pub mod command;
+pub mod signals;
 pub mod state;
 pub use caps::{GenericCaps, Range};
 

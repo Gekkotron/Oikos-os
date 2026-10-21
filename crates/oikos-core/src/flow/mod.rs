@@ -12,8 +12,8 @@ mod validate;
 pub use duration::{DurationError, parse_duration};
 pub use model::{
     CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, Missing, Node,
-    NodeKind, Op, Position, SunWhich, TriggerScheduleParams, TriggerStateParams, TriggerSunParams,
-    uses_sun_or_is_dark,
+    NodeKind, Op, Position, SunWhich, TriggerScheduleParams, TriggerSignalParams,
+    TriggerStateParams, TriggerSunParams, uses_sun_or_is_dark,
 };
 pub use scalar::{CompareError, Scalar, compare};
 pub use schedule::{Schedule, ScheduleError};

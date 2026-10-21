@@ -1273,3 +1273,132 @@ async fn local_flow_writes_wake_the_resubscribe() {
     assert!(woken(&wakeup).await, "a dropped watch must wake it");
     assert!(!hub.subscription_topics().contains(BUTTON_TOPIC));
 }
+
+const REMOTE_ID: &str = "device_automation.0xd4fe12345";
+const REMOTE_TOPIC: &str = "zigbee2mqtt/rooms/hall/remote/action";
+
+/// Teaches the hub a remote with the `on` and `off` actions.
+fn add_remote(hub: &Hub) {
+    for payload in ["on", "off"] {
+        let config = serde_json::json!({
+            "automation_type": "trigger",
+            "topic": REMOTE_TOPIC,
+            "payload": payload,
+            "type": "action",
+            "subtype": payload,
+            "device": {"identifiers": ["zigbee2mqtt_0xd4fe12345"], "name": "rooms/hall/remote"}
+        });
+        hub.ingest(
+            &format!("oikos/device_automation/0xd4fe12345/action_{payload}/config"),
+            config.to_string().as_bytes(),
+        );
+    }
+}
+
+fn signal_flow(trigger_params: serde_json::Value) -> Flow {
+    Flow::decode(
+        serde_json::json!({
+            "id": "remote", "name": "Remote", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "press", "type": "trigger.signal", "params": trigger_params },
+                { "id": "on", "type": "command",
+                  "params": { "entity": LED_ID, "command": { "type": "turn_on" } } }
+            ],
+            "edges": [{ "from": "press", "to": "on" }]
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .expect("signal flow")
+}
+
+#[tokio::test]
+async fn signal_fires_matching_trigger_only() {
+    let (hub, publisher, _engine) = engine_hub();
+    add_remote(&hub);
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.set_flow(signal_flow(
+        serde_json::json!({ "entity": REMOTE_ID, "signal": "on" }),
+    ))
+    .await
+    .expect("set_flow");
+    settle().await;
+    assert!(hub.subscription_topics().contains(REMOTE_TOPIC));
+    let mut events = hub.subscribe();
+
+    hub.ingest_message(REMOTE_TOPIC, b"off", false);
+    no_run_event(&mut events).await;
+    assert!(published(&log).is_empty(), "{log:?}");
+
+    hub.ingest_message(REMOTE_TOPIC, b"on", false);
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(step_nodes(&run), ["press", "on"]);
+    assert_eq!(published(&log).len(), 1, "{log:?}");
+}
+
+#[tokio::test]
+async fn retained_signal_never_fires_a_flow() {
+    let (hub, publisher, _engine) = engine_hub();
+    add_remote(&hub);
+    let log = echo(publisher, Arc::clone(&hub));
+    hub.set_flow(signal_flow(serde_json::json!({ "entity": REMOTE_ID })))
+        .await
+        .expect("set_flow");
+    settle().await;
+    let mut events = hub.subscribe();
+
+    hub.ingest_message(REMOTE_TOPIC, b"on", true);
+    settle().await;
+
+    assert!(published(&log).is_empty(), "{log:?}");
+    while let Ok(event) = events.try_recv() {
+        assert!(
+            !matches!(
+                event,
+                WsEvent::SignalReceived { .. } | WsEvent::FlowRunChanged { .. }
+            ),
+            "{event:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn signal_trigger_rejects_unannounced_signal() {
+    let (hub, _publisher, _engine) = engine_hub();
+    add_remote(&hub);
+    match hub
+        .set_flow(signal_flow(
+            serde_json::json!({ "entity": REMOTE_ID, "signal": "warp" }),
+        ))
+        .await
+    {
+        Err(HubError::InvalidFlow(reason)) => assert!(reason.contains("warp"), "{reason}"),
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+    // A card entity is no signal source.
+    match hub
+        .set_flow(signal_flow(serde_json::json!({ "entity": LED_ID })))
+        .await
+    {
+        Err(HubError::InvalidFlow(_)) => {}
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+    hub.set_flow(signal_flow(
+        serde_json::json!({ "entity": REMOTE_ID, "signal": "off" }),
+    ))
+    .await
+    .expect("announced signal validates");
+}
+
+#[tokio::test]
+async fn state_trigger_on_a_remote_is_rejected() {
+    let (hub, _publisher, _engine) = engine_hub();
+    add_remote(&hub);
+    let flow = button_flow(serde_json::json!({ "entity": REMOTE_ID }));
+    match hub.set_flow(flow).await {
+        Err(HubError::InvalidFlow(reason)) => {
+            assert!(reason.contains("trigger.signal"), "{reason}");
+        }
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+}

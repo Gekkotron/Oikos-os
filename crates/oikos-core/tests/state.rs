@@ -1220,3 +1220,50 @@ fn history_num_maps_lock_and_tracker() {
     );
     assert_eq!(num("humidifier", humidifier, "h/target", "45"), Some(45.0));
 }
+
+#[test]
+fn remote_press_is_a_signal() {
+    use oikos_core::types::{signals::signal_of, type_def};
+    let mut entity = lock(json!({}));
+    entity.component = "device_automation".to_owned();
+    entity.bindings.config = json!({"actions": [
+        {"object": "action_on", "topic": "z/remote/action", "payload": "on", "type": "action", "subtype": "on"},
+        {"object": "action_off", "topic": "z/remote/action", "payload": "off", "type": "action", "subtype": "off"},
+    ]});
+    let def = type_def("device_automation").unwrap();
+    let templates = Templates::new();
+    let of = |topic: &str, payload: &[u8]| signal_of(&entity, def, topic, payload, &templates);
+    assert_eq!(of("z/remote/action", b"on"), Some("on".to_owned()));
+    assert_eq!(of("z/remote/action", b"warp"), None);
+    assert_eq!(of("z/other", b"on"), None);
+    assert_eq!(of("z/remote/action", &[0xff, 0xfe]), None);
+}
+
+#[test]
+fn event_and_tag_signals() {
+    use oikos_core::types::{signals::signal_of, type_def};
+    let templates = Templates::new();
+    let mut event = lock(json!({}));
+    event.component = "event".to_owned();
+    event.bindings.config = json!({"state_topic": "e/state"});
+    let def = type_def("event").unwrap();
+    assert_eq!(
+        signal_of(
+            &event,
+            def,
+            "e/state",
+            br#"{"event_type":"single"}"#,
+            &templates
+        ),
+        Some("single".to_owned())
+    );
+    assert_eq!(signal_of(&event, def, "e/state", b"nope", &templates), None);
+    let mut tag = lock(json!({}));
+    tag.component = "tag".to_owned();
+    tag.bindings.config = json!({"topic": "t/scan"});
+    let def = type_def("tag").unwrap();
+    assert_eq!(
+        signal_of(&tag, def, "t/scan", b"abc123", &templates),
+        Some("abc123".to_owned())
+    );
+}

@@ -235,6 +235,7 @@ fn node_editor_body(
         NodeKind::TriggerState(_) => "Trigger",
         NodeKind::TriggerSchedule(_) => "Schedule",
         NodeKind::TriggerSun(_) => "Sun",
+        NodeKind::TriggerSignal(_) => "Signal",
         NodeKind::If(_) => "If",
         NodeKind::Delay(_) => "Delay",
         NodeKind::Command(_) => "Command",
@@ -430,6 +431,41 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     initial=p.from.unwrap_or(serde_json::Value::Null)
                     optional=true
                     write=from_write
+                />
+            }
+            .into_any()
+        }
+        NodeKind::TriggerSignal(p) => {
+            let entity_id = id.clone();
+            let entity_write = Callback::new(move |value: Option<String>| {
+                form.update(&entity_id, |n| {
+                    if let NodeKind::TriggerSignal(ref mut t) = n.kind {
+                        t.entity = value.unwrap_or_default();
+                    }
+                });
+            });
+            let signal_id = id;
+            let signal_write = Callback::new(move |value: Option<String>| {
+                form.update(&signal_id, |n| {
+                    if let NodeKind::TriggerSignal(ref mut t) = n.kind {
+                        t.signal = value.filter(|v| !v.is_empty());
+                    }
+                });
+            });
+            view! {
+                <TextField
+                    label="Entity".into()
+                    initial=p.entity
+                    placeholder="device_automation.id".into()
+                    optional=false
+                    write=entity_write
+                />
+                <TextField
+                    label="Signal (optional)".into()
+                    initial=p.signal.unwrap_or_default()
+                    placeholder="any".into()
+                    optional=true
+                    write=signal_write
                 />
             }
             .into_any()

@@ -41,6 +41,7 @@ fn summary_label(node: &Node) -> String {
         NodeKind::TriggerState(_) => "Trigger".into(),
         NodeKind::TriggerSchedule(p) => describe(&p.cron),
         NodeKind::TriggerSun(_) => "Sun".into(),
+        NodeKind::TriggerSignal(_) => "Signal".into(),
         NodeKind::If(_) => "If".into(),
         NodeKind::Delay(p) => format!("Delay {}", p.for_),
         NodeKind::Command(p) => humanise(command_name(&p.command)),
@@ -56,6 +57,7 @@ pub fn trigger_summary(flow: &Flow, entities: &BTreeMap<String, EntityView>) -> 
         .iter()
         .filter_map(|n| match &n.kind {
             NodeKind::TriggerState(p) => Some(entity_label(&p.entity, entities)),
+            NodeKind::TriggerSignal(p) => Some(entity_label(&p.entity, entities)),
             NodeKind::TriggerSchedule(p) => Some(describe(&p.cron)),
             _ => None,
         })
@@ -115,7 +117,9 @@ pub fn orphans(flow: &Flow) -> BTreeSet<String> {
         .filter(|n| {
             !matches!(
                 n.kind,
-                NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_)
+                NodeKind::TriggerState(_)
+                    | NodeKind::TriggerSchedule(_)
+                    | NodeKind::TriggerSignal(_)
             )
         })
         .filter(|n| !flow.edges.iter().any(|e| e.to == n.id))

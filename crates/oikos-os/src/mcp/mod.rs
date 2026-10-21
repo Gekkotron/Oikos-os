@@ -131,7 +131,7 @@ fn instructions() -> String {
          switches it and `delete_flow` removes it; `run_flow` starts a manual run. `set_virtual` and `delete_virtual` manage virtual \
          entities (a `switch`, `number` or `button` the hub owns, as `virtual_<id>`) for flows \
          to read and write. A flow is a \
-         graph of nodes: `trigger.state` (an entity's state changes), `trigger.schedule` (a \
+         graph of nodes: `trigger.state` (an entity's state changes), `trigger.signal` (a remote press, an event or a tag scan: `entity` is a `device_automation.*`, `event.*` or `tag.*` id and `signal` optionally names one of its announced signals; the trigger value is the signal name, and `trigger.state` is refused on those entities), `trigger.schedule` (a \
          5-field cron in the house local time; it fires only while the flow is enabled and \
          the first run is at the next tick), `flow.enable` (sets another flow's `enabled`, or its own flow when `flow` is absent; a flow \
          that disables itself still finishes the current run), `if` (compares a value; edges \
