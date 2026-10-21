@@ -57,7 +57,10 @@ pub fn trigger_summary(flow: &Flow, entities: &BTreeMap<String, EntityView>) -> 
         .iter()
         .filter_map(|n| match &n.kind {
             NodeKind::TriggerState(p) => Some(entity_label(&p.entity, entities)),
-            NodeKind::TriggerSignal(p) => Some(entity_label(&p.entity, entities)),
+            NodeKind::TriggerSignal(p) => Some(match &p.signal {
+                Some(signal) => format!("{} sends {signal}", entity_label(&p.entity, entities)),
+                None => format!("{} signals", entity_label(&p.entity, entities)),
+            }),
             NodeKind::TriggerSchedule(p) => Some(describe(&p.cron)),
             _ => None,
         })

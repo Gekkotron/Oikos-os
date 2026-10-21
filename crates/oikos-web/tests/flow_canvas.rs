@@ -1112,3 +1112,65 @@ async fn cancel_on_an_unsaved_flow_goes_to_the_list() {
     let path = web_sys::window().unwrap().location().pathname().unwrap();
     assert_eq!(path, "/flows");
 }
+
+#[wasm_bindgen_test]
+async fn signal_trigger_editor_lists_signals() {
+    use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
+    const SIGNAL_FLOW: &str = r#"{
+      "id": "remote_flow", "name": "Remote", "enabled": true, "mode": "single",
+      "nodes": [
+        { "id": "press", "type": "trigger.signal",
+          "params": { "entity": "remote_1", "signal": "on" } }
+      ],
+      "edges": []
+    }"#;
+    let view = FlowView {
+        definition: Flow::decode(SIGNAL_FLOW.as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let host = host();
+    let (_mounted, house) = mount_house(&host, vec![view], "/flows/remote_flow");
+    house.entities.update(|m| {
+        m.insert(
+            "remote_1".into(),
+            oikos_api::EntityView {
+                id: "remote_1".into(),
+                device_id: None,
+                name: "Remote".into(),
+                device_name: None,
+                label: None,
+                kind: Kind::Generic,
+                component: "device_automation".into(),
+                protocol_kind: Kind::Generic,
+                device_class: None,
+                unit: None,
+                icon: None,
+                category: EntityCategory::Primary,
+                enabled_by_default: true,
+                area: "salon".into(),
+                part_of: None,
+                capabilities: Capabilities {
+                    generic: Some(oikos_core::types::GenericCaps {
+                        signals: vec!["on".into(), "off".into(), "brightness_move_up".into()],
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+                ui: UiOverride::default(),
+                state: EntityState::default(),
+            },
+        );
+    });
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    click(&host, ".flow-toolbar__edit");
+    tick().await;
+    select_card(&host, "press").await;
+    let chips = text(&host, ".signal-chips");
+    for name in ["any", "on", "off", "brightness_move_up"] {
+        assert!(chips.contains(name), "{chips}");
+    }
+    assert_eq!(count(&host, ".signal-chips .chip"), 4);
+    assert_eq!(count(&host, ".signal-chips .chip--selected"), 1);
+}
