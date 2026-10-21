@@ -1,7 +1,8 @@
 //! Human-readable state values for cards.
 
 use oikos_api::EntityView;
-use oikos_core::model::{EntityState, Kind, StateValue, SwitchType};
+use oikos_core::model::{EntityState, GenericValue, Kind, StateValue, SwitchType};
+use oikos_core::types::{GenericCaps, TypeDef};
 
 const DASH: &str = "—";
 
@@ -44,6 +45,7 @@ pub fn display_value(state: &EntityState, unit: Option<&str>) -> String {
             (Some(v), _) | (None, Some(v)) => with_unit(number(v), unit),
             (None, None) => w.mode.as_deref().map_or_else(|| DASH.into(), word),
         },
+        StateValue::Generic(_) => generic_value(None, None, state),
         StateValue::Unknown => DASH.into(),
     }
 }
@@ -247,6 +249,53 @@ pub fn word(s: &str) -> String {
     }
 }
 
+/// A canonical choice value as shown on a card: `not_home` is "Away", `home` "Home", the rest
+/// sentence case.
+pub fn choice_word(s: &str) -> String {
+    match s {
+        "not_home" => "Away".into(),
+        other => word(other),
+    }
+}
+
+/// The value a generic card shows: the type's primary field (a lone or `state` field without a
+/// type), "••••" for a secret, "" for a picture, "—" while nothing is known.
+pub fn generic_value(
+    def: Option<&TypeDef>,
+    caps: Option<&GenericCaps>,
+    state: &EntityState,
+) -> String {
+    if caps.is_some_and(|c| c.secret) {
+        return "••••".into();
+    }
+    let StateValue::Generic(g) = &state.value else {
+        return DASH.into();
+    };
+    let value = match def {
+        Some(d) => {
+            if let Some(field) = d.primary.as_deref().and_then(|p| d.fields.get(p))
+                && field.shape == oikos_core::types::Shape::Picture
+            {
+                return String::new();
+            }
+            oikos_core::types::state::primary(d, g)
+        }
+        None => g.fields.get("state").or_else(|| {
+            (g.fields.len() == 1)
+                .then(|| g.fields.values().next())
+                .flatten()
+        }),
+    };
+    match value {
+        Some(GenericValue::Bool(true)) => "On".into(),
+        Some(GenericValue::Bool(false)) => "Off".into(),
+        Some(GenericValue::Number(n)) => number(*n),
+        Some(GenericValue::Text(s)) if is_unusable(s) || s.is_empty() => DASH.into(),
+        Some(GenericValue::Text(s)) => choice_word(s),
+        None => DASH.into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{display_value, entity_title, list_label, wrap_id};
@@ -264,6 +313,7 @@ mod tests {
             device_name: Some(device.into()),
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: class.map(Into::into),
             unit: None,
@@ -534,6 +584,7 @@ mod tests {
 #[cfg(test)]
 mod ts_tests {
     use super::format_timestamp;
+    use oikos_core::model::{EntityState, GenericValue, StateValue};
 
     #[test]
     fn unix_epoch_formats_as_iso() {
@@ -543,5 +594,52 @@ mod ts_tests {
     #[test]
     fn a_recent_timestamp_formats_in_utc() {
         assert_eq!(format_timestamp(1_792_402_860), "2026-10-19T09:41:00Z");
+    }
+
+    fn generic_state(field: &str, v: GenericValue) -> EntityState {
+        let mut g = oikos_core::model::GenericState::default();
+        g.fields.insert(field.into(), v);
+        EntityState {
+            value: StateValue::Generic(g),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn generic_value_humanises_choices() {
+        use super::generic_value;
+        use oikos_core::model::GenericValue::Text;
+        let lock = oikos_core::types::type_def("lock");
+        let tracker = oikos_core::types::type_def("device_tracker");
+        assert_eq!(
+            generic_value(lock, None, &generic_state("state", Text("locked".into()))),
+            "Locked"
+        );
+        assert_eq!(
+            generic_value(
+                tracker,
+                None,
+                &generic_state("state", Text("not_home".into()))
+            ),
+            "Away"
+        );
+        assert_eq!(
+            generic_value(tracker, None, &generic_state("state", Text("home".into()))),
+            "Home"
+        );
+    }
+
+    #[test]
+    fn generic_value_hides_secrets() {
+        use super::generic_value;
+        let caps = oikos_core::types::GenericCaps {
+            secret: true,
+            ..Default::default()
+        };
+        let s = generic_state("state", GenericValue::Text("hunter2".into()));
+        assert_eq!(
+            generic_value(oikos_core::types::type_def("text"), Some(&caps), &s),
+            "••••"
+        );
     }
 }

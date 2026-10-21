@@ -141,6 +141,9 @@ pub enum NodeKind {
     /// Starts a run at a solar event (sunrise, sunset, dusk or dawn), with an optional offset.
     #[serde(rename = "trigger.sun")]
     TriggerSun(TriggerSunParams),
+    /// Starts a run when a remote, an event entity or a tag scanner sends a signal.
+    #[serde(rename = "trigger.signal")]
+    TriggerSignal(TriggerSignalParams),
     /// Branches on a comparison of an entity (or the trigger value) with a constant.
     #[serde(rename = "if")]
     If(IfParams),
@@ -162,6 +165,7 @@ impl NodeKind {
             NodeKind::TriggerState(_) => "trigger.state",
             NodeKind::TriggerSchedule(_) => "trigger.schedule",
             NodeKind::TriggerSun(_) => "trigger.sun",
+            NodeKind::TriggerSignal(_) => "trigger.signal",
             NodeKind::If(_) => "if",
             NodeKind::Delay(_) => "delay",
             NodeKind::Command(_) => "command",
@@ -173,7 +177,10 @@ impl NodeKind {
     pub fn is_trigger(&self) -> bool {
         matches!(
             self,
-            NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_)
+            NodeKind::TriggerState(_)
+                | NodeKind::TriggerSchedule(_)
+                | NodeKind::TriggerSun(_)
+                | NodeKind::TriggerSignal(_)
         )
     }
 
@@ -199,6 +206,19 @@ pub struct TriggerStateParams {
     /// Only trigger when the previous value equalled this.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<Value>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `trigger.signal`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct TriggerSignalParams {
+    /// Entity id (`device_automation.<node>`, `event.<...>`, `tag.<...>`).
+    pub entity: String,
+    /// Only trigger when the signal name equals this; absent means any signal of `entity`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }
@@ -376,6 +396,20 @@ mod tests {
             panic!()
         };
         assert_eq!((p.flow, p.enabled), (None, false));
+    }
+
+    #[test]
+    fn trigger_signal_round_trips_json() {
+        let text = r#"{"id":"s","type":"trigger.signal","params":{"entity":"device_automation.0xd4fe12345","signal":"on"}}"#;
+        let node: Node = serde_json::from_str(text).unwrap();
+        assert!(node.kind.is_trigger());
+        assert_eq!(node.kind.type_name(), "trigger.signal");
+        assert!(matches!(&node.kind, NodeKind::TriggerSignal(p)
+            if p.entity == "device_automation.0xd4fe12345" && p.signal.as_deref() == Some("on")));
+        assert_eq!(
+            serde_json::to_value(&node).unwrap(),
+            serde_json::from_str::<serde_json::Value>(text).unwrap()
+        );
     }
 
     #[test]

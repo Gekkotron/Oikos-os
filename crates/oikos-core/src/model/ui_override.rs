@@ -79,6 +79,9 @@ pub struct UiOverride {
     pub light_on_brightness: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub climate_presets: Option<String>,
+    /// A generic entity's main control: one of its announced controls, or `"none"` to hide it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_control: Option<String>,
     /// Fields written by a newer app, preserved verbatim.
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
@@ -106,6 +109,7 @@ impl Default for UiOverride {
             light_on_preset: None,
             light_on_brightness: None,
             climate_presets: None,
+            main_control: None,
             extra: BTreeMap::new(),
         }
     }
@@ -162,7 +166,7 @@ impl FieldType {
     }
 }
 
-/// The 19 app fields, in the app's order, with what a patch may set them to.
+/// The 20 app fields, in the app's order, with what a patch may set them to.
 const FIELD_TYPES: &[(&str, FieldType)] = &[
     ("name", FieldType::Text),
     ("area", FieldType::Text),
@@ -183,10 +187,11 @@ const FIELD_TYPES: &[(&str, FieldType)] = &[
     ("lightOnPreset", FieldType::LightOnPreset),
     ("lightOnBrightness", FieldType::Brightness),
     ("climatePresets", FieldType::Text),
+    ("mainControl", FieldType::Text),
 ];
 
 impl UiOverride {
-    /// The 19 camelCase field names the app knows, in the app's order.
+    /// The 20 camelCase field names the app knows, in the app's order.
     pub const FIELDS: &[&str] = &[
         "name",
         "area",
@@ -207,6 +212,7 @@ impl UiOverride {
         "lightOnPreset",
         "lightOnBrightness",
         "climatePresets",
+        "mainControl",
     ];
 
     /// Decodes a retained payload leniently; `None` when it is not a JSON object or a known

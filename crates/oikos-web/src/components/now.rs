@@ -7,12 +7,12 @@ use leptos::prelude::*;
 pub struct Now(pub RwSignal<u64>);
 
 #[cfg(target_arch = "wasm32")]
-fn unix_now() -> u64 {
+pub(crate) fn unix_now() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn unix_now() -> u64 {
+pub(crate) fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())

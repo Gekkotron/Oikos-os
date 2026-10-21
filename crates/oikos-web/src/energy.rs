@@ -540,6 +540,7 @@ mod tests {
             device_name: None,
             label: None,
             kind: Kind::Sensor,
+            component: "sensor".to_string(),
             protocol_kind: Kind::Sensor,
             device_class: None,
             unit: Some(unit.into()),

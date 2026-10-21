@@ -38,6 +38,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
             "/entities/{id}/override",
             patch(set_override).delete(clear_override),
         )
+        .route("/entities/{id}/picture", get(entity_picture))
         .route("/areas", put(set_areas))
         .route("/areas/{id}", patch(rename_area))
         .route("/areas/{id}/groups/{kind}", patch(set_area_group))
@@ -60,6 +61,84 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/history/today", get(history_today))
         .route("/history/last_change", get(history_last_change))
         .fallback(not_found)
+}
+
+/// The picture of a camera or image entity: stored bytes, or the URL fetched now.
+async fn entity_picture(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<Response, HttpError> {
+    use crate::pictures::Picture;
+    let picture = hub.pictures().get(&id).ok_or_else(|| HttpError {
+        status: StatusCode::NOT_FOUND,
+        error: "no picture for this entity".to_owned(),
+    })?;
+    match picture {
+        Picture::Bytes { content_type, body } => Ok(picture_response(&content_type, body)),
+        Picture::Url(url) => {
+            let (content_type, body) = fetch_picture(&url).await.map_err(|err| {
+                tracing::warn!(%id, %err, "could not fetch picture URL");
+                HttpError {
+                    status: StatusCode::BAD_GATEWAY,
+                    error: "could not fetch picture URL".to_owned(),
+                }
+            })?;
+            Ok(picture_response(&content_type, body))
+        }
+    }
+}
+
+/// A picture reply that can only be shown as an image: anything that is not `image/*` is
+/// served as an opaque download, and sniffing is off, so a broker-supplied page cannot run
+/// from the hub's origin.
+fn picture_response(content_type: &str, body: impl Into<axum::body::Body>) -> Response {
+    let content_type = if content_type
+        .trim()
+        .get(..6)
+        .is_some_and(|p| p.eq_ignore_ascii_case("image/"))
+    {
+        content_type
+    } else {
+        "application/octet-stream"
+    };
+    (
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        body.into(),
+    )
+        .into_response()
+}
+
+/// Fetches `url` (no redirects, 10 s, 2xx, at most 5 MiB).
+async fn fetch_picture(url: &str) -> Result<(String, bytes::Bytes), String> {
+    use crate::pictures::MAX_PICTURE_BYTES;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|err| err.to_string())?;
+    let mut response = client
+        .get(url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|err| err.to_string())?;
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_owned();
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|err| err.to_string())? {
+        if body.len() + chunk.len() > MAX_PICTURE_BYTES {
+            return Err("picture over 5 MiB".to_owned());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok((content_type, bytes::Bytes::from(body)))
 }
 
 /// An error reply: the status and an [`ApiError`] body.

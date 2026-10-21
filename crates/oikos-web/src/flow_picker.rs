@@ -1,11 +1,14 @@
 //! Entries of the "Add" picker: what a query offers to put on the canvas. Pure, tested natively.
 
+use oikos_api::EntityView;
+use oikos_core::flow::TriggerSignalParams;
 use oikos_core::flow::{
     CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, Op, Scalar, SunWhich,
     TriggerScheduleParams, TriggerStateParams,
 };
 use oikos_core::model::{Command, Kind};
-use serde_json::Value;
+use oikos_core::types::{Shape, type_def};
+use serde_json::{Value, json};
 
 use crate::flow_edit::fold_accents;
 use crate::flow_text::{Ctx, sentence};
@@ -66,8 +69,8 @@ fn turn_on() -> Command {
 }
 
 /// The commands offered for an entity of this kind.
-fn commands(kind: Kind, current: Option<&Scalar>) -> Vec<Command> {
-    match kind {
+fn commands(entity: &EntityView, current: Option<&Scalar>) -> Vec<Command> {
+    match entity.kind {
         Kind::Light | Kind::Switch => vec![turn_on(), Command::TurnOff, Command::Toggle],
         Kind::Cover => vec![Command::Open, Command::Close, Command::Stop],
         Kind::Number => vec![Command::SetNumber {
@@ -78,8 +81,45 @@ fn commands(kind: Kind, current: Option<&Scalar>) -> Vec<Command> {
         }],
         Kind::Button => vec![Command::Press],
         Kind::Climate => vec![Command::SetTemperature { temperature: 20.0 }],
+        Kind::Generic => generic_controls(entity),
         _ => Vec::new(),
     }
+}
+
+/// One `control` command per announced control, with a sensible default value for its shape.
+fn generic_controls(entity: &EntityView) -> Vec<Command> {
+    let Some(caps) = entity.capabilities.generic.as_ref() else {
+        return Vec::new();
+    };
+    let def = type_def(&entity.component);
+    caps.controls
+        .iter()
+        .map(|name| {
+            let ctl = def.and_then(|d| d.controls.get(name));
+            let value = match ctl {
+                Some(c) if c.press => None,
+                Some(c) => match c.shape {
+                    Shape::OnOff => Some(json!(true)),
+                    Shape::Number => Some(json!(0.0)),
+                    Shape::Choice => Some(json!(
+                        c.field
+                            .as_ref()
+                            .and_then(|f| caps.options.get(f))
+                            .and_then(|o| o.first())
+                            .cloned()
+                            .unwrap_or_default()
+                    )),
+                    Shape::Text => Some(json!("")),
+                    _ => None,
+                },
+                None => None,
+            };
+            Command::Control {
+                control: name.clone(),
+                value,
+            }
+        })
+        .collect()
 }
 
 /// The picker entries for `query`, ordered by [`Group`] then entity title. An empty query gives
@@ -183,7 +223,30 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 }),
                 ctx,
             ));
-            for c in commands(e.kind, current.as_ref()) {
+            if let Some(caps) = e
+                .capabilities
+                .generic
+                .as_ref()
+                .filter(|c| !c.signals.is_empty())
+            {
+                let signals = caps
+                    .signals
+                    .iter()
+                    .map(|s| Some(s.clone()))
+                    .chain(std::iter::once(None));
+                for signal in signals {
+                    out.push(entry(
+                        Group::When,
+                        NodeKind::TriggerSignal(TriggerSignalParams {
+                            entity: e.id.clone(),
+                            signal,
+                            ..Default::default()
+                        }),
+                        ctx,
+                    ));
+                }
+            }
+            for c in commands(e, current.as_ref()) {
                 out.push(entry(Group::Then, command(&e.id, c), ctx));
             }
         }
@@ -209,6 +272,7 @@ mod tests {
             device_name: None,
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: None,
             unit: None,
@@ -262,6 +326,44 @@ mod tests {
             NodeKind::TriggerSchedule(p) if p.cron == "0 * * * *"
         ));
         assert!(matches!(&got[3].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+    }
+
+    #[test]
+    fn picker_offers_lock_controls() {
+        let mut lock = ent("k1", "Front door", Kind::Generic);
+        lock.component = "lock".into();
+        lock.capabilities.generic = Some(oikos_core::types::GenericCaps {
+            controls: vec!["locked".into(), "open".into()],
+            ..Default::default()
+        });
+        let cmds = commands(&lock, None);
+        assert!(cmds.contains(&Command::Control {
+            control: "locked".into(),
+            value: Some(json!(true))
+        }));
+        assert!(cmds.contains(&Command::Control {
+            control: "open".into(),
+            value: None
+        }));
+    }
+
+    #[test]
+    fn picker_offers_remote_signals() {
+        let mut remote = ent("r1", "Remote", Kind::Generic);
+        remote.component = "device_automation".into();
+        remote.capabilities.generic = Some(oikos_core::types::GenericCaps {
+            signals: vec!["on".into(), "off".into()],
+            ..Default::default()
+        });
+        let got = run("remote", &house(vec![remote]));
+        let signals: Vec<Option<String>> = got
+            .iter()
+            .filter_map(|e| match &e.kind {
+                NodeKind::TriggerSignal(p) => Some(p.signal.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(signals, [Some("on".into()), Some("off".into()), None]);
     }
 
     #[test]

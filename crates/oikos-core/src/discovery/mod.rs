@@ -12,5 +12,8 @@ mod parse;
 mod topic;
 
 pub use expand::expand;
-pub use parse::{DEVICE_BASED_REASON, DiscoveryError, Parsed, expand_device_based, parse};
+pub use parse::{
+    DEVICE_BASED_REASON, DeviceAutomationFragment, DiscoveryError, Parsed, expand_device_based,
+    parse,
+};
 pub use topic::{DiscoveryTopic, TopicClass, classify};

@@ -8,14 +8,15 @@
 mod areas;
 mod folding;
 mod ignored;
+mod remote;
 mod routing;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::discovery::DiscoveryTopic;
 use crate::model::{
-    Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, StateValue, SwitchType,
-    UNASSIGNED_AREA, UiOverride,
+    Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, GenericState, GenericValue,
+    StateValue, SwitchType, UNASSIGNED_AREA, UiOverride,
 };
 use crate::state::{Applied, StateError, apply_parts};
 use crate::template::Templates;
@@ -66,6 +67,8 @@ pub enum Inbound {
         payload: Vec<u8>,
     },
     Areas(Vec<u8>),
+    /// A message the hub itself publishes (the `_types` table): nothing to apply.
+    Ignored,
     Z2mDevices(Vec<u8>),
     Z2mBridgeInfo(Vec<u8>),
     Z2mBridgeState(Vec<u8>),
@@ -116,6 +119,9 @@ pub struct Registry {
     /// Discovery topic → the entities it produced, and the reverse.
     produced: BTreeMap<String, Vec<String>>,
     origin: BTreeMap<String, String>,
+    /// `device_automation` discovery topic → (remote entity id, action object id). The remote
+    /// is not in `produced`/`origin`: many topics contribute to it.
+    device_automation_actions: BTreeMap<String, (String, String)>,
     template_failures: BTreeSet<String>,
 }
 
@@ -137,6 +143,7 @@ impl Registry {
             last_override: BTreeMap::new(),
             produced: BTreeMap::new(),
             origin: BTreeMap::new(),
+            device_automation_actions: BTreeMap::new(),
             template_failures: BTreeSet::new(),
         }
     }
@@ -174,6 +181,7 @@ impl Registry {
                 self.apply_override(unique_id, payload, &mut changes);
             }
             Inbound::Areas(payload) => self.apply_areas(&payload, &mut changes),
+            Inbound::Ignored => {}
             Inbound::Z2mDevices(payload) => {
                 if let Ok(devices) = Device::parse_list(&payload)
                     && devices != self.devices
@@ -199,6 +207,34 @@ impl Registry {
         changes.sort();
         changes.dedup();
         changes
+    }
+
+    /// Records a signal (a remote press, an event, a tag scan) on a signal-placed entity: its
+    /// `last` field becomes `signal` and its `at` field the time in milliseconds, so a repeated
+    /// signal still changes the state. `at_ms` is kept strictly increasing per entity.
+    pub fn record_signal(&mut self, unique_id: &str, signal: &str, at_ms: u64) -> Vec<Change> {
+        let Some(state) = self.states.get_mut(unique_id) else {
+            return Vec::new();
+        };
+        if !matches!(state.value, StateValue::Generic(_)) {
+            state.value = StateValue::Generic(GenericState::default());
+        }
+        let StateValue::Generic(generic) = &mut state.value else {
+            return Vec::new();
+        };
+        let previous = match generic.fields.get("at") {
+            Some(GenericValue::Number(n)) => *n,
+            _ => 0.0,
+        };
+        let at = (at_ms as f64).max(previous + 1.0);
+        generic
+            .fields
+            .insert("last".to_owned(), GenericValue::Text(signal.to_owned()));
+        generic
+            .fields
+            .insert("at".to_owned(), GenericValue::Number(at));
+        state.last_update = Some(at_ms / 1000);
+        vec![Change::StateChanged(unique_id.to_owned())]
     }
 
     pub fn entity(&self, unique_id: &str) -> Option<&Entity> {
@@ -367,10 +403,18 @@ impl Registry {
         {
             ids.retain(|other| *other != id);
         }
+        if let Some(previous) = self.entities.get(&id)
+            && as_discovered(previous) == entity
+        {
+            return;
+        }
+        self.store(entity, changes);
+    }
+
+    /// Indexes and stores `entity`, replacing any entity with the same id, and reports it.
+    fn store(&mut self, entity: Entity, changes: &mut Vec<Change>) {
+        let id = entity.unique_id.clone();
         if let Some(previous) = self.entities.get(&id) {
-            if as_discovered(previous) == entity {
-                return;
-            }
             let previous = previous.clone();
             self.unindex(&id, &previous);
         }

@@ -121,14 +121,17 @@ fn instructions() -> String {
          `set_override` writes the Android app's `oikos/ui/<id>` override (fields: {fields}; \
          `null` clears a field) and `clear_override` removes it. `send_command` publishes to \
          the device and reports `accepted: true` once the next state echo confirms it, or \
-         `accepted: false` with the reason. The `oikos://snapshot` resource is the whole house \
+         `accepted: false` with the reason; a generic entity (lock, fan, siren, scene, text and so on) \
+         takes `{{\"type\":\"control\",\"control\":\"<name>\",\"value\":...}}` with a name from its \
+         `capabilities.generic.controls`, and a control with no state to echo is accepted as soon \
+         as it is published. The `oikos://snapshot` resource is the whole house \
          as one JSON document. Automations are flows: `list_flows` and `get_flow` read them, \
          `set_flow` creates or replaces one (validated against the house, saved retained on \
          `oikos/automation/<id>`, the prefix being configurable), `set_flow_enabled` \
          switches it and `delete_flow` removes it; `run_flow` starts a manual run. `set_virtual` and `delete_virtual` manage virtual \
          entities (a `switch`, `number` or `button` the hub owns, as `virtual_<id>`) for flows \
          to read and write. A flow is a \
-         graph of nodes: `trigger.state` (an entity's state changes), `trigger.schedule` (a \
+         graph of nodes: `trigger.state` (an entity's state changes), `trigger.signal` (a remote press, an event or a tag scan: `entity` is a `device_automation.*`, `event.*` or `tag.*` id and `signal` optionally names one of its announced signals; the trigger value is the signal name, and `trigger.state` is refused on those entities), `trigger.schedule` (a \
          5-field cron in the house local time; it fires only while the flow is enabled and \
          the first run is at the next tick), `flow.enable` (sets another flow's `enabled`, or its own flow when `flow` is absent; a flow \
          that disables itself still finishes the current run), `if` (compares a value; edges \

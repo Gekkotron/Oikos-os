@@ -1,0 +1,1 @@
+{"name":"Weather map","unique_id":"weather_map","image_topic":"homeassistant/image/weather/map","content_type":"image/png","device":{"identifiers":["weather_station_dev"],"name":"Weather station"}}

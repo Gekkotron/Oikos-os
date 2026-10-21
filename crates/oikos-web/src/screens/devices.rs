@@ -82,6 +82,17 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
                 </span>
                 <span class="device__badges">
                     {device
+                        .update
+                        .clone()
+                        .filter(|u| u.available)
+                        .map(|u| {
+                            view! {
+                                <span class="chip-badge device__update-badge" title="Firmware update available">
+                                    {format!("v{}", u.latest.unwrap_or_default())}
+                                </span>
+                            }
+                        })}
+                    {device
                         .battery
                         .map(|b| view! { <span class="chip-badge">{format!("{b} %")}</span> })}
                     {device
@@ -192,6 +203,7 @@ mod tests {
             availability: Availability::Online,
             battery: None,
             linkquality: None,
+            update: None,
         }
     }
 

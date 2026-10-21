@@ -119,6 +119,7 @@ async fn insert_then_load_latest_round_trips() {
                 availability: Availability::Online,
                 last_update: Some(2),
             },
+            num: Some(22.0),
         },
         &mut out,
     );
@@ -240,6 +241,7 @@ async fn replay_after_restart_writes_nothing() {
                 availability: Availability::Online,
                 last_update: Some(2),
             },
+            num: Some(20.0),
         },
         &mut rows,
     );
@@ -256,6 +258,7 @@ async fn replay_after_restart_writes_nothing() {
                 availability: Availability::Online,
                 last_update: Some(3),
             },
+            num: Some(21.0),
         },
         &mut rows,
     );
@@ -417,6 +420,7 @@ async fn writer_survives_unreachable_database_at_boot() {
             availability: Availability::Online,
             last_update: Some(1),
         },
+        num: None,
     });
 
     // Wait long enough for sqlx's acquire_timeout (5 s) to fire plus a retry tick: the

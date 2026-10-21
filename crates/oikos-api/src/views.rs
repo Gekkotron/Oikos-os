@@ -4,9 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oikos_core::model::{
     Area, Availability, BridgeInfo, Capabilities, Device, Entity, EntityCategory, EntityState,
-    Kind, StateValue, UiOverride,
+    GenericValue, Kind, StateValue, UiOverride,
 };
 use oikos_core::registry::Ignored;
+use oikos_core::types::{Placement, type_def};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,7 @@ pub struct EntityView {
     pub device_name: Option<String>,
     pub label: Option<String>,
     pub kind: Kind,
+    pub component: String,
     pub protocol_kind: Kind,
     pub device_class: Option<String>,
     pub unit: Option<String>,
@@ -46,6 +48,8 @@ impl EntityView {
     }
 
     pub fn from(entity: &Entity, state: &EntityState) -> Self {
+        let mut masked = state.clone();
+        mask_secret(entity, &mut masked);
         let name = match entity.ui.name.as_deref() {
             Some(name) if !name.trim().is_empty() => name.to_owned(),
             _ => entity.name.clone(),
@@ -57,6 +61,7 @@ impl EntityView {
             device_name: entity.device_name.clone(),
             label: entity.label.clone(),
             kind: entity.kind,
+            component: entity.component.clone(),
             protocol_kind: entity.protocol_kind,
             device_class: entity.device_class.clone(),
             unit: entity.unit.clone(),
@@ -67,7 +72,28 @@ impl EntityView {
             part_of: entity.part_of.clone(),
             capabilities: entity.capabilities.clone(),
             ui: entity.ui.clone(),
-            state: state.clone(),
+            state: masked,
+        }
+    }
+}
+
+/// What a secret entity shows in place of its value.
+const MASK: &str = "\u{2022}\u{2022}\u{2022}\u{2022}";
+
+/// Blanks every field of a secret entity's generic state (a password-mode text), for any
+/// copy of the state that leaves the hub. A no-op for every other entity.
+pub fn mask_secret(entity: &Entity, state: &mut EntityState) {
+    if !entity
+        .capabilities
+        .generic
+        .as_ref()
+        .is_some_and(|g| g.secret)
+    {
+        return;
+    }
+    if let StateValue::Generic(gs) = &mut state.value {
+        for value in gs.fields.values_mut() {
+            *value = GenericValue::Text(MASK.to_owned());
         }
     }
 }
@@ -88,6 +114,38 @@ pub struct DeviceView {
     pub availability: Availability,
     pub battery: Option<u8>,
     pub linkquality: Option<u32>,
+    /// Firmware versions, from the device's `update` entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<UpdateView>,
+}
+
+/// What a device's `update` entity reports about its firmware.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateView {
+    pub installed: Option<String>,
+    pub latest: Option<String>,
+    /// Both versions are known and differ.
+    pub available: bool,
+}
+
+impl UpdateView {
+    fn from_state(state: &EntityState) -> Self {
+        let text = |key: &str| match &state.value {
+            StateValue::Generic(g) => match g.fields.get(key) {
+                Some(GenericValue::Text(t)) => Some(t.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let installed = text("installed");
+        let latest = text("latest");
+        let available = installed.is_some() && latest.is_some() && installed != latest;
+        Self {
+            installed,
+            latest,
+            available,
+        }
+    }
 }
 
 impl DeviceView {
@@ -109,6 +167,17 @@ impl DeviceView {
                     _ => None,
                 })
         };
+        // A device can carry more than one `update` entity: the first that reports a version wins.
+        let mut updates = members
+            .iter()
+            .filter(|(entity, _)| placement_of(&entity.component) == Some(Placement::Update))
+            .map(|(_, state)| UpdateView::from_state(state))
+            .collect::<Vec<_>>();
+        let known = updates
+            .iter()
+            .position(|u| u.installed.is_some() || u.latest.is_some())
+            .unwrap_or(0);
+        let update = (known < updates.len()).then(|| updates.swap_remove(known));
         Self {
             id: device.id.clone(),
             ieee: device.ieee.clone(),
@@ -124,6 +193,7 @@ impl DeviceView {
             // `as` saturates, so the clamp only needs to bound the top.
             battery: number("_battery_zigbee2mqtt").map(|n| n.clamp(0.0, 100.0) as u8),
             linkquality: number("_linkquality_zigbee2mqtt").map(|n| n as u32),
+            update,
         }
     }
 }
@@ -161,6 +231,11 @@ impl AreaView {
             group_favorites: area.group_favorites.clone(),
         }
     }
+}
+
+/// Where the type table places a generic component; `None` for a component it does not list.
+pub(crate) fn placement_of(component: &str) -> Option<Placement> {
+    type_def(component).map(|def| def.placement)
 }
 
 /// The primary rule shared by [`EntityView::is_primary`] and the area counts.

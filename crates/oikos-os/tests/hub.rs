@@ -535,7 +535,7 @@ async fn set_override_canonicalises_area() {
 }
 
 /// A discovery payload that cannot become an entity is logged once with its topic: not again
-/// on re-delivery, not for an ignored component (expected noise), and again only after the
+/// on re-delivery, and again only after the
 /// topic recovered and broke anew.
 #[tokio::test]
 async fn invalid_discovery_is_logged_once() {
@@ -553,19 +553,22 @@ async fn invalid_discovery_is_logged_once() {
         "a re-delivery is not logged again"
     );
 
-    hub.ingest("oikos/update/x/config", br#"{"unique_id":"u"}"#);
-    assert_eq!(hub.ignored().len(), 2);
-    assert_eq!(
-        hub.logged_ignored_len(),
-        1,
-        "an ignored component is not logged"
+    hub.ingest(
+        "oikos/update/x/config",
+        br#"{"unique_id":"u","state_topic":"zigbee2mqtt/u"}"#,
     );
+    assert_eq!(
+        hub.ignored().len(),
+        1,
+        "an update is an entity, not ignored"
+    );
+    assert_eq!(hub.logged_ignored_len(), 1, "a valid config is not logged");
 
     hub.ingest(
         "oikos/sensor/garbage/x/config",
         br#"{"unique_id":"g","state_topic":"zigbee2mqtt/g"}"#,
     );
-    assert_eq!(hub.ignored().len(), 1);
+    assert_eq!(hub.ignored().len(), 0);
     assert_eq!(
         hub.logged_ignored_len(),
         0,
@@ -942,6 +945,7 @@ async fn offer_never_blocks_when_full() {
                 availability: oikos_core::model::Availability::Online,
                 last_update: Some((at / 1_000_000) as u64),
             },
+            num: None,
         }
     }
 
@@ -958,4 +962,123 @@ async fn offer_never_blocks_when_full() {
         rx.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
     ));
+}
+
+/// Feeds a hand-written generic entity (`unique_id` `u1`) and returns its id.
+fn feed_generic(hub: &Hub, component: &str, config: serde_json::Value) -> String {
+    let topic = format!("oikos/{component}/u1/main/config");
+    hub.ingest(&topic, config.to_string().as_bytes());
+    let snapshot = hub.snapshot();
+    snapshot
+        .entities
+        .iter()
+        .find(|e| e.component == component)
+        .unwrap_or_else(|| panic!("no {component} entity"))
+        .id
+        .clone()
+}
+
+fn control(name: &str, value: Option<serde_json::Value>) -> Command {
+    Command::Control {
+        control: name.to_owned(),
+        value,
+    }
+}
+
+#[tokio::test]
+async fn scene_activate_is_accepted_without_echo() {
+    let (hub, mut publisher) = hub_with_timeout(5_000);
+    let id = feed_generic(
+        &hub,
+        "scene",
+        serde_json::json!({"name": "Movie", "unique_id": "u1", "command_topic": "sc/set"}),
+    );
+    let started = std::time::Instant::now();
+    let response = hub
+        .send_command(&id, control("activate", None))
+        .await
+        .expect("accepted");
+    assert!(response.accepted);
+    assert_eq!(response.reason, None);
+    assert_eq!(response.state, None);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(publisher.try_recv().expect("published").topic, "sc/set");
+}
+
+#[tokio::test]
+async fn lock_command_waits_for_echo() {
+    let (hub, _publisher) = hub();
+    let id = feed_generic(
+        &hub,
+        "lock",
+        serde_json::json!({"name": "Door", "unique_id": "u1", "state_topic": "l/s",
+                           "command_topic": "l/set"}),
+    );
+    let response = hub
+        .send_command(&id, control("locked", Some(serde_json::json!(true))))
+        .await
+        .expect("mapped");
+    assert!(!response.accepted);
+}
+
+fn secret_text_config() -> serde_json::Value {
+    serde_json::json!({"name": "Code", "unique_id": "u1", "mode": "password",
+                       "state_topic": "t/s", "command_topic": "t/set"})
+}
+
+#[tokio::test]
+async fn secret_text_is_masked_in_state_changed_events() {
+    let (hub, _publisher) = hub();
+    let id = feed_generic(&hub, "text", secret_text_config());
+    let mut events = hub.subscribe();
+    hub.ingest("t/s", b"hunter2");
+    loop {
+        match next_event(&mut events).await {
+            WsEvent::StateChanged { id: changed, state } if changed == id => {
+                let StateValue::Generic(gs) = state.value else {
+                    panic!("generic state");
+                };
+                assert_eq!(
+                    gs.fields.get("value"),
+                    Some(&oikos_core::model::GenericValue::Text("••••".to_owned()))
+                );
+                break;
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn secret_text_never_reaches_history() {
+    let (hub, _publisher) = hub();
+    let (history, mut rx) = History::detached(8, chrono_tz::UTC);
+    hub.set_history(history);
+    feed_generic(&hub, "text", secret_text_config());
+    hub.ingest("t/s", b"hunter2");
+    assert!(matches!(
+        rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
+async fn type_table_is_published_retained_on_connect() {
+    let (hub, mut publisher) = hub();
+    hub.publish_types().await.expect("publish");
+    let sent = publisher.try_recv().expect("a publish");
+    assert_eq!(sent.topic, "oikos/ui/_types");
+    assert!(sent.retain);
+    assert_eq!(sent.payload, oikos_core::types::table_json());
+}
+
+#[tokio::test]
+async fn type_table_echo_is_not_an_override() {
+    let (hub, _publisher) = hub();
+    let before = hub.snapshot();
+    hub.ingest(
+        "oikos/ui/_types",
+        oikos_core::types::table_json().as_bytes(),
+    );
+    assert_eq!(hub.snapshot(), before);
 }

@@ -43,6 +43,7 @@ pub fn num_of(value: &StateValue) -> Option<f64> {
         StateValue::Text(_)
         | StateValue::Alarm(_)
         | StateValue::Vacuum(_)
+        | StateValue::Generic(_)
         | StateValue::Unknown => return None,
     };
     n.is_finite().then_some(n)
@@ -54,6 +55,8 @@ pub struct Incoming {
     pub at: Micros,
     pub id: String,
     pub state: EntityState,
+    /// Precomputed by the hub: `types::history_num` for a generic state, else [`num_of`].
+    pub num: Option<f64>,
 }
 
 /// A row to insert in `entity_state`.
@@ -125,7 +128,7 @@ impl LastWritten {
                     at: incoming.at,
                     id: incoming.id.clone(),
                     value: incoming_value.clone(),
-                    num: num_of(incoming_value),
+                    num: incoming.num,
                 });
                 self.values
                     .insert(incoming.id.clone(), incoming_value.clone());
@@ -211,6 +214,7 @@ mod tests {
         Incoming {
             at,
             id: id.into(),
+            num: num_of(&value),
             state: EntityState {
                 value,
                 attributes: serde_json::Map::new(),
@@ -427,5 +431,42 @@ mod tests {
         p.requeue_front(batch);
         let all = p.take(3);
         assert_eq!(all, vec![a, b, c]);
+    }
+
+    fn generic(fields: &[(&str, &str)], num: Option<f64>) -> Incoming {
+        use crate::model::{GenericState, GenericValue};
+        let mut state = GenericState::default();
+        for (k, v) in fields {
+            state
+                .fields
+                .insert((*k).to_owned(), GenericValue::Text((*v).to_owned()));
+        }
+        let mut i = incoming(
+            "g",
+            1_000_000,
+            StateValue::Generic(state),
+            Availability::Online,
+        );
+        i.num = num;
+        i
+    }
+
+    #[test]
+    fn lock_change_is_recorded_as_one_and_zero() {
+        let mut last = LastWritten::default();
+        let mut rows = Rows::default();
+        last.diff(&generic(&[("state", "locked")], Some(1.0)), &mut rows);
+        last.diff(&generic(&[("state", "unlocked")], Some(0.0)), &mut rows);
+        let nums: Vec<_> = rows.values.iter().map(|r| r.num).collect();
+        assert_eq!(nums, vec![Some(1.0), Some(0.0)]);
+    }
+
+    #[test]
+    fn fan_preset_change_is_not_recorded() {
+        let mut last = LastWritten::default();
+        let mut rows = Rows::default();
+        last.diff(&generic(&[("preset", "eco")], None), &mut rows);
+        assert_eq!(rows.values.len(), 1);
+        assert_eq!(rows.values[0].num, None);
     }
 }

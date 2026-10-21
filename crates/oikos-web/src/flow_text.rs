@@ -25,9 +25,10 @@ pub enum Role {
 /// The role of a node type.
 pub fn role(kind: &NodeKind) -> Role {
     match kind {
-        NodeKind::TriggerState(_) | NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_) => {
-            Role::Trigger
-        }
+        NodeKind::TriggerState(_)
+        | NodeKind::TriggerSchedule(_)
+        | NodeKind::TriggerSun(_)
+        | NodeKind::TriggerSignal(_) => Role::Trigger,
         NodeKind::If(_) => Role::Check,
         NodeKind::Command(_) | NodeKind::FlowEnable(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
@@ -74,6 +75,20 @@ fn unit_of<'a>(id: &str, ctx: &'a Ctx) -> Option<&'a str> {
     ctx.entities.get(id).and_then(|e| e.unit.as_deref())
 }
 
+/// A generic control as a sentence: "Lock Front door", "Set Bedroom fan percentage to 60",
+/// "Activate Scene 1" (a press has no value).
+fn control_sentence(control: &str, value: Option<&Value>, e: &str) -> String {
+    let name = control.replace('_', " ");
+    // TODO: table-only dispatch. The lock/unlock wording is the one control name matched
+    // here; a `sentence` hint on the table's `ControlDef` would let the table own it.
+    match (control, value) {
+        ("locked", Some(Value::Bool(true))) => format!("Lock {e}"),
+        ("locked", Some(Value::Bool(false))) => format!("Unlock {e}"),
+        (_, None) => format!("{} {e}", crate::format::word(control)),
+        (_, Some(v)) => format!("Set {e} {name} to {}", value_words(v, None)),
+    }
+}
+
 fn command_sentence(command: &Command, entity: &str, ctx: &Ctx) -> String {
     let e = entity_text(entity, ctx);
     match command {
@@ -104,6 +119,7 @@ fn command_sentence(command: &Command, entity: &str, ctx: &Ctx) -> String {
         }
         Command::SelectOption { option } => format!("Set {e} to {option}"),
         Command::SetHvacMode { mode } => format!("Set {e} mode to {mode}"),
+        Command::Control { control, value } => control_sentence(control, value.as_ref(), &e),
         other => format!("{} {e}", humanise(command_name(other))),
     }
 }
@@ -134,6 +150,10 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
                 ),
             }
         }
+        NodeKind::TriggerSignal(p) => match &p.signal {
+            Some(signal) => format!("When {} sends {signal}", entity_text(&p.entity, ctx)),
+            None => format!("When {} sends a signal", entity_text(&p.entity, ctx)),
+        },
         NodeKind::TriggerSchedule(p) => describe(&p.cron),
         NodeKind::TriggerSun(p) => sun_summary(p.which, p.offset()),
         NodeKind::If(p) if p.op == Op::IsDark => "Is it dark now? (sun below -6°)".to_owned(),
@@ -178,6 +198,7 @@ pub fn title(node: &Node, ctx: &Ctx) -> String {
 fn entity_id(node: &Node) -> Option<&str> {
     match &node.kind {
         NodeKind::TriggerState(p) => Some(&p.entity),
+        NodeKind::TriggerSignal(p) => Some(&p.entity),
         NodeKind::If(p) => p.entity.as_deref(),
         NodeKind::Command(p) => Some(&p.entity),
         _ => None,
@@ -240,6 +261,7 @@ mod tests {
             device_name: device.map(Into::into),
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: None,
             unit: unit.map(Into::into),
@@ -383,5 +405,89 @@ mod tests {
         let n = node(r#"{"id":"a","type":"delay","params":{"for":"5m"}}"#);
         assert_eq!(subline(&n, &ctx), None);
         assert_eq!(role(&n.kind), Role::Wait);
+    }
+}
+
+#[cfg(test)]
+mod generic_tests {
+    use std::collections::BTreeMap;
+
+    use oikos_api::EntityView;
+    use oikos_core::flow::{Node, NodeKind, TriggerSignalParams};
+    use oikos_core::model::{Capabilities, Command, EntityCategory, EntityState, Kind, UiOverride};
+    use serde_json::json;
+
+    use super::*;
+
+    fn ent(id: &str, name: &str) -> EntityView {
+        EntityView {
+            id: id.into(),
+            device_id: None,
+            name: name.into(),
+            device_name: None,
+            label: None,
+            kind: Kind::Generic,
+            component: "lock".into(),
+            protocol_kind: Kind::Generic,
+            device_class: None,
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "salon".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui: UiOverride::default(),
+            state: EntityState::default(),
+        }
+    }
+
+    fn ctx_of(entities: &BTreeMap<String, EntityView>) -> Ctx<'_> {
+        Ctx {
+            entities,
+            areas: &[],
+            flows: &[],
+        }
+    }
+
+    #[test]
+    fn control_command_sentence_reads_naturally() {
+        let entities = BTreeMap::new();
+        let ctx = ctx_of(&entities);
+        let c = |control: &str, value| Command::Control {
+            control: control.into(),
+            value,
+        };
+        assert_eq!(
+            command_sentence(&c("locked", Some(json!(false))), "Front door", &ctx),
+            "Unlock Front door"
+        );
+        assert_eq!(
+            command_sentence(&c("percentage", Some(json!(60))), "Bedroom fan", &ctx),
+            "Set Bedroom fan percentage to 60"
+        );
+        assert_eq!(
+            command_sentence(&c("activate", None), "Scene 1", &ctx),
+            "Activate Scene 1"
+        );
+    }
+
+    #[test]
+    fn signal_trigger_sentence_names_the_signal() {
+        let entities: BTreeMap<_, _> = [("r1".to_owned(), ent("r1", "Remote"))].into();
+        let ctx = ctx_of(&entities);
+        let node = |signal: Option<&str>| Node {
+            id: String::new(),
+            name: None,
+            position: None,
+            kind: NodeKind::TriggerSignal(TriggerSignalParams {
+                entity: "r1".into(),
+                signal: signal.map(Into::into),
+                ..Default::default()
+            }),
+            extra: Default::default(),
+        };
+        assert_eq!(sentence(&node(Some("on")), &ctx), "When Remote sends on");
+        assert_eq!(sentence(&node(None), &ctx), "When Remote sends a signal");
     }
 }

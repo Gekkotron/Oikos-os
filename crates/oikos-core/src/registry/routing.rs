@@ -16,6 +16,9 @@ pub(super) fn route(registry: &Registry, topic: &str, payload: Vec<u8>, at: u64)
         if rest == "_areas" {
             return Inbound::Areas(payload);
         }
+        if rest == "_types" {
+            return Inbound::Ignored;
+        }
         if !rest.is_empty() {
             return Inbound::Override {
                 unique_id: rest.to_owned(),
@@ -87,9 +90,14 @@ pub(super) fn apply_discovery(
             produced.push(entity.unique_id.clone());
             registry.upsert(*entity, &topic_str, changes);
         }
+        Ok(Parsed::DeviceAutomation(fragment)) => {
+            forget_ignored(registry, &topic_str, changes);
+            registry.upsert_device_automation(fragment, &topic_str, changes);
+        }
         Ok(Parsed::Removed) => {
             removed = true;
             forget_ignored(registry, &topic_str, changes);
+            registry.remove_device_automation(&topic_str, changes);
         }
         Ok(Parsed::Ignored { reason }) if reason == DEVICE_BASED_REASON => {
             forget_ignored(registry, &topic_str, changes);
@@ -155,6 +163,10 @@ fn expand(
                 forget_ignored(registry, &entity_topic_str, changes);
                 produced.push(entity.unique_id.clone());
                 registry.upsert(*entity, topic_str, changes);
+            }
+            Ok(Parsed::DeviceAutomation(fragment)) => {
+                forget_ignored(registry, &entity_topic_str, changes);
+                registry.upsert_device_automation(fragment, &entity_topic_str, changes);
             }
             Ok(Parsed::Removed) => {}
             Ok(Parsed::Ignored { reason }) => {

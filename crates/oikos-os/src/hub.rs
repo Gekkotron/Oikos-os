@@ -11,16 +11,19 @@ use crate::alerts::{AlertStore, Applied};
 use crate::flows::FlowStore;
 use crate::history::History;
 use crate::media::MediaProxy;
+use crate::pictures::{MAX_PICTURE_BYTES, Picture, Pictures};
 use crate::virtual_entities as virtuals;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
-    Snapshot, VirtualSpec, WsEvent, area_views, device_views, snapshot,
+    Snapshot, VirtualSpec, WsEvent, area_views, device_views, mask_secret, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{
-    AreasDocument, Availability, Command, GroupKind, PatchError, UNASSIGNED_AREA, UiOverride,
+    AreasDocument, Availability, Command, Entity, GroupKind, Kind, PatchError, StateValue,
+    UNASSIGNED_AREA, UiOverride,
 };
 use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
+use oikos_core::types::command::expects_echo;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::clock;
@@ -128,6 +131,8 @@ pub struct Hub {
     engine_rx: Mutex<Option<mpsc::UnboundedReceiver<EngineRequest>>>,
     /// Frigate media served through the hub; `None` without a `[frigate] url`.
     media: Option<Arc<MediaProxy>>,
+    /// The latest picture of each camera or image entity.
+    pictures: Arc<Pictures>,
     confirm_timeout: Duration,
     subscription_debounce: Duration,
     /// Entities whose template failure was already logged, so each failure is logged once.
@@ -205,6 +210,7 @@ impl Hub {
             engine_tx,
             engine_rx: Mutex::new(Some(engine_rx)),
             media,
+            pictures: Arc::new(Pictures::new()),
             confirm_timeout: Duration::from_millis(cfg.commands.confirm_timeout_ms),
             subscription_debounce: Duration::from_millis(cfg.commands.subscription_debounce_ms),
             logged_failures: Mutex::new(BTreeSet::new()),
@@ -273,13 +279,25 @@ impl Hub {
             } else {
                 Vec::new()
             };
-            let history_feed: Vec<(String, oikos_core::model::EntityState)> =
+            let history_feed: Vec<(String, oikos_core::model::EntityState, Option<f64>)> =
                 if history_feed_enabled {
                     changes
                         .iter()
                         .filter_map(|change| match change {
                             Change::StateChanged(id) => {
-                                reg.state(id).map(|state| (id.clone(), state.clone()))
+                                let entity = reg.entity(id)?;
+                                // A secret is never offered to history.
+                                if entity
+                                    .capabilities
+                                    .generic
+                                    .as_ref()
+                                    .is_some_and(|g| g.secret)
+                                {
+                                    return None;
+                                }
+                                let state = reg.state(id)?;
+                                let num = history_num_of(entity, &state.value);
+                                Some((id.clone(), state.clone(), num))
                             }
                             _ => None,
                         })
@@ -297,11 +315,12 @@ impl Hub {
             )
         };
         if let Some(history) = self.history.get() {
-            for (id, state) in history_feed {
+            for (id, state, num) in history_feed {
                 history.offer(oikos_core::history::Incoming {
                     at: at_micros,
                     id,
                     state,
+                    num,
                 });
             }
         }
@@ -324,6 +343,7 @@ impl Hub {
     /// event: a non-retained message on the command topic of a button some flow watches
     /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.
     pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
+        self.capture_pictures(topic, payload);
         if !retain {
             let pressed = self.watched_button_topics().remove(topic);
             if let Some(ids) = pressed {
@@ -332,8 +352,123 @@ impl Hub {
                 }
                 return Vec::new();
             }
+            for (id, signal) in self.signals_of(topic, payload) {
+                self.record_signal(&id, &signal);
+                self.broadcast(WsEvent::SignalReceived { id, signal });
+            }
         }
         self.ingest(topic, payload)
+    }
+
+    /// The in-memory pictures the route serves.
+    pub fn pictures(&self) -> &Arc<Pictures> {
+        &self.pictures
+    }
+
+    /// Keeps what a message says about the picture of the camera and image entities reading
+    /// `topic`: the bytes (decoded from base64 when `image_encoding` says so) or a URL.
+    fn capture_pictures(&self, topic: &str, payload: &[u8]) {
+        use base64::Engine as _;
+        use oikos_core::types::{Shape, type_def};
+        let mut found = Vec::new();
+        {
+            let reg = self.read();
+            for id in reg.entities_on_topic(topic) {
+                let Some(entity) = reg.entity(id) else {
+                    continue;
+                };
+                let Some(field) = type_def(&entity.component)
+                    .filter(|def| def.primary.as_deref() == Some("picture"))
+                    .and_then(|def| def.fields.get("picture"))
+                    .filter(|field| field.shape == Shape::Picture)
+                else {
+                    continue;
+                };
+                let cfg = &entity.bindings.config;
+                let is = |key: &str| cfg.get(key).and_then(|v| v.as_str()) == Some(topic);
+                if is(&field.topic) {
+                    let body = if cfg.get("image_encoding").and_then(|v| v.as_str()) == Some("b64")
+                    {
+                        let text = String::from_utf8_lossy(payload);
+                        match base64::engine::general_purpose::STANDARD.decode(text.trim()) {
+                            Ok(body) => body,
+                            Err(err) => {
+                                tracing::warn!(%id, %err, "picture is not valid base64");
+                                continue;
+                            }
+                        }
+                    } else {
+                        payload.to_vec()
+                    };
+                    if body.len() > MAX_PICTURE_BYTES {
+                        tracing::warn!(%id, size = body.len(), "picture over 5 MiB dropped");
+                        continue;
+                    }
+                    let content_type = cfg
+                        .get("content_type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("image/jpeg")
+                        .to_owned();
+                    found.push((
+                        id.clone(),
+                        Picture::Bytes {
+                            content_type,
+                            body: body.into(),
+                        },
+                    ));
+                } else if is("url_topic") {
+                    let text = String::from_utf8_lossy(payload);
+                    let url = match cfg.get("url_template").and_then(|v| v.as_str()) {
+                        Some(template) => match reg.templates().render(template, &text) {
+                            Ok(url) => url,
+                            Err(err) => {
+                                tracing::warn!(%id, %err, "picture url template failed");
+                                continue;
+                            }
+                        },
+                        None => text.into_owned(),
+                    };
+                    let url = url.trim().to_owned();
+                    if !url.is_empty() {
+                        found.push((id.clone(), Picture::Url(url)));
+                    }
+                }
+            }
+        }
+        for (id, picture) in found {
+            self.pictures.put(&id, picture);
+        }
+    }
+
+    /// Stores the signal as the entity's `last` and `at` (ms) and announces the state change,
+    /// so the sheet shows it and a repeated signal still counts.
+    fn record_signal(&self, id: &str, signal: &str) {
+        let at_ms = clock::now_micros().max(0) as u64 / 1000;
+        let events = {
+            let mut reg = self.write();
+            let changes = reg.record_signal(id, signal, at_ms);
+            events_for(&reg, &changes)
+        };
+        for event in events {
+            self.broadcast(event);
+        }
+    }
+
+    /// The signals a message carries: one per signal-placed entity (remote, event, tag) it
+    /// belongs to.
+    fn signals_of(&self, topic: &str, payload: &[u8]) -> Vec<(String, String)> {
+        use oikos_core::types::{Placement, signals::signal_of, type_def};
+        let reg = self.read();
+        reg.entities_on_topic(topic)
+            .iter()
+            .filter_map(|id| reg.entity(id))
+            .filter_map(|entity| {
+                let def =
+                    type_def(&entity.component).filter(|d| d.placement == Placement::Signal)?;
+                let signal = signal_of(entity, def, topic, payload, reg.templates())?;
+                Some((entity.unique_id.clone(), signal))
+            })
+            .collect()
     }
 
     /// A button appearing or any entity vanishing may change the button topics to subscribe to.
@@ -532,7 +667,7 @@ impl Hub {
         // Subscribed before publishing, so a fast echo cannot slip between the two.
         let mut events = self.subscribe();
         let mut seen = self.state_seen.subscribe();
-        let (publishes, before) = {
+        let (publishes, before, no_echo_expected) = {
             let reg = self.read();
             let entity = reg
                 .entity(id)
@@ -541,13 +676,30 @@ impl Hub {
             if state.availability == Availability::Offline {
                 return Err(HubError::Rejected("entity is offline".to_owned()));
             }
+            // A generic control with no state topic to echo on (a press, a scene) is done
+            // once published.
+            let no_echo_expected = match &cmd {
+                Command::Control { control, .. } if entity.kind == Kind::Generic => {
+                    oikos_core::types::type_def(&entity.component)
+                        .is_some_and(|def| !expects_echo(def, entity, control))
+                }
+                _ => false,
+            };
             (
                 map_command(entity, &state, &cmd, reg.templates())?,
                 state.value,
+                no_echo_expected,
             )
         };
         for publish in publishes {
             self.publish(publish)?;
+        }
+        if no_echo_expected {
+            return Ok(CommandResponse {
+                accepted: true,
+                reason: None,
+                state: None,
+            });
         }
 
         let confirmed = tokio::time::timeout(self.confirm_timeout, async {
@@ -580,11 +732,16 @@ impl Hub {
         .flatten();
 
         match confirmed {
-            Some(state) => Ok(CommandResponse {
-                accepted: true,
-                reason: None,
-                state: Some(state),
-            }),
+            Some(mut state) => {
+                if let Some(entity) = self.read().entity(id) {
+                    mask_secret(entity, &mut state);
+                }
+                Ok(CommandResponse {
+                    accepted: true,
+                    reason: None,
+                    state: Some(state),
+                })
+            }
             None => {
                 let reason = format!(
                     "no state change within {} ms",
@@ -611,14 +768,29 @@ impl Hub {
         id: &str,
         patch: &OverridePatch,
     ) -> Result<EntityView, HubError> {
-        let current = {
+        let (current, announced) = {
             let reg = self.read();
-            if reg.entity(id).is_none() {
+            let Some(entity) = reg.entity(id) else {
                 return Err(HubError::UnknownEntity(id.to_owned()));
-            }
-            reg.raw_override(id).cloned().unwrap_or_default()
+            };
+            let announced = entity
+                .capabilities
+                .generic
+                .as_ref()
+                .map(|g| g.controls.clone())
+                .unwrap_or_default();
+            (reg.raw_override(id).cloned().unwrap_or_default(), announced)
         };
         let mut next = current.apply_patch(patch)?;
+        if let Some(main) = next.main_control.as_deref()
+            && main != "none"
+            && !announced.iter().any(|c| c == main)
+        {
+            return Err(HubError::Patch(PatchError::InvalidValue {
+                field: "mainControl".to_owned(),
+                expected: "one of the entity's announced controls or \"none\"".to_owned(),
+            }));
+        }
         next.area = next
             .area
             .as_deref()
@@ -652,6 +824,15 @@ impl Hub {
         })?;
         self.ingest(&topic, payload.as_bytes());
         Ok(area_views(&self.read()))
+    }
+
+    /// Publishes the entity type table retained on `<ui_prefix>/_types`, for the app.
+    pub async fn publish_types(&self) -> Result<(), HubError> {
+        self.publish(Publish {
+            topic: format!("{}/_types", self.ui_prefix),
+            payload: oikos_core::types::table_json().to_owned(),
+            retain: true,
+        })
     }
 
     /// Renames area `id` in the declared document, the app's other fields kept; an implicit
@@ -905,6 +1086,16 @@ impl Hub {
     }
 }
 
+/// The number history plots for a state: the type table's mapping for a generic entity,
+/// the kind's own for the others.
+fn history_num_of(entity: &Entity, value: &StateValue) -> Option<f64> {
+    match value {
+        StateValue::Generic(gs) => oikos_core::types::type_def(&entity.component)
+            .and_then(|def| oikos_core::types::history_num(def, gs)),
+        other => oikos_core::history::num_of(other),
+    }
+}
+
 /// The WebSocket events for `changes`, built from the registry right after they were applied.
 /// `IgnoredChanged` and `SubscriptionsChanged` are internal and produce none.
 fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
@@ -916,9 +1107,15 @@ fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
                 WsEvent::EntityUpserted(EntityView::from(entity, &state))
             }),
             Change::EntityRemoved(id) => Some(WsEvent::EntityRemoved { id: id.clone() }),
-            Change::StateChanged(id) => reg.state(id).map(|state| WsEvent::StateChanged {
-                id: id.clone(),
-                state: state.clone(),
+            Change::StateChanged(id) => reg.state(id).map(|state| {
+                let mut state = state.clone();
+                if let Some(entity) = reg.entity(id) {
+                    mask_secret(entity, &mut state);
+                }
+                WsEvent::StateChanged {
+                    id: id.clone(),
+                    state,
+                }
             }),
             Change::AreasChanged => Some(WsEvent::AreasChanged {
                 areas: area_views(reg),

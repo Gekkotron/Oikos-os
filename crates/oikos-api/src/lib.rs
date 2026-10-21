@@ -20,5 +20,7 @@ pub use history::{
     EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange, LastChangeItem,
 };
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
-pub use views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView};
+pub use views::{
+    AreaView, BridgeView, DeviceView, EntityView, IgnoredView, UpdateView, mask_secret,
+};
 pub use virtual_entities::{VirtualKind, VirtualSpec};

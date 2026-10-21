@@ -1075,3 +1075,120 @@ fn every_command_on_every_fixture_is_mapped_or_rejected() {
     // 48 switches x 4 on/off commands, 9 covers x 4, 7 lights x 3, 4 climates x 3, ... : 305.
     assert!(mapped >= 300, "mapped: {mapped}");
 }
+
+fn generic(component: &str, config: Value) -> Entity {
+    common::entity(component, config)
+}
+
+fn control(name: &str, value: Option<Value>) -> Command {
+    Command::Control {
+        control: name.to_owned(),
+        value,
+    }
+}
+
+#[test]
+fn lock_control_publishes_lock_and_unlock_words() {
+    let lock = generic(
+        "lock",
+        json!({"name": "Door", "unique_id": "l1", "state_topic": "l/state", "command_topic": "l/set"}),
+    );
+    assert_eq!(
+        ok(&lock, &control("locked", Some(json!(true)))),
+        [publish("l/set", "LOCK")]
+    );
+    assert_eq!(
+        ok(&lock, &control("locked", Some(json!(false)))),
+        [publish("l/set", "UNLOCK")]
+    );
+}
+
+#[test]
+fn fan_percentage_out_of_range_is_refused() {
+    let fan = generic(
+        "fan",
+        json!({"name": "Fan", "unique_id": "f1", "state_topic": "f/s", "command_topic": "f/set",
+               "percentage_command_topic": "f/pct/set", "percentage_state_topic": "f/pct"}),
+    );
+    assert_eq!(
+        ok(&fan, &control("percentage", Some(json!(60)))),
+        [publish("f/pct/set", "60")]
+    );
+    let e = err(
+        &fan,
+        &EntityState::default(),
+        &control("percentage", Some(json!(150))),
+    );
+    assert!(matches!(e, CommandError::OutOfRange(_)), "{e:?}");
+}
+
+#[test]
+fn siren_tone_is_sent_as_json() {
+    let siren = generic(
+        "siren",
+        json!({"name": "Siren", "unique_id": "s1", "state_topic": "s/s", "command_topic": "s/set",
+               "available_tones": ["fire", "alarm"]}),
+    );
+    let publishes = ok(&siren, &control("tone", Some(json!("fire"))));
+    assert_eq!(publishes[0].topic, "s/set");
+    assert_eq!(json_payload(&publishes[0]), json!({"tone": "fire"}));
+    let e = err(
+        &siren,
+        &EntityState::default(),
+        &control("tone", Some(json!("nope"))),
+    );
+    assert!(matches!(e, CommandError::OutOfRange(_)), "{e:?}");
+}
+
+#[test]
+fn unannounced_control_is_unsupported() {
+    let fan = generic(
+        "fan",
+        json!({"name": "Fan", "unique_id": "f2", "state_topic": "f/s", "command_topic": "f/set"}),
+    );
+    for name in ["percentage", "no_such_control"] {
+        let e = err(
+            &fan,
+            &EntityState::default(),
+            &control(name, Some(json!(10))),
+        );
+        assert!(matches!(e, CommandError::Unsupported { .. }), "{e:?}");
+    }
+}
+
+#[test]
+fn press_with_value_is_refused() {
+    let scene = generic(
+        "scene",
+        json!({"name": "Movie", "unique_id": "sc1", "command_topic": "sc/set"}),
+    );
+    assert_eq!(
+        ok(&scene, &control("activate", None)),
+        [publish("sc/set", "ON")]
+    );
+    let e = err(
+        &scene,
+        &EntityState::default(),
+        &control("activate", Some(json!(true))),
+    );
+    assert!(matches!(e, CommandError::OutOfRange(_)), "{e:?}");
+}
+
+#[test]
+fn text_longer_than_max_is_refused() {
+    let text = generic(
+        "text",
+        json!({"name": "Msg", "unique_id": "t1", "state_topic": "t/s", "command_topic": "t/set",
+               "max": 5}),
+    );
+    assert_eq!(
+        ok(&text, &control("value", Some(json!("hello")))),
+        [publish("t/set", "hello")]
+    );
+    let e = err(
+        &text,
+        &EntityState::default(),
+        &control("value", Some(json!("too long"))),
+    );
+    assert!(matches!(e, CommandError::OutOfRange(_)), "{e:?}");
+}

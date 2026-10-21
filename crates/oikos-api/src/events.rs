@@ -65,6 +65,12 @@ pub enum WsEvent {
     ButtonPressed {
         id: String,
     },
+    /// A remote, event entity or tag scanner sent a signal (a non-retained message). An event,
+    /// not a state: a repeated signal is a new one.
+    SignalReceived {
+        id: String,
+        signal: String,
+    },
 }
 
 /// A partial override: the keys to set (`null` clears one).

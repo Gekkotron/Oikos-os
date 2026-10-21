@@ -7,6 +7,7 @@ pub mod chime;
 pub mod climate;
 pub mod cover;
 pub mod door;
+pub mod generic;
 pub mod group;
 pub mod light;
 pub mod number;

@@ -104,7 +104,8 @@ fn snapshot_of_recorded_house_serializes() {
 }
 
 /// Each area counts its entities and, apart, the primary ones (what the UI shows by
-/// default: primary category, enabled by default, not folded, not hidden).
+/// default: primary category, enabled by default, not folded, not hidden, and a card
+/// placement for the generic types).
 #[test]
 fn area_views_count_entities_and_primary_entities() {
     let registry = load_house();
@@ -113,7 +114,9 @@ fn area_views_count_entities_and_primary_entities() {
     let mut primary: BTreeMap<&str, usize> = BTreeMap::new();
     for entity in &snap.entities {
         *entities.entry(entity.area.as_str()).or_default() += 1;
-        if entity.is_primary() {
+        let card = oikos_core::types::type_def(&entity.component)
+            .is_none_or(|d| d.placement == oikos_core::types::Placement::Card);
+        if entity.is_primary() && card {
             *primary.entry(entity.area.as_str()).or_default() += 1;
         }
     }
@@ -164,4 +167,98 @@ fn snapshot_has_a_json_schema() {
     let schema = schemars::schema_for!(Snapshot);
     assert!(schema.as_value().is_object());
     let _ = schemars::schema_for!(WsEvent);
+}
+
+#[test]
+fn secret_text_is_masked_in_the_snapshot() {
+    use oikos_core::model::{GenericValue, StateValue};
+    let mut registry = load_house();
+    feed(
+        &mut registry,
+        "oikos/text/u1/main/config",
+        br#"{"name":"Code","unique_id":"u1","mode":"password","state_topic":"t/s","command_topic":"t/set"}"#
+            .to_vec(),
+    );
+    feed(&mut registry, "t/s", b"hunter2".to_vec());
+    let snap = snapshot(&registry, ConnectionStatus::Online, AT);
+    let view = snap
+        .entities
+        .iter()
+        .find(|e| e.component == "text" && e.name == "Code")
+        .expect("text entity");
+    let StateValue::Generic(gs) = &view.state.value else {
+        panic!("generic state: {:?}", view.state.value);
+    };
+    assert_eq!(
+        gs.fields.get("value"),
+        Some(&GenericValue::Text("••••".to_owned()))
+    );
+}
+
+const FIRMWARE_ID: &str = "fw1";
+
+/// A Z2M `update` entity (the recorded discovery shape) on the Bedroom 2 light's device, fed
+/// the device payload carrying both versions.
+fn bedroom2_update(registry: &mut Registry, installed: &str, latest: &str) -> oikos_api::DeviceView {
+    let mut config: serde_json::Value = serde_json::from_str(include_str!(
+        "../../oikos-core/tests/fixtures/discovery/update__0x20a716fffea4e8de__update.json"
+    ))
+    .expect("fixture");
+    config["unique_id"] = FIRMWARE_ID.into();
+    let topic = config["state_topic"]
+        .as_str()
+        .expect("state topic")
+        .to_owned();
+    feed(
+        registry,
+        "oikos/update/fw1/update/config",
+        config.to_string().into_bytes(),
+    );
+    let payload = format!(
+        r#"{{"update":{{"installed_version":"{installed}","latest_version":"{latest}","state":"idle"}}}}"#
+    );
+    feed(registry, &topic, payload.into_bytes());
+    let snap = snapshot(registry, ConnectionStatus::Online, AT);
+    snap.devices
+        .into_iter()
+        .find(|d| d.entity_ids.iter().any(|id| id == FIRMWARE_ID))
+        .expect("device with an update entity")
+}
+
+#[test]
+fn device_with_newer_firmware_is_marked() {
+    let mut registry = load_house();
+    let device = bedroom2_update(&mut registry, "1.0", "1.1");
+    let update = device.update.expect("update view");
+    assert_eq!(update.installed.as_deref(), Some("1.0"));
+    assert_eq!(update.latest.as_deref(), Some("1.1"));
+    assert!(update.available);
+
+    let device = bedroom2_update(&mut registry, "1.1", "1.1");
+    assert!(!device.update.expect("update view").available);
+}
+
+/// Signal, target and update entities never show as Home cards, so they are not counted as
+/// primary entities of their area.
+#[test]
+fn area_primary_count_skips_non_card_generic_placements() {
+    let mut registry = load_house();
+    let before = snapshot(&registry, ConnectionStatus::Online, AT);
+    feed(
+        &mut registry,
+        "oikos/event/ev1/press/config",
+        br#"{"name":"Press","unique_id":"ev1","state_topic":"t/ev","event_types":["press"]}"#
+            .to_vec(),
+    );
+    let after = snapshot(&registry, ConnectionStatus::Online, AT);
+    let event = after
+        .entities
+        .iter()
+        .find(|e| e.component == "event")
+        .expect("event entity");
+    assert!(event.is_primary());
+    let sum = |s: &oikos_api::Snapshot| s.areas.iter().map(|a| a.primary_count).sum::<usize>();
+    assert_eq!(sum(&after), sum(&before));
+    let entities = |s: &oikos_api::Snapshot| s.areas.iter().map(|a| a.entity_count).sum::<usize>();
+    assert_eq!(entities(&after), entities(&before) + 1);
 }

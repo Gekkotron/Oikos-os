@@ -1,0 +1,1 @@
+{"topic":"homeassistant/tag/key_fob/scanned","value_template":"{{ value_json.tag_id }}","device":{"identifiers":["key_fob_reader_dev"],"name":"Key fob reader"}}

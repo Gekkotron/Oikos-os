@@ -179,6 +179,7 @@ mod tests {
             device_name: None,
             label: None,
             kind: Kind::Sensor,
+            component: "sensor".to_string(),
             protocol_kind: Kind::Sensor,
             device_class: Some(class.into()),
             unit: None,

@@ -1,5 +1,7 @@
 //! The current state of an entity, as the app's `StateValue`.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -64,6 +66,24 @@ pub struct WaterHeaterState {
     pub target: Option<f64>,
 }
 
+/// One named value of a generic entity.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(untagged)]
+pub enum GenericValue {
+    Bool(bool),
+    Number(f64),
+    Text(String),
+}
+
+/// A generic entity's state: the fields of its type that have been reported so far.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(default)]
+pub struct GenericState {
+    pub fields: BTreeMap<String, GenericValue>,
+}
+
 /// The typed value of an entity, by kind.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -78,6 +98,7 @@ pub enum StateValue {
     Alarm(String),
     Vacuum(VacuumState),
     WaterHeater(WaterHeaterState),
+    Generic(GenericState),
     /// Nothing received yet, or the payload could not be read.
     #[default]
     Unknown,
@@ -93,4 +114,24 @@ pub struct EntityState {
     pub availability: Availability,
     /// Unix time in seconds of the last state message, when any.
     pub last_update: Option<u64>,
+}
+
+#[cfg(test)]
+mod generic_tests {
+    use super::*;
+
+    #[test]
+    fn generic_state_round_trips_mixed_fields() {
+        let mut fields = BTreeMap::new();
+        fields.insert("a".to_owned(), GenericValue::Bool(true));
+        fields.insert("b".to_owned(), GenericValue::Number(2.5));
+        fields.insert("c".to_owned(), GenericValue::Text("x".into()));
+        let value = StateValue::Generic(GenericState { fields });
+        let json = serde_json::to_string(&value).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"generic","value":{"fields":{"a":true,"b":2.5,"c":"x"}}}"#
+        );
+        assert_eq!(serde_json::from_str::<StateValue>(&json).unwrap(), value);
+    }
 }

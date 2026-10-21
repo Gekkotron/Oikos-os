@@ -419,6 +419,7 @@ impl Engine {
                 self.state_changed(&id, Scalar::of_state(&state.value));
             }
             WsEvent::ButtonPressed { id } => self.button_pressed(&id),
+            WsEvent::SignalReceived { id, signal } => self.signal_received(&id, &signal),
             // The broker is about to replay retained states: forget what we knew so the replay
             // is only recorded, never acted on.
             WsEvent::ConnectionChanged(status) if status != ConnectionStatus::Online => {
@@ -445,6 +446,32 @@ impl Engine {
         let trigger = TriggerInfo {
             entity: id.to_owned(),
             value: Value::String("PRESS".to_owned()),
+            previous: Value::Null,
+        };
+        for (flow, node) in fires {
+            self.fire(flow, node, Some(trigger.clone()));
+        }
+    }
+
+    /// Fires every `trigger.signal` on `id` that wants this signal. Like a press, a signal is an
+    /// event the hub never replays from retained messages, so the `known` map is bypassed. The
+    /// trigger value is the signal name.
+    fn signal_received(&mut self, id: &str, signal: &str) {
+        let mut fires = Vec::new();
+        for flow in &self.flows {
+            for node in flow.triggers() {
+                if matches!(&node.kind, NodeKind::TriggerSignal(params)
+                        if params.entity == id
+                            && params.signal.as_deref().is_none_or(|s| s == signal))
+                    && !fires.iter().any(|(f, _): &(Flow, String)| f.id == flow.id)
+                {
+                    fires.push((flow.clone(), node.id.clone()));
+                }
+            }
+        }
+        let trigger = TriggerInfo {
+            entity: id.to_owned(),
+            value: Value::String(signal.to_owned()),
             previous: Value::Null,
         };
         for (flow, node) in fires {
@@ -697,6 +724,13 @@ async fn run_node(
         NodeKind::TriggerState(params) => {
             let detail = match trigger {
                 Some(trigger) => format!("{} = {}", params.entity, trigger.value),
+                None => "manual".to_owned(),
+            };
+            (StepOutcome::Ok, detail, None)
+        }
+        NodeKind::TriggerSignal(params) => {
+            let detail = match trigger {
+                Some(trigger) => format!("{} sent {}", params.entity, trigger.value),
                 None => "manual".to_owned(),
             };
             (StepOutcome::Ok, detail, None)

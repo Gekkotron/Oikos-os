@@ -235,6 +235,7 @@ fn node_editor_body(
         NodeKind::TriggerState(_) => "Trigger",
         NodeKind::TriggerSchedule(_) => "Schedule",
         NodeKind::TriggerSun(_) => "Sun",
+        NodeKind::TriggerSignal(_) => "Signal",
         NodeKind::If(_) => "If",
         NodeKind::Delay(_) => "Delay",
         NodeKind::Command(_) => "Command",
@@ -431,6 +432,81 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     optional=true
                     write=from_write
                 />
+            }
+            .into_any()
+        }
+        NodeKind::TriggerSignal(p) => {
+            let entity_id = id.clone();
+            let entity_write = Callback::new(move |value: Option<String>| {
+                form.update(&entity_id, |n| {
+                    if let NodeKind::TriggerSignal(ref mut t) = n.kind {
+                        t.entity = value.unwrap_or_default();
+                    }
+                });
+            });
+            let house = expect_context::<House>();
+            let signals_of = move |entity: &str| -> Vec<String> {
+                house.entities.with(|m| {
+                    m.get(entity)
+                        .and_then(|e| e.capabilities.generic.as_ref())
+                        .map(|g| g.signals.clone())
+                        .unwrap_or_default()
+                })
+            };
+            let draft = form.editor.draft;
+            let node_id = id.clone();
+            let current = move || {
+                draft.with(|f| match f.node(&node_id).map(|n| &n.kind) {
+                    Some(NodeKind::TriggerSignal(t)) => (t.entity.clone(), t.signal.clone()),
+                    _ => (String::new(), None),
+                })
+            };
+            let chip_id = id;
+            let chips = move || {
+                let (entity, selected) = current();
+                let options: Vec<Option<String>> = std::iter::once(None)
+                    .chain(signals_of(&entity).into_iter().map(Some))
+                    .collect();
+                options
+                    .into_iter()
+                    .map(|option| {
+                        let is_selected = selected == option;
+                        let label = option.clone().unwrap_or_else(|| "any".to_owned());
+                        let chip_id = chip_id.clone();
+                        view! {
+                            <button
+                                type="button"
+                                class="chip"
+                                class:chip--selected=is_selected
+                                aria-pressed=is_selected.to_string()
+                                on:click=move |_| {
+                                    form.arm();
+                                    let option = option.clone();
+                                    form.update(&chip_id, |n| {
+                                        if let NodeKind::TriggerSignal(ref mut t) = n.kind {
+                                            t.signal = option;
+                                        }
+                                    });
+                                }
+                            >
+                                {label}
+                            </button>
+                        }
+                    })
+                    .collect_view()
+            };
+            view! {
+                <TextField
+                    label="Entity".into()
+                    initial=p.entity
+                    placeholder="device_automation.id".into()
+                    optional=false
+                    write=entity_write
+                />
+                <div class="override__field" role="group" aria-label="Signal">
+                    <span class="override__label">"Signal"</span>
+                    <div class="override__chips signal-chips">{chips}</div>
+                </div>
             }
             .into_any()
         }

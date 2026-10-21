@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::model::{GroupKind, Kind, Placement, SwitchType, UNASSIGNED_AREA};
+use oikos_core::types::Placement as TypePlacement;
 use std::collections::{BTreeMap, HashSet};
 
 use crate::cards::alarm::AlarmPanelCard;
@@ -12,6 +13,7 @@ use crate::cards::chime::ChimeCard;
 use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
 use crate::cards::door::DoorCard;
+use crate::cards::generic::GenericCard;
 use crate::cards::group::{CoverGroupCard, LightGroupCard};
 use crate::cards::light::LightCard;
 use crate::cards::number::NumberCard;
@@ -34,7 +36,9 @@ pub(crate) const FAVORITES: &str = "__favorites__";
 /// True when Home shows `e`: a primary entity that the app's placement rule keeps on Home (an
 /// entity with an energy role or shown on Security leaves Home unless it is pinned).
 pub(crate) fn shows_on_home(e: &EntityView) -> bool {
-    e.is_primary() && Placement::on_home(e.kind, e.device_class.as_deref(), &e.ui)
+    e.is_primary()
+        && (e.kind != Kind::Generic || generic_placement(e) == TypePlacement::Card)
+        && Placement::on_home(e.kind, e.device_class.as_deref(), &e.ui)
 }
 
 /// How many entities Home shows per area id.
@@ -103,8 +107,13 @@ pub(crate) fn without_paired_humidity(mut shown: Vec<&EntityView>) -> Vec<&Entit
     shown
 }
 
+/// Where the type table places a generic entity; unknown components stay cards.
+fn generic_placement(e: &EntityView) -> TypePlacement {
+    oikos_core::types::type_def(&e.component).map_or(TypePlacement::Card, |d| d.placement)
+}
+
 /// The card component for an entity's kind.
-pub(crate) fn card_for(entity: EntityView) -> AnyView {
+pub fn card_for(entity: EntityView) -> AnyView {
     match entity.kind {
         Kind::Light => view! { <LightCard entity=entity /> }.into_any(),
         Kind::Switch => match SwitchType::of(entity.protocol_kind, &entity.ui) {
@@ -123,6 +132,11 @@ pub(crate) fn card_for(entity: EntityView) -> AnyView {
         Kind::AlarmPanel => view! { <AlarmPanelCard entity=entity /> }.into_any(),
         Kind::Vacuum => view! { <VacuumCard entity=entity /> }.into_any(),
         Kind::WaterHeater => view! { <WaterHeaterCard entity=entity /> }.into_any(),
+        Kind::Generic => match generic_placement(&entity) {
+            TypePlacement::Card => view! { <GenericCard entity=entity /> }.into_any(),
+            // Signal, target and update entities do not show on Home.
+            _ => ().into_any(),
+        },
     }
 }
 
@@ -274,6 +288,7 @@ mod tests {
             device_name: None,
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: device_class.map(Into::into),
             unit: None,

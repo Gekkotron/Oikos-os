@@ -73,7 +73,7 @@ impl HouseState {
             WsEvent::FlowsChanged { flows } => self.flows = flows,
             WsEvent::FlowRunChanged { flow_id, run } => upsert_run(&mut self.flows, &flow_id, run),
             WsEvent::CommandFailed { .. } => {}
-            WsEvent::ButtonPressed { .. } => {}
+            WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
         }
     }
 }
@@ -121,6 +121,7 @@ mod tests {
             device_name: None,
             label: None,
             kind: Kind::Light,
+            component: "light".to_string(),
             protocol_kind: Kind::Light,
             device_class: None,
             unit: None,
@@ -163,6 +164,7 @@ mod tests {
             availability: Availability::Online,
             battery: None,
             linkquality: None,
+            update: None,
         }
     }
 

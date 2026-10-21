@@ -1454,3 +1454,108 @@ async fn history_bad_params_are_400() {
         .await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn main_control_patch_rejects_unknown_control() {
+    let mut server = Server::start().await;
+    server.online();
+    server.hub.ingest(
+        "oikos/lock/0x00158d0001a2b3c4/lock/config",
+        &fixture("discovery/lock__0x00158d0001a2b3c4__lock.json"),
+    );
+    let lock_id = "0x00158d0001a2b3c4_lock_zigbee2mqtt";
+    let client = server.client.clone();
+    let lock_url = server.url(&format!("/api/v1/entities/{lock_id}/override"));
+    let patch = |body: Value| client.patch(&lock_url).json(&body).send();
+
+    let response = patch(json!({"mainControl": "warp"})).await.expect("PATCH");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(server.publisher.try_recv().is_err());
+
+    let response = patch(json!({"mainControl": "none"})).await.expect("PATCH");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = patch(json!({"mainControl": "locked"}))
+        .await
+        .expect("PATCH");
+    assert_eq!(response.status(), StatusCode::OK);
+    let view: Value = response.json().await.expect("json");
+    assert_eq!(view["ui"]["mainControl"], "locked");
+
+    let response = patch(json!({"mainControl": "locked"}))
+        .await
+        .expect("PATCH");
+    assert_eq!(response.status(), StatusCode::OK);
+    // A switch announces no generic controls, so anything but "none" is refused.
+    let response = server
+        .client
+        .patch(server.url(&format!("/api/v1/entities/{SWITCH_ID}/override")))
+        .json(&json!({"mainControl": "locked"}))
+        .send()
+        .await
+        .expect("PATCH");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+const CAMERA_TOPIC: &str = "oikos/camera/porch/config";
+const CAMERA_ID: &str = "porch_camera";
+
+fn camera_config() -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "unique_id": CAMERA_ID,
+        "name": "Porch",
+        "topic": "cam/stream",
+    }))
+    .expect("json")
+}
+
+#[tokio::test]
+async fn camera_bytes_are_served_by_the_picture_route() {
+    let server = Server::start().await;
+    server.hub.ingest(CAMERA_TOPIC, &camera_config());
+    server
+        .hub
+        .ingest_message("cam/stream", &[0xFF, 0xD8, 1, 2, 3], false);
+
+    let response = server
+        .get(&format!("/api/v1/entities/{CAMERA_ID}/picture"))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("image/jpeg")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
+        response.bytes().await.expect("body").as_ref(),
+        &[0xFF, 0xD8, 1, 2, 3]
+    );
+}
+
+#[tokio::test]
+async fn unknown_entity_picture_is_404() {
+    let server = Server::start().await;
+    let response = server.get("/api/v1/entities/no_such_id/picture").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn oversized_picture_is_dropped() {
+    let server = Server::start().await;
+    server.hub.ingest(CAMERA_TOPIC, &camera_config());
+    let big = vec![0u8; 6 * 1024 * 1024];
+    server.hub.ingest_message("cam/stream", &big, false);
+
+    let response = server
+        .get(&format!("/api/v1/entities/{CAMERA_ID}/picture"))
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
