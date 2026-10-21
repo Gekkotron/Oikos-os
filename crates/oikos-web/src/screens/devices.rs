@@ -192,6 +192,7 @@ mod tests {
             availability: Availability::Online,
             battery: None,
             linkquality: None,
+            update: None,
         }
     }
 

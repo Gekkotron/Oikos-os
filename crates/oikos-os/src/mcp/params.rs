@@ -79,7 +79,8 @@ pub struct SetOverrideParams {
     /// `energyIcon`, `energyMeter`, `homePinned`, `securityAction`, `securityAsk`, `ungrouped`,
     /// `showAs` (light, door, siren, chime, plug), `lightOnPreset` (white, warm, red, green,
     /// blue), `lightOnBrightness` (1 to
-    /// 255), `climatePresets`.
+    /// 255), `climatePresets`, `mainControl` (one of the entity's announced controls, or `none`
+    /// to hide it).
     pub patch: OverridePatch,
 }
 

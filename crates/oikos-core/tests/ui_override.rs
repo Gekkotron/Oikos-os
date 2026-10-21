@@ -148,10 +148,11 @@ fn is_default_after_clearing_everything() {
 }
 
 #[test]
-fn fields_lists_the_nineteen_app_fields() {
-    assert_eq!(UiOverride::FIELDS.len(), 19);
+fn fields_lists_the_twenty_app_fields() {
+    assert_eq!(UiOverride::FIELDS.len(), 20);
     assert_eq!(UiOverride::FIELDS[0], "name");
     assert!(UiOverride::FIELDS.contains(&"climatePresets"));
+    assert!(UiOverride::FIELDS.contains(&"mainControl"));
 }
 
 #[test]
@@ -221,4 +222,28 @@ fn show_as_patch_is_validated() {
     );
     let unknown = UiOverride::decode(br#"{"showAs":"fan"}"#).unwrap();
     assert_eq!(unknown.show_as.as_deref(), Some("fan"));
+}
+
+#[test]
+fn main_control_round_trips_and_null_clears() {
+    let base = UiOverride::default();
+    let set = base
+        .apply_patch(&patch(json!({"mainControl": "locked"})))
+        .unwrap();
+    assert_eq!(set.main_control.as_deref(), Some("locked"));
+    let wire: Value = serde_json::from_str(&set.encode()).unwrap();
+    assert_eq!(wire, json!({"mainControl": "locked"}));
+    assert_eq!(
+        UiOverride::decode(set.encode().as_bytes()),
+        Some(set.clone())
+    );
+    let cleared = set
+        .apply_patch(&patch(json!({"mainControl": null})))
+        .unwrap();
+    assert_eq!(cleared.main_control, None);
+    assert_eq!(cleared.encode(), "{}");
+    assert!(matches!(
+        base.apply_patch(&patch(json!({"mainControl": 3}))),
+        Err(PatchError::InvalidValue { .. })
+    ));
 }

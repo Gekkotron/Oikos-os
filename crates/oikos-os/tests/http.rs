@@ -1454,3 +1454,44 @@ async fn history_bad_params_are_400() {
         .await;
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn main_control_patch_rejects_unknown_control() {
+    let mut server = Server::start().await;
+    server.online();
+    server.hub.ingest(
+        "oikos/lock/0x00158d0001a2b3c4/lock/config",
+        &fixture("discovery/lock__0x00158d0001a2b3c4__lock.json"),
+    );
+    let lock_id = "0x00158d0001a2b3c4_lock_zigbee2mqtt";
+    let client = server.client.clone();
+    let lock_url = server.url(&format!("/api/v1/entities/{lock_id}/override"));
+    let patch = |body: Value| client.patch(&lock_url).json(&body).send();
+
+    let response = patch(json!({"mainControl": "warp"})).await.expect("PATCH");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(server.publisher.try_recv().is_err());
+
+    let response = patch(json!({"mainControl": "none"})).await.expect("PATCH");
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = patch(json!({"mainControl": "locked"}))
+        .await
+        .expect("PATCH");
+    assert_eq!(response.status(), StatusCode::OK);
+    let view: Value = response.json().await.expect("json");
+    assert_eq!(view["ui"]["mainControl"], "locked");
+
+    let response = patch(json!({"mainControl": "locked"}))
+        .await
+        .expect("PATCH");
+    assert_eq!(response.status(), StatusCode::OK);
+    // A switch announces no generic controls, so anything but "none" is refused.
+    let response = server
+        .client
+        .patch(server.url(&format!("/api/v1/entities/{SWITCH_ID}/override")))
+        .json(&json!({"mainControl": "locked"}))
+        .send()
+        .await
+        .expect("PATCH");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

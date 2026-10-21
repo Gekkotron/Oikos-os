@@ -191,3 +191,34 @@ fn secret_text_is_masked_in_the_snapshot() {
         Some(&GenericValue::Text("••••".to_owned()))
     );
 }
+
+const FIRMWARE_ID: &str = "fw1";
+
+/// An `update` entity on the Bedroom 2 light's device, with both versions reported.
+fn bedroom2_update(registry: &mut Registry, installed: &str, latest: &str) -> oikos_api::DeviceView {
+    feed(
+        registry,
+        "oikos/update/fw1/update/config",
+        br#"{"name":"Firmware","unique_id":"fw1","state_topic":"t/installed","latest_version_topic":"t/latest","device":{"identifiers":["zigbee2mqtt_0x20a716fffea4e8de"]}}"#.to_vec(),
+    );
+    feed(registry, "t/installed", installed.as_bytes().to_vec());
+    feed(registry, "t/latest", latest.as_bytes().to_vec());
+    let snap = snapshot(registry, ConnectionStatus::Online, AT);
+    snap.devices
+        .into_iter()
+        .find(|d| d.entity_ids.iter().any(|id| id == FIRMWARE_ID))
+        .expect("device with an update entity")
+}
+
+#[test]
+fn device_with_newer_firmware_is_marked() {
+    let mut registry = load_house();
+    let device = bedroom2_update(&mut registry, "1.0", "1.1");
+    let update = device.update.expect("update view");
+    assert_eq!(update.installed.as_deref(), Some("1.0"));
+    assert_eq!(update.latest.as_deref(), Some("1.1"));
+    assert!(update.available);
+
+    let device = bedroom2_update(&mut registry, "1.1", "1.1");
+    assert!(!device.update.expect("update view").available);
+}

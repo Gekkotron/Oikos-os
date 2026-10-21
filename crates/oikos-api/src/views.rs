@@ -113,6 +113,38 @@ pub struct DeviceView {
     pub availability: Availability,
     pub battery: Option<u8>,
     pub linkquality: Option<u32>,
+    /// Firmware versions, from the device's `update` entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<UpdateView>,
+}
+
+/// What a device's `update` entity reports about its firmware.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateView {
+    pub installed: Option<String>,
+    pub latest: Option<String>,
+    /// Both versions are known and differ.
+    pub available: bool,
+}
+
+impl UpdateView {
+    fn from_state(state: &EntityState) -> Self {
+        let text = |key: &str| match &state.value {
+            StateValue::Generic(g) => match g.fields.get(key) {
+                Some(GenericValue::Text(t)) => Some(t.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let installed = text("installed");
+        let latest = text("latest");
+        let available = installed.is_some() && latest.is_some() && installed != latest;
+        Self {
+            installed,
+            latest,
+            available,
+        }
+    }
 }
 
 impl DeviceView {
@@ -134,6 +166,17 @@ impl DeviceView {
                     _ => None,
                 })
         };
+        // A device can carry more than one `update` entity: the first that reports a version wins.
+        let mut updates = members
+            .iter()
+            .filter(|(entity, _)| entity.component == "update")
+            .map(|(_, state)| UpdateView::from_state(state))
+            .collect::<Vec<_>>();
+        let known = updates
+            .iter()
+            .position(|u| u.installed.is_some() || u.latest.is_some())
+            .unwrap_or(0);
+        let update = (known < updates.len()).then(|| updates.swap_remove(known));
         Self {
             id: device.id.clone(),
             ieee: device.ieee.clone(),
@@ -149,6 +192,7 @@ impl DeviceView {
             // `as` saturates, so the clamp only needs to bound the top.
             battery: number("_battery_zigbee2mqtt").map(|n| n.clamp(0.0, 100.0) as u8),
             linkquality: number("_linkquality_zigbee2mqtt").map(|n| n as u32),
+            update,
         }
     }
 }

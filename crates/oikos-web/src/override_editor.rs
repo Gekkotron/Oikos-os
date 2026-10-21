@@ -49,6 +49,7 @@ pub fn dirty_patch(before: &UiOverride, after: &UiOverride) -> OverridePatch {
         light_on_preset => "lightOnPreset",
         light_on_brightness => "lightOnBrightness",
         climate_presets => "climatePresets",
+        main_control => "mainControl",
     }
     patch
 }
@@ -864,6 +865,7 @@ mod tests {
             light_on_preset: Some("warm".into()),
             light_on_brightness: Some(9),
             climate_presets: Some("p".into()),
+            main_control: Some("locked".into()),
             ..UiOverride::default()
         };
         let patch = dirty_patch(&UiOverride::default(), &after);

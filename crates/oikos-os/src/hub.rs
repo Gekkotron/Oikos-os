@@ -683,14 +683,29 @@ impl Hub {
         id: &str,
         patch: &OverridePatch,
     ) -> Result<EntityView, HubError> {
-        let current = {
+        let (current, announced) = {
             let reg = self.read();
-            if reg.entity(id).is_none() {
+            let Some(entity) = reg.entity(id) else {
                 return Err(HubError::UnknownEntity(id.to_owned()));
-            }
-            reg.raw_override(id).cloned().unwrap_or_default()
+            };
+            let announced = entity
+                .capabilities
+                .generic
+                .as_ref()
+                .map(|g| g.controls.clone())
+                .unwrap_or_default();
+            (reg.raw_override(id).cloned().unwrap_or_default(), announced)
         };
         let mut next = current.apply_patch(patch)?;
+        if let Some(main) = next.main_control.as_deref()
+            && main != "none"
+            && !announced.iter().any(|c| c == main)
+        {
+            return Err(HubError::Patch(PatchError::InvalidValue {
+                field: "mainControl".to_owned(),
+                expected: "one of the entity's announced controls or \"none\"".to_owned(),
+            }));
+        }
         next.area = next
             .area
             .as_deref()
