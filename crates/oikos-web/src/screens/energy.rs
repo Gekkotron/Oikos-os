@@ -6,15 +6,18 @@
 use std::collections::BTreeMap;
 
 use leptos::prelude::*;
-use oikos_api::ConnectionStatus;
+use leptos::task::spawn_local;
+use oikos_api::{ConnectionStatus, EnergyKind};
 use oikos_core::energy::{
-    ARC_SLOTS, ConsumerOrder, EnergyFlow, EnergyHint, EnergyNode, EnergyUi, Flow, NodeKind,
-    NodeStatus,
+    ARC_SLOTS, ConsumerOrder, EnergyEntity, EnergyFlow, EnergyHint, EnergyMeters, EnergyNode,
+    EnergyRole, EnergyUi, Flow, NodeKind, NodeStatus,
 };
 
+use crate::api::history::fetch_today;
 use crate::energy::{
-    CLEARANCE, NODE_R, VIEW_H, VIEW_W, aria_sentence, edge, energy_entities, energy_text,
-    meter_text, node_label, node_value_text, now_ms, positions, power_text, speed, stroke,
+    CLEARANCE, HouseTodayParts, NODE_R, VIEW_H, VIEW_W, aria_sentence, derived_house_today,
+    edge, energy_entities, energy_text, meter_text, node_label, node_value_text, now_ms,
+    plus_minus_ids, positions, power_text, speed, stroke,
 };
 use crate::house::House;
 use crate::icons::{consumer_icon, role_icon};
@@ -181,6 +184,7 @@ fn EnergyCard(
     ui: Memo<EnergyUi>,
     open: Callback<String>,
     names: Memo<BTreeMap<String, String>>,
+    today: Signal<Option<f64>>,
 ) -> impl IntoView {
     let node = Memo::new(move |_| ui.with(|u| u.cards.iter().find(|n| n.id == id).cloned()));
     let sensors_open = RwSignal::new(false);
@@ -219,6 +223,9 @@ fn EnergyCard(
                 <div class="card__body">
                     <span class="card__value">{node_value_text(&n)}</span>
                     <span class="energy-card__total">{total}</span>
+                    <span class="energy-tile-today">
+                        {move || today.get().map(|v| format!("{v:.1} kWh today"))}
+                    </span>
                 </div>
                 <Show when=move || many && sensors_open.get()>
                     <ul class="energy-card__sensors">
@@ -247,6 +254,130 @@ fn EnergyCard(
             </article>
         })
     }
+}
+
+const TODAY_INTERVAL_MS: u32 = 300_000;
+
+/// Fetch `/today?kind=counter` for every energy counter on screen entry and every 5 min,
+/// paused when the tab is hidden and refreshed once on `visibilitychange` → visible.
+fn install_today_refresh(house: House, kwh_today: RwSignal<BTreeMap<String, Option<f64>>>) {
+    let fire = move || {
+        let ids: Vec<String> = house.entities.with(|m| {
+            let all = energy_entities(m);
+            EnergyMeters::counters(&all)
+                .into_iter()
+                .map(|e| e.id.clone())
+                .collect()
+        });
+        for id in ids {
+            let id_c = id.clone();
+            spawn_local(async move {
+                let value = fetch_today(&id_c, EnergyKind::Counter)
+                    .await
+                    .ok()
+                    .and_then(|t| t.kwh);
+                kwh_today.update(|m| {
+                    m.insert(id_c, value);
+                });
+            });
+        }
+    };
+
+    // First fetch after the entity map is populated.
+    Effect::new(move |_| {
+        let n = house.entities.with(|m| m.len());
+        if n > 0 {
+            fire();
+        }
+    });
+
+    // 5-min visibility-aware tick.
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast;
+        let hidden = move || {
+            web_sys::window()
+                .and_then(|w| w.document())
+                .is_some_and(|d| d.hidden())
+        };
+        let fire_tick = fire.clone();
+        let _interval = gloo_timers::callback::Interval::new(TODAY_INTERVAL_MS, move || {
+            if !hidden() {
+                fire_tick();
+            }
+        });
+        _interval.forget();
+
+        // Immediate refresh on visibilitychange → visible.
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            let fire_vis = fire;
+            let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+                if !web_sys::window()
+                    .and_then(|w| w.document())
+                    .is_some_and(|d| d.hidden())
+                {
+                    fire_vis();
+                }
+            }) as Box<dyn Fn()>);
+            let _ = doc.add_event_listener_with_callback(
+                "visibilitychange",
+                closure.as_ref().unchecked_ref(),
+            );
+            closure.forget();
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = fire;
+    }
+}
+
+/// kWh today for one card, from the kwh_today map built by `install_today_refresh`.
+fn today_for_card(
+    card_id: &str,
+    house: House,
+    ui: Memo<EnergyUi>,
+    kwh_today: RwSignal<BTreeMap<String, Option<f64>>>,
+) -> Option<f64> {
+    let node = ui.with(|u| u.cards.iter().find(|n| n.id == card_id).cloned())?;
+    let all = house.entities.with(energy_entities);
+    let map = kwh_today.get();
+    if node.kind == NodeKind::House {
+        let by_role = by_role(&all);
+        let (plus_ids, minus_ids) = plus_minus_ids(&by_role, &all)?;
+        let parts = HouseTodayParts {
+            plus: plus_ids.iter().map(|id| map.get(id).copied().flatten()).collect(),
+            minus: minus_ids.iter().map(|id| map.get(id).copied().flatten()).collect(),
+        };
+        return derived_house_today(&parts);
+    }
+    let sensors: Vec<&EnergyEntity> = node
+        .sensor_ids
+        .iter()
+        .filter_map(|sid| all.iter().find(|e| e.id == *sid))
+        .collect();
+    let counters = EnergyMeters::node_meters(&sensors, &all);
+    if counters.is_empty() {
+        return None;
+    }
+    let mut sum = 0.0;
+    for c in &counters {
+        match map.get(&c.id).copied().flatten() {
+            Some(v) => sum += v,
+            None => return None,
+        }
+    }
+    Some(sum)
+}
+
+fn by_role<'a>(all: &'a [EnergyEntity]) -> BTreeMap<EnergyRole, Vec<&'a EnergyEntity>> {
+    let mut m: BTreeMap<EnergyRole, Vec<&EnergyEntity>> = BTreeMap::new();
+    for e in all {
+        if let Some(r) = e.role {
+            m.entry(r).or_default().push(e);
+        }
+    }
+    m
 }
 
 #[component]
@@ -300,6 +431,10 @@ pub fn EnergyScreen() -> impl IntoView {
     let cards = move || ui.with(|u| u.cards.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
     let description = move || ui.with(aria_sentence);
     let folded = move || ui.with(|u| u.consumers.len() > ARC_SLOTS);
+
+    // kWh-today per counter entity id. `None` while loading or on error.
+    let kwh_today: RwSignal<BTreeMap<String, Option<f64>>> = RwSignal::new(BTreeMap::new());
+    install_today_refresh(house, kwh_today);
 
     view! {
         <section class="energy">
@@ -383,7 +518,13 @@ pub fn EnergyScreen() -> impl IntoView {
                             each=cards
                             key=|id| id.clone()
                             children=move |id| {
-                                view! { <EnergyCard id=id ui=ui open=open names=names /> }
+                                let card_id = id.clone();
+                                let today = Signal::derive(move || {
+                                    today_for_card(&card_id, house, ui, kwh_today)
+                                });
+                                view! {
+                                    <EnergyCard id=id ui=ui open=open names=names today=today />
+                                }
                             }
                         />
                     </div>

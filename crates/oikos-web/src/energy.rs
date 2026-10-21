@@ -342,6 +342,50 @@ pub fn now_ms() -> u64 {
     }
 }
 
+// --- History tiles (kWh today) ---
+
+/// Per-counter kWh-today values for the derived house, split into additions and subtractions.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HouseTodayParts {
+    pub plus: Vec<Option<f64>>,
+    pub minus: Vec<Option<f64>>,
+}
+
+/// Sum `plus - minus` from the derived-house parts. Returns `None` if any part is missing: a
+/// partial sum would understate consumption and mislead the viewer.
+pub fn derived_house_today(parts: &HouseTodayParts) -> Option<f64> {
+    let mut acc = 0.0;
+    for v in parts.plus.iter().chain(parts.minus.iter()) {
+        v.as_ref()?;
+    }
+    for v in &parts.plus {
+        acc += v.unwrap_or(0.0);
+    }
+    for v in &parts.minus {
+        acc -= v.unwrap_or(0.0);
+    }
+    Some(acc)
+}
+
+/// Returns `interval_ms` when the tab is visible, `None` when it is hidden — so the caller
+/// doesn't schedule another timer while nobody is watching.
+pub fn next_fire_delay(hidden: bool, interval_ms: u32) -> Option<u32> {
+    if hidden { None } else { Some(interval_ms) }
+}
+
+/// The derived house's `plus` and `minus` counter ids. `None` when the house has no derived
+/// total (no solar or grid, or the inputs are not fully meter-paired).
+pub fn plus_minus_ids(
+    by_role: &BTreeMap<EnergyRole, Vec<&EnergyEntity>>,
+    all: &[EnergyEntity],
+) -> Option<(Vec<String>, Vec<String>)> {
+    let m = oikos_core::energy::EnergyMeters::house_meters(by_role, all)?;
+    Some((
+        m.plus.into_iter().map(|e| e.id.clone()).collect(),
+        m.minus.into_iter().map(|e| e.id.clone()).collect(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,5 +554,39 @@ mod tests {
         assert!(any_solar_active([view("kW", 0.5)].iter()));
         assert!(!any_solar_active([view("W", 9.0)].iter()));
         assert!(!any_solar_active([view("Wh", 900.0)].iter()));
+    }
+
+    #[test]
+    fn next_fire_delay_pauses_when_hidden() {
+        assert_eq!(next_fire_delay(false, 300_000), Some(300_000));
+        assert_eq!(next_fire_delay(true, 300_000), None);
+    }
+
+    #[test]
+    fn derived_house_today_sums_plus_minus_minus() {
+        let m = HouseTodayParts {
+            plus: vec![Some(10.0), Some(4.0)],
+            minus: vec![Some(1.5)],
+        };
+        assert_eq!(derived_house_today(&m), Some(12.5));
+    }
+
+    #[test]
+    fn derived_house_today_is_none_when_any_part_is_missing() {
+        let partial = HouseTodayParts {
+            plus: vec![Some(10.0), None],
+            minus: vec![Some(1.0)],
+        };
+        assert_eq!(derived_house_today(&partial), None);
+        let partial = HouseTodayParts {
+            plus: vec![Some(10.0)],
+            minus: vec![None],
+        };
+        assert_eq!(derived_house_today(&partial), None);
+    }
+
+    #[test]
+    fn derived_house_today_handles_empty_parts() {
+        assert_eq!(derived_house_today(&HouseTodayParts::default()), Some(0.0));
     }
 }
