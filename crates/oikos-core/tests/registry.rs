@@ -459,7 +459,7 @@ fn identical_payload_is_noop() {
             .iter()
             .filter(|c| matches!(c, Change::StateReported(_)))
             .count(),
-        5,
+        6, // the five sensors and the firmware `update`, which reads the same payload
         "{changes:?}"
     );
 

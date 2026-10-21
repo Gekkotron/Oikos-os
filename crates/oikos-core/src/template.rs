@@ -67,6 +67,18 @@ impl Templates {
         env.add_filter("iif", filters::iif);
         env.add_filter("truncate", filters::truncate);
         env.add_test("is_number", filters::is_number);
+        // Z2M templates call Python's `dict.get(key, default)`.
+        env.set_unknown_method_callback(|_, value, method, args| match (method, args) {
+            ("get", [key]) | ("get", [key, _]) if value.kind() == ValueKind::Map => {
+                let found = value.get_item(key).unwrap_or(Value::UNDEFINED);
+                if found.is_undefined() {
+                    Ok(args.get(1).cloned().unwrap_or(Value::from(())))
+                } else {
+                    Ok(found)
+                }
+            }
+            _ => Err(JinjaError::from(ErrorKind::UnknownMethod)),
+        });
         Self { env }
     }
 

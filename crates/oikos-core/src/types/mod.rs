@@ -89,6 +89,12 @@ pub struct FieldDef {
     pub range: Option<RangeDef>,
     /// OnOff: canonical value meaning "on" (e.g. `locked`).
     pub on: Option<String>,
+    /// For a text/version shape: when the rendered template produces a JSON object, read
+    /// the value at this top-level key instead of using the whole blob as the field value.
+    /// Lets a Z2M `update` entity expose `installed_version` and `latest_version` from one
+    /// `value_template`.
+    #[serde(default)]
+    pub json_path: Option<String>,
 }
 
 /// A payload word: its canonical value, the config key that may override it, and the default.

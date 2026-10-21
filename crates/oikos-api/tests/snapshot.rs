@@ -194,15 +194,27 @@ fn secret_text_is_masked_in_the_snapshot() {
 
 const FIRMWARE_ID: &str = "fw1";
 
-/// An `update` entity on the Bedroom 2 light's device, with both versions reported.
+/// A Z2M `update` entity (the recorded discovery shape) on the Bedroom 2 light's device, fed
+/// the device payload carrying both versions.
 fn bedroom2_update(registry: &mut Registry, installed: &str, latest: &str) -> oikos_api::DeviceView {
+    let mut config: serde_json::Value = serde_json::from_str(include_str!(
+        "../../oikos-core/tests/fixtures/discovery/update__0x20a716fffea4e8de__update.json"
+    ))
+    .expect("fixture");
+    config["unique_id"] = FIRMWARE_ID.into();
+    let topic = config["state_topic"]
+        .as_str()
+        .expect("state topic")
+        .to_owned();
     feed(
         registry,
         "oikos/update/fw1/update/config",
-        br#"{"name":"Firmware","unique_id":"fw1","state_topic":"t/installed","latest_version_topic":"t/latest","device":{"identifiers":["zigbee2mqtt_0x20a716fffea4e8de"]}}"#.to_vec(),
+        config.to_string().into_bytes(),
     );
-    feed(registry, "t/installed", installed.as_bytes().to_vec());
-    feed(registry, "t/latest", latest.as_bytes().to_vec());
+    let payload = format!(
+        r#"{{"update":{{"installed_version":"{installed}","latest_version":"{latest}","state":"idle"}}}}"#
+    );
+    feed(registry, &topic, payload.into_bytes());
     let snap = snapshot(registry, ConnectionStatus::Online, AT);
     snap.devices
         .into_iter()

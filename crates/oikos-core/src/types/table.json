@@ -632,12 +632,14 @@
         "installed": {
           "shape": "version",
           "topic": "state_topic",
-          "template": "value_template"
+          "template": "value_template",
+          "json_path": "installed_version"
         },
         "latest": {
           "shape": "version",
-          "topic": "latest_version_topic",
-          "template": "latest_version_template"
+          "topic": "state_topic",
+          "template": "value_template",
+          "json_path": "latest_version"
         }
       }
     },

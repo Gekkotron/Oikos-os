@@ -372,3 +372,19 @@ fn every_recorded_value_template_compiles() {
         "expected at least one template per fixture, checked {checked} in {files} files"
     );
 }
+
+#[test]
+fn dict_get_with_and_without_default() {
+    let t = Templates::new();
+    let payload = r#"{"a":{"x":1}}"#;
+    assert_eq!(
+        t.render("{{ value_json['a'].get('x', 'n') }}", payload)
+            .unwrap(),
+        "1"
+    );
+    assert_eq!(
+        t.render("{{ value_json['a'].get('y', 'n') }}", payload)
+            .unwrap(),
+        "n"
+    );
+}

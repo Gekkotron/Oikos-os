@@ -1267,3 +1267,16 @@ fn event_and_tag_signals() {
         Some("abc123".to_owned())
     );
 }
+
+#[test]
+fn update_json_blob_populates_installed_and_latest() {
+    let entity = common::parse_fixture("update__0x5c0272fffea35cfb__update");
+    let payload = r#"{"update":{"installed_version":"1.0.0","latest_version":"1.0.1","state":"available"},"linkquality":80}"#;
+    let state = generic_state(
+        &entity,
+        &[("zigbee2mqtt/rooms/bedroom2/thermometer", payload)],
+    );
+    let fields = generic_fields(&state);
+    assert_eq!(fields["installed"], GenericValue::Text("1.0.0".into()));
+    assert_eq!(fields["latest"], GenericValue::Text("1.0.1".into()));
+}

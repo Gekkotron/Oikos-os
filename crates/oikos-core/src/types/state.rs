@@ -24,6 +24,19 @@ enum Update {
     Nothing,
 }
 
+/// The string at the field's `json_path` when the rendered value is a JSON object with it.
+fn json_key(field: &FieldDef, value: &str) -> Option<String> {
+    let key = field.json_path.as_deref()?;
+    let Value::Object(map) = serde_json::from_str::<Value>(value).ok()? else {
+        return None;
+    };
+    match map.get(key)? {
+        Value::String(s) => Some(s.clone()),
+        Value::Null => None,
+        other => Some(other.to_string()),
+    }
+}
+
 fn read_field(cfg: &Value, field: &FieldDef, value: &str) -> Update {
     match field.shape {
         Shape::OnOff => {
@@ -49,7 +62,9 @@ fn read_field(cfg: &Value, field: &FieldDef, value: &str) -> Update {
             Some(_) => Update::Remove,
             None => Update::Nothing,
         },
-        Shape::Text | Shape::Version => Update::Set(GenericValue::Text(value.to_owned())),
+        Shape::Text | Shape::Version => Update::Set(GenericValue::Text(
+            json_key(field, value).unwrap_or_else(|| value.to_owned()),
+        )),
         // The picture bytes are the hub's business.
         Shape::Picture => Update::Nothing,
     }
