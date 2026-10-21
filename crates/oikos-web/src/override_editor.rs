@@ -1,6 +1,8 @@
 //! The settings form of the device sheet: only the controls that apply to the entity (see
 //! [`crate::settings_rules`]), saved as a partial patch of the hub's `UiOverride`.
 
+use std::borrow::Cow;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oikos_api::{EntityView, OverridePatch};
@@ -11,6 +13,7 @@ use serde_json::json;
 use crate::api::{clear_override, set_override};
 use crate::components::toast::Toasts;
 use crate::energy::energy_entities;
+use crate::format::word;
 use crate::house::House;
 use crate::icons::consumer_icon;
 use crate::settings_rules::{Shown, clear_field, order_valid, other_saved, set_type, shown};
@@ -163,17 +166,20 @@ fn FlagField(
 
 /// One chip of a [`ChipField`]: its text, the value it stands for (`None`: the field's default)
 /// and an optional glyph shown before the text.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct ChipOption {
-    label: &'static str,
-    value: Option<&'static str>,
+    label: Cow<'static, str>,
+    value: Option<Cow<'static, str>>,
     glyph: Option<&'static str>,
 }
 
 const fn chip(label: &'static str, value: Option<&'static str>) -> ChipOption {
     ChipOption {
-        label,
-        value,
+        label: Cow::Borrowed(label),
+        value: match value {
+            Some(v) => Some(Cow::Borrowed(v)),
+            None => None,
+        },
         glyph: None,
     }
 }
@@ -186,13 +192,16 @@ fn ChipField(
     draft: Draft,
     options: Vec<ChipOption>,
     get: fn(&UiOverride) -> Text,
-    on_pick: fn(&mut UiOverride, Option<&'static str>),
+    on_pick: fn(&mut UiOverride, Option<&str>),
 ) -> impl IntoView {
-    let known: Vec<Option<&'static str>> = options.iter().map(|o| o.value).collect();
+    let known: Vec<Option<String>> = options
+        .iter()
+        .map(|o| o.value.as_ref().map(|v| v.to_string()))
+        .collect();
     let unknown = move || {
         draft
             .with(get)
-            .filter(|v| !known.contains(&Some(v.as_str())))
+            .filter(|v| !known.contains(&Some(v.clone())))
     };
     view! {
         <div class="override__field" role="group" aria-label=label>
@@ -201,14 +210,17 @@ fn ChipField(
                 {options
                     .into_iter()
                     .map(|o| {
-                        let selected = move || draft.with(get).as_deref() == o.value;
+                        let value = o.value.clone();
+                        let pick = o.value.clone();
+                        let selected =
+                            Signal::derive(move || draft.with(get).as_deref() == value.as_deref());
                         view! {
                             <button
                                 type="button"
                                 class="chip"
                                 class:chip--selected=selected
-                                aria-pressed=move || selected().to_string()
-                                on:click=move |_| draft.update(|d| on_pick(d, o.value))
+                                aria-pressed=move || selected.get().to_string()
+                                on:click=move |_| draft.update(|d| on_pick(d, pick.as_deref()))
                             >
                                 {o.glyph.map(|g| view! { <span class="chip__glyph" inner_html=g></span> })}
                                 {o.label}
@@ -479,6 +491,33 @@ fn type_options() -> Vec<ChipOption> {
         .collect()
 }
 
+/// The entity's announced controls as chips, then "None" (hide the main control).
+fn main_control_options(entity: &EntityView) -> Vec<ChipOption> {
+    let controls = entity
+        .capabilities
+        .generic
+        .as_ref()
+        .map(|g| g.controls.as_slice())
+        .unwrap_or_default();
+    controls
+        .iter()
+        .map(|c| ChipOption {
+            label: control_label(c).into(),
+            value: Some(c.clone().into()),
+            glyph: None,
+        })
+        .chain(std::iter::once(chip("None", Some("none"))))
+        .collect()
+}
+
+/// `locked` reads "Lock"; the rest is the snake_case name in sentence case.
+fn control_label(control: &str) -> String {
+    match control {
+        "locked" => "Lock".into(),
+        other => word(other),
+    }
+}
+
 fn light_on_options() -> Vec<ChipOption> {
     std::iter::once(chip("Last state", None))
         .chain(
@@ -501,13 +540,13 @@ fn energy_role_options() -> Vec<ChipOption> {
 
 fn icon_options() -> Vec<ChipOption> {
     std::iter::once(ChipOption {
-        label: "Plug",
+        label: "Plug".into(),
         value: None,
         glyph: Some(consumer_icon(None)),
     })
     .chain(CONSUMER_ICONS.iter().map(|(key, label)| ChipOption {
-        label,
-        value: Some(*key),
+        label: (*label).into(),
+        value: Some((*key).into()),
         glyph: Some(consumer_icon(ConsumerIcon::parse(key))),
     }))
     .collect()
@@ -600,6 +639,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
         }
     };
 
+    let options_entity = entity.clone();
     let rules_entity = entity.clone();
     let shown = Memo::new(move |_| draft.with(|d| shown(&rules_entity, d)));
     let order_ok = RwSignal::new(true);
@@ -663,6 +703,15 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                             .unwrap_or(SwitchType::Switch);
                         set_type(d, t);
                     }
+                />
+            </Section>
+            <Section title="Main control" when=on(|s| s.main_control)>
+                <ChipField
+                    label="Main control"
+                    draft=draft
+                    options=main_control_options(&options_entity)
+                    get=|d| d.main_control.clone()
+                    on_pick=|d, v| d.main_control = v.map(str::to_owned)
                 />
             </Section>
             <Section title="Light" when=on(|s| s.group_with_room || s.light_on)>
@@ -840,6 +889,35 @@ mod tests {
                 .as_object()
                 .cloned()
                 .unwrap()
+        );
+    }
+
+    #[test]
+    fn main_control_patch_uses_camel_case() {
+        let after = UiOverride {
+            main_control: Some("locked".into()),
+            ..UiOverride::default()
+        };
+        let patch = dirty_patch(&UiOverride::default(), &after);
+        assert_eq!(
+            patch,
+            json!({"mainControl": "locked"})
+                .as_object()
+                .cloned()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn clearing_main_control_sends_null() {
+        let before = UiOverride {
+            main_control: Some("locked".into()),
+            ..UiOverride::default()
+        };
+        let patch = dirty_patch(&before, &UiOverride::default());
+        assert_eq!(
+            patch,
+            json!({"mainControl": null}).as_object().cloned().unwrap()
         );
     }
 

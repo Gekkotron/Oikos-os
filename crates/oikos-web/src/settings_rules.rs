@@ -30,6 +30,8 @@ pub struct Shown {
     pub energy_meter: bool,
     pub unit_warning: bool,
     pub climate_presets: bool,
+    /// The "Main control" chips: generic entities that announce at least one control.
+    pub main_control: bool,
 }
 
 pub fn shown(entity: &EntityView, draft: &UiOverride) -> Shown {
@@ -65,6 +67,12 @@ pub fn shown(entity: &EntityView, draft: &UiOverride) -> Shown {
         energy_meter,
         unit_warning: energy_meter && PowerUnits::factor(entity.unit.as_deref()).is_none(),
         climate_presets: kind == Kind::Climate,
+        main_control: entity.kind == Kind::Generic
+            && entity
+                .capabilities
+                .generic
+                .as_ref()
+                .is_some_and(|g| !g.controls.is_empty()),
     }
 }
 
@@ -81,7 +89,7 @@ pub fn set_type(draft: &mut UiOverride, t: SwitchType) {
 pub fn other_saved(draft: &UiOverride, shown: &Shown) -> Vec<(&'static str, String)> {
     let default = UiOverride::default();
     let text = |o: &Option<String>| o.clone().unwrap_or_default();
-    let candidates: [(&'static str, bool, bool, String); 13] = [
+    let candidates: [(&'static str, bool, bool, String); 14] = [
         (
             "cardStyle",
             shown.card_style,
@@ -163,6 +171,12 @@ pub fn other_saved(draft: &UiOverride, shown: &Shown) -> Vec<(&'static str, Stri
             draft.climate_presets != default.climate_presets,
             text(&draft.climate_presets),
         ),
+        (
+            "mainControl",
+            shown.main_control,
+            draft.main_control != default.main_control,
+            text(&draft.main_control),
+        ),
     ];
     candidates
         .into_iter()
@@ -188,6 +202,7 @@ pub fn clear_field(draft: &mut UiOverride, key: &str) {
         "lightOnPreset" => draft.light_on_preset = None,
         "lightOnBrightness" => draft.light_on_brightness = None,
         "climatePresets" => draft.climate_presets = None,
+        "mainControl" => draft.main_control = None,
         _ => {}
     }
 }
@@ -242,6 +257,23 @@ mod tests {
             energy_role: Some(role.into()),
             ..UiOverride::default()
         }
+    }
+
+    #[test]
+    fn main_control_is_shown_for_generic_with_controls() {
+        let mut lock = entity(Kind::Generic, Some("lock"), None);
+        lock.capabilities.generic = Some(oikos_core::types::GenericCaps {
+            controls: vec!["locked".into(), "open".into()],
+            ..Default::default()
+        });
+        assert!(shown(&lock, &UiOverride::default()).main_control);
+        let bare = entity(Kind::Generic, None, None);
+        assert!(!shown(&bare, &UiOverride::default()).main_control);
+    }
+
+    #[test]
+    fn main_control_is_hidden_for_lights() {
+        assert!(!shown(&colour_light(), &UiOverride::default()).main_control);
     }
 
     #[test]
