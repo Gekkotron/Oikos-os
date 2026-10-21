@@ -154,9 +154,11 @@ pub fn HomeScreen() -> impl IntoView {
     // Memos only notify when their value changes, so a state echo leaves chips and the card list
     // alone and repaints just the one card that changed.
     let favorites = Memo::new(move |_| {
-        house
-            .areas
-            .with(|a| house.entities.with(|m| favorites_count(m.values(), a)))
+        house.areas.with(|a| {
+            house
+                .entities
+                .with(|m| house.groups.with(|g| favorites_count(m.values(), a, g)))
+        })
     });
     let counts = Memo::new(move |_| house.entities.with(|m| home_counts(m.values())));
     // The groups' member counts: fetched on mount and again when a group appears or goes.
@@ -190,9 +192,11 @@ pub fn HomeScreen() -> impl IntoView {
     });
     let items = Memo::new(move |_| {
         current.get().map_or_else(Vec::new, |chip| {
-            house
-                .areas
-                .with(|a| house.entities.with(|m| home_items(m.values(), a, &chip)))
+            house.areas.with(|a| {
+                house
+                    .entities
+                    .with(|m| house.groups.with(|g| home_items(m.values(), a, &chip, g)))
+            })
         })
     });
     let loaded = Memo::new(move |_| {
@@ -291,7 +295,7 @@ mod tests {
 
     /// The ids of the single cards `home_items` gives under `chip` (no groups expected).
     fn entity_ids<'a>(entities: impl Iterator<Item = &'a EntityView>, chip: &str) -> Vec<String> {
-        home_items(entities, &[], chip)
+        home_items(entities, &[], chip, &BTreeMap::new())
             .into_iter()
             .map(|i| match i {
                 HomeItem::Entity(id) => id,

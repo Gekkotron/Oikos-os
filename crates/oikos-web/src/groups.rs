@@ -1,9 +1,9 @@
 //! Room groups on Home: which cards a room shows (two or more covers, or two or more lights,
 //! fold into one group card) and the text and maths of a group. Pure; the cards live elsewhere.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use oikos_api::{AreaView, EntityView};
+use oikos_api::{AreaView, EntityView, GroupView};
 use oikos_core::model::{
     Availability, Command, CoverState, GroupKey, GroupKind, MIN_GROUP_MEMBERS, StateValue,
 };
@@ -48,12 +48,23 @@ pub fn home_items<'a>(
     entities: impl Iterator<Item = &'a EntityView>,
     areas: &[AreaView],
     chip: &str,
+    groups: &BTreeMap<String, GroupView>,
 ) -> Vec<HomeItem> {
+    // Members of a group with `hide_members` lose their own card on Home; a member that is in
+    // several groups is hidden when any of them says so.
+    let hidden_member_ids: HashSet<&str> = groups
+        .values()
+        .filter(|g| g.hide_members)
+        .flat_map(|g| g.members.iter().map(|m| m.id.as_str()))
+        .collect();
     let all = shown(entities);
     let in_room = groups_of(&all);
     let candidates: Vec<&EntityView> = all
         .into_iter()
         .filter(|e| {
+            if hidden_member_ids.contains(e.id.as_str()) && !(chip == FAVORITES && e.ui.favorite) {
+                return false;
+            }
             if chip != FAVORITES {
                 return e.area == chip;
             }
@@ -142,8 +153,9 @@ pub fn is_favorite(areas: &[AreaView], key: &GroupKey) -> bool {
 pub fn favorites_count<'a>(
     entities: impl Iterator<Item = &'a EntityView>,
     areas: &[AreaView],
+    groups: &BTreeMap<String, GroupView>,
 ) -> usize {
-    home_items(entities, areas, FAVORITES).len()
+    home_items(entities, areas, FAVORITES, groups).len()
 }
 
 /// `/group/{area}/{kind}`, the route of a group's sheet.
@@ -448,7 +460,7 @@ mod tests {
     }
 
     fn items(all: &[EntityView], areas: &[AreaView], chip: &str) -> Vec<HomeItem> {
-        home_items(all.iter(), areas, chip)
+        home_items(all.iter(), areas, chip, &BTreeMap::new())
     }
 
     #[test]
@@ -584,7 +596,10 @@ mod tests {
             items(&all, &[area("living")], FAVORITES),
             [key("living", GroupKind::Cover, &["blind_a", "blind_b"])]
         );
-        assert_eq!(favorites_count(all.iter(), &[area("living")]), 1);
+        assert_eq!(
+            favorites_count(all.iter(), &[area("living")], &BTreeMap::new()),
+            1
+        );
     }
 
     #[test]
@@ -647,8 +662,11 @@ mod tests {
     fn favorites_chip_counts_favourited_groups() {
         let all = [light("a1", "attic"), light("a2", "attic")];
         let areas = [favourite_groups("attic", &["light"])];
-        assert_eq!(favorites_count(all.iter(), &areas), 1);
-        assert_eq!(favorites_count(all.iter(), &[area("attic")]), 0);
+        assert_eq!(favorites_count(all.iter(), &areas, &BTreeMap::new()), 1);
+        assert_eq!(
+            favorites_count(all.iter(), &[area("attic")], &BTreeMap::new()),
+            0
+        );
     }
 
     #[test]
@@ -866,5 +884,111 @@ mod tests {
         assert_eq!(group_path(&k), "/group/r%C3%A9mi/light");
         assert_eq!(parse_group_path("bedroom3", "light"), Some(k));
         assert_eq!(parse_group_path("bedroom3", "sensor"), None);
+    }
+
+    fn hand_group(id: &str, members: &[&str], hide_members: bool) -> (String, GroupView) {
+        let view = GroupView {
+            id: id.into(),
+            name: id.into(),
+            kind: Kind::Light,
+            members: members
+                .iter()
+                .map(|m| oikos_api::GroupMemberView {
+                    id: (*m).to_owned(),
+                    name: (*m).to_owned(),
+                    present: true,
+                    mismatch: false,
+                })
+                .collect(),
+            hide_members,
+            entity: entity(
+                &format!("group_{id}"),
+                Kind::Light,
+                "living",
+                UiOverride::default(),
+            ),
+            used_by_flows: Vec::new(),
+        };
+        (id.to_owned(), view)
+    }
+
+    fn ids(items: Vec<HomeItem>) -> Vec<String> {
+        items
+            .into_iter()
+            .map(|i| match i {
+                HomeItem::Entity(id) => id,
+                HomeItem::Group { .. } => panic!("unexpected derived group"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn member_hidden_when_any_group_hides_it() {
+        let all = [
+            light("lamp", "living"),
+            cover("group_a", "living"),
+            entity("group_b", Kind::Switch, "living", UiOverride::default()),
+        ];
+        let groups: BTreeMap<_, _> = [
+            hand_group("a", &["lamp"], true),
+            hand_group("b", &["lamp"], false),
+        ]
+        .into();
+        let got = ids(home_items(all.iter(), &[area("living")], "living", &groups));
+        assert!(got.contains(&"group_a".to_owned()));
+        assert!(got.contains(&"group_b".to_owned()));
+        assert!(!got.contains(&"lamp".to_owned()));
+    }
+
+    #[test]
+    fn favourited_member_still_shows_on_favorites() {
+        let fav = UiOverride {
+            favorite: true,
+            ..Default::default()
+        };
+        let all = [
+            entity("lamp", Kind::Light, "living", fav),
+            light("other", "living"),
+        ];
+        let groups: BTreeMap<_, _> = [hand_group("a", &["lamp", "other"], true)].into();
+        let got = ids(home_items(
+            all.iter(),
+            &[area("living")],
+            FAVORITES,
+            &groups,
+        ));
+        assert_eq!(got, ["lamp"]);
+    }
+
+    #[test]
+    fn nothing_hidden_when_no_group_hides_members() {
+        let all = [light("lamp", "living"), cover("shutter", "living")];
+        let groups: BTreeMap<_, _> = [hand_group("a", &["lamp", "shutter"], false)].into();
+        let got = ids(home_items(all.iter(), &[area("living")], "living", &groups));
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn empty_groups_leave_every_chip_unchanged() {
+        let fav = UiOverride {
+            favorite: true,
+            ..Default::default()
+        };
+        let all = [
+            entity("lamp", Kind::Light, "living", fav),
+            cover("shutter", "kitchen"),
+        ];
+        let areas = [area("living"), area("kitchen")];
+        for chip in ["living", "kitchen", FAVORITES] {
+            let got = home_items(all.iter(), &areas, chip, &BTreeMap::new());
+            let with_unhidden = home_items(
+                all.iter(),
+                &areas,
+                chip,
+                &[hand_group("a", &["lamp", "shutter"], false)].into(),
+            );
+            assert_eq!(got, with_unhidden, "{chip}");
+        }
+        assert_eq!(items(&all, &areas, FAVORITES), [single("lamp")]);
     }
 }
