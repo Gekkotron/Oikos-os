@@ -1,15 +1,24 @@
 //! Dashboard wire types. Unknown widget kinds are dropped on decode (oikos-api-side
 //! wrapper, oikos-core untouched) so a newer hub's payload never breaks an older UI.
+//!
+//! Do NOT use `serde_json::from_*::<Dashboard>` for payloads that cross a version boundary
+//! (retained MQTT, REST responses from a newer/older peer): it errors on unknown widget
+//! kinds. Use `decode_dashboard` or `DashboardView` instead.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+/// For cross-version payloads decode with `decode_dashboard`, not plain serde: it errors on
+/// unknown widget kinds.
+pub use oikos_core::dashboard::Dashboard;
 pub use oikos_core::dashboard::{
-    Dashboard, HOUSE_ID, HOUSE_NAME, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
+    HOUSE_ID, HOUSE_NAME, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
 };
 
 /// Decodes a dashboard, silently dropping widgets whose `kind` this build does not know.
 /// Known kinds with malformed bodies still fail: only unknown kinds are tolerated.
+/// Do NOT use `serde_json::from_*::<Dashboard>` across a version boundary: it errors on
+/// unknown widget kinds.
 pub fn decode_dashboard(mut value: Value) -> Result<Dashboard, serde_json::Error> {
     if let Some(widgets) = value.get_mut("widgets").and_then(Value::as_array_mut) {
         widgets.retain(|w| {
@@ -36,7 +45,10 @@ impl<'de> Deserialize<'de> for DashboardView {
         }
         let raw = Raw::deserialize(d)?;
         let dashboard = decode_dashboard(raw.dashboard).map_err(serde::de::Error::custom)?;
-        Ok(Self { dashboard, synthesized: raw.synthesized })
+        Ok(Self {
+            dashboard,
+            synthesized: raw.synthesized,
+        })
     }
 }
 
