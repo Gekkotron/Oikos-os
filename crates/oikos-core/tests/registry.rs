@@ -749,3 +749,89 @@ fn bridge_state_feeds_entity_availability() {
         oikos_core::model::Availability::Offline
     );
 }
+
+const REMOTE: &str = "device_automation.0xd4fe12345";
+
+fn remote_topic(object: &str) -> String {
+    format!("oikos/device_automation/0xd4fe12345/{object}/config")
+}
+
+fn remote_config(payload: &str) -> Vec<u8> {
+    json!({
+        "automation_type": "trigger",
+        "topic": "zigbee2mqtt/rooms/hall/remote/action",
+        "payload": payload,
+        "type": "action",
+        "subtype": payload,
+        "device": {"identifiers": ["zigbee2mqtt_0xd4fe12345"], "name": "rooms/hall/remote"}
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn remote_registry() -> Registry {
+    let mut registry = Registry::new(config());
+    for object in ["action_on", "action_off", "action_brightness_move_up"] {
+        let payload = object.trim_start_matches("action_");
+        feed(&mut registry, &remote_topic(object), remote_config(payload));
+    }
+    registry
+}
+
+fn signals(registry: &Registry) -> Vec<String> {
+    registry
+        .entity(REMOTE)
+        .and_then(|e| e.capabilities.generic.clone())
+        .map(|g| g.signals)
+        .unwrap_or_default()
+}
+
+#[test]
+fn actions_of_one_device_fold_into_one_remote() {
+    let registry = remote_registry();
+    let remotes: Vec<_> = registry
+        .entities()
+        .filter(|e| e.component == "device_automation")
+        .collect();
+    assert_eq!(remotes.len(), 1);
+    assert_eq!(remotes[0].unique_id, REMOTE);
+    assert_eq!(signals(&registry), ["on", "off", "brightness_move_up"]);
+}
+
+#[test]
+fn removing_one_action_keeps_the_others() {
+    let mut registry = remote_registry();
+    let changes = feed(&mut registry, &remote_topic("action_off"), Vec::new());
+    assert!(changes.contains(&Change::EntityUpserted(REMOTE.to_owned())));
+    assert!(!changes.contains(&Change::EntityRemoved(REMOTE.to_owned())));
+    assert_eq!(signals(&registry), ["on", "brightness_move_up"]);
+}
+
+#[test]
+fn removing_last_action_removes_the_remote() {
+    let mut registry = Registry::new(config());
+    feed(
+        &mut registry,
+        &remote_topic("action_on"),
+        remote_config("on"),
+    );
+    assert!(registry.entity(REMOTE).is_some());
+    let changes = feed(&mut registry, &remote_topic("action_on"), Vec::new());
+    assert!(changes.contains(&Change::EntityRemoved(REMOTE.to_owned())));
+    assert!(registry.entity(REMOTE).is_none());
+}
+
+#[test]
+fn remote_subscribes_to_its_action_topics() {
+    let registry = remote_registry();
+    let topic = "zigbee2mqtt/rooms/hall/remote/action";
+    assert!(registry.subscription_topics().contains(topic));
+    assert!(
+        registry
+            .entity(REMOTE)
+            .unwrap()
+            .bindings
+            .topics()
+            .contains(topic)
+    );
+}

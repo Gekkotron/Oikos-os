@@ -29,6 +29,27 @@ pub enum Parsed {
     Ignored {
         reason: String,
     },
+    /// One `device_automation` action; the registry folds the actions of a device into one
+    /// remote entity.
+    DeviceAutomation(DeviceAutomationFragment),
+}
+
+/// One `device_automation` trigger config, before it is folded into its device's remote.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceAutomationFragment {
+    /// The device's node id: the discovery topic's node (else the first device identifier),
+    /// lowercased with every non-alphanumeric character turned into `_`.
+    pub node: String,
+    /// The object id of the discovery topic.
+    pub object: String,
+    /// The topic the action is published on.
+    pub topic: String,
+    /// The payload that identifies the action.
+    pub payload: String,
+    pub action_type: Option<String>,
+    pub action_subtype: Option<String>,
+    /// The shared `device` object.
+    pub device: Value,
 }
 
 /// The reason given for a device-based (`device` component) config holding `components`.
@@ -89,6 +110,9 @@ fn parse_generic(
     text: &str,
     topic_str: &str,
 ) -> Result<Parsed, DiscoveryError> {
+    if topic.component == "device_automation" {
+        return parse_device_automation(topic, text);
+    }
     let Some(def) = crate::types::type_def(&topic.component) else {
         return Ok(Parsed::Ignored {
             reason: format!("unsupported component `{}`", topic.component),
@@ -107,6 +131,42 @@ fn parse_generic(
     let mut entity = build(Kind::Generic, topic, config, topic_str);
     entity.capabilities.generic = Some(GenericCaps::from_config(def, &entity.bindings.config));
     Ok(Parsed::Entity(Box::new(entity)))
+}
+
+/// A `device_automation` config becomes a fragment for the registry to fold.
+fn parse_device_automation(topic: &DiscoveryTopic, text: &str) -> Result<Parsed, DiscoveryError> {
+    let config = expand_object(object(text)?);
+    let (Some(action_topic), Some(payload)) = (
+        string(&config, "topic"),
+        config.get("payload").and_then(Value::as_str),
+    ) else {
+        return Err(DiscoveryError::Invalid(
+            "device_automation without topic or payload".to_owned(),
+        ));
+    };
+    let device = config
+        .get("device")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    let raw_node = topic
+        .node_id
+        .clone()
+        .or_else(|| device.get("identifiers").and_then(first_string))
+        .unwrap_or_else(|| topic.object_id.clone());
+    let node = raw_node
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+    Ok(Parsed::DeviceAutomation(DeviceAutomationFragment {
+        node,
+        object: topic.object_id.clone(),
+        topic: action_topic,
+        payload: payload.to_owned(),
+        action_type: string(&config, "type"),
+        action_subtype: string(&config, "subtype"),
+        device,
+    }))
 }
 
 /// Splits a device-based config (`device` component with `components`) into one per-entity

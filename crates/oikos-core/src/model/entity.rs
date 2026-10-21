@@ -146,6 +146,14 @@ impl Bindings {
                 topics.insert(topic.to_owned());
             }
         }
+        if let Some(actions) = config.get("actions").and_then(Value::as_array) {
+            topics.extend(
+                actions
+                    .iter()
+                    .filter_map(|action| action.get("topic").and_then(Value::as_str))
+                    .map(str::to_owned),
+            );
+        }
         topics
     }
 }

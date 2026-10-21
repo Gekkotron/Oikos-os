@@ -151,6 +151,8 @@ fn parses_every_recorded_discovery_file() {
                 ignored += 1;
                 *reasons.entry(reason).or_default() += 1;
             }
+            // A fragment of a remote the registry folds: counted with the entities.
+            Ok(Parsed::DeviceAutomation(_)) => entities += 1,
             Ok(Parsed::Removed) => removed += 1,
             Err(e) => errors.push(format!("{topic_str}: {e}")),
         }

@@ -8,6 +8,7 @@
 mod areas;
 mod folding;
 mod ignored;
+mod remote;
 mod routing;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -116,6 +117,9 @@ pub struct Registry {
     /// Discovery topic → the entities it produced, and the reverse.
     produced: BTreeMap<String, Vec<String>>,
     origin: BTreeMap<String, String>,
+    /// `device_automation` discovery topic → (remote entity id, action object id). The remote
+    /// is not in `produced`/`origin`: many topics contribute to it.
+    device_automation_actions: BTreeMap<String, (String, String)>,
     template_failures: BTreeSet<String>,
 }
 
@@ -137,6 +141,7 @@ impl Registry {
             last_override: BTreeMap::new(),
             produced: BTreeMap::new(),
             origin: BTreeMap::new(),
+            device_automation_actions: BTreeMap::new(),
             template_failures: BTreeSet::new(),
         }
     }
@@ -367,10 +372,18 @@ impl Registry {
         {
             ids.retain(|other| *other != id);
         }
+        if let Some(previous) = self.entities.get(&id)
+            && as_discovered(previous) == entity
+        {
+            return;
+        }
+        self.store(entity, changes);
+    }
+
+    /// Indexes and stores `entity`, replacing any entity with the same id, and reports it.
+    fn store(&mut self, entity: Entity, changes: &mut Vec<Change>) {
+        let id = entity.unique_id.clone();
         if let Some(previous) = self.entities.get(&id) {
-            if as_discovered(previous) == entity {
-                return;
-            }
             let previous = previous.clone();
             self.unindex(&id, &previous);
         }
