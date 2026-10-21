@@ -104,7 +104,8 @@ fn snapshot_of_recorded_house_serializes() {
 }
 
 /// Each area counts its entities and, apart, the primary ones (what the UI shows by
-/// default: primary category, enabled by default, not folded, not hidden).
+/// default: primary category, enabled by default, not folded, not hidden, and a card
+/// placement for the generic types).
 #[test]
 fn area_views_count_entities_and_primary_entities() {
     let registry = load_house();
@@ -113,7 +114,9 @@ fn area_views_count_entities_and_primary_entities() {
     let mut primary: BTreeMap<&str, usize> = BTreeMap::new();
     for entity in &snap.entities {
         *entities.entry(entity.area.as_str()).or_default() += 1;
-        if entity.is_primary() {
+        let card = oikos_core::types::type_def(&entity.component)
+            .is_none_or(|d| d.placement == oikos_core::types::Placement::Card);
+        if entity.is_primary() && card {
             *primary.entry(entity.area.as_str()).or_default() += 1;
         }
     }
@@ -233,4 +236,29 @@ fn device_with_newer_firmware_is_marked() {
 
     let device = bedroom2_update(&mut registry, "1.1", "1.1");
     assert!(!device.update.expect("update view").available);
+}
+
+/// Signal, target and update entities never show as Home cards, so they are not counted as
+/// primary entities of their area.
+#[test]
+fn area_primary_count_skips_non_card_generic_placements() {
+    let mut registry = load_house();
+    let before = snapshot(&registry, ConnectionStatus::Online, AT);
+    feed(
+        &mut registry,
+        "oikos/event/ev1/press/config",
+        br#"{"name":"Press","unique_id":"ev1","state_topic":"t/ev","event_types":["press"]}"#
+            .to_vec(),
+    );
+    let after = snapshot(&registry, ConnectionStatus::Online, AT);
+    let event = after
+        .entities
+        .iter()
+        .find(|e| e.component == "event")
+        .expect("event entity");
+    assert!(event.is_primary());
+    let sum = |s: &oikos_api::Snapshot| s.areas.iter().map(|a| a.primary_count).sum::<usize>();
+    assert_eq!(sum(&after), sum(&before));
+    let entities = |s: &oikos_api::Snapshot| s.areas.iter().map(|a| a.entity_count).sum::<usize>();
+    assert_eq!(entities(&after), entities(&before) + 1);
 }

@@ -79,6 +79,8 @@ fn unit_of<'a>(id: &str, ctx: &'a Ctx) -> Option<&'a str> {
 /// "Activate Scene 1" (a press has no value).
 fn control_sentence(control: &str, value: Option<&Value>, e: &str) -> String {
     let name = control.replace('_', " ");
+    // TODO: table-only dispatch. The lock/unlock wording is the one control name matched
+    // here; a `sentence` hint on the table's `ControlDef` would let the table own it.
     match (control, value) {
         ("locked", Some(Value::Bool(true))) => format!("Lock {e}"),
         ("locked", Some(Value::Bool(false))) => format!("Unlock {e}"),

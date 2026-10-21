@@ -7,6 +7,7 @@ use oikos_core::model::{
     GenericValue, Kind, StateValue, UiOverride,
 };
 use oikos_core::registry::Ignored;
+use oikos_core::types::{Placement, type_def};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -169,7 +170,7 @@ impl DeviceView {
         // A device can carry more than one `update` entity: the first that reports a version wins.
         let mut updates = members
             .iter()
-            .filter(|(entity, _)| entity.component == "update")
+            .filter(|(entity, _)| placement_of(&entity.component) == Some(Placement::Update))
             .map(|(_, state)| UpdateView::from_state(state))
             .collect::<Vec<_>>();
         let known = updates
@@ -230,6 +231,11 @@ impl AreaView {
             group_favorites: area.group_favorites.clone(),
         }
     }
+}
+
+/// Where the type table places a generic component; `None` for a component it does not list.
+pub(crate) fn placement_of(component: &str) -> Option<Placement> {
+    type_def(component).map(|def| def.placement)
 }
 
 /// The primary rule shared by [`EntityView::is_primary`] and the area counts.

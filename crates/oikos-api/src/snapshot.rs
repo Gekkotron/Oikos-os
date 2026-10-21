@@ -2,15 +2,18 @@
 
 use std::collections::BTreeMap;
 
-use oikos_core::model::EntityState;
+use oikos_core::model::{EntityState, Kind};
 use oikos_core::registry::Registry;
+use oikos_core::types::Placement;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::alerts::AlertView;
 use crate::events::ConnectionStatus;
 use crate::flows::FlowView;
-use crate::views::{AreaView, BridgeView, DeviceView, EntityView, IgnoredView, is_primary};
+use crate::views::{
+    AreaView, BridgeView, DeviceView, EntityView, IgnoredView, is_primary, placement_of,
+};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Snapshot {
@@ -58,12 +61,17 @@ pub fn area_views(reg: &Registry) -> Vec<AreaView> {
     for entity in reg.entities() {
         let (entities, primary) = per_area.entry(entity.area.as_str()).or_default();
         *entities += 1;
-        if is_primary(
-            entity.category,
-            entity.enabled_by_default,
-            entity.part_of.is_some(),
-            entity.ui.hidden,
-        ) {
+        // A generic entity placed as a signal, target or update is not a Home card.
+        let card = entity.kind != Kind::Generic
+            || placement_of(&entity.component).is_none_or(|p| p == Placement::Card);
+        if card
+            && is_primary(
+                entity.category,
+                entity.enabled_by_default,
+                entity.part_of.is_some(),
+                entity.ui.hidden,
+            )
+        {
             *primary += 1;
         }
     }
