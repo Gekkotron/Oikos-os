@@ -15,6 +15,7 @@ mod water_heater;
 use super::{Applied, StateError};
 use crate::model::{Entity, EntityState, Kind, StateValue};
 use crate::template::Templates;
+use crate::types;
 
 /// Applies the message to the entity's value through the mapper of its `protocol_kind`.
 pub(super) fn apply(
@@ -38,8 +39,9 @@ pub(super) fn apply(
         Kind::Button => button::apply(entity, state, topic, payload, templates),
         Kind::Vacuum => vacuum::apply(entity, state, topic, payload, templates),
         Kind::WaterHeater => water_heater::apply(entity, state, topic, payload, templates),
-        // Replaced by `types::state::apply` once the generic state path lands.
-        Kind::Generic => Ok(Applied::NotForThisEntity),
+        Kind::Generic => types::type_def(&entity.component)
+            .map(|def| types::state::apply(entity, def, state, topic, payload, templates))
+            .unwrap_or(Ok(Applied::NotForThisEntity)),
     }
 }
 

@@ -5,8 +5,8 @@ mod common;
 use std::collections::BTreeMap;
 
 use oikos_core::model::{
-    Availability, ClimateState, CoverState, Entity, EntityState, Hs, Kind, LightState, StateValue,
-    VacuumState, WaterHeaterState,
+    Availability, ClimateState, CoverState, Entity, EntityState, GenericValue, Hs, LightState,
+    StateValue, VacuumState, WaterHeaterState,
 };
 use oikos_core::state::color::{rgb_to_hs, xy_to_hs};
 use oikos_core::state::{Applied, StateError, apply_message};
@@ -69,12 +69,7 @@ fn recorded_states_apply_to_every_entity() {
                     *counts.entry("unchanged").or_default() += 1;
                 }
                 Ok(Applied::NotForThisEntity) => {
-                    // Generic entities take no state until the generic state path lands.
-                    assert!(
-                        !bound || entity.kind == Kind::Generic,
-                        "{} ignored bound {topic}",
-                        entity.unique_id
-                    );
+                    assert!(!bound, "{} ignored bound {topic}", entity.unique_id);
                     assert_eq!(state, EntityState::default());
                     *counts.entry("not_for_this_entity").or_default() += 1;
                 }
@@ -1079,4 +1074,149 @@ fn hostile_payloads_never_panic() {
             }
         }
     }
+}
+
+fn generic_fields(state: &EntityState) -> &BTreeMap<String, GenericValue> {
+    match &state.value {
+        StateValue::Generic(g) => &g.fields,
+        other => panic!("not generic: {other:?}"),
+    }
+}
+
+fn generic_state(entity: &Entity, messages: &[(&str, &str)]) -> EntityState {
+    let mut state = EntityState::default();
+    for (topic, payload) in messages {
+        assert_eq!(apply(entity, &mut state, topic, payload), Applied::Changed);
+    }
+    state
+}
+
+fn lock(config: Value) -> Entity {
+    let mut cfg = json!({"name": "Door", "unique_id": "lock1", "state_topic": "l/state"});
+    cfg.as_object_mut()
+        .unwrap()
+        .extend(config.as_object().unwrap().clone());
+    common::entity("lock", cfg)
+}
+
+#[test]
+fn lock_payload_maps_to_canonical_word() {
+    let state = generic_state(&lock(json!({})), &[("l/state", "LOCKED")]);
+    assert_eq!(
+        generic_fields(&state)["state"],
+        GenericValue::Text("locked".into())
+    );
+}
+
+#[test]
+fn custom_state_word_is_honoured() {
+    let entity = lock(json!({"state_locked": "closed"}));
+    let state = generic_state(&entity, &[("l/state", "closed")]);
+    assert_eq!(
+        generic_fields(&state)["state"],
+        GenericValue::Text("locked".into())
+    );
+}
+
+#[test]
+fn unmapped_payload_is_kept_as_raw_text() {
+    let state = generic_state(&lock(json!({})), &[("l/state", "FOO")]);
+    assert_eq!(
+        generic_fields(&state)["state"],
+        GenericValue::Text("FOO".into())
+    );
+    let StateValue::Generic(g) = &state.value else {
+        unreachable!()
+    };
+    assert!(!oikos_core::types::alerting(
+        oikos_core::types::type_def("lock").unwrap(),
+        g
+    ));
+}
+
+#[test]
+fn fan_fields_merge_across_topics() {
+    let entity = common::entity(
+        "fan",
+        json!({"name": "Fan", "unique_id": "fan1", "command_topic": "f/set",
+               "state_topic": "f/state", "percentage_state_topic": "f/pct"}),
+    );
+    let state = generic_state(&entity, &[("f/state", "ON"), ("f/pct", "60")]);
+    let fields = generic_fields(&state);
+    assert_eq!(fields["state"], GenericValue::Bool(true));
+    assert_eq!(fields["percentage"], GenericValue::Number(60.0));
+}
+
+#[test]
+fn generic_number_non_finite_is_not_stored() {
+    let entity = common::entity(
+        "fan",
+        json!({"name": "Fan", "unique_id": "fan1", "command_topic": "f/set",
+               "state_topic": "f/state", "percentage_state_topic": "f/pct"}),
+    );
+    let mut state = generic_state(&entity, &[("f/pct", "60")]);
+    assert_eq!(
+        apply(&entity, &mut state, "f/pct", "inf"),
+        Applied::Unchanged
+    );
+    assert_eq!(
+        generic_fields(&state)["percentage"],
+        GenericValue::Number(60.0)
+    );
+    assert_eq!(
+        apply(&entity, &mut state, "f/pct", "None"),
+        Applied::Changed
+    );
+    assert!(!generic_fields(&state).contains_key("percentage"));
+    assert_eq!(
+        apply(&entity, &mut state, "other", "1"),
+        Applied::NotForThisEntity
+    );
+}
+
+#[test]
+fn alerting_lock_when_unlocked_or_jammed() {
+    use oikos_core::types::{alerting, type_def};
+    let def = type_def("lock").unwrap();
+    let entity = lock(json!({}));
+    for (payload, expected) in [("LOCKED", false), ("UNLOCKED", true), ("JAMMED", true)] {
+        let state = generic_state(&entity, &[("l/state", payload)]);
+        let StateValue::Generic(g) = &state.value else {
+            unreachable!()
+        };
+        assert_eq!(alerting(def, g), expected, "{payload}");
+    }
+}
+
+#[test]
+fn history_num_maps_lock_and_tracker() {
+    use oikos_core::types::{history_num, type_def};
+    let num = |component: &str, entity: Entity, topic: &str, payload: &str| {
+        let state = generic_state(&entity, &[(topic, payload)]);
+        let StateValue::Generic(g) = &state.value else {
+            unreachable!()
+        };
+        history_num(type_def(component).unwrap(), g)
+    };
+    let l = lock(json!({}));
+    assert_eq!(num("lock", l.clone(), "l/state", "LOCKED"), Some(1.0));
+    assert_eq!(num("lock", l, "l/state", "UNLOCKED"), Some(0.0));
+    let tracker = common::entity(
+        "device_tracker",
+        json!({"name": "T", "unique_id": "t1", "state_topic": "t/state"}),
+    );
+    assert_eq!(num("device_tracker", tracker, "t/state", "home"), Some(1.0));
+    let fan = common::entity(
+        "fan",
+        json!({"name": "Fan", "unique_id": "fan1", "command_topic": "f/set",
+               "percentage_state_topic": "f/pct"}),
+    );
+    assert_eq!(num("fan", fan, "f/pct", "60"), None);
+    let humidifier = common::entity(
+        "humidifier",
+        json!({"name": "H", "unique_id": "h1", "command_topic": "h/set",
+               "target_humidity_command_topic": "h/tset",
+               "target_humidity_state_topic": "h/target"}),
+    );
+    assert_eq!(num("humidifier", humidifier, "h/target", "45"), Some(45.0));
 }

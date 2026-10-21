@@ -1,7 +1,7 @@
 //! Human-readable state values for cards.
 
 use oikos_api::EntityView;
-use oikos_core::model::{EntityState, Kind, StateValue, SwitchType};
+use oikos_core::model::{EntityState, GenericValue, Kind, StateValue, SwitchType};
 
 const DASH: &str = "—";
 
@@ -43,6 +43,18 @@ pub fn display_value(state: &EntityState, unit: Option<&str>) -> String {
         StateValue::WaterHeater(w) => match (w.current, w.target) {
             (Some(v), _) | (None, Some(v)) => with_unit(number(v), unit),
             (None, None) => w.mode.as_deref().map_or_else(|| DASH.into(), word),
+        },
+        // No type table here yet (Task 13): the `state` field, else a lone field.
+        StateValue::Generic(g) => match g.fields.get("state").or_else(|| {
+            (g.fields.len() == 1)
+                .then(|| g.fields.values().next())
+                .flatten()
+        }) {
+            Some(GenericValue::Bool(true)) => "On".into(),
+            Some(GenericValue::Bool(false)) => "Off".into(),
+            Some(GenericValue::Number(n)) => format!("{n}"),
+            Some(GenericValue::Text(s)) => s.clone(),
+            None => DASH.into(),
         },
         StateValue::Unknown => DASH.into(),
     }

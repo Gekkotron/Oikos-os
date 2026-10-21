@@ -43,6 +43,7 @@ pub fn num_of(value: &StateValue) -> Option<f64> {
         StateValue::Text(_)
         | StateValue::Alarm(_)
         | StateValue::Vacuum(_)
+        | StateValue::Generic(_)
         | StateValue::Unknown => return None,
     };
     n.is_finite().then_some(n)

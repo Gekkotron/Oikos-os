@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::model::Op;
-use crate::model::StateValue;
+use crate::model::{GenericState, GenericValue, StateValue};
+use crate::types::{self, TypeDef};
 
 /// A comparable value; the JSON form is the bare boolean, number or string.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -29,8 +30,19 @@ impl Scalar {
             StateValue::Climate(climate) => climate.mode.clone().map(Scalar::Text),
             StateValue::Vacuum(vacuum) => vacuum.state.clone().map(Scalar::Text),
             StateValue::WaterHeater(heater) => heater.mode.clone().map(Scalar::Text),
+            // Needs the type table: see `Scalar::of_generic`.
+            StateValue::Generic(_) => None,
             StateValue::Unknown => None,
         }
+    }
+
+    /// The primary field of a generic entity as a scalar.
+    pub fn of_generic(def: &TypeDef, state: &GenericState) -> Option<Scalar> {
+        Some(match types::state::primary(def, state)? {
+            GenericValue::Bool(b) => Scalar::Bool(*b),
+            GenericValue::Number(n) => Scalar::Number(*n),
+            GenericValue::Text(t) => Scalar::Text(t.clone()),
+        })
     }
 
     /// Reads a JSON boolean, finite number or string; null, arrays and objects are `None`.
@@ -89,6 +101,21 @@ pub fn compare(left: Option<&Scalar>, op: Op, right: &Scalar) -> Result<bool, Co
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scalar_of_generic_is_its_primary() {
+        use crate::model::{GenericState, GenericValue};
+        let def = crate::types::type_def("lock").unwrap();
+        let mut gs = GenericState::default();
+        assert_eq!(Scalar::of_generic(def, &gs), None);
+        gs.fields
+            .insert("state".into(), GenericValue::Text("locked".into()));
+        assert_eq!(
+            Scalar::of_generic(def, &gs),
+            Some(Scalar::Text("locked".into()))
+        );
+        assert_eq!(Scalar::of_state(&StateValue::Generic(gs)), None);
+    }
+
     use serde_json::json;
 
     use super::*;

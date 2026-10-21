@@ -9,7 +9,7 @@ pub mod color;
 
 mod availability;
 mod kinds;
-mod util;
+pub(crate) mod util;
 
 use crate::model::{Entity, EntityState};
 use crate::template::{TemplateError, Templates};

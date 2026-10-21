@@ -6,7 +6,10 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
+use crate::model::{GenericState, GenericValue};
+
 pub mod caps;
+pub mod state;
 pub use caps::{GenericCaps, Range};
 
 /// The table, embedded verbatim; the hub also publishes it as-is.
@@ -195,6 +198,32 @@ pub fn main_control<'a>(
         return Some(found);
     }
     def.main.iter().find_map(|m| announced(m))
+}
+
+/// True when an alert of the type fires for the state.
+pub fn alerting(def: &TypeDef, state: &GenericState) -> bool {
+    def.alerts
+        .iter()
+        .any(|alert| match state.fields.get(&alert.field) {
+            Some(GenericValue::Text(s)) => alert.any_of.contains(s),
+            Some(GenericValue::Bool(b)) => {
+                let word = if *b { "on" } else { "off" };
+                alert.any_of.iter().any(|a| a == word)
+            }
+            _ => false,
+        })
+}
+
+/// The number charted for the state, following the type's history definition.
+pub fn history_num(def: &TypeDef, state: &GenericState) -> Option<f64> {
+    let h = def.history.as_ref()?;
+    let n = match state.fields.get(&h.field)? {
+        GenericValue::Number(n) if h.map.is_empty() => *n,
+        GenericValue::Number(_) => return None,
+        GenericValue::Bool(b) => *h.map.get(if *b { "on" } else { "off" })?,
+        GenericValue::Text(s) => *h.map.get(s)?,
+    };
+    n.is_finite().then_some(n)
 }
 
 #[cfg(test)]
