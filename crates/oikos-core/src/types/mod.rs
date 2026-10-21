@@ -6,6 +6,9 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
+pub mod caps;
+pub use caps::{GenericCaps, Range};
+
 /// The table, embedded verbatim; the hub also publishes it as-is.
 const TABLE_JSON: &str = include_str!("table.json");
 
@@ -172,6 +175,28 @@ pub fn table_json() -> &'static str {
     TABLE_JSON
 }
 
+/// The control a card leads with: the user's choice if announced (`"none"` means no main
+/// control), else the first announced entry of the type's `main` list.
+pub fn main_control<'a>(
+    def: &'a TypeDef,
+    caps: &'a GenericCaps,
+    chosen: Option<&'a str>,
+) -> Option<&'a str> {
+    let announced = |name: &str| {
+        caps.controls
+            .iter()
+            .find(|c| *c == name)
+            .map(String::as_str)
+    };
+    if chosen == Some("none") {
+        return None;
+    }
+    if let Some(found) = chosen.and_then(announced) {
+        return Some(found);
+    }
+    def.main.iter().find_map(|m| announced(m))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +240,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn main_def() -> TypeDef {
+        serde_json::from_value(serde_json::json!({
+            "placement": "card", "icon": "x", "main": ["power", "speed"]
+        }))
+        .unwrap()
+    }
+
+    fn caps_with(controls: &[&str]) -> GenericCaps {
+        GenericCaps {
+            controls: controls.iter().map(|s| s.to_string()).collect(),
+            ..GenericCaps::default()
+        }
+    }
+
+    #[test]
+    fn main_control_prefers_override_then_table_order() {
+        let d = main_def();
+        let caps = caps_with(&["power", "speed"]);
+        assert_eq!(main_control(&d, &caps, Some("speed")), Some("speed"));
+        assert_eq!(main_control(&d, &caps, None), Some("power"));
+        assert_eq!(main_control(&d, &caps, Some("none")), None);
+    }
+
+    #[test]
+    fn main_control_falls_back_when_not_announced() {
+        let d = main_def();
+        let caps = caps_with(&["power"]);
+        assert_eq!(main_control(&d, &caps, Some("speed")), Some("power"));
     }
 
     #[test]

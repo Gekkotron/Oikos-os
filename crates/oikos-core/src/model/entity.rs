@@ -58,6 +58,8 @@ pub struct Capabilities {
     pub code_arm_required: bool,
     pub code_disarm_required: bool,
     pub code_format: CodeFormat,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generic: Option<crate::types::GenericCaps>,
 }
 
 /// The expanded discovery config: topics, templates and payload constants.
