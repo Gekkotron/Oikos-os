@@ -29,7 +29,7 @@ pub enum FlowError {
     BadValue { node: String },
     #[error("node `{node}`: {reason}")]
     BadCron { node: String, reason: String },
-    #[error("node `{node}`: an if after a schedule must name an entity")]
+    #[error("node `{node}`: an if after a schedule or sun trigger must name an entity")]
     IfNeedsEntity { node: String },
     #[error("node `{node}`: `{flow}` is not a valid flow id")]
     BadFlowTarget { node: String, flow: String },
@@ -128,7 +128,7 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                 None => {
                     return Err(FlowError::BadOperand {
                         node: node.id.clone(),
-                        reason: format!("value is required for op {:?}", p.op),
+                        reason: format!("value is required for op {}", p.op.wire_name()),
                     });
                 }
                 Some(value) if Scalar::from_json(value).is_none() => {
@@ -484,7 +484,7 @@ mod tests {
         );
         assert_eq!(
             err.to_string(),
-            "node `check`: an if after a schedule must name an entity"
+            "node `check`: an if after a schedule or sun trigger must name an entity"
         );
     }
 
@@ -607,7 +607,7 @@ mod tests {
     fn non_is_dark_op_requires_value() {
         let err = validate(&flow_with_if_params_json(r#"{"op":"lt","entity":"t"}"#)).unwrap_err();
         assert!(
-            matches!(err, FlowError::BadOperand { ref reason, .. } if reason.contains("value"))
+            matches!(err, FlowError::BadOperand { ref reason, .. } if reason == "value is required for op lt")
         );
     }
 

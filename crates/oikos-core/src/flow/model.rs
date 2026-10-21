@@ -341,6 +341,21 @@ pub enum Op {
     IsDark,
 }
 
+impl Op {
+    /// The lowercase name this operator carries in the flow JSON.
+    pub fn wire_name(&self) -> &'static str {
+        match self {
+            Op::Eq => "eq",
+            Op::Ne => "ne",
+            Op::Gt => "gt",
+            Op::Lt => "lt",
+            Op::Gte => "gte",
+            Op::Lte => "lte",
+            Op::IsDark => "is_dark",
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
