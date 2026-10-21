@@ -242,9 +242,10 @@ fn state_routes_to_all_entities_on_shared_topic() {
         );
         assert_eq!(state.last_update, Some(AT + 1));
     }
+    // The five sensors plus the device's firmware `update` entity, which shares the topic.
     assert_eq!(
         registry.entities_on_topic(THERMOMETER_TOPIC).len(),
-        5,
+        6,
         "{:?}",
         registry.entities_on_topic(THERMOMETER_TOPIC)
     );

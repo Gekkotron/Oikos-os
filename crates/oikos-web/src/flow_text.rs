@@ -240,6 +240,7 @@ mod tests {
             device_name: device.map(Into::into),
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: None,
             unit: unit.map(Into::into),

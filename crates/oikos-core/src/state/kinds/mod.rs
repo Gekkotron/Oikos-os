@@ -38,6 +38,8 @@ pub(super) fn apply(
         Kind::Button => button::apply(entity, state, topic, payload, templates),
         Kind::Vacuum => vacuum::apply(entity, state, topic, payload, templates),
         Kind::WaterHeater => water_heater::apply(entity, state, topic, payload, templates),
+        // Replaced by `types::state::apply` once the generic state path lands.
+        Kind::Generic => Ok(Applied::NotForThisEntity),
     }
 }
 

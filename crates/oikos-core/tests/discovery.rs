@@ -5,8 +5,8 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use oikos_core::discovery::{
-    DiscoveryTopic, Parsed, TopicClass, capabilities, classify, expand, expand_device_based,
-    naming, parse,
+    DiscoveryError, DiscoveryTopic, Parsed, TopicClass, capabilities, classify, expand,
+    expand_device_based, naming, parse,
 };
 use oikos_core::model::{AlarmMode, Bindings, Entity, EntityCategory, Kind, UNASSIGNED_AREA};
 use serde_json::{Value, json};
@@ -138,8 +138,9 @@ fn parses_every_recorded_discovery_file() {
             Ok(Parsed::Entity(entity)) => {
                 entities += 1;
                 assert!(!entity.unique_id.is_empty(), "{stem}: empty unique_id");
+                // Write-only generic entities (a scene, a notifier) have nothing to read.
                 assert!(
-                    !entity.bindings.topics().is_empty(),
+                    entity.kind == Kind::Generic || !entity.bindings.topics().is_empty(),
                     "{stem}: no topic to subscribe to"
                 );
                 assert_eq!(entity.discovery_topic, topic_str);
@@ -291,16 +292,6 @@ fn empty_payload_is_removed_and_ignored_component_is_ignored() {
         parse(&light, b"", "oikos/light/0x1/light/config"),
         Ok(Parsed::Removed)
     ));
-
-    let update = discovery_topic("oikos/update/0x1/update/config");
-    match parse(
-        &update,
-        br#"{"name":"Firmware"}"#,
-        "oikos/update/0x1/update/config",
-    ) {
-        Ok(Parsed::Ignored { reason }) => assert!(reason.contains("update"), "{reason}"),
-        other => panic!("expected Ignored, got {other:?}"),
-    }
 
     let device = discovery_topic("oikos/device/0x1/config");
     match parse(&device, br#"{"cmps":{}}"#, "oikos/device/0x1/config") {
@@ -462,4 +453,109 @@ fn capabilities_from_config_reads_alarm_code() {
     assert!(caps.code_arm_required);
     assert!(!caps.code_disarm_required);
     assert_eq!(caps.code_format, oikos_core::model::CodeFormat::Text);
+}
+
+/// One recorded fixture per component the type table adds (`device_automation` is covered
+/// by the signal wave).
+const GENERIC_FIXTURES: &[(&str, &str)] = &[
+    ("lock", "lock__0x00158d0001a2b3c4__lock"),
+    ("fan", "fan__0x00158d0002b3c4d5__fan"),
+    ("siren", "siren__0x00124b0003c4d5e6__siren"),
+    ("valve", "valve__0x00124b0004d5e6f7__valve"),
+    ("humidifier", "humidifier__homeassistant__bedroom"),
+    ("lawn_mower", "lawn_mower__homeassistant__garden"),
+    ("text", "text__0x00124b001c2fa59c__action"),
+    ("scene", "scene__homeassistant__movie_night"),
+    ("device_tracker", "device_tracker__oikos_phone"),
+    ("camera", "camera__homeassistant__front_door"),
+    ("image", "image__homeassistant__weather_map"),
+    ("event", "event__0x00158d0005e6f708__action"),
+    ("tag", "tag__homeassistant__key_fob"),
+    ("notify", "notify__homeassistant__phone"),
+    ("update", "update__0x20a716fffea4e8de__update"),
+];
+
+#[test]
+fn each_new_component_becomes_a_generic_entity() {
+    for (component, stem) in GENERIC_FIXTURES {
+        let entity = parse_fixture(stem);
+        assert_eq!(entity.kind, Kind::Generic, "{stem}");
+        assert_eq!(entity.protocol_kind, Kind::Generic, "{stem}");
+        assert_eq!(entity.component, *component, "{stem}");
+        assert!(
+            entity.capabilities.generic.is_some(),
+            "{stem}: no generic caps"
+        );
+    }
+}
+
+#[test]
+fn existing_kinds_carry_their_component() {
+    let light = parse_fixture("light__0x00124b0011b6b80f__light_4");
+    assert_eq!(light.component, "light");
+    assert_eq!(light.kind, Kind::Light);
+    assert!(light.capabilities.generic.is_none());
+}
+
+fn generic_entity(component: &str, config: Value) -> Entity {
+    let topic_str = format!("oikos/{component}/test/config");
+    let topic = discovery_topic(&topic_str);
+    match parse(&topic, config.to_string().as_bytes(), &topic_str) {
+        Ok(Parsed::Entity(entity)) => *entity,
+        other => panic!("{component} did not parse as an entity: {other:?}"),
+    }
+}
+
+#[test]
+fn fan_without_percentage_topic_offers_power_only() {
+    let fan = generic_entity("fan", json!({"command_topic": "f/set", "state_topic": "f"}));
+    assert_eq!(fan.capabilities.generic.unwrap().controls, ["power"]);
+}
+
+#[test]
+fn lock_without_payload_open_has_no_open_control() {
+    let lock = generic_entity(
+        "lock",
+        json!({"command_topic": "l/set", "state_topic": "l"}),
+    );
+    let controls = lock.capabilities.generic.unwrap().controls;
+    assert!(controls.iter().any(|c| c == "locked"), "{controls:?}");
+    assert!(!controls.iter().any(|c| c == "open"), "{controls:?}");
+    let with_open = generic_entity(
+        "lock",
+        json!({"command_topic": "l/set", "state_topic": "l", "payload_open": "OPEN"}),
+    );
+    assert!(
+        with_open
+            .capabilities
+            .generic
+            .unwrap()
+            .controls
+            .iter()
+            .any(|c| c == "open")
+    );
+}
+
+#[test]
+fn lock_without_state_topic_is_rejected() {
+    let topic_str = "oikos/lock/test/config";
+    let topic = discovery_topic(topic_str);
+    let result = parse(&topic, br#"{"command_topic": "l/set"}"#, topic_str);
+    assert_eq!(
+        result,
+        Err(DiscoveryError::Invalid(
+            "lock without state_topic".to_owned()
+        ))
+    );
+}
+
+#[test]
+fn a_bare_topic_key_is_a_state_topic() {
+    let camera = parse_fixture("camera__homeassistant__front_door");
+    assert!(
+        camera
+            .bindings
+            .topics()
+            .contains("homeassistant/camera/front_door/image")
+    );
 }

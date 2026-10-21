@@ -535,7 +535,7 @@ async fn set_override_canonicalises_area() {
 }
 
 /// A discovery payload that cannot become an entity is logged once with its topic: not again
-/// on re-delivery, not for an ignored component (expected noise), and again only after the
+/// on re-delivery, and again only after the
 /// topic recovered and broke anew.
 #[tokio::test]
 async fn invalid_discovery_is_logged_once() {
@@ -553,19 +553,22 @@ async fn invalid_discovery_is_logged_once() {
         "a re-delivery is not logged again"
     );
 
-    hub.ingest("oikos/update/x/config", br#"{"unique_id":"u"}"#);
-    assert_eq!(hub.ignored().len(), 2);
-    assert_eq!(
-        hub.logged_ignored_len(),
-        1,
-        "an ignored component is not logged"
+    hub.ingest(
+        "oikos/update/x/config",
+        br#"{"unique_id":"u","state_topic":"zigbee2mqtt/u"}"#,
     );
+    assert_eq!(
+        hub.ignored().len(),
+        1,
+        "an update is an entity, not ignored"
+    );
+    assert_eq!(hub.logged_ignored_len(), 1, "a valid config is not logged");
 
     hub.ingest(
         "oikos/sensor/garbage/x/config",
         br#"{"unique_id":"g","state_topic":"zigbee2mqtt/g"}"#,
     );
-    assert_eq!(hub.ignored().len(), 1);
+    assert_eq!(hub.ignored().len(), 0);
     assert_eq!(
         hub.logged_ignored_len(),
         0,

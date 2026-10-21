@@ -180,6 +180,7 @@ mod tests {
             device_name: None,
             label: None,
             kind: Kind::BinarySensor,
+            component: "binary_sensor".to_string(),
             protocol_kind: Kind::BinarySensor,
             device_class: None,
             unit: None,

@@ -1,0 +1,1 @@
+{"name":"Movie night","unique_id":"movie_night","command_topic":"homeassistant/scene/movie_night/set","payload_on":"ON"}

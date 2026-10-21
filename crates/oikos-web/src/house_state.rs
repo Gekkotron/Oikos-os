@@ -121,6 +121,7 @@ mod tests {
             device_name: None,
             label: None,
             kind: Kind::Light,
+            component: "light".to_string(),
             protocol_kind: Kind::Light,
             device_class: None,
             unit: None,

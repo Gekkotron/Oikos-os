@@ -264,6 +264,7 @@ mod tests {
             device_name: Some(device.into()),
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: class.map(Into::into),
             unit: None,

@@ -73,6 +73,8 @@ pub fn from_config(kind: Kind, cfg: &Value) -> Capabilities {
             temp_step: number(cfg, "precision"),
             ..Capabilities::default()
         },
+        // The generic caps are set by `parse` from the type table.
+        Kind::Generic => Capabilities::default(),
         Kind::Number => Capabilities {
             min: number(cfg, "min"),
             max: number(cfg, "max"),

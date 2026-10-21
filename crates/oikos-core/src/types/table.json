@@ -1,1 +1,733 @@
-{"version": 1, "types": {}}
+{
+  "version": 1,
+  "types": {
+    "camera": {
+      "placement": "card",
+      "icon": "camera",
+      "primary": "picture",
+      "fields": {
+        "picture": {
+          "shape": "picture",
+          "topic": "topic"
+        }
+      }
+    },
+    "device_automation": {
+      "placement": "signal",
+      "icon": "signal",
+      "primary": "last",
+      "fields": {
+        "last": {
+          "shape": "choice",
+          "topic": "topic"
+        }
+      }
+    },
+    "device_tracker": {
+      "placement": "card",
+      "icon": "tracker",
+      "primary": "state",
+      "requires_state": true,
+      "fields": {
+        "state": {
+          "shape": "choice",
+          "topic": "state_topic",
+          "template": "value_template",
+          "values": [
+            {
+              "value": "home",
+              "key": "payload_home",
+              "default": "home"
+            },
+            {
+              "value": "not_home",
+              "key": "payload_not_home",
+              "default": "not_home"
+            }
+          ]
+        }
+      },
+      "history": {
+        "field": "state",
+        "map": {
+          "home": 1.0,
+          "not_home": 0.0
+        }
+      }
+    },
+    "event": {
+      "placement": "signal",
+      "icon": "event",
+      "primary": "last",
+      "requires_state": true,
+      "fields": {
+        "last": {
+          "shape": "choice",
+          "topic": "state_topic",
+          "template": "value_template",
+          "options": "event_types"
+        }
+      }
+    },
+    "fan": {
+      "placement": "card",
+      "icon": "fan",
+      "primary": "state",
+      "fields": {
+        "state": {
+          "shape": "on_off",
+          "topic": "state_topic",
+          "template": "state_value_template",
+          "values": [
+            {
+              "value": "on",
+              "key": "payload_on",
+              "default": "ON"
+            },
+            {
+              "value": "off",
+              "key": "payload_off",
+              "default": "OFF"
+            }
+          ],
+          "on": "on"
+        },
+        "percentage": {
+          "shape": "number",
+          "topic": "percentage_state_topic",
+          "template": "percentage_value_template",
+          "range": {
+            "min": 0.0,
+            "max": 100.0,
+            "step": 1.0
+          }
+        },
+        "preset": {
+          "shape": "choice",
+          "topic": "preset_mode_state_topic",
+          "template": "preset_mode_value_template",
+          "options": "preset_modes"
+        },
+        "oscillation": {
+          "shape": "on_off",
+          "topic": "oscillation_state_topic",
+          "template": "oscillation_value_template",
+          "on": "on",
+          "values": [
+            {
+              "value": "on",
+              "key": "payload_oscillation_on",
+              "default": "oscillate_on"
+            },
+            {
+              "value": "off",
+              "key": "payload_oscillation_off",
+              "default": "oscillate_off"
+            }
+          ]
+        },
+        "direction": {
+          "shape": "choice",
+          "topic": "direction_state_topic",
+          "template": "direction_value_template",
+          "values": [
+            {
+              "value": "forward",
+              "default": "forward"
+            },
+            {
+              "value": "reverse",
+              "default": "reverse"
+            }
+          ]
+        }
+      },
+      "controls": {
+        "power": {
+          "shape": "on_off",
+          "topic": "command_topic",
+          "template": "command_template",
+          "field": "state",
+          "on": "on",
+          "payload_on": {
+            "value": "on",
+            "key": "payload_on",
+            "default": "ON"
+          },
+          "payload_off": {
+            "value": "off",
+            "key": "payload_off",
+            "default": "OFF"
+          }
+        },
+        "percentage": {
+          "shape": "number",
+          "topic": "percentage_command_topic",
+          "template": "percentage_command_template",
+          "field": "percentage"
+        },
+        "preset": {
+          "shape": "choice",
+          "topic": "preset_mode_command_topic",
+          "template": "preset_mode_command_template",
+          "field": "preset"
+        },
+        "oscillation": {
+          "shape": "on_off",
+          "topic": "oscillation_command_topic",
+          "template": "oscillation_command_template",
+          "field": "oscillation",
+          "on": "on",
+          "payload_on": {
+            "value": "on",
+            "key": "payload_oscillation_on",
+            "default": "oscillate_on"
+          },
+          "payload_off": {
+            "value": "off",
+            "key": "payload_oscillation_off",
+            "default": "oscillate_off"
+          }
+        },
+        "direction": {
+          "shape": "choice",
+          "topic": "direction_command_topic",
+          "template": "direction_command_template",
+          "field": "direction"
+        }
+      },
+      "main": [
+        "power"
+      ],
+      "history": {
+        "field": "state",
+        "map": {
+          "on": 1.0,
+          "off": 0.0
+        }
+      }
+    },
+    "humidifier": {
+      "placement": "card",
+      "icon": "humidifier",
+      "primary": "state",
+      "fields": {
+        "state": {
+          "shape": "on_off",
+          "topic": "state_topic",
+          "template": "state_value_template",
+          "on": "on",
+          "values": [
+            {
+              "value": "on",
+              "key": "payload_on",
+              "default": "ON"
+            },
+            {
+              "value": "off",
+              "key": "payload_off",
+              "default": "OFF"
+            }
+          ]
+        },
+        "target": {
+          "shape": "number",
+          "topic": "target_humidity_state_topic",
+          "template": "target_humidity_state_template",
+          "range": {
+            "min_key": "min_humidity",
+            "max_key": "max_humidity",
+            "min": 0.0,
+            "max": 100.0,
+            "step": 1.0
+          }
+        },
+        "mode": {
+          "shape": "choice",
+          "topic": "mode_state_topic",
+          "template": "mode_state_template",
+          "options": "modes"
+        },
+        "current": {
+          "shape": "number",
+          "topic": "current_humidity_topic",
+          "template": "current_humidity_template",
+          "range": {
+            "min": 0.0,
+            "max": 100.0,
+            "step": 1.0
+          }
+        },
+        "action": {
+          "shape": "choice",
+          "topic": "action_topic",
+          "template": "action_template"
+        }
+      },
+      "controls": {
+        "power": {
+          "shape": "on_off",
+          "topic": "command_topic",
+          "template": "command_template",
+          "field": "state",
+          "on": "on",
+          "payload_on": {
+            "value": "on",
+            "key": "payload_on",
+            "default": "ON"
+          },
+          "payload_off": {
+            "value": "off",
+            "key": "payload_off",
+            "default": "OFF"
+          }
+        },
+        "target": {
+          "shape": "number",
+          "topic": "target_humidity_command_topic",
+          "template": "target_humidity_command_template",
+          "field": "target"
+        },
+        "mode": {
+          "shape": "choice",
+          "topic": "mode_command_topic",
+          "template": "mode_command_template",
+          "field": "mode"
+        }
+      },
+      "main": [
+        "power"
+      ],
+      "history": {
+        "field": "target",
+        "map": {}
+      }
+    },
+    "image": {
+      "placement": "card",
+      "icon": "image",
+      "primary": "picture",
+      "fields": {
+        "picture": {
+          "shape": "picture",
+          "topic": "image_topic"
+        }
+      }
+    },
+    "lawn_mower": {
+      "placement": "card",
+      "icon": "lawn_mower",
+      "primary": "activity",
+      "fields": {
+        "activity": {
+          "shape": "choice",
+          "topic": "activity_state_topic",
+          "template": "activity_value_template",
+          "values": [
+            {
+              "value": "mowing",
+              "default": "mowing"
+            },
+            {
+              "value": "paused",
+              "default": "paused"
+            },
+            {
+              "value": "docked",
+              "default": "docked"
+            },
+            {
+              "value": "error",
+              "default": "error"
+            },
+            {
+              "value": "returning",
+              "default": "returning"
+            }
+          ]
+        }
+      },
+      "controls": {
+        "start": {
+          "shape": "on_off",
+          "topic": "start_mowing_command_topic",
+          "template": "start_mowing_command_template",
+          "press": true,
+          "payload": {
+            "value": "start",
+            "default": "start_mowing"
+          }
+        },
+        "pause": {
+          "shape": "on_off",
+          "topic": "pause_command_topic",
+          "template": "pause_command_template",
+          "press": true,
+          "payload": {
+            "value": "pause",
+            "default": "pause"
+          }
+        },
+        "dock": {
+          "shape": "on_off",
+          "topic": "dock_command_topic",
+          "template": "dock_command_template",
+          "press": true,
+          "payload": {
+            "value": "dock",
+            "default": "dock"
+          }
+        }
+      },
+      "main": [
+        "start"
+      ],
+      "alerts": [
+        {
+          "field": "activity",
+          "any_of": [
+            "error"
+          ]
+        }
+      ]
+    },
+    "lock": {
+      "placement": "card",
+      "icon": "lock",
+      "primary": "state",
+      "requires_state": true,
+      "fields": {
+        "state": {
+          "shape": "choice",
+          "topic": "state_topic",
+          "template": "value_template",
+          "values": [
+            {
+              "value": "locked",
+              "key": "state_locked",
+              "default": "LOCKED"
+            },
+            {
+              "value": "unlocked",
+              "key": "state_unlocked",
+              "default": "UNLOCKED"
+            },
+            {
+              "value": "locking",
+              "default": "LOCKING"
+            },
+            {
+              "value": "unlocking",
+              "default": "UNLOCKING"
+            },
+            {
+              "value": "jammed",
+              "default": "JAMMED"
+            },
+            {
+              "value": "open",
+              "default": "OPEN"
+            },
+            {
+              "value": "opening",
+              "default": "OPENING"
+            }
+          ]
+        }
+      },
+      "controls": {
+        "locked": {
+          "shape": "on_off",
+          "topic": "command_topic",
+          "template": "command_template",
+          "field": "state",
+          "on": "locked",
+          "payload_on": {
+            "value": "locked",
+            "key": "payload_lock",
+            "default": "LOCK"
+          },
+          "payload_off": {
+            "value": "unlocked",
+            "key": "payload_unlock",
+            "default": "UNLOCK"
+          },
+          "labels": {
+            "on": "Lock",
+            "off": "Unlock"
+          }
+        },
+        "open": {
+          "shape": "on_off",
+          "topic": "command_topic",
+          "template": "command_template",
+          "press": true,
+          "payload": {
+            "value": "open",
+            "key": "payload_open",
+            "default": "OPEN"
+          },
+          "requires": "payload_open"
+        }
+      },
+      "main": [
+        "locked"
+      ],
+      "alerts": [
+        {
+          "field": "state",
+          "any_of": [
+            "unlocked",
+            "jammed"
+          ]
+        }
+      ],
+      "history": {
+        "field": "state",
+        "map": {
+          "locked": 1.0,
+          "unlocked": 0.0
+        }
+      }
+    },
+    "notify": {
+      "placement": "target",
+      "icon": "notify",
+      "controls": {
+        "message": {
+          "shape": "text",
+          "topic": "command_topic",
+          "template": "command_template"
+        }
+      }
+    },
+    "scene": {
+      "placement": "card",
+      "icon": "scene",
+      "controls": {
+        "activate": {
+          "shape": "on_off",
+          "topic": "command_topic",
+          "press": true,
+          "payload": {
+            "value": "activate",
+            "key": "payload_on",
+            "default": "ON"
+          }
+        }
+      },
+      "main": [
+        "activate"
+      ]
+    },
+    "siren": {
+      "placement": "card",
+      "icon": "siren",
+      "primary": "state",
+      "requires_state": true,
+      "fields": {
+        "state": {
+          "shape": "on_off",
+          "topic": "state_topic",
+          "template": "state_value_template",
+          "on": "on",
+          "values": [
+            {
+              "value": "on",
+              "key": "state_on",
+              "default": "ON"
+            },
+            {
+              "value": "off",
+              "key": "state_off",
+              "default": "OFF"
+            }
+          ]
+        }
+      },
+      "controls": {
+        "power": {
+          "shape": "on_off",
+          "topic": "command_topic",
+          "template": "command_template",
+          "field": "state",
+          "on": "on",
+          "payload_on": {
+            "value": "on",
+            "key": "payload_on",
+            "default": "ON"
+          },
+          "payload_off": {
+            "value": "off",
+            "key": "payload_off",
+            "default": "OFF"
+          }
+        },
+        "tone": {
+          "shape": "choice",
+          "topic": "command_topic",
+          "json_key": "tone",
+          "requires": "available_tones"
+        }
+      },
+      "main": [
+        "power"
+      ],
+      "alerts": [
+        {
+          "field": "state",
+          "any_of": [
+            "on"
+          ]
+        }
+      ],
+      "history": {
+        "field": "state",
+        "map": {
+          "on": 1.0,
+          "off": 0.0
+        }
+      }
+    },
+    "tag": {
+      "placement": "signal",
+      "icon": "tag",
+      "primary": "last",
+      "fields": {
+        "last": {
+          "shape": "text",
+          "topic": "topic",
+          "template": "value_template"
+        }
+      }
+    },
+    "text": {
+      "placement": "card",
+      "icon": "text",
+      "primary": "value",
+      "fields": {
+        "value": {
+          "shape": "text",
+          "topic": "state_topic",
+          "template": "value_template"
+        }
+      },
+      "controls": {
+        "value": {
+          "shape": "text",
+          "topic": "command_topic",
+          "template": "command_template",
+          "field": "value"
+        }
+      },
+      "main": [
+        "value"
+      ]
+    },
+    "update": {
+      "placement": "update",
+      "icon": "update",
+      "primary": "latest",
+      "fields": {
+        "installed": {
+          "shape": "version",
+          "topic": "state_topic",
+          "template": "value_template"
+        },
+        "latest": {
+          "shape": "version",
+          "topic": "latest_version_topic",
+          "template": "latest_version_template"
+        }
+      }
+    },
+    "valve": {
+      "placement": "card",
+      "icon": "valve",
+      "primary": "state",
+      "requires_state": true,
+      "fields": {
+        "state": {
+          "shape": "choice",
+          "topic": "state_topic",
+          "template": "value_template",
+          "values": [
+            {
+              "value": "open",
+              "key": "state_open",
+              "default": "open"
+            },
+            {
+              "value": "opening",
+              "default": "opening"
+            },
+            {
+              "value": "closed",
+              "key": "state_closed",
+              "default": "closed"
+            },
+            {
+              "value": "closing",
+              "default": "closing"
+            }
+          ]
+        },
+        "position": {
+          "shape": "number",
+          "topic": "state_topic",
+          "template": "value_template",
+          "range": {
+            "min": 0.0,
+            "max": 100.0,
+            "step": 1.0
+          }
+        }
+      },
+      "controls": {
+        "valve": {
+          "shape": "on_off",
+          "topic": "command_topic",
+          "template": "command_template",
+          "field": "state",
+          "on": "open",
+          "payload_on": {
+            "value": "open",
+            "key": "payload_open",
+            "default": "OPEN"
+          },
+          "payload_off": {
+            "value": "closed",
+            "key": "payload_close",
+            "default": "CLOSE"
+          },
+          "labels": {
+            "on": "Open",
+            "off": "Close"
+          }
+        },
+        "stop": {
+          "shape": "on_off",
+          "topic": "command_topic",
+          "template": "command_template",
+          "press": true,
+          "payload": {
+            "value": "stop",
+            "key": "payload_stop",
+            "default": "STOP"
+          },
+          "requires": "payload_stop"
+        }
+      },
+      "main": [
+        "valve"
+      ],
+      "history": {
+        "field": "state",
+        "map": {
+          "open": 1.0,
+          "closed": 0.0
+        }
+      }
+    }
+  }
+}

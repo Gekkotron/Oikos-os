@@ -1,0 +1,1 @@
+{"name":"Front door camera","unique_id":"front_door_camera","topic":"homeassistant/camera/front_door/image","device":{"identifiers":["front_door_camera_dev"],"name":"Front door camera"}}

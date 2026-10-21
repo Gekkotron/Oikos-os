@@ -123,6 +123,8 @@ pub(crate) fn card_for(entity: EntityView) -> AnyView {
         Kind::AlarmPanel => view! { <AlarmPanelCard entity=entity /> }.into_any(),
         Kind::Vacuum => view! { <VacuumCard entity=entity /> }.into_any(),
         Kind::WaterHeater => view! { <WaterHeaterCard entity=entity /> }.into_any(),
+        // Placeholder readout until the generic card lands.
+        Kind::Generic => view! { <SensorCard entity=entity /> }.into_any(),
     }
 }
 
@@ -274,6 +276,7 @@ mod tests {
             device_name: None,
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: device_class.map(Into::into),
             unit: None,

@@ -266,12 +266,28 @@ pub fn channel_icon(channel: AlertChannel) -> &'static str {
 /// The icon of an entity card or sheet: the switch type's glyph when a switch is shown as
 /// something else, else [`kind_icon`].
 pub fn entity_icon(entity: &oikos_api::EntityView) -> &'static str {
+    if entity.kind == Kind::Generic {
+        return generic_icon(&entity.component);
+    }
     match SwitchType::of(entity.protocol_kind, &entity.ui) {
         Some(SwitchType::Door) => DOOR,
         Some(SwitchType::Siren) => SIREN,
         Some(SwitchType::Chime) => CHIME,
         Some(SwitchType::Plug) => PLUG,
         _ => kind_icon(entity.kind, entity.device_class.as_deref()),
+    }
+}
+
+/// Placeholder glyph for a table-described component until the generic cards land: the
+/// table's icon name where we draw it, else the sensor glyph.
+fn generic_icon(component: &str) -> &'static str {
+    let name = oikos_core::types::type_def(component).map(|d| d.icon.as_str());
+    match name {
+        Some("lock") => LOCK_OPEN,
+        Some("siren") => SIREN,
+        Some("humidifier") => HUMIDITY,
+        Some("camera") => CHANNEL_CAMERA,
+        _ => SENSOR,
     }
 }
 
@@ -292,6 +308,7 @@ pub fn kind_icon(kind: Kind, device_class: Option<&str>) -> &'static str {
         Kind::Button => BUTTON,
         Kind::Vacuum => VACUUM,
         Kind::WaterHeater => WATER_HEATER,
+        Kind::Generic => SENSOR,
     }
 }
 
@@ -326,6 +343,7 @@ mod tests {
             device_name: None,
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: None,
             unit: None,

@@ -9,6 +9,7 @@ use super::topic::DiscoveryTopic;
 use crate::model::{
     Bindings, Entity, EntityCategory, IGNORED_COMPONENTS, Kind, UNASSIGNED_AREA, UiOverride,
 };
+use crate::types::GenericCaps;
 
 /// Why a discovery payload could not be used.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -63,10 +64,9 @@ pub fn parse(
             reason: format!("ignored component `{}`", topic.component),
         });
     }
-    let Some(kind) = Kind::from_component(&topic.component) else {
-        return Ok(Parsed::Ignored {
-            reason: format!("unsupported component `{}`", topic.component),
-        });
+    let kind = Kind::from_component(&topic.component).filter(|k| *k != Kind::Generic);
+    let Some(kind) = kind else {
+        return parse_generic(topic, text, topic_str);
     };
     let config = expand_object(object(text)?);
     if REQUIRES_STATE_TOPIC.contains(&kind)
@@ -80,6 +80,33 @@ pub fn parse(
     Ok(Parsed::Entity(Box::new(build(
         kind, topic, config, topic_str,
     ))))
+}
+
+/// A component the type table describes becomes a [`Kind::Generic`] entity; any other
+/// component is unsupported.
+fn parse_generic(
+    topic: &DiscoveryTopic,
+    text: &str,
+    topic_str: &str,
+) -> Result<Parsed, DiscoveryError> {
+    let Some(def) = crate::types::type_def(&topic.component) else {
+        return Ok(Parsed::Ignored {
+            reason: format!("unsupported component `{}`", topic.component),
+        });
+    };
+    let config = expand_object(object(text)?);
+    if def.requires_state
+        && let Some(field) = def.primary.as_ref().and_then(|p| def.fields.get(p))
+        && !config.get(&field.topic).is_some_and(Value::is_string)
+    {
+        return Err(DiscoveryError::Invalid(format!(
+            "{} without {}",
+            topic.component, field.topic
+        )));
+    }
+    let mut entity = build(Kind::Generic, topic, config, topic_str);
+    entity.capabilities.generic = Some(GenericCaps::from_config(def, &entity.bindings.config));
+    Ok(Parsed::Entity(Box::new(entity)))
 }
 
 /// Splits a device-based config (`device` component with `components`) into one per-entity
@@ -173,6 +200,7 @@ fn build(
         label,
         kind,
         protocol_kind: kind,
+        component: topic.component.clone(),
         device_class,
         unit,
         icon,

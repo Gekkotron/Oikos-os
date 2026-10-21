@@ -131,8 +131,10 @@ impl Bindings {
             return topics;
         };
         for (key, value) in config {
-            let is_topic =
-                key.ends_with("_topic") || key == "state_topic" || key == "json_attributes_topic";
+            let is_topic = key.ends_with("_topic")
+                || key == "state_topic"
+                || key == "json_attributes_topic"
+                || key == "topic";
             let is_command =
                 key.ends_with("command_topic") || WRITE_ONLY_TOPIC_KEYS.contains(&key.as_str());
             let is_availability = key == "availability_topic";
@@ -163,6 +165,9 @@ pub struct Entity {
     pub kind: Kind,
     /// The kind as discovered, which picks the MQTT mapper.
     pub protocol_kind: Kind,
+    /// The Home Assistant discovery component this entity was created from
+    /// (`light`, `switch`, `lock`, `fan`, `device_automation`, ...).
+    pub component: String,
     pub device_class: Option<String>,
     pub unit: Option<String>,
     pub icon: Option<String>,

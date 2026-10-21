@@ -21,6 +21,8 @@ pub(super) fn map(m: &Mapper<'_>) -> Result<Vec<Publish>, CommandError> {
         Kind::AlarmPanel => alarm(m),
         Kind::Vacuum => vacuum(m),
         Kind::Sensor | Kind::BinarySensor => Err(m.unsupported()),
+        // Replaced by `types::command::map` once the generic command path lands.
+        Kind::Generic => Ok(Vec::new()),
     }
 }
 

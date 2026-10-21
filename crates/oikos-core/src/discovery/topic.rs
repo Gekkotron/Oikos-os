@@ -57,5 +57,7 @@ pub fn classify(topic: &str, prefixes: &[String], reserved: &[String]) -> TopicC
 }
 
 fn is_component(name: &str) -> bool {
-    Kind::from_component(name).is_some() || IGNORED_COMPONENTS.contains(&name)
+    Kind::from_component(name).is_some()
+        || IGNORED_COMPONENTS.contains(&name)
+        || crate::types::type_def(name).is_some()
 }

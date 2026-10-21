@@ -209,6 +209,7 @@ mod tests {
             device_name: None,
             label: None,
             kind,
+            component: kind.component().to_string(),
             protocol_kind: kind,
             device_class: None,
             unit: None,

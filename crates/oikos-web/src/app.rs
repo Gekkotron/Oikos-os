@@ -182,6 +182,7 @@ mod tests {
             device_name: None,
             label: None,
             kind: Kind::AlarmPanel,
+            component: "alarm_control_panel".to_string(),
             protocol_kind: Kind::AlarmPanel,
             device_class: None,
             unit: None,

@@ -19,28 +19,12 @@ pub enum Kind {
     Button,
     Vacuum,
     WaterHeater,
+    /// Any other component, described by the type table; the component name is in `Entity.component`.
+    Generic,
 }
 
 /// Home Assistant components that are recognised as discovery but never become entities.
-pub const IGNORED_COMPONENTS: &[&str] = &[
-    "device_automation",
-    "update",
-    "device_tracker",
-    "text",
-    "event",
-    "scene",
-    "siren",
-    "lock",
-    "fan",
-    "humidifier",
-    "camera",
-    "image",
-    "lawn_mower",
-    "notify",
-    "tag",
-    "valve",
-    "device",
-];
+pub const IGNORED_COMPONENTS: &[&str] = &["device"];
 
 impl Kind {
     /// Every kind, in declaration order.
@@ -57,6 +41,7 @@ impl Kind {
         Kind::Button,
         Kind::Vacuum,
         Kind::WaterHeater,
+        Kind::Generic,
     ];
 
     /// The kind for a Home Assistant component name (`alarm_control_panel` → [`Kind::AlarmPanel`]).
@@ -82,6 +67,8 @@ impl Kind {
             Kind::Button => "button",
             Kind::Vacuum => "vacuum",
             Kind::WaterHeater => "water_heater",
+            // A formal placeholder: the real component lives in `Entity.component`.
+            Kind::Generic => "generic",
         }
     }
 }

@@ -5,7 +5,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use oikos_core::model::{
-    Availability, ClimateState, CoverState, Entity, EntityState, Hs, LightState, StateValue,
+    Availability, ClimateState, CoverState, Entity, EntityState, Hs, Kind, LightState, StateValue,
     VacuumState, WaterHeaterState,
 };
 use oikos_core::state::color::{rgb_to_hs, xy_to_hs};
@@ -69,7 +69,12 @@ fn recorded_states_apply_to_every_entity() {
                     *counts.entry("unchanged").or_default() += 1;
                 }
                 Ok(Applied::NotForThisEntity) => {
-                    assert!(!bound, "{} ignored bound {topic}", entity.unique_id);
+                    // Generic entities take no state until the generic state path lands.
+                    assert!(
+                        !bound || entity.kind == Kind::Generic,
+                        "{} ignored bound {topic}",
+                        entity.unique_id
+                    );
                     assert_eq!(state, EntityState::default());
                     *counts.entry("not_for_this_entity").or_default() += 1;
                 }
