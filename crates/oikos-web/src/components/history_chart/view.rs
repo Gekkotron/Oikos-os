@@ -182,9 +182,17 @@ fn render_series(
     unit: Option<String>,
 ) -> impl IntoView {
     let scale = y_scale(&s.points);
-    let StepPath { d, band_d } = step_path(&s.points, scale, VIEW_W, VIEW_H);
+    // The x-axis is the whole range ending now, so short history sits at the right edge.
+    let now = (crate::energy::now_ms() / 1000) as i64;
+    let StepPath { d, band_d } = step_path(
+        &s.points,
+        scale,
+        now - range.span_secs(),
+        now,
+        VIEW_W,
+        VIEW_H,
+    );
     let (y_lo, y_hi) = y_labels(&scale, &kind, unit.as_deref());
-    let now = s.points.last().map(|p| p.0).unwrap_or(0);
     let xticks = tick_labels(range, now);
     let (min_v, max_v) = series_min_max(&s.points);
     let unit_str = unit.unwrap_or_default();

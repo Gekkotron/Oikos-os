@@ -57,11 +57,14 @@ pub fn y_scale(points: &[(i64, f64, f64, f64)]) -> YScale {
     }
 }
 
-/// Build the step-line path and its min/max band in viewBox coordinates. Empty input yields
-/// empty strings.
+/// Build the step-line path and its min/max band in viewBox coordinates, with x spanning the
+/// window `t_start..t_end` (bucket starts before it clamp to the left edge). Each value is held
+/// until the next point, and the last one until `t_end`. Empty input yields empty strings.
 pub fn step_path(
     points: &[(i64, f64, f64, f64)],
     scale: YScale,
+    t_start: i64,
+    t_end: i64,
     view_w: f64,
     view_h: f64,
 ) -> StepPath {
@@ -71,12 +74,11 @@ pub fn step_path(
             band_d: String::new(),
         };
     }
-    let t_lo = points.first().unwrap().0;
-    let t_hi = points.last().unwrap().0;
-    let t_span = (t_hi - t_lo).max(1) as f64;
+    let t_span = (t_end - t_start).max(1) as f64;
     let y_span = (scale.max - scale.min).max(f64::EPSILON);
-    let x_of = |t: i64| (t - t_lo) as f64 / t_span * view_w;
+    let x_of = |t: i64| ((t - t_start) as f64 / t_span).clamp(0.0, 1.0) * view_w;
     let y_of = |v: f64| view_h - (v - scale.min) / y_span * view_h;
+    let x_end = view_w;
 
     let (x0, y0) = (x_of(points[0].0), y_of(points[0].1));
     let mut d = format!("M{x0},{y0}");
@@ -88,11 +90,12 @@ pub fn step_path(
         d.push('V');
         d.push_str(&format!("{y}"));
     }
+    d.push_str(&format!("H{x_end}"));
 
-    // Band: step up along max values, step back along min values, closed.
+    // Band: step forward along max values to the window end, then step back along min values.
     let mut band = String::new();
-    let (xb0, ymax0) = (x_of(points[0].0), y_of(points[0].3));
-    band.push_str(&format!("M{xb0},{ymax0}"));
+    let ymax0 = y_of(points[0].3);
+    band.push_str(&format!("M{x0},{ymax0}"));
     for p in &points[1..] {
         let x = x_of(p.0);
         let y_max = y_of(p.3);
@@ -101,13 +104,17 @@ pub fn step_path(
         band.push('V');
         band.push_str(&format!("{y_max}"));
     }
-    // Walk back along min
-    for p in points.iter().rev() {
-        let x = x_of(p.0);
-        let y_min = y_of(p.2);
-        band.push('L');
-        band.push_str(&format!("{x},{y_min}"));
+    let y_min_last = y_of(points[points.len() - 1].2);
+    band.push_str(&format!("H{x_end}V{y_min_last}"));
+    for i in (1..points.len()).rev() {
+        let x = x_of(points[i].0);
+        let y_min_prev = y_of(points[i - 1].2);
+        band.push('H');
+        band.push_str(&format!("{x}"));
+        band.push('V');
+        band.push_str(&format!("{y_min_prev}"));
     }
+    band.push_str(&format!("H{x0}"));
     band.push('Z');
 
     StepPath { d, band_d: band }
@@ -172,14 +179,48 @@ mod tests {
     fn step_path_produces_horizontal_then_vertical_segments() {
         let p = vec![(0, 0.0, 0.0, 0.0), (10, 1.0, 1.0, 1.0)];
         let s = YScale { min: 0.0, max: 1.0 };
-        let out = step_path(&p, s, 100.0, 50.0);
+        let out = step_path(&p, s, 0, 10, 100.0, 50.0);
         assert!(out.d.contains("M0,50"));
         assert!(out.d.contains("H") && out.d.contains("V"));
     }
 
     #[test]
+    fn step_path_holds_a_single_point_until_the_window_end() {
+        let p = vec![(50, 0.5, 0.0, 1.0)];
+        let s = YScale { min: 0.0, max: 1.0 };
+        let out = step_path(&p, s, 0, 100, 100.0, 50.0);
+        assert_eq!(out.d, "M50,25H100");
+        assert_eq!(out.band_d, "M50,0H100V50H50Z");
+    }
+
+    #[test]
+    fn step_path_places_short_history_at_the_right_of_the_window() {
+        let p = vec![(80, 0.0, 0.0, 0.0), (90, 1.0, 1.0, 1.0)];
+        let s = YScale { min: 0.0, max: 1.0 };
+        let out = step_path(&p, s, 0, 100, 100.0, 50.0);
+        assert_eq!(out.d, "M80,50H90V0H100");
+    }
+
+    #[test]
+    fn step_path_clamps_a_bucket_starting_before_the_window() {
+        let p = vec![(-20, 0.0, 0.0, 0.0)];
+        let s = YScale { min: 0.0, max: 1.0 };
+        let out = step_path(&p, s, 0, 100, 100.0, 50.0);
+        assert_eq!(out.d, "M0,50H100");
+    }
+
+    #[test]
+    fn step_path_band_steps_back_along_min_without_diagonals() {
+        let p = vec![(0, 0.5, 0.0, 1.0), (50, 0.5, 0.25, 0.75)];
+        let s = YScale { min: 0.0, max: 1.0 };
+        let out = step_path(&p, s, 0, 100, 100.0, 100.0);
+        assert!(!out.band_d.contains('L'));
+        assert_eq!(out.band_d, "M0,0H50V25H100V75H50V100H0Z");
+    }
+
+    #[test]
     fn step_path_empty_input_is_empty() {
-        let out = step_path(&[], YScale { min: 0.0, max: 1.0 }, 100.0, 50.0);
+        let out = step_path(&[], YScale { min: 0.0, max: 1.0 }, 0, 100, 100.0, 50.0);
         assert_eq!(out.d, "");
         assert_eq!(out.band_d, "");
     }
