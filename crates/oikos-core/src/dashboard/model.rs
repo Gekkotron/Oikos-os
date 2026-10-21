@@ -79,6 +79,7 @@ pub enum DashboardHistoryRange {
 
 /// Untagged: `History` is listed before `Entity` because both carry
 /// `entity_id`, and `History` is the one that requires `range`.
+/// Do not reorder: see `widget_config_history_decodes_before_entity`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[serde(untagged)]
@@ -219,6 +220,24 @@ mod tests {
         assert_eq!(
             w.config,
             WidgetConfig::Entity { entity_id: "lamp".into(), title: None }
+        );
+    }
+
+    #[test]
+    fn widget_config_history_decodes_before_entity() {
+        let h: WidgetConfig =
+            serde_json::from_str(r#"{"entity_id":"t","range":"24h"}"#).unwrap();
+        assert_eq!(
+            h,
+            WidgetConfig::History {
+                entity_id: "t".into(),
+                range: DashboardHistoryRange::H24
+            }
+        );
+        let e: WidgetConfig = serde_json::from_str(r#"{"entity_id":"t"}"#).unwrap();
+        assert_eq!(
+            e,
+            WidgetConfig::Entity { entity_id: "t".into(), title: None }
         );
     }
 
