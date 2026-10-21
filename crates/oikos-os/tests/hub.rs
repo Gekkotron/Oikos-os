@@ -1446,9 +1446,10 @@ async fn migration_honours_group_names() {
     let (hub, _rx) = migration_hub(true);
     feed_member(&hub, Kind::Light, 1, "living").await;
     feed_member(&hub, Kind::Light, 2, "living").await;
-    hub.set_area_group("living", "light", Some(Some("Main lamps".to_owned())), None)
-        .await
-        .expect("area group name");
+    hub.ingest(
+        "oikos/ui/_areas",
+        br#"{"areas":[{"id":"living","name":"Living","groupNames":{"light":"Main lamps"}}]}"#,
+    );
     let outcome = hub.run_group_migration_once().await;
     assert_eq!(outcome.created, ["light_living"]);
     let views = hub.list_groups().expect("enabled");

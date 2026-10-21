@@ -3,7 +3,7 @@
 
 use oikos_api::EntityView;
 use oikos_core::energy::{EnergyRole, PowerUnits};
-use oikos_core::model::{GroupKind, Kind, Placement, SwitchType, UNASSIGNED_AREA, UiOverride};
+use oikos_core::model::{Kind, Placement, SwitchType, UNASSIGNED_AREA, UiOverride};
 
 use crate::cards::light::has_colour;
 
@@ -48,7 +48,8 @@ pub fn shown(entity: &EntityView, draft: &UiOverride) -> Shown {
     Shown {
         show_as: switch_type.is_some(),
         show_on_home: Placement::elsewhere(kind, class, draft),
-        group_with_room: GroupKind::of(kind).is_some() && entity.area != UNASSIGNED_AREA,
+        group_with_room: matches!(kind, Kind::Cover | Kind::Light)
+            && entity.area != UNASSIGNED_AREA,
         light_on,
         light_on_brightness: light_on
             && draft.light_on_preset.is_some()

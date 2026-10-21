@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oikos_api::{AreaView, ConnectionStatus, EntityView, GroupSpec};
-use oikos_core::model::{GroupKey, GroupKind, Kind, MIN_GROUP_MEMBERS};
+use oikos_core::model::{Kind, UNASSIGNED_AREA};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::time::timeout;
 
@@ -15,44 +15,59 @@ use crate::hub::Hub;
 /// How long the retained sync must stay silent before the migration starts.
 const SETTLE_QUIET: Duration = Duration::from_millis(1500);
 
-/// The groups the derived rule shows today, as `(id, spec)` sorted by id. The id is
+/// A room holds a derived group only from this many members.
+const MIN_MEMBERS: usize = 2;
+
+/// The kind a derived room group takes, with its `groupNames` key and default card name;
+/// `None` for kinds that never grouped.
+fn derived_kind(kind: Kind) -> Option<(&'static str, &'static str)> {
+    match kind {
+        Kind::Cover => Some(("cover", "Shutters")),
+        Kind::Light => Some(("light", "Lights")),
+        _ => None,
+    }
+}
+
+/// The groups the derived rule showed, as `(id, spec)` sorted by id. The id is
 /// `<kind key>_<area id>`; area ids are already `[a-z0-9_]` slugs.
 pub fn plan(
     entities: &BTreeMap<String, EntityView>,
     areas: &[AreaView],
 ) -> Vec<(String, GroupSpec)> {
-    let mut rosters: BTreeMap<GroupKey, Vec<String>> = BTreeMap::new();
+    let mut rosters: BTreeMap<(String, Kind), Vec<String>> = BTreeMap::new();
     for (id, entity) in entities {
-        if let Some(key) = GroupKey::candidate(&entity.area, entity.kind, &entity.ui) {
-            rosters.entry(key).or_default().push(id.clone());
+        if entity.ui.ungrouped || entity.area == UNASSIGNED_AREA {
+            continue;
+        }
+        if derived_kind(entity.kind).is_some() {
+            rosters
+                .entry((entity.area.clone(), entity.kind))
+                .or_default()
+                .push(id.clone());
         }
     }
     let mut out: Vec<(String, GroupSpec)> = rosters
         .into_iter()
-        .filter(|(_, members)| members.len() >= MIN_GROUP_MEMBERS)
-        .map(|(key, mut members)| {
+        .filter(|(_, members)| members.len() >= MIN_MEMBERS)
+        .filter_map(|((area, kind), mut members)| {
+            let (key, default_name) = derived_kind(kind)?;
             members.sort();
             let custom = areas
                 .iter()
-                .find(|a| a.id == key.area)
-                .and_then(|a| a.group_names.get(key.kind.key()))
+                .find(|a| a.id == area)
+                .and_then(|a| a.group_names.get(key))
                 .map(|name| name.trim())
                 .filter(|name| !name.is_empty());
-            let name = custom.unwrap_or_else(|| key.kind.default_name()).to_owned();
-            let kind = match key.kind {
-                GroupKind::Light => Kind::Light,
-                GroupKind::Cover => Kind::Cover,
-            };
-            let id = format!("{}_{}", key.kind.key(), key.area);
-            (
-                id,
+            let name = custom.unwrap_or(default_name).to_owned();
+            Some((
+                format!("{key}_{area}"),
                 GroupSpec {
                     kind,
                     name,
                     members,
                     hide_members: true,
                 },
-            )
+            ))
         })
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));

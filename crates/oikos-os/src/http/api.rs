@@ -40,7 +40,6 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         )
         .route("/areas", put(set_areas))
         .route("/areas/{id}", patch(rename_area))
-        .route("/areas/{id}/groups/{kind}", patch(set_area_group))
         .route("/ignored", get(ignored))
         .route("/alerts", get(alerts))
         .route("/alerts/{id}/actions/{action}", post(alert_action))
@@ -244,29 +243,6 @@ async fn rename_area(
 ) -> Result<Json<Vec<AreaView>>, HttpError> {
     let Json(RenameArea { name }) = body?;
     Ok(Json(hub.rename_area(&id, &name).await?))
-}
-
-/// The `PATCH /areas/{id}/groups/{kind}` body. `name` absent leaves the name, `null` clears it.
-#[derive(serde::Deserialize)]
-struct SetAreaGroup {
-    #[serde(default, deserialize_with = "present")]
-    name: Option<Option<String>>,
-    favorite: Option<bool>,
-}
-
-/// Any present value, `null` included, becomes `Some`; an absent field stays `None` through
-/// `#[serde(default)]`.
-fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
-    serde::Deserialize::deserialize(d).map(Some)
-}
-
-async fn set_area_group(
-    State(hub): HubState,
-    Path((id, kind)): Path<(String, String)>,
-    body: Body<SetAreaGroup>,
-) -> Result<Json<Vec<AreaView>>, HttpError> {
-    let Json(SetAreaGroup { name, favorite }) = body?;
-    Ok(Json(hub.set_area_group(&id, &kind, name, favorite).await?))
 }
 
 async fn ignored(State(hub): HubState) -> Json<Vec<IgnoredView>> {

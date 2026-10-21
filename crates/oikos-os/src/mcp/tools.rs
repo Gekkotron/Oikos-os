@@ -46,8 +46,7 @@ impl OikosMcp {
 
     /// Replaces the declared rooms (retained on `oikos/ui/_areas`) and returns the resulting
     /// list. A room kept by id keeps the `icon`, group names, group favourites and other
-    /// fields you leave out; group names and favourites are changed with
-    /// `PATCH /api/v1/areas/{id}/groups/{kind}`.
+    /// fields you leave out.
     #[tool(name = "set_areas", annotations(idempotent_hint = true))]
     async fn set_areas(
         &self,

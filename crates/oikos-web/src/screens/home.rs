@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
-use oikos_core::model::{GroupKind, Kind, Placement, SwitchType, UNASSIGNED_AREA};
+use oikos_core::model::{Kind, Placement, SwitchType, UNASSIGNED_AREA};
 use std::collections::{BTreeMap, HashSet};
 
 use crate::cards::alarm::AlarmPanelCard;
@@ -13,9 +13,8 @@ use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
 use crate::cards::door::DoorCard;
 use crate::cards::group::{
-    ButtonGroupCard, ClimateGroupCard, CoverGroupCard, CoverGroupEntityCard, LightGroupCard,
-    LightGroupEntityCard, NumberGroupCard, SelectGroupCard, SwitchGroupCard, VacuumGroupCard,
-    WaterHeaterGroupCard,
+    ButtonGroupCard, ClimateGroupCard, CoverGroupEntityCard, LightGroupEntityCard, NumberGroupCard,
+    SelectGroupCard, SwitchGroupCard, VacuumGroupCard, WaterHeaterGroupCard,
 };
 use crate::cards::light::LightCard;
 use crate::cards::number::NumberCard;
@@ -266,12 +265,6 @@ pub fn HomeScreen() -> impl IntoView {
                                     });
                                     view! { {move || entity.get().map(card_for)} }.into_any()
                                 }
-                                HomeItem::Group { key, members } if key.kind == GroupKind::Cover => {
-                                    view! { <CoverGroupCard key=key members=members /> }.into_any()
-                                }
-                                HomeItem::Group { key, members } => {
-                                    view! { <LightGroupCard key=key members=members /> }.into_any()
-                                }
                             }
                         />
                     </div>
@@ -299,7 +292,6 @@ mod tests {
             .into_iter()
             .map(|i| match i {
                 HomeItem::Entity(id) => id,
-                HomeItem::Group { key, .. } => panic!("unexpected group {key:?}"),
             })
             .collect()
     }
