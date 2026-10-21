@@ -161,7 +161,8 @@ impl From<HubError> for HttpError {
             | HubError::UnknownAlert(_)
             | HubError::UnknownAction(_)
             | HubError::UnknownFlow(_)
-            | HubError::UnknownArea(_) => StatusCode::NOT_FOUND,
+            | HubError::UnknownArea(_)
+            | HubError::UnknownDashboard(_) => StatusCode::NOT_FOUND,
             HubError::Rejected(_) | HubError::Command(_) | HubError::InvalidFlow(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
