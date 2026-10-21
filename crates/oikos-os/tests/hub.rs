@@ -986,6 +986,38 @@ fn control(name: &str, value: Option<serde_json::Value>) -> Command {
 }
 
 #[tokio::test]
+async fn retained_group_definition_is_loaded() {
+    let (hub, _rx) = hub();
+    let changes = hub.ingest(
+        "oikos/group/living/definition",
+        br#"{"name":"Living lights","kind":"light","members":[]}"#,
+    );
+    assert!(changes.is_empty());
+    assert!(hub.read_group_store().get("living").is_some());
+    hub.ingest("oikos/group/_migrated", b"1");
+    assert!(hub.read_group_store().migrated());
+}
+
+fn groups_hub() -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.groups.enabled = true;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    feed_switch(&hub);
+    (hub, rx)
+}
+
+fn switch_group() -> oikos_api::GroupSpec {
+    oikos_api::GroupSpec {
+        kind: Kind::Switch,
+        name: "Stair".to_owned(),
+        members: vec![SWITCH_ID.to_owned()],
+        hide_members: true,
+    }
+}
+
+#[tokio::test]
 async fn scene_activate_is_accepted_without_echo() {
     let (hub, mut publisher) = hub_with_timeout(5_000);
     let id = feed_generic(
@@ -1063,6 +1095,22 @@ async fn secret_text_never_reaches_history() {
 }
 
 #[tokio::test]
+async fn set_group_with_the_switch_off_is_refused_without_publish() {
+    let (hub, mut rx) = hub();
+    feed_switch(&hub);
+    assert!(matches!(
+        hub.set_group("stair", switch_group()).await,
+        Err(HubError::Publish(_))
+    ));
+    assert!(drain(&mut rx).is_empty());
+    assert!(matches!(hub.list_groups(), Err(HubError::Publish(_))));
+    assert!(matches!(
+        hub.delete_group("stair").await,
+        Err(HubError::Publish(_))
+    ));
+}
+
+#[tokio::test]
 async fn type_table_is_published_retained_on_connect() {
     let (hub, mut publisher) = hub();
     hub.publish_types().await.expect("publish");
@@ -1081,4 +1129,493 @@ async fn type_table_echo_is_not_an_override() {
         oikos_core::types::table_json().as_bytes(),
     );
     assert_eq!(hub.snapshot(), before);
+}
+
+#[tokio::test]
+async fn set_group_rejects_bad_specs_without_publish() {
+    let (hub, mut rx) = groups_hub();
+    let mut sensor = switch_group();
+    sensor.kind = Kind::Sensor;
+    assert!(matches!(
+        hub.set_group("stair", sensor).await,
+        Err(HubError::Rejected(_))
+    ));
+    let mut nested = switch_group();
+    nested.members = vec!["group_other".to_owned()];
+    assert!(matches!(
+        hub.set_group("stair", nested).await,
+        Err(HubError::Rejected(_))
+    ));
+    let mut wrong_kind = switch_group();
+    wrong_kind.kind = Kind::Light;
+    assert!(matches!(
+        hub.set_group("stair", wrong_kind).await,
+        Err(HubError::Rejected(_))
+    ));
+    assert!(matches!(
+        hub.set_group("BAD-id", switch_group()).await,
+        Err(HubError::Rejected(_))
+    ));
+    assert!(drain(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn set_group_publishes_definition_config_availability_and_state() {
+    let (hub, mut rx) = groups_hub();
+    let view = hub
+        .set_group("stair", switch_group())
+        .await
+        .expect("created");
+    assert_eq!(view.id, "stair");
+    assert_eq!(view.entity.id, "group_stair");
+    assert_eq!(view.members.len(), 1);
+    assert!(view.members[0].present && !view.members[0].mismatch);
+    let published = drain(&mut rx);
+    let topics: Vec<&str> = published.iter().map(|p| p.topic.as_str()).collect();
+    assert_eq!(
+        topics,
+        [
+            "oikos/switch/group/stair/config",
+            "oikos/group/stair/avail",
+            "oikos/group/stair/definition",
+            "oikos/group/stair",
+        ]
+    );
+    assert!(published.iter().all(|p| p.retain));
+    assert_eq!(published[1].payload, "online");
+
+    let again = hub
+        .set_group("stair", switch_group())
+        .await
+        .expect("replaced");
+    assert_eq!(again.id, "stair");
+    let topics: Vec<String> = drain(&mut rx).into_iter().map(|p| p.topic).collect();
+    assert!(
+        !topics.contains(&"oikos/group/stair".to_owned()),
+        "{topics:?}"
+    );
+}
+
+#[tokio::test]
+async fn changing_the_kind_clears_the_old_config_topic() {
+    let (hub, mut rx) = groups_hub();
+    let mut spec = switch_group();
+    spec.members.clear();
+    hub.set_group("stair", spec.clone()).await.expect("created");
+    drain(&mut rx);
+    spec.kind = Kind::Light;
+    hub.set_group("stair", spec).await.expect("replaced");
+    let published = drain(&mut rx);
+    assert!(
+        published
+            .iter()
+            .any(|p| p.topic == "oikos/switch/group/stair/config"
+                && p.payload.is_empty()
+                && p.retain),
+        "{published:?}"
+    );
+    assert!(
+        published
+            .iter()
+            .any(|p| p.topic == "oikos/light/group/stair/config" && !p.payload.is_empty())
+    );
+}
+
+#[tokio::test]
+async fn delete_group_clears_the_four_topics_in_order() {
+    let (hub, mut rx) = groups_hub();
+    let spec = switch_group();
+    hub.set_group("stair", spec.clone()).await.expect("created");
+    drain(&mut rx);
+    hub.delete_group("stair").await.expect("deleted");
+    let published = drain(&mut rx);
+    let topics: Vec<&str> = published.iter().map(|p| p.topic.as_str()).collect();
+    assert_eq!(
+        topics,
+        [
+            "oikos/group/stair/definition",
+            "oikos/switch/group/stair/config",
+            "oikos/group/stair",
+            "oikos/group/stair/avail",
+        ]
+    );
+    assert!(published.iter().all(|p| p.payload.is_empty() && p.retain));
+    assert!(hub.entity_view("group_stair").is_none());
+    assert!(matches!(
+        hub.delete_group("nope").await,
+        Err(HubError::UnknownEntity(_))
+    ));
+}
+
+#[tokio::test]
+async fn list_groups_names_the_flows_that_use_each_group() {
+    let (hub, _rx) = groups_hub();
+    let spec = switch_group();
+    hub.set_group("stair", spec.clone()).await.expect("created");
+    hub.ingest(
+        "oikos/automation/lamp",
+        br#"{"id":"lamp","name":"Stair lamp","enabled":true,"nodes":[
+            {"id":"t","type":"trigger.state","params":{"entity":"group_stair"}}],"edges":[]}"#,
+    );
+    hub.ingest(
+        "oikos/automation/other",
+        br#"{"id":"other","name":"Other","enabled":true,"nodes":[
+            {"id":"t","type":"trigger.state","params":{"entity":"somebody_else"}}],"edges":[]}"#,
+    );
+    let views = hub.list_groups().expect("enabled");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].used_by_flows, ["Stair lamp"]);
+    assert_eq!(views[0].name, "Stair");
+}
+
+#[tokio::test]
+async fn list_groups_skips_groups_without_entities() {
+    let (hub, _rx) = groups_hub();
+    hub.ingest(
+        "oikos/group/ghost/definition",
+        br#"{"name":"Ghost","kind":"switch","members":[]}"#,
+    );
+    let mut living = switch_group();
+    living.members.clear();
+    hub.set_group("living", living).await.expect("created");
+    let views = hub.list_groups().expect("enabled");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].id, "living");
+}
+
+const HALL_ID: &str = "0xaaaaaaaaaaaaaaaa_switch_zigbee2mqtt";
+
+/// A second recorded switch, `rooms/hall/light`, made from the stair one.
+fn feed_hall_switch(hub: &Hub) {
+    let text = String::from_utf8(fixture(SWITCH_FIXTURE))
+        .expect("utf8")
+        .replace("0x847127fffe24e322", "0xaaaaaaaaaaaaaaaa")
+        .replace("rooms/stair/light", "rooms/hall/light");
+    hub.ingest(
+        "oikos/switch/0xaaaaaaaaaaaaaaaa/switch/config",
+        text.as_bytes(),
+    );
+}
+
+fn two_switch_group() -> oikos_api::GroupSpec {
+    oikos_api::GroupSpec {
+        kind: Kind::Switch,
+        name: "Living".to_owned(),
+        members: vec![SWITCH_ID.to_owned(), HALL_ID.to_owned()],
+        hide_members: true,
+    }
+}
+
+#[tokio::test]
+async fn group_command_with_every_member_offline_is_rejected() {
+    let (hub, mut rx) = groups_hub();
+    feed_hall_switch(&hub);
+    hub.set_group("living", two_switch_group())
+        .await
+        .expect("created");
+    hub.ingest("zigbee2mqtt/bridge/state", br#"{"state":"offline"}"#);
+    drain(&mut rx);
+
+    let response = hub
+        .send_command(
+            "group_living",
+            Command::TurnOn {
+                brightness: None,
+                color: None,
+                effect: None,
+            },
+        )
+        .await
+        .expect("a response");
+    assert!(!response.accepted);
+    assert_eq!(response.reason, Some("no reachable member".to_owned()));
+    assert!(
+        drain(&mut rx)
+            .iter()
+            .all(|p| p.topic != "oikos/group/living"),
+        "the group state is untouched"
+    );
+}
+
+#[tokio::test]
+async fn member_state_echo_republishes_the_group_state() {
+    let (hub, mut rx) = groups_hub();
+    feed_hall_switch(&hub);
+    hub.ingest(&switch_state_topic(), br#"{"state":"OFF"}"#);
+    hub.ingest("zigbee2mqtt/rooms/hall/light", br#"{"state":"OFF"}"#);
+    hub.set_group("living", two_switch_group())
+        .await
+        .expect("created");
+    let initial = drain(&mut rx);
+    let state = initial
+        .iter()
+        .find(|p| p.topic == "oikos/group/living")
+        .expect("initial state");
+    assert_eq!(state.payload, r#"{"state":"OFF"}"#);
+
+    hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+    let published = drain(&mut rx);
+    let state = published
+        .iter()
+        .find(|p| p.topic == "oikos/group/living")
+        .expect("republished state");
+    assert_eq!(state.payload, r#"{"state":"ON"}"#);
+    assert!(state.retain);
+    let view = hub.entity_view("group_living").expect("group entity");
+    assert_eq!(view.state.value, StateValue::OnOff(true));
+}
+
+#[tokio::test]
+async fn showas_drift_drops_the_member_from_fanout_but_keeps_it_mismatched() {
+    let (hub, mut rx) = groups_hub();
+    let mut patch = serde_json::Map::new();
+    patch.insert("showAs".to_owned(), serde_json::Value::from("light"));
+    hub.set_override(SWITCH_ID, &patch).await.expect("override");
+    let spec = oikos_api::GroupSpec {
+        kind: Kind::Light,
+        name: "Living".to_owned(),
+        members: vec![SWITCH_ID.to_owned()],
+        hide_members: true,
+    };
+    hub.set_group("living", spec.clone())
+        .await
+        .expect("created");
+
+    let mut clear = serde_json::Map::new();
+    clear.insert("showAs".to_owned(), serde_json::Value::Null);
+    hub.set_override(SWITCH_ID, &clear).await.expect("override");
+    drain(&mut rx);
+
+    assert_eq!(hub.read_group_store().get("living"), Some(&spec));
+    let views = hub.list_groups().expect("enabled");
+    assert!(views[0].members[0].mismatch);
+
+    let response = hub
+        .send_command(
+            "group_living",
+            Command::TurnOn {
+                brightness: None,
+                color: None,
+                effect: None,
+            },
+        )
+        .await
+        .expect("a response");
+    assert!(!response.accepted);
+    assert!(
+        drain(&mut rx)
+            .iter()
+            .all(|p| p.topic != "zigbee2mqtt/rooms/stair/light/set"),
+        "nothing reaches the drifted member"
+    );
+}
+
+#[tokio::test]
+async fn a_command_on_the_group_topic_fans_out_to_the_members() {
+    let (hub, mut rx) = groups_hub();
+    hub.set_group("stair", switch_group())
+        .await
+        .expect("created");
+    drain(&mut rx);
+
+    let changes = hub.ingest_message("oikos/group/stair", br#"{"type":"turn_on"}"#, false);
+    assert!(changes.is_empty());
+    let publish = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        .await
+        .expect("a publish")
+        .expect("open");
+    assert_eq!(publish.topic, "zigbee2mqtt/rooms/stair/light/set");
+}
+
+#[tokio::test]
+async fn group_command_is_accepted_once_every_member_echoes() {
+    let (hub, mut rx) = groups_hub();
+    hub.set_group("stair", switch_group())
+        .await
+        .expect("created");
+    drain(&mut rx);
+    let echo = {
+        let hub = Arc::clone(&hub);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            hub.ingest("zigbee2mqtt/rooms/stair/light", br#"{"state":"ON"}"#);
+        })
+    };
+    let response = hub
+        .send_command("group_stair", Command::TurnOff)
+        .await
+        .expect("a response");
+    echo.await.expect("echo task");
+    assert!(response.accepted, "{response:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn group_command_timeout_lists_missing_members_in_definition_order() {
+    let (hub, mut rx) = groups_hub();
+    feed_hall_switch(&hub);
+    let spec = oikos_api::GroupSpec {
+        members: vec![HALL_ID.to_owned(), SWITCH_ID.to_owned()],
+        ..two_switch_group()
+    };
+    hub.set_group("living", spec).await.expect("created");
+    drain(&mut rx);
+
+    let response = hub
+        .send_command("group_living", Command::TurnOff)
+        .await
+        .expect("a response");
+    assert!(!response.accepted);
+    assert_eq!(
+        response.reason,
+        Some(format!("{HALL_ID}, {SWITCH_ID}: no echo"))
+    );
+}
+
+#[tokio::test]
+async fn group_command_refused_when_switch_is_off() {
+    let (hub, mut rx) = hub();
+    feed_switch(&hub);
+    let spec = serde_json::to_vec(&switch_group()).expect("json");
+    hub.ingest("oikos/group/stair/definition", &spec);
+    assert!(hub.read_group_store().get("stair").is_some());
+    drain(&mut rx);
+
+    let response = hub
+        .send_command("group_stair", Command::TurnOff)
+        .await
+        .expect("a response");
+    assert!(!response.accepted);
+    assert_eq!(response.reason, Some("groups disabled".to_owned()));
+    assert!(response.state.is_none());
+    assert!(drain(&mut rx).is_empty(), "nothing reaches the members");
+}
+
+/// A recorded light or cover config made into entity `n`, placed in area `area` by override.
+async fn feed_member(hub: &Hub, kind: Kind, n: u8, area: &str) -> String {
+    let (fixture_name, old_id, old_path, component) = match kind {
+        Kind::Light => (
+            "discovery/light__0x00124b000b1355e6__light_3.json",
+            "0x00124b000b1355e6",
+            "miscellaneous/heater_mobile/3",
+            "light",
+        ),
+        _ => (
+            "discovery/cover__0x000d6ffffe9d44e4__cover.json",
+            "0x000d6ffffe9d44e4",
+            "rooms/office/shutter",
+            "cover",
+        ),
+    };
+    let hw = format!("0xbbbb00000000000{n}");
+    let text = String::from_utf8(fixture(fixture_name))
+        .expect("utf8")
+        .replace(old_id, &hw)
+        .replace(old_path, &format!("rooms/{area}/{component}{n}"));
+    hub.ingest(
+        &format!("oikos/{component}/{hw}/{component}/config"),
+        text.as_bytes(),
+    );
+    let id = hub
+        .snapshot()
+        .entities
+        .into_iter()
+        .find(|e| e.id.starts_with(&hw))
+        .expect("entity")
+        .id;
+    let mut patch = serde_json::Map::new();
+    patch.insert("area".to_owned(), serde_json::Value::from(area));
+    hub.set_override(&id, &patch).await.expect("area override");
+    id
+}
+
+fn migration_hub(enabled: bool) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.groups.enabled = enabled;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    (hub, rx)
+}
+
+async fn feed_living(hub: &Hub) {
+    for n in 1..=2 {
+        feed_member(hub, Kind::Light, n, "living").await;
+        feed_member(hub, Kind::Cover, n + 2, "living").await;
+    }
+}
+
+#[tokio::test]
+async fn migration_on_empty_registry_defers_and_leaves_no_marker() {
+    let (hub, mut rx) = migration_hub(true);
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(
+        outcome.skipped_reason,
+        Some("house empty, retained sync not settled")
+    );
+    assert!(outcome.created.is_empty());
+    assert!(drain(&mut rx).is_empty(), "no marker published");
+    assert!(!hub.read_group_store().migrated());
+}
+
+#[tokio::test]
+async fn migration_builds_light_and_cover_groups_once_marker_absent() {
+    let (hub, mut rx) = migration_hub(true);
+    feed_living(&hub).await;
+    drain(&mut rx);
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(outcome.skipped_reason, None);
+    assert_eq!(outcome.created, ["cover_living", "light_living"]);
+    let published = drain(&mut rx);
+    let marker = published
+        .iter()
+        .find(|p| p.topic == "oikos/group/_migrated")
+        .expect("marker");
+    assert!(marker.retain && !marker.payload.is_empty());
+    assert!(hub.read_group_store().migrated());
+    let views = hub.list_groups().expect("enabled");
+    assert_eq!(views.len(), 2);
+    for view in &views {
+        let spec = hub.read_group_store().get(&view.id).cloned().expect("spec");
+        assert!(spec.hide_members);
+        assert_eq!(view.members.len(), 2);
+    }
+    let names: Vec<&str> = views.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(names, ["Shutters", "Lights"]);
+}
+
+#[tokio::test]
+async fn migration_is_a_no_op_when_already_migrated() {
+    let (hub, mut rx) = migration_hub(true);
+    feed_living(&hub).await;
+    hub.ingest("oikos/group/_migrated", b"1");
+    drain(&mut rx);
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(outcome.skipped_reason, Some("already migrated"));
+    assert!(outcome.created.is_empty());
+    assert!(drain(&mut rx).is_empty(), "nothing published");
+}
+
+#[tokio::test]
+async fn migration_refuses_when_switch_is_off() {
+    let (hub, mut rx) = migration_hub(false);
+    feed_living(&hub).await;
+    drain(&mut rx);
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(outcome.skipped_reason, Some("groups disabled"));
+    assert!(drain(&mut rx).is_empty());
+}
+
+#[tokio::test]
+async fn migration_honours_group_names() {
+    let (hub, _rx) = migration_hub(true);
+    feed_member(&hub, Kind::Light, 1, "living").await;
+    feed_member(&hub, Kind::Light, 2, "living").await;
+    hub.ingest(
+        "oikos/ui/_areas",
+        br#"{"areas":[{"id":"living","name":"Living","groupNames":{"light":"Main lamps"}}]}"#,
+    );
+    let outcome = hub.run_group_migration_once().await;
+    assert_eq!(outcome.created, ["light_living"]);
+    let views = hub.list_groups().expect("enabled");
+    assert_eq!(views[0].name, "Main lamps");
 }

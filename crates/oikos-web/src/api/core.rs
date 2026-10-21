@@ -2,8 +2,8 @@
 
 use gloo_net::http::{Request, Response};
 use oikos_api::{
-    ApiError, CommandResponse, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView,
-    OverridePatch, RunView, SchedulePreview,
+    ApiError, CommandResponse, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec,
+    GroupView, OverridePatch, RunView, SchedulePreview,
 };
 use oikos_core::flow::Flow;
 use oikos_core::model::{AreasDocument, Command};
@@ -123,6 +123,26 @@ pub async fn get_flows_config() -> Result<FlowsConfigView, ApiError> {
     read_json(response).await
 }
 
+/// Every hand-made group the hub holds.
+pub async fn list_groups() -> Result<Vec<GroupView>, ApiError> {
+    let response = check(Request::get("/api/v1/groups").build(), None).await?;
+    read_json(response).await
+}
+
+/// Creates or replaces group `id` from `spec`; the reply is the group as the hub now has it.
+pub async fn set_group(id: &str, spec: &GroupSpec) -> Result<GroupView, ApiError> {
+    let url = format!("/api/v1/groups/{}", encode_id(id));
+    let response = check(Request::put(&url).json(spec), None).await?;
+    read_json(response).await
+}
+
+/// Deletes group `id` on the hub.
+pub async fn delete_group(id: &str) -> Result<(), ApiError> {
+    let url = format!("/api/v1/groups/{}", encode_id(id));
+    check(Request::delete(&url).build(), None).await?;
+    Ok(())
+}
+
 /// The next three ticks of `cron` in the house time zone; a `422` (the hub's message names what
 /// is wrong with the expression) comes back as an `ApiError`.
 pub async fn schedule_preview(cron: &str) -> Result<SchedulePreview, ApiError> {
@@ -147,31 +167,6 @@ pub async fn rename_area(id: &str, name: &str) -> Result<Vec<oikos_api::AreaView
 }
 
 /// The body of a room-group edit: absent fields are left out, `Some(None)` clears the name.
-fn group_body(name: Option<Option<&str>>, favorite: Option<bool>) -> Value {
-    let mut body = serde_json::Map::new();
-    if let Some(name) = name {
-        body.insert("name".to_owned(), serde_json::json!(name));
-    }
-    if let Some(favorite) = favorite {
-        body.insert("favorite".to_owned(), Value::Bool(favorite));
-    }
-    Value::Object(body)
-}
-
-/// Edits the `kind` group (`cover` or `light`) of area `id`: its custom name and whether it is a
-/// favourite. The hub answers with the area list it now has.
-pub async fn set_area_group(
-    id: &str,
-    kind: &str,
-    name: Option<Option<&str>>,
-    favorite: Option<bool>,
-) -> Result<Vec<oikos_api::AreaView>, ApiError> {
-    let url = format!("/api/v1/areas/{}/groups/{}", encode_id(id), encode_id(kind));
-    let body = group_body(name, favorite);
-    let response = check(Request::patch(&url).json(&body), Some(BROKER_OFFLINE)).await?;
-    read_json(response).await
-}
-
 // Reserved: a full area editor is not built yet, so nothing calls this.
 pub async fn set_areas(doc: AreasDocument) -> Result<Vec<oikos_api::AreaView>, ApiError> {
     let response = check(Request::put("/api/v1/areas").json(&doc), None).await?;
@@ -180,8 +175,7 @@ pub async fn set_areas(doc: AreasDocument) -> Result<Vec<oikos_api::AreaView>, A
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_error, encode_id, group_body};
-    use serde_json::json;
+    use super::{decode_error, encode_id};
 
     #[test]
     fn ordinary_ids_pass_through() {
@@ -210,16 +204,5 @@ mod tests {
             "HTTP 502"
         );
         assert_eq!(decode_error(500, "").error, "HTTP 500");
-    }
-
-    #[test]
-    fn group_body_distinguishes_null_from_absent() {
-        assert_eq!(group_body(Some(None), None), json!({"name": null}));
-        assert_eq!(group_body(None, None), json!({}));
-        assert_eq!(group_body(None, Some(true)), json!({"favorite": true}));
-        assert_eq!(
-            group_body(Some(Some("Blinds")), Some(false)),
-            json!({"name": "Blinds", "favorite": false})
-        );
     }
 }

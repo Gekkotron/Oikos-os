@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use oikos_api::{CommandResponse, DeviceView, EntityView};
+use oikos_api::{CommandResponse, DeviceView, EntityView, GroupView};
 use oikos_core::model::{AreasDocument, SwitchType};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{tool, tool_router};
@@ -12,10 +12,10 @@ use serde_json::Value;
 
 use super::params::{
     AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_LIMIT, DEFAULT_SEARCH_LIMIT,
-    DeleteVirtualParams, Deleted, DeviceList, EntityDetailView, EntityPage, GetEntityParams,
-    GetHistoryParams, HistoryAnswer, HistoryWhat, IgnoredList, Include, ListDevicesParams,
-    ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult, SendCommandParams, SetAreasParams,
-    SetOverrideParams, SetVirtualParams,
+    DeleteGroupParams, DeleteVirtualParams, Deleted, DeviceList, EntityDetailView, EntityPage,
+    GetEntityParams, GetHistoryParams, GroupList, HistoryAnswer, HistoryWhat, IgnoredList, Include,
+    ListDevicesParams, ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult,
+    SendCommandParams, SetAreasParams, SetGroupParams, SetOverrideParams, SetVirtualParams,
 };
 use super::{OikosMcp, ToolError};
 use crate::history::query as history_query;
@@ -46,8 +46,7 @@ impl OikosMcp {
 
     /// Replaces the declared rooms (retained on `oikos/ui/_areas`) and returns the resulting
     /// list. A room kept by id keeps the `icon`, group names, group favourites and other
-    /// fields you leave out; group names and favourites are changed with
-    /// `PATCH /api/v1/areas/{id}/groups/{kind}`.
+    /// fields you leave out.
     #[tool(name = "set_areas", annotations(idempotent_hint = true))]
     async fn set_areas(
         &self,
@@ -265,6 +264,37 @@ impl OikosMcp {
     ) -> ToolResult<Deleted> {
         log_write("delete_virtual", &params);
         self.hub.delete_virtual(&params.id).await?;
+        Ok(Json(Deleted { id: params.id }))
+    }
+
+    /// Creates or replaces a group: one entity the hub owns, as `group_<id>`, that fans commands
+    /// out to its members and presents their combined state. Its definition is retained on
+    /// `oikos/group/<id>/definition`; a member of another kind than the group's is flagged.
+    #[tool(name = "set_group", annotations(idempotent_hint = true))]
+    async fn set_group(
+        &self,
+        Parameters(params): Parameters<SetGroupParams>,
+    ) -> ToolResult<GroupView> {
+        log_write("set_group", &params);
+        Ok(Json(self.hub.set_group(&params.id, params.spec).await?))
+    }
+
+    /// Every group the hub stores, with its members and the flows that use it, sorted by id.
+    #[tool(name = "list_groups", annotations(idempotent_hint = true))]
+    async fn list_groups(&self) -> ToolResult<GroupList> {
+        Ok(Json(GroupList {
+            groups: self.hub.list_groups()?,
+        }))
+    }
+
+    /// Removes a group and clears what the broker retained for it. The UI override is kept.
+    #[tool(name = "delete_group", annotations(idempotent_hint = true))]
+    async fn delete_group(
+        &self,
+        Parameters(params): Parameters<DeleteGroupParams>,
+    ) -> ToolResult<Deleted> {
+        log_write("delete_group", &params);
+        self.hub.delete_group(&params.id).await?;
         Ok(Json(Deleted { id: params.id }))
     }
 

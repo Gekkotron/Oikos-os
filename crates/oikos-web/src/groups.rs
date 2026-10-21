@@ -1,24 +1,18 @@
-//! Room groups on Home: which cards a room shows (two or more covers, or two or more lights,
-//! fold into one group card) and the text and maths of a group. Pure; the cards live elsewhere.
+//! Group text and maths, and the cards Home shows. Pure; the cards live elsewhere.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashSet};
 
-use oikos_api::{AreaView, EntityView};
-use oikos_core::model::{
-    Availability, Command, CoverState, GroupKey, GroupKind, MIN_GROUP_MEMBERS, StateValue,
-};
+use oikos_api::{AreaView, EntityView, GroupView};
+use oikos_core::model::{Availability, Command, CoverState, StateValue};
 
-use crate::api::encode_id;
 use crate::cards::cover::is_moving;
 use crate::format::is_on;
 use crate::screens::home::{FAVORITES, shows_on_home, without_paired_humidity};
 
-/// One card on Home: a single entity, or the group card of a room. A group carries the ids of
-/// its members in Home order: under Favorites that can be fewer than the room's group.
+/// One card on Home: a single entity (a hand-made group is an entity too).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum HomeItem {
     Entity(String),
-    Group { key: GroupKey, members: Vec<String> },
 }
 
 /// The entities Home shows, in Home order (the hub's `order` override first, then by name).
@@ -28,135 +22,60 @@ fn shown<'a>(entities: impl Iterator<Item = &'a EntityView>) -> Vec<&'a EntityVi
     shown
 }
 
-/// The groups that exist among `shown`, each with its member count.
-fn groups_of(shown: &[&EntityView]) -> HashMap<GroupKey, usize> {
-    let mut counts = HashMap::new();
-    for e in shown {
-        if let Some(k) = GroupKey::candidate(&e.area, e.kind, &e.ui) {
-            *counts.entry(k).or_insert(0) += 1;
-        }
-    }
-    counts.retain(|_, n| *n >= MIN_GROUP_MEMBERS);
-    counts
-}
-
-/// What Home shows under `chip`, in display order: filter first, then fold what is left (the
-/// app's `HomeUiBuilder` then `RoomGroups.fold`). A room chip shows the whole room; Favorites
-/// shows the favourite entities and every member of a favourited group. Each group folds into
-/// its first member's slot, then pinned cards, then by room, groups before singles.
+/// What Home shows under `chip`, in display order: pinned cards first, then by room. A room
+/// chip shows the whole room; Favorites shows the favourite entities.
 pub fn home_items<'a>(
     entities: impl Iterator<Item = &'a EntityView>,
     areas: &[AreaView],
     chip: &str,
+    groups: &BTreeMap<String, GroupView>,
 ) -> Vec<HomeItem> {
-    let all = shown(entities);
-    let in_room = groups_of(&all);
-    let candidates: Vec<&EntityView> = all
+    // Members of a group with `hide_members` lose their own card on Home; a member that is in
+    // several groups is hidden when any of them says so.
+    let hidden_member_ids: HashSet<&str> = groups
+        .values()
+        .filter(|g| g.hide_members)
+        .flat_map(|g| g.members.iter().map(|m| m.id.as_str()))
+        .collect();
+    let candidates: Vec<&EntityView> = shown(entities)
         .into_iter()
         .filter(|e| {
+            if hidden_member_ids.contains(e.id.as_str()) && !(chip == FAVORITES && e.ui.favorite) {
+                return false;
+            }
             if chip != FAVORITES {
                 return e.area == chip;
             }
-            let favourited_group = GroupKey::candidate(&e.area, e.kind, &e.ui)
-                .is_some_and(|k| in_room.contains_key(&k) && is_favorite(areas, &k));
-            e.ui.favorite || favourited_group
+            e.ui.favorite
         })
         .collect();
     let candidates = without_paired_humidity(candidates);
-    let groups = groups_of(&candidates);
 
-    let mut placed: Vec<(i32, usize, HomeItem)> = Vec::new();
-    // Where each group sits in `placed`, so later members join it.
-    let mut slots: HashMap<GroupKey, usize> = HashMap::new();
-    for e in candidates {
-        let area_index = areas
-            .iter()
-            .position(|a| a.id == e.area)
-            .unwrap_or(usize::MAX);
-        let group = GroupKey::candidate(&e.area, e.kind, &e.ui).filter(|k| groups.contains_key(k));
-        match group {
-            Some(k) => match slots.get(&k) {
-                Some(&slot) => {
-                    if let HomeItem::Group { members, .. } = &mut placed[slot].2 {
-                        members.push(e.id.clone());
-                    }
-                }
-                None => {
-                    slots.insert(k.clone(), placed.len());
-                    placed.push((
-                        i32::MAX,
-                        area_index,
-                        HomeItem::Group {
-                            key: k,
-                            members: vec![e.id.clone()],
-                        },
-                    ));
-                }
-            },
-            None => placed.push((
+    let mut placed: Vec<(i32, usize, HomeItem)> = candidates
+        .into_iter()
+        .map(|e| {
+            let area_index = areas
+                .iter()
+                .position(|a| a.id == e.area)
+                .unwrap_or(usize::MAX);
+            (
                 e.ui.order.unwrap_or(i32::MAX),
                 area_index,
                 HomeItem::Entity(e.id.clone()),
-            )),
-        }
-    }
-    placed.sort_by_key(|(order, area, item)| {
-        (*order, *area, !matches!(item, HomeItem::Group { .. }))
-    });
+            )
+        })
+        .collect();
+    placed.sort_by_key(|(order, area, _)| (*order, *area));
     placed.into_iter().map(|(_, _, item)| item).collect()
 }
 
-/// The members of `key` in Home order; empty when the group does not exist (fewer than two).
-pub fn members(entities: &BTreeMap<String, EntityView>, key: &GroupKey) -> Vec<EntityView> {
-    let found: Vec<EntityView> = shown(entities.values())
-        .into_iter()
-        .filter(|e| GroupKey::candidate(&e.area, e.kind, &e.ui).as_ref() == Some(key))
-        .cloned()
-        .collect();
-    if found.len() < MIN_GROUP_MEMBERS {
-        return Vec::new();
-    }
-    found
-}
-
-fn area_of<'a>(areas: &'a [AreaView], key: &GroupKey) -> Option<&'a AreaView> {
-    areas.iter().find(|a| a.id == key.area)
-}
-
-/// The group's name: the room's custom name for the kind, else "Shutters" / "Lights".
-pub fn group_name(areas: &[AreaView], key: &GroupKey) -> String {
-    area_of(areas, key)
-        .and_then(|a| a.group_names.get(key.kind.key()))
-        .map(|n| n.trim())
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| key.kind.default_name())
-        .to_owned()
-}
-
-/// Whether the group is a favourite of its room.
-pub fn is_favorite(areas: &[AreaView], key: &GroupKey) -> bool {
-    area_of(areas, key).is_some_and(|a| a.group_favorites.contains(key.kind.key()))
-}
-
-/// How many cards the Favorites chip would show (a folded group counts once).
+/// How many cards the Favorites chip would show.
 pub fn favorites_count<'a>(
     entities: impl Iterator<Item = &'a EntityView>,
     areas: &[AreaView],
+    groups: &BTreeMap<String, GroupView>,
 ) -> usize {
-    home_items(entities, areas, FAVORITES).len()
-}
-
-/// `/group/{area}/{kind}`, the route of a group's sheet.
-pub fn group_path(key: &GroupKey) -> String {
-    format!("/group/{}/{}", encode_id(&key.area), key.kind.key())
-}
-
-/// The group a `/group/:area/:kind` route names. The router hands over decoded params.
-pub fn parse_group_path(area: &str, kind: &str) -> Option<GroupKey> {
-    Some(GroupKey {
-        area: area.to_owned(),
-        kind: GroupKind::from_key(kind)?,
-    })
+    home_items(entities, areas, FAVORITES, groups).len()
 }
 
 /// The way a cover group is moving.
@@ -351,7 +270,7 @@ mod tests {
     use crate::screens::home::FAVORITES;
     use oikos_core::model::{
         Availability, Capabilities, CoverState, EntityCategory, EntityState, Kind, LightState,
-        StateValue, UNASSIGNED_AREA, UiOverride,
+        StateValue, UiOverride,
     };
 
     fn entity(id: &str, kind: Kind, area: &str, ui: UiOverride) -> EntityView {
@@ -398,23 +317,6 @@ mod tests {
         }
     }
 
-    fn favourite_groups(id: &str, kinds: &[&str]) -> AreaView {
-        AreaView {
-            group_favorites: kinds.iter().map(|k| (*k).to_owned()).collect(),
-            ..area(id)
-        }
-    }
-
-    fn key(area: &str, kind: GroupKind, members: &[&str]) -> HomeItem {
-        HomeItem::Group {
-            key: GroupKey {
-                area: area.into(),
-                kind,
-            },
-            members: members.iter().map(|m| (*m).to_owned()).collect(),
-        }
-    }
-
     fn single(id: &str) -> HomeItem {
         HomeItem::Entity(id.into())
     }
@@ -449,53 +351,12 @@ mod tests {
     }
 
     fn items(all: &[EntityView], areas: &[AreaView], chip: &str) -> Vec<HomeItem> {
-        home_items(all.iter(), areas, chip)
+        home_items(all.iter(), areas, chip, &BTreeMap::new())
     }
 
-    #[test]
-    fn two_lights_fold_into_one_group() {
-        let all = [
-            light("lamp_a", "living"),
-            light("lamp_b", "living"),
-            entity("plug", Kind::Switch, "living", UiOverride::default()),
-        ];
-        assert_eq!(
-            items(&all, &[area("living")], "living"),
-            [
-                key("living", GroupKind::Light, &["lamp_a", "lamp_b"]),
-                single("plug")
-            ]
-        );
-    }
-
-    #[test]
-    fn ungrouped_member_dissolves_a_pair() {
-        let all = [
-            light("lamp_a", "living"),
-            entity(
-                "lamp_b",
-                Kind::Light,
-                "living",
-                UiOverride {
-                    ungrouped: true,
-                    ..Default::default()
-                },
-            ),
-            entity("plug", Kind::Switch, "living", UiOverride::default()),
-        ];
-        assert_eq!(
-            items(&all, &[area("living")], "living"),
-            [single("lamp_a"), single("lamp_b"), single("plug")]
-        );
-    }
-
-    #[test]
-    fn unassigned_never_groups() {
-        let all = [light("a", UNASSIGNED_AREA), light("b", UNASSIGNED_AREA)];
-        assert_eq!(
-            items(&all, &[area(UNASSIGNED_AREA)], UNASSIGNED_AREA),
-            [single("a"), single("b")]
-        );
+    fn favourite(mut e: EntityView) -> EntityView {
+        e.ui.favorite = true;
+        e
     }
 
     #[test]
@@ -524,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn group_takes_first_slot_and_goes_before_singles() {
+    fn pinned_cards_go_first() {
         let pinned = entity(
             "zplug",
             Kind::Switch,
@@ -538,151 +399,23 @@ mod tests {
             entity("aplug", Kind::Switch, "living", UiOverride::default()),
             light("lamp_a", "living"),
             pinned,
-            light("lamp_b", "living"),
         ];
         assert_eq!(
             items(&all, &[area("living")], "living"),
-            [
-                single("zplug"),
-                key("living", GroupKind::Light, &["lamp_a", "lamp_b"]),
-                single("aplug")
-            ]
+            [single("zplug"), single("aplug"), single("lamp_a")]
         );
     }
 
     #[test]
-    fn favorites_take_favourited_groups_whole() {
-        let mut fav_lamp = light("lamp_a", "living");
-        fav_lamp.ui.favorite = true;
+    fn favorites_show_favourite_entities_by_area_order() {
         let all = [
-            cover("blind_a", "living"),
-            cover("blind_b", "living"),
-            fav_lamp,
-            light("lamp_b", "living"),
-        ];
-        let areas = [favourite_groups("living", &["cover"])];
-        assert_eq!(
-            items(&all, &areas, FAVORITES),
-            [
-                key("living", GroupKind::Cover, &["blind_a", "blind_b"]),
-                single("lamp_a")
-            ]
-        );
-    }
-
-    fn favourite(mut e: EntityView) -> EntityView {
-        e.ui.favorite = true;
-        e
-    }
-
-    #[test]
-    fn individually_favourited_members_fold_under_favorites() {
-        let all = [
-            favourite(cover("blind_a", "living")),
-            favourite(cover("blind_b", "living")),
-        ];
-        assert_eq!(
-            items(&all, &[area("living")], FAVORITES),
-            [key("living", GroupKind::Cover, &["blind_a", "blind_b"])]
-        );
-        assert_eq!(favorites_count(all.iter(), &[area("living")]), 1);
-    }
-
-    #[test]
-    fn partial_favourites_fold_to_a_partial_group() {
-        let all = [
-            favourite(light("lamp_a", "living")),
-            favourite(light("lamp_b", "living")),
-            light("lamp_c", "living"),
-        ];
-        assert_eq!(
-            items(&all, &[area("living")], FAVORITES),
-            [key("living", GroupKind::Light, &["lamp_a", "lamp_b"])]
-        );
-        // The room chip still shows the whole group.
-        assert_eq!(
-            items(&all, &[area("living")], "living"),
-            [key(
-                "living",
-                GroupKind::Light,
-                &["lamp_a", "lamp_b", "lamp_c"]
-            )]
-        );
-    }
-
-    #[test]
-    fn single_favourite_member_stays_single() {
-        let all = [
-            favourite(light("lamp_a", "living")),
-            light("lamp_b", "living"),
-            light("lamp_c", "living"),
-        ];
-        assert_eq!(
-            items(&all, &[area("living")], FAVORITES),
-            [single("lamp_a")]
-        );
-    }
-
-    #[test]
-    fn favorites_order_follows_area_index() {
-        let all = [
-            light("a1", "attic"),
+            favourite(light("a1", "attic")),
             light("a2", "attic"),
-            light("b1", "bath"),
-            light("b2", "bath"),
+            favourite(light("b1", "bath")),
         ];
-        let areas = [
-            favourite_groups("bath", &["light"]),
-            favourite_groups("attic", &["light"]),
-        ];
-        assert_eq!(
-            items(&all, &areas, FAVORITES),
-            [
-                key("bath", GroupKind::Light, &["b1", "b2"]),
-                key("attic", GroupKind::Light, &["a1", "a2"])
-            ]
-        );
-    }
-
-    #[test]
-    fn favorites_chip_counts_favourited_groups() {
-        let all = [light("a1", "attic"), light("a2", "attic")];
-        let areas = [favourite_groups("attic", &["light"])];
-        assert_eq!(favorites_count(all.iter(), &areas), 1);
-        assert_eq!(favorites_count(all.iter(), &[area("attic")]), 0);
-    }
-
-    #[test]
-    fn members_are_empty_below_two() {
-        let all = [light("a", "living"), cover("c", "living")];
-        let map: BTreeMap<_, _> = all.iter().map(|e| (e.id.clone(), e.clone())).collect();
-        let k = GroupKey {
-            area: "living".into(),
-            kind: GroupKind::Light,
-        };
-        assert!(members(&map, &k).is_empty());
-    }
-
-    #[test]
-    fn names_and_favourite_flag() {
-        let mut a = area("living");
-        a.group_names.insert("cover".into(), "  Blinds ".into());
-        a.group_names.insert("light".into(), "   ".into());
-        a.group_favorites.insert("cover".into());
-        let cover_key = GroupKey {
-            area: "living".into(),
-            kind: GroupKind::Cover,
-        };
-        let light_key = GroupKey {
-            area: "living".into(),
-            kind: GroupKind::Light,
-        };
-        let areas = [a];
-        assert_eq!(group_name(&areas, &cover_key), "Blinds");
-        assert_eq!(group_name(&areas, &light_key), "Lights");
-        assert_eq!(group_name(&[], &cover_key), "Shutters");
-        assert!(is_favorite(&areas, &cover_key));
-        assert!(!is_favorite(&areas, &light_key));
+        let areas = [area("bath"), area("attic")];
+        assert_eq!(items(&all, &areas, FAVORITES), [single("b1"), single("a1")]);
+        assert_eq!(favorites_count(all.iter(), &areas, &BTreeMap::new()), 2);
     }
 
     #[test]
@@ -858,14 +591,108 @@ mod tests {
         assert_eq!(mean_brightness(&[dim("a", false, Some(9))]), 255);
     }
 
-    #[test]
-    fn group_route_round_trips_accented_area() {
-        let k = GroupKey {
-            area: "bedroom3".into(),
-            kind: GroupKind::Light,
+    fn hand_group(id: &str, members: &[&str], hide_members: bool) -> (String, GroupView) {
+        let view = GroupView {
+            id: id.into(),
+            name: id.into(),
+            kind: Kind::Light,
+            members: members
+                .iter()
+                .map(|m| oikos_api::GroupMemberView {
+                    id: (*m).to_owned(),
+                    name: (*m).to_owned(),
+                    present: true,
+                    mismatch: false,
+                })
+                .collect(),
+            hide_members,
+            entity: entity(
+                &format!("group_{id}"),
+                Kind::Light,
+                "living",
+                UiOverride::default(),
+            ),
+            used_by_flows: Vec::new(),
         };
-        assert_eq!(group_path(&k), "/group/r%C3%A9mi/light");
-        assert_eq!(parse_group_path("bedroom3", "light"), Some(k));
-        assert_eq!(parse_group_path("bedroom3", "sensor"), None);
+        (id.to_owned(), view)
+    }
+
+    fn ids(items: Vec<HomeItem>) -> Vec<String> {
+        items
+            .into_iter()
+            .map(|i| match i {
+                HomeItem::Entity(id) => id,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn member_hidden_when_any_group_hides_it() {
+        let all = [
+            light("lamp", "living"),
+            cover("group_a", "living"),
+            entity("group_b", Kind::Switch, "living", UiOverride::default()),
+        ];
+        let groups: BTreeMap<_, _> = [
+            hand_group("a", &["lamp"], true),
+            hand_group("b", &["lamp"], false),
+        ]
+        .into();
+        let got = ids(home_items(all.iter(), &[area("living")], "living", &groups));
+        assert!(got.contains(&"group_a".to_owned()));
+        assert!(got.contains(&"group_b".to_owned()));
+        assert!(!got.contains(&"lamp".to_owned()));
+    }
+
+    #[test]
+    fn favourited_member_still_shows_on_favorites() {
+        let fav = UiOverride {
+            favorite: true,
+            ..Default::default()
+        };
+        let all = [
+            entity("lamp", Kind::Light, "living", fav),
+            light("other", "living"),
+        ];
+        let groups: BTreeMap<_, _> = [hand_group("a", &["lamp", "other"], true)].into();
+        let got = ids(home_items(
+            all.iter(),
+            &[area("living")],
+            FAVORITES,
+            &groups,
+        ));
+        assert_eq!(got, ["lamp"]);
+    }
+
+    #[test]
+    fn nothing_hidden_when_no_group_hides_members() {
+        let all = [light("lamp", "living"), cover("shutter", "living")];
+        let groups: BTreeMap<_, _> = [hand_group("a", &["lamp", "shutter"], false)].into();
+        let got = ids(home_items(all.iter(), &[area("living")], "living", &groups));
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn empty_groups_leave_every_chip_unchanged() {
+        let fav = UiOverride {
+            favorite: true,
+            ..Default::default()
+        };
+        let all = [
+            entity("lamp", Kind::Light, "living", fav),
+            cover("shutter", "kitchen"),
+        ];
+        let areas = [area("living"), area("kitchen")];
+        for chip in ["living", "kitchen", FAVORITES] {
+            let got = home_items(all.iter(), &areas, chip, &BTreeMap::new());
+            let with_unhidden = home_items(
+                all.iter(),
+                &areas,
+                chip,
+                &[hand_group("a", &["lamp", "shutter"], false)].into(),
+            );
+            assert_eq!(got, with_unhidden, "{chip}");
+        }
+        assert_eq!(items(&all, &areas, FAVORITES), [single("lamp")]);
     }
 }

@@ -3,7 +3,7 @@
 
 use oikos_api::EntityView;
 use oikos_core::energy::{EnergyRole, PowerUnits};
-use oikos_core::model::{GroupKind, Kind, Placement, SwitchType, UNASSIGNED_AREA, UiOverride};
+use oikos_core::model::{Kind, Placement, SwitchType, UiOverride};
 
 use crate::cards::light::has_colour;
 
@@ -50,7 +50,7 @@ pub fn shown(entity: &EntityView, draft: &UiOverride) -> Shown {
     Shown {
         show_as: switch_type.is_some(),
         show_on_home: Placement::elsewhere(kind, class, draft),
-        group_with_room: GroupKind::of(kind).is_some() && entity.area != UNASSIGNED_AREA,
+        group_with_room: false,
         light_on,
         light_on_brightness: light_on
             && draft.light_on_preset.is_some()
@@ -219,7 +219,7 @@ mod tests {
     use crate::override_editor::dirty_patch;
     use oikos_api::EntityView;
     use oikos_core::model::{
-        Capabilities, EntityCategory, EntityState, Kind, SwitchType, UNASSIGNED_AREA, UiOverride,
+        Capabilities, EntityCategory, EntityState, Kind, SwitchType, UiOverride,
     };
 
     fn entity(kind: Kind, class: Option<&str>, unit: Option<&str>) -> EntityView {
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn light_has_only_light_settings() {
         let s = shown(&colour_light(), &UiOverride::default());
-        assert!(s.light_on && s.group_with_room);
+        assert!(s.light_on && !s.group_with_room);
         assert!(!s.show_as);
         assert!(!s.security_shown && !s.security_action && !s.security_ask);
         assert!(!s.card_style && !s.energy_role && !s.energy_meter && !s.climate_presets);
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(d.show_as.as_deref(), Some("light"));
         assert!(!d.security_action);
         let s = shown(&switch, &d);
-        assert!(s.group_with_room && s.show_as);
+        assert!(!s.group_with_room && s.show_as);
         assert!(!s.security_action && !s.security_ask);
     }
 
@@ -400,11 +400,9 @@ mod tests {
     }
 
     #[test]
-    fn group_needs_a_room() {
-        let mut light = colour_light();
-        light.area = UNASSIGNED_AREA.into();
-        assert!(!shown(&light, &UiOverride::default()).group_with_room);
-        assert!(shown(&entity(Kind::Cover, None, None), &UiOverride::default()).group_with_room);
+    fn group_with_room_is_never_shown() {
+        assert!(!shown(&colour_light(), &UiOverride::default()).group_with_room);
+        assert!(!shown(&entity(Kind::Cover, None, None), &UiOverride::default()).group_with_room);
     }
 
     #[test]

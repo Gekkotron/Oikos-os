@@ -2,8 +2,9 @@
 
 use leptos::prelude::*;
 use leptos_router::components::A;
-use oikos_api::DeviceView;
+use oikos_api::{DeviceView, GroupView};
 
+use crate::components::toast::Toasts;
 use crate::format::{list_label, wrap_id};
 use crate::house::House;
 use crate::screens::entity_sheet::{availability_class, availability_word};
@@ -137,10 +138,39 @@ pub fn DevicesScreen() -> impl IntoView {
         devices
     });
     let total = Memo::new(move |_| house.devices.with(Vec::len));
+    let toasts = expect_context::<Toasts>();
+    let groups = RwSignal::new(Vec::<GroupView>::new());
+    leptos::task::spawn_local(async move {
+        match crate::api::list_groups().await {
+            Ok(list) => groups.set(list),
+            Err(e) => toasts.push(e.error),
+        }
+    });
 
     view! {
         <div class="devices">
             <h1 class="devices__title">"Devices"</h1>
+            <section class="sheet__panel">
+                <h2 class="sheet__heading">"Groups"</h2>
+                <A href="/groups/new" attr:class="btn">
+                    "＋ New group"
+                </A>
+                <ul class="sheet__links">
+                    <For
+                        each=move || groups.get()
+                        key=|g| (g.id.clone(), g.name.clone(), g.members.len())
+                        children=|g| {
+                            view! {
+                                <li>
+                                    <A href=format!("/group/{}", crate::api::encode_id(&g.id))>
+                                        {wrap_id(&g.name)}
+                                    </A>
+                                </li>
+                            }
+                        }
+                    />
+                </ul>
+            </section>
             <input
                 class="devices__search"
                 type="search"

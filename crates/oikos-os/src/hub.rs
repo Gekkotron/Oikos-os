@@ -4,23 +4,27 @@
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{
+    Arc, Mutex, MutexGuard, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
+};
 use std::time::Duration;
 
 use crate::alerts::{AlertStore, Applied};
 use crate::flows::FlowStore;
+use crate::groups::{self, ApplyOutcome, GroupStore};
 use crate::history::History;
 use crate::media::MediaProxy;
 use crate::pictures::{MAX_PICTURE_BYTES, Picture, Pictures};
 use crate::virtual_entities as virtuals;
 use oikos_api::{
-    AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, IgnoredView, OverridePatch,
-    Snapshot, VirtualSpec, WsEvent, area_views, device_views, mask_secret, snapshot,
+    AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, GroupMemberView, GroupSpec,
+    GroupView, IgnoredView, OverridePatch, Snapshot, VirtualSpec, WsEvent, area_views,
+    device_views, entity_views, mask_secret, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{
-    AreasDocument, Availability, Command, Entity, GroupKind, Kind, PatchError, StateValue,
-    UNASSIGNED_AREA, UiOverride,
+    AreasDocument, Availability, Command, Entity, Kind, PatchError, StateValue, UNASSIGNED_AREA,
+    UiOverride,
 };
 use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
 use oikos_core::types::command::expects_echo;
@@ -63,6 +67,13 @@ pub enum HubError {
     InvalidFlow(String),
 }
 
+/// A message on a group's command topic that is a command: a JSON object with a `type`.
+fn parse_group_command(payload: &[u8]) -> Option<Command> {
+    let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
+    value.get("type")?;
+    serde_json::from_value(value).ok()
+}
+
 /// The `install_id` the web sends in a reply; the app sends its own install id.
 const WEB_INSTALL_ID: &str = "oikos-web";
 
@@ -94,7 +105,18 @@ pub struct StateSeen {
     pub epoch: u64,
 }
 
+/// What [`Hub::run_group_migration_once`] did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MigrationOutcome {
+    /// The ids of the groups created.
+    pub created: Vec<String>,
+    /// Why nothing was attempted; `None` when the migration ran.
+    pub skipped_reason: Option<&'static str>,
+}
+
 pub struct Hub {
+    /// The hub's own `Arc`, so a message handler can spawn work that outlives its `&self`.
+    me: Weak<Hub>,
     registry: RwLock<Registry>,
     events: broadcast::Sender<WsEvent>,
     /// The ids whose state was reported, changed or not: Zigbee2MQTT echoes the whole device
@@ -116,6 +138,9 @@ pub struct Hub {
     alerts: Mutex<AlertStore>,
     /// The retained flow definitions and their runs.
     flow_store: Mutex<FlowStore>,
+    group_store: Mutex<GroupStore>,
+    /// `[groups] enabled`: group writes and listing are refused while it is false.
+    groups_enabled: bool,
     /// The topic prefix flows are retained under, one topic per flow id.
     automation_prefix: String,
     /// The time zone schedules and their preview run in.
@@ -183,7 +208,8 @@ impl Hub {
         let media = MediaProxy::new(cfg.frigate.clone());
         let alerts = AlertStore::with_media_origin(media.as_ref().map(|m| m.origin().to_owned()));
         let (engine_tx, engine_rx) = mpsc::unbounded_channel();
-        Arc::new(Hub {
+        Arc::new_cyclic(|me| Hub {
+            me: me.clone(),
             registry: RwLock::new(registry),
             events,
             state_seen,
@@ -202,6 +228,8 @@ impl Hub {
             responses_topic: cfg.push.responses_topic.clone(),
             alerts: Mutex::new(alerts),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
+            group_store: Mutex::new(GroupStore::default()),
+            groups_enabled: cfg.groups.enabled,
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
             house_point: cfg.flows.house_point(),
@@ -243,6 +271,9 @@ impl Hub {
             } else {
                 Vec::new()
             };
+        }
+        if self.ingest_group(topic, payload) {
+            return Vec::new();
         }
         let at = clock::now();
         let at_micros = clock::now_micros();
@@ -331,10 +362,22 @@ impl Hub {
         for event in events {
             self.broadcast(event);
         }
+        // A member whose value or availability changed, or that reported, moves its groups.
+        let mut touched: BTreeSet<String> = changes
+            .iter()
+            .filter_map(|change| match change {
+                Change::StateChanged(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect();
         for id in seen {
+            touched.insert(id.clone());
             // An error only means no command is waiting right now.
             let epoch = self.link_epoch();
             let _ = self.state_seen.send(StateSeen { id, epoch });
+        }
+        for id in &touched {
+            self.on_member_state_change(id);
         }
         self.with_button_subscriptions(changes)
     }
@@ -355,6 +398,16 @@ impl Hub {
             for (id, signal) in self.signals_of(topic, payload) {
                 self.record_signal(&id, &signal);
                 self.broadcast(WsEvent::SignalReceived { id, signal });
+            }
+            if let Some(group_id) = self.group_command_id(topic)
+                && let Some(cmd) = parse_group_command(payload)
+                && let Some(hub) = self.me.upgrade()
+                && tokio::runtime::Handle::try_current().is_ok()
+            {
+                tokio::spawn(async move {
+                    let _ = hub.on_group_command(&group_id, cmd).await;
+                });
+                return Vec::new();
             }
         }
         self.ingest(topic, payload)
@@ -469,6 +522,17 @@ impl Hub {
                 Some((entity.unique_id.clone(), signal))
             })
             .collect()
+    }
+
+    /// The id of the group whose command topic `topic` is, when the definition is known.
+    fn group_command_id(&self, topic: &str) -> Option<String> {
+        let id = topic
+            .strip_prefix(self.discovery_prefix.as_str())?
+            .strip_prefix("/group/")?;
+        if id.is_empty() || id.contains('/') {
+            return None;
+        }
+        self.group_store().get(id).is_some().then(|| id.to_owned())
     }
 
     /// A button appearing or any entity vanishing may change the button topics to subscribe to.
@@ -664,6 +728,16 @@ impl Hub {
     /// entity is rejected before anything is published, and a broker link that is down is
     /// [`HubError::Publish`] right away rather than a wait for an echo that cannot come.
     pub async fn send_command(&self, id: &str, cmd: Command) -> Result<CommandResponse, HubError> {
+        if let Some(group_id) = id.strip_prefix("group_") {
+            if !self.groups_enabled {
+                return Ok(CommandResponse {
+                    accepted: false,
+                    reason: Some("groups disabled".to_owned()),
+                    state: None,
+                });
+            }
+            return Ok(self.on_group_command(group_id, cmd).await);
+        }
         // Subscribed before publishing, so a fast echo cannot slip between the two.
         let mut events = self.subscribe();
         let mut seen = self.state_seen.subscribe();
@@ -757,6 +831,166 @@ impl Hub {
                     state: None,
                 })
             }
+        }
+    }
+
+    /// The present members of `spec`, as views.
+    fn group_member_views(&self, spec: &GroupSpec) -> Vec<EntityView> {
+        let reg = self.read();
+        spec.members
+            .iter()
+            .filter_map(|member| {
+                let entity = reg.entity(member)?;
+                let state = reg.state(member).cloned().unwrap_or_default();
+                Some(EntityView::from(entity, &state))
+            })
+            .collect()
+    }
+
+    /// Fans `cmd` out to the reachable members of group `id` and waits up to two seconds for
+    /// each of them to report. The group's own state is not published here: it follows the
+    /// members' echoes ([`Self::on_member_state_change`]).
+    pub async fn on_group_command(&self, id: &str, cmd: Command) -> CommandResponse {
+        let reject = |reason: String| CommandResponse {
+            accepted: false,
+            reason: Some(reason),
+            state: None,
+        };
+        if !self.groups_enabled {
+            return reject("groups disabled".to_owned());
+        }
+        let Some(spec) = self.group_store().get(id).cloned() else {
+            return reject("unknown group".to_owned());
+        };
+        // Subscribed before publishing, so a fast echo cannot slip between the two.
+        let mut seen = self.state_seen.subscribe();
+        let members = self.group_member_views(&spec);
+        let mut targeted = BTreeSet::new();
+        let mut publishes = Vec::new();
+        {
+            let reg = self.read();
+            for target in groups::fanout::targets(&spec, &members) {
+                let Some(member) = members.iter().find(|m| m.id == target) else {
+                    continue;
+                };
+                let Some(member_cmd) = groups::fanout::translate(&spec, &cmd, member) else {
+                    continue;
+                };
+                let (Some(entity), Some(state)) = (reg.entity(&target), reg.state(&target)) else {
+                    continue;
+                };
+                match map_command(entity, state, &member_cmd, reg.templates()) {
+                    Ok(mapped) => {
+                        publishes.extend(mapped);
+                        targeted.insert(target);
+                    }
+                    Err(err) => {
+                        tracing::warn!(group = %id, member = %target, %err, "group member skipped")
+                    }
+                }
+            }
+        }
+        let mut waiting: Vec<String> = spec
+            .members
+            .iter()
+            .filter(|m| targeted.contains(*m))
+            .cloned()
+            .collect();
+        if waiting.is_empty() {
+            return reject("no reachable member".to_owned());
+        }
+        for publish in publishes {
+            if let Err(err) = self.publish(publish) {
+                return reject(err.to_string());
+            }
+        }
+        let window = Duration::from_millis(2000);
+        let _ = tokio::time::timeout(window, async {
+            while !waiting.is_empty() {
+                match seen.recv().await {
+                    Ok(report) => {
+                        waiting.retain(|m| *m != report.id);
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+        .await;
+        if waiting.is_empty() {
+            return CommandResponse {
+                accepted: true,
+                reason: None,
+                state: None,
+            };
+        }
+        let reason = format!("{}: no echo", waiting.join(", "));
+        self.broadcast(WsEvent::CommandFailed {
+            id: groups::topics::unique_id(id),
+            reason: reason.clone(),
+        });
+        reject(reason)
+    }
+
+    /// Recomputes and republishes every group that lists `member_id`: the combined state when
+    /// it changed, and the availability (online while any targeted member is reachable). A
+    /// group is never a member of a group, so group ids are ignored, which also keeps the
+    /// group's own state echoes from looping back here.
+    pub fn on_member_state_change(&self, member_id: &str) {
+        if member_id.starts_with("group_") {
+            return;
+        }
+        let affected: Vec<(String, GroupSpec)> = self
+            .group_store()
+            .all()
+            .iter()
+            .filter(|(_, spec)| spec.members.iter().any(|m| m == member_id))
+            .map(|(id, spec)| (id.clone(), spec.clone()))
+            .collect();
+        let prefix = &self.discovery_prefix;
+        for (group_id, spec) in affected {
+            let Some(group) = self.entity_view(&groups::topics::unique_id(&group_id)) else {
+                continue;
+            };
+            let members = self.group_member_views(&spec);
+            let reachable = !groups::fanout::targets(&spec, &members).is_empty();
+            let matching: Vec<EntityView> = members
+                .into_iter()
+                .filter(|m| m.kind == spec.kind)
+                .collect();
+
+            if let Some(state) = groups::state::combine(spec.kind, &matching) {
+                let topic = groups::topics::state_topic(prefix, &group_id);
+                let payload = groups::state::encode(&state);
+                self.ingest(&topic, payload.as_bytes());
+                let changed = self
+                    .entity_view(&group.id)
+                    .is_some_and(|now| now.state.value != group.state.value);
+                if changed {
+                    self.republish(topic, payload);
+                }
+            }
+
+            let topic = groups::topics::availability_topic(prefix, &group_id);
+            let payload = if reachable { "online" } else { "offline" };
+            self.ingest(&topic, payload.as_bytes());
+            let flipped = self
+                .entity_view(&group.id)
+                .is_some_and(|now| now.state.availability != group.state.availability);
+            if flipped {
+                self.republish(topic, payload.to_owned());
+            }
+        }
+    }
+
+    /// Publishes a group topic retained; a refused publish is logged, the local copy stays.
+    fn republish(&self, topic: String, payload: String) {
+        if let Err(err) = self.publish(Publish {
+            topic: topic.clone(),
+            payload,
+            retain: true,
+        }) {
+            tracing::warn!(%topic, %err, "group publish refused");
         }
     }
 
@@ -860,38 +1094,6 @@ impl Hub {
         self.set_areas(doc).await
     }
 
-    /// Edits the `kind` room group card of area `id` in the declared document: `name` (`None`
-    /// leaves it, `Some(None)` or a blank clears it) and `favorite`, the rest kept.
-    pub async fn set_area_group(
-        &self,
-        id: &str,
-        kind: &str,
-        name: Option<Option<String>>,
-        favorite: Option<bool>,
-    ) -> Result<Vec<AreaView>, HubError> {
-        let kind = GroupKind::from_key(kind)
-            .ok_or_else(|| HubError::Rejected(format!("`{kind}` is not a group kind")))?;
-        if id == UNASSIGNED_AREA {
-            return Err(HubError::Rejected(
-                "`Unassigned` has no room groups".to_owned(),
-            ));
-        }
-        if name.is_none() && favorite.is_none() {
-            return Err(HubError::Rejected(
-                "nothing to change: give a `name` or a `favorite`".to_owned(),
-            ));
-        }
-        let mut doc = {
-            let reg = self.read();
-            if !reg.effective_areas().iter().any(|area| area.id == id) {
-                return Err(HubError::UnknownArea(id.to_owned()));
-            }
-            reg.areas_document().clone()
-        };
-        doc.set_group(id, kind, name.as_ref().map(Option::as_deref), favorite);
-        self.set_areas(doc).await
-    }
-
     /// Creates or replaces virtual entity `id`: publishes its discovery config retained and
     /// applies it locally. The initial state (`OFF`, the number's `min`, or `initial`) is
     /// published retained only when the entity did not exist, so redefining one keeps its
@@ -958,6 +1160,235 @@ impl Hub {
         })?;
         self.ingest(&config_topic, b"");
         Ok(())
+    }
+
+    /// Fails with a `Publish` error (503 over HTTP) while `[groups] enabled` is false.
+    fn require_groups(&self) -> Result<(), HubError> {
+        if self.groups_enabled {
+            Ok(())
+        } else {
+            Err(HubError::Publish("groups disabled".to_owned()))
+        }
+    }
+
+    /// Creates or replaces group `id`: validates everything first, then publishes the
+    /// discovery config, availability and definition retained, and the combined state only
+    /// when the group is new. A changed component clears the old config topic.
+    pub async fn set_group(&self, id: &str, spec: GroupSpec) -> Result<GroupView, HubError> {
+        self.require_groups()?;
+        groups::topics::validate_id(id).map_err(HubError::Rejected)?;
+        groups::topics::component_for(spec.kind).map_err(HubError::Rejected)?;
+        if let Some(nested) = spec.members.iter().find(|m| m.starts_with("group_")) {
+            return Err(HubError::Rejected(format!(
+                "members cannot be groups: {nested}"
+            )));
+        }
+        let previous = self.group_store().get(id).cloned();
+        let mut members = Vec::new();
+        for member in &spec.members {
+            let Some(view) = self.entity_view(member) else {
+                continue;
+            };
+            if view.kind == spec.kind {
+                members.push(view);
+            } else if !previous
+                .as_ref()
+                .is_some_and(|p| p.members.contains(member))
+            {
+                return Err(HubError::Rejected(format!(
+                    "member kind does not match: {member}"
+                )));
+            }
+        }
+
+        let prefix = &self.discovery_prefix;
+        let config_topic = groups::topics::config_topic(prefix, spec.kind, id);
+        let config = groups::discovery::build_config(prefix, id, &spec, &members).to_string();
+        let definition = serde_json::to_string(&spec)
+            .map_err(|err| HubError::Rejected(format!("cannot encode the group: {err}")))?;
+        self.publish(Publish {
+            topic: config_topic.clone(),
+            payload: config.clone(),
+            retain: true,
+        })?;
+        self.publish(Publish {
+            topic: groups::topics::availability_topic(prefix, id),
+            payload: "online".to_owned(),
+            retain: true,
+        })?;
+        let definition_topic = groups::topics::definition_topic(prefix, id);
+        self.publish(Publish {
+            topic: definition_topic.clone(),
+            payload: definition.clone(),
+            retain: true,
+        })?;
+        match &previous {
+            None => {
+                let payload = groups::state::combine(spec.kind, &members)
+                    .map(|state| groups::state::encode(&state))
+                    .unwrap_or_default();
+                self.publish(Publish {
+                    topic: groups::topics::state_topic(prefix, id),
+                    payload,
+                    retain: true,
+                })?;
+            }
+            Some(old) if old.kind != spec.kind => {
+                self.publish(Publish {
+                    topic: groups::topics::config_topic(prefix, old.kind, id),
+                    payload: String::new(),
+                    retain: true,
+                })?;
+            }
+            Some(_) => {}
+        }
+        self.ingest(&definition_topic, definition.as_bytes());
+        self.ingest(&config_topic, config.as_bytes());
+        self.group_view(id, &spec)
+    }
+
+    /// Removes group `id`: empty retained payloads on its definition, config, state and
+    /// availability topics. The UI override is left in place.
+    pub async fn delete_group(&self, id: &str) -> Result<(), HubError> {
+        self.require_groups()?;
+        let spec = self
+            .group_store()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| HubError::UnknownEntity(groups::topics::unique_id(id)))?;
+        let prefix = &self.discovery_prefix;
+        let config_topic = groups::topics::config_topic(prefix, spec.kind, id);
+        let definition_topic = groups::topics::definition_topic(prefix, id);
+        for topic in [
+            definition_topic.clone(),
+            config_topic.clone(),
+            groups::topics::state_topic(prefix, id),
+            groups::topics::availability_topic(prefix, id),
+        ] {
+            self.publish(Publish {
+                topic,
+                payload: String::new(),
+                retain: true,
+            })?;
+        }
+        self.ingest(&definition_topic, b"");
+        self.ingest(&config_topic, b"");
+        Ok(())
+    }
+
+    /// Turns the derived room groups into hand-made groups once: refused while the switch is
+    /// off, once the retained marker is set, or while the house is still empty (the retained
+    /// sync has not settled, and a marker published now would lock the migration out).
+    /// A group that fails to be created is logged and skipped.
+    pub async fn run_group_migration_once(&self) -> MigrationOutcome {
+        let skipped = |reason| MigrationOutcome {
+            created: Vec::new(),
+            skipped_reason: Some(reason),
+        };
+        if !self.groups_enabled {
+            return skipped("groups disabled");
+        }
+        if self.group_store().migrated() {
+            return skipped("already migrated");
+        }
+        let (entities, areas) = {
+            let reg = self.read();
+            if reg.entities().next().is_none() {
+                return skipped("house empty, retained sync not settled");
+            }
+            let entities: std::collections::BTreeMap<String, EntityView> = entity_views(&reg)
+                .into_iter()
+                .map(|view| (view.id.clone(), view))
+                .collect();
+            (entities, area_views(&reg))
+        };
+        let mut created = Vec::new();
+        for (id, spec) in groups::migrate::plan(&entities, &areas) {
+            match self.set_group(&id, spec).await {
+                Ok(_) => created.push(id),
+                Err(err) => tracing::warn!(group = %id, %err, "group migration skipped a group"),
+            }
+        }
+        let marker = Publish {
+            topic: groups::topics::migration_marker_topic(&self.discovery_prefix),
+            payload: "1".to_owned(),
+            retain: true,
+        };
+        if let Err(err) = self.publish(marker) {
+            tracing::warn!(%err, "group migration marker not published; it will run again");
+            return MigrationOutcome {
+                created,
+                skipped_reason: None,
+            };
+        }
+        self.group_store().mark_migrated();
+        MigrationOutcome {
+            created,
+            skipped_reason: None,
+        }
+    }
+
+    /// Every stored group that has its entity, with its members and the flows that use it,
+    /// sorted by id.
+    pub fn list_groups(&self) -> Result<Vec<GroupView>, HubError> {
+        self.require_groups()?;
+        let stored: Vec<(String, GroupSpec)> = self
+            .group_store()
+            .all()
+            .iter()
+            .map(|(id, spec)| (id.clone(), spec.clone()))
+            .collect();
+        // A definition without its discovery entity (not loaded yet, or lost) is skipped
+        // rather than failing the whole listing.
+        Ok(stored
+            .iter()
+            .filter_map(|(id, spec)| self.group_view(id, spec).ok())
+            .collect())
+    }
+
+    fn group_view(&self, id: &str, spec: &GroupSpec) -> Result<GroupView, HubError> {
+        let unique_id = groups::topics::unique_id(id);
+        let entity = self
+            .entity_view(&unique_id)
+            .ok_or_else(|| HubError::UnknownEntity(unique_id.clone()))?;
+        let members = spec
+            .members
+            .iter()
+            .map(|member| match self.entity_view(member) {
+                Some(view) => GroupMemberView {
+                    id: member.clone(),
+                    name: view.name,
+                    present: true,
+                    mismatch: view.kind != spec.kind,
+                },
+                None => GroupMemberView {
+                    id: member.clone(),
+                    name: member.clone(),
+                    present: false,
+                    mismatch: false,
+                },
+            })
+            .collect();
+        let used_by_flows = self
+            .flow_store()
+            .flows()
+            .iter()
+            .filter(|flow| {
+                flow.nodes
+                    .iter()
+                    .any(|node| node_entity(&node.kind) == Some(unique_id.as_str()))
+            })
+            .map(|flow| flow.name.clone())
+            .collect();
+        Ok(GroupView {
+            id: id.to_owned(),
+            name: spec.name.clone(),
+            kind: spec.kind,
+            members,
+            hide_members: spec.hide_members,
+            entity,
+            used_by_flows,
+        })
     }
 
     fn write_override(&self, id: &str, next: &UiOverride) -> Result<EntityView, HubError> {
@@ -1041,6 +1472,49 @@ impl Hub {
         self.flow_store
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The group store, taken as it is when a thread panicked while holding it.
+    pub(crate) fn group_store(&self) -> MutexGuard<'_, GroupStore> {
+        self.group_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Read access to the group store, for tests and diagnostics.
+    pub fn read_group_store(&self) -> MutexGuard<'_, GroupStore> {
+        self.group_store()
+    }
+
+    /// Feeds a group definition or the migration marker to the store; false when `topic` is
+    /// neither, so state and availability topics fall through to the registry.
+    fn ingest_group(&self, topic: &str, payload: &[u8]) -> bool {
+        let id = if topic == groups::topics::migration_marker_topic(&self.discovery_prefix) {
+            "_migrated"
+        } else {
+            let Some(id) = topic
+                .strip_prefix(self.discovery_prefix.as_str())
+                .and_then(|rest| rest.strip_prefix("/group/"))
+                .and_then(|rest| rest.strip_suffix("/definition"))
+            else {
+                return false;
+            };
+            if id.is_empty() || id.contains('/') {
+                return false;
+            }
+            id
+        };
+        let outcome = self.group_store().apply(id, payload);
+        match &outcome {
+            ApplyOutcome::Rejected(reason) => {
+                tracing::warn!(%id, %reason, "group definition rejected");
+            }
+            ApplyOutcome::Created | ApplyOutcome::Replaced | ApplyOutcome::Deleted => {
+                tracing::info!(%id, ?outcome, "group definition applied");
+            }
+            ApplyOutcome::Marker | ApplyOutcome::Unchanged => {}
+        }
+        true
     }
 
     /// Asks the flow engine to do something; nobody listening is fine (no engine started).
@@ -1130,4 +1604,15 @@ fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
             }
         })
         .collect()
+}
+
+/// The entity id a flow node refers to, when its type carries one.
+fn node_entity(kind: &oikos_core::flow::NodeKind) -> Option<&str> {
+    use oikos_core::flow::NodeKind;
+    match kind {
+        NodeKind::TriggerState(params) => Some(params.entity.as_str()),
+        NodeKind::Command(params) => Some(params.entity.as_str()),
+        NodeKind::If(params) => params.entity.as_deref(),
+        _ => None,
+    }
 }

@@ -4,7 +4,9 @@
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
-use oikos_api::{DeviceView, EntityView};
+use std::collections::BTreeMap;
+
+use oikos_api::{DeviceView, EntityView, GroupView};
 use oikos_core::model::{Availability, Command, EntityState, Hs, Kind, LightState, StateValue};
 
 use crate::cards::Sender;
@@ -48,6 +50,19 @@ fn Panel(title: &'static str, children: Children) -> impl IntoView {
             {children()}
         </section>
     }
+}
+
+/// The `(group id, group name)` of every group that lists `entity_id` as a member, in group-id
+/// order.
+pub(crate) fn groups_containing(
+    groups: &BTreeMap<String, GroupView>,
+    entity_id: &str,
+) -> Vec<(String, String)> {
+    groups
+        .values()
+        .filter(|g| g.members.iter().any(|m| m.id == entity_id))
+        .map(|g| (g.id.clone(), g.name.clone()))
+        .collect()
 }
 
 /// The colour of a light, when its state has one.
@@ -250,6 +265,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
     };
 
     let history_href = format!("/history/{}", crate::api::encode_id(&id));
+    let id_for_groups = id.clone();
     view! {
         <header class="sheet__header">
             <A href=move || return_path.0.get() attr:class="sheet__back">
@@ -269,6 +285,28 @@ pub fn SheetBody(id: String) -> impl IntoView {
         <Panel title="Settings">
             {initial.map(|e| view! { <OverrideEditor entity=e /> })}
         </Panel>
+        {move || {
+            let list = house.groups.with(|g| groups_containing(g, &id_for_groups));
+            (!list.is_empty())
+                .then(|| {
+                    view! {
+                        <Panel title="In groups">
+                            <ul class="sheet__links">
+                                {list
+                                    .into_iter()
+                                    .map(|(gid, name)| {
+                                        view! {
+                                            <li>
+                                                <A href=format!("/group/{}", crate::api::encode_id(&gid))>{wrap_id(&name)}</A>
+                                            </li>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </ul>
+                        </Panel>
+                    }
+                })
+        }}
         <details class="sheet__panel sheet__details">
             <summary class="sheet__heading sheet__summary">"Device & diagnostics"</summary>
             {move || entity.get().and_then(|e| device_panel(house, &e))}
@@ -318,8 +356,65 @@ pub fn EntitySheetScreen() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::{WHITE, is_white};
-    use oikos_core::model::Hs;
+    use super::{WHITE, groups_containing, is_white};
+    use oikos_api::{EntityView, GroupMemberView, GroupView};
+    use oikos_core::model::{Capabilities, EntityCategory, EntityState, Hs, Kind, UiOverride};
+    use std::collections::BTreeMap;
+
+    fn group(id: &str, name: &str, members: &[&str]) -> GroupView {
+        GroupView {
+            id: id.into(),
+            name: name.into(),
+            kind: Kind::Light,
+            members: members
+                .iter()
+                .map(|m| GroupMemberView {
+                    id: (*m).into(),
+                    name: (*m).into(),
+                    present: true,
+                    mismatch: false,
+                })
+                .collect(),
+            hide_members: true,
+            entity: EntityView {
+                id: format!("group_{id}"),
+                device_id: None,
+                name: name.into(),
+                device_name: None,
+                label: None,
+                kind: Kind::Light,
+                component: Kind::Light.component().to_string(),
+                protocol_kind: Kind::Light,
+                device_class: None,
+                unit: None,
+                icon: None,
+                category: EntityCategory::Primary,
+                enabled_by_default: true,
+                area: "x".into(),
+                part_of: None,
+                capabilities: Capabilities::default(),
+                ui: UiOverride::default(),
+                state: EntityState::default(),
+            },
+            used_by_flows: vec![],
+        }
+    }
+
+    #[test]
+    fn lists_every_group_containing_the_entity() {
+        let mut m = BTreeMap::new();
+        for g in [
+            group("hall", "Hallway lights", &["a", "b"]),
+            group("living", "Living lights", &["a"]),
+            group("other", "Other", &["c"]),
+        ] {
+            m.insert(g.id.clone(), g);
+        }
+        let got = groups_containing(&m, "a");
+        let names: Vec<_> = got.iter().map(|(_, n)| n.as_str()).collect();
+        assert_eq!(names, ["Hallway lights", "Living lights"]);
+        assert!(groups_containing(&m, "zzz").is_empty());
+    }
 
     #[test]
     fn white_is_near_zero_saturation() {

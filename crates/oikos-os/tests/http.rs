@@ -460,117 +460,13 @@ async fn patch_group(server: &Server, path: &str, body: Value) -> reqwest::Respo
 }
 
 #[tokio::test]
-async fn patch_area_group_sets_name_and_favorite() {
-    let mut server = Server::start().await;
-    server.online();
-    server.hub.ingest(
-        "oikos/ui/_areas",
-        br#"{"areas":[{"id":"dehors","name":"Dehors","order":7}]}"#,
-    );
-
-    let response = patch_group(
-        &server,
-        "/api/v1/areas/dehors/groups/cover",
-        json!({"name": "Volets", "favorite": true}),
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let areas: Value = response.json().await.expect("json");
-    let dehors = areas
-        .as_array()
-        .expect("an array")
-        .iter()
-        .find(|a| a["id"] == "dehors")
-        .expect("the area");
-    assert_eq!(dehors["group_names"], json!({"cover": "Volets"}));
-    assert_eq!(dehors["group_favorites"], json!(["cover"]));
-    let published = server.publisher.try_recv().expect("the areas publish");
-    assert_eq!(published.topic, "oikos/ui/_areas");
-    assert_eq!(
-        published.payload,
-        r#"{"areas":[{"id":"dehors","name":"Dehors","order":7,"groupNames":{"cover":"Volets"},"groupFavorites":["cover"]}]}"#
-    );
-}
-
-#[tokio::test]
-async fn patch_area_group_null_name_clears() {
-    let mut server = Server::start().await;
-    server.online();
-    server.hub.ingest(
-        "oikos/ui/_areas",
-        br#"{"areas":[{"id":"dehors","name":"Dehors","groupNames":{"cover":"Volets"},"groupFavorites":["cover"]}]}"#,
-    );
-
-    let response = patch_group(
-        &server,
-        "/api/v1/areas/dehors/groups/cover",
-        json!({"name": null}),
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::OK);
-    let published = server.publisher.try_recv().expect("the areas publish");
-    assert_eq!(
-        published.payload,
-        r#"{"areas":[{"id":"dehors","name":"Dehors","groupFavorites":["cover"]}]}"#
-    );
-}
-
-#[tokio::test]
-async fn patch_area_group_rejects() {
-    let mut server = Server::start().await;
-    server.online();
-    server.hub.ingest(
-        "oikos/ui/_areas",
-        br#"{"areas":[{"id":"dehors","name":"Dehors"}]}"#,
-    );
-
-    for (path, body, status) in [
-        (
-            "/api/v1/areas/dehors/groups/switch",
-            json!({"favorite": true}),
-            StatusCode::UNPROCESSABLE_ENTITY,
-        ),
-        (
-            "/api/v1/areas/Unassigned/groups/cover",
-            json!({"favorite": true}),
-            StatusCode::UNPROCESSABLE_ENTITY,
-        ),
-        (
-            "/api/v1/areas/dehors/groups/cover",
-            json!({}),
-            StatusCode::UNPROCESSABLE_ENTITY,
-        ),
-        (
-            "/api/v1/areas/attic/groups/cover",
-            json!({"favorite": true}),
-            StatusCode::NOT_FOUND,
-        ),
-    ] {
-        let response = patch_group(&server, path, body.clone()).await;
-        assert_eq!(response.status(), status, "{path} {body}");
-    }
-    assert!(
-        server.publisher.try_recv().is_err(),
-        "a refused edit publishes nothing"
-    );
-}
-
-#[tokio::test]
 async fn rename_keeps_group_fields() {
     let mut server = Server::start().await;
     server.online();
     server.hub.ingest(
         "oikos/ui/_areas",
-        br#"{"areas":[{"id":"dehors","name":"Dehors"}]}"#,
+        br#"{"areas":[{"id":"dehors","name":"Dehors","groupNames":{"cover":"Volets"}}]}"#,
     );
-    let response = patch_group(
-        &server,
-        "/api/v1/areas/dehors/groups/cover",
-        json!({"name": "Volets"}),
-    )
-    .await;
-    assert_eq!(response.status(), StatusCode::OK);
-    server.publisher.try_recv().expect("the group publish");
 
     let response = patch_group(&server, "/api/v1/areas/dehors", json!({"name": "Outdoor"})).await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -1558,4 +1454,60 @@ async fn oversized_picture_is_dropped() {
         .get(&format!("/api/v1/entities/{CAMERA_ID}/picture"))
         .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+fn groups_config() -> Config {
+    let mut cfg = config();
+    cfg.groups.enabled = true;
+    cfg
+}
+
+#[tokio::test]
+async fn http_groups_list_is_empty_then_503_when_off() {
+    let server = Server::start_with(groups_config()).await;
+    let res = server.get("/api/v1/groups").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.json::<Value>().await.expect("json"), json!([]));
+
+    let off = Server::start().await;
+    assert_eq!(
+        off.get("/api/v1/groups").await.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+}
+
+#[tokio::test]
+async fn http_put_and_delete_group() {
+    let server = Server::start_with(groups_config()).await;
+    server.online();
+    let url = server.url("/api/v1/groups/living");
+    let res = server
+        .client
+        .put(&url)
+        .json(&json!({ "kind": "switch", "name": "Living", "members": [] }))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::OK);
+    let view: Value = res.json().await.expect("json");
+    assert_eq!(view["id"], "living");
+    assert_eq!(view["hideMembers"], true);
+    assert_eq!(view["usedByFlows"], json!([]));
+
+    let bad = server
+        .client
+        .put(server.url("/api/v1/groups/BAD-id"))
+        .json(&json!({ "kind": "switch", "name": "x", "members": [] }))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let missing = server
+        .client
+        .delete(server.url("/api/v1/groups/ghost"))
+        .send()
+        .await
+        .expect("DELETE");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 }

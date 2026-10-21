@@ -19,6 +19,7 @@ pub struct Config {
     pub frigate: FrigateConfig,
     pub automation: AutomationConfig,
     pub flows: FlowsConfig,
+    pub groups: GroupsConfig,
     pub history: HistoryConfig,
 }
 
@@ -250,6 +251,13 @@ impl FlowsConfig {
     }
 }
 
+/// Hub-level kill switch for group publishing and migration. Off by default.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct GroupsConfig {
+    pub enabled: bool,
+}
+
 /// TimescaleDB connection and the writer's queue size. An empty `url` turns history off
 /// (the house keeps running, the `/api/v1/history/*` routes answer 503).
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -344,6 +352,25 @@ impl Config {
             }
         }
         figment.extract()
+    }
+}
+
+#[cfg(test)]
+mod groups_config_tests {
+    use super::*;
+
+    #[test]
+    fn groups_default_is_disabled() {
+        assert!(!Config::default().groups.enabled);
+    }
+
+    #[test]
+    fn groups_enabled_true_from_toml() {
+        let cfg: Config = Figment::from(Serialized::defaults(Config::default()))
+            .merge(Toml::string("[groups]\nenabled = true\n"))
+            .extract()
+            .unwrap();
+        assert!(cfg.groups.enabled);
     }
 }
 

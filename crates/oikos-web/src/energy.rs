@@ -55,7 +55,11 @@ pub fn energy_entity(e: &EntityView) -> EnergyEntity {
 }
 
 pub fn energy_entities(entities: &BTreeMap<String, EntityView>) -> Vec<EnergyEntity> {
-    entities.values().map(energy_entity).collect()
+    entities
+        .values()
+        .filter(|e| !e.id.starts_with("group_"))
+        .map(energy_entity)
+        .collect()
 }
 
 /// True when the solar roles together produce at least 10 W, so the Energy tab glyph lights up.
@@ -397,6 +401,37 @@ pub fn plus_minus_ids(
 mod tests {
     use super::*;
     use oikos_core::energy::EnergyFlow;
+
+    #[test]
+    fn group_entities_never_reach_the_energy_list() {
+        use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
+        let view = |id: &str| EntityView {
+            id: id.into(),
+            device_id: None,
+            name: id.into(),
+            device_name: None,
+            label: None,
+            kind: Kind::Sensor,
+            component: Kind::Sensor.component().to_string(),
+            protocol_kind: Kind::Sensor,
+            device_class: None,
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "x".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui: UiOverride::default(),
+            state: EntityState::default(),
+        };
+        let map: BTreeMap<String, EntityView> = ["power", "group_all"]
+            .into_iter()
+            .map(|id| (id.to_owned(), view(id)))
+            .collect();
+        let ids: Vec<_> = energy_entities(&map).into_iter().map(|e| e.id).collect();
+        assert_eq!(ids, ["power"]);
+    }
 
     fn ent(id: &str, name: &str, role: EnergyRole, unit: &str, value: f64) -> EnergyEntity {
         EnergyEntity {

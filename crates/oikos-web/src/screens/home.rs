@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
-use oikos_core::model::{GroupKind, Kind, Placement, SwitchType, UNASSIGNED_AREA};
+use oikos_core::model::{Kind, Placement, SwitchType, UNASSIGNED_AREA};
 use oikos_core::types::Placement as TypePlacement;
 use std::collections::{BTreeMap, HashSet};
 
@@ -14,7 +14,10 @@ use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
 use crate::cards::door::DoorCard;
 use crate::cards::generic::GenericCard;
-use crate::cards::group::{CoverGroupCard, LightGroupCard};
+use crate::cards::group::{
+    ButtonGroupCard, ClimateGroupCard, CoverGroupEntityCard, LightGroupEntityCard, NumberGroupCard,
+    SelectGroupCard, SwitchGroupCard, VacuumGroupCard, WaterHeaterGroupCard,
+};
 use crate::cards::light::LightCard;
 use crate::cards::number::NumberCard;
 use crate::cards::select::SelectCard;
@@ -25,6 +28,7 @@ use crate::cards::vacuum::VacuumCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::alert_row::RecentAlerts;
 use crate::components::area_chip::AreaChip;
+use crate::components::card_frame::GROUP_PREFIX;
 use crate::components::room_title::RoomTitle;
 use crate::groups::{HomeItem, favorites_count, home_items};
 use crate::house::House;
@@ -114,6 +118,22 @@ fn generic_placement(e: &EntityView) -> TypePlacement {
 
 /// The card component for an entity's kind.
 pub fn card_for(entity: EntityView) -> AnyView {
+    if entity.id.starts_with(GROUP_PREFIX) {
+        match entity.kind {
+            Kind::Switch => return view! { <SwitchGroupCard entity=entity /> }.into_any(),
+            Kind::Climate => return view! { <ClimateGroupCard entity=entity /> }.into_any(),
+            Kind::WaterHeater => {
+                return view! { <WaterHeaterGroupCard entity=entity /> }.into_any();
+            }
+            Kind::Number => return view! { <NumberGroupCard entity=entity /> }.into_any(),
+            Kind::Select => return view! { <SelectGroupCard entity=entity /> }.into_any(),
+            Kind::Button => return view! { <ButtonGroupCard entity=entity /> }.into_any(),
+            Kind::Vacuum => return view! { <VacuumGroupCard entity=entity /> }.into_any(),
+            Kind::Light => return view! { <LightGroupEntityCard entity=entity /> }.into_any(),
+            Kind::Cover => return view! { <CoverGroupEntityCard entity=entity /> }.into_any(),
+            _ => {}
+        }
+    }
     match entity.kind {
         Kind::Light => view! { <LightCard entity=entity /> }.into_any(),
         Kind::Switch => match SwitchType::of(entity.protocol_kind, &entity.ui) {
@@ -147,11 +167,26 @@ pub fn HomeScreen() -> impl IntoView {
     // Memos only notify when their value changes, so a state echo leaves chips and the card list
     // alone and repaints just the one card that changed.
     let favorites = Memo::new(move |_| {
-        house
-            .areas
-            .with(|a| house.entities.with(|m| favorites_count(m.values(), a)))
+        house.areas.with(|a| {
+            house
+                .entities
+                .with(|m| house.groups.with(|g| favorites_count(m.values(), a, g)))
+        })
     });
     let counts = Memo::new(move |_| house.entities.with(|m| home_counts(m.values())));
+    // The groups' member counts: fetched on mount and again when a group appears or goes.
+    let group_ids = Memo::new(move |_| {
+        house.entities.with(|m| {
+            m.keys()
+                .filter(|id| id.starts_with(GROUP_PREFIX))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    });
+    Effect::new(move |_| {
+        group_ids.track();
+        house.refresh_groups();
+    });
     let chip_list = Memo::new(move |_| {
         house
             .areas
@@ -170,9 +205,11 @@ pub fn HomeScreen() -> impl IntoView {
     });
     let items = Memo::new(move |_| {
         current.get().map_or_else(Vec::new, |chip| {
-            house
-                .areas
-                .with(|a| house.entities.with(|m| home_items(m.values(), a, &chip)))
+            house.areas.with(|a| {
+                house
+                    .entities
+                    .with(|m| house.groups.with(|g| home_items(m.values(), a, &chip, g)))
+            })
         })
     });
     let loaded = Memo::new(move |_| {
@@ -242,12 +279,6 @@ pub fn HomeScreen() -> impl IntoView {
                                     });
                                     view! { {move || entity.get().map(card_for)} }.into_any()
                                 }
-                                HomeItem::Group { key, members } if key.kind == GroupKind::Cover => {
-                                    view! { <CoverGroupCard key=key members=members /> }.into_any()
-                                }
-                                HomeItem::Group { key, members } => {
-                                    view! { <LightGroupCard key=key members=members /> }.into_any()
-                                }
                             }
                         />
                     </div>
@@ -271,11 +302,10 @@ mod tests {
 
     /// The ids of the single cards `home_items` gives under `chip` (no groups expected).
     fn entity_ids<'a>(entities: impl Iterator<Item = &'a EntityView>, chip: &str) -> Vec<String> {
-        home_items(entities, &[], chip)
+        home_items(entities, &[], chip, &BTreeMap::new())
             .into_iter()
             .map(|i| match i {
                 HomeItem::Entity(id) => id,
-                HomeItem::Group { key, .. } => panic!("unexpected group {key:?}"),
             })
             .collect()
     }
