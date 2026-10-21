@@ -962,3 +962,60 @@ async fn offer_never_blocks_when_full() {
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
     ));
 }
+
+/// Feeds a hand-written generic entity (`unique_id` `u1`) and returns its id.
+fn feed_generic(hub: &Hub, component: &str, config: serde_json::Value) -> String {
+    let topic = format!("oikos/{component}/u1/main/config");
+    hub.ingest(&topic, config.to_string().as_bytes());
+    let snapshot = hub.snapshot();
+    snapshot
+        .entities
+        .iter()
+        .find(|e| e.component == component)
+        .unwrap_or_else(|| panic!("no {component} entity"))
+        .id
+        .clone()
+}
+
+fn control(name: &str, value: Option<serde_json::Value>) -> Command {
+    Command::Control {
+        control: name.to_owned(),
+        value,
+    }
+}
+
+#[tokio::test]
+async fn scene_activate_is_accepted_without_echo() {
+    let (hub, mut publisher) = hub_with_timeout(5_000);
+    let id = feed_generic(
+        &hub,
+        "scene",
+        serde_json::json!({"name": "Movie", "unique_id": "u1", "command_topic": "sc/set"}),
+    );
+    let started = std::time::Instant::now();
+    let response = hub
+        .send_command(&id, control("activate", None))
+        .await
+        .expect("accepted");
+    assert!(response.accepted);
+    assert_eq!(response.reason, None);
+    assert_eq!(response.state, None);
+    assert!(started.elapsed() < Duration::from_secs(1));
+    assert_eq!(publisher.try_recv().expect("published").topic, "sc/set");
+}
+
+#[tokio::test]
+async fn lock_command_waits_for_echo() {
+    let (hub, _publisher) = hub();
+    let id = feed_generic(
+        &hub,
+        "lock",
+        serde_json::json!({"name": "Door", "unique_id": "u1", "state_topic": "l/s",
+                           "command_topic": "l/set"}),
+    );
+    let response = hub
+        .send_command(&id, control("locked", Some(serde_json::json!(true))))
+        .await
+        .expect("mapped");
+    assert!(!response.accepted);
+}

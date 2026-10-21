@@ -121,7 +121,10 @@ fn instructions() -> String {
          `set_override` writes the Android app's `oikos/ui/<id>` override (fields: {fields}; \
          `null` clears a field) and `clear_override` removes it. `send_command` publishes to \
          the device and reports `accepted: true` once the next state echo confirms it, or \
-         `accepted: false` with the reason. The `oikos://snapshot` resource is the whole house \
+         `accepted: false` with the reason; a generic entity (lock, fan, siren, scene, text and so on) \
+         takes `{{\"type\":\"control\",\"control\":\"<name>\",\"value\":...}}` with a name from its \
+         `capabilities.generic.controls`, and a control with no state to echo is accepted as soon \
+         as it is published. The `oikos://snapshot` resource is the whole house \
          as one JSON document. Automations are flows: `list_flows` and `get_flow` read them, \
          `set_flow` creates or replaces one (validated against the house, saved retained on \
          `oikos/automation/<id>`, the prefix being configurable), `set_flow_enabled` \

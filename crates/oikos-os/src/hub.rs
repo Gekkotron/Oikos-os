@@ -18,9 +18,10 @@ use oikos_api::{
 };
 use oikos_core::command::{CommandError, Publish, map_command};
 use oikos_core::model::{
-    AreasDocument, Availability, Command, GroupKind, PatchError, UNASSIGNED_AREA, UiOverride,
+    AreasDocument, Availability, Command, GroupKind, Kind, PatchError, UNASSIGNED_AREA, UiOverride,
 };
 use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
+use oikos_core::types::command::expects_echo;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::clock;
@@ -532,7 +533,7 @@ impl Hub {
         // Subscribed before publishing, so a fast echo cannot slip between the two.
         let mut events = self.subscribe();
         let mut seen = self.state_seen.subscribe();
-        let (publishes, before) = {
+        let (publishes, before, no_echo_expected) = {
             let reg = self.read();
             let entity = reg
                 .entity(id)
@@ -541,13 +542,30 @@ impl Hub {
             if state.availability == Availability::Offline {
                 return Err(HubError::Rejected("entity is offline".to_owned()));
             }
+            // A generic control with no state topic to echo on (a press, a scene) is done
+            // once published.
+            let no_echo_expected = match &cmd {
+                Command::Control { control, .. } if entity.kind == Kind::Generic => {
+                    oikos_core::types::type_def(&entity.component)
+                        .is_some_and(|def| !expects_echo(def, entity, control))
+                }
+                _ => false,
+            };
             (
                 map_command(entity, &state, &cmd, reg.templates())?,
                 state.value,
+                no_echo_expected,
             )
         };
         for publish in publishes {
             self.publish(publish)?;
+        }
+        if no_echo_expected {
+            return Ok(CommandResponse {
+                accepted: true,
+                reason: None,
+                state: None,
+            });
         }
 
         let confirmed = tokio::time::timeout(self.confirm_timeout, async {

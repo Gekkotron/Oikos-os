@@ -88,21 +88,22 @@ pub fn command_name(command: &Command) -> &'static str {
         Command::Disarm { .. } => "disarm",
         Command::VacuumAction { .. } => "vacuum_action",
         Command::SetFanSpeed { .. } => "set_fan_speed",
+        Command::Control { .. } => "control",
     }
 }
 
 /// One command seen through an entity's config.
 #[derive(Clone, Copy)]
-struct Mapper<'a> {
-    entity: &'a Entity,
-    state: &'a EntityState,
-    config: &'a Value,
-    templates: &'a Templates,
-    command: &'a Command,
+pub(crate) struct Mapper<'a> {
+    pub(crate) entity: &'a Entity,
+    pub(crate) state: &'a EntityState,
+    pub(crate) config: &'a Value,
+    pub(crate) templates: &'a Templates,
+    pub(crate) command: &'a Command,
 }
 
 impl Mapper<'_> {
-    fn unsupported(&self) -> CommandError {
+    pub(crate) fn unsupported(&self) -> CommandError {
         CommandError::Unsupported {
             kind: self.entity.protocol_kind,
             command: command_name(self.command).to_owned(),
@@ -110,7 +111,7 @@ impl Mapper<'_> {
     }
 
     /// The topic named by `config[key]`.
-    fn topic(&self, key: &str) -> Result<String, CommandError> {
+    pub(crate) fn topic(&self, key: &str) -> Result<String, CommandError> {
         self.config
             .get(key)
             .and_then(Value::as_str)
@@ -120,13 +121,13 @@ impl Mapper<'_> {
     }
 
     /// A payload word from the config, with its Home Assistant default.
-    fn word(&self, key: &str, default: &str) -> String {
+    pub(crate) fn word(&self, key: &str, default: &str) -> String {
         config::config_string_or(self.config, key, default)
     }
 
     /// `payload` through the template at `config[template_key]` when there is one, with
     /// `value` = `payload` plus `extra` in context; the bare payload otherwise.
-    fn render(
+    pub(crate) fn render(
         &self,
         template_key: &str,
         payload: &str,
@@ -143,7 +144,7 @@ impl Mapper<'_> {
 
     /// A publish on `config[topic_key]` carrying `payload`, rendered through
     /// `config[template_key]` when that key is given and present.
-    fn publish(
+    pub(crate) fn publish(
         &self,
         topic_key: &str,
         template_key: Option<&str>,
@@ -169,7 +170,7 @@ impl Mapper<'_> {
 }
 
 /// `Ok` when `value` is one of `list`; `OutOfRange` otherwise, including for an empty list.
-fn listed(value: &str, list: &[String], what: &str) -> Result<(), CommandError> {
+pub(crate) fn listed(value: &str, list: &[String], what: &str) -> Result<(), CommandError> {
     if list.iter().any(|item| item == value) {
         Ok(())
     } else {
@@ -189,7 +190,7 @@ fn listed_if_any(value: &str, list: &[String], what: &str) -> Result<(), Command
 }
 
 /// `Ok` when `value` is finite and within the bounds that are given.
-fn in_range(
+pub(crate) fn in_range(
     value: f64,
     min: Option<f64>,
     max: Option<f64>,

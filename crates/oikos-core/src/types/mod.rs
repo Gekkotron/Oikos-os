@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::{GenericState, GenericValue};
 
 pub mod caps;
+pub mod command;
 pub mod state;
 pub use caps::{GenericCaps, Range};
 

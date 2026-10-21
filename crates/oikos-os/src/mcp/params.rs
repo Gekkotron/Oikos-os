@@ -97,7 +97,10 @@ pub struct SendCommandParams {
     /// `effect`), `turn_off`, `toggle`, `set_position` {position 0-100}, `open`, `close`,
     /// `stop`, `set_temperature` {temperature}, `set_hvac_mode` {mode}, `set_fan_mode` {mode},
     /// `set_number` {value}, `select_option` {option}, `press`, `arm` {mode, code?}, `disarm`
-    /// {code?} and the vacuum and water-heater commands the entity's capabilities list.
+    /// {code?}, `{"type":"control","control":"<name>","value":…}` for a generic entity (control
+    /// names come from its `capabilities.generic.controls`; `value` is a bool, number or
+    /// string by the control's shape, absent for a press) and the vacuum and water-heater
+    /// commands the entity's capabilities list.
     pub command: Command,
 }
 
