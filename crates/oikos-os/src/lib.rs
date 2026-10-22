@@ -2,6 +2,7 @@
 
 pub mod alerts;
 pub mod cli;
+pub mod climate;
 pub mod clock;
 pub mod config;
 pub mod dashboards;

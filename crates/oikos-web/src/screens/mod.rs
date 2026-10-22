@@ -1,6 +1,7 @@
 pub mod alert_detail;
 pub mod alerts;
 pub mod dashboard;
+pub mod climate;
 pub mod devices;
 pub mod energy;
 pub mod entity_sheet;

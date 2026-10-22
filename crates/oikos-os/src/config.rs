@@ -21,6 +21,7 @@ pub struct Config {
     pub automation: AutomationConfig,
     pub flows: FlowsConfig,
     pub groups: GroupsConfig,
+    pub climate: ClimateConfig,
     pub history: HistoryConfig,
 }
 
@@ -456,6 +457,42 @@ pub struct GroupsConfig {
     pub enabled: bool,
 }
 
+/// The climate engine's switch and the topic prefix of its retained documents. Off by default;
+/// everything else is edited through MCP and the web Climate screen.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ClimateConfig {
+    pub enabled: bool,
+    pub prefix: String,
+}
+
+impl Default for ClimateConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            prefix: "oikos/climate".to_owned(),
+        }
+    }
+}
+
+impl ClimateConfig {
+    /// An enabled engine needs a prefix to keep its documents under: not empty, not only `/`,
+    /// and free of the MQTT wildcards `+` and `#`.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        let prefix = self.prefix.trim();
+        if prefix.chars().all(|c| c == '/') {
+            return Err("[climate] is enabled but prefix is empty".to_owned());
+        }
+        if prefix.contains(['+', '#']) {
+            return Err("[climate] prefix must not contain the MQTT wildcards + or #".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// TimescaleDB connection and the writer's queue size. An empty `url` turns history off
 /// (the house keeps running, the `/api/v1/history/*` routes answer 503).
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -530,6 +567,7 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "watchdog.acl.log_topic",
     "watchdog.acl.log_file",
     "history.url",
+    "climate.prefix",
 ];
 
 impl Config {
@@ -576,6 +614,60 @@ mod groups_config_tests {
             .extract()
             .unwrap();
         assert!(cfg.groups.enabled);
+    }
+}
+
+#[cfg(test)]
+mod climate_config_tests {
+    use super::*;
+
+    #[test]
+    fn climate_off_by_default() {
+        let cfg = Config::default();
+        assert!(!cfg.climate.enabled);
+        assert_eq!(cfg.climate.prefix, "oikos/climate");
+    }
+
+    #[test]
+    fn climate_enabled_from_toml() {
+        let cfg: Config = Figment::from(Serialized::defaults(Config::default()))
+            .merge(Toml::string("[climate]\nenabled = true\n"))
+            .extract()
+            .unwrap();
+        assert!(cfg.climate.enabled);
+        assert_eq!(cfg.climate.prefix, "oikos/climate");
+    }
+
+    #[test]
+    fn climate_empty_prefix_rejected_when_enabled() {
+        let mut cfg = ClimateConfig {
+            enabled: true,
+            prefix: "  ".to_owned(),
+        };
+        assert!(cfg.validate().unwrap_err().contains("prefix"));
+        cfg.enabled = false;
+        assert_eq!(cfg.validate(), Ok(()));
+    }
+
+    #[test]
+    fn climate_prefix_rejects_slashes_only_and_wildcards() {
+        for bad in ["", "/", " // ", "oikos/+/climate", "oikos/#", "a+b"] {
+            let cfg = ClimateConfig {
+                enabled: true,
+                prefix: bad.to_owned(),
+            };
+            assert!(
+                cfg.validate().unwrap_err().contains("prefix"),
+                "{bad:?} accepted"
+            );
+        }
+        for good in ["oikos/climate", "climate/", "home"] {
+            let cfg = ClimateConfig {
+                enabled: true,
+                prefix: good.to_owned(),
+            };
+            assert_eq!(cfg.validate(), Ok(()), "{good:?}");
+        }
     }
 }
 

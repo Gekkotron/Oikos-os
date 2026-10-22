@@ -54,6 +54,15 @@ const EXPECTED_TOOLS: &[&str] = &[
     "get_history",
     "send_notification",
     "list_alerts",
+    "climate_status",
+    "get_climate_zone",
+    "set_climate_settings",
+    "set_climate_zone",
+    "approve_climate_proposal",
+    "reject_climate_proposal",
+    "set_climate_override",
+    "clear_climate_override",
+    "learn_climate_zone",
 ];
 
 const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
@@ -183,6 +192,7 @@ async fn lists_the_expected_tools() {
     assert!(instructions.contains("send_notification"), "{instructions}");
     assert!(instructions.contains("list_alerts"), "{instructions}");
     assert!(instructions.contains("`notify`"), "{instructions}");
+    assert!(instructions.contains("climate_status"), "{instructions}");
 
     let tools = client.list_all_tools().await.expect("list tools");
     let mut names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
@@ -1156,4 +1166,123 @@ async fn list_alerts_filters_by_channel_and_limits() {
     );
     assert_eq!(one["alerts"].as_array().map(Vec::len), Some(1));
     assert_eq!(one["alerts"][0]["id"], "c");
+}
+
+#[tokio::test]
+async fn climate_status_disabled_error() {
+    let server = Server::start().await;
+    let client = server.client().await;
+    let result = call(&client, "climate_status", json!({})).await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        text_of(&result).contains("climate disabled"),
+        "{}",
+        text_of(&result)
+    );
+    let result = call(&client, "learn_climate_zone", json!({"zone": "living"})).await;
+    assert_eq!(result.is_error, Some(true));
+}
+
+#[tokio::test]
+async fn climate_status_enabled_returns_zones() {
+    let mut cfg = config();
+    cfg.climate.enabled = true;
+    let server = Server::start_with(cfg).await;
+    server.online();
+    server.hub.ingest(
+        "oikos/climate/daikin_192_168_1_150/climate/config",
+        &fixture("discovery/climate__daikin_192_168_1_150__climate.json"),
+    );
+    let id = server
+        .hub
+        .snapshot()
+        .entities
+        .into_iter()
+        .find(|e| e.id.starts_with("daikin_192_168_1_150"))
+        .expect("daikin")
+        .id;
+    let mut patch = serde_json::Map::new();
+    patch.insert("area".to_owned(), Value::from("living"));
+    server.hub.set_override(&id, &patch).await.expect("area");
+
+    let client = server.client().await;
+    let status = json_of(
+        "climate_status",
+        &call(&client, "climate_status", json!({})).await,
+    );
+    assert_eq!(status["zones"][0]["zone"], "living");
+
+    let zone = json_of(
+        "get_climate_zone",
+        &call(&client, "get_climate_zone", json!({"zone": "living"})).await,
+    );
+    assert_eq!(zone["zone"]["zone"], "living");
+    assert!(zone["decisions"].is_array());
+
+    // A pending zone does not follow overrides: an in-band refusal.
+    let pending = call(
+        &client,
+        "set_climate_override",
+        json!({"zone": "living", "setpoint": 21.0, "minutes": 30}),
+    )
+    .await;
+    assert_eq!(pending.is_error, Some(true));
+    assert!(
+        text_of(&pending).contains("zone is not active"),
+        "{}",
+        text_of(&pending)
+    );
+    json_of(
+        "set_climate_zone",
+        &call(
+            &client,
+            "set_climate_zone",
+            json!({"zone": "living", "settings": {"state": "active"}}),
+        )
+        .await,
+    );
+
+    let held = call(
+        &client,
+        "set_climate_override",
+        json!({"zone": "living", "setpoint": 21.0, "minutes": 30}),
+    )
+    .await;
+    json_of("set_climate_override", &held);
+    let both = call(
+        &client,
+        "set_climate_override",
+        json!({"zone": "living", "setpoint": 21.0, "minutes": 30, "until": 4_000_000_000u64}),
+    )
+    .await;
+    assert_eq!(both.is_error, Some(true));
+    json_of(
+        "clear_climate_override",
+        &call(&client, "clear_climate_override", json!({"zone": "living"})).await,
+    );
+    let nothing = call(
+        &client,
+        "approve_climate_proposal",
+        json!({"zone": "living"}),
+    )
+    .await;
+    assert_eq!(nothing.is_error, Some(true));
+}
+
+#[tokio::test]
+async fn set_climate_override_schema_accepts_zone_with_the_fields() {
+    let server = Server::start().await;
+    let client = server.client().await;
+    let tools = client.list_all_tools().await.expect("list tools");
+    let tool = tools
+        .iter()
+        .find(|t| t.name == "set_climate_override")
+        .expect("tool");
+    let schema = Value::Object((*tool.input_schema).clone());
+    let props = schema["properties"].as_object().expect("properties");
+    for field in ["zone", "setpoint", "mode", "minutes", "until"] {
+        assert!(props.contains_key(field), "{field} missing: {schema}");
+    }
+    // `additionalProperties: false` is fine only because every field is listed above.
+    assert_eq!(schema["required"], json!(["zone"]), "{schema}");
 }

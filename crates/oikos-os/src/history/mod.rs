@@ -2,6 +2,7 @@
 //! feeds it without blocking the ingest path (`writer`), and the hourly rollup task that
 //! fills `history_hourly` (`rollup`).
 
+pub mod climate;
 pub mod db;
 pub mod query;
 pub mod rollup;

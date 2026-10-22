@@ -17,6 +17,8 @@ use oikos_api::{
     GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, IgnoredView, LastChange,
     OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec,
 };
+use oikos_climate::doc::{HouseSettings, Rules, ZoneSettings};
+use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus, OverrideRequest};
 use oikos_core::flow::{Flow, Schedule};
 use oikos_core::model::{AreasDocument, Command};
 use serde::Serialize;
@@ -58,6 +60,20 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/flows/{id}/run", post(run_flow))
         .route("/groups", get(list_groups))
         .route("/groups/{id}", put(put_group).delete(delete_group))
+        .route("/climate", get(climate))
+        .route("/climate/house", put(put_climate_house))
+        .route("/climate/zones/{id}", put(put_climate_zone))
+        .route(
+            "/climate/zones/{id}/override",
+            post(set_climate_override).delete(clear_climate_override),
+        )
+        .route(
+            "/climate/zones/{id}/proposal/approve",
+            post(approve_climate),
+        )
+        .route("/climate/zones/{id}/proposal/reject", post(reject_climate))
+        .route("/climate/zones/{id}/learn", post(learn_climate))
+        .route("/climate/zones/{id}/decisions", get(climate_decisions))
         .route("/dashboards", get(list_dashboards))
         .route("/dashboards/order", post(reorder_dashboards))
         .route(
@@ -626,6 +642,109 @@ async fn delete_group(
 ) -> Result<StatusCode, HttpError> {
     hub.delete_group(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The climate engine as one document (`200`); `503` while `[climate] enabled` is false.
+async fn climate(State(hub): HubState) -> Result<Json<ClimateView>, HttpError> {
+    Ok(Json(hub.climate_view()?))
+}
+
+/// Replaces the house settings (204); `422` when they do not validate, `503` while climate is
+/// off or the broker link is down.
+async fn put_climate_house(
+    State(hub): HubState,
+    body: Body<HouseSettings>,
+) -> Result<StatusCode, HttpError> {
+    let Json(house) = body?;
+    hub.set_climate_house(house)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Replaces the settings of a zone (204); `404` for an area that is not a zone, `422` for
+/// settings that do not validate.
+async fn put_climate_zone(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<ZoneSettings>,
+) -> Result<StatusCode, HttpError> {
+    let Json(settings) = body?;
+    hub.set_climate_zone(&id, settings)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Holds a target and/or mode on the zone (204); exactly one of `minutes` and `until`, else
+/// `422`.
+async fn set_climate_override(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<OverrideRequest>,
+) -> Result<StatusCode, HttpError> {
+    let Json(request) = body?;
+    let ov = request
+        .into_override(crate::clock::now())
+        .map_err(HubError::Rejected)?;
+    hub.set_climate_override(&id, ov).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Removes every override of the zone (204).
+async fn clear_climate_override(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    hub.clear_climate_override(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Approves the pending proposal of a zone (204), with optional edited rules as the body;
+/// `422` when there is none.
+async fn approve_climate(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<StatusCode, HttpError> {
+    let rules: Option<Rules> = if body.iter().all(u8::is_ascii_whitespace) {
+        None
+    } else {
+        Some(serde_json::from_slice(&body).map_err(|err| HttpError {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            error: format!("invalid rules: {err}"),
+        })?)
+    };
+    hub.approve_climate_proposal(&id, rules).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Rejects the pending proposal of a zone (204); `422` when there is none.
+async fn reject_climate(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    hub.reject_climate_proposal(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Learns a zone now (`200` with where the learner stands).
+async fn learn_climate(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<Json<LearnStatus>, HttpError> {
+    Ok(Json(hub.learn_climate_zone(&id).await?))
+}
+
+/// `GET /climate/zones/{id}/decisions?limit=` — the recent decisions from memory, then older
+/// rows from history; `limit` is 50 by default and 500 at most.
+async fn climate_decisions(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    RawQuery(q): RawQuery,
+) -> Result<Json<DecisionLog>, HttpError> {
+    let params = parse_query(q.as_deref());
+    let limit = match get_one(&params, "limit") {
+        Some(text) => text.parse::<usize>().map_err(|_| bad_request())?,
+        None => 50,
+    };
+    Ok(Json(hub.climate_decision_log(&id, limit.min(500)).await?))
 }
 
 /// Creates or replaces a virtual switch, number or button (`200` with the entity); `422` for

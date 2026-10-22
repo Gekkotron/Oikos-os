@@ -2241,6 +2241,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oikos-climate"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "oikos-core",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "oikos-core"
 version = "0.1.0"
 dependencies = [
@@ -2277,6 +2288,7 @@ dependencies = [
  "iana-time-zone",
  "mime_guess",
  "oikos-api",
+ "oikos-climate",
  "oikos-core",
  "oikos-frigate",
  "oikos-push",
@@ -2340,6 +2352,7 @@ dependencies = [
  "leptos",
  "leptos_router",
  "oikos-api",
+ "oikos-climate",
  "oikos-core",
  "serde",
  "serde-wasm-bindgen",

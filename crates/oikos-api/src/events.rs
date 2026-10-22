@@ -71,6 +71,10 @@ pub enum WsEvent {
         id: String,
         signal: String,
     },
+    /// A climate document changed: one zone's, or the house settings when `zone` is `None`.
+    ClimateChanged {
+        zone: Option<String>,
+    },
 }
 
 /// A partial override: the keys to set (`null` clears one).

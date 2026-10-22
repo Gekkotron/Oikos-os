@@ -12,10 +12,11 @@ use crate::components::now::install_now;
 use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
-use crate::icons::{BELL, BOLT, FLOW_NODES, GEAR, LAYERS, SHIELD};
+use crate::icons::{BELL, BOLT, FLOW_NODES, GEAR, LAYERS, SHIELD, THERMOMETER};
 use crate::nav::{TrackReturnPath, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
+use crate::screens::climate::ClimateScreen;
 use crate::screens::dashboard::DashboardScreen;
 use crate::screens::devices::DevicesScreen;
 use crate::screens::energy::{EnergyScreen, install_history_refresh};
@@ -86,6 +87,23 @@ pub fn App() -> impl IntoView {
             house.command_failed.set(None);
         }
     });
+    // The Climate link shows only while the hub's engine answers (a 503 means it is disabled).
+    let climate_on = RwSignal::new(false);
+    Effect::new(move |_| {
+        house.climate_rev.track();
+        leptos::task::spawn_local(async move {
+            // Only the engine being disabled hides the link; any other failure keeps it as it was.
+            match crate::api::climate::get_climate().await {
+                Ok(_) => {
+                    climate_on.try_set(true);
+                }
+                Err(e) if e.error == crate::api::climate::CLIMATE_DISABLED => {
+                    climate_on.try_set(false);
+                }
+                Err(_) => {}
+            }
+        });
+    });
     let theme = install_theme();
     provide_context(theme);
     let alarm_armed = Memo::new(move |_| house.entities.with(|m| any_alarm_armed(m.values())));
@@ -154,6 +172,12 @@ pub fn App() -> impl IntoView {
                         ></span>
                         <span class="nav__label">"Security"</span>
                     </A>
+                    <Show when=move || climate_on.get()>
+                        <A href="/climate">
+                            <span class="nav__glyph" inner_html=THERMOMETER></span>
+                            <span class="nav__label">"Climate"</span>
+                        </A>
+                    </Show>
                     <A href="/alerts">
                         <span class="nav__glyph" inner_html=BELL></span>
                         <span class="nav__label">"Alerts"</span>
@@ -189,6 +213,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/group/:id") view=GroupSheetV2Screen />
                     <Route path=path!("/energy") view=EnergyScreen />
                     <Route path=path!("/security") view=SecurityScreen />
+                    <Route path=path!("/climate") view=ClimateScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
                     <Route path=path!("/flows") view=FlowsScreen />

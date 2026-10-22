@@ -50,6 +50,9 @@ async fn main() -> anyhow::Result<ExitCode> {
             cfg.watchdog
                 .validate()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
+            cfg.climate
+                .validate()
+                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
             logging::init(&cfg.log);
             tracing::info!(host = %cfg.mqtt.host, port = cfg.mqtt.port, "starting oikos-os");
 
@@ -65,6 +68,7 @@ async fn main() -> anyhow::Result<ExitCode> {
                 }
             }
             let engine = hub.start_engine();
+            let climate = hub.start_climate();
             let push_retry = hub.push().spawn_retry_worker();
             let acl_tail = spawn_acl_tail(&cfg, &hub);
             let (link, mut link_task) = mqtt::start(
@@ -90,6 +94,9 @@ async fn main() -> anyhow::Result<ExitCode> {
                 link_task.abort();
             }
             engine.abort();
+            if let Some(task) = &climate {
+                task.abort();
+            }
             push_retry.abort();
             for task in &acl_tail {
                 task.abort();

@@ -465,3 +465,63 @@ pub struct HistoryAnswer {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_change: Option<LastChangeItem>,
 }
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClimateZoneParams {
+    /// The zone id: the id of an area with climate devices (see `climate_status`).
+    pub zone: String,
+}
+
+/// A zone with its latest decisions.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ClimateZoneDetail {
+    pub zone: oikos_climate::view::ZoneView,
+    /// The last 20 decisions, newest first, each with its `source` and `reason`.
+    pub decisions: Vec<oikos_climate::doc::Decision>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetClimateSettingsParams {
+    /// The whole house document; it replaces the current one.
+    pub settings: oikos_climate::doc::HouseSettings,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetClimateZoneParams {
+    /// The zone id: the id of an area with climate devices.
+    pub zone: String,
+    /// The whole zone document (`state` `off`, `pending` or `active`, rules, targets); it
+    /// replaces the current one.
+    pub settings: oikos_climate::doc::ZoneSettings,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApproveClimateProposalParams {
+    /// The zone id.
+    pub zone: String,
+    /// Edited rules to apply instead of the proposal's own.
+    #[serde(default)]
+    pub rules: Option<oikos_climate::doc::Rules>,
+}
+
+/// No `deny_unknown_fields` here: serde does not support it beside `flatten`; the flattened
+/// request denies unknown fields itself.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SetClimateOverrideParams {
+    /// The zone id.
+    pub zone: String,
+    /// What to hold, and for how long: `setpoint` and/or `mode`, and exactly one of `minutes`
+    /// and `until` (Unix seconds).
+    #[serde(flatten)]
+    pub request: oikos_climate::view::OverrideRequest,
+}
+
+/// The zone a climate write was applied to.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ClimateAck {
+    pub zone: String,
+}

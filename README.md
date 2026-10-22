@@ -172,12 +172,19 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `GET /api/v1/history/daily?entity=&days=&kind=` | kWh per calendar day for the last `days` days (7, 30 or 365), with `kind` (`counter` or `power`). |
 | `GET /api/v1/history/today?entity=&kind=` | kWh since local midnight: `{kwh, since}`. |
 | `GET /api/v1/history/last_change?entity=&entity=…` | Last change time of 1 to 50 entities, in request order. |
+| `GET /api/v1/climate` | The climate engine: house settings and every zone with its reading, decision and why, overrides, pending proposal and learner state. `503` while `[climate] enabled` is false. |
+| `PUT /api/v1/climate/house` | Replaces the house settings (204); `422` when they do not validate. |
+| `PUT /api/v1/climate/zones/{id}` | Replaces a zone's settings (204); `404` for an area that is not a zone, `422` when they do not validate. |
+| `POST /api/v1/climate/zones/{id}/override` | `{setpoint?, mode?, minutes?, until?}` — holds a target and/or mode, with exactly one of `minutes` and `until` (204, else `422`). `DELETE` on the same path clears the zone's overrides (204). |
+| `POST /api/v1/climate/zones/{id}/proposal/approve` | Approves the pending proposal, optionally with edited `Rules` as the body (204); `422` when there is none. `…/reject` drops it. |
+| `POST /api/v1/climate/zones/{id}/learn` | Learns the zone now; `200` with the learner state. |
+| `GET /api/v1/climate/zones/{id}/decisions?limit=` | `{recent, older}`: the latest decisions from memory, then older rows from history when it is on (`limit` 50 by default, 500 at most). |
 
 Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` differs from the path: `id mismatch`), 404 (unknown entity, flow, virtual entity or route), 422 (command refused, a bad virtual id or spec, a flow that is invalid, disabled or already running, or an unknown room) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 
 ## MCP
 
-The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers twenty tools and one resource:
+The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers thirty-four tools and one resource:
 
 - `bridge_info` — the Zigbee2MQTT bridge and the state of the link to the broker.
 - `list_areas` — the rooms, each with its entity count and the count of entities shown by default (`primary_count`).
@@ -201,6 +208,7 @@ The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers twenty tools
 - `set_virtual` — creates or replaces a virtual switch, number or button the hub owns.
 - `delete_virtual` — removes a virtual entity.
 - `get_history` — one slice of an entity's history: a chart `series` over a `range`, kWh per `daily` with `days` and `kind`, kWh `today` with `kind`, or `last_change`. Available only when `[history] url` is set.
+- `climate_status`, `get_climate_zone`, `set_climate_settings`, `set_climate_zone`, `approve_climate_proposal`, `reject_climate_proposal`, `set_climate_override`, `clear_climate_override`, `learn_climate_zone` — the climate engine (see [Climate](#climate)); each answers `climate disabled` while `[climate] enabled` is false.
 - Resource `oikos://snapshot` — the whole house as one JSON document.
 
 A failed tool call answers in-band (`isError: true` with the reason) so the assistant can retry with better arguments.
@@ -332,6 +340,10 @@ A flow can sit in a room: its optional `area` is an area id, and it only decides
 The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `run_flow` and friends), and the web UI shows them at `/flows`. The Flows page searches name, description, trigger devices and room (ignoring case and accents), filters by status (All, On, Off, ⚠ Needs attention) and trigger (Device state, Schedule, Sun, Button / event, Manual), sorts by name or last run, and groups by room (with a "No room" section last) or not at all. Room sections fold; a folded section that hides a flow needing attention shows ⚠. The **⋯** menu on a row or card moves a flow to another room, and the flow editor has the same room picker. The view, grouping, sort, filters and folded sections are remembered per browser; the search is not. See [HTTP API](#http-api) for the REST routes.
 
 The flow page (`/flows/<id>`) is a full-bleed canvas: each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of a check. The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live. The **Edit** button switches to a React Flow-style editor: click a card to select it (amber ring) and edit its settings in the drawer, drag it to move it, drag from an output pin onto another card to wire it, click a wire for its ✕, press ⌫ to delete the selection and ⌘/Ctrl-Z to undo. **＋ Add** opens a searchable picker grouped WHEN / AND / THEN / WAIT / FLOW (type an entity name to list its triggers, checks and actions), **Tidy** re-lays the graph out, and nothing reaches the hub until **Save** (**Cancel** discards the draft). **New flow** on `/flows` opens an unsaved draft in edit mode; its first Save creates the flow, disabled, under a slug of its name. On a phone (narrow or touch-only screens) the canvas is view-only: Edit and New flow are hidden, while pan, pinch-zoom, the drawer, the switch and Run still work.
+
+## Climate
+
+With `[climate] enabled = true` the hub heats and cools by zone: each area with a climate device is a zone (`off`, `pending`, `active`). The engine decides per zone from a priority tree (safety, override, holiday, away, schedule), and every decision carries its `source` and `reason`. It learns a weekly schedule from the history database and proposes it with the evidence; nothing applies until it is approved (REST, MCP or the push button). Safety (frost, overheat, stale readings) always acts, and a temperature set by hand on a device holds until the zone's next scheduled change, at most `manual_hold_max_min`. Settings are retained documents under `[climate] prefix` (`oikos/climate` by default), edited over REST and MCP. The engine keeps deciding when history is off; only the learner pauses.
 
 ## History
 

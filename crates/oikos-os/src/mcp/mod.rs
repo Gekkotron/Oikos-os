@@ -1,9 +1,10 @@
-//! The MCP server: twenty-five tools and the `oikos://snapshot` resource over the hub, served at
+//! The MCP server: thirty-four tools and the `oikos://snapshot` resource over the hub, served at
 //! `/mcp` over streamable HTTP with stateful sessions, and the stdio proxy in front of it.
 //!
 //! A failed tool call is answered in-band (`isError: true` with the reason as text) rather
 //! than as a JSON-RPC error, so the assistant reads why and retries with better arguments.
 
+mod climate_tools;
 mod flow_tools;
 mod params;
 mod stdio_proxy;
@@ -41,7 +42,9 @@ impl OikosMcp {
     pub fn new(hub: Arc<Hub>) -> Self {
         Self {
             hub,
-            tool_router: Self::tool_router() + Self::flow_tool_router(),
+            tool_router: Self::tool_router()
+                + Self::flow_tool_router()
+                + Self::climate_tool_router(),
         }
     }
 }
@@ -154,7 +157,13 @@ fn instructions() -> String {
          `[history] url` is set in the hub's config. `send_notification` sends a phone push (`title` \
          required; `channel` alarm, security, camera, energy, climate, system or misc; `severity` \
          info, warning or critical; the same `id` replaces an earlier alert) and `list_alerts` \
-         returns the recent ones, newest first.",
+         returns the recent ones, newest first. Climate (when `[climate] enabled`): each area with a \
+         climate device is a zone (`off`, `pending`, `active`). `climate_status` shows every \
+         zone's reading, decision and why (`source`, `reason`), overrides and pending proposal. \
+         The engine learns rules from history and proposes them; nothing applies until \
+         `approve_climate_proposal` (or the push button). Safety (frost, overheat, stale \
+         readings) always acts. A temperature set by hand holds until the zone's next scheduled \
+         change, at most `manual_hold_max_min`.",
         fields = UiOverride::FIELDS.join(", ")
     )
 }

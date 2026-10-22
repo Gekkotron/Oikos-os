@@ -31,6 +31,8 @@ pub struct House {
     /// Unix seconds of the user's last visit to the Alerts tab. The nav badge counts alerts
     /// newer than this. Persisted to `localStorage` by [`crate::alerts::install_alerts_badge`].
     pub last_alerts_seen: RwSignal<u64>,
+    /// Bumped on every `ClimateChanged` event; the Climate screen and the nav refetch on it.
+    pub climate_rev: RwSignal<u64>,
 }
 
 impl House {
@@ -49,6 +51,7 @@ impl House {
             dashboards: RwSignal::new(Vec::new()),
             command_failed: RwSignal::new(None),
             last_alerts_seen: RwSignal::new(0),
+            climate_rev: RwSignal::new(0),
         }
     }
 
@@ -134,6 +137,8 @@ impl House {
             WsEvent::CommandFailed { id, reason } => self.command_failed.set(Some((id, reason))),
             // A press is an event for the flow engine; the UI has nothing to show for it.
             WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
+            // The Climate screen reads its own view: tell it to refetch.
+            WsEvent::ClimateChanged { .. } => self.climate_rev.update(|r| *r += 1),
         }
     }
 }

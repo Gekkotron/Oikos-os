@@ -187,6 +187,7 @@ const SCENE: &str =
 const TAG: &str = svg!(r#"<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.2"/>"#);
 const UPDATE: &str = svg!(r#"<path d="M12 4v11m-4-4 4 4 4-4"/><path d="M5 20h14"/>"#);
 pub const SHIELD: &str = CHANNEL_SECURITY;
+pub const THERMOMETER: &str = CHANNEL_CLIMATE;
 pub const BOLT: &str = CHANNEL_ENERGY;
 pub const DROP: &str = HUMIDITY;
 pub const WATER_HEATER_GLYPH: &str = WATER_HEATER;
