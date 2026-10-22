@@ -2352,6 +2352,7 @@ dependencies = [
  "leptos",
  "leptos_router",
  "oikos-api",
+ "oikos-climate",
  "oikos-core",
  "serde",
  "serde-wasm-bindgen",

@@ -16,6 +16,7 @@ use crate::icons::{BOLT, SHIELD};
 use crate::nav::{TrackReturnPath, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
+use crate::screens::climate::ClimateScreen;
 use crate::screens::dashboard::DashboardScreen;
 use crate::screens::devices::DevicesScreen;
 use crate::screens::energy::{EnergyScreen, install_history_refresh};
@@ -93,6 +94,15 @@ pub fn App() -> impl IntoView {
             house.command_failed.set(None);
         }
     });
+    // The Climate link shows only while the hub's engine answers (a 503 means it is disabled).
+    let climate_on = RwSignal::new(false);
+    Effect::new(move |_| {
+        house.climate_rev.track();
+        leptos::task::spawn_local(async move {
+            let ok = crate::api::climate::get_climate().await.is_ok();
+            climate_on.try_set(ok);
+        });
+    });
     let theme = install_theme();
     provide_context(theme);
     let alarm_armed = Memo::new(move |_| house.entities.with(|m| any_alarm_armed(m.values())));
@@ -160,6 +170,9 @@ pub fn App() -> impl IntoView {
                         ></span>
                         "Security"
                     </A>
+                    <Show when=move || climate_on.get()>
+                        <A href="/climate">"Climate"</A>
+                    </Show>
                     <A href="/alerts">"Alerts"</A>
                     <A href="/flows">"Flows"</A>
                     <A href="/devices">"Devices"</A>
@@ -175,6 +188,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/group/:id") view=GroupSheetV2Screen />
                     <Route path=path!("/energy") view=EnergyScreen />
                     <Route path=path!("/security") view=SecurityScreen />
+                    <Route path=path!("/climate") view=ClimateScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
                     <Route path=path!("/flows") view=FlowsScreen />

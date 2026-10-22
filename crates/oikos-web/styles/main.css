@@ -4383,3 +4383,81 @@ html:has(.flow-canvas-screen) {
 .dashboard-settings-sheet__reorder { display: flex; gap: 8px; }
 .dashboard-settings-sheet__reorder button { flex: 1; }
 .widget__edit-overlay { position: absolute; inset: 0; z-index: 1; cursor: pointer; pointer-events: auto; }
+
+/* Climate */
+.climate {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.climate__zones {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.climate__empty,
+.climate-learn__text,
+.climate-zone__reason,
+.climate-zone__target-label,
+.climate-field__label {
+  color: var(--ink-dim, inherit);
+  opacity: 0.8;
+}
+
+.climate-zone__header,
+.climate-zone__target,
+.climate-hold,
+.climate-learn,
+.climate-overrides {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.climate-zone__name {
+  flex: 1 1 auto;
+  margin: 0;
+  font: var(--type-title, var(--type-body));
+}
+
+.climate-zone--orphan {
+  opacity: 0.7;
+}
+
+.climate-overrides__list {
+  flex: 1 1 auto;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.climate-hold__setpoint {
+  flex: 0 0 90px;
+  width: 90px;
+}
+
+.climate-decisions__list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font: var(--type-label);
+}
+
+.climate-decisions__older {
+  opacity: 0.7;
+}
+
+.climate-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.climate-settings {
+  gap: 12px;
+}
+
+.climate-chips {
+  flex-wrap: wrap;
+}

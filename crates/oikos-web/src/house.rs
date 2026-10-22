@@ -28,6 +28,8 @@ pub struct House {
     pub dashboards: RwSignal<Vec<DashboardView>>,
     /// The last rejected command as `(entity id, reason)`.
     pub command_failed: RwSignal<Option<(String, String)>>,
+    /// Bumped on every `ClimateChanged` event; the Climate screen and the nav refetch on it.
+    pub climate_rev: RwSignal<u64>,
 }
 
 impl House {
@@ -45,6 +47,7 @@ impl House {
             groups: RwSignal::new(BTreeMap::new()),
             dashboards: RwSignal::new(Vec::new()),
             command_failed: RwSignal::new(None),
+            climate_rev: RwSignal::new(0),
         }
     }
 
@@ -130,8 +133,8 @@ impl House {
             WsEvent::CommandFailed { id, reason } => self.command_failed.set(Some((id, reason))),
             // A press is an event for the flow engine; the UI has nothing to show for it.
             WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
-            // The Climate screen reads its own view; nothing to patch here yet.
-            WsEvent::ClimateChanged { .. } => {}
+            // The Climate screen reads its own view: tell it to refetch.
+            WsEvent::ClimateChanged { .. } => self.climate_rev.update(|r| *r += 1),
         }
     }
 }

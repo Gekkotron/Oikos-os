@@ -24,6 +24,7 @@ js-sys.workspace = true
 leptos.workspace = true
 leptos_router.workspace = true
 oikos-api = { path = "../oikos-api" }
+oikos-climate = { path = "../oikos-climate" }
 oikos-core = { path = "../oikos-core" }
 serde.workspace = true
 serde-wasm-bindgen.workspace = true

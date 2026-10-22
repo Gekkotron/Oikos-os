@@ -28,7 +28,7 @@ fn decode_error(status: u16, body: &str) -> ApiError {
 }
 
 /// Sends `request` and turns a transport failure or a status of 400 and up into an `ApiError`.
-async fn check(
+pub(crate) async fn check(
     request: Result<Request, gloo_net::Error>,
     on_503: Option<&str>,
 ) -> Result<Response, ApiError> {
@@ -50,7 +50,7 @@ async fn check(
     Ok(response)
 }
 
-async fn read_json<T: DeserializeOwned>(response: Response) -> Result<T, ApiError> {
+pub(crate) async fn read_json<T: DeserializeOwned>(response: Response) -> Result<T, ApiError> {
     response.json::<T>().await.map_err(network_error)
 }
 
