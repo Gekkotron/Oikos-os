@@ -57,7 +57,45 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/superpowers/plans/2026-10-22-climate-engine.md`.
 
 - Follow-up designs, each its own brainstorm: shutters, comfort ↔ cost slider with prices, ML layers.
-- Open: run the DB-gated climate tests against a TimescaleDB (`TEST_DATABASE_URL=… cargo test -p oikos-os --test history_db climate learn_zone`).
+- **Open (before merge):** run the DB-gated climate tests against a TimescaleDB (`TEST_DATABASE_URL=… cargo test -p oikos-os --test history_db climate learn_zone`).
+
+### Deferred follow-ups (from the SDD reviews; none blocks enabling the feature)
+
+- **T1** ZoneSettings::validate does not range-check away_setpoint 0..=40 (doc.rs:444)
+- **T1** ModeRules::validate does not check to <= 1440 for programmatic HhMm (doc.rs:277)
+- **T2** no boundary test for age == stale_after_s (fresh when <=) (schedule.rs:129)
+- **T2** no boundary test for outdoor == heat_below / cool_above (hold band) (schedule.rs:84)
+- **T2** Stale.last prefers stale sensor over newer device value — display only (schedule.rs:152)
+- **T3** hold_devices skips a device override the device can't do; device keeps zone target (decide.rs hold_devices)
+- **T4** from_decisions depends on iteration order; hub must not let an older decision overwrite a newer one (ledger.rs:62)
+- **T4** no boundary tests at exactly 30/31 s echo and 120/121 s drift
+- **T4** mode comparison case-sensitive (ledger.rs:109)
+- **T5** day_agrees measures against the raw run median, not the final fitted setpoint; 80 % slot rule looser than spec's "start/end within 30 min" for long blocks (learn.rs day_agrees)
+- **T5** combine() float summation order depends on device order (learn.rs combine)
+- **T6** effective_areas rebuilt per climate entity (climate/hub.rs:341)
+- **T6** disabled test's last ingest_message has no assertion (climate_hub.rs)
+- **T6** ingest_climate applies non-retained messages too (climate/hub.rs:314)
+- **T7** no test pins seq tie-break for equal times (history_db.rs)
+- **T8** unconfirmed entry expiry 120 s can turn a late-applied engine command into a hand change — Ruling: real but rare; holds the engine's own value (safe) — deferred.
+- **T8** safety alerts not persisted, re-pushed after restart — Ruling: real, low impact — deferred.
+- **T8** overheat/overcool reason text is false while latched inside the hysteresis band (decide.rs:264, 303)
+- **T8** a dropped pass's abandoned command is not moved to unconfirmed (engine.rs:61)
+- **T8** broker dropping during a confirm wait still counts a failure (engine.rs:629)
+- **T8** stray blank lines before `cause: None,` in struct literals
+- **T9** autumn repeated hour merges samples in micros_local (learning.rs:68) — Ruling: real, ≤1 h/year of evidence — deferred.
+- **T9** daily push limit seeded from a pending proposal that may never have been pushed (one suppressed push worst case)
+- **T10** approve route parses its body outside Body<T>/JsonRejection (inconsistent 422 path)
+- **T10** pre-existing workspace clippy failure in oikos-web dashboards/grid.rs:57 (not from this branch)
+- **T10** decision-log `before` truncated to whole seconds can omit a same-second row (climate/hub.rs:131)
+- **T11** until/override text refreshes only on zone data change, not clock ticks (zone_card.rs)
+- **T11** NumField in settings_sheet.rs has no is_finite guard
+- **T11** decision rows show HH:MM without the day for older rows
+- **T12** Off→On restores base/nearest, not the block's own pre-Off temperature (timeline.rs BlockEditor)
+- **T12** handles tiny on one-step blocks; duplicate .climate-timeline__handle CSS rule (main.css:4619)
+- **T12** temperature input doesn't track refresh after a refused/clamped value
+- **Final** re-activating a zone (Off→Active) can hold devices changed by hand while it was off, up to manual_hold_max — Ruling: defensible by analogy with §7's restart rule, frost still acts; real, deferred (fix: forget the zone's ledger entries when it leaves Active).
+- **Final** overlapping learning sequences / manual learn_climate_zone bypasses claim_run — Ruling: practically unreachable, conclude is serialised — deferred.
+- **Final** one failed re-assert right after reconnect turns drift into a hold after ~121 s — Ruling: never fights the user; frost overrides — deferred.
 
 ## Other backlog ideas (unrelated to dashboards)
 
