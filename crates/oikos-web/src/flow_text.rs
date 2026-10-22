@@ -4,14 +4,32 @@ use std::collections::BTreeMap;
 
 use oikos_api::{AreaView, EntityView};
 use oikos_core::command::command_name;
-use oikos_core::flow::{Node, NodeKind, Op, parse_duration};
+use oikos_core::flow::{Node, NodeKind, Op, SunWhich, parse_duration};
 use oikos_core::model::Command;
 use serde_json::Value;
 
 use crate::flows::{humanise, value_text};
 use crate::format::entity_title;
 use crate::schedule::describe;
-use crate::screens::flow_canvas::sun::sun_summary;
+
+fn event_name(which: SunWhich) -> &'static str {
+    match which {
+        SunWhich::Sunrise => "sunrise",
+        SunWhich::Sunset => "sunset",
+        SunWhich::Dusk => "civil dusk",
+        SunWhich::Dawn => "civil dawn",
+    }
+}
+
+/// The card's sentence: "At sunset", "15 min after sunrise", "15 min before civil dusk".
+pub fn sun_summary(which: SunWhich, offset_minutes: i32) -> String {
+    let name = event_name(which);
+    match offset_minutes {
+        0 => format!("At {name}"),
+        n if n > 0 => format!("{n} min after {name}"),
+        n => format!("{} min before {name}", n.unsigned_abs()),
+    }
+}
 
 /// What a card does in a flow; drives its colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -245,6 +263,14 @@ pub fn duration_words(spec: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_line_renders_expected_string() {
+        assert_eq!(sun_summary(SunWhich::Sunset, 0), "At sunset");
+        assert_eq!(sun_summary(SunWhich::Sunrise, 15), "15 min after sunrise");
+        assert_eq!(sun_summary(SunWhich::Dusk, -15), "15 min before civil dusk");
+        assert_eq!(sun_summary(SunWhich::Dawn, 0), "At civil dawn");
+    }
     use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
 
     fn ent(

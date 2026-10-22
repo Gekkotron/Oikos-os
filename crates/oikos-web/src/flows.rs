@@ -8,6 +8,7 @@ use oikos_api::{EntityView, RunStatus, RunView, StepOutcome, TriggerInfo};
 use oikos_core::command::command_name;
 use oikos_core::flow::{Flow, Node, NodeKind, parse_duration};
 
+use crate::flow_text::sun_summary;
 use crate::format::entity_title;
 use crate::schedule::describe;
 
@@ -62,6 +63,7 @@ pub fn trigger_summary(flow: &Flow, entities: &BTreeMap<String, EntityView>) -> 
                 None => format!("{} signals", entity_label(&p.entity, entities)),
             }),
             NodeKind::TriggerSchedule(p) => Some(describe(&p.cron)),
+            NodeKind::TriggerSun(p) => Some(sun_summary(p.which, p.offset())),
             _ => None,
         })
         .collect();
@@ -420,6 +422,24 @@ mod tests {
         assert_eq!(trigger_summary(&flow, &entities), "m · Every 10 minutes");
         flow.nodes.retain(|n| !n.kind.is_trigger());
         assert_eq!(trigger_summary(&flow, &entities), "No trigger");
+    }
+
+    #[test]
+    fn trigger_summary_describes_sun() {
+        let flow = Flow::decode(
+            br#"{
+          "id": "f", "name": "F",
+          "nodes": [
+            { "id": "s", "type": "trigger.sun", "params": { "which": "sunset", "offset_minutes": 15 } }
+          ],
+          "edges": []
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            trigger_summary(&flow, &BTreeMap::new()),
+            "15 min after sunset"
+        );
     }
 
     #[test]

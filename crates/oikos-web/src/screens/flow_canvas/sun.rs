@@ -8,6 +8,8 @@ use oikos_api::FlowsConfigView;
 use oikos_core::flow::sun::sun_events;
 use oikos_core::flow::{Node, NodeKind, SunWhich, TriggerSunParams};
 
+use crate::flow_text::sun_summary;
+
 /// The house point used when the hub reports no coordinates (matches the hub's fallback).
 const PARIS: (f64, f64) = (48.8566, 2.3522);
 /// Largest offset the chips offer, in minutes.
@@ -23,25 +25,6 @@ pub fn sun_params_from_preset(which: SunWhich, offset_minutes: Option<i32>) -> T
         which,
         offset_minutes,
         extra: Default::default(),
-    }
-}
-
-fn event_name(which: SunWhich) -> &'static str {
-    match which {
-        SunWhich::Sunrise => "sunrise",
-        SunWhich::Sunset => "sunset",
-        SunWhich::Dusk => "civil dusk",
-        SunWhich::Dawn => "civil dawn",
-    }
-}
-
-/// The card's sentence: "At sunset", "15 min after sunrise", "15 min before civil dusk".
-pub fn sun_summary(which: SunWhich, offset_minutes: i32) -> String {
-    let name = event_name(which);
-    match offset_minutes {
-        0 => format!("At {name}"),
-        n if n > 0 => format!("{n} min after {name}"),
-        n => format!("{} min before {name}", n.unsigned_abs()),
     }
 }
 
@@ -319,14 +302,6 @@ mod tests {
         assert_eq!(offset_for(Timing::Before, 20), Some(-20));
         assert_eq!(offset_for(Timing::After, 20), Some(20));
         assert_eq!(timing_of(-20), Timing::Before);
-    }
-
-    #[test]
-    fn summary_line_renders_expected_string() {
-        assert_eq!(sun_summary(SunWhich::Sunset, 0), "At sunset");
-        assert_eq!(sun_summary(SunWhich::Sunrise, 15), "15 min after sunrise");
-        assert_eq!(sun_summary(SunWhich::Dusk, -15), "15 min before civil dusk");
-        assert_eq!(sun_summary(SunWhich::Dawn, 0), "At civil dawn");
     }
 
     #[test]
