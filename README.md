@@ -89,6 +89,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `DELETE /api/v1/flows/{id}` | Removes the flow (204), or `404`. |
 | `POST /api/v1/flows/{id}/enabled` | `{"enabled": bool}`; returns the flow. |
 | `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or already running. |
+| `POST /api/v1/flows/{id}/area` | `{"area": "<id>" \| null}` sets the room the flow is listed under; returns the flow. `422` for an unknown room or an invalid flow, `404` for an unknown flow. |
 | `GET /api/v1/history/series?entity=&range=` | A chart series over `24h`, `7d`, `30d` or `1y`: `{window, points:[[t,mean,min,max],…]}`. See [History](#history). |
 | `GET /api/v1/history/daily?entity=&days=&kind=` | kWh per calendar day for the last `days` days (7, 30 or 365), with `kind` (`counter` or `power`). |
 | `GET /api/v1/history/today?entity=&kind=` | kWh since local midnight: `{kwh, since}`. |
@@ -111,9 +112,9 @@ The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers twenty tools
 - `send_command` — publishes a command and reports `accepted` once the device echoes the change.
 - `search` — devices (name, model, vendor) and entities (name, id, or belonging to a matching device) containing the query.
 - `list_ignored` — the discovery topics that did not become an entity, with the reason.
-- `list_flows` — the automations (flows) with name, enabled state, node count and latest run.
-- `get_flow` — one flow with its definition and recent runs.
-- `set_flow` — creates or replaces a flow (`trigger.state`, `trigger.schedule`, `flow.enable`, `if`, `delay` and `command` nodes; `mode: restart` for "N minutes after the last …"), validated against the house. A `trigger.schedule` fires only while the flow is enabled; `flow.enable` turns another flow (or its own) on or off.
+- `list_flows` — the automations (flows) with name, enabled state, node count, room (`area`) and latest run.
+- `get_flow` — one flow with its definition (including `area`) and recent runs.
+- `set_flow` — creates or replaces a flow (`trigger.state`, `trigger.schedule`, `flow.enable`, `if`, `delay` and `command` nodes; `mode: restart` for "N minutes after the last …"), validated against the house; `area` sets the room it is listed under. A `trigger.schedule` fires only while the flow is enabled; `flow.enable` turns another flow (or its own) on or off.
 - `delete_flow` — removes a flow.
 - `set_flow_enabled` — turns a flow on or off.
 - `run_flow` — starts a manual run of a flow.
@@ -162,7 +163,7 @@ Screens:
 - Devices: the administration view of the Zigbee devices.
 - Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night, Warm).
 - Alerts (`/alerts`): the push alerts OikosPush keeps, with channel chips and day groups, and a "Recent alerts" section on Home; the detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". Same screens as the Android app; the body stays in the producer's language.
-- Flows (`/flows`, `/flows/<id>`): the flows list with an enable switch per flow and a **New flow** button, and a full-bleed canvas per flow (see [Flows](#flows)).
+- Flows (`/flows`, `/flows/<id>`): the flows list, grouped by room, with search, status and trigger filters, sorting and a List/Cards view; an enable switch per flow and a **New flow** button; and a full-bleed canvas per flow (see [Flows](#flows)).
 
 Development runs in two terminals:
 
@@ -245,7 +246,9 @@ The scalar is the one value of a state that triggers and `if` compare: the on/of
 
 Two config keys: `[topics] automation_prefix` (default `oikos/automation`) and `[automation] runs_kept` (recent runs remembered per flow, default 20). Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker.
 
-The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `run_flow` and friends), and the web UI shows them at `/flows`. See [HTTP API](#http-api) for the REST routes.
+A flow can sit in a room: its optional `area` is an area id, and it only decides where the Flows page lists the flow; what the flow runs does not change. The hub checks it on save. An unknown room is refused, a room name is resolved to its id, and `Unassigned` is not a room for a flow. A room id already stored and since deleted is kept as it is, so it never blocks a save. Invalid flows keep their real name and room in listings.
+
+The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `run_flow` and friends), and the web UI shows them at `/flows`. The Flows page searches name, description, trigger devices and room (ignoring case and accents), filters by status (All, On, Off, ⚠ Needs attention) and trigger (Device state, Schedule, Sun, Button / event, Manual), sorts by name or last run, and groups by room (with a "No room" section last) or not at all. Room sections fold; a folded section that hides a flow needing attention shows ⚠. The **⋯** menu on a row or card moves a flow to another room, and the flow editor has the same room picker. The view, grouping, sort, filters and folded sections are remembered per browser; the search is not. See [HTTP API](#http-api) for the REST routes.
 
 The flow page (`/flows/<id>`) is a full-bleed canvas: each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of a check. The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live. The **Edit** button switches to a React Flow-style editor: click a card to select it (amber ring) and edit its settings in the drawer, drag it to move it, drag from an output pin onto another card to wire it, click a wire for its ✕, press ⌫ to delete the selection and ⌘/Ctrl-Z to undo. **＋ Add** opens a searchable picker grouped WHEN / AND / THEN / WAIT / FLOW (type an entity name to list its triggers, checks and actions), **Tidy** re-lays the graph out, and nothing reaches the hub until **Save** (**Cancel** discards the draft). **New flow** on `/flows` opens an unsaved draft in edit mode; its first Save creates the flow, disabled, under a slug of its name. On a phone (narrow or touch-only screens) the canvas is view-only: Edit and New flow are hidden, while pan, pinch-zoom, the drawer, the switch and Run still work.
 
