@@ -1,7 +1,9 @@
 //! The Climate screen's parts: the zone card, the settings sheet and the pure text helpers.
 
 pub mod entity_field;
+pub mod proposal;
 pub mod settings_sheet;
+pub mod timeline;
 pub mod zone_card;
 
 use chrono::{DateTime, Datelike, Timelike};

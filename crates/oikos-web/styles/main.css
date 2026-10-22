@@ -4461,3 +4461,156 @@ html:has(.flow-canvas-screen) {
 .climate-chips {
   flex-wrap: wrap;
 }
+
+/* Climate: week timeline and proposal panel */
+.climate-zone__extra {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.climate-proposal,
+.climate-rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.climate-proposal__title {
+  margin: 0;
+  font: var(--type-card-value);
+}
+
+.climate-proposal__changes {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.climate-proposal__none,
+.climate-timeline__base {
+  margin: 0;
+  opacity: 0.8;
+}
+
+.climate-proposal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.climate-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.climate-timeline__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.climate-timeline__day {
+  flex: 0 0 30px;
+  font: var(--type-label);
+  opacity: 0.8;
+}
+
+.climate-timeline__track,
+.climate-timeline__hours {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.climate-timeline__track {
+  height: 28px;
+  border-radius: 6px;
+  background: rgb(88 225 255 / 10%);
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(25% - 1px),
+    var(--card-border) calc(25% - 1px),
+    var(--card-border) 25%
+  );
+}
+
+.climate-timeline__hours {
+  display: flex;
+  justify-content: space-between;
+  font: var(--type-label);
+  opacity: 0.7;
+}
+
+.climate-timeline__bar {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  min-width: 4px;
+  border-radius: 5px;
+  background: var(--accent-amber);
+  color: #1b1405;
+  overflow: hidden;
+}
+
+.climate-timeline__bar--off {
+  background: var(--chip-border);
+  color: var(--ink);
+}
+
+.climate-timeline__bar--editable {
+  cursor: pointer;
+}
+
+.climate-timeline__bar--selected {
+  outline: 2px solid var(--accent-cyan);
+}
+
+.climate-timeline__label {
+  flex: 1 1 auto;
+  padding: 0 8px;
+  overflow: hidden;
+  font: var(--type-label);
+  white-space: nowrap;
+  text-overflow: clip;
+  pointer-events: none;
+}
+
+.climate-timeline__handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  cursor: ew-resize;
+  touch-action: none;
+  background: rgb(0 0 0 / 28%);
+}
+
+.climate-timeline__handle--from {
+  left: 0;
+}
+
+.climate-timeline__handle--to {
+  right: 0;
+}
+
+.climate-timeline__editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.climate-timeline__editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.climate-field--inline {
+  flex-direction: row;
+  align-items: center;
+}

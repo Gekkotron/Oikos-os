@@ -11,6 +11,7 @@ use oikos_climate::doc::{Mode, Override, OverrideOrigin, Setpoint, ZoneState};
 use oikos_climate::view::{DecisionLog, ZoneView};
 
 use crate::api::climate::{self as api, OverrideBody};
+use crate::climate::proposal::{ProposalPanel, RulesPanel};
 use crate::climate::{
     age_text, decision_line, degrees_text, learn_status_text, minutes_to_next_change, mode_word,
     row_line, setpoint_text, source_word, until_text, week_minute,
@@ -69,9 +70,6 @@ pub fn ZoneCard(
     tz: Signal<Tz>,
     /// Called after any change so the screen refetches.
     on_changed: Callback<()>,
-    /// Task 12 puts the week timeline and the proposal panel here.
-    #[prop(optional)]
-    children: Option<Children>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let id = zone.with_untracked(|z| z.zone.clone());
@@ -237,6 +235,26 @@ pub fn ZoneCard(
         })
     };
 
+    // The proposal panel is rebuilt only when the proposal itself changes (id or fingerprint),
+    // so a refetch keeps an edit in progress.
+    let proposal_key = Memo::new(move |_| {
+        zone.with(|z| {
+            z.proposal
+                .as_ref()
+                .map(|p| (p.id.clone(), p.fingerprint.clone()))
+        })
+    });
+    let proposal = move || {
+        proposal_key.get().and_then(|_| {
+            zone.with_untracked(|z| {
+                z.proposal.clone().map(|p| {
+                    let approved = z.settings.rules.clone();
+                    view! { <ProposalPanel zone=z.zone.clone() proposal=p approved=approved on_changed=on_changed /> }
+                })
+            })
+        })
+    };
+
     view! {
         <article class="card climate-zone" class:climate-zone--orphan=move || zone.with(|z| z.orphan)>
             <header class="climate-zone__header">
@@ -315,8 +333,10 @@ pub fn ZoneCard(
                         })
                 }}
             </div>
-            // Task 12: the week timeline and the proposal panel go into this slot.
-            {children.map(|c| view! { <div class="climate-zone__extra">{c()}</div> })}
+            <div class="climate-zone__extra">
+                {proposal}
+                <RulesPanel zone=zone on_changed=on_changed />
+            </div>
             <div class="climate-decisions">
                 <button
                     type="button"
