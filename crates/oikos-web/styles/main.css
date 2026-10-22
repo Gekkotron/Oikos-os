@@ -489,7 +489,7 @@ body {
 
 .chip:focus-visible {
   outline: 2px solid var(--accent-mint);
-  outline-offset: 2px;
+  outline-offset: 0;
 }
 
 .chip--selected {
@@ -521,8 +521,12 @@ a.chip {
 }
 
 .chip:hover {
-  background: var(--raised);
-  border-color: color-mix(in srgb, var(--chip-border) 50%, var(--ink));
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border-color: color-mix(in srgb, var(--ink) 35%, var(--chip-border));
+}
+
+.chip--selected:hover {
+  background: color-mix(in srgb, var(--accent-amber) 85%, var(--ink));
 }
 
 .chip--add {
