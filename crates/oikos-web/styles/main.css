@@ -2362,6 +2362,14 @@ p.override__hint {
   z-index: 1;
 }
 
+/* Faded parts (opacity makes them paint above the link) let a press through to it. */
+.flow-icon,
+.flow-tag,
+.flow-row__trigger,
+.flow-tile__trigger {
+  pointer-events: none;
+}
+
 .flow-tag {
   padding: 1px 8px;
   border-radius: var(--radius-nav);
