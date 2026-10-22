@@ -2280,6 +2280,7 @@ dependencies = [
  "oikos-core",
  "oikos-frigate",
  "oikos-push",
+ "oikos-watchdog",
  "reqwest",
  "rmcp",
  "rumqttc",
@@ -2314,6 +2315,15 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "oikos-watchdog"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -72,6 +72,22 @@ password = ""
 # ttl = 43200                    # seconds
 # topic_prefix = "frigate"       # Frigate's MQTT topic_prefix
 
+# Watchdogs that raise `system` push alerts. Both are off by default.
+# Gateway health: alerts when a component under `<prefix>/` turns non-ok or recovers.
+# [watchdog.gateway]
+# enabled = true
+# prefix = "encryption-gateway/health"
+#
+# Broker ACL: alerts on Mosquitto "Denied PUBLISH/SUBSCRIBE/UNSUBSCRIBE" log lines. `source`
+# is "topic" (reads `log_topic`; needs `log_dest topic` in mosquitto.conf) or "file" (tails
+# `log_file`, which is then required). Repeats of one denial wait `cooldown` seconds.
+# [watchdog.acl]
+# enabled = true
+# source = "topic"
+# log_topic = "$SYS/broker/log/#"
+# log_file = "/mosquitto/log/mosquitto.log"
+# cooldown = 300
+
 # TimescaleDB connection for the entity-state history. An empty url turns history off (the
 # house keeps running, the /api/v1/history/* routes answer 503). `buffer_rows` is how many
 # pending states the writer keeps when the database is unreachable, before dropping the

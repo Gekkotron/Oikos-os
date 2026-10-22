@@ -106,11 +106,35 @@ While `legacy_prefix` is set the hub also reads `oikos-push/notification/+`, `oi
 
    Mosquitto denies silently, but the Python ACL watchdog keeps running throughout, so a missing grant shows up on the phone as a system alert. The ACL file lives on the broker host, outside this repo.
 1. Ship the hub with push on but **no `[push] credentials`**, and the Frigate bridge and the gateway watchdog **off**: it builds its history from the producers' notifications and shows alerts, and sends nothing. OikosPush is still the sender. Check that the hub's history matches OikosPush's: for alerts received while both run, the same ids in the same order with the same `cancel` state. A mismatch is a bug to fix before step 2.
-2. Stop the OikosPush core, the Frigate bridge container and the gateway watchdog container (`docker compose down` on the broker host). Leave the ACL watchdog container running.
-3. Set `[push] credentials` (copy the service-account key from the OikosPush deploy directory, git-ignored, never printed), turn `[frigate] bridge` and `[watchdog.gateway]` on, and restart the hub.
+2. Stop the OikosPush core, the Frigate bridge container and the gateway watchdog container (`docker compose down` on the broker host). Leave the ACL watchdog container running: it stays the Python container until the hub runs next to Mosquitto (or can read its log or `$SYS` topic), and `[watchdog.acl]` is left off until then.
+3. Set `[push] credentials` (copy the service-account key from the OikosPush deploy directory, git-ignored, never printed), turn `[frigate] bridge` and `[watchdog.gateway]` on (`[watchdog.acl]` stays off, see above), and restart the hub.
 4. Send a test notification over MCP and check that it arrives once. Trigger a camera event and check the snapshot, then the clip.
 
 Until step 3 both the hub and OikosPush publish a retained history, on different topics (`oikos/push/history` and `oikos-push/history`); the current app reads the old one, so nothing changes for the phone.
+
+## Watchdogs
+
+Two opt-in watchdogs raise `system` alerts (ported from OikosPush's `gateway_health_watchdog` and `broker_acl_watchdog`).
+
+**Gateway health.** `[watchdog.gateway] enabled = true` subscribes to `<prefix>/+` (default `encryption-gateway/health`), where the gateway publishes one retained state per component (`{"status": "ok" | "fail" | "config_error", ...}`). The hub alerts on a change only: `ok` to non-ok ("<component> down", `warning`), non-ok to `ok` ("<component> recovered", `info`), `fail` to `config_error`, and a first message that is not `ok`. A first `ok`, and a retained state replayed unchanged on reconnect, stay silent.
+
+**Broker ACL.** Mosquitto acknowledges an ACL-denied PUBLISH and drops it with only a log line. `[watchdog.acl] enabled = true` turns each `Denied PUBLISH/SUBSCRIBE/UNSUBSCRIBE` line (and the older `Client X is not authorised to ...` wording) into a `warning` alert "MQTT ACL denial". A client, topic and action alert once per `cooldown` seconds (default 300); later denials are counted and named in the next alert (`+N more in last 300s`). Two sources:
+
+- `source = "topic"` (default) reads `log_topic` (`$SYS/broker/log/#`; needs `log_dest topic` in `mosquitto.conf`, and a broker that forwards ACL denials there);
+- `source = "file"` tails `log_file` from its end, follows rotation and truncation, and needs the hub to read the Mosquitto log; a file source without `log_file` is a config error.
+
+```toml
+[watchdog.gateway]
+enabled = true
+prefix = "encryption-gateway/health"
+
+[watchdog.acl]
+enabled = true
+source = "topic"
+cooldown = 300
+```
+
+The broker user needs read on `<prefix>/+` and, for the topic source, on `$SYS/broker/log/#`.
 
 ## HTTP API
 

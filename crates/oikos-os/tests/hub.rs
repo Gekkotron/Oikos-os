@@ -1793,3 +1793,126 @@ async fn frigate_events_ignored_when_bridge_off() {
         "{published:?}"
     );
 }
+
+// ----- Watchdogs -----
+
+/// A hub with the watchdogs on, its push sync already settled.
+async fn watchdog_hub(
+    acl_source: oikos_os::config::AclSource,
+) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.watchdog.gateway.enabled = true;
+    cfg.watchdog.acl.enabled = true;
+    cfg.watchdog.acl.source = acl_source;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    hub.on_connected();
+    hub.on_suback();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    (hub, rx)
+}
+
+/// The alert ids in the latest history publish, newest first.
+fn history_ids(published: &[Publish]) -> Vec<String> {
+    let Some(last) = published
+        .iter()
+        .rev()
+        .find(|p| p.topic == "oikos/push/history")
+    else {
+        return Vec::new();
+    };
+    let list: serde_json::Value = serde_json::from_str(&last.payload).expect("json");
+    list.as_array()
+        .expect("list")
+        .iter()
+        .map(|a| a["id"].as_str().expect("id").to_owned())
+        .collect()
+}
+
+const GW_FAIL: &str = r#"{"status":"fail","exit_code":1,"timestamp":1700000000,"host":"GEEKOMA5"}"#;
+const GW_OK: &str = r#"{"status":"ok","exit_code":0,"timestamp":1700000060,"host":"GEEKOMA5"}"#;
+const DENIED: &str =
+    "1791743566: Denied PUBLISH from Athena (d0, q0, r1, m0, 'athena/heartbeat', ... (207 bytes))";
+
+#[tokio::test(start_paused = true)]
+async fn watchdog_filters_follow_the_enabled_watchdogs() {
+    use oikos_os::config::AclSource;
+    let (hub, _rx) = watchdog_hub(AclSource::Topic).await;
+    assert_eq!(
+        hub.extra_filters(),
+        vec![
+            "encryption-gateway/health/+".to_owned(),
+            "$SYS/broker/log/#".to_owned()
+        ]
+    );
+    let (hub, _rx) = watchdog_hub(AclSource::File).await;
+    assert_eq!(
+        hub.extra_filters(),
+        vec!["encryption-gateway/health/+".to_owned()]
+    );
+    let (hub, _rx) = frigate_hub(false).await;
+    assert!(hub.extra_filters().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn gateway_health_transitions_alert_even_when_retained_and_replays_stay_silent() {
+    use oikos_os::config::AclSource;
+    let (hub, mut publisher) = watchdog_hub(AclSource::Topic).await;
+    let topic = "encryption-gateway/health/gateway";
+
+    // The retained replay on connect is news the first time ...
+    hub.ingest_message(topic, GW_FAIL.as_bytes(), true);
+    let ids = history_ids(&drain(&mut publisher));
+    assert_eq!(ids, vec!["gw-health-gateway-fail-1700000000".to_owned()]);
+
+    // ... and nothing when a reconnect replays it unchanged.
+    hub.ingest_message(topic, GW_FAIL.as_bytes(), true);
+    assert!(history_ids(&drain(&mut publisher)).is_empty());
+
+    hub.ingest_message(topic, GW_OK.as_bytes(), false);
+    let ids = history_ids(&drain(&mut publisher));
+    assert_eq!(ids[0], "gw-health-gateway-ok-1700000060");
+}
+
+#[tokio::test(start_paused = true)]
+async fn acl_log_topic_lines_become_system_alerts_and_cool_down() {
+    use oikos_os::config::AclSource;
+    let (hub, mut publisher) = watchdog_hub(AclSource::Topic).await;
+
+    hub.ingest_message("$SYS/broker/log/N", DENIED.as_bytes(), false);
+    let ids = history_ids(&drain(&mut publisher));
+    assert_eq!(ids.len(), 1, "{ids:?}");
+    assert!(ids[0].starts_with("mqtt-acl-Athena-publish-"), "{ids:?}");
+
+    hub.ingest_message("$SYS/broker/log/N", DENIED.as_bytes(), false);
+    assert!(
+        history_ids(&drain(&mut publisher)).is_empty(),
+        "inside the cooldown"
+    );
+
+    // A retained replay and a topic outside the filter are no log lines.
+    hub.ingest_message(
+        "$SYS/broker/log/E",
+        b"Denied SUBSCRIBE from B (q0, 'x/y')",
+        true,
+    );
+    hub.ingest_message("other/log", b"Denied SUBSCRIBE from B (q0, 'x/y')", false);
+    assert!(history_ids(&drain(&mut publisher)).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn acl_file_source_takes_lines_through_on_acl_line() {
+    use oikos_os::config::AclSource;
+    let (hub, mut publisher) = watchdog_hub(AclSource::File).await;
+    hub.ingest_message("$SYS/broker/log/N", DENIED.as_bytes(), false);
+    assert!(
+        history_ids(&drain(&mut publisher)).is_empty(),
+        "topic ignored for a file source"
+    );
+
+    hub.on_acl_line(DENIED);
+    let ids = history_ids(&drain(&mut publisher));
+    assert!(ids[0].starts_with("mqtt-acl-Athena-publish-"), "{ids:?}");
+}

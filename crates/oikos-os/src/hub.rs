@@ -34,7 +34,7 @@ use oikos_push::{PushService, Rejected};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::clock;
-use crate::config::Config;
+use crate::config::{AclSource, Config};
 pub use crate::flows::EngineRequest;
 
 /// Events kept for a slow WebSocket client before it starts missing some.
@@ -156,6 +156,12 @@ pub struct MigrationOutcome {
     pub skipped_reason: Option<&'static str>,
 }
 
+/// The broker ACL watchdog and, for the topic source, the log filter it listens on.
+struct AclWatchdog {
+    topic: Option<String>,
+    dog: Mutex<oikos_watchdog::AclWatchdog>,
+}
+
 pub struct Hub {
     /// The hub's own `Arc`, so a message handler can spawn work that outlives its `&self`.
     me: Weak<Hub>,
@@ -180,6 +186,10 @@ pub struct Hub {
     alerts: Mutex<AlertStore>,
     /// The Frigate event bridge and the topic it reads, when `[frigate] bridge` is on.
     frigate: Option<(String, Mutex<oikos_frigate::FrigateBridge>)>,
+    /// The gateway health watchdog, when `[watchdog.gateway]` is on.
+    gateway_watchdog: Option<Mutex<oikos_watchdog::GatewayWatchdog>>,
+    /// The broker ACL watchdog, when `[watchdog.acl]` is on.
+    acl_watchdog: Option<AclWatchdog>,
     /// The retained flow definitions and their runs.
     flow_store: Mutex<FlowStore>,
     group_store: Mutex<GroupStore>,
@@ -283,6 +293,17 @@ impl Hub {
                     cfg.frigate.events_topic(),
                     Mutex::new(oikos_frigate::FrigateBridge::new(settings)),
                 )
+            }),
+            gateway_watchdog: cfg.watchdog.gateway.enabled.then(|| {
+                Mutex::new(oikos_watchdog::GatewayWatchdog::new(
+                    cfg.watchdog.gateway.prefix.clone(),
+                ))
+            }),
+            acl_watchdog: cfg.watchdog.acl.enabled.then(|| AclWatchdog {
+                // The file source is fed by `on_acl_line`, through the tail task in main.
+                topic: (cfg.watchdog.acl.source == AclSource::Topic)
+                    .then(|| cfg.watchdog.acl.log_topic.clone()),
+                dog: Mutex::new(oikos_watchdog::AclWatchdog::new(cfg.watchdog.acl.cooldown)),
             }),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             group_store: Mutex::new(GroupStore::default()),
@@ -459,6 +480,27 @@ impl Hub {
             && !retain
         {
             self.on_frigate_event(payload);
+        }
+        // Health states are retained: a reconnect replays them, and an unchanged one is silent.
+        if let Some(dog) = &self.gateway_watchdog {
+            let alert = {
+                let mut dog = dog.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                if dog.wants(topic) {
+                    dog.on_message(topic, payload, clock::now())
+                } else {
+                    None
+                }
+            };
+            self.raise_system(alert);
+        }
+        if !retain
+            && let Some(acl) = &self.acl_watchdog
+            && acl
+                .topic
+                .as_deref()
+                .is_some_and(|filter| oikos_watchdog::topic_matches(filter, topic))
+        {
+            self.on_acl_line(&String::from_utf8_lossy(payload));
         }
         self.capture_pictures(topic, payload);
         if !retain {
@@ -674,11 +716,42 @@ impl Hub {
         }
     }
 
-    /// Topics to subscribe to beyond the push ones: Frigate's events when the bridge is on.
+    /// One Mosquitto log line for the ACL watchdog: from the log topic, or from the tail task
+    /// when the source is a file. The watchdog's lock is released before the alert goes out.
+    pub fn on_acl_line(&self, line: &str) {
+        let Some(acl) = &self.acl_watchdog else {
+            return;
+        };
+        let alert = acl
+            .dog
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .on_line(line, clock::now());
+        self.raise_system(alert);
+    }
+
+    fn raise_system(&self, alert: Option<serde_json::Value>) {
+        if let Some(alert) = alert
+            && let Err(rejected) = self.notify("system", &alert)
+        {
+            tracing::warn!(?rejected, "a watchdog alert was rejected");
+        }
+    }
+
+    /// Topics to subscribe to beyond the push ones: Frigate's events when the bridge is on, the
+    /// gateway health states and the broker log topic when their watchdogs are.
     pub fn extra_filters(&self) -> Vec<String> {
+        let gateway = self.gateway_watchdog.iter().map(|dog| {
+            dog.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .filter()
+        });
+        let acl = self.acl_watchdog.iter().filter_map(|acl| acl.topic.clone());
         self.frigate
             .iter()
             .map(|(topic, _)| topic.clone())
+            .chain(gateway)
+            .chain(acl)
             .collect()
     }
 

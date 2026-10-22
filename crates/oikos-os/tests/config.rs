@@ -311,3 +311,48 @@ fn frigate_bridge_defaults_and_string_env() {
         Ok(())
     });
 }
+
+#[test]
+fn watchdog_defaults_and_validation() {
+    use oikos_os::config::AclSource;
+    Jail::expect_with(|jail| {
+        let cfg = Config::load(None)?;
+        let w = &cfg.watchdog;
+        assert!(!w.gateway.enabled && !w.acl.enabled);
+        assert_eq!(w.gateway.prefix, "encryption-gateway/health");
+        assert_eq!(w.acl.source, AclSource::Topic);
+        assert_eq!(w.acl.log_topic, "$SYS/broker/log/#");
+        assert_eq!((w.acl.log_file.is_none(), w.acl.cooldown), (true, 300));
+        assert_eq!(w.validate(), Ok(()));
+
+        // A file source without a log file is a config error, but only once enabled.
+        jail.set_env("OIKOS_WATCHDOG__ACL__SOURCE", "file");
+        assert_eq!(Config::load(None)?.watchdog.validate(), Ok(()));
+        jail.set_env("OIKOS_WATCHDOG__ACL__ENABLED", "true");
+        let cfg = Config::load(None)?;
+        assert_eq!(cfg.watchdog.acl.source, AclSource::File);
+        assert!(cfg.watchdog.validate().is_err());
+
+        jail.set_env("OIKOS_WATCHDOG__ACL__LOG_FILE", "007");
+        let cfg = Config::load(None)?;
+        assert_eq!(
+            cfg.watchdog.acl.log_file.as_deref(),
+            Some(std::path::Path::new("007"))
+        );
+        assert_eq!(cfg.watchdog.validate(), Ok(()));
+
+        jail.set_env("OIKOS_WATCHDOG__GATEWAY__ENABLED", "true");
+        jail.set_env("OIKOS_WATCHDOG__GATEWAY__PREFIX", "/");
+        assert!(Config::load(None)?.watchdog.validate().is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn watchdog_rejects_an_unknown_source() {
+    Jail::expect_with(|jail| {
+        jail.set_env("OIKOS_WATCHDOG__ACL__SOURCE", "stdin");
+        assert!(Config::load(None).is_err());
+        Ok(())
+    });
+}

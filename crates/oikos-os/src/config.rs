@@ -17,6 +17,7 @@ pub struct Config {
     pub log: LogConfig,
     pub push: PushConfig,
     pub frigate: FrigateConfig,
+    pub watchdog: WatchdogConfig,
     pub automation: AutomationConfig,
     pub flows: FlowsConfig,
     pub groups: GroupsConfig,
@@ -270,6 +271,98 @@ impl FrigateConfig {
     }
 }
 
+/// Watchdogs that turn infrastructure trouble into `system` push alerts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WatchdogConfig {
+    pub gateway: GatewayWatchdogConfig,
+    pub acl: AclWatchdogConfig,
+}
+
+impl WatchdogConfig {
+    /// Rejects a watchdog that is on but has nothing to read.
+    pub fn validate(&self) -> Result<(), String> {
+        let blank = |s: &str| s.trim().is_empty();
+        if self.gateway.enabled && blank(self.gateway.prefix.trim_matches('/')) {
+            return Err("[watchdog.gateway] is enabled but prefix is empty".to_owned());
+        }
+        let acl = &self.acl;
+        if acl.enabled {
+            match acl.source {
+                AclSource::File
+                    if acl
+                        .log_file
+                        .as_ref()
+                        .is_none_or(|p| p.as_os_str().is_empty()) =>
+                {
+                    return Err(
+                        "[watchdog.acl] source = \"file\" needs log_file (the Mosquitto log path)"
+                            .to_owned(),
+                    );
+                }
+                AclSource::Topic if blank(&acl.log_topic) => {
+                    return Err("[watchdog.acl] source = \"topic\" needs log_topic".to_owned());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The gateway health watchdog: alerts on state changes of `<prefix>/<component>`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct GatewayWatchdogConfig {
+    pub enabled: bool,
+    pub prefix: String,
+}
+
+impl Default for GatewayWatchdogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            prefix: "encryption-gateway/health".to_owned(),
+        }
+    }
+}
+
+/// Where the broker ACL watchdog reads Mosquitto's log lines from.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AclSource {
+    /// The `log_topic` (`$SYS/broker/log/#`; needs `log_dest topic` in `mosquitto.conf`).
+    #[default]
+    Topic,
+    /// Tail `log_file`.
+    File,
+}
+
+/// The broker ACL watchdog: alerts on `Denied PUBLISH/SUBSCRIBE/UNSUBSCRIBE` log lines.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AclWatchdogConfig {
+    pub enabled: bool,
+    pub source: AclSource,
+    pub log_topic: String,
+    /// The Mosquitto log to tail when `source = "file"`.
+    pub log_file: Option<PathBuf>,
+    /// Seconds during which repeats of one denial are held back.
+    pub cooldown: u64,
+}
+
+impl Default for AclWatchdogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            source: AclSource::Topic,
+            log_topic: "$SYS/broker/log/#".to_owned(),
+            log_file: None,
+            cooldown: 300,
+        }
+    }
+}
+
 impl fmt::Debug for FrigateConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let password = self.password.as_ref().map(|_| "***");
@@ -433,6 +526,9 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "frigate.media_url",
     "frigate.severity",
     "frigate.topic_prefix",
+    "watchdog.gateway.prefix",
+    "watchdog.acl.log_topic",
+    "watchdog.acl.log_file",
     "history.url",
 ];
 
