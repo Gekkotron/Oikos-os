@@ -1,6 +1,7 @@
 //! The sensor card: the big value and its unit.
 
 use leptos::prelude::*;
+use leptos_router::components::A;
 use oikos_api::EntityView;
 use oikos_core::model::{EntityState, Kind, StateValue};
 
@@ -81,8 +82,14 @@ fn humidity_view(
     }
 }
 
+/// The href of the history chart for `id`.
+fn history_href(id: &str) -> String {
+    format!("/history/{}", crate::api::encode_id(id))
+}
+
 /// The body of a temperature card: the temperature, tinted by comfort, and the humidity of the
-/// same device under it when Home shows one.
+/// same device under it when Home shows one. The temperature readout and the humidity bar are
+/// separate links so each opens its own history chart.
 fn temperature_body(entity: &EntityView, house: House) -> impl IntoView + use<> {
     let value = numeric(&entity.state);
     let class = match value {
@@ -90,27 +97,47 @@ fn temperature_body(entity: &EntityView, house: House) -> impl IntoView + use<> 
         None => "readout__temp".into(),
     };
     let text = degrees(value, entity.unit.as_deref());
+    let temp_href = history_href(&entity.id);
     let device_id = entity.device_id.clone();
-    let humidity = Memo::new(move |_| {
+    let device_id_val = device_id.clone();
+    let humidity_id: Memo<Option<String>> = Memo::new(move |_| {
         house.entities.with(|m| {
-            partner(m.values(), device_id.as_deref(), "humidity").map(|e| numeric(&e.state))
+            partner(m.values(), device_id.as_deref(), "humidity").map(|e| e.id.clone())
+        })
+    });
+    let humidity_value: Memo<Option<f64>> = Memo::new(move |_| {
+        house.entities.with(|m| {
+            partner(m.values(), device_id_val.as_deref(), "humidity")
+                .and_then(|e| numeric(&e.state))
         })
     });
     view! {
         <div class="readout">
-            <span class=class>{text}</span>
-            {move || humidity.get().map(|_| humidity_view(move || humidity.get().flatten()))}
+            <A href=temp_href attr:class="readout__link">
+                <span class=class>{text}</span>
+            </A>
+            {move || humidity_id.get().map(|id| {
+                let href = history_href(&id);
+                view! {
+                    <A href=href attr:class="readout__link">
+                        {humidity_view(move || humidity_value.get())}
+                    </A>
+                }
+            })}
         </div>
     }
 }
 
-/// The body of a lone humidity card.
+/// The body of a lone humidity card. The readout itself links to the history chart.
 fn humidity_body(entity: &EntityView) -> impl IntoView + use<> {
     let value = numeric(&entity.state);
+    let href = history_href(&entity.id);
     view! {
         <div class="readout">
-            <span class="readout__temp">{humidity_text(value)}</span>
-            {humidity_view(move || value)}
+            <A href=href attr:class="readout__link">
+                <span class="readout__temp">{humidity_text(value)}</span>
+                {humidity_view(move || value)}
+            </A>
         </div>
     }
 }

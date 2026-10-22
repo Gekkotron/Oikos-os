@@ -385,48 +385,6 @@ body {
   color: var(--accent-amber);
 }
 
-/* Theme toggle sits in the status cluster next to the StatusPill: a moon-icon chip whose label
-   is the active theme. One click cycles Auto -> Night -> Warm. */
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-height: var(--touch-min);
-  padding: 0 14px;
-  border: 1px solid var(--chip-border);
-  border-radius: var(--radius-nav);
-  background: transparent;
-  color: inherit;
-  font: var(--type-label);
-  text-transform: capitalize;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background var(--motion-short) var(--ease),
-    border-color var(--motion-short) var(--ease);
-}
-
-.theme-toggle:hover {
-  background: var(--raised);
-  border-color: color-mix(in srgb, var(--chip-border) 60%, var(--ink));
-}
-
-.theme-toggle:focus-visible {
-  outline: 2px solid var(--select);
-  outline-offset: 2px;
-}
-
-.theme-toggle__glyph {
-  display: inline-flex;
-  width: 16px;
-  height: 16px;
-}
-
-.theme-toggle__glyph svg {
-  width: 100%;
-  height: 100%;
-}
-
 .pill {
   display: inline-flex;
   align-items: center;

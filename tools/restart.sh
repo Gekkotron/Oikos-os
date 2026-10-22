@@ -26,8 +26,12 @@ for arg in "$@"; do
   esac
 done
 
-BIN="$ROOT/target/$PROFILE/oikos-os"
-LOG="${OIKOS_LOG:-$ROOT/target/oikos-os.log}"
+# Ask cargo where it writes artifacts: honours CARGO_TARGET_DIR, config.toml, and CLI flags.
+TARGET_DIR="$(cd "$ROOT" && cargo metadata --no-deps --format-version=1 2>/dev/null \
+  | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p' | head -1)"
+TARGET_DIR="${TARGET_DIR:-$ROOT/target}"
+BIN="$TARGET_DIR/$PROFILE/oikos-os"
+LOG="${OIKOS_LOG:-$TARGET_DIR/oikos-os.log}"
 BIND="$(sed -n 's/^bind *= *"\(.*\)"/\1/p' "$ROOT/oikos.toml" 2>/dev/null | head -1)"
 HEALTH="http://${BIND:-127.0.0.1:8081}/health"
 
@@ -43,10 +47,10 @@ if [ "$SWEEP" = 1 ]; then
     echo "    --sweep ignored: cargo-sweep is not installed (cargo install cargo-sweep)" >&2
   fi
 fi
-if [ -d "$ROOT/target" ]; then
-  target_gb="$(du -sg "$ROOT/target" 2>/dev/null | cut -f1)"
+if [ -d "$TARGET_DIR" ]; then
+  target_gb="$(du -sg "$TARGET_DIR" 2>/dev/null | cut -f1)"
   if [ "${target_gb:-0}" -gt "${TARGET_WARN_GB:-10}" ]; then
-    echo "WARNING: target/ is ${target_gb} GB; run tools/restart.sh --sweep (or cargo clean) before the disk fills" >&2
+    echo "WARNING: $TARGET_DIR is ${target_gb} GB; run tools/restart.sh --sweep (or cargo clean) before the disk fills" >&2
   fi
 fi
 
