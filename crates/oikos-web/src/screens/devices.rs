@@ -1,12 +1,15 @@
 //! The Zigbee devices of the house, with the discovery topics the hub ignored.
+//!
+//! Admin / diagnostics screen reached from Settings; the top nav no longer links to it, and
+//! user-facing groups moved to [`crate::screens::groups`].
 
 use leptos::prelude::*;
 use leptos_router::components::A;
-use oikos_api::{DeviceView, GroupView};
+use oikos_api::DeviceView;
 
-use crate::components::toast::Toasts;
 use crate::format::{list_label, wrap_id};
 use crate::house::House;
+use crate::icons::MAGNIFIER;
 use crate::screens::entity_sheet::{availability_class, availability_word};
 
 /// True when the device's name, model, vendor or IEEE address contains `query`, ignoring case.
@@ -138,47 +141,21 @@ pub fn DevicesScreen() -> impl IntoView {
         devices
     });
     let total = Memo::new(move |_| house.devices.with(Vec::len));
-    let toasts = expect_context::<Toasts>();
-    let groups = RwSignal::new(Vec::<GroupView>::new());
-    leptos::task::spawn_local(async move {
-        match crate::api::list_groups().await {
-            Ok(list) => groups.set(list),
-            Err(e) => toasts.push(e.error),
-        }
-    });
 
     view! {
         <div class="devices">
-            <h1 class="devices__title">"Devices"</h1>
-            <section class="sheet__panel">
-                <h2 class="sheet__heading">"Groups"</h2>
-                <A href="/groups/new" attr:class="btn">
-                    "＋ New group"
-                </A>
-                <ul class="sheet__links">
-                    <For
-                        each=move || groups.get()
-                        key=|g| (g.id.clone(), g.name.clone(), g.members.len())
-                        children=|g| {
-                            view! {
-                                <li>
-                                    <A href=format!("/group/{}", crate::api::encode_id(&g.id))>
-                                        {wrap_id(&g.name)}
-                                    </A>
-                                </li>
-                            }
-                        }
-                    />
-                </ul>
-            </section>
-            <input
-                class="devices__search"
-                type="search"
-                placeholder="Search name, model, vendor or IEEE"
-                aria-label="Search devices"
-                prop:value=move || query.get()
-                on:input=move |ev| query.set(event_target_value(&ev))
-            />
+            <h1 class="devices__title">"Zigbee2MQTT devices"</h1>
+            <label class="devices__search">
+                <span class="devices__search-icon" inner_html=MAGNIFIER></span>
+                <input
+                    class="devices__search-input"
+                    type="search"
+                    placeholder="Search name, model, vendor or IEEE"
+                    aria-label="Search devices"
+                    prop:value=move || query.get()
+                    on:input=move |ev| query.set(event_target_value(&ev))
+                />
+            </label>
             <p class="devices__count">
                 {move || filtered.with(Vec::len)} " of " {move || total.get()} " devices"
             </p>
