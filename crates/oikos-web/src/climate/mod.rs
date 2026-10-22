@@ -8,7 +8,7 @@ pub mod zone_card;
 
 use chrono::{DateTime, Datelike, Timelike};
 use chrono_tz::Tz;
-use oikos_climate::doc::{Day, Decision, Mode, Rules, Setpoint, Source};
+use oikos_climate::doc::{Day, Decision, Mode, Rules, Setpoint, Source, ZoneState};
 use oikos_climate::view::{DecisionRow, LearnStatus};
 
 /// What the learner's state says, in one line.
@@ -151,6 +151,12 @@ pub fn row_line(r: &DecisionRow, tz: Tz) -> String {
     )
 }
 
+/// Whether a zone in `state` offers the hold controls: only an active zone follows overrides,
+/// and the hub refuses one anywhere else.
+pub fn can_hold(state: ZoneState) -> bool {
+    state == ZoneState::Active
+}
+
 /// Minutes from `(today, minute)` until the schedule of `mode` next changes level: the nearest
 /// block start or end within the coming week. `None` without blocks for the mode.
 pub fn minutes_to_next_change(rules: &Rules, mode: Mode, today: Day, minute: u16) -> Option<u32> {
@@ -176,6 +182,13 @@ pub fn minutes_to_next_change(rules: &Rules, mode: Mode, today: Day, minute: u16
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_active_zone_can_hold() {
+        assert!(can_hold(ZoneState::Active));
+        assert!(!can_hold(ZoneState::Pending));
+        assert!(!can_hold(ZoneState::Off));
+    }
     use oikos_climate::doc::{Block, HhMm, ModeRules};
 
     #[test]

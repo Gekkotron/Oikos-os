@@ -424,24 +424,42 @@ pub(crate) fn spawn_zone_learning(hub: &Arc<Hub>, zone: &str) {
     if hub.climate.is_none() || tokio::runtime::Handle::try_current().is_err() {
         return;
     }
-    if !hub.climate_runtime().learning_now.insert(zone.to_owned()) {
+    let Some(guard) = claim_run(hub, zone) else {
         return;
-    }
-    let guard = RunGuard {
-        hub: Arc::clone(hub),
-        zone: zone.to_owned(),
     };
-    tokio::spawn(async move {
-        let status = learn_zone(&guard.hub, &guard.zone, clock::now()).await;
-        tracing::debug!(zone = %guard.zone, ?status, "climate learning run");
-    });
+    tokio::spawn(async move { run_claimed(guard).await });
 }
 
-/// Starts a learning run of every zone that is not already being learned.
+/// Marks `zone` as being learned; `None` when a run of it is already in progress.
+fn claim_run(hub: &Arc<Hub>, zone: &str) -> Option<RunGuard> {
+    hub.climate_runtime()
+        .learning_now
+        .insert(zone.to_owned())
+        .then(|| RunGuard {
+            hub: Arc::clone(hub),
+            zone: zone.to_owned(),
+        })
+}
+
+async fn run_claimed(guard: RunGuard) {
+    let status = learn_zone(&guard.hub, &guard.zone, clock::now()).await;
+    tracing::debug!(zone = %guard.zone, ?status, "climate learning run");
+}
+
+/// Learns every zone, one after another, in the background; a zone already being learned is
+/// skipped.
 pub(crate) fn spawn_learning(hub: &Arc<Hub>) {
-    for zone in hub.climate_zone_ids() {
-        spawn_zone_learning(hub, &zone);
+    if hub.climate.is_none() || tokio::runtime::Handle::try_current().is_err() {
+        return;
     }
+    let hub = Arc::clone(hub);
+    tokio::spawn(async move {
+        for zone in hub.climate_zone_ids() {
+            if let Some(guard) = claim_run(&hub, &zone) {
+                run_claimed(guard).await;
+            }
+        }
+    });
 }
 
 #[cfg(test)]

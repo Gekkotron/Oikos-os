@@ -46,8 +46,9 @@ impl OikosMcp {
         Ok(Json(ClimateZoneDetail { zone, decisions }))
     }
 
-    /// Replaces the house settings (season, away, holiday, safety thresholds, hold limit).
-    /// Read them with `climate_status` first and send the whole document back.
+    /// Replaces the house settings (season and outdoor sensor, presence and away grace,
+    /// holiday, safety thresholds, stale-reading limit, learner). Read them with
+    /// `climate_status` first and send the whole document back.
     #[tool(name = "set_climate_settings", annotations(idempotent_hint = true))]
     async fn set_climate_settings(
         &self,
@@ -58,8 +59,10 @@ impl OikosMcp {
         Ok(Json(self.hub.climate_view()?))
     }
 
-    /// Replaces a zone's settings (`state` `off`, `pending` or `active`, targets, rules). The
-    /// reason of a refusal is returned so you can fix the document and retry.
+    /// Replaces a zone's settings (`state` `off`, `pending` or `active`, targets, rules). New
+    /// non-empty rules count as approved: a pending zone becomes active. A device another zone
+    /// lists in `entities` is refused. The reason of a refusal is returned so you can fix the
+    /// document and retry.
     #[tool(name = "set_climate_zone", annotations(idempotent_hint = true))]
     async fn set_climate_zone(
         &self,

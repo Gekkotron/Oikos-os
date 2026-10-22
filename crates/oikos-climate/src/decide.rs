@@ -79,8 +79,13 @@ pub struct ZoneInputs<'a> {
     pub previous_cause: Option<SafetyCause>,
 }
 
-/// How far back inside a limit the reading must be before a latched safety cause clears.
+/// How far back inside the overheat or overcool limit the reading must be before that latched
+/// cause clears.
 pub const SAFETY_HYSTERESIS: f64 = 0.5;
+
+/// How far above the frost limit frost protection heats, and so where a latched frost cause
+/// clears.
+pub const FROST_MARGIN: f64 = 2.0;
 
 /// Clamp to the device's range and round to its step (0.5 when it has none).
 pub fn fit(t: f64, caps: &DeviceCaps) -> f64 {
@@ -115,7 +120,7 @@ pub fn device_target(setpoint: Setpoint, mode: Mode, caps: &DeviceCaps) -> Optio
             mode: m.to_string(),
             held: false,
         }),
-        Setpoint::Off if can(caps, "off") => Some(DeviceTarget {
+        Setpoint::Off if can(caps, m) && can(caps, "off") => Some(DeviceTarget {
             setpoint: None,
             mode: "off".to_string(),
             held: false,
@@ -211,17 +216,17 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
     match inp.reading {
         Reading::Fresh { value, .. }
             if value < house.frost
-                || (latched(inp, SafetyCause::Frost)
-                    && value < house.frost + SAFETY_HYSTERESIS) =>
+                || (latched(inp, SafetyCause::Frost) && value < house.frost + FROST_MARGIN) =>
         {
-            let sp = Setpoint::Temp(house.frost + 2.0);
+            let frost_target = house.frost + FROST_MARGIN;
+            let sp = Setpoint::Temp(frost_target);
             let reason = if value < house.frost {
                 format!("Frost protection: {} < {}", temp(value), temp(house.frost))
             } else {
                 format!(
                     "Frost protection: {}, holding until {}",
                     temp(value),
-                    temp(house.frost + SAFETY_HYSTERESIS)
+                    temp(frost_target)
                 )
             };
             let mut d = safety_decision(inp, SafetyCause::Frost, reason);
@@ -231,9 +236,11 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
                 .devices
                 .iter()
                 .filter_map(|dev| {
-                    let t = dev
-                        .target
-                        .map_or(house.frost + 2.0, |c| c.max(house.frost + 2.0));
+                    // A device that is off is not warming the room, whatever target it remembers.
+                    let t = match dev.target {
+                        Some(c) if dev.mode.as_deref() != Some("off") => c.max(frost_target),
+                        _ => frost_target,
+                    };
                     Some((
                         dev.id.clone(),
                         device_target(Setpoint::Temp(t), Mode::Heat, &dev.caps)?,
@@ -266,13 +273,19 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
                     temp(house.overheat)
                 ),
             );
+            // A device that is off is not heating, so overheat leaves it alone.
+            let running: Vec<Device> = inp
+                .devices
+                .iter()
+                .filter(|dev| dev.mode.as_deref() != Some("off"))
+                .cloned()
+                .collect();
             d.entities = match base {
                 Some(sp) => {
                     d.setpoint = Some(sp);
-                    targets(inp.devices, sp, Mode::Heat)
+                    targets(&running, sp, Mode::Heat)
                 }
-                None => inp
-                    .devices
+                None => running
                     .iter()
                     .filter_map(|dev| {
                         let sp = Setpoint::Temp(dev.caps.min_temp.unwrap_or(house.frost));
@@ -749,16 +762,16 @@ mod tests {
     }
 
     #[test]
-    fn frost_holds_until_half_a_degree_above() {
+    fn frost_holds_until_the_frost_target() {
         let mut c = Case::new();
         c.devices = vec![dev("trv", &["off", "heat"], Some(5.0))];
         c.previous = Some(SafetyCause::Frost);
         for (reading, safety) in [
             (6.9, true),
             (7.0, true),
-            (7.2, true),
-            (7.49, true),
-            (7.5, false),
+            (7.5, true),
+            (8.99, true),
+            (9.0, false),
         ] {
             c.reading = fresh(reading);
             assert_eq!(c.run().source == Source::Safety, safety, "{reading}");
@@ -769,6 +782,12 @@ mod tests {
         assert_ne!(c.run().source, Source::Safety);
         c.reading = fresh(6.99);
         assert_eq!(c.run().source, Source::Safety);
+        c.previous = Some(SafetyCause::Frost);
+        c.reading = fresh(8.0);
+        assert_eq!(
+            c.run().reason,
+            "Frost protection: 8.0 °C, holding until 9.0 °C"
+        );
         // Another latched cause does not hold frost.
         c.previous = Some(SafetyCause::Stale);
         c.reading = fresh(7.2);
@@ -815,6 +834,77 @@ mod tests {
         c.settings = active(Setpoint::Off);
         let d = c.run();
         assert_eq!(d.entities["trv"], target(Some(5.0), "heat", false));
+    }
+
+    #[test]
+    fn frost_on_an_off_device_targets_frost_plus_two() {
+        let mut c = Case::new();
+        c.reading = fresh(6.5);
+        let mut off = dev("off", &["off", "heat"], Some(21.0));
+        off.mode = Some("off".into());
+        c.devices = vec![off];
+        assert_eq!(c.run().entities["off"], target(Some(9.0), "heat", false));
+    }
+
+    #[test]
+    fn overheat_leaves_off_devices_alone() {
+        let mut c = Case::new();
+        c.reading = fresh(31.0);
+        let mut off = dev("off", &["off", "heat"], Some(5.0));
+        off.mode = Some("off".into());
+        c.devices = vec![trv(), off.clone()];
+        let d = c.run();
+        assert_eq!(d.source, Source::Safety);
+        assert!(d.entities.contains_key("trv"));
+        assert!(!d.entities.contains_key("off"));
+        c.settings = active(Setpoint::Off);
+        let d = c.run();
+        assert!(d.entities.contains_key("trv"));
+        assert!(!d.entities.contains_key("off"));
+    }
+
+    #[test]
+    fn off_never_touches_a_device_that_cannot_run_the_mode() {
+        // A heating radiator in a cooling zone.
+        let radiator = || dev("rad", &["heat", "off"], Some(20.0));
+        let mut c = Case::new();
+        c.mode = Some(Mode::Cool);
+        c.devices = vec![radiator()];
+        c.settings.rules.cool.as_mut().unwrap().blocks[0].setpoint = Setpoint::Off;
+        let d = c.run();
+        assert_eq!(d.source, Source::Schedule);
+        assert!(d.entities.is_empty(), "cool Off block: {:?}", d.entities);
+        c.holiday = true;
+        let d = c.run();
+        assert_eq!(d.source, Source::Holiday);
+        assert!(d.entities.is_empty(), "holiday in cool: {:?}", d.entities);
+        c.holiday = false;
+        c.reading = fresh(15.0);
+        let d = c.run();
+        assert_eq!(d.cause, Some(SafetyCause::Overcool));
+        assert!(d.entities.is_empty(), "overcool: {:?}", d.entities);
+        assert!(!d.reason.contains("cannot stop cooling"), "{}", d.reason);
+        c.settings.rules.cool.as_mut().unwrap().base = Setpoint::Off;
+        c.reading = Reading::Missing;
+        let d = c.run();
+        assert_eq!(d.cause, Some(SafetyCause::Stale));
+        assert!(d.entities.is_empty(), "stale in cool: {:?}", d.entities);
+
+        // A cooling-only AC in a heating zone whose base is off.
+        let mut c = Case::new();
+        let mut ac = dev("ac", &["cool", "off"], Some(24.0));
+        ac.mode = Some("cool".into());
+        c.devices = vec![ac];
+        let heat = c.settings.rules.heat.as_mut().unwrap();
+        heat.blocks.clear();
+        heat.base = Setpoint::Off;
+        let d = c.run();
+        assert_eq!(d.source, Source::Schedule);
+        assert!(d.entities.is_empty(), "heat Off base: {:?}", d.entities);
+        assert_eq!(
+            device_target(Setpoint::Off, Mode::Heat, &caps(&["cool", "off"])),
+            None
+        );
     }
 
     #[test]

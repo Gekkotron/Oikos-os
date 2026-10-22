@@ -237,7 +237,7 @@ A **proposal**:
 
 ### 8.4 HTTP and MCP
 
-- HTTP under `/api/v1/climate`: `GET /` (enabled, settings, zones with state, reading, decision, override, pending proposal, learning status), `PUT /settings`, `PUT /zones/{id}`, `POST /zones/{id}/override`, `DELETE /zones/{id}/override`, `POST /zones/{id}/proposal/approve` (optional edited rules in the body), `POST /zones/{id}/proposal/reject`, `POST /zones/{id}/learn`, `GET /zones/{id}/decisions`. All answer 503 when disabled.
+- HTTP under `/api/v1/climate`: `GET /` (enabled, settings, zones with state, reading, decision, override, pending proposal, learning status), `PUT /house`, `PUT /zones/{id}`, `POST /zones/{id}/override`, `DELETE /zones/{id}/override`, `POST /zones/{id}/proposal/approve` (optional edited rules in the body), `POST /zones/{id}/proposal/reject`, `POST /zones/{id}/learn`, `GET /zones/{id}/decisions`. All answer 503 when disabled.
 - MCP: a `climate_tools.rs` router added to the `+` chain in `mcp/mod.rs`: `climate_status`, `get_climate_zone` (decision, why, proposal, recent decisions), `set_climate_settings`, `set_climate_zone`, `approve_climate_proposal`, `reject_climate_proposal`, `set_climate_override`, `clear_climate_override`, `learn_climate_zone`. Tools are always registered and answer "climate disabled" when off. The MCP instructions text gets a short climate paragraph.
 
 ### 8.5 Web

@@ -1190,6 +1190,29 @@ async fn climate_status_enabled_returns_zones() {
     assert_eq!(zone["zone"]["zone"], "living");
     assert!(zone["decisions"].is_array());
 
+    // A pending zone does not follow overrides: an in-band refusal.
+    let pending = call(
+        &client,
+        "set_climate_override",
+        json!({"zone": "living", "setpoint": 21.0, "minutes": 30}),
+    )
+    .await;
+    assert_eq!(pending.is_error, Some(true));
+    assert!(
+        text_of(&pending).contains("zone is not active"),
+        "{}",
+        text_of(&pending)
+    );
+    json_of(
+        "set_climate_zone",
+        &call(
+            &client,
+            "set_climate_zone",
+            json!({"zone": "living", "settings": {"state": "active"}}),
+        )
+        .await,
+    );
+
     let held = call(
         &client,
         "set_climate_override",

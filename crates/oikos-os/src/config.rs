@@ -476,10 +476,18 @@ impl Default for ClimateConfig {
 }
 
 impl ClimateConfig {
-    /// An enabled engine needs a prefix to keep its documents under.
+    /// An enabled engine needs a prefix to keep its documents under: not empty, not only `/`,
+    /// and free of the MQTT wildcards `+` and `#`.
     pub fn validate(&self) -> Result<(), String> {
-        if self.enabled && self.prefix.trim().is_empty() {
+        if !self.enabled {
+            return Ok(());
+        }
+        let prefix = self.prefix.trim();
+        if prefix.chars().all(|c| c == '/') {
             return Err("[climate] is enabled but prefix is empty".to_owned());
+        }
+        if prefix.contains(['+', '#']) {
+            return Err("[climate] prefix must not contain the MQTT wildcards + or #".to_owned());
         }
         Ok(())
     }
@@ -639,6 +647,27 @@ mod climate_config_tests {
         assert!(cfg.validate().unwrap_err().contains("prefix"));
         cfg.enabled = false;
         assert_eq!(cfg.validate(), Ok(()));
+    }
+
+    #[test]
+    fn climate_prefix_rejects_slashes_only_and_wildcards() {
+        for bad in ["", "/", " // ", "oikos/+/climate", "oikos/#", "a+b"] {
+            let cfg = ClimateConfig {
+                enabled: true,
+                prefix: bad.to_owned(),
+            };
+            assert!(
+                cfg.validate().unwrap_err().contains("prefix"),
+                "{bad:?} accepted"
+            );
+        }
+        for good in ["oikos/climate", "climate/", "home"] {
+            let cfg = ClimateConfig {
+                enabled: true,
+                prefix: good.to_owned(),
+            };
+            assert_eq!(cfg.validate(), Ok(()), "{good:?}");
+        }
     }
 }
 

@@ -14,6 +14,9 @@ const SOURCE: &str = "climate";
 /// How long a safety cause must stay absent before its alert resolves, in seconds: a reading
 /// hovering at a limit must not raise a push every time it crosses.
 const RESOLVE_AFTER_S: u64 = 600;
+/// A safety alert that resolved is not raised again for its zone and cause for this many
+/// seconds; the safety action itself still runs.
+const REPEAT_AFTER_S: u64 = 6 * 3600;
 
 fn slug(cause: SafetyCause) -> &'static str {
     match cause {
@@ -88,8 +91,9 @@ pub(crate) fn resolve(hub: &Hub, id: &str) {
     }
 }
 
-/// Raises the alert of `decision`'s safety cause. The zone's other safety alerts resolve once
-/// their cause has been absent for ten minutes.
+/// Raises the alert of `decision`'s safety cause, unless the same alert resolved less than six
+/// hours ago. The zone's other safety alerts resolve once their cause has been absent for ten
+/// minutes.
 pub(crate) fn sync_safety(
     hub: &Hub,
     zone: &str,
@@ -100,7 +104,16 @@ pub(crate) fn sync_safety(
     for cause in ALL_CAUSES {
         let id = safety_id(zone, cause);
         if d.cause == Some(cause) {
-            hub.climate_runtime().absent_since.remove(&id);
+            let recently_resolved = {
+                let mut rt = hub.climate_runtime();
+                rt.absent_since.remove(&id);
+                rt.safety_resolved_at
+                    .get(&id)
+                    .is_some_and(|at| now.saturating_sub(*at) < REPEAT_AFTER_S)
+            };
+            if recently_resolved {
+                continue;
+            }
             let name = title(cause);
             raise(
                 hub,
@@ -121,7 +134,11 @@ pub(crate) fn sync_safety(
             now.saturating_sub(since) >= RESOLVE_AFTER_S
         };
         if due {
-            hub.climate_runtime().absent_since.remove(&id);
+            {
+                let mut rt = hub.climate_runtime();
+                rt.absent_since.remove(&id);
+                rt.safety_resolved_at.insert(id.clone(), now);
+            }
             resolve(hub, &id);
         }
     }

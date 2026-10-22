@@ -13,8 +13,8 @@ use oikos_climate::view::{DecisionLog, ZoneView};
 use crate::api::climate::{self as api, OverrideBody};
 use crate::climate::proposal::{ProposalPanel, RulesPanel};
 use crate::climate::{
-    age_text, decision_line, degrees_text, learn_status_text, minutes_to_next_change, mode_word,
-    row_line, setpoint_text, source_word, until_text, week_minute,
+    age_text, can_hold, decision_line, degrees_text, learn_status_text, minutes_to_next_change,
+    mode_word, row_line, setpoint_text, source_word, until_text, week_minute,
 };
 use crate::components::now::unix_now;
 use crate::components::toast::Toasts;
@@ -192,6 +192,8 @@ pub fn ZoneCard(
     let hold_1h = hold.clone();
     let hold_2h = hold.clone();
     let hold_next = hold;
+    // A memo, so a refetch that keeps the state does not rebuild the hold input being typed in.
+    let holdable = Memo::new(move |_| zone.with(|z| can_hold(z.settings.state)));
 
     // Learning.
     let learn_line = move || zone.with(|z| learn_status_text(&z.learn));
@@ -285,29 +287,48 @@ pub fn ZoneCard(
                 {state_buttons}
             </div>
             {overrides}
-            <div class="climate-hold">
-                <input
-                    class="field climate-hold__setpoint"
-                    type="number"
-                    step="0.5"
-                    aria-label="Hold temperature"
-                    prop:value=move || setpoint.get()
-                    on:input=move |ev| setpoint.set(event_target_value(&ev))
-                />
-                <button type="button" class="btn" on:click=move |_| hold_1h(60)>"1 h"</button>
-                <button type="button" class="btn" on:click=move |_| hold_2h(120)>"2 h"</button>
-                {move || {
-                    until_change()
-                        .map(|m| {
-                            let hold_next = hold_next.clone();
-                            view! {
-                                <button type="button" class="btn" on:click=move |_| hold_next(m)>
-                                    "Until next change"
+            {move || {
+                holdable
+                    .get()
+                    .then(|| {
+                        let hold_1h = hold_1h.clone();
+                        let hold_2h = hold_2h.clone();
+                        let hold_next = hold_next.clone();
+                        view! {
+                            <div class="climate-hold">
+                                <input
+                                    class="field climate-hold__setpoint"
+                                    type="number"
+                                    step="0.5"
+                                    aria-label="Hold temperature"
+                                    prop:value=move || setpoint.get()
+                                    on:input=move |ev| setpoint.set(event_target_value(&ev))
+                                />
+                                <button type="button" class="btn" on:click=move |_| hold_1h(60)>
+                                    "1 h"
                                 </button>
-                            }
-                        })
-                }}
-            </div>
+                                <button type="button" class="btn" on:click=move |_| hold_2h(120)>
+                                    "2 h"
+                                </button>
+                                {move || {
+                                    until_change()
+                                        .map(|m| {
+                                            let hold_next = hold_next.clone();
+                                            view! {
+                                                <button
+                                                    type="button"
+                                                    class="btn"
+                                                    on:click=move |_| hold_next(m)
+                                                >
+                                                    "Until next change"
+                                                </button>
+                                            }
+                                        })
+                                }}
+                            </div>
+                        }
+                    })
+            }}
             <div class="climate-learn">
                 <span class="climate-learn__text">{learn_line}</span>
                 {move || {

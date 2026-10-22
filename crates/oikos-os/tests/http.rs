@@ -1630,6 +1630,30 @@ async fn climate_override_minutes_and_until_exclusive() {
         let req = server.client.post(&url).json(&body);
         async move { req.send().await.expect("POST").status() }
     };
+    // A pending zone does not follow overrides: 422, not a silent no-op.
+    let pending = server
+        .client
+        .post(&url)
+        .json(&json!({"setpoint": 21.0, "minutes": 30}))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(pending.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = pending.json().await.expect("json");
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("zone is not active")),
+        "{body}"
+    );
+    let active = server
+        .client
+        .put(server.url("/api/v1/climate/zones/living"))
+        .json(&json!({"state": "active"}))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(active.status(), StatusCode::NO_CONTENT);
     assert_eq!(
         post(json!({"setpoint": 21.0, "minutes": 30, "until": 4_000_000_000u64})).await,
         StatusCode::UNPROCESSABLE_ENTITY

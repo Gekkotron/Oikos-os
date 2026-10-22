@@ -296,6 +296,89 @@ async fn set_zone_rejects_bad_ids_and_unknown_areas() {
     assert!(drain(&mut rx).is_empty());
 }
 
+#[tokio::test]
+async fn setting_new_rules_approves_them() {
+    let (hub, mut rx) = hub(true);
+    feed_daikin(&hub, 0, "living").await;
+    hub.set_climate_zone("living", ZoneSettings::default())
+        .unwrap();
+    let rules = Rules {
+        heat: Some(ModeRules {
+            base: Setpoint::Temp(18.0),
+            blocks: Vec::new(),
+        }),
+        ..Rules::default()
+    };
+    let view_zone = |hub: &Hub| hub.climate_view().unwrap().zones[0].settings.clone();
+    assert_eq!(view_zone(&hub).state, ZoneState::Pending);
+    let before = oikos_os::clock::now();
+    let edited = ZoneSettings {
+        rules: rules.clone(),
+        ..view_zone(&hub)
+    };
+    hub.set_climate_zone("living", edited).unwrap();
+    let saved = view_zone(&hub);
+    assert_eq!(
+        saved.state,
+        ZoneState::Active,
+        "a pending zone is now active"
+    );
+    let approved = saved.approved_at.expect("approved");
+    assert!(approved >= before);
+    // The same rules again are no new approval.
+    let same = ZoneSettings {
+        approved_at: Some(1),
+        ..saved
+    };
+    hub.set_climate_zone("living", same).unwrap();
+    assert_eq!(view_zone(&hub).approved_at, Some(1));
+    // An off zone stays off, its new rules approved.
+    let off = ZoneSettings {
+        state: ZoneState::Off,
+        rules: Rules {
+            heat: Some(ModeRules {
+                base: Setpoint::Temp(19.0),
+                blocks: Vec::new(),
+            }),
+            ..Rules::default()
+        },
+        approved_at: None,
+        ..view_zone(&hub)
+    };
+    hub.set_climate_zone("living", off).unwrap();
+    let saved = view_zone(&hub);
+    assert_eq!(saved.state, ZoneState::Off);
+    assert!(saved.approved_at.is_some());
+    // Clearing the rules approves nothing.
+    let cleared = ZoneSettings {
+        state: ZoneState::Pending,
+        rules: Rules::default(),
+        approved_at: None,
+        ..saved
+    };
+    hub.set_climate_zone("living", cleared).unwrap();
+    let saved = view_zone(&hub);
+    assert_eq!(saved.state, ZoneState::Pending);
+    assert_eq!(saved.approved_at, None);
+    drain(&mut rx);
+}
+
+#[tokio::test]
+async fn an_area_id_that_cannot_be_a_topic_level_is_not_a_zone() {
+    let (hub, _rx) = hub(true);
+    feed_daikin(&hub, 0, "up/stairs").await;
+    feed_daikin(&hub, 1, "a+b").await;
+    feed_daikin(&hub, 2, "living").await;
+    let zones: Vec<String> = hub
+        .climate_view()
+        .unwrap()
+        .zones
+        .into_iter()
+        .map(|z| z.zone)
+        .collect();
+    assert_eq!(zones, vec!["living".to_owned()]);
+}
+
 // ----- the evaluation loop -----
 
 mod engine {
@@ -979,19 +1062,172 @@ mod engine {
             commands(&out),
             vec![("/ha/mode/set".to_owned(), "heat".to_owned())]
         );
-        for (at, reading) in [(61, 7.0), (122, 6.9), (183, 7.2), (244, 7.4)] {
+        for (at, reading) in [(61, 7.0), (122, 6.9), (183, 7.5), (244, 8.9)] {
             rig.sim.set(&rig.hub, 0, "heat", 10.0, reading);
             let out = rig.pass(at).await;
             assert!(commands(&out).is_empty(), "{reading}: {out:?}");
             assert_eq!(rig.zone().decision.unwrap().source, Source::Safety);
         }
-        rig.sim.set(&rig.hub, 0, "heat", 10.0, 7.5);
+        // Frost holds until the room reaches the frost target, frost + 2.
+        rig.sim.set(&rig.hub, 0, "heat", 10.0, 9.0);
         let out = rig.pass(305).await;
         assert_eq!(
             commands(&out),
             vec![("/ha/mode/set".to_owned(), "off".to_owned())],
             "{out:?}"
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_hand_change_without_its_event_is_caught_by_the_next_pass() {
+        let mut rig = Rig::new(None).await;
+        rig.settings(heat_rules(17.0));
+        assert_eq!(temperature_commands(&rig.pass(0).await), vec![17.0]);
+        // Someone turns it up; the event is lost (no observe), only the registry knows.
+        rig.sim.set(&rig.hub, 0, "heat", 22.0, 20.0);
+        let out = rig.pass(600).await;
+        assert!(commands(&out).is_empty(), "commanded back: {out:?}");
+        let overrides = rig.zone().overrides;
+        assert_eq!(overrides.len(), 1, "{overrides:?}");
+        assert_eq!(overrides[0].entity.as_deref(), Some(rig.id.as_str()));
+        assert_eq!(overrides[0].setpoint, Some(Setpoint::Temp(22.0)));
+        assert_eq!(overrides[0].origin, OverrideOrigin::Hand);
+        assert!(rig.zone().decision.unwrap().entities[&rig.id].held);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_explicit_list_claims_its_devices() {
+        let mut rig = Rig::new(None).await;
+        let second = feed_daikin(&rig.hub, 1, "living").await;
+        feed_daikin(&rig.hub, 2, "other").await;
+        rig.sim.set(&rig.hub, 1, "heat", 22.0, 20.0);
+        rig.sim.set(&rig.hub, 2, "heat", 22.0, 20.0);
+        // `other` lists the second living device: it leaves living's default list.
+        let claimed = ZoneSettings {
+            entities: Some(vec![second.clone()]),
+            ..heat_rules(17.0)
+        };
+        rig.hub.set_climate_zone("other", claimed).unwrap();
+        rig.settings(heat_rules(17.0));
+        let view = rig.hub.climate_view().unwrap();
+        let entities = |zone: &str| {
+            view.zones
+                .iter()
+                .find(|z| z.zone == zone)
+                .map(|z| z.entities.clone())
+                .unwrap()
+        };
+        assert_eq!(entities("living"), vec![rig.id.clone()]);
+        assert_eq!(entities("other"), vec![second.clone()]);
+        // A second explicit claim on it is refused.
+        let again = ZoneSettings {
+            entities: Some(vec![second.clone()]),
+            ..heat_rules(17.0)
+        };
+        assert!(matches!(
+            rig.hub.set_climate_zone("living", again),
+            Err(HubError::Rejected(m)) if m.contains("other")
+        ));
+        // Each device is commanded once, by its own zone, and a hand change on the claimed one
+        // is held in the zone that claims it.
+        rig.pass(0).await;
+        let decision = |zone: &str| {
+            rig.hub
+                .climate_view()
+                .unwrap()
+                .zones
+                .into_iter()
+                .find(|z| z.zone == zone)
+                .and_then(|z| z.decision)
+                .unwrap()
+        };
+        assert!(!decision("living").entities.contains_key(&second));
+        assert!(decision("other").entities.contains_key(&second));
+        rig.sim.set(&rig.hub, 1, "heat", 23.0, 20.0);
+        rig.hub.observe_climate(&second, rig.t0 + 600);
+        let held_in = |zone: &str| {
+            rig.hub
+                .climate_view()
+                .unwrap()
+                .zones
+                .into_iter()
+                .find(|z| z.zone == zone)
+                .unwrap()
+                .overrides
+                .len()
+        };
+        assert_eq!(held_in("other"), 1);
+        assert_eq!(held_in("living"), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_resolved_frost_alert_is_not_raised_again_for_six_hours() {
+        let mut rig = Rig::new(None).await;
+        load_push(&rig.hub).await;
+        // Long enough that the far passes still see a fresh reading.
+        let house = HouseSettings {
+            stale_after_min: 24 * 60,
+            ..HouseSettings::default()
+        };
+        rig.hub.set_climate_house(house).unwrap();
+        drain(&mut rig.rx);
+        let id = "climate-safety-living-frost";
+        rig.sim.set(&rig.hub, 0, "off", 10.0, 5.0);
+        assert!(!commands(&rig.pass(0).await).is_empty());
+        assert!(!alert(&rig.hub, id).unwrap().resolved);
+        // Warm again; the alert resolves ten minutes later.
+        rig.sim.set(&rig.hub, 0, "heat", 10.0, 18.0);
+        rig.pass(61).await;
+        rig.pass(61 + 601).await;
+        let first = alert(&rig.hub, id).unwrap();
+        assert!(first.resolved);
+        // Frost again within six hours: safety acts, but no new push.
+        rig.sim.set(&rig.hub, 0, "off", 10.0, 5.0);
+        let out = rig.pass(3600).await;
+        assert_eq!(
+            commands(&out),
+            vec![("/ha/mode/set".to_owned(), "heat".to_owned())],
+            "{out:?}"
+        );
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Safety);
+        let alerts: Vec<_> = rig
+            .hub
+            .alerts()
+            .into_iter()
+            .filter(|a| a.id == id)
+            .collect();
+        assert_eq!(alerts.len(), 1, "{alerts:?}");
+        assert!(alerts[0].resolved, "not raised again");
+        // Six hours after it resolved, a frost that is still there is told again.
+        rig.sim.report(&rig.hub, 0);
+        rig.pass(61 + 601 + 6 * 3600).await;
+        assert!(!alert(&rig.hub, id).unwrap().resolved);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn restoring_an_off_device_sends_no_temperature() {
+        let mut rig = Rig::new(None).await;
+        // A heater switched off at 20 °C in a freezing room: frost heats it at the frost
+        // target (the unit's minimum, 10 °C), not at the 20 °C it remembers.
+        rig.sim.set(&rig.hub, 0, "off", 20.0, 5.0);
+        let out = rig.pass(0).await;
+        assert_eq!(
+            commands(&out),
+            vec![
+                ("/ha/mode/set".to_owned(), "heat".to_owned()),
+                ("/ha/temperature/set".to_owned(), "10".to_owned()),
+            ],
+            "{out:?}"
+        );
+        // Warm again: it is put back off, and an off device gets no temperature.
+        rig.sim.set(&rig.hub, 0, "heat", 10.0, 18.0);
+        let out = rig.pass(61).await;
+        assert_eq!(
+            commands(&out),
+            vec![("/ha/mode/set".to_owned(), "off".to_owned())],
+            "{out:?}"
+        );
+        assert!(commands(&rig.pass(122).await).is_empty());
     }
 
     #[tokio::test(start_paused = true)]
@@ -1049,14 +1285,15 @@ mod engine {
         rig.hub
             .ingest("oikos/climate/daikin_192_168_1_150/climate/config", b"");
         assert!(rig.hub.snapshot().entities.iter().all(|e| e.id != rig.id));
-        rig.sim.set(&rig.hub, 1, "heat", 22.0, 20.0);
+        rig.sim.report(&rig.hub, 1);
+        rig.settings(heat_rules(18.0));
         let out = rig.pass(700).await;
         assert!(rig.zone().overrides.is_empty(), "its override is dropped");
         assert!(
             out.iter().all(|p| !p.topic.contains("150")),
             "never commanded: {out:?}"
         );
-        assert_eq!(temperature_commands(&out), vec![17.0]);
+        assert_eq!(temperature_commands(&out), vec![18.0]);
         assert!(rig.zone().decision.unwrap().entities.contains_key(&second));
     }
 
@@ -1601,6 +1838,21 @@ mod approval {
             until,
             origin: oikos_climate::doc::OverrideOrigin::Hand,
         };
+        // A pending zone does not follow overrides: refused rather than silently ignored.
+        assert!(matches!(
+            hub.set_climate_override("living", ov(None, now + 600)).await,
+            Err(HubError::Rejected(m)) if m == "zone is not active"
+        ));
+        assert!(zone(&hub).overrides.is_empty());
+        hub.set_climate_zone(
+            "living",
+            ZoneSettings {
+                state: ZoneState::Active,
+                ..ZoneSettings::default()
+            },
+        )
+        .unwrap();
+        drain(&mut rx);
         hub.set_climate_override("living", ov(None, now + 600))
             .await
             .unwrap();
@@ -1632,6 +1884,16 @@ mod approval {
                 Err(HubError::Rejected(_))
             ));
         }
+        // The range error names the override's mode.
+        let too_hot = oikos_climate::doc::Override {
+            setpoint: Some(Setpoint::Temp(50.0)),
+            mode: Some(oikos_climate::doc::Mode::Cool),
+            ..ov(None, now + 600)
+        };
+        assert!(matches!(
+            hub.set_climate_override("living", too_hot).await,
+            Err(HubError::Rejected(m)) if m.starts_with("cool override:") && !m.contains("heat")
+        ));
         assert!(matches!(
             hub.set_climate_override("nowhere", ov(None, now + 600))
                 .await,

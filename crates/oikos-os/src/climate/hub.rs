@@ -56,6 +56,7 @@ impl Hub {
         let areas = self.climate_areas();
         let history = self.history_configured();
         let now = clock::now();
+        let claims = self.climate_claims();
         let (seen, learn) = {
             let rt = self.climate_runtime();
             (rt.seen_at.clone(), rt.learn_status.clone())
@@ -70,7 +71,8 @@ impl Hub {
                         zone,
                         name,
                         false,
-                        devices.clone(),
+                        devices,
+                        &claims,
                         docs,
                         history,
                         learn.get(zone),
@@ -79,12 +81,12 @@ impl Hub {
                 .collect();
             for (zone, docs) in &store.zones {
                 if !areas.contains_key(zone) {
-                    let devices = default_entities(&docs.settings, &[]);
                     zones.push(zone_view(
                         zone,
                         zone,
                         true,
-                        devices,
+                        &[],
+                        &claims,
                         Some(docs),
                         history,
                         learn.get(zone),
@@ -179,12 +181,30 @@ impl Hub {
 
     /// Replaces the settings of `zone`, an area with climate entities: validates, publishes
     /// retained and applies locally.
-    pub fn set_climate_zone(&self, zone: &str, settings: ZoneSettings) -> Result<(), HubError> {
+    ///
+    /// Setting non-empty rules that differ from the zone's is an approval of them (spec §4.4):
+    /// `approved_at` becomes now and a pending zone becomes active. A device another zone
+    /// already lists in `entities` is refused.
+    pub fn set_climate_zone(&self, zone: &str, mut settings: ZoneSettings) -> Result<(), HubError> {
         let prefix = self.require_climate()?.prefix.clone();
-        if zone.is_empty() || zone.contains(['/', '+', '#']) {
+        if !valid_zone_id(zone) {
             return Err(HubError::Rejected(format!("invalid zone id `{zone}`")));
         }
         settings.validate().map_err(HubError::Rejected)?;
+        if let Some(listed) = &settings.entities {
+            let claims = self.climate_claims();
+            let taken = listed.iter().find_map(|id| {
+                claims
+                    .get(id)
+                    .filter(|owner| *owner != zone)
+                    .map(|o| (id, o))
+            });
+            if let Some((id, owner)) = taken {
+                return Err(HubError::Rejected(format!(
+                    "`{id}` is already listed by zone `{owner}`"
+                )));
+            }
+        }
         let known = zone != UNASSIGNED_AREA
             && self
                 .read()
@@ -193,6 +213,13 @@ impl Hub {
                 .any(|area| area.id == zone);
         if !known {
             return Err(HubError::UnknownArea(zone.to_owned()));
+        }
+        let current = self.zone_settings(zone);
+        if !settings.rules.is_empty() && settings.rules != current.rules {
+            settings.approved_at = Some(clock::now());
+            if current.state == ZoneState::Pending && settings.state == ZoneState::Pending {
+                settings.state = ZoneState::Active;
+            }
         }
         self.publish_climate(
             topics::zone_topic(&prefix, zone, ZoneDoc::Settings),
@@ -262,9 +289,11 @@ impl Hub {
     }
 
     /// The areas that can be zones, by id: each with its name and the climate entities it holds.
+    /// An area whose id cannot be a topic level is skipped, with a warning the first time.
     pub(crate) fn climate_areas(&self) -> BTreeMap<String, (String, Vec<String>)> {
-        let reg = self.read();
         let mut out: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
+        let mut skipped: Vec<String> = Vec::new();
+        let reg = self.read();
         for entity in reg.entities() {
             if entity.kind != Kind::Climate
                 || entity.unique_id.starts_with(GROUP_PREFIX)
@@ -273,6 +302,10 @@ impl Hub {
                 continue;
             }
             let area = &entity.area;
+            if !valid_zone_id(area) {
+                skipped.push(area.clone());
+                continue;
+            }
             let name = reg
                 .effective_areas()
                 .into_iter()
@@ -283,10 +316,35 @@ impl Hub {
                 .1
                 .push(entity.unique_id.clone());
         }
+        drop(reg);
         for (_, devices) in out.values_mut() {
             devices.sort();
         }
+        if !skipped.is_empty() && self.climate_enabled() {
+            let mut rt = self.climate_runtime();
+            for area in skipped {
+                if rt.skipped_areas.insert(area.clone()) {
+                    tracing::warn!(
+                        area = %area,
+                        "area id cannot be a climate zone (empty, or holds `/`, `+` or `#`); skipped"
+                    );
+                }
+            }
+        }
         out
+    }
+
+    /// Entity -> the zone whose `settings.entities` lists it. A device listed by two zones (only
+    /// possible through documents published around the hub) belongs to the first by id.
+    pub(crate) fn climate_claims(&self) -> BTreeMap<String, String> {
+        let store = self.climate_store();
+        let mut claims = BTreeMap::new();
+        for (zone, docs) in &store.zones {
+            for id in docs.settings.entities.iter().flatten() {
+                claims.entry(id.clone()).or_insert_with(|| zone.clone());
+            }
+        }
+        claims
     }
 
     fn history_configured(&self) -> bool {
@@ -294,19 +352,35 @@ impl Hub {
     }
 }
 
-/// `settings.entities`, or the zone's climate entities.
-fn default_entities(settings: &ZoneSettings, area_entities: &[String]) -> Vec<String> {
-    settings
-        .entities
-        .clone()
-        .unwrap_or_else(|| area_entities.to_vec())
+/// Whether `id` can be a zone: one topic level, no MQTT wildcard.
+pub(crate) fn valid_zone_id(id: &str) -> bool {
+    !id.is_empty() && !id.contains(['/', '+', '#'])
 }
 
+/// `settings.entities`, or the area's climate entities that no zone lists; never a device
+/// another zone claims (see [`Hub::climate_claims`]).
+pub(crate) fn zone_devices(
+    zone: &str,
+    settings: &ZoneSettings,
+    area_entities: &[String],
+    claims: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let listed = settings.entities.as_deref();
+    listed
+        .unwrap_or(area_entities)
+        .iter()
+        .filter(|id| claims.get(*id).is_none_or(|owner| owner == zone))
+        .cloned()
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn zone_view(
     zone: &str,
     name: &str,
     orphan: bool,
-    area_entities: Vec<String>,
+    area_entities: &[String],
+    claims: &BTreeMap<String, String>,
     docs: Option<&ZoneDocs>,
     history: bool,
     ran: Option<&LearnStatus>,
@@ -333,7 +407,7 @@ fn zone_view(
         zone: zone.to_owned(),
         name: name.to_owned(),
         orphan,
-        entities: default_entities(&docs.settings, &area_entities),
+        entities: zone_devices(zone, &docs.settings, area_entities, claims),
         settings: docs.settings.clone(),
         settings_invalid: docs.settings_invalid.clone(),
         reading: None,

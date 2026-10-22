@@ -11,6 +11,7 @@ use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode}
 use oikos_core::model::{Availability, EntityState, Kind, StateValue};
 
 use super::GROUP_PREFIX;
+use super::hub::zone_devices;
 use crate::hub::Hub;
 
 /// Step assumed for a device that does not advertise one; the same as the decision tree's.
@@ -83,25 +84,30 @@ pub(crate) fn step_of(caps: &DeviceCaps) -> f64 {
     step_from(caps.temp_step)
 }
 
-/// The climate entities of `zone`: `settings.entities`, else the area's, never a group.
+/// The climate entities of `zone`: `settings.entities`, else the area's that no other zone
+/// lists, never a group.
 pub(crate) fn zone_entity_ids(hub: &Hub, zone: &str, settings: &ZoneSettings) -> Vec<String> {
+    let claims = hub.climate_claims();
     match &settings.entities {
-        Some(listed) => {
+        Some(_) => {
+            let listed = zone_devices(zone, settings, &[], &claims);
             let reg = hub.read();
             listed
-                .iter()
+                .into_iter()
                 .filter(|id| {
                     !id.starts_with(GROUP_PREFIX)
                         && reg.entity(id).is_some_and(|e| e.kind == Kind::Climate)
                 })
-                .cloned()
                 .collect()
         }
-        None => hub
-            .climate_areas()
-            .remove(zone)
-            .map(|(_, devices)| devices)
-            .unwrap_or_default(),
+        None => {
+            let area = hub
+                .climate_areas()
+                .remove(zone)
+                .map(|(_, devices)| devices)
+                .unwrap_or_default();
+            zone_devices(zone, settings, &area, &claims)
+        }
     }
 }
 

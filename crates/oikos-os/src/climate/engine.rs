@@ -19,6 +19,7 @@ use oikos_core::model::{Availability, Command, Kind, StateValue, UNASSIGNED_AREA
 use serde::Serialize;
 use tokio::task::JoinHandle;
 
+use super::hub::valid_zone_id;
 use super::inputs::{
     OUTDOOR_CACHE_S, OwnedZoneInputs, local_time, outdoor_mean, outdoor_reading, presence_home_now,
     step_from, step_of, zone_entity_ids, zone_inputs_owned,
@@ -335,18 +336,13 @@ impl Hub {
             }
             entity.area.clone()
         };
-        let store = self.climate_store();
-        let listed = store.zones.iter().find(|(_, docs)| {
-            docs.settings
-                .entities
-                .as_ref()
-                .is_some_and(|list| list.iter().any(|e| e == id))
-        });
-        if let Some((zone, _)) = listed {
-            return Some(zone.clone());
+        if let Some(zone) = self.climate_claims().remove(id) {
+            return Some(zone);
         }
         let area_is_zone = area != UNASSIGNED_AREA
-            && store
+            && valid_zone_id(&area)
+            && self
+                .climate_store()
                 .zones
                 .get(&area)
                 .is_none_or(|docs| docs.settings.entities.is_none());
@@ -431,6 +427,15 @@ impl Hub {
     }
 
     async fn evaluate_zone(self: &Arc<Self>, zone: &str, now: u64) {
+        // A hand change that landed while this pass waited on another zone, or whose event
+        // was lost, is caught here against the registry as it is now, before it is commanded
+        // back.
+        let settings = self.zone_settings(zone);
+        if settings.state == ZoneState::Active {
+            for id in zone_entity_ids(self, zone, &settings) {
+                self.observe_climate(&id, now);
+            }
+        }
         let Some(mut inp) = zone_inputs_owned(self, zone, now) else {
             return;
         };
@@ -708,7 +713,8 @@ impl Hub {
                 .ledger
                 .record(&device.id, &accepted, now);
         }
-        if let Some(wanted) = target.setpoint {
+        // An off device has no target worth sending.
+        if let Some(wanted) = target.setpoint.filter(|_| target.mode != "off") {
             let step = step_of(&device.caps);
             if current.is_none_or(|c| (c - wanted).abs() > step / 2.0) {
                 let command = Command::SetTemperature {
@@ -923,15 +929,17 @@ fn decision_rows(decision: &Decision, at: Micros) -> Vec<ClimateDecisionRow> {
         .collect()
 }
 
-/// Whether `device` differs from `target` by more than half a step, or in mode.
+/// Whether `device` differs from `target` by more than half a step, or in mode. The target of
+/// an off device does not count.
 fn needs_command(device: &Device, target: &DeviceTarget) -> bool {
     let mode_differs = device.mode.as_deref() != Some(target.mode.as_str());
     let step = step_of(&device.caps);
-    let temperature_differs = target.setpoint.is_some_and(|wanted| {
-        device
-            .target
-            .is_none_or(|current| (current - wanted).abs() > step / 2.0)
-    });
+    let temperature_differs = target.mode != "off"
+        && target.setpoint.is_some_and(|wanted| {
+            device
+                .target
+                .is_none_or(|current| (current - wanted).abs() > step / 2.0)
+        });
     mode_differs || temperature_differs
 }
 
@@ -1011,5 +1019,9 @@ mod tests {
             &want(Some(20.0), "heat")
         ));
         assert!(!needs_command(&device(None, "off"), &want(None, "off")));
+        assert!(!needs_command(
+            &device(Some(9.0), "off"),
+            &want(Some(10.0), "off")
+        ));
     }
 }

@@ -4,7 +4,8 @@
 use std::sync::Arc;
 
 use oikos_climate::doc::{
-    ModeRules, Override, OverrideOrigin, Proposal, ProposalKind, Rejection, Rules, ZoneState,
+    Mode, Override, OverrideOrigin, Proposal, ProposalKind, Rejection, Rules, ZoneState,
+    check_setpoint,
 };
 use oikos_climate::topics::{self, ZoneDoc};
 use oikos_climate::view::LearnStatus;
@@ -180,28 +181,29 @@ impl Hub {
         self.require_climate()?;
         self.require_zone(zone)?;
         let now = clock::now();
+        let settings = self.zone_settings(zone);
+        // Only an active zone follows overrides: anywhere else it would be silently ignored.
+        if settings.state != ZoneState::Active {
+            return Err(HubError::Rejected("zone is not active".to_owned()));
+        }
         if ov.until <= now {
             return Err(HubError::Rejected("the override already ended".to_owned()));
         }
-        if let Some(entity) = &ov.entity {
-            let settings = self.zone_settings(zone);
-            if !super::inputs::zone_entity_ids(self, zone, &settings).contains(entity) {
-                return Err(HubError::Rejected(format!(
-                    "`{entity}` is not a climate device of zone `{zone}`"
-                )));
-            }
+        if let Some(entity) = &ov.entity
+            && !super::inputs::zone_entity_ids(self, zone, &settings).contains(entity)
+        {
+            return Err(HubError::Rejected(format!(
+                "`{entity}` is not a climate device of zone `{zone}`"
+            )));
         }
         if let Some(setpoint) = ov.setpoint {
-            // The same range check as a schedule's setpoints.
-            Rules {
-                heat: Some(ModeRules {
-                    base: setpoint,
-                    blocks: Vec::new(),
-                }),
-                cool: None,
-            }
-            .validate()
-            .map_err(HubError::Rejected)?;
+            // The same range check as a schedule's setpoints, named after the override's mode.
+            let label = match ov.mode {
+                Some(Mode::Heat) => "heat override",
+                Some(Mode::Cool) => "cool override",
+                None => "override",
+            };
+            check_setpoint(&setpoint).map_err(|e| HubError::Rejected(format!("{label}: {e}")))?;
         }
         let ov = Override {
             origin: OverrideOrigin::User,

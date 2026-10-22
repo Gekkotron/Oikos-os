@@ -186,7 +186,8 @@ pub struct ModeRules {
     pub blocks: Vec<Block>,
 }
 
-fn check_setpoint(sp: &Setpoint) -> Result<(), String> {
+/// A setpoint is off or within 0..=40 °C.
+pub fn check_setpoint(sp: &Setpoint) -> Result<(), String> {
     match sp {
         Setpoint::Temp(t) if !(0.0..=40.0).contains(t) => {
             Err(format!("setpoint {t} is outside 0..=40"))
@@ -301,6 +302,12 @@ impl HouseSettings {
         }
         if !(self.learn_support > 0.0 && self.learn_support <= 1.0) {
             return Err("learn_support must be in (0, 1]".into());
+        }
+        if self.learn_days == 0 {
+            return Err("learn_days must be at least 1".into());
+        }
+        if self.learn_min_days == 0 {
+            return Err("learn_min_days must be at least 1".into());
         }
         if self.learn_min_days > self.learn_days {
             return Err("learn_min_days must not exceed learn_days".into());
@@ -662,6 +669,15 @@ mod tests {
                 stale_after_min: 0,
                 ..d()
             },
+            HouseSettings {
+                learn_days: 0,
+                learn_min_days: 0,
+                ..d()
+            },
+            HouseSettings {
+                learn_min_days: 0,
+                ..d()
+            },
         ];
         for h in bad {
             assert!(h.validate().is_err(), "{h:?}");
@@ -670,6 +686,12 @@ mod tests {
         let h = HouseSettings {
             overcool: 25.0,
             learn_support: 1.0,
+            ..d()
+        };
+        assert!(h.validate().is_ok());
+        let h = HouseSettings {
+            learn_days: 1,
+            learn_min_days: 1,
             ..d()
         };
         assert!(h.validate().is_ok());

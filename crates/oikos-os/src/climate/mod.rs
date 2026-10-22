@@ -95,4 +95,8 @@ pub(crate) struct ClimateRuntime {
     pub last_proposal_push: HashMap<String, u64>,
     /// Zones whose learning run is in progress.
     pub learning_now: HashSet<String>,
+    /// Area ids already warned about as unusable for a zone.
+    pub skipped_areas: HashSet<String>,
+    /// Safety alert id -> when it last resolved; it is not raised again for a while.
+    pub safety_resolved_at: HashMap<String, u64>,
 }
