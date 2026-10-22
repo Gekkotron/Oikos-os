@@ -1,0 +1,754 @@
+//! The learner (spec §6.2–§6.3): from the devices' target history to a proposed rule set, plus the
+//! plain-English diff between two rule sets and a fingerprint to remember rejections.
+//!
+//! Pure and deterministic. The hub builds the inputs from history and the command ledger.
+
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime};
+
+use crate::decide::{DeviceCaps, fit};
+use crate::doc::{Block, Day, Evidence, HhMm, Mode, ModeRules, Rules, Setpoint, Source};
+
+/// Slots per day (15 minutes each).
+pub const SLOTS: usize = 96;
+const SLOT_MIN: i64 = 15;
+/// Two temperatures this close count as the same value.
+const SAME_TOL: f64 = 0.5;
+/// A device target this close to the engine's command is the engine's own.
+const ENGINE_TOL: f64 = 0.25;
+/// A day counts as data when at least this many slots are known.
+const MIN_KNOWN_SLOTS: usize = 48;
+/// A day deviates from its group's median when it differs on more than this share of slots.
+const DEVIATION_SHARE: f64 = 0.25;
+/// Runs shorter than this many slots (30 min) are absorbed by a neighbour.
+const MIN_RUN: usize = 2;
+/// `differs` / `diff` thresholds: 30 minutes, 0.5 degrees.
+const SHIFT_MIN: u16 = 30;
+const SHIFT_TEMP: f64 = 0.5;
+
+/// One recorded target of a device, in local time. A `None` mode means the mode being learned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TargetSample {
+    pub at: NaiveDateTime,
+    pub target: Option<f64>,
+    pub mode: Option<String>,
+}
+
+/// A device's samples, sorted by time. The first may predate the window and carries the value in
+/// force at its start.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeviceHistory {
+    pub entity: String,
+    pub samples: Vec<TargetSample>,
+}
+
+/// A command the engine applied, from its decision log.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EngineCommand {
+    pub entity: String,
+    pub at: NaiveDateTime,
+    pub setpoint: Option<f64>,
+    pub mode: String,
+    pub source: Source,
+}
+
+pub struct LearnInput<'a> {
+    pub mode: Mode,
+    pub devices: &'a [DeviceHistory],
+    pub engine: &'a [EngineCommand],
+    /// The rules in force, if any. Engine-held slots already agree with them through the history,
+    /// so the learner needs no further use of them; callers compare with [`differs`].
+    pub approved: Option<&'a ModeRules>,
+    pub first_day: NaiveDate,
+    pub days: u32,
+    pub min_days: u32,
+    pub support: f64,
+    pub frost: f64,
+    pub caps: &'a DeviceCaps,
+}
+
+/// The effective target of the zone during one slot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Slot {
+    None,
+    Off,
+    Temp(f64),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LearnOutcome {
+    NotEnough { days: u32, needed: u32 },
+    Rules(ModeRules),
+}
+
+fn mode_name(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Heat => "heat",
+        Mode::Cool => "cool",
+    }
+}
+
+fn same(a: Slot, b: Slot) -> bool {
+    match (a, b) {
+        (Slot::Off, Slot::Off) => true,
+        (Slot::Temp(x), Slot::Temp(y)) => (x - y).abs() <= SAME_TOL,
+        _ => false,
+    }
+}
+
+/// Order of values from "lowest" to "highest" for ranking: `Off` is below every temperature in
+/// heat and above every temperature in cool.
+fn rank(s: Slot, mode: Mode) -> f64 {
+    match (s, mode) {
+        (Slot::Temp(t), _) => t,
+        (Slot::Off, Mode::Heat) => f64::NEG_INFINITY,
+        (Slot::Off, Mode::Cool) => f64::INFINITY,
+        (Slot::None, _) => f64::NAN,
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Timeline
+// ---------------------------------------------------------------------------------------------
+
+/// The zone's effective target per day and slot (§6.2).
+pub fn timeline(input: &LearnInput) -> Vec<(NaiveDate, [Slot; SLOTS])> {
+    let commands: Vec<Vec<&EngineCommand>> = input
+        .devices
+        .iter()
+        .map(|d| {
+            let mut v: Vec<&EngineCommand> = input
+                .engine
+                .iter()
+                .filter(|c| c.entity == d.entity)
+                .collect();
+            v.sort_by_key(|c| c.at);
+            v
+        })
+        .collect();
+    (0..input.days)
+        .map(|i| {
+            let date = input.first_day + Duration::days(i64::from(i));
+            let midnight = date.and_time(NaiveTime::MIN);
+            let mut slots = [Slot::None; SLOTS];
+            for (n, slot) in slots.iter_mut().enumerate() {
+                let start = midnight + Duration::minutes(SLOT_MIN * n as i64);
+                *slot =
+                    combine(
+                        input.devices.iter().zip(&commands).map(|(d, c)| {
+                            device_slot(d, c, input.mode, start).unwrap_or(Slot::None)
+                        }),
+                    );
+            }
+            (date, slots)
+        })
+        .collect()
+}
+
+/// The mean of the devices' temperatures, `Off` when every contributing device is off.
+fn combine(parts: impl Iterator<Item = Slot>) -> Slot {
+    let (mut sum, mut n, mut off) = (0.0, 0u32, false);
+    for p in parts {
+        match p {
+            Slot::Temp(t) => {
+                sum += t;
+                n += 1;
+            }
+            Slot::Off => off = true,
+            Slot::None => {}
+        }
+    }
+    if n > 0 {
+        Slot::Temp(sum / f64::from(n))
+    } else if off {
+        Slot::Off
+    } else {
+        Slot::None
+    }
+}
+
+/// What one device held for most of the slot starting at `start`.
+fn device_slot(
+    history: &DeviceHistory,
+    commands: &[&EngineCommand],
+    mode: Mode,
+    start: NaiveDateTime,
+) -> Option<Slot> {
+    let end = start + Duration::minutes(SLOT_MIN);
+    let samples = &history.samples;
+    let idx = samples.partition_point(|s| s.at <= start);
+    let mut cur = idx.checked_sub(1);
+    let mut from = start;
+    let mut best: (Option<usize>, NaiveDateTime, i64) = (None, start, -1);
+    let mut consider = |s: Option<usize>, from: NaiveDateTime, to: NaiveDateTime| {
+        let d = (to - from).num_seconds();
+        if d > best.2 {
+            best = (s, from, d);
+        }
+    };
+    for (i, next) in samples.iter().enumerate().skip(idx) {
+        if next.at >= end {
+            break;
+        }
+        consider(cur, from, next.at);
+        cur = Some(i);
+        from = next.at;
+    }
+    consider(cur, from, end);
+    let (sample, held_from, _) = best;
+    let sample = &samples[sample?];
+
+    let wanted = mode_name(mode);
+    let device_mode = sample.mode.as_deref().unwrap_or(wanted);
+    let value = if device_mode == "off" {
+        Slot::Off
+    } else if device_mode == wanted {
+        Slot::Temp(sample.target?)
+    } else {
+        return None;
+    };
+    let engine = commands.iter().rev().find(|c| c.at <= held_from);
+    if let Some(c) = engine
+        && c.mode == device_mode
+        && (device_mode == "off"
+            || matches!((c.setpoint, sample.target),
+                (Some(a), Some(b)) if (a - b).abs() <= ENGINE_TOL))
+        && c.source != Source::Schedule
+    {
+        return None;
+    }
+    Some(value)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Learning
+// ---------------------------------------------------------------------------------------------
+
+struct DayData {
+    day: Day,
+    slots: [Slot; SLOTS],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Run {
+    start: usize,
+    len: usize,
+    value: Slot,
+}
+
+struct Group {
+    days: Vec<Day>,
+    members: Vec<usize>,
+    runs: Vec<Run>,
+}
+
+fn day_index(d: Day) -> u8 {
+    match d {
+        Day::Mon => 0,
+        Day::Tue => 1,
+        Day::Wed => 2,
+        Day::Thu => 3,
+        Day::Fri => 4,
+        Day::Sat => 5,
+        Day::Sun => 6,
+    }
+}
+
+fn is_weekend(d: Day) -> bool {
+    matches!(d, Day::Sat | Day::Sun)
+}
+
+/// Learn the rules of one mode from the device history (§6.3).
+pub fn learn(input: &LearnInput) -> LearnOutcome {
+    let counted: Vec<DayData> = timeline(input)
+        .into_iter()
+        .filter(|(_, s)| s.iter().filter(|x| **x != Slot::None).count() >= MIN_KNOWN_SLOTS)
+        .map(|(d, slots)| DayData {
+            day: Day::from_chrono(d.weekday()),
+            slots,
+        })
+        .collect();
+    let n = u32::try_from(counted.len()).unwrap_or(u32::MAX);
+    if n < input.min_days {
+        return LearnOutcome::NotEnough {
+            days: n,
+            needed: input.min_days,
+        };
+    }
+
+    let mut groups = make_groups(&counted, input);
+    for g in &mut groups {
+        let median = filled(median_day(&counted, &g.members, input.mode));
+        g.runs = runs_of(&median, input.mode);
+    }
+    let Some(base) = pick_base(&groups, input.mode) else {
+        return LearnOutcome::Rules(ModeRules {
+            base: Setpoint::Off,
+            blocks: Vec::new(),
+        });
+    };
+    let base_sp = finalize(base, input);
+
+    let mut blocks: Vec<Block> = Vec::new();
+    for g in &groups {
+        let total = g.members.len() as u32;
+        for run in g.runs.iter().filter(|r| !same(r.value, base)) {
+            let agree = g
+                .members
+                .iter()
+                .filter(|&&m| day_agrees(&counted[m].slots, run))
+                .count() as u32;
+            if f64::from(agree) < input.support * f64::from(total) {
+                continue;
+            }
+            let setpoint = finalize(run.value, input);
+            if setpoint == base_sp {
+                continue;
+            }
+            let block = Block {
+                days: g.days.clone(),
+                from: HhMm((run.start as u16) * SLOT_MIN as u16),
+                to: HhMm(((run.start + run.len) as u16) * SLOT_MIN as u16),
+                setpoint,
+                evidence: Some(Evidence { agree, of: total }),
+            };
+            merge_block(&mut blocks, block);
+        }
+    }
+    for b in &mut blocks {
+        b.days.sort_by_key(|d| day_index(*d));
+    }
+    blocks.sort_by_key(|b| (day_index(b.days[0]), b.from));
+    LearnOutcome::Rules(ModeRules {
+        base: base_sp,
+        blocks,
+    })
+}
+
+/// Identical blocks of different groups become one block over the union of days.
+fn merge_block(blocks: &mut Vec<Block>, block: Block) {
+    let found = blocks
+        .iter_mut()
+        .find(|b| b.from == block.from && b.to == block.to && b.setpoint == block.setpoint);
+    match found {
+        Some(b) => {
+            b.days.extend(block.days);
+            if let (Some(e), Some(add)) = (b.evidence.as_mut(), block.evidence) {
+                e.agree += add.agree;
+                e.of += add.of;
+            }
+        }
+        None => blocks.push(block),
+    }
+}
+
+fn finalize(value: Slot, input: &LearnInput) -> Setpoint {
+    match value {
+        Slot::Temp(t) => {
+            let t = match input.mode {
+                Mode::Heat => t.max(input.frost),
+                Mode::Cool => t,
+            };
+            Setpoint::Temp(fit(t, input.caps))
+        }
+        Slot::Off | Slot::None => Setpoint::Off,
+    }
+}
+
+/// Weekdays and weekend days; a group whose days disagree splits into one group per weekday.
+fn make_groups(counted: &[DayData], input: &LearnInput) -> Vec<Group> {
+    let mut groups = Vec::new();
+    for weekend in [false, true] {
+        let members: Vec<usize> = (0..counted.len())
+            .filter(|&i| is_weekend(counted[i].day) == weekend)
+            .collect();
+        if members.is_empty() {
+            continue;
+        }
+        if disagrees(counted, &members, input) {
+            for d in [
+                Day::Mon,
+                Day::Tue,
+                Day::Wed,
+                Day::Thu,
+                Day::Fri,
+                Day::Sat,
+                Day::Sun,
+            ] {
+                let same_day: Vec<usize> = members
+                    .iter()
+                    .copied()
+                    .filter(|&i| counted[i].day == d)
+                    .collect();
+                if !same_day.is_empty() {
+                    groups.push(Group {
+                        days: vec![d],
+                        members: same_day,
+                        runs: Vec::new(),
+                    });
+                }
+            }
+        } else {
+            let mut days: Vec<Day> = Vec::new();
+            for &i in &members {
+                if !days.contains(&counted[i].day) {
+                    days.push(counted[i].day);
+                }
+            }
+            days.sort_by_key(|d| day_index(*d));
+            groups.push(Group {
+                days,
+                members,
+                runs: Vec::new(),
+            });
+        }
+    }
+    groups
+}
+
+/// More than `1 - support` of the days differ from the group's median on over a quarter of the
+/// slots they share with it. A few odd days lower a block's evidence without splitting the group.
+fn disagrees(counted: &[DayData], members: &[usize], input: &LearnInput) -> bool {
+    let median = median_day(counted, members, input.mode);
+    let deviant = members
+        .iter()
+        .filter(|&&m| {
+            let (mut compared, mut differing) = (0u32, 0u32);
+            for (a, b) in counted[m].slots.iter().zip(&median) {
+                if *a != Slot::None && *b != Slot::None {
+                    compared += 1;
+                    differing += u32::from(!same(*a, *b));
+                }
+            }
+            f64::from(differing) > DEVIATION_SHARE * f64::from(compared)
+        })
+        .count();
+    deviant as f64 > (1.0 - input.support) * members.len() as f64
+}
+
+/// The per-slot median of the group's known values; `Slot::None` where no day knows. With an even
+/// count the lower middle value wins.
+fn median_day(counted: &[DayData], members: &[usize], mode: Mode) -> [Slot; SLOTS] {
+    let mut out = [Slot::None; SLOTS];
+    for (s, slot) in out.iter_mut().enumerate() {
+        let mut values: Vec<Slot> = members
+            .iter()
+            .map(|&m| counted[m].slots[s])
+            .filter(|v| *v != Slot::None)
+            .collect();
+        values.sort_by(|a, b| rank(*a, mode).total_cmp(&rank(*b, mode)));
+        if !values.is_empty() {
+            *slot = values[(values.len() - 1) / 2];
+        }
+    }
+    out
+}
+
+/// Unknown slots take the previous known value (the first ones, the next).
+fn filled(day: [Slot; SLOTS]) -> Vec<Slot> {
+    let first = day.iter().copied().find(|s| *s != Slot::None);
+    let mut last = first.unwrap_or(Slot::Off);
+    day.iter()
+        .map(|s| {
+            if *s != Slot::None {
+                last = *s;
+            }
+            last
+        })
+        .collect()
+}
+
+/// Cut a day into runs of similar slots, absorb runs shorter than 30 minutes, and give each run
+/// the median of its slots.
+fn runs_of(day: &[Slot], mode: Mode) -> Vec<Run> {
+    let mut runs: Vec<Run> = Vec::new();
+    for (i, &v) in day.iter().enumerate() {
+        match runs.last_mut() {
+            Some(r) if same(r.value, v) => r.len += 1,
+            _ => runs.push(Run {
+                start: i,
+                len: 1,
+                value: v,
+            }),
+        }
+    }
+    loop {
+        let short = runs.iter().position(|r| r.len < MIN_RUN);
+        let similar = (1..runs.len()).find(|&i| same(runs[i - 1].value, runs[i].value));
+        let (a, b) = match (short, similar) {
+            (Some(i), _) if runs.len() > 1 => {
+                if i > 0 {
+                    (i - 1, i)
+                } else {
+                    (0, 1)
+                }
+            }
+            (_, Some(i)) => (i - 1, i),
+            _ => break,
+        };
+        // The longer run keeps its value; on a tie, the earlier one.
+        let value = if runs[b].len > runs[a].len {
+            runs[b].value
+        } else {
+            runs[a].value
+        };
+        runs[a].len += runs[b].len;
+        runs[a].value = value;
+        runs.remove(b);
+    }
+    for r in &mut runs {
+        let mut values: Vec<Slot> = day[r.start..r.start + r.len].to_vec();
+        values.sort_by(|a, b| rank(*a, mode).total_cmp(&rank(*b, mode)));
+        r.value = values[(values.len() - 1) / 2];
+    }
+    runs
+}
+
+/// The most frequent run value across all counted days of all groups. Ties go to the lowest value
+/// in heat and the highest in cool (`Off` counts as a value).
+fn pick_base(groups: &[Group], mode: Mode) -> Option<Slot> {
+    let mut tally: Vec<(Slot, usize)> = Vec::new();
+    for g in groups {
+        for r in &g.runs {
+            match tally.iter_mut().find(|(v, _)| same(*v, r.value)) {
+                Some((_, n)) => *n += g.members.len(),
+                None => tally.push((r.value, g.members.len())),
+            }
+        }
+    }
+    let key = |s: Slot| match mode {
+        Mode::Heat => rank(s, mode),
+        Mode::Cool => -rank(s, mode),
+    };
+    tally
+        .into_iter()
+        .min_by(|(a, na), (b, nb)| nb.cmp(na).then(key(*a).total_cmp(&key(*b))))
+        .map(|(v, _)| v)
+}
+
+/// A day agrees with a run when at least half of its slots are known and 80 % of the known ones
+/// are within 0.5 °C of the run's value.
+fn day_agrees(slots: &[Slot; SLOTS], run: &Run) -> bool {
+    let range = &slots[run.start..run.start + run.len];
+    let known = range.iter().filter(|s| **s != Slot::None).count();
+    let matching = range.iter().filter(|s| same(**s, run.value)).count();
+    known * 2 >= run.len && matching * 5 >= known * 4
+}
+
+// ---------------------------------------------------------------------------------------------
+// Diff
+// ---------------------------------------------------------------------------------------------
+
+fn same_days(a: &[Day], b: &[Day]) -> bool {
+    a.len() == b.len() && a.iter().all(|d| b.contains(d))
+}
+
+fn setpoints_differ(a: Setpoint, b: Setpoint) -> bool {
+    match (a, b) {
+        (Setpoint::Off, Setpoint::Off) => false,
+        (Setpoint::Temp(x), Setpoint::Temp(y)) => (x - y).abs() >= SHIFT_TEMP,
+        _ => true,
+    }
+}
+
+struct Pairing {
+    pairs: Vec<(usize, usize)>,
+    removed: Vec<usize>,
+    added: Vec<usize>,
+}
+
+/// Match each old block with an unused new block on the same days that overlaps it in time.
+fn pair(old: &ModeRules, new: &ModeRules) -> Pairing {
+    let mut used = vec![false; new.blocks.len()];
+    let (mut pairs, mut removed) = (Vec::new(), Vec::new());
+    for (i, o) in old.blocks.iter().enumerate() {
+        let found = new.blocks.iter().enumerate().find(|(j, n)| {
+            !used[*j] && same_days(&o.days, &n.days) && o.from < n.to && n.from < o.to
+        });
+        match found {
+            Some((j, _)) => {
+                used[j] = true;
+                pairs.push((i, j));
+            }
+            None => removed.push(i),
+        }
+    }
+    let added = (0..new.blocks.len()).filter(|j| !used[*j]).collect();
+    Pairing {
+        pairs,
+        removed,
+        added,
+    }
+}
+
+fn start_moved(o: &Block, n: &Block) -> bool {
+    o.from.0.abs_diff(n.from.0) >= SHIFT_MIN
+}
+
+fn end_moved(o: &Block, n: &Block) -> bool {
+    o.to.0.abs_diff(n.to.0) >= SHIFT_MIN
+}
+
+/// Whether the new rules of a mode differ from the old ones enough to propose a change (§6.3).
+pub fn differs(old: &ModeRules, new: &ModeRules) -> bool {
+    if setpoints_differ(old.base, new.base) {
+        return true;
+    }
+    let p = pair(old, new);
+    !p.removed.is_empty()
+        || !p.added.is_empty()
+        || p.pairs.iter().any(|&(i, j)| {
+            let (o, n) = (&old.blocks[i], &new.blocks[j]);
+            start_moved(o, n) || end_moved(o, n) || setpoints_differ(o.setpoint, n.setpoint)
+        })
+}
+
+fn days_text(days: &[Day]) -> String {
+    let has = |d: Day| days.contains(&d);
+    let weekdays = [Day::Mon, Day::Tue, Day::Wed, Day::Thu, Day::Fri];
+    if days.len() == 7 {
+        return "every day".into();
+    }
+    if days.len() == 5 && weekdays.iter().all(|d| has(*d)) {
+        return "weekdays".into();
+    }
+    if days.len() == 2 && has(Day::Sat) && has(Day::Sun) {
+        return "weekends".into();
+    }
+    let mut sorted = days.to_vec();
+    sorted.sort_by_key(|d| day_index(*d));
+    sorted
+        .iter()
+        .map(|d| match d {
+            Day::Mon => "Mon",
+            Day::Tue => "Tue",
+            Day::Wed => "Wed",
+            Day::Thu => "Thu",
+            Day::Fri => "Fri",
+            Day::Sat => "Sat",
+            Day::Sun => "Sun",
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn time_text(t: HhMm) -> String {
+    format!("{:02}:{:02}", t.0 / 60, t.0 % 60)
+}
+
+fn setpoint_text(s: Setpoint) -> String {
+    match s {
+        Setpoint::Temp(t) => format!("{t:.1} °C"),
+        Setpoint::Off => "off".into(),
+    }
+}
+
+fn block_text(b: &Block) -> String {
+    let mut s = format!(
+        "{} {}–{} at {}",
+        days_text(&b.days),
+        time_text(b.from),
+        time_text(b.to),
+        setpoint_text(b.setpoint)
+    );
+    if let Some(e) = &b.evidence {
+        s.push_str(&format!(" ({} of {} days)", e.agree, e.of));
+    }
+    s
+}
+
+/// Plain-English differences between the approved rules and a proposal.
+pub fn diff(old: Option<&Rules>, new: &Rules) -> Vec<String> {
+    let modes = [Mode::Heat, Mode::Cool];
+    let present = |m: Mode| new.get(m).is_some() || old.is_some_and(|o| o.get(m).is_some());
+    let prefixed = modes.iter().filter(|m| present(**m)).count() > 1;
+    let mut lines = Vec::new();
+    for mode in modes {
+        let mut mode_lines = Vec::new();
+        match (old.and_then(|o| o.get(mode)), new.get(mode)) {
+            (_, Some(n)) => diff_mode(old.and_then(|o| o.get(mode)), n, &mut mode_lines),
+            (Some(_), None) => mode_lines.push(format!("Removed: all {} rules", mode_name(mode))),
+            (None, None) => {}
+        }
+        for l in mode_lines {
+            lines.push(if prefixed {
+                format!("{}: {l}", if mode == Mode::Heat { "Heat" } else { "Cool" })
+            } else {
+                l
+            });
+        }
+    }
+    lines
+}
+
+fn diff_mode(old: Option<&ModeRules>, new: &ModeRules, out: &mut Vec<String>) {
+    let Some(old) = old else {
+        out.push(format!("Base: {}", setpoint_text(new.base)));
+        out.extend(new.blocks.iter().map(|b| format!("New: {}", block_text(b))));
+        return;
+    };
+    if setpoints_differ(old.base, new.base) {
+        out.push(format!(
+            "Base: {} → {}",
+            setpoint_text(old.base),
+            setpoint_text(new.base)
+        ));
+    }
+    let p = pair(old, new);
+    for &(i, j) in &p.pairs {
+        let (o, n) = (&old.blocks[i], &new.blocks[j]);
+        let days = days_text(&n.days);
+        if start_moved(o, n) {
+            out.push(format!(
+                "Changed: {days} start {} → {}",
+                time_text(o.from),
+                time_text(n.from)
+            ));
+        }
+        if end_moved(o, n) {
+            out.push(format!(
+                "Changed: {days} end {} → {}",
+                time_text(o.to),
+                time_text(n.to)
+            ));
+        }
+        if setpoints_differ(o.setpoint, n.setpoint) {
+            out.push(format!(
+                "Changed: {days} setpoint {} → {}",
+                setpoint_text(o.setpoint),
+                setpoint_text(n.setpoint)
+            ));
+        }
+    }
+    out.extend(
+        p.removed
+            .iter()
+            .map(|&i| format!("Removed: {}", block_text(&old.blocks[i]))),
+    );
+    out.extend(
+        p.added
+            .iter()
+            .map(|&j| format!("New: {}", block_text(&new.blocks[j]))),
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Fingerprint
+// ---------------------------------------------------------------------------------------------
+
+/// FNV-1a 64-bit over the rules' JSON without evidence, as 16 lowercase hex digits.
+pub fn fingerprint(rules: &Rules) -> String {
+    let mut bare = rules.clone();
+    for m in [bare.heat.as_mut(), bare.cool.as_mut()]
+        .into_iter()
+        .flatten()
+    {
+        for b in &mut m.blocks {
+            b.evidence = None;
+        }
+    }
+    let json = serde_json::to_string(&bare).unwrap_or_default();
+    let hash = json.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, byte| {
+        (h ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    });
+    format!("{hash:016x}")
+}
