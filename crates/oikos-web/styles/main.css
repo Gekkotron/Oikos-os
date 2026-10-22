@@ -2243,6 +2243,7 @@ p.override__hint {
   opacity: 0.7;
 }
 
+.flow-section__dot,
 .flow-section__count {
   opacity: 0.5;
 }

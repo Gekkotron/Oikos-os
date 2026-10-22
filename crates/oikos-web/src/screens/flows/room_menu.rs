@@ -11,21 +11,24 @@ use crate::api;
 use crate::components::toast::Toasts;
 use crate::house::House;
 
-/// A ⋯ button over a small popover. `current` is the flow's room (a known area id), `invalid`
-/// flows cannot be moved. Esc or a press outside the menu closes it.
-#[component]
-pub fn RoomMenu(id: String, href: String, current: Option<String>, invalid: bool) -> impl IntoView {
-    let house = expect_context::<House>();
-    let toasts = expect_context::<Toasts>();
-    let open = RwSignal::new(false);
+/// Which flow's ⋯ menu is open (its id), held by the page rather than by each menu: a row the
+/// list rebuilds keeps its menu open, only one menu is ever open, and one pair of window
+/// listeners serves them all.
+#[derive(Clone, Copy)]
+pub struct OpenMenu(RwSignal<Option<String>>);
 
+/// Provides [`OpenMenu`] to the page and registers its one Escape / outside-press listener pair,
+/// removed when the page goes away.
+pub fn provide_open_menu() {
+    let open = RwSignal::new(None::<String>);
+    provide_context(OpenMenu(open));
     let esc = window_event_listener(ev::keydown, move |ev| {
-        if open.get_untracked() && ev.key() == "Escape" {
-            open.set(false);
+        if ev.key() == "Escape" && open.with_untracked(Option::is_some) {
+            open.set(None);
         }
     });
     let outside = window_event_listener(ev::pointerdown, move |ev| {
-        if !open.get_untracked() {
+        if open.with_untracked(Option::is_none) {
             return;
         }
         let inside = ev
@@ -33,18 +36,31 @@ pub fn RoomMenu(id: String, href: String, current: Option<String>, invalid: bool
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
             .is_some_and(|el| el.closest(".room-menu").ok().flatten().is_some());
         if !inside {
-            open.set(false);
+            open.set(None);
         }
     });
     on_cleanup(move || {
         esc.remove();
         outside.remove();
     });
+}
+
+/// A ⋯ button over a small popover. `current` is the flow's room (a known area id), `invalid`
+/// flows cannot be moved. Esc or a press outside the menu closes it (see [`OpenMenu`]).
+#[component]
+pub fn RoomMenu(id: String, href: String, current: Option<String>, invalid: bool) -> impl IntoView {
+    let house = expect_context::<House>();
+    let toasts = expect_context::<Toasts>();
+    let OpenMenu(open_menu) = expect_context::<OpenMenu>();
+    let open = {
+        let id = id.clone();
+        Memo::new(move |_| open_menu.with(|o| o.as_deref() == Some(id.as_str())))
+    };
 
     let id = StoredValue::new(id);
     // The hub's push refreshes the list, like the enable switch.
     let move_to = move |area: Option<String>| {
-        open.set(false);
+        open_menu.set(None);
         let id = id.get_value();
         spawn_local(async move {
             if let Err(e) = api::set_flow_area(&id, area.as_deref()).await {
@@ -98,7 +114,10 @@ pub fn RoomMenu(id: String, href: String, current: Option<String>, invalid: bool
                 title="Flow actions"
                 aria-haspopup="menu"
                 aria-expanded=move || open.get().to_string()
-                on:click=move |_| open.update(|o| *o = !*o)
+                on:click=move |_| {
+                    let id = id.get_value();
+                    open_menu.update(|o| *o = (o.as_deref() != Some(id.as_str())).then_some(id));
+                }
             >
                 "⋯"
             </button>

@@ -15,7 +15,7 @@ use crate::flow_list::{
 use crate::house::House;
 use bar::FlowsBar;
 use card::FlowCard;
-use room_menu::RoomMenu;
+use room_menu::{RoomMenu, provide_open_menu};
 use row::FlowRow;
 
 /// Storage key for the remembered view, grouping, sort, filters and folded sections.
@@ -68,40 +68,63 @@ fn menu_for(row: &ListRow) -> AnyView {
     .into_any()
 }
 
-/// The rows of one block, as a list panel or a card grid.
-fn block(rows: Vec<ListRow>, mode: ViewMode) -> AnyView {
+/// The rows of one block, as a list panel or a card grid. Keyed by [`flow_list::row_key`], so a
+/// change rebuilds only the rows it touched.
+fn block(rows: Signal<Vec<ListRow>>, mode: ViewMode) -> AnyView {
     match mode {
         ViewMode::List => view! {
             <ul class="flow-list">
-                {rows.into_iter()
-                    .map(|row| {
+                <For each=move || rows.get() key=flow_list::row_key let:row>
+                    {
                         let menu = menu_for(&row);
                         view! { <FlowRow row=row menu=menu /> }
-                    })
-                    .collect_view()}
+                    }
+                </For>
             </ul>
         }
         .into_any(),
         ViewMode::Cards => view! {
             <ul class="flow-grid">
-                {rows.into_iter()
-                    .map(|row| {
+                <For each=move || rows.get() key=flow_list::row_key let:row>
+                    {
                         let menu = menu_for(&row);
                         view! { <FlowCard row=row menu=menu /> }
-                    })
-                    .collect_view()}
+                    }
+                </For>
             </ul>
         }
         .into_any(),
     }
 }
 
-/// A foldable room section: header button (title, count, ⚠) over its block.
-fn section_view(section: Section, mode: ViewMode, prefs: RwSignal<FlowListPrefs>) -> impl IntoView {
-    let key = section.key.clone();
+/// A foldable room section: header button (title · count, ⚠) over its block. It is keyed by
+/// the room and reads its title, rows and attention from `sections`, so a run event updates it
+/// in place.
+fn section_view(
+    key: String,
+    sections: Memo<Vec<Section>>,
+    mode: ViewMode,
+    prefs: RwSignal<FlowListPrefs>,
+) -> impl IntoView {
+    let section = {
+        let key = key.clone();
+        Memo::new(move |_| sections.with(|all| all.iter().find(|s| s.key == key).cloned()))
+    };
+    let rows = Signal::derive(move || {
+        section
+            .with(|s| s.as_ref().map(|s| s.rows.clone()))
+            .unwrap_or_default()
+    });
+    let title = move || {
+        section
+            .with(|s| s.as_ref().map(|s| s.title.to_uppercase()))
+            .unwrap_or_default()
+    };
+    let count = move || section.with(|s| s.as_ref().map_or(0, |s| s.rows.len()));
+    let attention = move || section.with(|s| s.as_ref().is_some_and(|s| s.attention));
     let folded = {
         let key = key.clone();
-        move || prefs.with(|p| p.folded.contains(&key))
+        Memo::new(move |_| prefs.with(|p| p.folded.contains(&key)))
     };
     let toggle = move |_| {
         prefs.update(|p| {
@@ -110,27 +133,22 @@ fn section_view(section: Section, mode: ViewMode, prefs: RwSignal<FlowListPrefs>
             }
         });
     };
-    let title = section.title.to_uppercase();
-    let count = section.rows.len();
-    let attention = section.attention;
-    let rows = section.rows;
-    let folded_for_hdr = folded.clone();
-    let folded_for_warn = folded.clone();
     view! {
         <section class="flow-section">
             <button
                 type="button"
                 class="flow-section__head"
-                aria-expanded=move || (!folded_for_hdr()).to_string()
+                aria-expanded=move || (!folded.get()).to_string()
                 on:click=toggle
             >
-                <span class="flow-section__caret" class:flow-section__caret--folded=folded.clone()>
+                <span class="flow-section__caret" class:flow-section__caret--folded=folded>
                     "▾"
                 </span>
                 <span class="flow-section__title">{title}</span>
+                <span class="flow-section__dot" aria-hidden="true">"·"</span>
                 <span class="flow-section__count">{count}</span>
                 {move || {
-                    (attention && folded_for_warn())
+                    (attention() && folded.get())
                         .then(|| {
                             view! {
                                 <span
@@ -143,7 +161,7 @@ fn section_view(section: Section, mode: ViewMode, prefs: RwSignal<FlowListPrefs>
                         })
                 }}
             </button>
-            <Show when=move || !folded()>{block(rows.clone(), mode)}</Show>
+            <Show when=move || !folded.get()>{move || block(rows, mode)}</Show>
         </section>
     }
 }
@@ -151,6 +169,7 @@ fn section_view(section: Section, mode: ViewMode, prefs: RwSignal<FlowListPrefs>
 #[component]
 pub fn FlowsScreen() -> impl IntoView {
     let house = expect_context::<House>();
+    provide_open_menu();
     let prefs = RwSignal::new(load_prefs());
     // The search text is never remembered.
     let query = RwSignal::new(String::new());
@@ -187,10 +206,20 @@ pub fn FlowsScreen() -> impl IntoView {
             p.triggers.clear();
         });
     };
-    let body = move || {
+    // `body` reads only the layout and emptiness, so a run event or a fold never rebuilds the
+    // list: the keyed sections and rows below update in place.
+    let layout = Memo::new(move |_| prefs.with(|p| (p.view, p.grouping)));
+    let empty = Memo::new(move |_| shown.with(Vec::is_empty));
+    let sections = Memo::new(move |_| {
         let rows = shown.get();
-        let (mode, grouping) = prefs.with(|p| (p.view, p.grouping));
-        if rows.is_empty() {
+        house.areas.with(|areas| flow_list::sections(rows, areas))
+    });
+    let section_keys = Memo::new(move |_| {
+        sections.with(|all| all.iter().map(|s| s.key.clone()).collect::<Vec<_>>())
+    });
+    let body = move || {
+        let (mode, grouping) = layout.get();
+        if empty.get() {
             return view! {
                 <div class="flow-list__empty">
                     <p>"No flows match"</p>
@@ -202,15 +231,13 @@ pub fn FlowsScreen() -> impl IntoView {
             .into_any();
         }
         match grouping {
-            Grouping::None => block(rows, mode),
-            Grouping::Room => {
-                let sections = house.areas.with(|areas| flow_list::sections(rows, areas));
-                sections
-                    .into_iter()
-                    .map(|s| section_view(s, mode, prefs))
-                    .collect_view()
-                    .into_any()
+            Grouping::None => block(shown.into(), mode),
+            Grouping::Room => view! {
+                <For each=move || section_keys.get() key=|key| key.clone() let:key>
+                    {section_view(key, sections, mode, prefs)}
+                </For>
             }
+            .into_any(),
         }
     };
     view! {

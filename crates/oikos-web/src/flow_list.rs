@@ -2,10 +2,13 @@
 //! room and the remembered preferences. No leptos and no browser types, so everything here is
 //! tested natively (the screen lives in `screens/flows/`).
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{Hash, Hasher};
+use std::mem::discriminant;
 
 use oikos_api::{AreaView, EntityView, FlowView, RunStatus};
-use oikos_core::flow::{Flow, NodeKind};
+use oikos_core::flow::{Flow, FlowMode, NodeKind};
 use oikos_core::model::UNASSIGNED_AREA;
 use serde::{Deserialize, Serialize};
 
@@ -16,7 +19,7 @@ use crate::flows::trigger_summary;
 pub const NO_ROOM_KEY: &str = "__no_room__";
 
 /// What starts a flow; one chip each in the top bar. `Manual` is a flow with no trigger node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerKind {
     State,
@@ -289,6 +292,36 @@ pub fn sections(rows: Vec<ListRow>, areas: &[AreaView]) -> Vec<Section> {
     out
 }
 
+/// The `<For>` key of a row or card: the flow id and a digest of everything it shows (name,
+/// switch, restart tag, invalid reason, trigger, icon, room, attention, newest run and whether
+/// the last finished one failed). A run event changes the key of its own row only, so the page
+/// rebuilds that row and keeps every other one as it is; steps added to a running run change
+/// nothing shown, so they keep the row too.
+pub fn row_key(row: &ListRow) -> (String, u64) {
+    let flow = &row.view.definition;
+    let mut hasher = DefaultHasher::new();
+    flow.name.hash(&mut hasher);
+    flow.enabled.hash(&mut hasher);
+    (flow.mode == FlowMode::Restart).hash(&mut hasher);
+    row.view.invalid.hash(&mut hasher);
+    row.trigger_text.hash(&mut hasher);
+    row.kinds.hash(&mut hasher);
+    row.room.hash(&mut hasher);
+    row.attention.hash(&mut hasher);
+    if let Some(run) = row.view.runs.first() {
+        run.id.hash(&mut hasher);
+        discriminant(&run.status).hash(&mut hasher);
+        run.started_at.hash(&mut hasher);
+    }
+    row.view
+        .runs
+        .iter()
+        .find(|r| matches!(r.status, RunStatus::Done | RunStatus::Failed))
+        .map(|r| r.status == RunStatus::Failed)
+        .hash(&mut hasher);
+    (flow.id.clone(), hasher.finish())
+}
+
 /// The preferences from their stored JSON; anything unreadable gives the defaults.
 pub fn decode_prefs(raw: &str) -> FlowListPrefs {
     serde_json::from_str(raw).unwrap_or_default()
@@ -370,6 +403,41 @@ mod tests {
             active_run: None,
             runs: vec![],
         }
+    }
+
+    #[test]
+    fn row_key_changes_only_with_what_the_row_shows() {
+        let base = view("f", "Hall light", &["trigger.state"]);
+        let key = |v: &FlowView| row_key(&row(v.clone()));
+        assert_eq!(key(&base), key(&base));
+        assert_eq!(key(&base).0, "f");
+
+        let mut running = base.clone();
+        running.runs = vec![run(RunStatus::Running, 5)];
+        assert_ne!(key(&running), key(&base), "a new run shows");
+        let mut stepped = running.clone();
+        stepped.runs[0].steps.push(oikos_api::StepView {
+            node: "t0".into(),
+            at: 6,
+            outcome: oikos_api::StepOutcome::Ok,
+            detail: String::new(),
+        });
+        assert_eq!(key(&stepped), key(&running), "a step shows nothing new");
+        let mut done = running.clone();
+        done.runs[0].status = RunStatus::Done;
+        assert_ne!(key(&done), key(&running), "the run ending shows");
+
+        let mut off = base.clone();
+        off.definition.enabled = false;
+        assert_ne!(key(&off), key(&base));
+        let mut renamed = base.clone();
+        renamed.definition.name = "Porch light".into();
+        assert_ne!(key(&renamed), key(&base));
+        let moved = row_in(base.clone(), "living", "Living room");
+        assert_ne!(row_key(&moved), key(&base));
+        let mut broken = base.clone();
+        broken.invalid = Some("unknown entity".into());
+        assert_ne!(key(&broken), key(&base));
     }
 
     #[test]
