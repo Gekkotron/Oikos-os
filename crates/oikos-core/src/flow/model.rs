@@ -156,6 +156,9 @@ pub enum NodeKind {
     /// Enables or disables a flow (its own by default).
     #[serde(rename = "flow.enable")]
     FlowEnable(FlowEnableParams),
+    /// Sends a phone push notification.
+    #[serde(rename = "notify")]
+    Notify(NotifyParams),
 }
 
 impl NodeKind {
@@ -170,6 +173,7 @@ impl NodeKind {
             NodeKind::Delay(_) => "delay",
             NodeKind::Command(_) => "command",
             NodeKind::FlowEnable(_) => "flow.enable",
+            NodeKind::Notify(_) => "notify",
         }
     }
 
@@ -310,6 +314,38 @@ pub struct FlowEnableParams {
     pub extra: BTreeMap<String, Value>,
 }
 
+/// Params of `notify`: the fields of a v1 push alert.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct NotifyParams {
+    /// The alert title; required, not empty.
+    pub title: String,
+    /// The alert body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// One of `alarm`, `security`, `camera`, `energy`, `climate`, `system`, `misc` (the default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    /// One of `info` (the default), `warning`, `critical`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    /// The entity the alert is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity_id: Option<String>,
+    /// An image to show with the alert.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    /// Deliver without sound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub silent: Option<bool>,
+    /// A fixed alert id: a later run replaces the earlier alert. Absent means
+    /// `flow-<flow id>-<run id>`, one alert per run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
 /// Params of `delay`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -385,6 +421,21 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn notify_node_round_trips() {
+        let text = r#"{"id":"n","type":"notify","params":{"title":"Door open"}}"#;
+        let node: Node = serde_json::from_str(text).unwrap();
+        assert!(!node.kind.is_trigger());
+        assert!(node.kind.ports().is_empty());
+        assert_eq!(node.kind.type_name(), "notify");
+        assert!(matches!(&node.kind, NodeKind::Notify(p)
+            if p.title == "Door open" && p.body.is_none() && p.silent.is_none()));
+        assert_eq!(
+            serde_json::to_value(&node).unwrap(),
+            serde_json::from_str::<serde_json::Value>(text).unwrap()
+        );
+    }
 
     #[test]
     fn flow_enable_defaults_to_self() {

@@ -265,6 +265,52 @@ pub struct LastRun {
     pub started_at: u64,
 }
 
+/// A phone push notification to send.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SendNotificationParams {
+    /// The alert title; required, not empty.
+    pub title: String,
+    /// The alert body.
+    pub body: Option<String>,
+    /// One of `alarm`, `security`, `camera`, `energy`, `climate`, `system`, `misc` (the default).
+    pub channel: Option<String>,
+    /// One of `info` (the default), `warning`, `critical`.
+    pub severity: Option<String>,
+    /// The entity the alert is about.
+    pub entity_id: Option<String>,
+    /// An image to show with the alert.
+    pub image_url: Option<String>,
+    /// Deliver without sound.
+    pub silent: Option<bool>,
+    /// A fixed alert id: sending again with it replaces the earlier alert. Absent means a new
+    /// `mcp-<unix seconds>-<n>` id.
+    pub id: Option<String>,
+}
+
+/// The id of the alert `send_notification` raised.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct Sent {
+    pub id: String,
+}
+
+/// Default number of alerts `list_alerts` returns.
+pub const DEFAULT_ALERTS_LIMIT: usize = 20;
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct ListAlertsParams {
+    /// How many alerts to return, newest first: 20 by default.
+    pub limit: Option<usize>,
+    /// Only alerts of this channel (`alarm`, `security`, `camera`, `energy`, `climate`,
+    /// `system`, `misc`).
+    pub channel: Option<String>,
+}
+
+/// The push alerts, newest first.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AlertList {
+    pub alerts: Vec<oikos_api::AlertView>,
+}
+
 /// The id of a flow that `delete_flow` removed.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct Deleted {

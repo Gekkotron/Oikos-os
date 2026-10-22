@@ -770,6 +770,34 @@ async fn run_node(
                 Err(err) => failed(err.to_string()),
             }
         }
+        NodeKind::Notify(params) => {
+            let mut alert = serde_json::json!({
+                "v": 1,
+                "id": params
+                    .id
+                    .clone()
+                    .unwrap_or_else(|| format!("flow-{flow_id}-{run_id}")),
+                "title": params.title,
+                "channel": params.channel.as_deref().unwrap_or("misc"),
+                "severity": params.severity.as_deref().unwrap_or("info"),
+            });
+            for (key, value) in [
+                ("body", params.body.as_ref()),
+                ("entity_id", params.entity_id.as_ref()),
+                ("image_url", params.image_url.as_ref()),
+            ] {
+                if let Some(value) = value {
+                    alert[key] = Value::String(value.clone());
+                }
+            }
+            if let Some(silent) = params.silent {
+                alert["silent"] = Value::Bool(silent);
+            }
+            match hub.notify("flow", &alert) {
+                Ok(id) => (StepOutcome::Ok, format!("sent {id}"), None),
+                Err(rejected) => failed(rejected.reason),
+            }
+        }
         NodeKind::If(params) => {
             if params.op == Op::IsDark {
                 let (lat, lon) = hub.house_point();

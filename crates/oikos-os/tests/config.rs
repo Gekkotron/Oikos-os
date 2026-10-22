@@ -21,8 +21,9 @@ fn defaults_match_spec() {
         assert_eq!(cfg.commands.subscription_debounce_ms, 500);
         assert_eq!(cfg.log.level, "info");
         assert!(!cfg.log.json);
-        assert_eq!(cfg.push.history_topic, "oikos-push/history");
-        assert_eq!(cfg.push.responses_topic, "oikos-push/responses");
+        assert_eq!(cfg.push.prefix, "oikos/push");
+        assert_eq!(cfg.push.legacy_prefix, "oikos-push");
+        assert_eq!(cfg.push.credentials, None);
         assert_eq!(cfg.frigate.url, None);
         assert_eq!(cfg.frigate.user, None);
         assert_eq!(cfg.frigate.password, None);
@@ -87,7 +88,7 @@ fn numeric_looking_env_strings_stay_strings() {
         jail.set_env("OIKOS_TOPICS__Z2M_BASE", "0123");
         jail.set_env("OIKOS_HTTP__BIND", "8080");
         jail.set_env("OIKOS_LOG__LEVEL", "5");
-        jail.set_env("OIKOS_PUSH__HISTORY_TOPIC", "1");
+        jail.set_env("OIKOS_PUSH__PREFIX", "1");
         jail.set_env("OIKOS_FRIGATE__PASSWORD", "0042");
         let cfg = Config::load(None)?;
         assert_eq!(cfg.mqtt.ha_status_topic, "42");
@@ -95,7 +96,7 @@ fn numeric_looking_env_strings_stay_strings() {
         assert_eq!(cfg.topics.z2m_base, "0123");
         assert_eq!(cfg.http.bind, "8080");
         assert_eq!(cfg.log.level, "5");
-        assert_eq!(cfg.push.history_topic, "1");
+        assert_eq!(cfg.push.prefix, "1");
         assert_eq!(cfg.frigate.password.as_deref(), Some("0042"));
         assert_eq!(cfg.mqtt.password.as_deref(), Some("123456"));
         assert_eq!(cfg.mqtt.client_id, "1");
@@ -208,6 +209,150 @@ fn flows_timezone_is_read() {
         );
         jail.set_env("OIKOS_FLOWS__TIMEZONE", "UTC");
         assert_eq!(Config::load(None)?.flows.timezone.as_deref(), Some("UTC"));
+        Ok(())
+    });
+}
+
+#[test]
+fn push_defaults_are_new_topics() {
+    Jail::expect_with(|_jail| {
+        let push = Config::load(None)?.push;
+        assert_eq!(push.prefix, "oikos/push");
+        assert_eq!(push.legacy_prefix, "oikos-push");
+        assert_eq!(push.credentials, None);
+        assert_eq!(push.retry_interval, 60);
+        assert_eq!(push.max_retries, 10);
+        assert_eq!(push.history_size, 100);
+        assert_eq!(push.history_days, 7);
+        Ok(())
+    });
+}
+
+#[test]
+fn push_keys_are_read() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "oikos.toml",
+            "[push]\nprefix = \"home/push\"\nlegacy_prefix = \"\"\n\
+             credentials = \"/etc/oikos/fcm.json\"\nretry_interval = 30\n",
+        )?;
+        let push = Config::load(None)?.push;
+        assert_eq!(push.prefix, "home/push");
+        assert_eq!(push.legacy_prefix, "");
+        assert_eq!(
+            push.credentials.as_deref(),
+            Some(std::path::Path::new("/etc/oikos/fcm.json"))
+        );
+        assert_eq!(push.retry_interval, 30);
+        jail.set_env("OIKOS_PUSH__CREDENTIALS", "/tmp/key.json");
+        assert_eq!(
+            Config::load(None)?.push.credentials.as_deref(),
+            Some(std::path::Path::new("/tmp/key.json"))
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn old_push_keys_are_rejected() {
+    Jail::expect_with(|jail| {
+        jail.create_file("oikos.toml", "[push]\nhistory_topic = \"x\"\n")?;
+        let err = Config::load(None).expect_err("history_topic is no longer a key");
+        let text = err.to_string();
+        assert!(text.contains("history_topic"), "{text}");
+        assert!(
+            text.contains("legacy_prefix"),
+            "the error names the new keys: {text}"
+        );
+        jail.create_file("oikos.toml", "[push]\nresponses_topic = \"x\"\n")?;
+        let err = Config::load(None).expect_err("responses_topic is no longer a key");
+        assert!(err.to_string().contains("responses_topic"), "{err}");
+        Ok(())
+    });
+}
+
+#[test]
+fn example_config_loads() {
+    Jail::expect_with(|_jail| {
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../oikos.example.toml"
+        ));
+        let cfg = Config::load(Some(path))?;
+        assert_eq!(cfg.push.prefix, "oikos/push");
+        assert_eq!(cfg.push.credentials, None);
+        Ok(())
+    });
+}
+
+#[test]
+fn frigate_bridge_defaults_and_string_env() {
+    Jail::expect_with(|jail| {
+        let cfg = Config::load(None)?;
+        let f = &cfg.frigate;
+        assert!(!f.bridge && f.media_url.is_none());
+        assert!(f.labels.is_empty() && f.cameras.is_empty() && f.zones.is_empty());
+        assert_eq!((f.cooldown, f.ttl), (0, 43200));
+        assert_eq!(
+            (f.severity.as_str(), f.topic_prefix.as_str()),
+            ("warning", "frigate")
+        );
+        assert!(f.bridge_settings().is_none());
+
+        jail.set_env("OIKOS_FRIGATE__SEVERITY", "123");
+        jail.set_env("OIKOS_FRIGATE__TOPIC_PREFIX", "007");
+        jail.set_env("OIKOS_FRIGATE__MEDIA_URL", "http://192.168.1.20:5000/");
+        jail.set_env("OIKOS_FRIGATE__BRIDGE", "true");
+        let cfg = Config::load(None)?;
+        assert_eq!(cfg.frigate.severity, "123");
+        assert_eq!(cfg.frigate.events_topic(), "007/events");
+        let settings = cfg.frigate.bridge_settings().expect("bridge on");
+        assert_eq!(settings.media_url, "http://192.168.1.20:5000");
+        Ok(())
+    });
+}
+
+#[test]
+fn watchdog_defaults_and_validation() {
+    use oikos_os::config::AclSource;
+    Jail::expect_with(|jail| {
+        let cfg = Config::load(None)?;
+        let w = &cfg.watchdog;
+        assert!(!w.gateway.enabled && !w.acl.enabled);
+        assert_eq!(w.gateway.prefix, "encryption-gateway/health");
+        assert_eq!(w.acl.source, AclSource::Topic);
+        assert_eq!(w.acl.log_topic, "$SYS/broker/log/#");
+        assert_eq!((w.acl.log_file.is_none(), w.acl.cooldown), (true, 300));
+        assert_eq!(w.validate(), Ok(()));
+
+        // A file source without a log file is a config error, but only once enabled.
+        jail.set_env("OIKOS_WATCHDOG__ACL__SOURCE", "file");
+        assert_eq!(Config::load(None)?.watchdog.validate(), Ok(()));
+        jail.set_env("OIKOS_WATCHDOG__ACL__ENABLED", "true");
+        let cfg = Config::load(None)?;
+        assert_eq!(cfg.watchdog.acl.source, AclSource::File);
+        assert!(cfg.watchdog.validate().is_err());
+
+        jail.set_env("OIKOS_WATCHDOG__ACL__LOG_FILE", "007");
+        let cfg = Config::load(None)?;
+        assert_eq!(
+            cfg.watchdog.acl.log_file.as_deref(),
+            Some(std::path::Path::new("007"))
+        );
+        assert_eq!(cfg.watchdog.validate(), Ok(()));
+
+        jail.set_env("OIKOS_WATCHDOG__GATEWAY__ENABLED", "true");
+        jail.set_env("OIKOS_WATCHDOG__GATEWAY__PREFIX", "/");
+        assert!(Config::load(None)?.watchdog.validate().is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn watchdog_rejects_an_unknown_source() {
+    Jail::expect_with(|jail| {
+        jail.set_env("OIKOS_WATCHDOG__ACL__SOURCE", "stdin");
+        assert!(Config::load(None).is_err());
         Ok(())
     });
 }

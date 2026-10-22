@@ -44,6 +44,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/ignored", get(ignored))
         .route("/alerts", get(alerts))
         .route("/alerts/{id}/actions/{action}", post(alert_action))
+        .route("/push", get(push_status))
         .route("/media", get(media))
         .route("/flows", get(flows))
         .route("/schedule", get(schedule_preview))
@@ -335,6 +336,12 @@ async fn rename_area(
 
 async fn ignored(State(hub): HubState) -> Json<Vec<IgnoredView>> {
     Json(hub.ignored())
+}
+
+/// Whether push sends (`off` without credentials, `syncing`, `ready`), the registered installs
+/// and the alerts waiting in the retry queue.
+async fn push_status(State(hub): HubState) -> Json<oikos_push::PushStatus> {
+    Json(hub.push().status())
 }
 
 async fn alerts(State(hub): HubState) -> Json<Vec<AlertView>> {

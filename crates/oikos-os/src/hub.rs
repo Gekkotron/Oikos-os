@@ -29,10 +29,12 @@ use oikos_core::model::{
 };
 use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
 use oikos_core::types::command::expects_echo;
+use oikos_push::fcm::{FcmError, FcmTransport, HttpFcm, ServiceAccount};
+use oikos_push::{PushService, Rejected};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::clock;
-use crate::config::Config;
+use crate::config::{AclSource, Config};
 pub use crate::flows::EngineRequest;
 
 /// Events kept for a slow WebSocket client before it starts missing some.
@@ -77,6 +79,43 @@ fn parse_group_command(payload: &[u8]) -> Option<Command> {
     serde_json::from_value(value).ok()
 }
 
+/// The FCM HTTP v1 endpoint.
+const FCM_BASE: &str = "https://fcm.googleapis.com/";
+
+/// The FCM sender for `[push] credentials`, or `None` (history only) with one warning: no
+/// credentials configured, or a key file that cannot be read. Only the path is ever logged.
+fn push_transport(cfg: &crate::config::PushConfig) -> Option<Arc<dyn FcmTransport>> {
+    let Some(path) = cfg.credentials.as_deref() else {
+        tracing::warn!(
+            "push sending is off: no [push] credentials; alerts are kept in the history only"
+        );
+        return None;
+    };
+    let account = match ServiceAccount::load(path) {
+        Ok(account) => account,
+        Err(FcmError::Read { source, .. }) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %source,
+                "push sending is off: cannot read the [push] credentials file; alerts are kept in the history only"
+            );
+            return None;
+        }
+        Err(FcmError::Parse { source, .. }) => {
+            // Only the position: a serde message could quote part of the key file.
+            tracing::warn!(
+                path = %path.display(),
+                line = source.line(),
+                column = source.column(),
+                "push sending is off: the [push] credentials file is not a service-account key; alerts are kept in the history only"
+            );
+            return None;
+        }
+    };
+    let base = url::Url::parse(FCM_BASE).expect("FCM base URL parses");
+    Some(Arc::new(HttpFcm::new(account, base)))
+}
+
 /// The `install_id` the web sends in a reply; the app sends its own install id.
 const WEB_INSTALL_ID: &str = "oikos-web";
 
@@ -117,6 +156,12 @@ pub struct MigrationOutcome {
     pub skipped_reason: Option<&'static str>,
 }
 
+/// The broker ACL watchdog and, for the topic source, the log filter it listens on.
+struct AclWatchdog {
+    topic: Option<String>,
+    dog: Mutex<oikos_watchdog::AclWatchdog>,
+}
+
 pub struct Hub {
     /// The hub's own `Arc`, so a message handler can spawn work that outlives its `&self`.
     me: Weak<Hub>,
@@ -135,10 +180,16 @@ pub struct Hub {
     ui_prefix: String,
     /// The first discovery prefix: virtual entities are published under it.
     discovery_prefix: String,
-    /// OikosPush's retained history topic and its decoded copy.
-    history_topic: String,
-    responses_topic: String,
+    /// Push notifications: the service owns `<prefix>/history`; the alert store decodes the
+    /// broker's echo of it for the web and the API.
+    push: Arc<PushService>,
     alerts: Mutex<AlertStore>,
+    /// The Frigate event bridge and the topic it reads, when `[frigate] bridge` is on.
+    frigate: Option<(String, Mutex<oikos_frigate::FrigateBridge>)>,
+    /// The gateway health watchdog, when `[watchdog.gateway]` is on.
+    gateway_watchdog: Option<Mutex<oikos_watchdog::GatewayWatchdog>>,
+    /// The broker ACL watchdog, when `[watchdog.acl]` is on.
+    acl_watchdog: Option<AclWatchdog>,
     /// The retained flow definitions and their runs.
     flow_store: Mutex<FlowStore>,
     group_store: Mutex<GroupStore>,
@@ -213,6 +264,12 @@ impl Hub {
         let media = MediaProxy::new(cfg.frigate.clone());
         let alerts = AlertStore::with_media_origin(media.as_ref().map(|m| m.origin().to_owned()));
         let (engine_tx, engine_rx) = mpsc::unbounded_channel();
+        let push = PushService::new(
+            cfg.push.settings(),
+            publisher.clone(),
+            push_transport(&cfg.push),
+            clock::now,
+        );
         Arc::new_cyclic(|me| Hub {
             me: me.clone(),
             registry: RwLock::new(registry),
@@ -229,9 +286,25 @@ impl Hub {
                 .first()
                 .cloned()
                 .unwrap_or_else(|| "oikos".to_owned()),
-            history_topic: cfg.push.history_topic.clone(),
-            responses_topic: cfg.push.responses_topic.clone(),
+            push,
             alerts: Mutex::new(alerts),
+            frigate: cfg.frigate.bridge_settings().map(|settings| {
+                (
+                    cfg.frigate.events_topic(),
+                    Mutex::new(oikos_frigate::FrigateBridge::new(settings)),
+                )
+            }),
+            gateway_watchdog: cfg.watchdog.gateway.enabled.then(|| {
+                Mutex::new(oikos_watchdog::GatewayWatchdog::new(
+                    cfg.watchdog.gateway.prefix.clone(),
+                ))
+            }),
+            acl_watchdog: cfg.watchdog.acl.enabled.then(|| AclWatchdog {
+                // The file source is fed by `on_acl_line`, through the tail task in main.
+                topic: (cfg.watchdog.acl.source == AclSource::Topic)
+                    .then(|| cfg.watchdog.acl.log_topic.clone()),
+                dog: Mutex::new(oikos_watchdog::AclWatchdog::new(cfg.watchdog.acl.cooldown)),
+            }),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             group_store: Mutex::new(GroupStore::default()),
             groups_enabled: cfg.groups.enabled,
@@ -266,7 +339,7 @@ impl Hub {
     /// Routes and applies one broker message, broadcasts the resulting events and reports the
     /// changes (the MQTT task watches for [`Change::SubscriptionsChanged`]).
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
-        if topic == self.history_topic {
+        if topic == self.push.history_topic() {
             self.ingest_history(topic, payload);
             return Vec::new();
         }
@@ -398,6 +471,37 @@ impl Hub {
     /// event: a non-retained message on the command topic of a button some flow watches
     /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.
     pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
+        if self.push.wants(topic) {
+            // Then on: the history echo still feeds the alert store below.
+            self.push.on_message(topic, payload, retain);
+        }
+        if let Some((events, _)) = &self.frigate
+            && topic == events
+            && !retain
+        {
+            self.on_frigate_event(payload);
+        }
+        // Health states are retained: a reconnect replays them, and an unchanged one is silent.
+        if let Some(dog) = &self.gateway_watchdog {
+            let alert = {
+                let mut dog = dog.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                if dog.wants(topic) {
+                    dog.on_message(topic, payload, clock::now())
+                } else {
+                    None
+                }
+            };
+            self.raise_system(alert);
+        }
+        if !retain
+            && let Some(acl) = &self.acl_watchdog
+            && acl
+                .topic
+                .as_deref()
+                .is_some_and(|filter| oikos_watchdog::topic_matches(filter, topic))
+        {
+            self.on_acl_line(&String::from_utf8_lossy(payload));
+        }
         self.capture_pictures(topic, payload);
         if !retain {
             let pressed = self.watched_button_topics().remove(topic);
@@ -580,7 +684,84 @@ impl Hub {
         self.media.clone()
     }
 
-    /// The push alerts, newest first as OikosPush published them.
+    /// The push service (always built; it sends nothing without `[push] credentials`).
+    pub fn push(&self) -> &Arc<PushService> {
+        &self.push
+    }
+
+    /// The broker accepted the connection: the push token map is rebuilt from scratch.
+    pub fn on_connected(&self) {
+        self.push.on_connected();
+    }
+
+    /// The broker acknowledged the full on-connect subscription (push filters included): the
+    /// retained tokens are on their way, the push service starts its settle delay.
+    pub fn on_suback(&self) {
+        self.push.on_subscribed();
+    }
+
+    /// The bridge's lock is released before the alert goes to the push service.
+    fn on_frigate_event(&self, payload: &[u8]) {
+        let Some((_, bridge)) = &self.frigate else {
+            return;
+        };
+        let alert = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .on_event(payload, clock::now());
+        if let Some(alert) = alert
+            && let Err(rejected) = self.notify("frigate", &alert)
+        {
+            tracing::warn!(?rejected, "a Frigate alert was rejected");
+        }
+    }
+
+    /// One Mosquitto log line for the ACL watchdog: from the log topic, or from the tail task
+    /// when the source is a file. The watchdog's lock is released before the alert goes out.
+    pub fn on_acl_line(&self, line: &str) {
+        let Some(acl) = &self.acl_watchdog else {
+            return;
+        };
+        let alert = acl
+            .dog
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .on_line(line, clock::now());
+        self.raise_system(alert);
+    }
+
+    fn raise_system(&self, alert: Option<serde_json::Value>) {
+        if let Some(alert) = alert
+            && let Err(rejected) = self.notify("system", &alert)
+        {
+            tracing::warn!(?rejected, "a watchdog alert was rejected");
+        }
+    }
+
+    /// Topics to subscribe to beyond the push ones: Frigate's events when the bridge is on, the
+    /// gateway health states and the broker log topic when their watchdogs are.
+    pub fn extra_filters(&self) -> Vec<String> {
+        let gateway = self.gateway_watchdog.iter().map(|dog| {
+            dog.lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .filter()
+        });
+        let acl = self.acl_watchdog.iter().filter_map(|acl| acl.topic.clone());
+        self.frigate
+            .iter()
+            .map(|(topic, _)| topic.clone())
+            .chain(gateway)
+            .chain(acl)
+            .collect()
+    }
+
+    /// Raises a push alert from inside the hub (Frigate bridge, watchdogs, flows, MCP), as if
+    /// `payload` arrived on `<prefix>/notification/<source>`. Returns the alert id.
+    pub fn notify(&self, source: &str, payload: &serde_json::Value) -> Result<String, Rejected> {
+        self.push.submit(source, payload)
+    }
+
+    /// The push alerts, newest first, as the retained `<prefix>/history` holds them.
     pub fn alerts(&self) -> Vec<AlertView> {
         self.alerts
             .lock()
@@ -611,7 +792,7 @@ impl Hub {
         })
         .map_err(|err| HubError::Publish(err.to_string()))?;
         self.publish(Publish {
-            topic: self.responses_topic.clone(),
+            topic: self.push.responses_topic(),
             payload,
             retain: false,
         })

@@ -47,6 +47,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "set_group",
     "delete_group",
     "get_history",
+    "send_notification",
+    "list_alerts",
 ];
 
 fn fixtures() -> PathBuf {

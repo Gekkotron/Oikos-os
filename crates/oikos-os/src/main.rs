@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use oikos_os::cli::Cli;
-use oikos_os::config::Config;
+use oikos_os::config::{AclSource, Config};
 use oikos_os::history::History;
 use oikos_os::hub::Hub;
 use oikos_os::{http, logging, mcp, mqtt};
@@ -13,8 +13,30 @@ use tokio::sync::mpsc;
 
 /// Publishes waiting for the MQTT task before the hub refuses new ones.
 const PUBLISH_QUEUE: usize = 64;
+/// Log lines waiting for the ACL watchdog.
+const ACL_LINES: usize = 256;
 /// How long the Disconnect packet gets to reach the wire before the task is dropped.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// Feeds the ACL watchdog from the Mosquitto log file when that is its source: the tail task and
+/// the task that hands its lines to the hub.
+fn spawn_acl_tail(cfg: &Config, hub: &Arc<Hub>) -> Vec<tokio::task::JoinHandle<()>> {
+    let acl = &cfg.watchdog.acl;
+    let (true, AclSource::File, Some(path)) = (acl.enabled, acl.source, acl.log_file.clone())
+    else {
+        return Vec::new();
+    };
+    tracing::info!(path = %path.display(), "watching the broker log for ACL denials");
+    let (tx, mut rx) = mpsc::channel::<String>(ACL_LINES);
+    let tail = oikos_watchdog::tail(path, tx);
+    let hub = Arc::clone(hub);
+    let feed = tokio::spawn(async move {
+        while let Some(line) = rx.recv().await {
+            hub.on_acl_line(&line);
+        }
+    });
+    vec![tail, feed]
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
@@ -23,6 +45,9 @@ async fn main() -> anyhow::Result<ExitCode> {
         Cli::Run { config } => {
             let cfg = Config::load(config.as_deref())?;
             cfg.flows
+                .validate()
+                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
+            cfg.watchdog
                 .validate()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
             logging::init(&cfg.log);
@@ -40,10 +65,11 @@ async fn main() -> anyhow::Result<ExitCode> {
                 }
             }
             let engine = hub.start_engine();
+            let push_retry = hub.push().spawn_retry_worker();
+            let acl_tail = spawn_acl_tail(&cfg, &hub);
             let (link, mut link_task) = mqtt::start(
                 cfg.mqtt.clone(),
                 cfg.topics.clone(),
-                cfg.push.clone(),
                 Arc::clone(&hub),
                 publish_rx,
             );
@@ -64,6 +90,10 @@ async fn main() -> anyhow::Result<ExitCode> {
                 link_task.abort();
             }
             engine.abort();
+            push_retry.abort();
+            for task in &acl_tail {
+                task.abort();
+            }
             http_task.abort();
             tracing::info!("stopped");
             Ok(ExitCode::SUCCESS)
