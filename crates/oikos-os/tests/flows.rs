@@ -1572,20 +1572,45 @@ async fn unassigned_is_not_a_flow_area() {
     ));
 }
 
+/// `kitchen` is declared but no entity lives there, so once the document drops it the room is
+/// gone for good (`living` would stay an implicit area through the fixture's topics).
 #[tokio::test]
 async fn stale_area_is_kept_on_resave() {
     let (hub, _publisher) = hub_with_entities();
-    with_living_area(&hub).await;
-    hub.set_flow(in_area("living")).await.expect("first save");
+    hub.set_areas(AreasDocument {
+        areas: vec![Area {
+            id: "kitchen".into(),
+            name: "Kitchen".into(),
+            ..Area::default()
+        }],
+    })
+    .await
+    .expect("set_areas");
+    hub.set_flow(in_area("kitchen")).await.expect("first save");
     hub.set_areas(AreasDocument::default())
         .await
         .expect("set_areas");
+    assert!(
+        hub.snapshot().areas.iter().all(|area| area.id != "kitchen"),
+        "kitchen must be gone"
+    );
+
     let outcome = hub
-        .set_flow(in_area("living"))
+        .set_flow(in_area("kitchen"))
         .await
         .expect("resave keeps the stale area");
-    assert_eq!(outcome.flow.definition.area.as_deref(), Some("living"));
-    hub.set_flow_enabled("living", false).await.expect("toggle");
+    assert_eq!(outcome.flow.definition.area.as_deref(), Some("kitchen"));
+
+    let mut other = in_area("kitchen");
+    other.id = "other".to_owned();
+    match hub.set_flow(other).await {
+        Err(HubError::InvalidFlow(reason)) => assert!(reason.contains("unknown area"), "{reason}"),
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+
+    let view = hub.set_flow_enabled("living", false).await.expect("toggle");
+    assert!(!view.definition.enabled);
+    assert_eq!(view.definition.area.as_deref(), Some("kitchen"));
 }
 
 #[tokio::test]
