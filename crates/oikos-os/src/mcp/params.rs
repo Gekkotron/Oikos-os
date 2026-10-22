@@ -249,6 +249,8 @@ pub struct FlowSummary {
     pub id: String,
     pub name: String,
     pub enabled: bool,
+    /// The room the flow is listed under (an area id), if any.
+    pub area: Option<String>,
     /// Why the flow cannot run, when it cannot (a stored flow that no longer validates).
     pub invalid: Option<String>,
     /// How many nodes the flow has.
