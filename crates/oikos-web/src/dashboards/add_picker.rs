@@ -47,10 +47,37 @@ fn make_widget(kind: WidgetKind, config: WidgetConfig) -> Widget {
 pub fn AddWidgetPicker(on_add: Callback<Widget>) -> impl IntoView {
     let house = expect_context::<House>();
     let open = RwSignal::new(false);
+    let trigger_ref = NodeRef::<leptos::html::Button>::new();
+    // Fixed-position coords for the open panel, read from the trigger's rect each time it opens.
+    // The panel uses position: fixed + transform: translateY(-100%) to open upward from the
+    // trigger while escaping the sticky .topbar's stacking context, which otherwise painted
+    // over the top of the panel on short dashboards.
+    let panel_pos = RwSignal::new((0.0_f64, 0.0_f64));
 
     let add = move |w: Widget| {
         on_add.run(w);
         open.set(false);
+    };
+
+    let toggle = move || {
+        if !open.get_untracked()
+            && let Some(button) = trigger_ref.get_untracked()
+        {
+            let rect = button.get_bounding_client_rect();
+            // Any ancestor with transform/filter/backdrop-filter becomes the containing block
+            // for position: fixed descendants, so subtract the trigger's offsetParent origin
+            // to turn viewport coords into containing-block coords.
+            let (ox, oy) = button
+                .offset_parent()
+                .map(|p| {
+                    let r = p.get_bounding_client_rect();
+                    (r.left(), r.top())
+                })
+                .unwrap_or((0.0, 0.0));
+            // top anchors the panel's bottom (translateY(-100%)) six pixels above the trigger.
+            panel_pos.set((rect.left() - ox, rect.top() - oy - 6.0));
+        }
+        open.update(|o| *o = !*o);
     };
 
     let entities_of = move |kind: Kind| {
@@ -91,14 +118,22 @@ pub fn AddWidgetPicker(on_add: Callback<Widget>) -> impl IntoView {
     view! {
         <div class="dashboard-add-picker">
             <button
+                node_ref=trigger_ref
                 type="button"
                 class="dashboard-add-picker__trigger"
-                on:click=move |_| open.update(|o| *o = !*o)
+                on:click=move |_| toggle()
             >
                 "＋ Add widget"
             </button>
             <Show when=move || open.get()>
-                <div class="dashboard-add-picker__panel" on:click=move |ev| ev.stop_propagation()>
+                <div
+                    class="dashboard-add-picker__panel"
+                    style=move || {
+                        let (left, top) = panel_pos.get();
+                        format!("left:{left}px;top:{top}px")
+                    }
+                    on:click=move |ev| ev.stop_propagation()
+                >
                     <AddGroup
                         title="Lights"
                         entries=entities_of(Kind::Light)
