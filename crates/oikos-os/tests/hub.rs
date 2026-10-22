@@ -1916,3 +1916,15 @@ async fn acl_file_source_takes_lines_through_on_acl_line() {
     let ids = history_ids(&drain(&mut publisher));
     assert!(ids[0].starts_with("mqtt-acl-Athena-publish-"), "{ids:?}");
 }
+
+#[test]
+fn flow_notify_lists_mirror_the_push_service() {
+    assert_eq!(
+        oikos_core::flow::NOTIFY_CHANNELS,
+        oikos_push::normalize::CHANNELS
+    );
+    assert_eq!(
+        oikos_core::flow::NOTIFY_SEVERITIES,
+        oikos_push::normalize::SEVERITIES
+    );
+}

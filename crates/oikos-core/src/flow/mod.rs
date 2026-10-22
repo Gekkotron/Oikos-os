@@ -12,7 +12,7 @@ mod validate;
 pub use duration::{DurationError, parse_duration};
 pub use model::{
     CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, Missing, Node,
-    NodeKind, Op, Position, SunWhich, TriggerScheduleParams, TriggerSignalParams,
+    NodeKind, NotifyParams, Op, Position, SunWhich, TriggerScheduleParams, TriggerSignalParams,
     TriggerStateParams, TriggerSunParams, uses_sun_or_is_dark,
 };
 pub use scalar::{CompareError, Scalar, compare};
@@ -20,7 +20,9 @@ pub use schedule::{Schedule, ScheduleError};
 pub use sun::{
     APPARENT_ALTITUDE_DEG, CIVIL_ALTITUDE_DEG, SunEvents, is_dark_at, sun_altitude, sun_events,
 };
-pub use validate::{FlowError, is_valid_flow_id, is_valid_node_id, validate};
+pub use validate::{
+    FlowError, NOTIFY_CHANNELS, NOTIFY_SEVERITIES, is_valid_flow_id, is_valid_node_id, validate,
+};
 
 /// Shared fixture for the flow tests: the reference flow of the design.
 #[cfg(test)]

@@ -37,7 +37,17 @@ pub enum FlowError {
     BadSunOffset { node: String, offset_minutes: i32 },
     #[error("node `{node}`: {reason}")]
     BadOperand { node: String, reason: String },
+    #[error("node `{node}`: {reason}")]
+    BadNotify { node: String, reason: String },
 }
+
+/// The push channels. Mirrors `oikos_push::normalize::CHANNELS` (`oikos-push` depends on this
+/// crate); a test in `oikos-os` keeps the two equal.
+pub const NOTIFY_CHANNELS: [&str; 7] = [
+    "alarm", "security", "camera", "energy", "climate", "system", "misc",
+];
+/// The push severities. Mirrors `oikos_push::normalize::SEVERITIES`.
+pub const NOTIFY_SEVERITIES: [&str; 3] = ["info", "warning", "critical"];
 
 fn is_valid_id(id: &str, max: usize) -> bool {
     (1..=max).contains(&id.len())
@@ -97,6 +107,35 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                         node: node.id.clone(),
                         flow: target.to_owned(),
                     });
+                }
+            }
+            NodeKind::Notify(p) => {
+                let bad = |reason: String| FlowError::BadNotify {
+                    node: node.id.clone(),
+                    reason,
+                };
+                if p.title.trim().is_empty() {
+                    return Err(bad("title must not be empty".to_owned()));
+                }
+                if let Some(c) = p
+                    .channel
+                    .as_deref()
+                    .filter(|c| !NOTIFY_CHANNELS.contains(c))
+                {
+                    return Err(bad(format!(
+                        "unknown channel `{c}` (one of {})",
+                        NOTIFY_CHANNELS.join(", ")
+                    )));
+                }
+                if let Some(s) = p
+                    .severity
+                    .as_deref()
+                    .filter(|s| !NOTIFY_SEVERITIES.contains(s))
+                {
+                    return Err(bad(format!(
+                        "unknown severity `{s}` (one of {})",
+                        NOTIFY_SEVERITIES.join(", ")
+                    )));
                 }
             }
             NodeKind::TriggerSun(p) => {
@@ -432,6 +471,50 @@ mod tests {
         ));
         f.edges.push(edge("tick", then, None));
         f
+    }
+
+    fn notify_flow(params: &str) -> Flow {
+        let mut f = schedule_flow("*/10 * * * *", "act");
+        f.nodes.push(
+            serde_json::from_str(&format!(
+                r#"{{"id":"n","type":"notify","params":{params}}}"#
+            ))
+            .unwrap(),
+        );
+        f
+    }
+
+    #[test]
+    fn validate_rejects_empty_notify_title() {
+        let err = validate(&notify_flow(r#"{"title":"  "}"#)).unwrap_err();
+        assert_eq!(
+            err,
+            FlowError::BadNotify {
+                node: "n".into(),
+                reason: "title must not be empty".into()
+            }
+        );
+        assert!(validate(&notify_flow(r#"{"title":"Door"}"#)).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_unknown_notify_channel() {
+        let err = validate(&notify_flow(r#"{"title":"T","channel":"pager"}"#)).unwrap_err();
+        assert!(
+            matches!(&err, FlowError::BadNotify { reason, .. } if reason.contains("pager")),
+            "{err}"
+        );
+        let err = validate(&notify_flow(r#"{"title":"T","severity":"loud"}"#)).unwrap_err();
+        assert!(
+            matches!(&err, FlowError::BadNotify { reason, .. } if reason.contains("loud")),
+            "{err}"
+        );
+        assert!(
+            validate(&notify_flow(
+                r#"{"title":"T","channel":"camera","severity":"critical"}"#
+            ))
+            .is_ok()
+        );
     }
 
     #[test]

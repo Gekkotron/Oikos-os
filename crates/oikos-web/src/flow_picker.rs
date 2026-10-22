@@ -3,8 +3,8 @@
 use oikos_api::EntityView;
 use oikos_core::flow::TriggerSignalParams;
 use oikos_core::flow::{
-    CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, Op, Scalar, SunWhich,
-    TriggerScheduleParams, TriggerStateParams,
+    CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, NotifyParams, Op,
+    Scalar, SunWhich, TriggerScheduleParams, TriggerStateParams,
 };
 use oikos_core::model::{Command, Kind};
 use oikos_core::types::{Shape, type_def};
@@ -168,6 +168,14 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             Some("Wait"),
         ),
         (
+            Group::Then,
+            NodeKind::Notify(NotifyParams {
+                title: "Notification".into(),
+                ..Default::default()
+            }),
+            Some("Notify"),
+        ),
+        (
             Group::Flow,
             NodeKind::FlowEnable(FlowEnableParams {
                 enabled: false,
@@ -329,6 +337,7 @@ mod tests {
                 (Group::When, "Schedule"),
                 (Group::When, "Sun event"),
                 (Group::And, "When it's dark"),
+                (Group::Then, "Notify"),
                 (Group::Wait, "Wait"),
                 (Group::Flow, "Disable this flow"),
                 (Group::Flow, "Enable a flow"),
@@ -338,7 +347,8 @@ mod tests {
             &got[0].kind,
             NodeKind::TriggerSchedule(p) if p.cron == "0 * * * *"
         ));
-        assert!(matches!(&got[3].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+        assert!(matches!(&got[3].kind, NodeKind::Notify(p) if p.title == "Notification"));
+        assert!(matches!(&got[4].kind, NodeKind::Delay(p) if p.for_ == "5m"));
     }
 
     #[test]

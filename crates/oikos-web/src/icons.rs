@@ -233,8 +233,8 @@ pub fn consumer_icon(icon: Option<oikos_core::energy::ConsumerIcon>) -> &'static
 }
 
 /// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, a
-/// clock for a schedule, a sun for a solar event, a moon for an `if` on darkness, an hourglass for a delay, a play triangle for a command and a toggle
-/// for a flow switch.
+/// clock for a schedule, a sun for a solar event, a moon for an `if` on darkness, an hourglass for a delay, a play triangle for a command, a toggle
+/// for a flow switch and a bell for a notification.
 pub fn node_icon(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::TriggerState(_) => NODE_BOLT,
@@ -246,6 +246,7 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::Delay(_) => NODE_HOURGLASS,
         NodeKind::Command(_) => NODE_PLAY,
         NodeKind::FlowEnable(_) => NODE_SWITCH,
+        NodeKind::Notify(_) => CHANNEL_ALARM,
     }
 }
 
