@@ -2,6 +2,7 @@
 //! Push notifications for the hub, ported from OikosPush. This module tree is pure at the
 //! bottom: `normalize` turns producer payloads into alerts and FCM data maps.
 
+pub mod fcm;
 pub mod history;
 pub mod normalize;
 pub mod tokens;
