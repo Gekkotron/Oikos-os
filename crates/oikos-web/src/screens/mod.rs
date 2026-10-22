@@ -10,6 +10,7 @@ pub mod flows;
 pub mod generic_panel;
 pub mod group_sheet_v2;
 pub mod group_wizard;
+pub mod groups;
 pub mod history_detail;
 pub mod home;
 pub mod security;

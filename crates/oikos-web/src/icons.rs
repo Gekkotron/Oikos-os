@@ -135,6 +135,9 @@ pub const BELL: &str = svg!(
 pub const FLOW_NODES: &str = svg!(
     r#"<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6.5 7.4 10.5 16.6"/><path d="M17.5 7.4 13.5 16.6"/>"#
 );
+pub const LAYERS: &str = svg!(
+    r#"<path d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/>"#
+);
 pub const DEVICES_GRID: &str = svg!(
     r#"<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>"#
 );

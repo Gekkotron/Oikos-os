@@ -1,13 +1,15 @@
 //! The Zigbee devices of the house, with the discovery topics the hub ignored.
+//!
+//! Admin / diagnostics screen reached from Settings; the top nav no longer links to it, and
+//! user-facing groups moved to [`crate::screens::groups`].
 
 use leptos::prelude::*;
 use leptos_router::components::A;
-use oikos_api::{DeviceView, GroupView};
+use oikos_api::DeviceView;
 
-use crate::components::toast::Toasts;
 use crate::format::{list_label, wrap_id};
 use crate::house::House;
-use crate::icons::{MAGNIFIER, PLUS};
+use crate::icons::MAGNIFIER;
 use crate::screens::entity_sheet::{availability_class, availability_word};
 
 /// True when the device's name, model, vendor or IEEE address contains `query`, ignoring case.
@@ -139,46 +141,10 @@ pub fn DevicesScreen() -> impl IntoView {
         devices
     });
     let total = Memo::new(move |_| house.devices.with(Vec::len));
-    let toasts = expect_context::<Toasts>();
-    let groups = RwSignal::new(Vec::<GroupView>::new());
-    leptos::task::spawn_local(async move {
-        match crate::api::list_groups().await {
-            Ok(list) => groups.set(list),
-            Err(e) => toasts.push(e.error),
-        }
-    });
 
     view! {
         <div class="devices">
-            <h1 class="devices__title">"Devices"</h1>
-            <section class="sheet__panel groups-card">
-                <div class="groups-card__head">
-                    <h2 class="sheet__heading">"Groups"</h2>
-                    <span class="groups-card__count">
-                        {move || groups.with(Vec::len)} " groups"
-                    </span>
-                </div>
-                <div class="chip-row">
-                    <A href="/groups/new" attr:class="chip chip--add">
-                        <span class="chip__glyph" inner_html=PLUS></span>
-                        "New group"
-                    </A>
-                    <For
-                        each=move || groups.get()
-                        key=|g| (g.id.clone(), g.name.clone(), g.members.len())
-                        children=|g| {
-                            view! {
-                                <A
-                                    href=format!("/group/{}", crate::api::encode_id(&g.id))
-                                    attr:class="chip"
-                                >
-                                    {wrap_id(&g.name)}
-                                </A>
-                            }
-                        }
-                    />
-                </div>
-            </section>
+            <h1 class="devices__title">"Zigbee2MQTT devices"</h1>
             <label class="devices__search">
                 <span class="devices__search-icon" inner_html=MAGNIFIER></span>
                 <input

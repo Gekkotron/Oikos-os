@@ -263,6 +263,14 @@ pub fn SettingsScreen() -> impl IntoView {
                 <Snippet title="Codex CLI (~/.codex/config.toml)" text=codex />
                 <Snippet title="Claude Desktop (stdio proxy)" text=claude_desktop />
             </Panel>
+            <Panel title="Diagnostics">
+                <p class="settings__hint">
+                    "Zigbee2MQTT devices, firmware updates and ignored discovery topics."
+                </p>
+                <A href="/devices" attr:class="chip">
+                    "Open Z2M devices"
+                </A>
+            </Panel>
             <Panel title="Theme">
                 <ThemeSwitch />
             </Panel>
