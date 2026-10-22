@@ -10,6 +10,7 @@ use leptos_router::components::A;
 use leptos_router::hooks::use_navigate;
 use oikos_api::FlowView;
 use oikos_core::flow::{Flow, FlowMode, NodeKind};
+use oikos_core::model::UNASSIGNED_AREA;
 
 use super::picker::Picker;
 use super::{Camera, Editor, Selection};
@@ -18,6 +19,7 @@ use crate::components::flow_switch::FlowSwitch;
 use crate::components::toast::Toasts;
 use crate::flow_edit::{add_node, slug_id};
 use crate::flow_layout::{NODE_H, NODE_W, Pt, tidy, with_resolved_positions};
+use crate::flow_list::clear_stale_area;
 use crate::flow_viewport::visible_world;
 use crate::house::House;
 use crate::icons::{CHECK, PENCIL, PLAY, X_MARK};
@@ -70,6 +72,9 @@ fn EditControls(
         }
         saving.set(true);
         let mut snapshot = editor.draft.get_untracked();
+        house
+            .areas
+            .with_untracked(|areas| clear_stale_area(&mut snapshot, areas));
         let is_new = snapshot.id.is_empty();
         if is_new {
             let taken = house
@@ -250,6 +255,37 @@ pub fn Toolbar(
             FlowMode::Restart => "restart",
         })
     };
+    let house = expect_context::<House>();
+    // A room the house no longer has reads as "No room" (and is cleared on save).
+    let draft_room = move || {
+        let area = editor.draft.with(|f| f.area.clone());
+        house.areas.with(|areas| {
+            area.filter(|a| a != UNASSIGNED_AREA && areas.iter().any(|x| &x.id == a))
+                .unwrap_or_default()
+        })
+    };
+    let pick_room = move |ev: web_sys::Event| {
+        let value = event_target_value(&ev);
+        let area = (!value.is_empty()).then_some(value);
+        if area == editor.draft.with_untracked(|f| f.area.clone()) {
+            return;
+        }
+        editor
+            .history
+            .update_value(|h| h.record(editor.draft.get_untracked()));
+        editor.draft.update(|f| f.area = area);
+    };
+    // The room's name in read mode, when the flow has a known one.
+    let room_name = move || {
+        view.with(|v| v.definition.area.clone()).and_then(|a| {
+            house.areas.with(|areas| {
+                areas
+                    .iter()
+                    .find(|x| x.id == a && x.id != UNASSIGNED_AREA)
+                    .map(|x| x.name.clone())
+            })
+        })
+    };
     let original = Signal::derive(move || view.with(|v| v.definition.clone()));
     view! {
         <div class="flow-toolbar flow-toolbar--title">
@@ -272,6 +308,43 @@ pub fn Toolbar(
                 />
             </Show>
             <span class="flow-toolbar__mode">{mode}</span>
+            <Show
+                when=move || editing.get()
+                fallback=move || {
+                    room_name()
+                        .map(|name| view! { <span class="flow-toolbar__mode">{name}</span> })
+                }
+            >
+                <select
+                    class="field flow-toolbar__room"
+                    aria-label="Room"
+                    prop:value=draft_room
+                    on:change=pick_room
+                >
+                    <option value="" selected=move || draft_room().is_empty()>
+                        "No room"
+                    </option>
+                    {move || {
+                        let current = draft_room();
+                        house
+                            .areas
+                            .with(|areas| {
+                                areas
+                                    .iter()
+                                    .filter(|a| a.id != UNASSIGNED_AREA)
+                                    .map(|a| {
+                                        let selected = a.id == current;
+                                        view! {
+                                            <option value=a.id.clone() selected=selected>
+                                                {a.name.clone()}
+                                            </option>
+                                        }
+                                    })
+                                    .collect_view()
+                            })
+                    }}
+                </select>
+            </Show>
         </div>
         <div class="flow-toolbar flow-toolbar--actions">
             <Show

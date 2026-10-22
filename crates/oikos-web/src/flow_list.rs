@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use oikos_api::{AreaView, EntityView, FlowView, RunStatus};
-use oikos_core::flow::NodeKind;
+use oikos_core::flow::{Flow, NodeKind};
 use oikos_core::model::UNASSIGNED_AREA;
 use serde::{Deserialize, Serialize};
 
@@ -293,6 +293,18 @@ pub fn decode_prefs(raw: &str) -> FlowListPrefs {
     serde_json::from_str(raw).unwrap_or_default()
 }
 
+/// Drops a room the house no longer has (or `Unassigned`) from `flow`, so a save never keeps a
+/// stale one.
+pub fn clear_stale_area(flow: &mut Flow, areas: &[AreaView]) {
+    let known = flow
+        .area
+        .as_deref()
+        .is_some_and(|a| a != UNASSIGNED_AREA && areas.iter().any(|x| x.id == a));
+    if !known {
+        flow.area = None;
+    }
+}
+
 /// The preferences as the JSON to store.
 pub fn encode_prefs(p: &FlowListPrefs) -> String {
     serde_json::to_string(p).unwrap_or_default()
@@ -357,6 +369,22 @@ mod tests {
             active_run: None,
             runs: vec![],
         }
+    }
+
+    #[test]
+    fn clear_stale_area_drops_unknown_and_unassigned() {
+        let areas = vec![area("living", "Living room")];
+        let with = |a: &str| {
+            let mut f = Flow {
+                area: Some(a.into()),
+                ..Flow::default()
+            };
+            clear_stale_area(&mut f, &areas);
+            f.area
+        };
+        assert_eq!(with("ghost"), None);
+        assert_eq!(with(UNASSIGNED_AREA), None);
+        assert_eq!(with("living"), Some("living".into()));
     }
 
     fn area(id: &str, name: &str) -> AreaView {

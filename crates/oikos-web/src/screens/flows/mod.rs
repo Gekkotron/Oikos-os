@@ -3,6 +3,7 @@
 
 mod bar;
 mod card;
+mod room_menu;
 mod row;
 
 use leptos::prelude::*;
@@ -14,6 +15,7 @@ use crate::flow_list::{
 use crate::house::House;
 use bar::FlowsBar;
 use card::FlowCard;
+use room_menu::RoomMenu;
 use row::FlowRow;
 
 /// Storage key for the remembered view, grouping, sort, filters and folded sections.
@@ -51,18 +53,43 @@ fn save_prefs(prefs: &FlowListPrefs) {
     let _ = encode_prefs;
 }
 
+/// The ⋯ menu of a row: open the flow, or move it to a room.
+fn menu_for(row: &ListRow) -> AnyView {
+    let id = row.view.definition.id.clone();
+    let href = format!("/flows/{}", crate::api::encode_id(&id));
+    view! {
+        <RoomMenu
+            id=id
+            href=href
+            current=row.room.clone()
+            invalid=row.view.invalid.is_some()
+        />
+    }
+    .into_any()
+}
+
 /// The rows of one block, as a list panel or a card grid.
 fn block(rows: Vec<ListRow>, mode: ViewMode) -> AnyView {
     match mode {
         ViewMode::List => view! {
             <ul class="flow-list">
-                {rows.into_iter().map(|row| view! { <FlowRow row=row /> }).collect_view()}
+                {rows.into_iter()
+                    .map(|row| {
+                        let menu = menu_for(&row);
+                        view! { <FlowRow row=row menu=menu /> }
+                    })
+                    .collect_view()}
             </ul>
         }
         .into_any(),
         ViewMode::Cards => view! {
             <ul class="flow-grid">
-                {rows.into_iter().map(|row| view! { <FlowCard row=row /> }).collect_view()}
+                {rows.into_iter()
+                    .map(|row| {
+                        let menu = menu_for(&row);
+                        view! { <FlowCard row=row menu=menu /> }
+                    })
+                    .collect_view()}
             </ul>
         }
         .into_any(),

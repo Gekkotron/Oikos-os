@@ -2269,7 +2269,6 @@ p.override__hint {
 }
 
 .flow-list {
-  overflow: hidden;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-card);
   background: var(--card-bg);
@@ -4640,3 +4639,82 @@ html:has(.flow-canvas-screen) {
 .dashboard-settings-sheet__reorder { display: flex; gap: 8px; }
 .dashboard-settings-sheet__reorder button { flex: 1; }
 .widget__edit-overlay { position: absolute; inset: 0; z-index: 1; cursor: pointer; pointer-events: auto; }
+
+/* ⋯ menu on a flow row or card */
+.room-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.room-menu__pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-nav);
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.room-menu__head {
+  margin: 0;
+  padding: 8px 8px 4px;
+  font: 600 10px/14px var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.room-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--touch-min);
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: 400 13px/18px var(--font-body);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.room-menu__item:hover:not(:disabled),
+.room-menu__item:focus-visible {
+  background: var(--card-bg);
+}
+
+.room-menu__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.room-menu__check {
+  flex: none;
+  width: 1em;
+  color: var(--accent-mint);
+}
+
+.flow-toolbar__room {
+  flex: none;
+  max-width: 160px;
+  min-height: 0;
+  padding: 2px 8px;
+  font: var(--type-label);
+}
+
+/* An open menu rises above the neighbouring rows' switches. */
+.flow-row__menu:has(.room-menu__pop),
+.flow-tile__menu:has(.room-menu__pop) {
+  z-index: 8;
+}
