@@ -23,6 +23,8 @@ struct TestDb {
     db: Db,
     admin: PgPool,
     name: String,
+    /// The URL of the scratch database, for a hub that opens its own pool.
+    url: String,
 }
 
 impl TestDb {
@@ -64,7 +66,12 @@ async fn fresh_db() -> Option<TestDb> {
     url.set_path(&format!("/{name}"));
     let db = Db::connect_lazy(url.as_str()).ok()?;
     db.migrate().await.ok()?;
-    Some(TestDb { db, admin, name })
+    Some(TestDb {
+        db,
+        admin,
+        name,
+        url: url.to_string(),
+    })
 }
 
 fn value_row(id: &str, at_micros: i64, num: f64) -> ValueRow {
@@ -574,4 +581,205 @@ async fn mean_since_averages_num() {
     assert_eq!(tdb.db.mean_since("nope", 0, 5_000_000).await.unwrap(), None);
 
     tdb.drop_db().await;
+}
+
+// ----- climate learning runs -----
+
+mod learning {
+    use std::sync::Arc;
+
+    use chrono::{Datelike, TimeZone, Weekday};
+    use oikos_api::ConnectionStatus;
+    use oikos_climate::doc::{Day, ProposalKind, Setpoint, ZoneState};
+    use oikos_climate::view::LearnStatus;
+    use oikos_core::command::Publish;
+    use oikos_os::config::{Config, HistoryConfig};
+    use oikos_os::hub::Hub;
+    use tokio::sync::mpsc;
+
+    use super::*;
+
+    const DAY_MICROS: i64 = 86_400_000_000;
+
+    /// A hub with one Daikin in `living`, reading its history from `tdb`. The house clock is UTC
+    /// so the rows below land on the days the learner reads.
+    async fn hub_on(
+        tdb: &TestDb,
+    ) -> (
+        Arc<Hub>,
+        String,
+        mpsc::Receiver<Publish>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let mut cfg = Config::default();
+        cfg.topics.discovery_prefixes = vec!["oikos".to_owned()];
+        cfg.climate.enabled = true;
+        cfg.flows.timezone = Some("UTC".to_owned());
+        let (tx, rx) = mpsc::channel(256);
+        let hub = Hub::new(&cfg, tx);
+        hub.set_connection(ConnectionStatus::Online);
+        let fixture = std::fs::read(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../oikos-core/tests/fixtures/discovery/")
+                .join("climate__daikin_192_168_1_150__climate.json"),
+        )
+        .expect("fixture");
+        hub.ingest(
+            "oikos/climate/daikin_192_168_1_150/climate/config",
+            &fixture,
+        );
+        let id = hub
+            .snapshot()
+            .entities
+            .into_iter()
+            .find(|e| e.id.starts_with("daikin_192_168_1_150"))
+            .expect("daikin entity")
+            .id;
+        let mut patch = serde_json::Map::new();
+        patch.insert("area".to_owned(), serde_json::Value::from("living"));
+        hub.set_override(&id, &patch).await.expect("area");
+        let history_cfg = HistoryConfig {
+            url: tdb.url.clone(),
+            buffer_rows: 100,
+        };
+        let (history, writer) =
+            oikos_os::history::History::spawn_writer_for_tests(&history_cfg, chrono_tz::UTC)
+                .expect("lazy pool");
+        hub.set_history(history);
+        (hub, id, rx, writer)
+    }
+
+    /// 28 whole days before today of a heater held at 17 degrees, raised to 20.5 between 07:00
+    /// and 22:00 on weekdays.
+    async fn seed_weekday_routine(tdb: &TestDb, id: &str) {
+        let now = oikos_os::clock::now();
+        let today = i64::try_from(now - now % 86_400).unwrap() * 1_000_000;
+        let mut values = Vec::new();
+        for back in 1..=28 {
+            let start = today - back * DAY_MICROS;
+            let date = chrono::Utc
+                .timestamp_micros(start)
+                .single()
+                .expect("a valid day");
+            values.push(climate_row(id, start, Some(17.0), "heat"));
+            if !matches!(date.weekday(), Weekday::Sat | Weekday::Sun) {
+                values.push(climate_row(
+                    id,
+                    start + 7 * 3_600_000_000,
+                    Some(20.5),
+                    "heat",
+                ));
+                values.push(climate_row(
+                    id,
+                    start + 22 * 3_600_000_000,
+                    Some(17.0),
+                    "heat",
+                ));
+            }
+        }
+        tdb.db
+            .insert(&Rows {
+                values,
+                availability: vec![],
+            })
+            .await
+            .unwrap();
+    }
+
+    fn pending(hub: &Hub) -> Option<oikos_climate::doc::Proposal> {
+        hub.climate_view().unwrap().zones[0].proposal.clone()
+    }
+
+    #[tokio::test]
+    async fn learn_zone_proposes_initial_rules_from_history() {
+        let Some(tdb) = fresh_db().await else { return };
+        let (hub, id, _rx, writer) = hub_on(&tdb).await;
+        seed_weekday_routine(&tdb, &id).await;
+
+        let status = hub.learn_climate_zone("living").await.unwrap();
+        assert_eq!(status, LearnStatus::Proposed);
+        let proposal = pending(&hub).expect("a proposal is pending");
+        assert_eq!(proposal.kind, ProposalKind::Initial);
+        assert!(proposal.id.ends_with("-living"), "{}", proposal.id);
+        assert_eq!(proposal.window.days, 28);
+        let heat = proposal.rules.heat.expect("a heat schedule");
+        assert_eq!(heat.base, Setpoint::Temp(17.0));
+        let weekday_block = heat
+            .blocks
+            .iter()
+            .find(|b| b.days.contains(&Day::Mon) && !b.days.contains(&Day::Sat))
+            .unwrap_or_else(|| panic!("a weekday block in {heat:?}"));
+        assert_eq!(weekday_block.setpoint, Setpoint::Temp(20.5));
+        assert_eq!((weekday_block.from.0, weekday_block.to.0), (420, 1320));
+        assert_eq!(
+            hub.climate_view().unwrap().zones[0].settings.state,
+            ZoneState::Pending,
+            "learning never activates a zone"
+        );
+
+        writer.abort();
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn learn_zone_skips_rejected_fingerprint() {
+        let Some(tdb) = fresh_db().await else { return };
+        let (hub, id, _rx, writer) = hub_on(&tdb).await;
+        seed_weekday_routine(&tdb, &id).await;
+
+        assert_eq!(
+            hub.learn_climate_zone("living").await.unwrap(),
+            LearnStatus::Proposed
+        );
+        hub.reject_climate_proposal("living").await.unwrap();
+        assert!(pending(&hub).is_none());
+
+        // The same history makes the same proposal, which is remembered as rejected.
+        assert_eq!(
+            hub.learn_climate_zone("living").await.unwrap(),
+            LearnStatus::Rejected
+        );
+        assert!(pending(&hub).is_none());
+
+        writer.abort();
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn learn_zone_reports_days_still_needed() {
+        let Some(tdb) = fresh_db().await else { return };
+        let (hub, id, _rx, writer) = hub_on(&tdb).await;
+        // Two days of data, ten needed.
+        let now = oikos_os::clock::now();
+        let today = i64::try_from(now - now % 86_400).unwrap() * 1_000_000;
+        tdb.db
+            .insert(&Rows {
+                values: vec![
+                    climate_row(&id, today - 2 * DAY_MICROS, Some(17.0), "heat"),
+                    climate_row(&id, today - DAY_MICROS, Some(17.0), "heat"),
+                ],
+                availability: vec![],
+            })
+            .await
+            .unwrap();
+        let status = hub.learn_climate_zone("living").await.unwrap();
+        assert_eq!(
+            status,
+            LearnStatus::NotEnough {
+                days: 2,
+                needed: 10
+            }
+        );
+        assert_eq!(
+            hub.climate_view().unwrap().zones[0].learn,
+            LearnStatus::NotEnough {
+                days: 2,
+                needed: 10
+            }
+        );
+        assert!(pending(&hub).is_none());
+
+        writer.abort();
+        tdb.drop_db().await;
+    }
 }

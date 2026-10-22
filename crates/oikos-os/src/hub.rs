@@ -482,6 +482,12 @@ impl Hub {
         if self.ingest_climate(topic, payload) {
             return Vec::new();
         }
+        if !retain && self.climate.is_some() && topic == self.push.responses_topic() {
+            if let Some(hub) = self.me.upgrade() {
+                hub.on_climate_reply(payload);
+            }
+            return Vec::new();
+        }
         if self.push.wants(topic) {
             // Then on: the history echo still feeds the alert store below.
             self.push.on_message(topic, payload, retain);
@@ -761,7 +767,8 @@ impl Hub {
         let climate = self
             .climate_prefix()
             .into_iter()
-            .flat_map(oikos_climate::topics::filters);
+            .flat_map(oikos_climate::topics::filters)
+            .chain(self.climate.is_some().then(|| self.push.responses_topic()));
         self.frigate
             .iter()
             .map(|(topic, _)| topic.clone())

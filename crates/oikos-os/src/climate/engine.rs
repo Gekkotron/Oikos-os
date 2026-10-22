@@ -23,7 +23,7 @@ use super::inputs::{
     OUTDOOR_CACHE_S, OwnedZoneInputs, local_time, outdoor_mean, outdoor_reading, presence_home_now,
     step_from, step_of, zone_entity_ids, zone_inputs_owned,
 };
-use super::{GROUP_PREFIX, alerts};
+use super::{GROUP_PREFIX, alerts, learning};
 use crate::clock;
 use crate::history::climate::ClimateDecisionRow;
 use crate::hub::Hub;
@@ -103,6 +103,18 @@ impl Hub {
         for zone in self.climate_zone_ids() {
             self.evaluate_zone(&zone, now).await;
         }
+    }
+
+    /// Evaluates one zone at `now`, serialised with the full passes. What an approval does so
+    /// the new rules apply at once.
+    pub(crate) async fn evaluate_climate_zone(self: &Arc<Self>, zone: &str, now: u64) {
+        let Some(climate) = &self.climate else {
+            return;
+        };
+        let _pass = climate.pass.lock().await;
+        self.ensure_seeded();
+        self.refresh_house(now);
+        self.evaluate_zone(zone, now).await;
     }
 
     /// Looks at one entity whose state changed: tracks availability, and turns a change of a
@@ -185,6 +197,9 @@ impl Hub {
         tokio::time::sleep(BOOT_SETTLE).await;
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // The "on enable" run, then one every night at `learn_at`.
+        let mut last_learn = clock::now();
+        learning::spawn_learning(&self);
         let mut due: Option<tokio::time::Instant> = None;
         loop {
             let deadline = due;
@@ -217,7 +232,13 @@ impl Hub {
                 }
                 _ = tick.tick() => {
                     due = None;
-                    self.evaluate_climate(clock::now()).await;
+                    let now = clock::now();
+                    self.evaluate_climate(now).await;
+                    let learn_at = self.climate_store().house.learn_at;
+                    if learning::next_learn_at(self.zone(), last_learn, learn_at) <= now {
+                        last_learn = now;
+                        learning::spawn_learning(&self);
+                    }
                 }
             }
         }
@@ -289,7 +310,7 @@ impl Hub {
         }
     }
 
-    fn zone_settings(&self, zone: &str) -> oikos_climate::doc::ZoneSettings {
+    pub(crate) fn zone_settings(&self, zone: &str) -> oikos_climate::doc::ZoneSettings {
         self.climate_store()
             .zones
             .get(zone)
@@ -298,7 +319,7 @@ impl Hub {
     }
 
     /// The areas that hold climate entities and the zones that have documents.
-    fn climate_zone_ids(&self) -> Vec<String> {
+    pub(crate) fn climate_zone_ids(&self) -> Vec<String> {
         let mut ids: BTreeSet<String> = self.climate_areas().into_keys().collect();
         ids.extend(self.climate_store().zones.keys().cloned());
         ids.into_iter().collect()
@@ -332,7 +353,7 @@ impl Hub {
         area_is_zone.then_some(area)
     }
 
-    fn zone_display_name(&self, zone: &str) -> String {
+    pub(crate) fn zone_display_name(&self, zone: &str) -> String {
         self.climate_areas()
             .remove(zone)
             .map_or_else(|| zone.to_owned(), |(name, _)| name)
@@ -493,7 +514,7 @@ impl Hub {
     /// Changes the zone's override list under the write lock, from what the store holds now,
     /// so it never undoes a change made meanwhile by another writer. Writes only when the list
     /// changed; returns the list.
-    fn update_overrides(
+    pub(crate) fn update_overrides(
         &self,
         zone: &str,
         change: impl FnOnce(&mut Vec<Override>),
@@ -791,7 +812,7 @@ impl Hub {
 
     /// Publishes a zone document retained. When the broker is unreachable the hub still
     /// applies it locally, so the engine keeps honouring what it decided.
-    fn write_zone_doc<T: Serialize>(&self, zone: &str, doc: ZoneDoc, value: Option<&T>) {
+    pub(crate) fn write_zone_doc<T: Serialize>(&self, zone: &str, doc: ZoneDoc, value: Option<&T>) {
         let Some(prefix) = self.climate_prefix() else {
             return;
         };

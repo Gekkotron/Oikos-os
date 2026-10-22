@@ -4,6 +4,8 @@ pub(crate) mod alerts;
 pub(crate) mod engine;
 pub(crate) mod hub;
 pub(crate) mod inputs;
+pub(crate) mod learning;
+pub(crate) mod proposals;
 pub mod store;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -12,6 +14,7 @@ use std::sync::Mutex;
 use oikos_climate::decide::SafetyMemory;
 use oikos_climate::doc::{Decision, DeviceTarget, Mode};
 use oikos_climate::ledger::Ledger;
+use oikos_climate::view::LearnStatus;
 use oikos_core::model::Availability;
 
 pub use store::{Applied, ClimateStore, ZoneDocs};
@@ -85,4 +88,9 @@ pub(crate) struct ClimateRuntime {
     pub seeded: bool,
     /// Every zone device was classified once against the seeded ledger.
     pub swept: bool,
+    /// Zone -> where its last learning run ended; absent until a run says something the view
+    /// cannot work out itself (not enough days, a remembered rejection).
+    pub learn_status: HashMap<String, LearnStatus>,
+    /// Zone -> when its last proposal push went out, at most one a day.
+    pub last_proposal_push: HashMap<String, u64>,
 }

@@ -56,20 +56,39 @@ impl Hub {
         let areas = self.climate_areas();
         let history = self.history_configured();
         let now = clock::now();
-        let seen = self.climate_runtime().seen_at.clone();
+        let (seen, learn) = {
+            let rt = self.climate_runtime();
+            (rt.seen_at.clone(), rt.learn_status.clone())
+        };
         let mut view = {
             let store = self.climate_store();
             let mut zones: Vec<ZoneView> = areas
                 .iter()
                 .map(|(zone, (name, devices))| {
                     let docs = store.zones.get(zone);
-                    zone_view(zone, name, false, devices.clone(), docs, history)
+                    zone_view(
+                        zone,
+                        name,
+                        false,
+                        devices.clone(),
+                        docs,
+                        history,
+                        learn.get(zone),
+                    )
                 })
                 .collect();
             for (zone, docs) in &store.zones {
                 if !areas.contains_key(zone) {
                     let devices = default_entities(&docs.settings, &[]);
-                    zones.push(zone_view(zone, zone, true, devices, Some(docs), history));
+                    zones.push(zone_view(
+                        zone,
+                        zone,
+                        true,
+                        devices,
+                        Some(docs),
+                        history,
+                        learn.get(zone),
+                    ));
                 }
             }
             zones.sort_by(|a, b| a.orphan.cmp(&b.orphan).then_with(|| a.name.cmp(&b.name)));
@@ -223,17 +242,23 @@ fn zone_view(
     area_entities: Vec<String>,
     docs: Option<&ZoneDocs>,
     history: bool,
+    ran: Option<&LearnStatus>,
 ) -> ZoneView {
     let empty = ZoneDocs::default();
     let docs = docs.unwrap_or(&empty);
     let learn = if docs.settings.state == ZoneState::Off {
         LearnStatus::Off
-    } else if !history {
-        LearnStatus::HistoryOff
     } else if docs.proposal.is_some() {
         LearnStatus::Proposed
+    } else if !history {
+        LearnStatus::HistoryOff
     } else {
-        LearnStatus::UpToDate
+        match ran {
+            Some(status @ (LearnStatus::NotEnough { .. } | LearnStatus::Rejected)) => {
+                status.clone()
+            }
+            _ => LearnStatus::UpToDate,
+        }
     };
     ZoneView {
         zone: zone.to_owned(),

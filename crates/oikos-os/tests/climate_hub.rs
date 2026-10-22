@@ -1197,3 +1197,410 @@ mod engine {
         assert!(zone.reading_age_s.unwrap() < 60, "{:?}", zone.reading_age_s);
     }
 }
+
+// ----- learning, proposals and approval -----
+
+mod approval {
+    use std::time::Duration;
+
+    use oikos_climate::doc::{Proposal, ProposalKind, Rejection, Window};
+    use oikos_climate::view::LearnStatus;
+    use oikos_os::clock;
+    use oikos_os::history::History;
+
+    use super::*;
+
+    const RESPONSES: &str = "oikos/push/responses";
+
+    fn rules(base: f64) -> Rules {
+        Rules {
+            heat: Some(ModeRules {
+                base: Setpoint::Temp(base),
+                blocks: vec![Block {
+                    days: vec![Day::Mon, Day::Tue],
+                    from: HhMm(420),
+                    to: HhMm(600),
+                    setpoint: Setpoint::Temp(20.0),
+                    evidence: None,
+                }],
+            }),
+            cool: None,
+        }
+    }
+
+    fn proposal(id: &str, base: f64) -> Proposal {
+        Proposal {
+            id: id.to_owned(),
+            zone: "living".to_owned(),
+            kind: ProposalKind::Initial,
+            created: 1_000,
+            window: Window {
+                from: 0,
+                to: 1,
+                days: 28,
+            },
+            rules: rules(base),
+            changes: vec!["Base: 17.0 °C".to_owned()],
+            fingerprint: format!("fp-{id}"),
+        }
+    }
+
+    /// A hub with a living zone (one Daikin, no state, so nothing is ever commanded), pending,
+    /// with `p-1` proposed and a history that is configured but unreachable.
+    async fn rig() -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+        let (hub, mut rx) = hub(true);
+        feed_daikin(&hub, 0, "living").await;
+        let (history, _rx) = History::detached(8, chrono_tz::UTC);
+        hub.set_history(history);
+        hub.set_climate_zone("living", ZoneSettings::default())
+            .unwrap();
+        seed(&hub, &proposal("p-1", 17.0));
+        drain(&mut rx);
+        (hub, rx)
+    }
+
+    fn seed(hub: &Hub, proposal: &Proposal) {
+        hub.ingest_message(
+            "oikos/climate/zone/living/proposal",
+            serde_json::to_string(proposal).unwrap().as_bytes(),
+            true,
+        );
+    }
+
+    fn zone(hub: &Hub) -> oikos_climate::view::ZoneView {
+        hub.climate_view()
+            .unwrap()
+            .zones
+            .into_iter()
+            .find(|z| z.zone == "living")
+            .expect("living zone")
+    }
+
+    /// Makes the push service accept alerts, as it does once the broker has settled.
+    async fn load_push(hub: &Hub) {
+        hub.on_connected();
+        hub.on_suback();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+
+    #[tokio::test]
+    async fn history_off_reports_status() {
+        let (hub, mut rx) = hub(true);
+        feed_daikin(&hub, 0, "living").await;
+        hub.set_climate_zone("living", active()).unwrap();
+        drain(&mut rx);
+        let status = hub.learn_climate_zone("living").await.unwrap();
+        assert_eq!(status, LearnStatus::HistoryOff);
+        assert!(zone(&hub).proposal.is_none());
+        assert!(drain(&mut rx).is_empty());
+        assert!(matches!(
+            hub.learn_climate_zone("nowhere").await,
+            Err(HubError::UnknownArea(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn learning_is_refused_while_disabled() {
+        let (hub, _rx) = hub(false);
+        assert!(matches!(
+            hub.learn_climate_zone("living").await,
+            Err(HubError::Publish(m)) if m == "climate disabled"
+        ));
+        assert!(matches!(
+            hub.approve_climate_proposal("living", None).await,
+            Err(HubError::Publish(m)) if m == "climate disabled"
+        ));
+        assert!(matches!(
+            hub.reject_climate_proposal("living").await,
+            Err(HubError::Publish(m)) if m == "climate disabled"
+        ));
+    }
+
+    #[tokio::test]
+    async fn view_says_proposed_even_without_history() {
+        let (hub, _rx) = hub(true);
+        feed_daikin(&hub, 0, "living").await;
+        hub.set_climate_zone("living", active()).unwrap();
+        assert_eq!(zone(&hub).learn, LearnStatus::HistoryOff);
+        seed(&hub, &proposal("p-1", 17.0));
+        assert_eq!(zone(&hub).learn, LearnStatus::Proposed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn approve_activates_zone_and_clears_proposal() {
+        let (hub, mut rx) = rig().await;
+        load_push(&hub).await;
+        let before = clock::now();
+        hub.approve_climate_proposal("living", None).await.unwrap();
+        let published = drain(&mut rx);
+
+        let view = zone(&hub);
+        assert_eq!(view.settings.state, ZoneState::Active);
+        assert_eq!(view.settings.rules, rules(17.0));
+        assert_eq!(view.settings.approved_proposal.as_deref(), Some("p-1"));
+        assert!(view.settings.approved_at.unwrap() >= before);
+        assert!(view.proposal.is_none());
+        assert_eq!(view.learn, LearnStatus::UpToDate);
+
+        let cleared = published
+            .iter()
+            .find(|p| p.topic == "oikos/climate/zone/living/proposal")
+            .expect("proposal topic published");
+        assert!(cleared.retain && cleared.payload.is_empty());
+        assert!(
+            published
+                .iter()
+                .any(|p| p.topic == "oikos/climate/zone/living/settings" && p.retain)
+        );
+        // The alert is cancelled in the push history, whether or not this run raised it.
+        let history = published
+            .iter()
+            .rfind(|p| p.topic == "oikos/push/history")
+            .expect("the push history was published");
+        let entries: serde_json::Value = serde_json::from_str(&history.payload).unwrap();
+        assert!(
+            entries
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| { e["id"] == "climate-proposal-p-1" && e["cancel"] == true }),
+            "{entries}"
+        );
+
+        // Nothing is pending any more.
+        assert!(matches!(
+            hub.approve_climate_proposal("living", None).await,
+            Err(HubError::Rejected(m)) if m == "no pending proposal"
+        ));
+        assert!(matches!(
+            hub.reject_climate_proposal("living").await,
+            Err(HubError::Rejected(m)) if m == "no pending proposal"
+        ));
+    }
+
+    #[tokio::test]
+    async fn approve_with_edited_rules_validates() {
+        let (hub, mut rx) = rig().await;
+        let block = |from: u16, to: u16| Block {
+            days: vec![Day::Mon],
+            from: HhMm(from),
+            to: HhMm(to),
+            setpoint: Setpoint::Temp(20.0),
+            evidence: None,
+        };
+        let overlapping = Rules {
+            heat: Some(ModeRules {
+                base: Setpoint::Temp(18.0),
+                blocks: vec![block(60, 300), block(120, 400)],
+            }),
+            cool: None,
+        };
+        assert!(matches!(
+            hub.approve_climate_proposal("living", Some(overlapping))
+                .await,
+            Err(HubError::Rejected(_))
+        ));
+        assert!(
+            drain(&mut rx).is_empty(),
+            "a refused approval publishes nothing"
+        );
+        let view = zone(&hub);
+        assert_eq!(view.settings.state, ZoneState::Pending);
+        assert!(view.proposal.is_some());
+
+        // An edited, valid rule set replaces the proposal's.
+        hub.approve_climate_proposal("living", Some(rules(15.0)))
+            .await
+            .unwrap();
+        assert_eq!(zone(&hub).settings.rules, rules(15.0));
+    }
+
+    #[tokio::test]
+    async fn approve_keeps_an_off_zone_off() {
+        let (hub, _rx) = rig().await;
+        let off = ZoneSettings {
+            state: ZoneState::Off,
+            ..ZoneSettings::default()
+        };
+        hub.set_climate_zone("living", off).unwrap();
+        hub.approve_climate_proposal("living", None).await.unwrap();
+        assert_eq!(zone(&hub).settings.state, ZoneState::Off);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reject_remembers_fingerprint_for_7_days() {
+        let (hub, mut rx) = rig().await;
+        let now = clock::now();
+        let expired = Rejection {
+            fingerprint: "old".to_owned(),
+            until: now - 10,
+        };
+        let live = Rejection {
+            fingerprint: "live".to_owned(),
+            until: now + 1_000,
+        };
+        let settings = ZoneSettings {
+            rejected: vec![expired, live.clone()],
+            ..ZoneSettings::default()
+        };
+        hub.set_climate_zone("living", settings).unwrap();
+        drain(&mut rx);
+
+        hub.reject_climate_proposal("living").await.unwrap();
+        let view = zone(&hub);
+        assert!(view.proposal.is_none());
+        assert_eq!(
+            view.settings.state,
+            ZoneState::Pending,
+            "reject changes no rules"
+        );
+        assert!(view.settings.rules.is_empty());
+        let rejected = &view.settings.rejected;
+        assert_eq!(rejected.len(), 2, "{rejected:?}");
+        assert_eq!(rejected[0], live, "the expired one is pruned");
+        assert_eq!(rejected[1].fingerprint, "fp-p-1");
+        let week = 7 * 86_400;
+        assert!((now + week..=now + week + 5).contains(&rejected[1].until));
+        assert_eq!(view.learn, LearnStatus::Rejected);
+
+        let published = drain(&mut rx);
+        assert!(
+            published
+                .iter()
+                .any(|p| p.topic == "oikos/climate/zone/living/proposal" && p.payload.is_empty())
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn push_reply_approves() {
+        let (hub, _rx) = rig().await;
+        // A retained message is a replay, never a button press.
+        let reply = br#"{"id":"climate-proposal-p-1","action":"approve","install_id":"x","ts":1}"#;
+        hub.ingest_message(RESPONSES, reply, true);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(zone(&hub).settings.state, ZoneState::Pending);
+
+        let changes = hub.ingest_message(RESPONSES, reply, false);
+        assert!(changes.is_empty());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let view = zone(&hub);
+        assert_eq!(view.settings.state, ZoneState::Active);
+        assert_eq!(view.settings.rules, rules(17.0));
+        assert!(view.proposal.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn push_reply_rejects() {
+        let (hub, _rx) = rig().await;
+        hub.ingest_message(
+            RESPONSES,
+            br#"{"id":"climate-proposal-p-1","action":"reject"}"#,
+            false,
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let view = zone(&hub);
+        assert!(view.proposal.is_none());
+        assert_eq!(view.settings.rejected.len(), 1);
+        assert_eq!(view.settings.state, ZoneState::Pending);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stale_reply_is_ignored() {
+        let (hub, _rx) = rig().await;
+        // p-2 replaces p-1; the old buttons still on a phone point at p-1.
+        seed(&hub, &proposal("p-2", 18.0));
+        let replies: [&[u8]; 6] = [
+            br#"{"id":"climate-proposal-p-1","action":"approve"}"#,
+            br#"{"id":"climate-proposal-p-1","action":"reject"}"#,
+            br#"{"id":"climate-proposal-p-2","action":"snooze"}"#,
+            br#"{"id":"climate-safety-living-frost","action":"approve"}"#,
+            br#"{"id":"climate-proposal-","action":"approve"}"#,
+            b"not json",
+        ];
+        for reply in replies {
+            hub.ingest_message(RESPONSES, reply, false);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let view = zone(&hub);
+        assert_eq!(view.settings, ZoneSettings::default());
+        assert_eq!(view.proposal.as_ref().map(|p| p.id.as_str()), Some("p-2"));
+
+        // The current proposal's own button still works.
+        hub.ingest_message(
+            RESPONSES,
+            br#"{"id":"climate-proposal-p-2","action":"approve"}"#,
+            false,
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(zone(&hub).settings.rules, rules(18.0));
+    }
+
+    #[tokio::test]
+    async fn responses_filter_only_when_enabled() {
+        let (on, _rx) = hub(true);
+        assert!(on.extra_filters().contains(&RESPONSES.to_owned()));
+        let (off, _rx) = hub(false);
+        assert!(!off.extra_filters().contains(&RESPONSES.to_owned()));
+        // Disabled: a response is just a message nobody here cares about.
+        assert!(off.ingest_message(RESPONSES, b"{}", false).is_empty());
+    }
+
+    #[tokio::test]
+    async fn overrides_are_written_through_the_hub() {
+        let (hub, mut rx) = rig().await;
+        let id = hub.climate_view().unwrap().zones[0].entities[0].clone();
+        let now = clock::now();
+        let ov = |entity: Option<&str>, until: u64| oikos_climate::doc::Override {
+            entity: entity.map(str::to_owned),
+            setpoint: Some(Setpoint::Temp(21.0)),
+            mode: None,
+            until,
+            origin: oikos_climate::doc::OverrideOrigin::Hand,
+        };
+        hub.set_climate_override("living", ov(None, now + 600))
+            .await
+            .unwrap();
+        let held = zone(&hub).overrides;
+        assert_eq!(held.len(), 1);
+        assert_eq!(
+            held[0].origin,
+            oikos_climate::doc::OverrideOrigin::User,
+            "an override set through the hub is the user's"
+        );
+        // A second whole-zone override replaces the first; a device one sits beside it.
+        hub.set_climate_override("living", ov(None, now + 900))
+            .await
+            .unwrap();
+        hub.set_climate_override("living", ov(Some(&id), now + 900))
+            .await
+            .unwrap();
+        assert_eq!(zone(&hub).overrides.len(), 2);
+        let published = drain(&mut rx);
+        assert!(
+            published
+                .iter()
+                .all(|p| p.topic == "oikos/climate/zone/living/override" && p.retain)
+        );
+
+        for bad in [ov(None, now), ov(Some("climate.elsewhere"), now + 600)] {
+            assert!(matches!(
+                hub.set_climate_override("living", bad).await,
+                Err(HubError::Rejected(_))
+            ));
+        }
+        assert!(matches!(
+            hub.set_climate_override("nowhere", ov(None, now + 600))
+                .await,
+            Err(HubError::UnknownArea(_))
+        ));
+
+        hub.clear_climate_override("living").await.unwrap();
+        assert!(zone(&hub).overrides.is_empty());
+        let cleared = drain(&mut rx);
+        assert!(
+            cleared
+                .last()
+                .is_some_and(|p| p.payload.is_empty() && p.retain)
+        );
+    }
+}
