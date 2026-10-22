@@ -49,6 +49,15 @@ const EXPECTED_TOOLS: &[&str] = &[
     "get_history",
     "send_notification",
     "list_alerts",
+    "climate_status",
+    "get_climate_zone",
+    "set_climate_settings",
+    "set_climate_zone",
+    "approve_climate_proposal",
+    "reject_climate_proposal",
+    "set_climate_override",
+    "clear_climate_override",
+    "learn_climate_zone",
 ];
 
 fn fixtures() -> PathBuf {

@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::doc::{Decision, HouseSettings, Override, Proposal, ZoneSettings};
+use crate::doc::{
+    Decision, HouseSettings, Mode, Override, OverrideOrigin, Proposal, Setpoint, ZoneSettings,
+};
 
 /// Where the learner stands for one zone.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,4 +54,101 @@ pub struct ClimateView {
     /// Whether the history database is configured.
     pub history: bool,
     pub zones: Vec<ZoneView>,
+}
+
+/// One decision as the history database keeps it, one row per device.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct DecisionRow {
+    /// Unix seconds.
+    pub at: u64,
+    pub entity_id: String,
+    pub mode: String,
+    pub setpoint: Option<f64>,
+    pub source: String,
+    pub reason: String,
+    pub applied: bool,
+}
+
+/// The decisions of one zone: the recent ones the hub holds in memory, then older rows from
+/// the history database when it is configured.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct DecisionLog {
+    /// Newest first.
+    pub recent: Vec<Decision>,
+    /// Newest first; empty without history.
+    pub older: Vec<DecisionRow>,
+}
+
+/// A temporary override of a zone as a person asks for it: a target and/or a mode, held for
+/// `minutes` from now or until a Unix time. Exactly one of `minutes` and `until`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct OverrideRequest {
+    /// A temperature in degrees Celsius, or `"off"`.
+    #[serde(default)]
+    pub setpoint: Option<Setpoint>,
+    /// `heat` or `cool`.
+    #[serde(default)]
+    pub mode: Option<Mode>,
+    /// Hold for this many minutes from now.
+    #[serde(default)]
+    pub minutes: Option<u32>,
+    /// Hold until this Unix time, in seconds.
+    #[serde(default)]
+    pub until: Option<u64>,
+}
+
+impl OverrideRequest {
+    /// The zone-wide override this asks for, held by a person (`OverrideOrigin::User`).
+    pub fn into_override(self, now: u64) -> Result<Override, String> {
+        if self.setpoint.is_none() && self.mode.is_none() {
+            return Err("give a setpoint, a mode or both".to_owned());
+        }
+        let until = match (self.minutes, self.until) {
+            (Some(minutes), None) if minutes > 0 => now + u64::from(minutes) * 60,
+            (None, Some(until)) => until,
+            (Some(_), None) => return Err("minutes must be above 0".to_owned()),
+            _ => return Err("give exactly one of minutes and until".to_owned()),
+        };
+        Ok(Override {
+            entity: None,
+            setpoint: self.setpoint,
+            mode: self.mode,
+            until,
+            origin: OverrideOrigin::User,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn override_request_needs_one_duration_and_one_target() {
+        let base = OverrideRequest {
+            setpoint: Some(Setpoint::Temp(21.0)),
+            ..OverrideRequest::default()
+        };
+        let both = OverrideRequest {
+            minutes: Some(30),
+            until: Some(99),
+            ..base.clone()
+        };
+        assert!(both.into_override(0).is_err());
+        assert!(base.clone().into_override(0).is_err());
+        let timed = OverrideRequest {
+            minutes: Some(30),
+            ..base.clone()
+        };
+        assert_eq!(timed.into_override(100).expect("ok").until, 1900);
+        let bare = OverrideRequest {
+            minutes: Some(30),
+            ..OverrideRequest::default()
+        };
+        assert!(bare.into_override(0).is_err());
+    }
 }

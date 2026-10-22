@@ -1521,3 +1521,162 @@ async fn http_put_and_delete_group() {
         .expect("DELETE");
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 }
+
+const DAIKIN_TOPIC: &str = "oikos/climate/daikin_192_168_1_150/climate/config";
+const DAIKIN_FIXTURE: &str = "discovery/climate__daikin_192_168_1_150__climate.json";
+
+/// A server with `[climate] enabled`, the broker link up and one Daikin placed in `living`.
+async fn climate_server() -> Server {
+    let mut cfg = config();
+    cfg.climate.enabled = true;
+    let server = Server::start_with(cfg).await;
+    server.hub.ingest(DAIKIN_TOPIC, &fixture(DAIKIN_FIXTURE));
+    server.online();
+    let id = server
+        .hub
+        .snapshot()
+        .entities
+        .into_iter()
+        .find(|e| e.id.starts_with("daikin_192_168_1_150"))
+        .expect("daikin")
+        .id;
+    let mut patch = serde_json::Map::new();
+    patch.insert("area".to_owned(), Value::from("living"));
+    server
+        .hub
+        .set_override(&id, &patch)
+        .await
+        .expect("area override");
+    server
+}
+
+#[tokio::test]
+async fn climate_disabled_is_503() {
+    let server = Server::start().await;
+    assert_eq!(
+        server.get("/api/v1/climate").await.status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    let res = server
+        .client
+        .put(server.url("/api/v1/climate/zones/living"))
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value = res.json().await.expect("json");
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("climate disabled"))
+    );
+}
+
+#[tokio::test]
+async fn climate_get_view() {
+    let server = climate_server().await;
+    let res = server.get("/api/v1/climate").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let view: Value = res.json().await.expect("json");
+    assert_eq!(view["enabled"], true);
+    assert_eq!(view["zones"][0]["zone"], "living");
+
+    let decisions = server
+        .get("/api/v1/climate/zones/living/decisions?limit=5")
+        .await;
+    assert_eq!(decisions.status(), StatusCode::OK);
+    let log: Value = decisions.json().await.expect("json");
+    assert!(log["recent"].is_array() && log["older"].as_array().is_some_and(Vec::is_empty));
+    let missing = server.get("/api/v1/climate/zones/ghost/decisions").await;
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn climate_put_zone_rejects_invalid() {
+    let server = climate_server().await;
+    let url = server.url("/api/v1/climate/zones/living");
+    let bad = server
+        .client
+        .put(&url)
+        .json(&json!({"manual_hold_max_min": 0}))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let ok = server
+        .client
+        .put(&url)
+        .json(&json!({"state": "active"}))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(ok.status(), StatusCode::NO_CONTENT);
+    let unknown = server
+        .client
+        .put(server.url("/api/v1/climate/zones/ghost"))
+        .json(&json!({}))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn climate_override_minutes_and_until_exclusive() {
+    let server = climate_server().await;
+    let url = server.url("/api/v1/climate/zones/living/override");
+    let post = |body: Value| {
+        let req = server.client.post(&url).json(&body);
+        async move { req.send().await.expect("POST").status() }
+    };
+    assert_eq!(
+        post(json!({"setpoint": 21.0, "minutes": 30, "until": 4_000_000_000u64})).await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post(json!({"setpoint": 21.0})).await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post(json!({"minutes": 30})).await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        post(json!({"setpoint": 21.0, "minutes": 30})).await,
+        StatusCode::NO_CONTENT
+    );
+    let view: Value = server
+        .get("/api/v1/climate")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(view["zones"][0]["overrides"][0]["origin"], "user");
+    let cleared = server.client.delete(&url).send().await.expect("DELETE");
+    assert_eq!(cleared.status(), StatusCode::NO_CONTENT);
+    let view: Value = server
+        .get("/api/v1/climate")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(
+        view["zones"][0]["overrides"].as_array().map(Vec::len),
+        Some(0)
+    );
+}
+
+#[tokio::test]
+async fn climate_approve_without_proposal_is_rejected() {
+    let server = climate_server().await;
+    for action in ["approve", "reject"] {
+        let res = server
+            .client
+            .post(server.url(&format!("/api/v1/climate/zones/living/proposal/{action}")))
+            .send()
+            .await
+            .expect("POST");
+        assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "{action}");
+    }
+}

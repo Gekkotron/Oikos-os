@@ -4,9 +4,10 @@ use std::collections::BTreeMap;
 use std::sync::MutexGuard;
 
 use oikos_api::WsEvent;
+use oikos_climate::doc::Decision;
 use oikos_climate::doc::{HouseSettings, ZoneSettings, ZoneState};
 use oikos_climate::topics::{self, ClimateTopic, ZoneDoc};
-use oikos_climate::view::{ClimateView, LearnStatus, ZoneView};
+use oikos_climate::view::{ClimateView, DecisionLog, DecisionRow, LearnStatus, ZoneView};
 use oikos_core::command::Publish;
 use oikos_core::model::{Kind, UNASSIGNED_AREA};
 use serde::Serialize;
@@ -115,6 +116,51 @@ impl Hub {
             zone.reading_age_s = age;
         }
         Ok(view)
+    }
+
+    /// The latest decisions of `zone` (at most `limit`, newest first) from memory, then older
+    /// rows from the history database when it is on (none when it is off or unreachable).
+    pub async fn climate_decision_log(
+        &self,
+        zone: &str,
+        limit: usize,
+    ) -> Result<DecisionLog, HubError> {
+        self.require_climate()?;
+        if !self.climate_zone_ids().iter().any(|z| z == zone) {
+            return Err(HubError::UnknownArea(zone.to_owned()));
+        }
+        let recent: Vec<Decision> = self
+            .climate_runtime()
+            .decisions
+            .get(zone)
+            .map(|log| log.iter().rev().take(limit).cloned().collect())
+            .unwrap_or_default();
+        let mut older = Vec::new();
+        if let Some(history) = self.history().cloned()
+            && let Ok(db) = history.db()
+        {
+            match db
+                .climate_decisions(zone, i64::try_from(limit).unwrap_or(i64::MAX))
+                .await
+            {
+                Ok(rows) => {
+                    older = rows
+                        .into_iter()
+                        .map(|row| DecisionRow {
+                            at: u64::try_from(row.at / 1_000_000).unwrap_or(0),
+                            entity_id: row.entity_id,
+                            mode: row.mode,
+                            setpoint: row.setpoint,
+                            source: row.source,
+                            reason: row.reason,
+                            applied: row.applied,
+                        })
+                        .collect();
+                }
+                Err(err) => tracing::warn!(%zone, error = %err, "climate decisions not read"),
+            }
+        }
+        Ok(DecisionLog { recent, older })
     }
 
     /// Replaces the house settings: validates, publishes retained and applies locally.

@@ -52,25 +52,12 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 - `make_widget` in `AddWidgetPicker` panics natively (`js_sys::Date` is wasm-only); native tests use a fixed id instead. Fine, since those paths are wasm-only in production.
 - Normalize commit attribution across the branch — 11 of 24 commits ended up with `Co-Authored-By: Claude Sonnet 5.5` or `Haiku 5.5` instead of the requested `Opus 4.7` line because sub-agents' own session rules overrode the dispatch brief. If the user wants a uniform trailer, a one-pass rebase can rewrite them.
 
-## Climate engine (absorbing Athena-Hestia, brainstorm in progress 2026-10-22)
+## Climate engine v1 (landed on sc-critical-meissner-823c, 2026-10-22)
 
-Origin: `Athena-Hestia/docs/VISION.md` (Python prototype, prior art only — no coexistence, no shadow comparison with Python, phases B–D of that vision are out of scope).
+Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/superpowers/plans/2026-10-22-climate-engine.md`.
 
-### Agreed so far
-
-- **Naming:** `climate` everywhere — crate `oikos-climate`, config `[climate]`, docs and UI "Climate". No "Hestia" in code or docs.
-- **Switch:** `[climate] enabled = false` by default, built like `[groups] enabled` (`crates/oikos-os/src/config.rs`). Off = no climate logic, no climate subscriptions.
-- **Settings:** everything else (zones, targets, schedule, safety thresholds) in retained `oikos/climate/…` topics, edited via MCP and a web screen. No second config language.
-- **Rules learned from history, not ML:** on enable, the engine reads TimescaleDB history per area with a climate device (temperatures, setpoints and when, presence/motion) and drafts rules with their evidence ("20.5 °C weekdays 07:00 because you set it on 41 of 60 mornings").
-- **Approval every time:** nothing applies until approved. Before first approval a zone only shows what it *would* do. Later habit drifts produce change proposals; the current rule runs until answered. Notified through `oikos-push` (Approve / Review via the `<prefix>/responses` path — to confirm).
-- **Safety never needs approval:** frost, overheat and stale-sensor fallback always on; proposals can't loosen them.
-- **Per-room "managed" switch** to keep a room out of climate control on purpose.
-- **Scope order:** (1) Engine v1 — heating/cooling, priority tree, safety, presence/away, learned rules + push approval, overrides with expiry, decision reasons over MCP, Climate web screen. Then separate designs for (2) shutters, (3) comfort ↔ cost slider with prices, (4) ML layers.
-
-### Next step
-
-- Design written: `docs/superpowers/specs/2026-10-22-climate-engine-design.md` (builder check done, its answers folded in as Claude's calls in §13). Hand-change hold settled as: until the next scheduled change, max 4 h, per device.
-- Design approved 2026-10-22. Plan: `docs/superpowers/plans/2026-10-22-climate-engine.md` (12 tasks). **Waiting on the user's plan review + execution choice.**
+- Follow-up designs, each its own brainstorm: shutters, comfort ↔ cost slider with prices, ML layers.
+- Open: run the DB-gated climate tests against a TimescaleDB (`TEST_DATABASE_URL=… cargo test -p oikos-os --test history_db climate learn_zone`).
 
 ## Other backlog ideas (unrelated to dashboards)
 
