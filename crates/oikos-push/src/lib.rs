@@ -6,6 +6,7 @@ pub mod fcm;
 pub mod history;
 pub mod normalize;
 pub mod queue;
+pub mod service;
 pub mod tokens;
 
 pub use history::{History, to_history_entry};
@@ -14,4 +15,5 @@ pub use normalize::{
     to_fcm_data, ttl_seconds,
 };
 pub use queue::{Pending, RetryQueue};
+pub use service::{PushService, PushSettings, PushState, PushStatus};
 pub use tokens::{TokenStatus, Tokens};

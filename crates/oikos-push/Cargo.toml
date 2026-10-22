@@ -17,7 +17,8 @@ reqwest.workspace = true
 jsonwebtoken.workspace = true
 tokio.workspace = true
 futures-util.workspace = true
+oikos-core = { path = "../oikos-core" }
 
 [dev-dependencies]
 axum.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["test-util", "rt"] }

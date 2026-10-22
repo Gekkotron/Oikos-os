@@ -2296,6 +2296,7 @@ dependencies = [
  "axum",
  "futures-util",
  "jsonwebtoken",
+ "oikos-core",
  "reqwest",
  "serde",
  "serde_json",
