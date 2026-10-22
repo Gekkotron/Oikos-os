@@ -31,19 +31,35 @@ use crate::screens::security::SecurityScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::theme::install_theme;
 
-/// Landing and unknown paths go to the House dashboard, the first picker entry. `replace` keeps
-/// Back from bouncing off the redirect.
+/// Landing and unknown paths go to the first authored dashboard if there is one, else to
+/// House. Waits for the dashboards fetch to resolve before deciding, so an authored dashboard
+/// is honoured even when the user opens the app directly on `/`. `replace` keeps Back from
+/// bouncing off the redirect.
 #[component]
 fn HouseRedirect() -> impl IntoView {
+    let house = expect_context::<House>();
     let navigate = use_navigate();
     Effect::new(move |_| {
-        navigate(
-            &format!("/dashboards/{}", oikos_api::HOUSE_ID),
-            leptos_router::NavigateOptions {
-                replace: true,
-                ..Default::default()
-            },
-        );
+        let target = house.dashboards.with(|list| {
+            if list.is_empty() {
+                return None;
+            }
+            Some(
+                list.iter()
+                    .find(|d| d.dashboard.id != oikos_api::HOUSE_ID)
+                    .map(|d| d.dashboard.id.clone())
+                    .unwrap_or_else(|| oikos_api::HOUSE_ID.to_owned()),
+            )
+        });
+        if let Some(id) = target {
+            navigate(
+                &format!("/dashboards/{id}"),
+                leptos_router::NavigateOptions {
+                    replace: true,
+                    ..Default::default()
+                },
+            );
+        }
     });
 }
 
