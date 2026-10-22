@@ -21,7 +21,13 @@ pub enum StoreApplied {
 /// A retained payload, decoded: either a runnable flow or the reason it is not.
 enum Entry {
     Valid(Flow),
-    Invalid { reason: String },
+    Invalid {
+        reason: String,
+        /// The `name` the payload carried, when it was readable.
+        name: Option<String>,
+        /// The `area` the payload carried, when it was readable.
+        area: Option<String>,
+    },
 }
 
 /// The decoded copy of the retained flow definitions, with each flow's run history.
@@ -95,20 +101,37 @@ impl FlowStore {
         let filled = Self::fill_missing_id(id, payload);
         let mut flow = match Flow::decode(filled.as_deref().unwrap_or(payload)) {
             Ok(flow) => flow,
-            Err(reason) => return Entry::Invalid { reason },
+            Err(reason) => return Self::invalid(payload, reason),
         };
         if flow.id.is_empty() {
             flow.id = id.to_owned();
         } else if flow.id != id {
-            return Entry::Invalid {
-                reason: format!("id mismatch: payload says `{}`, topic says `{id}`", flow.id),
-            };
+            return Self::invalid(
+                payload,
+                format!("id mismatch: payload says `{}`, topic says `{id}`", flow.id),
+            );
         }
         match validate(&flow) {
             Ok(()) => Entry::Valid(flow),
-            Err(err) => Entry::Invalid {
-                reason: err.to_string(),
-            },
+            Err(err) => Self::invalid(payload, err.to_string()),
+        }
+    }
+
+    /// An invalid entry that still remembers the payload's `name` and `area` when they are
+    /// JSON strings, so the list can show and place the stub.
+    fn invalid(payload: &[u8], reason: String) -> Entry {
+        let value: Option<serde_json::Value> = serde_json::from_slice(payload).ok();
+        let text = |key: &str| {
+            value
+                .as_ref()
+                .and_then(|v| v.get(key))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        Entry::Invalid {
+            reason,
+            name: text("name"),
+            area: text("area"),
         }
     }
 
@@ -133,10 +156,11 @@ impl FlowStore {
         let entry = self.entries.get(id)?;
         let (definition, invalid) = match entry {
             Entry::Valid(flow) => (flow.clone(), None),
-            Entry::Invalid { reason } => (
+            Entry::Invalid { reason, name, area } => (
                 Flow {
                     id: id.to_owned(),
-                    name: id.to_owned(),
+                    name: name.clone().unwrap_or_else(|| id.to_owned()),
+                    area: area.clone(),
                     ..Default::default()
                 },
                 Some(reason.clone()),
@@ -365,9 +389,23 @@ mod tests {
         assert!(!views[0].invalid.as_ref().unwrap().is_empty());
         assert_eq!(views[0].definition.id, "living");
         assert_eq!(views[0].definition.name, "living");
+        assert_eq!(views[0].definition.area, None);
         assert!(views[0].definition.nodes.is_empty());
         assert!(store.flows().is_empty());
         assert!(store.exists("living"));
+    }
+
+    #[test]
+    fn invalid_stub_keeps_name_and_area_when_readable() {
+        let mut store = FlowStore::new(20);
+        store.apply(
+            "living",
+            br#"{"id":"living","name":"Living LED","area":"living","nodes":[{"id":"x","type":"nope"}]}"#,
+        );
+        let view = store.get("living").unwrap();
+        assert!(view.invalid.is_some());
+        assert_eq!(view.definition.name, "Living LED");
+        assert_eq!(view.definition.area.as_deref(), Some("living"));
     }
 
     #[test]

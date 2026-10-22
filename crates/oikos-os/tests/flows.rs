@@ -8,7 +8,7 @@ use std::time::Duration;
 use oikos_api::{ConnectionStatus, RunStatus, RunView, StepOutcome, StepView, WsEvent};
 use oikos_core::command::Publish;
 use oikos_core::flow::{Flow, NodeKind};
-use oikos_core::model::Command;
+use oikos_core::model::{Area, AreasDocument, Command};
 use oikos_os::config::Config;
 use oikos_os::hub::{Hub, HubError};
 use tokio::sync::mpsc;
@@ -1457,4 +1457,128 @@ fn remote_state(hub: &Hub) -> oikos_core::model::EntityState {
         .find(|e| e.id == REMOTE_ID)
         .map(|e| e.state)
         .expect("remote state")
+}
+
+async fn with_living_area(hub: &Hub) {
+    hub.set_areas(AreasDocument {
+        areas: vec![Area {
+            id: "living".into(),
+            name: "Living room".into(),
+            ..Area::default()
+        }],
+    })
+    .await
+    .expect("set_areas");
+}
+
+fn in_area(area: &str) -> Flow {
+    let mut flow = reference_flow();
+    flow.area = Some(area.to_owned());
+    flow
+}
+
+#[tokio::test]
+async fn set_flow_keeps_known_area() {
+    let (hub, mut publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    while publisher.try_recv().is_ok() {}
+    let outcome = hub.set_flow(in_area("living")).await.expect("set_flow");
+    assert_eq!(outcome.flow.definition.area.as_deref(), Some("living"));
+    let publish = publisher.try_recv().expect("the definition");
+    assert!(
+        publish.payload.contains("\"area\":\"living\""),
+        "{}",
+        publish.payload
+    );
+}
+
+#[tokio::test]
+async fn area_name_resolves_to_id() {
+    let (hub, _publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    let outcome = hub
+        .set_flow(in_area("Living room"))
+        .await
+        .expect("set_flow");
+    assert_eq!(outcome.flow.definition.area.as_deref(), Some("living"));
+}
+
+#[tokio::test]
+async fn unknown_area_is_rejected() {
+    let (hub, _publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    match hub.set_flow(in_area("ghost")).await {
+        Err(HubError::InvalidFlow(reason)) => assert!(reason.contains("unknown area"), "{reason}"),
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn unassigned_is_not_a_flow_area() {
+    let (hub, _publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    assert!(matches!(
+        hub.set_flow(in_area("Unassigned")).await,
+        Err(HubError::InvalidFlow(_))
+    ));
+}
+
+#[tokio::test]
+async fn stale_area_is_kept_on_resave() {
+    let (hub, _publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    hub.set_flow(in_area("living")).await.expect("first save");
+    hub.set_areas(AreasDocument::default())
+        .await
+        .expect("set_areas");
+    let outcome = hub
+        .set_flow(in_area("living"))
+        .await
+        .expect("resave keeps the stale area");
+    assert_eq!(outcome.flow.definition.area.as_deref(), Some("living"));
+    hub.set_flow_enabled("living", false).await.expect("toggle");
+}
+
+#[tokio::test]
+async fn set_flow_area_moves_and_clears() {
+    let (hub, mut publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    hub.set_flow(reference_flow()).await.expect("set_flow");
+    while publisher.try_recv().is_ok() {}
+
+    let view = hub
+        .set_flow_area("living", Some("living".into()))
+        .await
+        .expect("move");
+    assert_eq!(view.definition.area.as_deref(), Some("living"));
+    publisher.try_recv().expect("a publish");
+
+    let view = hub.set_flow_area("living", None).await.expect("clear");
+    assert_eq!(view.definition.area, None);
+    let publish = publisher.try_recv().expect("a publish");
+    assert!(!publish.payload.contains("\"area\""), "{}", publish.payload);
+
+    assert!(matches!(
+        hub.set_flow_area("living", Some("ghost".into())).await,
+        Err(HubError::InvalidFlow(_))
+    ));
+    assert!(matches!(
+        hub.set_flow_area("nobody", None).await,
+        Err(HubError::UnknownFlow(_))
+    ));
+    hub.ingest("oikos/automation/broken", b"not json");
+    assert!(matches!(
+        hub.set_flow_area("broken", None).await,
+        Err(HubError::InvalidFlow(_))
+    ));
+}
+
+#[tokio::test]
+async fn retained_unknown_area_loads_valid() {
+    let (hub, _publisher) = hub_with_entities();
+    let mut value: serde_json::Value = serde_json::from_str(&reference_json()).unwrap();
+    value["area"] = "ghost".into();
+    hub.ingest(FLOW_TOPIC, value.to_string().as_bytes());
+    let view = hub.flow("living").expect("flow");
+    assert!(view.invalid.is_none(), "{:?}", view.invalid);
 }

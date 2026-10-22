@@ -12,7 +12,7 @@ use oikos_api::{
 };
 use oikos_core::command::{Publish, map_command};
 use oikos_core::flow::{Flow, NodeKind, Scalar, uses_sun_or_is_dark, validate};
-use oikos_core::model::{Command, Kind};
+use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
 use oikos_core::types::{Placement, type_def};
 
 use super::{EngineRequest, StoreApplied};
@@ -96,9 +96,10 @@ impl Hub {
     /// rather than failing at 3 a.m.
     /// The outcome carries a warning when the flow reads the sun while the house point is the
     /// Paris fallback.
-    pub async fn set_flow(&self, flow: Flow) -> Result<FlowWriteOutcome, HubError> {
+    pub async fn set_flow(&self, mut flow: Flow) -> Result<FlowWriteOutcome, HubError> {
         validate(&flow).map_err(|err| HubError::InvalidFlow(err.to_string()))?;
         self.check_house(&flow)?;
+        self.check_area(&mut flow)?;
         let warning = (self.fallback_active() && uses_sun_or_is_dark(&flow))
             .then(|| PARIS_FALLBACK_WARNING.to_owned());
         let flow = self.write_flow(&flow)?;
@@ -131,6 +132,26 @@ impl Hub {
         }
         let mut flow = view.definition;
         flow.enabled = enabled;
+        self.write_flow(&flow)
+    }
+
+    /// Moves a flow to another room (or to none with `None`) without touching the rest. Like
+    /// [`Self::set_flow_enabled`] it skips the entity checks, so a flow whose entity vanished
+    /// can still be filed.
+    pub async fn set_flow_area(
+        &self,
+        id: &str,
+        area: Option<String>,
+    ) -> Result<FlowView, HubError> {
+        let view = self
+            .flow(id)
+            .ok_or_else(|| HubError::UnknownFlow(id.to_owned()))?;
+        if let Some(reason) = view.invalid {
+            return Err(HubError::InvalidFlow(reason));
+        }
+        let mut flow = view.definition;
+        flow.area = area;
+        self.check_area(&mut flow)?;
         self.write_flow(&flow)
     }
 
@@ -272,6 +293,32 @@ impl Hub {
             flow_id: flow_id.to_owned(),
             run: run.clone(),
         });
+    }
+
+    /// Resolves `flow.area` to an area id and refuses an unknown room. The area already stored
+    /// for this flow is always accepted, so a room deleted later does not block re-saving or
+    /// toggling the flow; `Unassigned` is never a flow's room (no area means that).
+    fn check_area(&self, flow: &mut Flow) -> Result<(), HubError> {
+        let Some(raw) = flow.area.clone() else {
+            return Ok(());
+        };
+        let stored = self
+            .flow_store()
+            .get(&flow.id)
+            .filter(|view| view.invalid.is_none())
+            .and_then(|view| view.definition.area);
+        let reg = self.read();
+        let resolved = reg.resolve_area(&raw);
+        let known = reg
+            .effective_areas()
+            .iter()
+            .any(|area| area.id == resolved && area.id != UNASSIGNED_AREA);
+        if stored.as_deref() == Some(resolved.as_str()) || known {
+            flow.area = Some(resolved);
+            Ok(())
+        } else {
+            Err(HubError::InvalidFlow(format!("unknown area `{raw}`")))
+        }
     }
 
     /// Checks every entity a node names exists and every command maps; publishes nothing.
