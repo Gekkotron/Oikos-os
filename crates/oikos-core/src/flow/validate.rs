@@ -49,6 +49,26 @@ pub const NOTIFY_CHANNELS: [&str; 7] = [
 /// The push severities. Mirrors `oikos_push::normalize::SEVERITIES`.
 pub const NOTIFY_SEVERITIES: [&str; 3] = ["info", "warning", "critical"];
 
+/// Why `channel` is not a push channel, or `None` when it is one.
+pub fn notify_channel_error(channel: &str) -> Option<String> {
+    (!NOTIFY_CHANNELS.contains(&channel)).then(|| {
+        format!(
+            "unknown channel `{channel}` (one of {})",
+            NOTIFY_CHANNELS.join(", ")
+        )
+    })
+}
+
+/// Why `severity` is not a push severity, or `None` when it is one.
+pub fn notify_severity_error(severity: &str) -> Option<String> {
+    (!NOTIFY_SEVERITIES.contains(&severity)).then(|| {
+        format!(
+            "unknown severity `{severity}` (one of {})",
+            NOTIFY_SEVERITIES.join(", ")
+        )
+    })
+}
+
 fn is_valid_id(id: &str, max: usize) -> bool {
     (1..=max).contains(&id.len())
         && id
@@ -117,25 +137,11 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                 if p.title.trim().is_empty() {
                     return Err(bad("title must not be empty".to_owned()));
                 }
-                if let Some(c) = p
-                    .channel
-                    .as_deref()
-                    .filter(|c| !NOTIFY_CHANNELS.contains(c))
-                {
-                    return Err(bad(format!(
-                        "unknown channel `{c}` (one of {})",
-                        NOTIFY_CHANNELS.join(", ")
-                    )));
+                if let Some(reason) = p.channel.as_deref().and_then(notify_channel_error) {
+                    return Err(bad(reason));
                 }
-                if let Some(s) = p
-                    .severity
-                    .as_deref()
-                    .filter(|s| !NOTIFY_SEVERITIES.contains(s))
-                {
-                    return Err(bad(format!(
-                        "unknown severity `{s}` (one of {})",
-                        NOTIFY_SEVERITIES.join(", ")
-                    )));
+                if let Some(reason) = p.severity.as_deref().and_then(notify_severity_error) {
+                    return Err(bad(reason));
                 }
             }
             NodeKind::TriggerSun(p) => {

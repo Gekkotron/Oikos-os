@@ -21,7 +21,8 @@ pub use sun::{
     APPARENT_ALTITUDE_DEG, CIVIL_ALTITUDE_DEG, SunEvents, is_dark_at, sun_altitude, sun_events,
 };
 pub use validate::{
-    FlowError, NOTIFY_CHANNELS, NOTIFY_SEVERITIES, is_valid_flow_id, is_valid_node_id, validate,
+    FlowError, NOTIFY_CHANNELS, NOTIFY_SEVERITIES, is_valid_flow_id, is_valid_node_id,
+    notify_channel_error, notify_severity_error, validate,
 };
 
 /// Shared fixture for the flow tests: the reference flow of the design.

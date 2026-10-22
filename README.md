@@ -189,8 +189,10 @@ The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers twenty tools
 - `list_ignored` — the discovery topics that did not become an entity, with the reason.
 - `list_flows` — the automations (flows) with name, enabled state, node count and latest run.
 - `get_flow` — one flow with its definition and recent runs.
-- `set_flow` — creates or replaces a flow (`trigger.state`, `trigger.schedule`, `flow.enable`, `if`, `delay` and `command` nodes; `mode: restart` for "N minutes after the last …"), validated against the house. A `trigger.schedule` fires only while the flow is enabled; `flow.enable` turns another flow (or its own) on or off.
+- `set_flow` — creates or replaces a flow (`trigger.state`, `trigger.schedule`, `flow.enable`, `if`, `delay`, `command` and `notify` nodes; `mode: restart` for "N minutes after the last …"), validated against the house. A `trigger.schedule` fires only while the flow is enabled; `flow.enable` turns another flow (or its own) on or off.
 - `delete_flow` — removes a flow.
+- `send_notification` — sends a phone push (`title`, optional `body`, `channel`, `severity`, `entity_id`, `image_url`, `silent`, `id`) and returns its alert id.
+- `list_alerts` — the recent push alerts, newest first (`limit` 20 by default, optional `channel` filter).
 - `set_flow_enabled` — turns a flow on or off.
 - `run_flow` — starts a manual run of a flow.
 - `set_virtual` — creates or replaces a virtual switch, number or button the hub owns.
