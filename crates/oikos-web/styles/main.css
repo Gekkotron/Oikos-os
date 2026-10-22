@@ -4611,12 +4611,13 @@ html:has(.flow-canvas-screen) {
 }
 .widget-unavailable-label { overflow-wrap: anywhere; }
 
-/* The dashboards picker replaces the Home tab. The menu is position: fixed with no offsets so it
-   sits at its static position yet escapes the nav's overflow-x clipping. */
+/* The dashboards picker replaces the Home tab. The menu is position: fixed with its coordinates
+   set from the trigger's bounding rect in Rust, which escapes .topbar__nav's overflow-x
+   clipping — an absolute-positioned dropdown would get hidden on viewports narrow enough that
+   the nav scrolls horizontally. */
 .dashboards-picker {
   display: flex;
   flex: 0 0 auto;
-  position: relative;
 }
 
 .dashboards-picker__trigger {
@@ -4638,9 +4639,7 @@ html:has(.flow-canvas-screen) {
 }
 
 .dashboards-picker__menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
+  position: fixed;
   z-index: 20;
   margin: 0;
   padding: 4px;
@@ -4676,18 +4675,21 @@ html:has(.flow-canvas-screen) {
   padding-top: 4px;
 }
 
-/* Edit mode: toolbar sits above the grid; per-tile tools overlay the tile's top-right corner. */
+/* Edit mode: toolbar sits above the grid, right-aligned, as a cluster of .btn controls. The
+   pencil is a round icon toggle that lights amber (.btn--active) when edit mode is on; the gear
+   opens the dashboard settings sheet; Discard and Save share the .btn--with-icon shape with
+   Save as the primary amber action. Per-tile tools overlay each tile's top-right corner. */
 .dashboard-edit-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   padding: 8px 12px 0;
 }
-.dashboard-edit-toolbar button {
-  min-height: var(--touch-min);
-  min-width: var(--touch-min);
+
+.dashboard-edit-toolbar .btn {
+  flex: 0 0 auto;
 }
-.dashboard-edit-toolbar__pencil[aria-pressed="true"] { font-weight: bold; }
 .widget { position: relative; }
 .widget__tools {
   position: absolute;
