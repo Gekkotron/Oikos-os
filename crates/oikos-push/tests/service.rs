@@ -259,6 +259,45 @@ async fn legacy_history_seeds_once_when_new_is_empty() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn retained_empty_array_blocks_legacy_seed() {
+    let mut h = harness();
+    h.svc.on_connected();
+    h.svc.on_message(&format!("{P}/history"), b"[]", true);
+    let legacy = json!([{"v": 1, "id": "leg", "title": "L", "sent_at": NOW}]).to_string();
+    h.svc
+        .on_message(&format!("{L}/history"), legacy.as_bytes(), true);
+    h.svc.on_subscribed();
+    advance(2.0).await;
+    let pubs = h.history_publishes();
+    assert_eq!(pubs.len(), 1);
+    assert_eq!(pubs[0].payload, "[]");
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_cleared_or_non_array_history_still_seeds() {
+    let legacy = json!([{"v": 1, "id": "leg", "title": "L", "sent_at": NOW}]);
+    for new in [
+        None,
+        Some(&b""[..]),
+        Some(&b"{\"a\": 1}"[..]),
+        Some(&b"not json"[..]),
+    ] {
+        let mut h = harness();
+        h.svc.on_connected();
+        if let Some(raw) = new {
+            h.svc.on_message(&format!("{P}/history"), raw, true);
+        }
+        h.svc
+            .on_message(&format!("{L}/history"), legacy.to_string().as_bytes(), true);
+        h.svc.on_subscribed();
+        advance(2.0).await;
+        let pubs = h.history_publishes();
+        assert_eq!(pubs.len(), 1, "{new:?}");
+        assert_eq!(ids(&pubs[0]), ["leg"], "{new:?}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn own_history_echo_is_ignored() {
     let mut h = harness();
     h.svc.on_connected();

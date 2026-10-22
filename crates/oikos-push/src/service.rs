@@ -353,24 +353,21 @@ impl PushService {
         let now = (self.clock)();
         let candidate = st.candidate.take();
         let seed = st.seed.take();
-        let adopted = [("history", candidate), ("legacy history", seed)]
-            .into_iter()
-            .find_map(|(what, raw)| {
-                let raw = raw?;
-                let mut list = History::new(0, 0);
-                if !list.replace_from_json(&raw) {
-                    tracing::warn!(what, "retained push history is not a JSON array");
-                    return None;
-                }
-                (!list.is_empty()).then_some((what, raw))
-            });
-        if let Some((what, raw)) = adopted {
-            st.history.replace_from_json(&raw);
-            tracing::info!(
-                what,
-                entries = st.history.entries().len(),
-                "push history adopted"
-            );
+        // A retained JSON array on the new topic, even `[]`, is the list: the legacy seed is
+        // used only when the new topic is missing, cleared (empty payload) or not an array.
+        for (what, raw) in [("history", candidate), ("legacy history", seed)] {
+            let Some(raw) = raw.filter(|r| !r.trim_ascii().is_empty()) else {
+                continue;
+            };
+            if st.history.replace_from_json(&raw) {
+                tracing::info!(
+                    what,
+                    entries = st.history.entries().len(),
+                    "push history adopted"
+                );
+                break;
+            }
+            tracing::warn!(what, "retained push history is not a JSON array");
         }
         st.loaded = true;
         st.history.trim(now);
