@@ -2241,6 +2241,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oikos-climate"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "oikos-core",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "oikos-core"
 version = "0.1.0"
 dependencies = [
