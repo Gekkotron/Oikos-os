@@ -83,9 +83,12 @@ pub fn FlowRow(row: ListRow, #[prop(optional)] menu: Option<AnyView>) -> impl In
                 {restart.then(|| view! { <span class="flow-tag">"restart"</span> })}
                 {badge}
             </span>
-            <span class="flow-row__trigger">{trigger}</span>
-            <span class="flow-row__run" class:flow-row__run--failed=failed title=started>
-                {move || last_run(&run_flow, now.0.get())}
+            <span class="flow-row__sub">
+                <span class="flow-row__trigger">{trigger}</span>
+                <span class="flow-row__dot" aria-hidden="true">" · "</span>
+                <span class="flow-row__run" class:flow-row__run--failed=failed title=started>
+                    {move || last_run(&run_flow, now.0.get())}
+                </span>
             </span>
             <span class="flow-row__switch">
                 <FlowSwitch id=id name=name_for_switch enabled=enabled invalid=invalid />

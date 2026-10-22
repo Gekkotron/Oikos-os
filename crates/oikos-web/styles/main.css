@@ -2367,6 +2367,15 @@ p.override__hint {
   opacity: 0.7;
 }
 
+/* Desktop: the wrapper vanishes so trigger and last run keep their own columns. */
+.flow-row__sub {
+  display: contents;
+}
+
+.flow-row__dot {
+  display: none;
+}
+
 .flow-row__trigger,
 .flow-row__run {
   min-width: 0;
@@ -2445,8 +2454,7 @@ p.override__hint {
     grid-template-columns: 28px minmax(0, 1fr) auto 32px;
     grid-template-areas:
       "icon name switch menu"
-      ". trigger trigger trigger"
-      ". run run run";
+      ". sub sub sub";
     gap: 4px 10px;
   }
 
@@ -2458,12 +2466,14 @@ p.override__hint {
     grid-area: name;
   }
 
-  .flow-row__trigger {
-    grid-area: trigger;
+  .flow-row__sub {
+    display: block;
+    grid-area: sub;
+    min-width: 0;
   }
 
-  .flow-row__run {
-    grid-area: run;
+  .flow-row__sub > * {
+    display: inline;
   }
 
   .flow-row__switch {
@@ -2483,14 +2493,16 @@ p.override__hint {
   }
 
   .flow-chips {
+    min-width: 0;
     flex-direction: column;
     gap: 8px;
   }
 
   .flow-chips__set {
     flex-wrap: nowrap;
-    margin: 0 -16px;
-    padding: 0 16px;
+    min-width: 0;
+    max-width: 100%;
+    padding-bottom: 4px;
     overflow-x: auto;
     scrollbar-width: none;
   }
