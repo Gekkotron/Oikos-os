@@ -4,5 +4,6 @@
 
 pub mod decide;
 pub mod doc;
+pub mod ledger;
 pub mod schedule;
 pub mod topics;
