@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use oikos_core::history::buckets::Bucket;
 use oikos_core::history::{AvailabilityRow, Incoming, Rows, ValueRow};
-use oikos_core::model::{Availability, EntityState, StateValue};
+use oikos_core::model::{Availability, ClimateState, EntityState, StateValue};
+use oikos_os::history::climate::ClimateDecisionRow;
 use oikos_os::history::db::Db;
 use oikos_os::history::rollup::rollup_once;
 use sqlx::{PgPool, postgres::PgPoolOptions};
@@ -432,4 +433,145 @@ async fn writer_survives_unreachable_database_at_boot() {
     );
 
     handle.abort();
+}
+
+fn decision(at: i64, zone: &str, entity: &str, applied: bool, reason: &str) -> ClimateDecisionRow {
+    ClimateDecisionRow {
+        at,
+        zone: zone.into(),
+        entity_id: entity.into(),
+        mode: "heat".into(),
+        setpoint: Some(19.5),
+        source: "schedule".into(),
+        reason: reason.into(),
+        applied,
+    }
+}
+
+fn climate_row(id: &str, at: i64, target: Option<f64>, mode: &str) -> ValueRow {
+    ValueRow {
+        at,
+        id: id.into(),
+        value: StateValue::Climate(ClimateState {
+            current: Some(20.0),
+            target,
+            mode: Some(mode.into()),
+            fan_mode: None,
+            action: None,
+        }),
+        num: None,
+    }
+}
+
+#[tokio::test]
+async fn climate_decisions_round_trip() {
+    let Some(tdb) = fresh_db().await else { return };
+    let mut empty = decision(3_000_000, "z1", "", false, "no devices");
+    empty.mode = String::new();
+    empty.setpoint = None;
+    let rows = vec![
+        decision(1_000_000, "z1", "climate.a", true, "first"),
+        decision(2_000_000, "z1", "climate.a", false, "second"),
+        empty.clone(),
+        decision(2_500_000, "z2", "climate.b", true, "other zone"),
+    ];
+    tdb.db.insert_climate_decisions(&rows).await.unwrap();
+
+    let got = tdb.db.climate_decisions("z1", 10).await.unwrap();
+    assert_eq!(got.len(), 3);
+    assert_eq!(got[0], empty);
+    assert_eq!(got[1], rows[1]);
+    assert_eq!(got[2], rows[0]);
+    let limited = tdb.db.climate_decisions("z1", 1).await.unwrap();
+    assert_eq!(limited, vec![empty]);
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
+async fn climate_commands_filters_applied_and_entities() {
+    let Some(tdb) = fresh_db().await else { return };
+    let rows = vec![
+        decision(1_000_000, "z1", "climate.a", true, "in"),
+        decision(2_000_000, "z1", "climate.a", false, "not applied"),
+        decision(3_000_000, "z1", "climate.b", true, "other entity"),
+        decision(4_000_000, "z1", "climate.a", true, "also in"),
+        decision(9_000_000, "z1", "climate.a", true, "after window"),
+    ];
+    tdb.db.insert_climate_decisions(&rows).await.unwrap();
+
+    let got = tdb
+        .db
+        .climate_commands(&["climate.a".to_string()], 0, 5_000_000)
+        .await
+        .unwrap();
+    let reasons: Vec<&str> = got.iter().map(|r| r.reason.as_str()).collect();
+    assert_eq!(reasons, ["in", "also in"]);
+    assert!(
+        tdb.db
+            .climate_commands(&[], 0, 5_000_000)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
+async fn climate_targets_reads_jsonb_and_carries_prior_value() {
+    let Some(tdb) = fresh_db().await else { return };
+    let t: i64 = 1_800_000_000_000_000;
+    let h = 3_600_000_000;
+    let m = 60_000_000;
+    let rows = Rows {
+        values: vec![
+            climate_row("climate.a", t - 2 * h, Some(18.0), "heat"),
+            climate_row("climate.a", t - 30 * m, Some(20.0), "heat"),
+            climate_row("climate.a", t + 10 * m, None, "off"),
+            climate_row("climate.b", t - 15 * m, Some(25.0), "cool"),
+            value_row("climate.a", t - 5 * m, 7.0),
+        ],
+        availability: vec![],
+    };
+    tdb.db.insert(&rows).await.unwrap();
+
+    let got = tdb
+        .db
+        .climate_targets("climate.a", t - h, t + h)
+        .await
+        .unwrap();
+    assert_eq!(
+        got,
+        vec![
+            (t - h, Some(18.0), Some("heat".to_string())),
+            (t - 30 * m, Some(20.0), Some("heat".to_string())),
+            (t + 10 * m, None, Some("off".to_string())),
+        ]
+    );
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
+async fn mean_since_averages_num() {
+    let Some(tdb) = fresh_db().await else { return };
+    let rows = Rows {
+        values: vec![
+            value_row("out", 1_000_000, 10.0),
+            value_row("out", 2_000_000, 20.0),
+            value_row("out", 9_000_000, 99.0),
+            value_row("other", 1_500_000, 50.0),
+        ],
+        availability: vec![],
+    };
+    tdb.db.insert(&rows).await.unwrap();
+
+    assert_eq!(
+        tdb.db.mean_since("out", 0, 5_000_000).await.unwrap(),
+        Some(15.0)
+    );
+    assert_eq!(tdb.db.mean_since("nope", 0, 5_000_000).await.unwrap(), None);
+
+    tdb.drop_db().await;
 }

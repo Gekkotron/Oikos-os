@@ -20,7 +20,7 @@ use oikos_core::model::{Availability, StateValue};
 /// Handle on the history Postgres pool.
 #[derive(Clone)]
 pub struct Db {
-    pool: PgPool,
+    pub(super) pool: PgPool,
 }
 
 impl Db {
@@ -384,11 +384,11 @@ async fn upsert_availability_latest(
     Ok(())
 }
 
-fn micros_to_dt(m: Micros) -> DateTime<Utc> {
+pub(super) fn micros_to_dt(m: Micros) -> DateTime<Utc> {
     DateTime::<Utc>::from_timestamp_micros(m).unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
 }
 
-fn dt_to_micros(dt: DateTime<Utc>) -> Micros {
+pub(super) fn dt_to_micros(dt: DateTime<Utc>) -> Micros {
     dt.timestamp_micros()
 }
 
