@@ -24,13 +24,16 @@ Until Zigbee2MQTT publishes under `oikos`, list the Home Assistant prefix next t
 discovery_prefixes = ["oikos", "homeassistant"]
 ```
 
-The web UI's Alerts screens read OikosPush's retained history, and alert buttons reply where the app replies. Both topics are configuration, with OikosPush's current names as defaults; they become `oikos/history` and `oikos/push/responses` once the hub takes over push:
+The hub sends the house's push notifications to the Android app through Firebase Cloud Messaging (see [Push notifications](#push-notifications)). Without `credentials` it keeps the alert history and sends nothing, with one warning at start; a key file that is missing or unreadable is the same, and the warning names its path. The hub starts either way.
 
 ```toml
 [push]
-history_topic = "oikos-push/history"
-responses_topic = "oikos-push/responses"
+prefix = "oikos/push"            # <prefix>/notification/<source>, /tokens/<installId>, /responses, /history
+legacy_prefix = "oikos-push"     # OikosPush's topics, still read during the switch-over; "" turns them off
+credentials = "/path/to/firebase-service-account.json"  # git-ignored, never logged; leave out to send nothing
 ```
+
+`retry_interval` (60 s), `max_retries` (10), `history_size` (100 alerts) and `history_days` (7) keep OikosPush's values. The old `history_topic` and `responses_topic` keys are refused at start: the error names the keys `[push]` takes.
 
 Alert snapshots and clips are URLs on Frigate. When they point at Frigate's login port (8971) the browser cannot load them, so give the hub the Frigate login and it serves them itself: media on that origin is rewritten to `/api/v1/media?url=…`, and the hub fetches it with Frigate's session cookie (logging in on demand, once more on a 401). Any other origin is refused. Leave `user` and `password` out for the unauthenticated port (5000).
 
@@ -40,6 +43,23 @@ url = "http://192.168.1.20:8971"
 user = "oikos"
 password = "…"
 ```
+
+The hub also replaces OikosPush's Frigate bridge: with `bridge = true` (and a `url` or `media_url`) it reads `<topic_prefix>/events` (subscribed only then) and raises a `camera` alert for each tracked object that qualifies. The first qualifying message (`new`, or the `update` that enters a watched zone) rings with the snapshot; `end` with a clip re-sends the same alert id silently with the clip; an event that only qualifies at `end` gets one audible alert with its clip. The title is the camera, the body `Person detected`, `Person in Porch` or `Alice (person) detected`, and `loc` (`frigate.object`) lets the app write it in the phone's language.
+
+```toml
+[frigate]
+bridge = true
+media_url = "http://192.168.1.20:5000"  # what the phone fetches media from; `url` when unset
+labels = ["person", "car"]              # empty: all
+cameras = []                            # empty: all
+zones = []                              # empty: any; otherwise alert once the object enters one
+cooldown = 0                            # seconds to ignore new events on a camera after an alert
+severity = "warning"
+ttl = 43200
+topic_prefix = "frigate"                # Frigate's MQTT topic_prefix
+```
+
+The broker user needs read on `<topic_prefix>/events`. Frigate needs `snapshots.enabled: true`, and event clips retained (`record.enabled`) for the clip update.
 
 ## Zigbee2MQTT
 
@@ -61,6 +81,61 @@ The [WaterHeaterController](https://github.com/Gekkotron/WaterHeaterController) 
 mosquitto_pub -h 192.168.1.91 -u <user> -P <password> -r -t oikos/device/water_heater/config -m '{"dev":{"ids":["water_heater_controller"],"name":"Water heater","mf":"Gekkotron","mdl":"WaterHeaterController"},"stat_t":"water-heater/data","cmps":{"heater":{"p":"water_heater","name":null,"uniq_id":"water_heater","unit_of_meas":"°C","modes":[],"curr_temp_t":"water-heater/data","curr_temp_tpl":"{{ (80 + (0.35 - value_json.adc_result_mv / 1000) * 86.67) | round(1) }}","mode_stat_t":"water-heater/data","mode_stat_tpl":"{{ \"heat\" if (value_json.triac_0_power + value_json.triac_1_power + value_json.triac_2_power) > 0 else \"off\" }}","json_attr_t":"water-heater/data","json_attr_tpl":"{{ {\"inlet_temperature\": value_json.temp_0 | round(1), \"power\": ((value_json.triac_0_power + value_json.triac_1_power + value_json.triac_2_power) / 3) | round | int} | tojson }}"},"tank_temp":{"p":"sensor","name":"Tank temperature","uniq_id":"water_heater_tank_temp","dev_cla":"temperature","stat_cla":"measurement","unit_of_meas":"°C","val_tpl":"{{ (80 + (0.35 - value_json.adc_result_mv / 1000) * 86.67) | round(1) }}"},"power_0":{"p":"number","name":"Power 1","uniq_id":"water_heater_power_0","cmd_t":"water-heater/control","cmd_tpl":"{\"power0\": {{ value | int }}}","val_tpl":"{{ value_json.triac_0_power }}","min":0,"max":100,"step":1,"unit_of_meas":"%"},"power_1":{"p":"number","name":"Power 2","uniq_id":"water_heater_power_1","cmd_t":"water-heater/control","cmd_tpl":"{\"power1\": {{ value | int }}}","val_tpl":"{{ value_json.triac_1_power }}","min":0,"max":100,"step":1,"unit_of_meas":"%"},"power_2":{"p":"number","name":"Power 3","uniq_id":"water_heater_power_2","cmd_t":"water-heater/control","cmd_tpl":"{\"power2\": {{ value | int }}}","val_tpl":"{{ value_json.triac_2_power }}","min":0,"max":100,"step":1,"unit_of_meas":"%"},"temp_0":{"p":"sensor","name":"Cold water inlet temperature","uniq_id":"water_heater_temp_0","dev_cla":"temperature","stat_cla":"measurement","unit_of_meas":"°C","val_tpl":"{{ value_json.temp_0 | round(1) }}"},"temp_1":{"p":"sensor","name":"Triac temperature","uniq_id":"water_heater_temp_1","dev_cla":"temperature","stat_cla":"measurement","unit_of_meas":"°C","val_tpl":"{{ value_json.temp_1 | round(1) }}","ent_cat":"diagnostic"},"frequency":{"p":"sensor","name":"Mains frequency","uniq_id":"water_heater_frequency","dev_cla":"frequency","stat_cla":"measurement","unit_of_meas":"Hz","ent_cat":"diagnostic","val_tpl":"{{ value_json.measuredFrequency | round(1) }}"},"frequency_error":{"p":"binary_sensor","name":"Mains frequency error","uniq_id":"water_heater_frequency_error","dev_cla":"problem","ent_cat":"diagnostic","pl_on":"1","pl_off":"0","val_tpl":"{{ value_json.frequencyError }}"}}}'
 ```
 
+## Push notifications
+
+The hub took over from OikosPush. Producers publish an alert (OikosPush's v1 or legacy payload) on `oikos/push/notification/<source>`; the hub normalises it, adds it to its history and sends it through FCM to every app install registered on `oikos/push/tokens/<installId>`. Sends that fail for a transient reason are retried from memory every `retry_interval` seconds, up to `max_retries` times; a dead token is cleared on the broker. Parts of the hub that raise alerts themselves hand them to the same path in process, without the broker.
+
+| Topic | Direction | Retained | Content |
+| --- | --- | --- | --- |
+| `oikos/push/notification/<source>` | producer → hub | no | v1 or legacy payload |
+| `oikos/push/tokens/<installId>` | app → hub | yes | `{token, device_name, lang, updated_at}`; an empty payload unregisters |
+| `oikos/push/responses` | app / web → producer | no | `{id, action, install_id, ts}` |
+| `oikos/push/history` | hub → app, web | yes | JSON array of the normalised alerts, newest first |
+
+After each (re)connect the hub waits for its subscription to be acknowledged, then 2 s more for the retained tokens, before it sends; alerts arriving meanwhile wait in the queue. The history is the retained `oikos/push/history` itself: the hub adopts it at its first sync, and only when that topic holds no list yet does it seed it once from OikosPush's `oikos-push/history`.
+
+While `legacy_prefix` is set the hub also reads `oikos-push/notification/+`, `oikos-push/tokens/+` and `oikos-push/history`, so producers outside this repo and an app build that is not updated yet keep working; a token registered on both topics is sent to once. The hub never publishes there, except an empty retained payload clearing a dead token that came from `oikos-push/tokens/<id>`.
+
+### Switching over from OikosPush
+
+0. **Broker ACL.** The hub connects as the `[mqtt] user` of `oikos.toml`. That user needs:
+   - [ ] read and write on `oikos/push/#`;
+   - [ ] read on `oikos-push/notification/+` and `oikos-push/history`;
+   - [ ] read and write on `oikos-push/tokens/+` (the hub clears dead tokens there);
+   - [ ] read on `<frigate prefix>/events` and `encryption-gateway/health/+`.
+
+   Mosquitto denies silently, but the Python ACL watchdog keeps running throughout, so a missing grant shows up on the phone as a system alert. The ACL file lives on the broker host, outside this repo.
+1. Ship the hub with push on but **no `[push] credentials`**, and the Frigate bridge and the gateway watchdog **off**: it builds its history from the producers' notifications and shows alerts, and sends nothing. OikosPush is still the sender. Check that the hub's history matches OikosPush's: for alerts received while both run, the same ids in the same order with the same `cancel` state. A mismatch is a bug to fix before step 2.
+2. Stop the OikosPush core, the Frigate bridge container and the gateway watchdog container (`docker compose down` on the broker host). Leave the ACL watchdog container running: it stays the Python container until the hub runs next to Mosquitto (or can read its log or `$SYS` topic), and `[watchdog.acl]` is left off until then.
+3. Set `[push] credentials` (copy the service-account key from the OikosPush deploy directory, git-ignored, never printed), turn `[frigate] bridge` and `[watchdog.gateway]` on (`[watchdog.acl]` stays off, see above), and restart the hub.
+4. Send a test notification over MCP and check that it arrives once. Trigger a camera event and check the snapshot, then the clip.
+
+Until step 3 both the hub and OikosPush publish a retained history, on different topics (`oikos/push/history` and `oikos-push/history`); the current app reads the old one, so nothing changes for the phone.
+
+## Watchdogs
+
+Two opt-in watchdogs raise `system` alerts (ported from OikosPush's `gateway_health_watchdog` and `broker_acl_watchdog`).
+
+**Gateway health.** `[watchdog.gateway] enabled = true` subscribes to `<prefix>/+` (default `encryption-gateway/health`), where the gateway publishes one retained state per component (`{"status": "ok" | "fail" | "config_error", ...}`). The hub alerts on a change only: `ok` to non-ok ("<component> down", `warning`), non-ok to `ok` ("<component> recovered", `info`), `fail` to `config_error`, and a first message that is not `ok`. A first `ok`, and a retained state replayed unchanged on reconnect, stay silent.
+
+**Broker ACL.** Mosquitto acknowledges an ACL-denied PUBLISH and drops it with only a log line. `[watchdog.acl] enabled = true` turns each `Denied PUBLISH/SUBSCRIBE/UNSUBSCRIBE` line (and the older `Client X is not authorised to ...` wording) into a `warning` alert "MQTT ACL denial". A client, topic and action alert once per `cooldown` seconds (default 300); later denials are counted and named in the next alert (`+N more in last 300s`). Two sources:
+
+- `source = "topic"` (default) reads `log_topic` (`$SYS/broker/log/#`; needs `log_dest topic` in `mosquitto.conf`, and a broker that forwards ACL denials there);
+- `source = "file"` tails `log_file` from its end, follows rotation and truncation, and needs the hub to read the Mosquitto log; a file source without `log_file` is a config error.
+
+```toml
+[watchdog.gateway]
+enabled = true
+prefix = "encryption-gateway/health"
+
+[watchdog.acl]
+enabled = true
+source = "topic"
+cooldown = 300
+```
+
+The broker user needs read on `<prefix>/+` and, for the topic source, on `$SYS/broker/log/#`.
+
 ## HTTP API
 
 The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 and clear of Zigbee2MQTT on 8080 on the same server), CORS open to any origin, JSON in and out.
@@ -79,8 +154,9 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `DELETE /api/v1/virtual/{id}` | Removes a virtual entity and clears its retained topics (204), or `404`. |
 | `GET /api/v1/ignored` | The discovery topics that did not become an entity, each with the reason. |
 | `GET /ws` | WebSocket: a snapshot first, then every hub event as a JSON text frame. |
-| `GET /api/v1/alerts` | The push alerts OikosPush keeps in its retained history, newest first. |
-| `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on the responses topic); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
+| `GET /api/v1/alerts` | The push alerts the hub keeps in its retained history (`oikos/push/history`), newest first. |
+| `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on `oikos/push/responses`); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
+| `GET /api/v1/push` | Push status: `{"state","installs","queued"}`, `state` being `off` (no usable `[push] credentials`), `syncing` (rebuilding the token map after a connect) or `ready`; `installs` counts the registered app installs, `queued` the alerts waiting in the retry queue. |
 | `GET /api/v1/media?url=…` | A Frigate snapshot or clip fetched by the hub with the Frigate login (`[frigate]`); `Range` is passed through so clips seek. `400` without a valid URL, `403` off the Frigate origin, `502` when Frigate is unreachable. |
 | `GET /api/v1/schedule?cron=…&count=…` | Previews a 5-field cron in the house local time: the next `count` ticks. `200` with the preview, `422` for a bad cron. |
 | `GET /api/v1/flows` | Every flow with its engine state: definition, why it is invalid, the active run and the recent runs. |
@@ -114,8 +190,10 @@ The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers twenty tools
 - `list_ignored` — the discovery topics that did not become an entity, with the reason.
 - `list_flows` — the automations (flows) with name, enabled state, node count, room (`area`) and latest run.
 - `get_flow` — one flow with its definition (including `area`) and recent runs.
-- `set_flow` — creates or replaces a flow (`trigger.state`, `trigger.schedule`, `flow.enable`, `if`, `delay` and `command` nodes; `mode: restart` for "N minutes after the last …"), validated against the house; `area` sets the room it is listed under. A `trigger.schedule` fires only while the flow is enabled; `flow.enable` turns another flow (or its own) on or off.
+- `set_flow` — creates or replaces a flow (`trigger.state`, `trigger.schedule`, `flow.enable`, `if`, `delay`, `command` and `notify` nodes; `mode: restart` for "N minutes after the last …"), validated against the house; `area` sets the room it is listed under. A `trigger.schedule` fires only while the flow is enabled; `flow.enable` turns another flow (or its own) on or off.
 - `delete_flow` — removes a flow.
+- `send_notification` — sends a phone push (`title`, optional `body`, `channel`, `severity`, `entity_id`, `image_url`, `silent`, `id`) and returns its alert id.
+- `list_alerts` — the recent push alerts, newest first (`limit` 20 by default, optional `channel` filter).
 - `set_flow_enabled` — turns a flow on or off.
 - `run_flow` — starts a manual run of a flow.
 - `set_virtual` — creates or replaces a virtual switch, number or button the hub owns.
@@ -162,7 +240,7 @@ Screens:
 - Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor.
 - Devices: the administration view of the Zigbee devices.
 - Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night, Warm).
-- Alerts (`/alerts`): the push alerts OikosPush keeps, with channel chips and day groups, and a "Recent alerts" section on Home; the detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". Same screens as the Android app; the body stays in the producer's language.
+- Alerts (`/alerts`): the push alerts the hub keeps in `oikos/push/history`, with channel chips and day groups, and a "Recent alerts" section on Home; the detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". Same screens as the Android app; the body stays in the producer's language.
 - Flows (`/flows`, `/flows/<id>`): the flows list, grouped by room, with search, status and trigger filters, sorting and a List/Cards view; an enable switch per flow and a **New flow** button; and a full-bleed canvas per flow (see [Flows](#flows)).
 
 Development runs in two terminals:
@@ -234,6 +312,7 @@ A flow is an n8n-style automation: a small graph of nodes stored as one retained
 | `trigger.state` | `entity` (id), optional `to`, optional `from` | one | Starts a run when the entity's scalar changes to a different value. `to`/`from` filter on the new/previous scalar. The replayed value after boot or reconnect arms the entity silently; it never fires on that replay, on an availability-only change, or on an equal-value report. |
 | `trigger.schedule` | `cron` (5 fields, house local time) | one | Starts a run at each wall-clock tick while the flow is enabled; the first run is at the next tick. |
 | `flow.enable` | optional `flow` (id), `enabled` (bool) | one | Enables or disables the target flow, its own by default. A flow that disables itself still finishes the current run. |
+| `notify` | `title` (required), optional `body`, `channel` (`alarm`, `security`, `camera`, `energy`, `climate`, `system`, `misc`; default `misc`), `severity` (`info`, `warning`, `critical`; default `info`), `entity_id`, `image_url`, `silent`, `id` | one | Sends a phone push notification. The alert id is `flow-<flow id>-<run id>` unless `id` is set; a fixed `id` makes each run replace the previous alert. |
 | `if` | `op` one of `eq ne gt lt gte lte`, `value` (bool, number or string), optional `entity`, optional `missing` (`fail`, `true` or `false`) | `true`, `false` | Compares the scalar of `entity` (default: the entity that triggered the run, read live) to `value`. `gt lt gte lte` need both sides numeric, otherwise the node fails. When the value is unknown, `missing` picks that port; the default `fail` fails the node. |
 | `delay` | `for`: `"90s"`, `"5m"`, `"1h30m"` | one | Pauses the run. Cancelled with the run. |
 | `command` | `entity` (id), `command` (the API's `Command` JSON) | one | Sends the command through the hub's command path, confirmed by the entity's state echo within `confirm_timeout_ms`, exactly like the API's `send_command`. No echo, a rejection or an offline entity fails the node. |

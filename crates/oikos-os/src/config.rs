@@ -1,7 +1,7 @@
 //! Layered configuration: defaults, then `oikos.toml`, then `OIKOS_*` env vars.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
@@ -17,6 +17,7 @@ pub struct Config {
     pub log: LogConfig,
     pub push: PushConfig,
     pub frigate: FrigateConfig,
+    pub watchdog: WatchdogConfig,
     pub automation: AutomationConfig,
     pub flows: FlowsConfig,
     pub groups: GroupsConfig,
@@ -131,21 +132,55 @@ impl Default for LogConfig {
     }
 }
 
-/// Where OikosPush keeps its retained alert history and where the app's replies go. The
-/// defaults match OikosPush today; they become `oikos/history` and `oikos/push/responses`
-/// once the hub takes over push.
+/// Push notifications, owned by the hub: producers publish on `<prefix>/notification/<source>`,
+/// the app registers on `<prefix>/tokens/<installId>` and replies on `<prefix>/responses`, the
+/// hub keeps the retained `<prefix>/history`. The legacy OikosPush topics under
+/// `legacy_prefix` are read too (empty disables them). Without `credentials` (a Firebase
+/// service-account key file) the hub keeps the history and sends nothing.
+///
+/// Unknown keys are refused, so a config still setting the old `history_topic` /
+/// `responses_topic` fails at start naming the keys it accepts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct PushConfig {
-    pub history_topic: String,
-    pub responses_topic: String,
+    pub prefix: String,
+    pub legacy_prefix: String,
+    /// Path of the service-account JSON key; only the path is ever logged.
+    pub credentials: Option<PathBuf>,
+    /// Seconds between two passes of the retry queue.
+    pub retry_interval: u64,
+    /// Attempts before a queued alert is given up.
+    pub max_retries: u32,
+    /// Alerts kept in the history.
+    pub history_size: usize,
+    /// Days an alert stays in the history.
+    pub history_days: u64,
 }
 
 impl Default for PushConfig {
     fn default() -> Self {
         Self {
-            history_topic: "oikos-push/history".into(),
-            responses_topic: "oikos-push/responses".into(),
+            prefix: "oikos/push".into(),
+            legacy_prefix: "oikos-push".into(),
+            credentials: None,
+            retry_interval: 60,
+            max_retries: 10,
+            history_size: 100,
+            history_days: 7,
+        }
+    }
+}
+
+impl PushConfig {
+    /// The service settings (everything but the credentials).
+    pub fn settings(&self) -> oikos_push::PushSettings {
+        oikos_push::PushSettings {
+            prefix: self.prefix.clone(),
+            legacy_prefix: self.legacy_prefix.clone(),
+            retry_interval: self.retry_interval,
+            max_retries: self.max_retries,
+            history_size: self.history_size,
+            history_days: self.history_days,
         }
     }
 }
@@ -161,6 +196,25 @@ pub struct FrigateConfig {
     pub password: Option<String>,
     /// How long a connection to Frigate may take before the media request fails.
     pub connect_timeout_ms: u64,
+    /// The base URL the phone uses to fetch media in the alerts the bridge raises; `url` when
+    /// unset.
+    pub media_url: Option<String>,
+    /// Turns Frigate events (`<topic_prefix>/events`) into push alerts. Needs a URL.
+    pub bridge: bool,
+    /// Labels to alert on; empty means all.
+    pub labels: Vec<String>,
+    /// Cameras to alert on; empty means all.
+    pub cameras: Vec<String>,
+    /// Alert only once the object enters one of these zones; empty means any.
+    pub zones: Vec<String>,
+    /// Seconds to ignore new events on a camera after an alert.
+    pub cooldown: u64,
+    /// The v1 `severity` of the alerts.
+    pub severity: String,
+    /// The v1 `ttl` of the alerts, in seconds.
+    pub ttl: u32,
+    /// Frigate's MQTT `topic_prefix`.
+    pub topic_prefix: String,
 }
 
 impl Default for FrigateConfig {
@@ -170,6 +224,141 @@ impl Default for FrigateConfig {
             user: None,
             password: None,
             connect_timeout_ms: 5000,
+            media_url: None,
+            bridge: false,
+            labels: Vec::new(),
+            cameras: Vec::new(),
+            zones: Vec::new(),
+            cooldown: 0,
+            severity: "warning".to_owned(),
+            ttl: 43200,
+            topic_prefix: "frigate".to_owned(),
+        }
+    }
+}
+
+impl FrigateConfig {
+    /// The bridge's settings, or `None` when it is off or no URL is set.
+    pub fn bridge_settings(&self) -> Option<oikos_frigate::FrigateSettings> {
+        let present = |s: &&String| !s.trim().is_empty();
+        let url = self
+            .media_url
+            .as_ref()
+            .filter(present)
+            .or(self.url.as_ref().filter(present))?;
+        if !self.bridge {
+            return None;
+        }
+        let set = |list: &[String]| {
+            list.iter()
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty())
+                .collect()
+        };
+        let mut settings = oikos_frigate::FrigateSettings::new(url.trim());
+        settings.labels = set(&self.labels);
+        settings.cameras = set(&self.cameras);
+        settings.zones = set(&self.zones);
+        settings.cooldown = self.cooldown;
+        settings.severity = self.severity.clone();
+        settings.ttl = self.ttl;
+        Some(settings)
+    }
+
+    /// The MQTT topic Frigate publishes its events on.
+    pub fn events_topic(&self) -> String {
+        format!("{}/events", self.topic_prefix.trim_matches('/'))
+    }
+}
+
+/// Watchdogs that turn infrastructure trouble into `system` push alerts.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WatchdogConfig {
+    pub gateway: GatewayWatchdogConfig,
+    pub acl: AclWatchdogConfig,
+}
+
+impl WatchdogConfig {
+    /// Rejects a watchdog that is on but has nothing to read.
+    pub fn validate(&self) -> Result<(), String> {
+        let blank = |s: &str| s.trim().is_empty();
+        if self.gateway.enabled && blank(self.gateway.prefix.trim_matches('/')) {
+            return Err("[watchdog.gateway] is enabled but prefix is empty".to_owned());
+        }
+        let acl = &self.acl;
+        if acl.enabled {
+            match acl.source {
+                AclSource::File
+                    if acl
+                        .log_file
+                        .as_ref()
+                        .is_none_or(|p| p.as_os_str().is_empty()) =>
+                {
+                    return Err(
+                        "[watchdog.acl] source = \"file\" needs log_file (the Mosquitto log path)"
+                            .to_owned(),
+                    );
+                }
+                AclSource::Topic if blank(&acl.log_topic) => {
+                    return Err("[watchdog.acl] source = \"topic\" needs log_topic".to_owned());
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The gateway health watchdog: alerts on state changes of `<prefix>/<component>`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct GatewayWatchdogConfig {
+    pub enabled: bool,
+    pub prefix: String,
+}
+
+impl Default for GatewayWatchdogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            prefix: "encryption-gateway/health".to_owned(),
+        }
+    }
+}
+
+/// Where the broker ACL watchdog reads Mosquitto's log lines from.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AclSource {
+    /// The `log_topic` (`$SYS/broker/log/#`; needs `log_dest topic` in `mosquitto.conf`).
+    #[default]
+    Topic,
+    /// Tail `log_file`.
+    File,
+}
+
+/// The broker ACL watchdog: alerts on `Denied PUBLISH/SUBSCRIBE/UNSUBSCRIBE` log lines.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AclWatchdogConfig {
+    pub enabled: bool,
+    pub source: AclSource,
+    pub log_topic: String,
+    /// The Mosquitto log to tail when `source = "file"`.
+    pub log_file: Option<PathBuf>,
+    /// Seconds during which repeats of one denial are held back.
+    pub cooldown: u64,
+}
+
+impl Default for AclWatchdogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            source: AclSource::Topic,
+            log_topic: "$SYS/broker/log/#".to_owned(),
+            log_file: None,
+            cooldown: 300,
         }
     }
 }
@@ -182,6 +371,15 @@ impl fmt::Debug for FrigateConfig {
             .field("user", &self.user)
             .field("password", &password)
             .field("connect_timeout_ms", &self.connect_timeout_ms)
+            .field("media_url", &self.media_url)
+            .field("bridge", &self.bridge)
+            .field("labels", &self.labels)
+            .field("cameras", &self.cameras)
+            .field("zones", &self.zones)
+            .field("cooldown", &self.cooldown)
+            .field("severity", &self.severity)
+            .field("ttl", &self.ttl)
+            .field("topic_prefix", &self.topic_prefix)
             .finish()
     }
 }
@@ -318,12 +516,19 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "topics.automation_prefix",
     "http.bind",
     "log.level",
-    "push.history_topic",
-    "push.responses_topic",
+    "push.prefix",
+    "push.legacy_prefix",
+    "push.credentials",
     "flows.timezone",
     "frigate.url",
     "frigate.user",
     "frigate.password",
+    "frigate.media_url",
+    "frigate.severity",
+    "frigate.topic_prefix",
+    "watchdog.gateway.prefix",
+    "watchdog.acl.log_topic",
+    "watchdog.acl.log_file",
     "history.url",
 ];
 

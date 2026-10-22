@@ -47,6 +47,7 @@ fn summary_label(node: &Node) -> String {
         NodeKind::Delay(p) => format!("Delay {}", p.for_),
         NodeKind::Command(p) => humanise(command_name(&p.command)),
         NodeKind::FlowEnable(p) => flow_switch_text(p),
+        NodeKind::Notify(_) => "Notify".into(),
     }
 }
 

@@ -48,7 +48,7 @@ pub fn role(kind: &NodeKind) -> Role {
         | NodeKind::TriggerSun(_)
         | NodeKind::TriggerSignal(_) => Role::Trigger,
         NodeKind::If(_) => Role::Check,
-        NodeKind::Command(_) | NodeKind::FlowEnable(_) => Role::Action,
+        NodeKind::Command(_) | NodeKind::FlowEnable(_) | NodeKind::Notify(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
     }
 }
@@ -189,6 +189,13 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         }
         NodeKind::Delay(p) => format!("Wait {}", duration_words(&p.for_)),
         NodeKind::Command(p) => command_sentence(&p.command, &p.entity, ctx),
+        NodeKind::Notify(p) => {
+            if p.title.trim().is_empty() {
+                "Notify".to_owned()
+            } else {
+                format!("Notify \"{}\"", p.title)
+            }
+        }
         NodeKind::FlowEnable(p) => {
             let verb = if p.enabled { "Enable" } else { "Disable" };
             let target = match &p.flow {
@@ -394,6 +401,14 @@ mod tests {
         assert_eq!(d("1h30m"), "Wait 1 h 30 min");
         assert_eq!(duration_words("45s"), "45 s");
         assert_eq!(duration_words("junk"), "junk");
+    }
+
+    #[test]
+    fn notify_text() {
+        let n = r#"{"id":"a","type":"notify","params":{"title":"Door open"}}"#;
+        assert_eq!(text(n), "Notify \"Door open\"");
+        let empty = r#"{"id":"a","type":"notify","params":{"title":""}}"#;
+        assert_eq!(text(empty), "Notify");
     }
 
     #[test]

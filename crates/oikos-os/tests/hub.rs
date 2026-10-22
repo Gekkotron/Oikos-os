@@ -585,7 +585,7 @@ async fn invalid_discovery_is_logged_once() {
 
 // ----- push alerts -----
 
-const HISTORY_TOPIC: &str = "oikos-push/history";
+const HISTORY_TOPIC: &str = "oikos/push/history";
 const ALERT_ENTRY: &str = r#"{"v":1,"id":"frigate-front-1696","channel":"camera","severity":"warning","title":"Front Door","body":"Person in Porch","image_url":"http://192.168.1.20:5000/api/events/1696/snapshot.jpg","actions":[{"id":"disarm","label":"Disarm"}],"silent":false,"sent_at":1760880000,"source":"frigate"}"#;
 
 fn history_payload() -> Vec<u8> {
@@ -670,7 +670,7 @@ async fn reply_publishes_the_app_payload() {
         .expect("reply accepted");
 
     let published = publisher.recv().await.expect("a publish");
-    assert_eq!(published.topic, "oikos-push/responses");
+    assert_eq!(published.topic, "oikos/push/responses");
     assert!(!published.retain);
     let value: serde_json::Value = serde_json::from_str(&published.payload).expect("json");
     assert_eq!(value["id"], "frigate-front-1696");
@@ -710,6 +710,124 @@ async fn reply_rejects_unknown_alert_action_and_offline() {
         hub.reply("frigate-front-1696", "disarm"),
         Err(HubError::Publish(_))
     ));
+}
+
+#[tokio::test]
+async fn push_history_topic_feeds_alert_store() {
+    let (hub, _publisher) = hub();
+    assert_eq!(hub.push().history_topic(), HISTORY_TOPIC);
+
+    // The broker's echo of the hub's own retained publish arrives live (retain = false).
+    hub.ingest_message(HISTORY_TOPIC, &history_payload(), false);
+    assert_eq!(hub.alerts().len(), 1);
+    assert_eq!(hub.alerts()[0].id, "frigate-front-1696");
+
+    // OikosPush's list is no longer what the web reads.
+    hub.ingest_message("oikos-push/history", b"[]", true);
+    assert_eq!(hub.alerts().len(), 1);
+}
+
+#[tokio::test]
+async fn push_topics_are_not_discovery() {
+    assert!(
+        oikos_core::registry::RegistryConfig::default_reserved().contains(&"push".to_owned()),
+        "push is a reserved sub-tree of the discovery prefix"
+    );
+    let (hub, _publisher) = hub();
+    hub.ingest_message(
+        "oikos/push/tokens/a",
+        br#"{"token":"t","device_name":"Pixel","lang":"fr","updated_at":1}"#,
+        true,
+    );
+    hub.ingest_message("oikos/push/notification/flow", br#"{"title":"T"}"#, false);
+    hub.ingest_message("oikos/push/sensor/config", br#"{"name":"x"}"#, true);
+    assert!(hub.ignored().is_empty(), "{:?}", hub.ignored());
+    assert_eq!(hub.counts().0, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn notify_publishes_history_after_sync() {
+    let (hub, mut publisher) = hub();
+    hub.on_connected();
+    hub.on_suback();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+
+    let id = hub
+        .notify(
+            "flow",
+            &serde_json::json!({"v": 1, "id": "x", "title": "T"}),
+        )
+        .expect("accepted");
+    assert_eq!(id, "x");
+
+    let published = drain(&mut publisher);
+    let last = published
+        .iter()
+        .rev()
+        .find(|p| p.topic == "oikos/push/history")
+        .unwrap_or_else(|| panic!("a history publish in {published:?}"));
+    assert!(last.retain);
+    let list: serde_json::Value = serde_json::from_str(&last.payload).expect("json");
+    assert_eq!(list[0]["id"], "x", "{list}");
+    assert_eq!(list[0]["title"], "T");
+}
+
+/// A hub whose `[push] credentials` point at `path`.
+fn hub_with_credentials(path: PathBuf) -> Arc<Hub> {
+    let mut cfg = config();
+    cfg.push.credentials = Some(path);
+    let (tx, _rx) = mpsc::channel(64);
+    Hub::new(&cfg, tx)
+}
+
+#[tokio::test]
+async fn unreadable_credentials_keep_push_off() {
+    let missing = std::env::temp_dir().join("oikos-push-test-no-such-key.json");
+    let hub = hub_with_credentials(missing);
+    assert_eq!(hub.push().status().state, oikos_push::PushState::Off);
+
+    let dir = std::env::temp_dir().join(format!("oikos-push-bad-key-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let bad = dir.join("key.json");
+    std::fs::write(&bad, "not json").expect("write");
+    let hub = hub_with_credentials(bad);
+    assert_eq!(hub.push().status().state, oikos_push::PushState::Off);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn readable_credentials_turn_push_on() {
+    let dir = std::env::temp_dir().join(format!("oikos-push-key-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let key = dir.join("key.json");
+    std::fs::write(
+        &key,
+        r#"{"project_id":"p","client_email":"e@p.iam.gserviceaccount.com","private_key":"k","token_uri":"https://oauth2.googleapis.com/token"}"#,
+    )
+    .expect("write");
+    let hub = hub_with_credentials(key);
+    assert_eq!(hub.push().status().state, oikos_push::PushState::Syncing);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn notify_rejects_an_invalid_payload() {
+    let (hub, _publisher) = hub();
+    assert!(hub.notify("flow", &serde_json::json!({"v": 1})).is_err());
+}
+
+#[tokio::test]
+async fn alert_action_replies_on_new_responses_topic() {
+    let (hub, mut publisher) = hub();
+    hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    hub.reply("frigate-front-1696", "disarm")
+        .expect("reply accepted");
+
+    let published = publisher.recv().await.expect("a publish");
+    assert_eq!(published.topic, hub.push().responses_topic());
+    assert_eq!(published.topic, "oikos/push/responses");
 }
 
 fn virtual_switch() -> VirtualSpec {
@@ -1618,4 +1736,195 @@ async fn migration_honours_group_names() {
     assert_eq!(outcome.created, ["light_living"]);
     let views = hub.list_groups().expect("enabled");
     assert_eq!(views[0].name, "Main lamps");
+}
+
+// ----- Frigate bridge -----
+
+const FRIGATE_EVENT: &str = r#"{"type":"new","before":{},"after":{"id":"1696.5-abc","camera":"front_door","label":"person","has_clip":false,"false_positive":false,"entered_zones":[]}}"#;
+
+/// A hub with the Frigate bridge on or off, its push sync already settled.
+async fn frigate_hub(bridge: bool) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.frigate.url = Some("http://192.168.1.20:5000".to_owned());
+    cfg.frigate.bridge = bridge;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    hub.on_connected();
+    hub.on_suback();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    (hub, rx)
+}
+
+#[tokio::test(start_paused = true)]
+async fn frigate_event_becomes_history_alert_when_bridge_on() {
+    let (hub, mut publisher) = frigate_hub(true).await;
+    assert_eq!(hub.extra_filters(), vec!["frigate/events".to_owned()]);
+
+    hub.ingest_message("frigate/events", FRIGATE_EVENT.as_bytes(), false);
+
+    let published = drain(&mut publisher);
+    let last = published
+        .iter()
+        .rev()
+        .find(|p| p.topic == "oikos/push/history")
+        .unwrap_or_else(|| panic!("a history publish in {published:?}"));
+    let list: serde_json::Value = serde_json::from_str(&last.payload).expect("json");
+    assert_eq!(list[0]["id"], "frigate-1696.5-abc", "{list}");
+    assert_eq!(list[0]["title"], "Front Door");
+    assert_eq!(list[0]["loc"]["key"], "frigate.object");
+    assert_eq!(
+        list[0]["image_url"],
+        "http://192.168.1.20:5000/api/events/1696.5-abc/snapshot.jpg"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn frigate_events_ignored_when_bridge_off() {
+    let (hub, mut publisher) = frigate_hub(false).await;
+    assert!(hub.extra_filters().is_empty());
+
+    hub.ingest_message("frigate/events", FRIGATE_EVENT.as_bytes(), false);
+
+    let published = drain(&mut publisher);
+    assert!(
+        !published.iter().any(|p| p.payload.contains("frigate-")),
+        "{published:?}"
+    );
+}
+
+// ----- Watchdogs -----
+
+/// A hub with the watchdogs on, its push sync already settled.
+async fn watchdog_hub(
+    acl_source: oikos_os::config::AclSource,
+) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.watchdog.gateway.enabled = true;
+    cfg.watchdog.acl.enabled = true;
+    cfg.watchdog.acl.source = acl_source;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    hub.on_connected();
+    hub.on_suback();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    (hub, rx)
+}
+
+/// The alert ids in the latest history publish, newest first.
+fn history_ids(published: &[Publish]) -> Vec<String> {
+    let Some(last) = published
+        .iter()
+        .rev()
+        .find(|p| p.topic == "oikos/push/history")
+    else {
+        return Vec::new();
+    };
+    let list: serde_json::Value = serde_json::from_str(&last.payload).expect("json");
+    list.as_array()
+        .expect("list")
+        .iter()
+        .map(|a| a["id"].as_str().expect("id").to_owned())
+        .collect()
+}
+
+const GW_FAIL: &str = r#"{"status":"fail","exit_code":1,"timestamp":1700000000,"host":"GEEKOMA5"}"#;
+const GW_OK: &str = r#"{"status":"ok","exit_code":0,"timestamp":1700000060,"host":"GEEKOMA5"}"#;
+const DENIED: &str =
+    "1791743566: Denied PUBLISH from Athena (d0, q0, r1, m0, 'athena/heartbeat', ... (207 bytes))";
+
+#[tokio::test(start_paused = true)]
+async fn watchdog_filters_follow_the_enabled_watchdogs() {
+    use oikos_os::config::AclSource;
+    let (hub, _rx) = watchdog_hub(AclSource::Topic).await;
+    assert_eq!(
+        hub.extra_filters(),
+        vec![
+            "encryption-gateway/health/+".to_owned(),
+            "$SYS/broker/log/#".to_owned()
+        ]
+    );
+    let (hub, _rx) = watchdog_hub(AclSource::File).await;
+    assert_eq!(
+        hub.extra_filters(),
+        vec!["encryption-gateway/health/+".to_owned()]
+    );
+    let (hub, _rx) = frigate_hub(false).await;
+    assert!(hub.extra_filters().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn gateway_health_transitions_alert_even_when_retained_and_replays_stay_silent() {
+    use oikos_os::config::AclSource;
+    let (hub, mut publisher) = watchdog_hub(AclSource::Topic).await;
+    let topic = "encryption-gateway/health/gateway";
+
+    // The retained replay on connect is news the first time ...
+    hub.ingest_message(topic, GW_FAIL.as_bytes(), true);
+    let ids = history_ids(&drain(&mut publisher));
+    assert_eq!(ids, vec!["gw-health-gateway-fail-1700000000".to_owned()]);
+
+    // ... and nothing when a reconnect replays it unchanged.
+    hub.ingest_message(topic, GW_FAIL.as_bytes(), true);
+    assert!(history_ids(&drain(&mut publisher)).is_empty());
+
+    hub.ingest_message(topic, GW_OK.as_bytes(), false);
+    let ids = history_ids(&drain(&mut publisher));
+    assert_eq!(ids[0], "gw-health-gateway-ok-1700000060");
+}
+
+#[tokio::test(start_paused = true)]
+async fn acl_log_topic_lines_become_system_alerts_and_cool_down() {
+    use oikos_os::config::AclSource;
+    let (hub, mut publisher) = watchdog_hub(AclSource::Topic).await;
+
+    hub.ingest_message("$SYS/broker/log/N", DENIED.as_bytes(), false);
+    let ids = history_ids(&drain(&mut publisher));
+    assert_eq!(ids.len(), 1, "{ids:?}");
+    assert!(ids[0].starts_with("mqtt-acl-Athena-publish-"), "{ids:?}");
+
+    hub.ingest_message("$SYS/broker/log/N", DENIED.as_bytes(), false);
+    assert!(
+        history_ids(&drain(&mut publisher)).is_empty(),
+        "inside the cooldown"
+    );
+
+    // A retained replay and a topic outside the filter are no log lines.
+    hub.ingest_message(
+        "$SYS/broker/log/E",
+        b"Denied SUBSCRIBE from B (q0, 'x/y')",
+        true,
+    );
+    hub.ingest_message("other/log", b"Denied SUBSCRIBE from B (q0, 'x/y')", false);
+    assert!(history_ids(&drain(&mut publisher)).is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn acl_file_source_takes_lines_through_on_acl_line() {
+    use oikos_os::config::AclSource;
+    let (hub, mut publisher) = watchdog_hub(AclSource::File).await;
+    hub.ingest_message("$SYS/broker/log/N", DENIED.as_bytes(), false);
+    assert!(
+        history_ids(&drain(&mut publisher)).is_empty(),
+        "topic ignored for a file source"
+    );
+
+    hub.on_acl_line(DENIED);
+    let ids = history_ids(&drain(&mut publisher));
+    assert!(ids[0].starts_with("mqtt-acl-Athena-publish-"), "{ids:?}");
+}
+
+#[test]
+fn flow_notify_lists_mirror_the_push_service() {
+    assert_eq!(
+        oikos_core::flow::NOTIFY_CHANNELS,
+        oikos_push::normalize::CHANNELS
+    );
+    assert_eq!(
+        oikos_core::flow::NOTIFY_SEVERITIES,
+        oikos_push::normalize::SEVERITIES
+    );
 }

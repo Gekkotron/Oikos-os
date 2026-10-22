@@ -52,6 +52,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "set_group",
     "delete_group",
     "get_history",
+    "send_notification",
+    "list_alerts",
 ];
 
 const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
@@ -178,6 +180,9 @@ async fn lists_the_expected_tools() {
     assert!(instructions.contains("list_entities"), "{instructions}");
     assert!(instructions.contains("set_override"), "{instructions}");
     assert!(instructions.contains("send_command"), "{instructions}");
+    assert!(instructions.contains("send_notification"), "{instructions}");
+    assert!(instructions.contains("list_alerts"), "{instructions}");
+    assert!(instructions.contains("`notify`"), "{instructions}");
 
     let tools = client.list_all_tools().await.expect("list tools");
     let mut names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
@@ -1026,4 +1031,129 @@ async fn get_history_is_listed() {
     );
 
     client.cancel().await.expect("close");
+}
+
+const HISTORY_TOPIC: &str = "oikos/push/history";
+
+fn history_entry(id: &str, channel: &str, sent_at: u64) -> String {
+    format!(
+        r#"{{"v":1,"id":"{id}","channel":"{channel}","severity":"info","title":"T {id}","body":"","silent":false,"sent_at":{sent_at},"source":"test"}}"#
+    )
+}
+
+#[tokio::test]
+async fn send_notification_tool_returns_id() {
+    let server = Server::start().await;
+    let client = server.client().await;
+
+    let result = call(
+        &client,
+        "send_notification",
+        json!({"title": "Washer done", "channel": "energy", "severity": "warning"}),
+    )
+    .await;
+    let id = json_of("send_notification", &result)["id"]
+        .as_str()
+        .expect("id")
+        .to_owned();
+    assert!(id.starts_with("mcp-"), "{id}");
+
+    let fixed = call(
+        &client,
+        "send_notification",
+        json!({"title": "Dryer", "id": "dryer"}),
+    )
+    .await;
+    assert_eq!(json_of("send_notification", &fixed)["id"], "dryer");
+}
+
+#[tokio::test]
+async fn send_notification_rejects_missing_title() {
+    let server = Server::start().await;
+    let client = server.client().await;
+
+    let blank = call(&client, "send_notification", json!({"title": "  "})).await;
+    assert_eq!(blank.is_error, Some(true));
+    assert!(text_of(&blank).contains("title"), "{}", text_of(&blank));
+
+    let channel = call(
+        &client,
+        "send_notification",
+        json!({"title": "T", "channel": "pager"}),
+    )
+    .await;
+    assert_eq!(channel.is_error, Some(true));
+    assert!(
+        text_of(&channel).contains("unknown channel `pager`"),
+        "{}",
+        text_of(&channel)
+    );
+
+    let severity = call(
+        &client,
+        "send_notification",
+        json!({"title": "T", "severity": "loud"}),
+    )
+    .await;
+    assert_eq!(severity.is_error, Some(true));
+    assert!(
+        text_of(&severity).contains("unknown severity `loud`"),
+        "{}",
+        text_of(&severity)
+    );
+
+    let absent = client
+        .call_tool(
+            CallToolRequestParams::new("send_notification").with_arguments(serde_json::Map::new()),
+        )
+        .await;
+    let refused = match absent {
+        Err(_) => true,
+        Ok(result) => result.is_error == Some(true),
+    };
+    assert!(refused, "a call without title must be refused");
+}
+
+#[tokio::test]
+async fn list_alerts_filters_by_channel_and_limits() {
+    let server = Server::start().await;
+    let client = server.client().await;
+    let history = format!(
+        "[{},{},{}]",
+        history_entry("c", "camera", 300),
+        history_entry("b", "energy", 200),
+        history_entry("a", "camera", 100)
+    );
+    server.hub.ingest(HISTORY_TOPIC, history.as_bytes());
+
+    let all = json_of(
+        "list_alerts",
+        &call(&client, "list_alerts", json!({})).await,
+    );
+    let ids: Vec<&str> = all["alerts"]
+        .as_array()
+        .expect("alerts")
+        .iter()
+        .map(|a| a["id"].as_str().expect("id"))
+        .collect();
+    assert_eq!(ids, ["c", "b", "a"]);
+
+    let camera = json_of(
+        "list_alerts",
+        &call(&client, "list_alerts", json!({"channel": "camera"})).await,
+    );
+    let ids: Vec<&str> = camera["alerts"]
+        .as_array()
+        .expect("alerts")
+        .iter()
+        .map(|a| a["id"].as_str().expect("id"))
+        .collect();
+    assert_eq!(ids, ["c", "a"]);
+
+    let one = json_of(
+        "list_alerts",
+        &call(&client, "list_alerts", json!({"limit": 1})).await,
+    );
+    assert_eq!(one["alerts"].as_array().map(Vec::len), Some(1));
+    assert_eq!(one["alerts"][0]["id"], "c");
 }

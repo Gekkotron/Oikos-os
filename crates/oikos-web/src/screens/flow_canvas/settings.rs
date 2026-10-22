@@ -240,6 +240,7 @@ fn node_editor_body(
         NodeKind::Delay(_) => "Delay",
         NodeKind::Command(_) => "Command",
         NodeKind::FlowEnable(_) => "Flow switch",
+        NodeKind::Notify(_) => "Notify",
     };
     let id_display = id.clone();
     let close = move |_: web_sys::MouseEvent| selected.set(None);
@@ -381,6 +382,100 @@ fn flow_enable_fields(
                 <option value="enable" selected=enabled>"Enable"</option>
                 <option value="disable" selected=!enabled>"Disable"</option>
             </select>
+        </label>
+    }
+}
+
+/// The `notify` editor: title and body text, the channel and severity of the alert, and
+/// whether it arrives silently.
+fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> impl IntoView {
+    let title_id = id.clone();
+    let title_write = Callback::new(move |value: Option<String>| {
+        form.update(&title_id, |n| {
+            if let NodeKind::Notify(ref mut f) = n.kind {
+                f.title = value.unwrap_or_default();
+            }
+        });
+    });
+    let body_id = id.clone();
+    let body_write = Callback::new(move |value: Option<String>| {
+        form.update(&body_id, |n| {
+            if let NodeKind::Notify(ref mut f) = n.kind {
+                f.body = value;
+            }
+        });
+    });
+    let channel_id = id.clone();
+    let on_channel = move |ev: web_sys::Event| {
+        let value = event_target_value(&ev);
+        form.update(&channel_id, |n| {
+            if let NodeKind::Notify(ref mut f) = n.kind {
+                f.channel = (value != "misc").then_some(value);
+            }
+        });
+    };
+    let severity_id = id.clone();
+    let on_severity = move |ev: web_sys::Event| {
+        let value = event_target_value(&ev);
+        form.update(&severity_id, |n| {
+            if let NodeKind::Notify(ref mut f) = n.kind {
+                f.severity = (value != "info").then_some(value);
+            }
+        });
+    };
+    let on_silent = move |ev: web_sys::Event| {
+        let silent = event_target_checked(&ev);
+        form.update(&id, |n| {
+            if let NodeKind::Notify(ref mut f) = n.kind {
+                f.silent = silent.then_some(true);
+            }
+        });
+    };
+    let channel = p.channel.clone().unwrap_or_else(|| "misc".to_owned());
+    let severity = p.severity.clone().unwrap_or_else(|| "info".to_owned());
+    let silent = p.silent.unwrap_or(false);
+    view! {
+        <TextField
+            label="Title".into()
+            initial=p.title
+            placeholder="Door open".into()
+            optional=false
+            write=title_write
+        />
+        <TextField
+            label="Body".into()
+            initial=p.body.unwrap_or_default()
+            placeholder="(none)".into()
+            optional=true
+            write=body_write
+        />
+        <label class="node-editor__field">
+            <span class="node-editor__label">"Channel"</span>
+            <select class="field" on:change=on_channel>
+                {oikos_core::flow::NOTIFY_CHANNELS
+                    .iter()
+                    .map(|c| {
+                        let chosen = *c == channel;
+                        view! { <option value=*c selected=chosen>{*c}</option> }
+                    })
+                    .collect_view()}
+            </select>
+        </label>
+        <label class="node-editor__field">
+            <span class="node-editor__label">"Severity"</span>
+            <select class="field" on:change=on_severity>
+                {oikos_core::flow::NOTIFY_SEVERITIES
+                    .iter()
+                    .map(|s| {
+                        let chosen = *s == severity;
+                        view! { <option value=*s selected=chosen>{*s}</option> }
+                    })
+                    .collect_view()}
+            </select>
+        </label>
+        <label class="node-editor__field">
+            <span class="node-editor__label">"Silent"</span>
+            <input type="checkbox" aria-label="Silent" prop:checked=silent on:change=on_silent />
         </label>
     }
 }
@@ -650,6 +745,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             sun_sheet(node, cfg).into_any()
         }
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
+        NodeKind::Notify(p) => notify_fields(form, id, p).into_any(),
         NodeKind::Delay(p) => {
             let for_id = id;
             let for_write = Callback::new(move |value: Option<String>| {

@@ -2,8 +2,11 @@
 //! await); write tools log their arguments and go through the hub's writers.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use oikos_api::{CommandResponse, DeviceView, EntityView, GroupView};
+use oikos_core::flow::{notify_channel_error, notify_severity_error};
 use oikos_core::model::{AreasDocument, SwitchType};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{tool, tool_router};
@@ -11,11 +14,12 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::params::{
-    AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_LIMIT, DEFAULT_SEARCH_LIMIT,
-    DeleteGroupParams, DeleteVirtualParams, Deleted, DeviceList, EntityDetailView, EntityPage,
-    GetEntityParams, GetHistoryParams, GroupList, HistoryAnswer, HistoryWhat, IgnoredList, Include,
-    ListDevicesParams, ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult,
-    SendCommandParams, SetAreasParams, SetGroupParams, SetOverrideParams, SetVirtualParams,
+    AlertList, AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_ALERTS_LIMIT, DEFAULT_LIMIT,
+    DEFAULT_SEARCH_LIMIT, DeleteGroupParams, DeleteVirtualParams, Deleted, DeviceList,
+    EntityDetailView, EntityPage, GetEntityParams, GetHistoryParams, GroupList, HistoryAnswer,
+    HistoryWhat, IgnoredList, Include, ListAlertsParams, ListDevicesParams, ListEntitiesParams,
+    MAX_LIMIT, SearchParams, SearchResult, SendCommandParams, SendNotificationParams, Sent,
+    SetAreasParams, SetGroupParams, SetOverrideParams, SetVirtualParams,
 };
 use super::{OikosMcp, ToolError};
 use crate::history::query as history_query;
@@ -373,6 +377,82 @@ impl OikosMcp {
             }
         }
     }
+
+    /// Sends a phone push notification and returns its alert id. Only `title` is required;
+    /// `channel` is one of alarm, security, camera, energy, climate, system, misc (default
+    /// misc) and `severity` one of info, warning, critical (default info). Sending again with
+    /// the same `id` replaces the earlier alert.
+    #[tool(name = "send_notification")]
+    async fn send_notification(
+        &self,
+        Parameters(params): Parameters<SendNotificationParams>,
+    ) -> ToolResult<Sent> {
+        log_write("send_notification", &params);
+        if let Some(reason) = params.channel.as_deref().and_then(notify_channel_error) {
+            return Err(ToolError(reason));
+        }
+        if let Some(reason) = params.severity.as_deref().and_then(notify_severity_error) {
+            return Err(ToolError(reason));
+        }
+        let id = params.id.clone().unwrap_or_else(generated_alert_id);
+        let mut alert = serde_json::json!({
+            "v": 1,
+            "id": id,
+            "title": params.title,
+            "channel": params.channel.as_deref().unwrap_or("misc"),
+            "severity": params.severity.as_deref().unwrap_or("info"),
+        });
+        for (key, value) in [
+            ("body", params.body.as_ref()),
+            ("entity_id", params.entity_id.as_ref()),
+            ("image_url", params.image_url.as_ref()),
+        ] {
+            if let Some(value) = value {
+                alert[key] = Value::String(value.clone());
+            }
+        }
+        if let Some(silent) = params.silent {
+            alert["silent"] = Value::Bool(silent);
+        }
+        self.hub
+            .notify("mcp", &alert)
+            .map(|id| Json(Sent { id }))
+            .map_err(|rejected| ToolError(rejected.reason))
+    }
+
+    /// The push alerts the phone received, newest first, with their channel, severity, title,
+    /// body and whether they are resolved. `limit` (20 by default) caps the list and
+    /// `channel` keeps one channel.
+    #[tool(name = "list_alerts", annotations(read_only_hint = true))]
+    async fn list_alerts(
+        &self,
+        Parameters(params): Parameters<ListAlertsParams>,
+    ) -> Json<AlertList> {
+        let limit = params.limit.unwrap_or(DEFAULT_ALERTS_LIMIT);
+        let alerts = self
+            .hub
+            .alerts()
+            .into_iter()
+            .filter(|alert| {
+                params
+                    .channel
+                    .as_deref()
+                    .is_none_or(|channel| alert.channel.id() == channel)
+            })
+            .take(limit)
+            .collect();
+        Json(AlertList { alerts })
+    }
+}
+
+/// A fresh alert id for a notification sent without one: `mcp-<unix seconds>-<n>`, `n` counting
+/// the notifications of this process so two in the same second differ.
+fn generated_alert_id() -> String {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    format!("mcp-{secs}-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
 /// Every write tool leaves a trace of what was asked, minus any alarm code.

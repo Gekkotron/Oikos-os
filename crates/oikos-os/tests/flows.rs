@@ -1656,3 +1656,77 @@ async fn retained_unknown_area_loads_valid() {
     let view = hub.flow("living").expect("flow");
     assert!(view.invalid.is_none(), "{:?}", view.invalid);
 }
+
+/// Runs flow `id` (a lone notify node, `params`) once and returns the retained history list the
+/// hub published afterwards.
+async fn run_notify(
+    hub: &Arc<Hub>,
+    publisher: &mut mpsc::Receiver<Publish>,
+    id: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    let notify = serde_json::json!({ "id": "n", "type": "notify", "params": params });
+    hub.ingest(
+        &format!("oikos/automation/{id}"),
+        chain_json(id, true, vec![notify]).as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+    hub.run_flow(id).expect("run");
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(run.steps.last().expect("step").outcome, StepOutcome::Ok);
+    settle().await;
+    let mut last = None;
+    while let Ok(publish) = publisher.try_recv() {
+        if publish.topic == "oikos/push/history" {
+            last = Some(publish);
+        }
+    }
+    let last = last.expect("a history publish");
+    serde_json::from_str(&last.payload).expect("history json")
+}
+
+/// Connects the hub and lets the push service finish its settle delay.
+async fn push_ready(hub: &Hub) {
+    hub.on_connected();
+    hub.on_suback();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn notify_step_submits_v1_alert() {
+    let (hub, mut publisher, _engine) = engine_hub();
+    push_ready(&hub).await;
+    let list = run_notify(
+        &hub,
+        &mut publisher,
+        "door",
+        serde_json::json!({ "title": "Door open", "channel": "security", "severity": "warning" }),
+    )
+    .await;
+    let alert = &list[0];
+    assert_eq!(alert["title"], "Door open", "{list}");
+    assert_eq!(alert["source"], "flow", "{list}");
+    assert_eq!(alert["channel"], "security");
+    let id = alert["id"].as_str().expect("id");
+    assert!(id.starts_with("flow-door-"), "{id}");
+    let run_id = hub.flow("door").expect("flow").runs[0].id.clone();
+    assert_eq!(id, format!("flow-door-{run_id}"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn notify_with_fixed_id_replaces_previous() {
+    let (hub, mut publisher, _engine) = engine_hub();
+    push_ready(&hub).await;
+    let params = serde_json::json!({ "title": "Washer", "id": "washer" });
+    run_notify(&hub, &mut publisher, "washer", params.clone()).await;
+    let list = run_notify(&hub, &mut publisher, "washer", params).await;
+    let same: Vec<_> = list
+        .as_array()
+        .expect("list")
+        .iter()
+        .filter(|a| a["id"] == "washer")
+        .collect();
+    assert_eq!(same.len(), 1, "{list}");
+}
