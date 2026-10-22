@@ -40,10 +40,10 @@ async fn main() -> anyhow::Result<ExitCode> {
                 }
             }
             let engine = hub.start_engine();
+            let push_retry = hub.push().spawn_retry_worker();
             let (link, mut link_task) = mqtt::start(
                 cfg.mqtt.clone(),
                 cfg.topics.clone(),
-                cfg.push.clone(),
                 Arc::clone(&hub),
                 publish_rx,
             );
@@ -64,6 +64,7 @@ async fn main() -> anyhow::Result<ExitCode> {
                 link_task.abort();
             }
             engine.abort();
+            push_retry.abort();
             http_task.abort();
             tracing::info!("stopped");
             Ok(ExitCode::SUCCESS)

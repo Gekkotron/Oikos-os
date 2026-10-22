@@ -29,6 +29,8 @@ use oikos_core::model::{
 };
 use oikos_core::registry::{Change, Ignored, Inbound, Registry, RegistryConfig};
 use oikos_core::types::command::expects_echo;
+use oikos_push::fcm::{FcmError, FcmTransport, HttpFcm, ServiceAccount};
+use oikos_push::{PushService, Rejected};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::clock;
@@ -75,6 +77,43 @@ fn parse_group_command(payload: &[u8]) -> Option<Command> {
     let value: serde_json::Value = serde_json::from_slice(payload).ok()?;
     value.get("type")?;
     serde_json::from_value(value).ok()
+}
+
+/// The FCM HTTP v1 endpoint.
+const FCM_BASE: &str = "https://fcm.googleapis.com/";
+
+/// The FCM sender for `[push] credentials`, or `None` (history only) with one warning: no
+/// credentials configured, or a key file that cannot be read. Only the path is ever logged.
+fn push_transport(cfg: &crate::config::PushConfig) -> Option<Arc<dyn FcmTransport>> {
+    let Some(path) = cfg.credentials.as_deref() else {
+        tracing::warn!(
+            "push sending is off: no [push] credentials; alerts are kept in the history only"
+        );
+        return None;
+    };
+    let account = match ServiceAccount::load(path) {
+        Ok(account) => account,
+        Err(FcmError::Read { source, .. }) => {
+            tracing::warn!(
+                path = %path.display(),
+                error = %source,
+                "push sending is off: cannot read the [push] credentials file; alerts are kept in the history only"
+            );
+            return None;
+        }
+        Err(FcmError::Parse { source, .. }) => {
+            // Only the position: a serde message could quote part of the key file.
+            tracing::warn!(
+                path = %path.display(),
+                line = source.line(),
+                column = source.column(),
+                "push sending is off: the [push] credentials file is not a service-account key; alerts are kept in the history only"
+            );
+            return None;
+        }
+    };
+    let base = url::Url::parse(FCM_BASE).expect("FCM base URL parses");
+    Some(Arc::new(HttpFcm::new(account, base)))
 }
 
 /// The `install_id` the web sends in a reply; the app sends its own install id.
@@ -135,9 +174,9 @@ pub struct Hub {
     ui_prefix: String,
     /// The first discovery prefix: virtual entities are published under it.
     discovery_prefix: String,
-    /// OikosPush's retained history topic and its decoded copy.
-    history_topic: String,
-    responses_topic: String,
+    /// Push notifications: the service owns `<prefix>/history`; the alert store decodes the
+    /// broker's echo of it for the web and the API.
+    push: Arc<PushService>,
     alerts: Mutex<AlertStore>,
     /// The retained flow definitions and their runs.
     flow_store: Mutex<FlowStore>,
@@ -213,6 +252,12 @@ impl Hub {
         let media = MediaProxy::new(cfg.frigate.clone());
         let alerts = AlertStore::with_media_origin(media.as_ref().map(|m| m.origin().to_owned()));
         let (engine_tx, engine_rx) = mpsc::unbounded_channel();
+        let push = PushService::new(
+            cfg.push.settings(),
+            publisher.clone(),
+            push_transport(&cfg.push),
+            clock::now,
+        );
         Arc::new_cyclic(|me| Hub {
             me: me.clone(),
             registry: RwLock::new(registry),
@@ -229,8 +274,7 @@ impl Hub {
                 .first()
                 .cloned()
                 .unwrap_or_else(|| "oikos".to_owned()),
-            history_topic: cfg.push.history_topic.clone(),
-            responses_topic: cfg.push.responses_topic.clone(),
+            push,
             alerts: Mutex::new(alerts),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             group_store: Mutex::new(GroupStore::default()),
@@ -266,7 +310,7 @@ impl Hub {
     /// Routes and applies one broker message, broadcasts the resulting events and reports the
     /// changes (the MQTT task watches for [`Change::SubscriptionsChanged`]).
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
-        if topic == self.history_topic {
+        if topic == self.push.history_topic() {
             self.ingest_history(topic, payload);
             return Vec::new();
         }
@@ -398,6 +442,10 @@ impl Hub {
     /// event: a non-retained message on the command topic of a button some flow watches
     /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.
     pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
+        if self.push.wants(topic) {
+            // Then on: the history echo still feeds the alert store below.
+            self.push.on_message(topic, payload, retain);
+        }
         self.capture_pictures(topic, payload);
         if !retain {
             let pressed = self.watched_button_topics().remove(topic);
@@ -580,7 +628,29 @@ impl Hub {
         self.media.clone()
     }
 
-    /// The push alerts, newest first as OikosPush published them.
+    /// The push service (always built; it sends nothing without `[push] credentials`).
+    pub fn push(&self) -> &Arc<PushService> {
+        &self.push
+    }
+
+    /// The broker accepted the connection: the push token map is rebuilt from scratch.
+    pub fn on_connected(&self) {
+        self.push.on_connected();
+    }
+
+    /// The broker acknowledged the full on-connect subscription (push filters included): the
+    /// retained tokens are on their way, the push service starts its settle delay.
+    pub fn on_suback(&self) {
+        self.push.on_subscribed();
+    }
+
+    /// Raises a push alert from inside the hub (Frigate bridge, watchdogs, flows, MCP), as if
+    /// `payload` arrived on `<prefix>/notification/<source>`. Returns the alert id.
+    pub fn notify(&self, source: &str, payload: &serde_json::Value) -> Result<String, Rejected> {
+        self.push.submit(source, payload)
+    }
+
+    /// The push alerts, newest first, as the retained `<prefix>/history` holds them.
     pub fn alerts(&self) -> Vec<AlertView> {
         self.alerts
             .lock()
@@ -611,7 +681,7 @@ impl Hub {
         })
         .map_err(|err| HubError::Publish(err.to_string()))?;
         self.publish(Publish {
-            topic: self.responses_topic.clone(),
+            topic: self.push.responses_topic(),
             payload,
             retain: false,
         })

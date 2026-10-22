@@ -585,7 +585,7 @@ async fn cors_is_open_to_any_origin() {
 
 // ----- push alerts -----
 
-const HISTORY_TOPIC: &str = "oikos-push/history";
+const HISTORY_TOPIC: &str = "oikos/push/history";
 const ALERT_ENTRY: &str = r#"{"v":1,"id":"frigate-front-1696","channel":"camera","severity":"warning","title":"Front Door","body":"Person in Porch","actions":[{"id":"disarm","label":"Disarm"}],"silent":false,"sent_at":1760880000,"source":"frigate"}"#;
 
 fn history_payload() -> Vec<u8> {
@@ -611,6 +611,16 @@ async fn alerts_route_and_ws_event() {
     let alerts: Value = response.json().await.expect("json");
     assert_eq!(alerts.as_array().map(Vec::len), Some(1));
     assert_eq!(alerts[0]["channel"], "camera");
+}
+
+#[tokio::test]
+async fn push_status_reports_off_without_credentials() {
+    let server = Server::start().await;
+
+    let response = server.get("/api/v1/push").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let status: Value = response.json().await.expect("json");
+    assert_eq!(status, json!({"state": "off", "installs": 0, "queued": 0}));
 }
 
 #[tokio::test]
@@ -648,7 +658,7 @@ async fn alert_action_publishes_and_404s() {
         .expect("POST");
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     let published = server.publisher.recv().await.expect("a publish");
-    assert_eq!(published.topic, "oikos-push/responses");
+    assert_eq!(published.topic, "oikos/push/responses");
 
     let response = server
         .client

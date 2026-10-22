@@ -585,7 +585,7 @@ async fn invalid_discovery_is_logged_once() {
 
 // ----- push alerts -----
 
-const HISTORY_TOPIC: &str = "oikos-push/history";
+const HISTORY_TOPIC: &str = "oikos/push/history";
 const ALERT_ENTRY: &str = r#"{"v":1,"id":"frigate-front-1696","channel":"camera","severity":"warning","title":"Front Door","body":"Person in Porch","image_url":"http://192.168.1.20:5000/api/events/1696/snapshot.jpg","actions":[{"id":"disarm","label":"Disarm"}],"silent":false,"sent_at":1760880000,"source":"frigate"}"#;
 
 fn history_payload() -> Vec<u8> {
@@ -670,7 +670,7 @@ async fn reply_publishes_the_app_payload() {
         .expect("reply accepted");
 
     let published = publisher.recv().await.expect("a publish");
-    assert_eq!(published.topic, "oikos-push/responses");
+    assert_eq!(published.topic, "oikos/push/responses");
     assert!(!published.retain);
     let value: serde_json::Value = serde_json::from_str(&published.payload).expect("json");
     assert_eq!(value["id"], "frigate-front-1696");
@@ -710,6 +710,124 @@ async fn reply_rejects_unknown_alert_action_and_offline() {
         hub.reply("frigate-front-1696", "disarm"),
         Err(HubError::Publish(_))
     ));
+}
+
+#[tokio::test]
+async fn push_history_topic_feeds_alert_store() {
+    let (hub, _publisher) = hub();
+    assert_eq!(hub.push().history_topic(), HISTORY_TOPIC);
+
+    // The broker's echo of the hub's own retained publish arrives live (retain = false).
+    hub.ingest_message(HISTORY_TOPIC, &history_payload(), false);
+    assert_eq!(hub.alerts().len(), 1);
+    assert_eq!(hub.alerts()[0].id, "frigate-front-1696");
+
+    // OikosPush's list is no longer what the web reads.
+    hub.ingest_message("oikos-push/history", b"[]", true);
+    assert_eq!(hub.alerts().len(), 1);
+}
+
+#[tokio::test]
+async fn push_topics_are_not_discovery() {
+    assert!(
+        oikos_core::registry::RegistryConfig::default_reserved().contains(&"push".to_owned()),
+        "push is a reserved sub-tree of the discovery prefix"
+    );
+    let (hub, _publisher) = hub();
+    hub.ingest_message(
+        "oikos/push/tokens/a",
+        br#"{"token":"t","device_name":"Pixel","lang":"fr","updated_at":1}"#,
+        true,
+    );
+    hub.ingest_message("oikos/push/notification/flow", br#"{"title":"T"}"#, false);
+    hub.ingest_message("oikos/push/sensor/config", br#"{"name":"x"}"#, true);
+    assert!(hub.ignored().is_empty(), "{:?}", hub.ignored());
+    assert_eq!(hub.counts().0, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn notify_publishes_history_after_sync() {
+    let (hub, mut publisher) = hub();
+    hub.on_connected();
+    hub.on_suback();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+
+    let id = hub
+        .notify(
+            "flow",
+            &serde_json::json!({"v": 1, "id": "x", "title": "T"}),
+        )
+        .expect("accepted");
+    assert_eq!(id, "x");
+
+    let published = drain(&mut publisher);
+    let last = published
+        .iter()
+        .rev()
+        .find(|p| p.topic == "oikos/push/history")
+        .unwrap_or_else(|| panic!("a history publish in {published:?}"));
+    assert!(last.retain);
+    let list: serde_json::Value = serde_json::from_str(&last.payload).expect("json");
+    assert_eq!(list[0]["id"], "x", "{list}");
+    assert_eq!(list[0]["title"], "T");
+}
+
+/// A hub whose `[push] credentials` point at `path`.
+fn hub_with_credentials(path: PathBuf) -> Arc<Hub> {
+    let mut cfg = config();
+    cfg.push.credentials = Some(path);
+    let (tx, _rx) = mpsc::channel(64);
+    Hub::new(&cfg, tx)
+}
+
+#[tokio::test]
+async fn unreadable_credentials_keep_push_off() {
+    let missing = std::env::temp_dir().join("oikos-push-test-no-such-key.json");
+    let hub = hub_with_credentials(missing);
+    assert_eq!(hub.push().status().state, oikos_push::PushState::Off);
+
+    let dir = std::env::temp_dir().join(format!("oikos-push-bad-key-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let bad = dir.join("key.json");
+    std::fs::write(&bad, "not json").expect("write");
+    let hub = hub_with_credentials(bad);
+    assert_eq!(hub.push().status().state, oikos_push::PushState::Off);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn readable_credentials_turn_push_on() {
+    let dir = std::env::temp_dir().join(format!("oikos-push-key-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("dir");
+    let key = dir.join("key.json");
+    std::fs::write(
+        &key,
+        r#"{"project_id":"p","client_email":"e@p.iam.gserviceaccount.com","private_key":"k","token_uri":"https://oauth2.googleapis.com/token"}"#,
+    )
+    .expect("write");
+    let hub = hub_with_credentials(key);
+    assert_eq!(hub.push().status().state, oikos_push::PushState::Syncing);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn notify_rejects_an_invalid_payload() {
+    let (hub, _publisher) = hub();
+    assert!(hub.notify("flow", &serde_json::json!({"v": 1})).is_err());
+}
+
+#[tokio::test]
+async fn alert_action_replies_on_new_responses_topic() {
+    let (hub, mut publisher) = hub();
+    hub.ingest(HISTORY_TOPIC, &history_payload());
+
+    hub.reply("frigate-front-1696", "disarm")
+        .expect("reply accepted");
+
+    let published = publisher.recv().await.expect("a publish");
+    assert_eq!(published.topic, hub.push().responses_topic());
+    assert_eq!(published.topic, "oikos/push/responses");
 }
 
 fn virtual_switch() -> VirtualSpec {

@@ -1,7 +1,7 @@
 //! Layered configuration: defaults, then `oikos.toml`, then `OIKOS_*` env vars.
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use figment::Figment;
 use figment::providers::{Env, Format, Serialized, Toml};
@@ -131,21 +131,55 @@ impl Default for LogConfig {
     }
 }
 
-/// Where OikosPush keeps its retained alert history and where the app's replies go. The
-/// defaults match OikosPush today; they become `oikos/history` and `oikos/push/responses`
-/// once the hub takes over push.
+/// Push notifications, owned by the hub: producers publish on `<prefix>/notification/<source>`,
+/// the app registers on `<prefix>/tokens/<installId>` and replies on `<prefix>/responses`, the
+/// hub keeps the retained `<prefix>/history`. The legacy OikosPush topics under
+/// `legacy_prefix` are read too (empty disables them). Without `credentials` (a Firebase
+/// service-account key file) the hub keeps the history and sends nothing.
+///
+/// Unknown keys are refused, so a config still setting the old `history_topic` /
+/// `responses_topic` fails at start naming the keys it accepts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct PushConfig {
-    pub history_topic: String,
-    pub responses_topic: String,
+    pub prefix: String,
+    pub legacy_prefix: String,
+    /// Path of the service-account JSON key; only the path is ever logged.
+    pub credentials: Option<PathBuf>,
+    /// Seconds between two passes of the retry queue.
+    pub retry_interval: u64,
+    /// Attempts before a queued alert is given up.
+    pub max_retries: u32,
+    /// Alerts kept in the history.
+    pub history_size: usize,
+    /// Days an alert stays in the history.
+    pub history_days: u64,
 }
 
 impl Default for PushConfig {
     fn default() -> Self {
         Self {
-            history_topic: "oikos-push/history".into(),
-            responses_topic: "oikos-push/responses".into(),
+            prefix: "oikos/push".into(),
+            legacy_prefix: "oikos-push".into(),
+            credentials: None,
+            retry_interval: 60,
+            max_retries: 10,
+            history_size: 100,
+            history_days: 7,
+        }
+    }
+}
+
+impl PushConfig {
+    /// The service settings (everything but the credentials).
+    pub fn settings(&self) -> oikos_push::PushSettings {
+        oikos_push::PushSettings {
+            prefix: self.prefix.clone(),
+            legacy_prefix: self.legacy_prefix.clone(),
+            retry_interval: self.retry_interval,
+            max_retries: self.max_retries,
+            history_size: self.history_size,
+            history_days: self.history_days,
         }
     }
 }
@@ -318,8 +352,9 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "topics.automation_prefix",
     "http.bind",
     "log.level",
-    "push.history_topic",
-    "push.responses_topic",
+    "push.prefix",
+    "push.legacy_prefix",
+    "push.credentials",
     "flows.timezone",
     "frigate.url",
     "frigate.user",

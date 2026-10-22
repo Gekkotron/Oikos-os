@@ -18,6 +18,7 @@ iana-time-zone = "0.1"
 mime_guess.workspace = true
 oikos-api = { path = "../oikos-api" }
 oikos-core = { path = "../oikos-core", features = ["schemars"] }
+oikos-push = { path = "../oikos-push" }
 rmcp.workspace = true
 rumqttc.workspace = true
 rust-embed.workspace = true

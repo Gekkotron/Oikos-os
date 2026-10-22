@@ -2271,6 +2271,7 @@ dependencies = [
  "mime_guess",
  "oikos-api",
  "oikos-core",
+ "oikos-push",
  "reqwest",
  "rmcp",
  "rumqttc",

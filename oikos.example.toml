@@ -34,12 +34,23 @@ runs_kept = 20
 level = "info"
 json = false
 
-# OikosPush's retained alert history (what the web UI shows under Alerts) and the topic the
-# app's reply buttons publish to. These move to "oikos/history" and "oikos/push/responses"
-# when the hub takes over push.
+# Push notifications, sent by the hub through Firebase Cloud Messaging. Producers publish on
+# <prefix>/notification/<source>, the app registers on <prefix>/tokens/<installId> and replies
+# on <prefix>/responses, the hub keeps the retained <prefix>/history the web UI shows under Alerts.
 [push]
-history_topic = "oikos-push/history"
-responses_topic = "oikos-push/responses"
+prefix = "oikos/push"
+# OikosPush's topics (<legacy>/notification/+, /tokens/+, /history), still read during the
+# switch-over. An empty string turns them off.
+legacy_prefix = "oikos-push"
+# The Firebase service-account key file (keep it out of git). Without it the hub keeps the
+# history and sends nothing; a missing or unreadable file is the same, with a warning.
+# credentials = "/path/to/firebase-service-account.json"
+# Seconds between retries of a failed send, and attempts before it is given up.
+retry_interval = 60
+max_retries = 10
+# Alerts kept in the history, and for how many days.
+history_size = 100
+history_days = 7
 
 # Frigate, for alert snapshots and clips. With `url` set, media on that origin is served by the
 # hub at /api/v1/media (the browser never sees the login). Needed when alerts point at Frigate's
