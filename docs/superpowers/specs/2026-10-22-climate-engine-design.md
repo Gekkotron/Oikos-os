@@ -97,7 +97,7 @@ A zone id is its area id. A zone with no settings document yet is shown with def
 
 - `state`: `off` | `pending` | `active`. `off`: the engine does nothing in the zone, not even safety (the user chose to keep it out). `pending`: no approved rules yet; safety acts, everything else is only shown ("would set 20.5 °C"). `active`: the engine runs the zone. Approving the first proposal turns `pending` into `active`.
 - `entities`: the zone's climate entities [all `climate` entities in the area, except `group_*` entities, so a group and its members are not commanded twice]. A device that does not advertise the current mode in `hvac_modes` is left alone for that mode (a cool-only air conditioner is never touched in winter).
-- `sensor`: a temperature sensor that represents the room better than the devices' own reading [none: the climate entities' `current`].
+- `sensor`: a temperature sensor that represents the room better than the devices' own reading [none: a thermometer of the zone's area, else the climate entities' `current`].
 - `away_setpoint` per mode [heat 16 °C, cool 28 °C].
 - `manual_hold_max` [4 h].
 - `rules`: per mode (`heat`, `cool`), a `base` setpoint and a list of blocks `{ days: [mon…sun], from: "HH:MM", to: "HH:MM", setpoint }`. Outside every block the zone sits at `base`. `base` or a block's `setpoint` may be `"off"` (device mode `off`), for houses that switch heating off at night instead of lowering it. Each block keeps the evidence it was approved with.
@@ -144,7 +144,7 @@ The record also carries `entities: { "<id>": { "setpoint", "mode" } }`, what the
 
 ### 5.4 Readings and staleness
 
-The room reading is `sensor` if set, else the mean of the zone's climate entities' `current`. A reading is stale when no state for it has been seen (`subscribe_state_seen`, which includes unchanged echoes) for `stale_after`. If the configured `sensor` is stale but the devices' own readings are fresh, the engine uses those and says so in the reason; only when every source is stale does the stale-sensor rule apply.
+The room reading is `sensor` if set, else a thermometer of the zone's area (a primary `temperature` sensor that is not on one of the zone's climate devices and is not `outdoor_entity`; the first by id), else the mean of the zone's climate entities' `current`. The read view names the sensor it used in `room_sensor`. A reading is stale when no state for it has been seen (`subscribe_state_seen`, which includes unchanged echoes) for `stale_after`. If the configured `sensor` is stale but the devices' own readings are fresh, the engine uses those and says so in the reason; only when every source is stale does the stale-sensor rule apply.
 
 ### 5.5 When it runs and when it commands
 

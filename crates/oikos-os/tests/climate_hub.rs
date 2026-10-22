@@ -1477,6 +1477,79 @@ mod engine {
         assert_eq!(zone.reading, Some(19.0));
         assert!(zone.reading_age_s.unwrap() < 60, "{:?}", zone.reading_age_s);
     }
+
+    /// Feeds the Z2M temperature sensor `fixture` (`<ieee>__<object>`), puts it in `area` and
+    /// reports `value` on `state_topic` under `key`; returns its entity id.
+    async fn feed_thermometer(
+        hub: &Hub,
+        fixture_name: &str,
+        area: &str,
+        state_topic: &str,
+        key: &str,
+        value: f64,
+    ) -> String {
+        let (ieee, object) = fixture_name.split_once("__").unwrap();
+        hub.ingest(
+            &format!("oikos/sensor/{ieee}/{object}/config"),
+            &fixture(&format!("sensor__{fixture_name}.json")),
+        );
+        let id = place(hub, &format!("{ieee}_{object}"), area).await;
+        hub.ingest(
+            state_topic,
+            serde_json::json!({ key: value }).to_string().as_bytes(),
+        );
+        id
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_room_thermometer_reads_the_room_before_the_devices() {
+        let mut rig = Rig::new(None).await;
+        rig.sim.set(&rig.hub, 0, "heat", 22.0, 24.0);
+        // A device's chip temperature is never the room.
+        feed_thermometer(
+            &rig.hub,
+            "0x00158d000449ba5c__device_temperature",
+            "living",
+            "zigbee2mqtt/rooms/stair/motion",
+            "device_temperature",
+            30.0,
+        )
+        .await;
+        let zone = rig.zone();
+        assert_eq!((zone.room_sensor, zone.reading), (None, Some(24.0)));
+
+        let thermometer = feed_thermometer(
+            &rig.hub,
+            "0x5c0272fffea35cfb__temperature",
+            "living",
+            "zigbee2mqtt/rooms/bedroom2/thermometer",
+            "temperature",
+            19.5,
+        )
+        .await;
+        let zone = rig.zone();
+        assert_eq!(zone.room_sensor.as_deref(), Some(thermometer.as_str()));
+        assert_eq!(zone.reading, Some(19.5));
+
+        // The outdoor sensor is never a room thermometer.
+        rig.hub
+            .set_climate_house(oikos_climate::doc::HouseSettings {
+                outdoor_entity: Some(thermometer.clone()),
+                ..Default::default()
+            })
+            .unwrap();
+        let zone = rig.zone();
+        assert_eq!((zone.room_sensor, zone.reading), (None, Some(24.0)));
+
+        // A sensor set on the zone is used as is.
+        rig.settings(ZoneSettings {
+            sensor: Some(thermometer.clone()),
+            ..ZoneSettings::default()
+        });
+        let zone = rig.zone();
+        assert_eq!(zone.room_sensor.as_deref(), Some(thermometer.as_str()));
+        assert_eq!(zone.reading, Some(19.5));
+    }
 }
 
 // ----- learning, proposals and approval -----

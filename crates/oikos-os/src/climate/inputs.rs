@@ -1,14 +1,14 @@
 //! What the engine reads for one zone: devices, room reading, presence, holiday and outdoor
 //! temperature, gathered from the registry, the retained documents and the runtime state.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::NaiveDateTime;
 use chrono_tz::Tz;
 use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
 use oikos_climate::doc::{HouseSettings, Mode, Override, SafetyCause, ZoneSettings};
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
-use oikos_core::model::{Availability, EntityState, Kind, StateValue};
+use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind, StateValue};
 
 use super::GROUP_PREFIX;
 use super::hub::zone_devices;
@@ -168,10 +168,54 @@ fn holiday_now(hub: &Hub, house: &HouseSettings) -> bool {
         .is_some_and(|id| hub.read().state(id).and_then(home_of).unwrap_or(false))
 }
 
+/// Whether `entity` is a thermometer of the room `zone`: a primary temperature sensor of its
+/// area that is not the outdoor sensor and not part of one of the zone's climate devices (whose
+/// own sensors read the air at the unit). A diagnostic temperature is a device's chip.
+fn is_room_thermometer(
+    entity: &Entity,
+    zone: &str,
+    climate_devices: &HashSet<&str>,
+    outdoor: Option<&str>,
+) -> bool {
+    entity.kind == Kind::Sensor
+        && entity.area == zone
+        && entity.device_class.as_deref() == Some("temperature")
+        && entity.category == EntityCategory::Primary
+        && !entity.unique_id.starts_with(GROUP_PREFIX)
+        && outdoor != Some(entity.unique_id.as_str())
+        && entity
+            .device_id
+            .as_deref()
+            .is_none_or(|d| !climate_devices.contains(d))
+}
+
+/// The sensor that reads the room of `zone`: `settings.sensor`, else a thermometer of its area
+/// (the first by id when there are several), else none and the devices' own readings are used.
+pub(crate) fn room_sensor(
+    hub: &Hub,
+    zone: &str,
+    settings: &ZoneSettings,
+    entity_ids: &[String],
+    outdoor: Option<&str>,
+) -> Option<String> {
+    if settings.sensor.is_some() {
+        return settings.sensor.clone();
+    }
+    let reg = hub.read();
+    let climate_devices: HashSet<&str> = entity_ids
+        .iter()
+        .filter_map(|id| reg.entity(id)?.device_id.as_deref())
+        .collect();
+    reg.entities()
+        .filter(|e| is_room_thermometer(e, zone, &climate_devices, outdoor))
+        .map(|e| e.unique_id.clone())
+        .min()
+}
+
 /// The room reading sources of a zone: its sensor, and its devices' own readings.
 fn reading_sources(
     hub: &Hub,
-    settings: &ZoneSettings,
+    sensor: Option<&str>,
     entity_ids: &[String],
     seen: &HashMap<String, u64>,
     now: u64,
@@ -184,7 +228,7 @@ fn reading_sources(
             age_s: age_of(seen, id, state, now),
         })
     };
-    let sensor = settings.sensor.as_deref().and_then(source);
+    let sensor = sensor.and_then(source);
     let devices = entity_ids.iter().filter_map(|id| source(id)).collect();
     (sensor, devices)
 }
@@ -192,13 +236,13 @@ fn reading_sources(
 /// The reading and its age for the read view, recomputed from what is seen now.
 pub(crate) fn view_reading(
     hub: &Hub,
-    settings: &ZoneSettings,
+    sensor: Option<&str>,
     entity_ids: &[String],
     stale_after_s: u64,
     now: u64,
     seen: &HashMap<String, u64>,
 ) -> (Option<f64>, Option<u64>) {
-    let (sensor, devices) = reading_sources(hub, settings, entity_ids, seen, now);
+    let (sensor, devices) = reading_sources(hub, sensor, entity_ids, seen, now);
     match room_reading(sensor, &devices, stale_after_s) {
         Reading::Fresh { value, age_s, .. } => (Some(value), Some(age_s)),
         Reading::Stale { last } => {
@@ -281,7 +325,15 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
             .collect()
     };
     let stale_after_s = u64::from(house.stale_after_min) * 60;
-    let (sensor, device_readings) = reading_sources(hub, &settings, &entity_ids, &seen, now);
+    let sensor = room_sensor(
+        hub,
+        zone,
+        &settings,
+        &entity_ids,
+        house.outdoor_entity.as_deref(),
+    );
+    let (sensor, device_readings) =
+        reading_sources(hub, sensor.as_deref(), &entity_ids, &seen, now);
     let reading = room_reading(sensor, &device_readings, stale_after_s);
     let outdoor_mean = outdoor_mean(hub, now);
     let home_now = presence_home_now(hub, &house);

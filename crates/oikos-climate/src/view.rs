@@ -38,6 +38,10 @@ pub struct ZoneView {
     pub entities: Vec<String>,
     pub reading: Option<f64>,
     pub reading_age_s: Option<u64>,
+    /// The temperature sensor that reads the room: `settings.sensor`, else the one the hub picked
+    /// in the area; none when the climate devices' own readings are used.
+    #[serde(default)]
+    pub room_sensor: Option<String>,
     pub decision: Option<Decision>,
     pub overrides: Vec<Override>,
     pub proposal: Option<Proposal>,

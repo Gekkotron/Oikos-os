@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 use super::hub::valid_zone_id;
 use super::inputs::{
     OUTDOOR_CACHE_S, OwnedZoneInputs, local_time, outdoor_mean, outdoor_reading, presence_home_now,
-    step_from, step_of, zone_entity_ids, zone_inputs_owned,
+    room_sensor, step_from, step_of, zone_entity_ids, zone_inputs_owned,
 };
 use super::{GROUP_PREFIX, alerts, learning};
 use crate::clock;
@@ -411,8 +411,15 @@ impl Hub {
         watched.extend(house.outdoor_entity.clone());
         for zone in self.climate_zone_ids() {
             let settings = self.zone_settings(&zone);
-            watched.extend(settings.sensor.clone());
-            watched.extend(zone_entity_ids(self, &zone, &settings));
+            let entity_ids = zone_entity_ids(self, &zone, &settings);
+            watched.extend(room_sensor(
+                self,
+                &zone,
+                &settings,
+                &entity_ids,
+                house.outdoor_entity.as_deref(),
+            ));
+            watched.extend(entity_ids);
         }
         let outdoor = outdoor_mean(self, now);
         let mut rt = self.climate_runtime();

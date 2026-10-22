@@ -139,6 +139,7 @@ mod tests {
             entities: vec![],
             reading,
             reading_age_s: None,
+            room_sensor: None,
             decision: None,
             overrides: vec![],
             proposal: None,

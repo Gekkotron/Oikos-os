@@ -5249,18 +5249,55 @@ html:has(.flow-canvas-screen) {
   opacity: 0.7;
 }
 
+/* The header button keeps its own width instead of sharing the row with the title. */
+.climate .sheet__header > .btn {
+  flex: none;
+  padding: 0 20px;
+}
+
 .climate-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
+/* `.field` is also the wizard's wrapper (margin) and inputs default to content-box sizing,
+   which pushed number inputs past the card edge. */
+.climate-field .field {
+  box-sizing: border-box;
+  margin: 0;
+}
+
+/* Settings: fields flow in columns on wide screens; title and actions span the row. */
 .climate-settings {
-  gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-items: end;
+  gap: 12px 16px;
+}
+
+.climate-settings__title,
+.climate-settings > .segmented {
+  grid-column: 1 / -1;
+}
+
+.climate-settings__title {
+  margin: 0;
+}
+
+.climate-settings > .segmented {
+  justify-content: flex-end;
+}
+
+.climate-settings > .segmented > .btn {
+  flex: 0 0 120px;
 }
 
 .climate-chips {
   flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
 }
 
 /* Climate: week timeline and proposal panel */

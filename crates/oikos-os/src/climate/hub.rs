@@ -105,10 +105,18 @@ impl Hub {
         };
         // The reading and its age are what the engine sees now, not what the last decision froze.
         let stale_after_s = u64::from(view.house.stale_after_min) * 60;
+        let outdoor = view.house.outdoor_entity.clone();
         for zone in &mut view.zones {
+            zone.room_sensor = inputs::room_sensor(
+                self,
+                &zone.zone,
+                &zone.settings,
+                &zone.entities,
+                outdoor.as_deref(),
+            );
             let (reading, age) = inputs::view_reading(
                 self,
-                &zone.settings,
+                zone.room_sensor.as_deref(),
                 &zone.entities,
                 stale_after_s,
                 now,
@@ -412,6 +420,7 @@ fn zone_view(
         settings_invalid: docs.settings_invalid.clone(),
         reading: None,
         reading_age_s: None,
+        room_sensor: None,
         decision: docs.decision.clone(),
         overrides: docs.overrides.clone(),
         proposal: docs.proposal.clone(),

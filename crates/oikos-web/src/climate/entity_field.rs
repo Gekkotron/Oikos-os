@@ -2,16 +2,32 @@
 
 use leptos::prelude::*;
 
+use oikos_api::EntityView;
+use oikos_core::model::Kind;
+
 use crate::format::list_label;
 use crate::house::House;
 
 /// Every entity as `(id, label)`, sorted by label.
 fn options(house: House) -> Vec<(String, String)> {
-    let mut list: Vec<(String, String)> = house
-        .entities
-        .with(|m| m.values().map(|e| (e.id.clone(), list_label(e))).collect());
+    options_where(house, |_| true)
+}
+
+/// The entities that pass `keep` as `(id, label)`, sorted by label.
+fn options_where(house: House, keep: impl Fn(&EntityView) -> bool) -> Vec<(String, String)> {
+    let mut list: Vec<(String, String)> = house.entities.with(|m| {
+        m.values()
+            .filter(|e| keep(e))
+            .map(|e| (e.id.clone(), list_label(e)))
+            .collect()
+    });
     list.sort_by_key(|(_, label)| label.to_lowercase());
     list
+}
+
+/// Whether `entity` reads a temperature.
+fn is_thermometer(entity: &EntityView) -> bool {
+    entity.kind == Kind::Sensor && entity.device_class.as_deref() == Some("temperature")
 }
 
 /// The label of `id`, or the id itself when the house no longer has it.
@@ -72,7 +88,8 @@ pub fn EntityListField(
     view! {
         <div class="climate-field">
             <span class="climate-field__label">{label}</span>
-            <div class="chips climate-chips">
+            <Show when=move || value.with(|v| !v.is_empty())>
+                <div class="chips climate-chips">
                 {move || {
                     value
                         .get()
@@ -98,7 +115,8 @@ pub fn EntityListField(
                         })
                         .collect_view()
                 }}
-            </div>
+                </div>
+            </Show>
             <select
                 class="field"
                 aria-label=label
@@ -124,5 +142,49 @@ pub fn EntityListField(
                 }}
             </select>
         </div>
+    }
+}
+
+/// The thermometer that reads a room: "Automatic" first, then the house's temperature sensors.
+/// `auto` is what Automatic resolves to now; none means the climate devices' own reading.
+#[component]
+pub fn ThermometerField(
+    value: Signal<Option<String>>,
+    auto: Signal<Option<String>>,
+    on_change: Callback<Option<String>>,
+) -> impl IntoView {
+    let house = expect_context::<House>();
+    let auto_text = move || match auto.get() {
+        Some(id) => format!("Automatic · {}", label_of(house, &id)),
+        None => "Automatic · climate device".to_owned(),
+    };
+    view! {
+        <label class="climate-field">
+            <span class="climate-field__label">"Room thermometer"</span>
+            <select
+                class="field"
+                on:change=move |ev| {
+                    let v = event_target_value(&ev);
+                    on_change.run((!v.is_empty()).then_some(v));
+                }
+            >
+                <option value="" selected=move || value.get().is_none()>{auto_text}</option>
+                {move || {
+                    let current = value.get();
+                    let mut list = options_where(house, is_thermometer);
+                    if let Some(id) = current.as_ref()
+                        && !list.iter().any(|(i, _)| i == id)
+                    {
+                        list.insert(0, (id.clone(), label_of(house, id)));
+                    }
+                    list.into_iter()
+                        .map(|(id, text)| {
+                            let selected = current.as_deref() == Some(id.as_str());
+                            view! { <option value=id selected=selected>{text}</option> }
+                        })
+                        .collect_view()
+                }}
+            </select>
+        </label>
     }
 }

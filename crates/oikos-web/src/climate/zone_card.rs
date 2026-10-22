@@ -11,6 +11,7 @@ use oikos_climate::doc::{Mode, Override, OverrideOrigin, Setpoint, ZoneState};
 use oikos_climate::view::{DecisionLog, ZoneView};
 
 use crate::api::climate::{self as api, OverrideBody};
+use crate::climate::entity_field::ThermometerField;
 use crate::climate::proposal::{ProposalPanel, RulesPanel};
 use crate::climate::{
     age_text, can_hold, decision_line, degrees_text, learn_status_text, minutes_to_next_change,
@@ -124,6 +125,17 @@ pub fn ZoneCard(
             }
         })
         .collect_view();
+
+    // Room thermometer: none on the zone lets the hub pick one in the room.
+    let sensor_id = id.clone();
+    let set_sensor = Callback::new(move |sensor: Option<String>| {
+        let mut next = zone.with_untracked(|z| z.settings.clone());
+        next.sensor = sensor;
+        let id = sensor_id.clone();
+        act(toasts, on_changed, async move {
+            api::put_zone(&id, &next).await
+        });
+    });
 
     // Overrides.
     let clear_id = id.clone();
@@ -286,6 +298,13 @@ pub fn ZoneCard(
             <div class="segmented climate-zone__state" role="group" aria-label="Zone state">
                 {state_buttons}
             </div>
+            <ThermometerField
+                value=Signal::derive(move || zone.with(|z| z.settings.sensor.clone()))
+                auto=Signal::derive(move || {
+                    zone.with(|z| z.settings.sensor.is_none().then(|| z.room_sensor.clone()).flatten())
+                })
+                on_change=set_sensor
+            />
             {overrides}
             {move || {
                 holdable
