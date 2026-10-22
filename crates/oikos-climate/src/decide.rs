@@ -89,7 +89,7 @@ pub fn fit(t: f64, caps: &DeviceCaps) -> f64 {
     v
 }
 
-fn mode_str(mode: Mode) -> &'static str {
+pub(crate) fn mode_str(mode: Mode) -> &'static str {
     match mode {
         Mode::Heat => "heat",
         Mode::Cool => "cool",

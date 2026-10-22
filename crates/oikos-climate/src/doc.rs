@@ -40,7 +40,7 @@ pub enum ZoneState {
 }
 
 /// A day of the week.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum Day {
@@ -54,6 +54,17 @@ pub enum Day {
 }
 
 impl Day {
+    /// Every day, Monday first.
+    pub const ALL: [Day; 7] = [
+        Day::Mon,
+        Day::Tue,
+        Day::Wed,
+        Day::Thu,
+        Day::Fri,
+        Day::Sat,
+        Day::Sun,
+    ];
+
     pub fn from_chrono(d: chrono::Weekday) -> Self {
         use chrono::Weekday as W;
         match d {

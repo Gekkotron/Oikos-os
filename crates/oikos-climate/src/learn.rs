@@ -5,7 +5,7 @@
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime};
 
-use crate::decide::{DeviceCaps, fit};
+use crate::decide::{DeviceCaps, fit, mode_str};
 use crate::doc::{Block, Day, Evidence, HhMm, Mode, ModeRules, Rules, Setpoint, Source};
 
 /// Slots per day (15 minutes each).
@@ -80,13 +80,6 @@ pub enum LearnOutcome {
     Rules(ModeRules),
 }
 
-fn mode_name(mode: Mode) -> &'static str {
-    match mode {
-        Mode::Heat => "heat",
-        Mode::Cool => "cool",
-    }
-}
-
 fn same(a: Slot, b: Slot) -> bool {
     match (a, b) {
         (Slot::Off, Slot::Off) => true,
@@ -125,6 +118,15 @@ pub fn timeline(input: &LearnInput) -> Vec<(NaiveDate, [Slot; SLOTS])> {
             v
         })
         .collect();
+    let samples: Vec<Vec<TargetSample>> = input
+        .devices
+        .iter()
+        .map(|d| {
+            let mut v = d.samples.clone();
+            v.sort_by_key(|s| s.at);
+            v
+        })
+        .collect();
     (0..input.days)
         .map(|i| {
             let date = input.first_day + Duration::days(i64::from(i));
@@ -132,12 +134,12 @@ pub fn timeline(input: &LearnInput) -> Vec<(NaiveDate, [Slot; SLOTS])> {
             let mut slots = [Slot::None; SLOTS];
             for (n, slot) in slots.iter_mut().enumerate() {
                 let start = midnight + Duration::minutes(SLOT_MIN * n as i64);
-                *slot =
-                    combine(
-                        input.devices.iter().zip(&commands).map(|(d, c)| {
-                            device_slot(d, c, input.mode, start).unwrap_or(Slot::None)
-                        }),
-                    );
+                *slot = combine(
+                    samples
+                        .iter()
+                        .zip(&commands)
+                        .map(|(d, c)| device_slot(d, c, input.mode, start).unwrap_or(Slot::None)),
+                );
             }
             (date, slots)
         })
@@ -168,13 +170,12 @@ fn combine(parts: impl Iterator<Item = Slot>) -> Slot {
 
 /// What one device held for most of the slot starting at `start`.
 fn device_slot(
-    history: &DeviceHistory,
+    samples: &[TargetSample],
     commands: &[&EngineCommand],
     mode: Mode,
     start: NaiveDateTime,
 ) -> Option<Slot> {
     let end = start + Duration::minutes(SLOT_MIN);
-    let samples = &history.samples;
     let idx = samples.partition_point(|s| s.at <= start);
     let mut cur = idx.checked_sub(1);
     let mut from = start;
@@ -197,7 +198,7 @@ fn device_slot(
     let (sample, held_from, _) = best;
     let sample = &samples[sample?];
 
-    let wanted = mode_name(mode);
+    let wanted = mode_str(mode);
     let device_mode = sample.mode.as_deref().unwrap_or(wanted);
     let value = if device_mode == "off" {
         Slot::Off
@@ -212,7 +213,10 @@ fn device_slot(
         && (device_mode == "off"
             || matches!((c.setpoint, sample.target),
                 (Some(a), Some(b)) if (a - b).abs() <= ENGINE_TOL))
-        && c.source != Source::Schedule
+        && matches!(
+            c.source,
+            Source::Safety | Source::Away | Source::Holiday | Source::Override
+        )
     {
         return None;
     }
@@ -239,18 +243,6 @@ struct Group {
     days: Vec<Day>,
     members: Vec<usize>,
     runs: Vec<Run>,
-}
-
-fn day_index(d: Day) -> u8 {
-    match d {
-        Day::Mon => 0,
-        Day::Tue => 1,
-        Day::Wed => 2,
-        Day::Thu => 3,
-        Day::Fri => 4,
-        Day::Sat => 5,
-        Day::Sun => 6,
-    }
 }
 
 fn is_weekend(d: Day) -> bool {
@@ -315,9 +307,9 @@ pub fn learn(input: &LearnInput) -> LearnOutcome {
         }
     }
     for b in &mut blocks {
-        b.days.sort_by_key(|d| day_index(*d));
+        b.days.sort();
     }
-    blocks.sort_by_key(|b| (day_index(b.days[0]), b.from));
+    blocks.sort_by_key(|b| (b.days[0], b.from));
     LearnOutcome::Rules(ModeRules {
         base: base_sp,
         blocks,
@@ -365,15 +357,7 @@ fn make_groups(counted: &[DayData], input: &LearnInput) -> Vec<Group> {
             continue;
         }
         if disagrees(counted, &members, input) {
-            for d in [
-                Day::Mon,
-                Day::Tue,
-                Day::Wed,
-                Day::Thu,
-                Day::Fri,
-                Day::Sat,
-                Day::Sun,
-            ] {
+            for d in Day::ALL {
                 let same_day: Vec<usize> = members
                     .iter()
                     .copied()
@@ -394,7 +378,7 @@ fn make_groups(counted: &[DayData], input: &LearnInput) -> Vec<Group> {
                     days.push(counted[i].day);
                 }
             }
-            days.sort_by_key(|d| day_index(*d));
+            days.sort();
             groups.push(Group {
                 days,
                 members,
@@ -503,15 +487,15 @@ fn runs_of(day: &[Slot], mode: Mode) -> Vec<Run> {
     runs
 }
 
-/// The most frequent run value across all counted days of all groups. Ties go to the lowest value
+/// The run value held for the most slot-days across all groups. Ties go to the lowest value
 /// in heat and the highest in cool (`Off` counts as a value).
 fn pick_base(groups: &[Group], mode: Mode) -> Option<Slot> {
     let mut tally: Vec<(Slot, usize)> = Vec::new();
     for g in groups {
         for r in &g.runs {
             match tally.iter_mut().find(|(v, _)| same(*v, r.value)) {
-                Some((_, n)) => *n += g.members.len(),
-                None => tally.push((r.value, g.members.len())),
+                Some((_, n)) => *n += r.len * g.members.len(),
+                None => tally.push((r.value, r.len * g.members.len())),
             }
         }
     }
@@ -615,18 +599,10 @@ fn days_text(days: &[Day]) -> String {
         return "weekends".into();
     }
     let mut sorted = days.to_vec();
-    sorted.sort_by_key(|d| day_index(*d));
+    sorted.sort();
     sorted
         .iter()
-        .map(|d| match d {
-            Day::Mon => "Mon",
-            Day::Tue => "Tue",
-            Day::Wed => "Wed",
-            Day::Thu => "Thu",
-            Day::Fri => "Fri",
-            Day::Sat => "Sat",
-            Day::Sun => "Sun",
-        })
+        .map(|d| format!("{d:?}"))
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -642,7 +618,7 @@ fn setpoint_text(s: Setpoint) -> String {
     }
 }
 
-fn block_text(b: &Block) -> String {
+fn block_text(b: &Block, evidence: bool) -> String {
     let mut s = format!(
         "{} {}–{} at {}",
         days_text(&b.days),
@@ -650,7 +626,7 @@ fn block_text(b: &Block) -> String {
         time_text(b.to),
         setpoint_text(b.setpoint)
     );
-    if let Some(e) = &b.evidence {
+    if let Some(e) = b.evidence.as_ref().filter(|_| evidence) {
         s.push_str(&format!(" ({} of {} days)", e.agree, e.of));
     }
     s
@@ -666,7 +642,7 @@ pub fn diff(old: Option<&Rules>, new: &Rules) -> Vec<String> {
         let mut mode_lines = Vec::new();
         match (old.and_then(|o| o.get(mode)), new.get(mode)) {
             (_, Some(n)) => diff_mode(old.and_then(|o| o.get(mode)), n, &mut mode_lines),
-            (Some(_), None) => mode_lines.push(format!("Removed: all {} rules", mode_name(mode))),
+            (Some(_), None) => mode_lines.push(format!("Removed: all {} rules", mode_str(mode))),
             (None, None) => {}
         }
         for l in mode_lines {
@@ -683,7 +659,11 @@ pub fn diff(old: Option<&Rules>, new: &Rules) -> Vec<String> {
 fn diff_mode(old: Option<&ModeRules>, new: &ModeRules, out: &mut Vec<String>) {
     let Some(old) = old else {
         out.push(format!("Base: {}", setpoint_text(new.base)));
-        out.extend(new.blocks.iter().map(|b| format!("New: {}", block_text(b))));
+        out.extend(
+            new.blocks
+                .iter()
+                .map(|b| format!("New: {}", block_text(b, true))),
+        );
         return;
     };
     if setpoints_differ(old.base, new.base) {
@@ -722,12 +702,12 @@ fn diff_mode(old: Option<&ModeRules>, new: &ModeRules, out: &mut Vec<String>) {
     out.extend(
         p.removed
             .iter()
-            .map(|&i| format!("Removed: {}", block_text(&old.blocks[i]))),
+            .map(|&i| format!("Removed: {}", block_text(&old.blocks[i], false))),
     );
     out.extend(
         p.added
             .iter()
-            .map(|&j| format!("New: {}", block_text(&new.blocks[j]))),
+            .map(|&j| format!("New: {}", block_text(&new.blocks[j], true))),
     );
 }
 
@@ -746,9 +726,160 @@ pub fn fingerprint(rules: &Rules) -> String {
             b.evidence = None;
         }
     }
-    let json = serde_json::to_string(&bare).unwrap_or_default();
+    let json = serde_json::to_string(&bare).expect("Rules serialize");
     let hash = json.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, byte| {
         (h ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
     });
     format!("{hash:016x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, 5).unwrap()
+    }
+
+    fn at(h: u32, m: u32) -> NaiveDateTime {
+        day().and_hms_opt(h, m, 0).unwrap()
+    }
+
+    fn sample(when: NaiveDateTime, target: Option<f64>, mode: &str) -> TargetSample {
+        TargetSample {
+            at: when,
+            target,
+            mode: Some(mode.into()),
+        }
+    }
+
+    fn device(name: &str, samples: Vec<TargetSample>) -> DeviceHistory {
+        DeviceHistory {
+            entity: name.into(),
+            samples,
+        }
+    }
+
+    fn caps() -> DeviceCaps {
+        DeviceCaps {
+            hvac_modes: vec![],
+            min_temp: None,
+            max_temp: None,
+            temp_step: None,
+        }
+    }
+
+    /// The first day's slots for the given devices and engine commands, learning heat.
+    fn slots(devices: &[DeviceHistory], engine: &[EngineCommand]) -> [Slot; SLOTS] {
+        let caps = caps();
+        let input = LearnInput {
+            mode: Mode::Heat,
+            devices,
+            engine,
+            approved: None,
+            first_day: day(),
+            days: 1,
+            min_days: 1,
+            support: 0.6,
+            frost: 7.0,
+            caps: &caps,
+        };
+        timeline(&input).remove(0).1
+    }
+
+    const NOON: usize = 12 * 4;
+
+    fn flat(name: &str, mode: &str, t: Option<f64>) -> DeviceHistory {
+        device(name, vec![sample(at(0, 0), t, mode)])
+    }
+
+    #[test]
+    fn two_devices_average() {
+        let d = [flat("a", "heat", Some(20.0)), flat("b", "heat", Some(21.0))];
+        assert_eq!(slots(&d, &[])[NOON], Slot::Temp(20.5));
+    }
+
+    #[test]
+    fn off_device_does_not_pull_the_mean() {
+        let d = [flat("a", "off", None), flat("b", "heat", Some(20.0))];
+        assert_eq!(slots(&d, &[])[NOON], Slot::Temp(20.0));
+    }
+
+    #[test]
+    fn all_devices_off_is_off() {
+        let d = [flat("a", "off", None), flat("b", "off", None)];
+        assert_eq!(slots(&d, &[])[NOON], Slot::Off);
+    }
+
+    #[test]
+    fn other_mode_contributes_nothing() {
+        let only = [flat("a", "cool", Some(24.0))];
+        assert_eq!(slots(&only, &[])[NOON], Slot::None);
+        let both = [flat("a", "cool", Some(24.0)), flat("b", "heat", Some(20.0))];
+        assert_eq!(slots(&both, &[])[NOON], Slot::Temp(20.0));
+    }
+
+    #[test]
+    fn longer_held_value_wins_the_slot() {
+        let d = [device(
+            "a",
+            vec![
+                sample(at(0, 0), Some(18.0), "heat"),
+                sample(at(12, 10), Some(22.0), "heat"),
+            ],
+        )];
+        let s = slots(&d, &[]);
+        assert_eq!(s[NOON], Slot::Temp(18.0));
+        assert_eq!(s[NOON + 1], Slot::Temp(22.0));
+    }
+
+    #[test]
+    fn first_sample_before_the_window_carries_in() {
+        let before = at(0, 0) - Duration::hours(2);
+        let d = [device("a", vec![sample(before, Some(19.0), "heat")])];
+        let s = slots(&d, &[]);
+        assert_eq!(s[0], Slot::Temp(19.0));
+        assert_eq!(s[SLOTS - 1], Slot::Temp(19.0));
+    }
+
+    #[test]
+    fn engine_commands_other_than_schedule_and_idle_are_no_data() {
+        let d = [flat("a", "heat", Some(16.0))];
+        let command = |source| EngineCommand {
+            entity: "a".into(),
+            at: at(0, 0),
+            setpoint: Some(16.0),
+            mode: "heat".into(),
+            source,
+        };
+        for source in [
+            Source::Safety,
+            Source::Away,
+            Source::Holiday,
+            Source::Override,
+        ] {
+            assert_eq!(
+                slots(&d, &[command(source)])[NOON],
+                Slot::None,
+                "{source:?}"
+            );
+        }
+        for source in [Source::Schedule, Source::Idle] {
+            assert_eq!(
+                slots(&d, &[command(source)])[NOON],
+                Slot::Temp(16.0),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runs_absorb_a_one_slot_spike() {
+        let mut v = vec![Slot::Temp(17.0); SLOTS];
+        v[40] = Slot::Temp(25.0);
+        let runs = runs_of(&v, Mode::Heat);
+        assert_eq!(runs.len(), 1);
+        assert_eq!((runs[0].start, runs[0].len), (0, SLOTS));
+        assert_eq!(runs[0].value, Slot::Temp(17.0));
+    }
 }

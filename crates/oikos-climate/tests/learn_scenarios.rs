@@ -2,8 +2,8 @@ use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Weekday};
 use oikos_climate::decide::DeviceCaps;
 use oikos_climate::doc::{Block, Day, Evidence, HhMm, Mode, ModeRules, Rules, Setpoint, Source};
 use oikos_climate::learn::{
-    DeviceHistory, EngineCommand, LearnInput, LearnOutcome, SLOTS, Slot, TargetSample, diff,
-    differs, fingerprint, learn, timeline,
+    DeviceHistory, EngineCommand, LearnInput, LearnOutcome, Slot, TargetSample, diff, differs,
+    fingerprint, learn, timeline,
 };
 
 const ENTITY: &str = "climate.room";
@@ -220,7 +220,7 @@ fn off_at_night_learns_off_base() {
         day_with(
             d,
             "heat",
-            &[("00:00", None), ("06:00", Some(20.0)), ("23:00", None)],
+            &[("00:00", None), ("10:00", Some(20.0)), ("20:00", None)],
         )
     });
     let c = caps();
@@ -229,7 +229,7 @@ fn off_at_night_learns_off_base() {
     assert_eq!(rules.blocks.len(), 1);
     let b = &rules.blocks[0];
     assert_eq!(b.days.len(), 7);
-    assert_eq!((b.from, b.to), (HhMm(360), HhMm(1380)));
+    assert_eq!((b.from, b.to), (HhMm(600), HhMm(1200)));
     assert_eq!(b.setpoint, Setpoint::Temp(20.0));
     assert_eq!(b.evidence, Some(Evidence { agree: 14, of: 14 }));
     assert!(heat(rules).validate().is_ok());
@@ -369,17 +369,84 @@ fn heat_floor_at_frost() {
     let c = caps();
     let rules = rules_of(learn(&input(&h, &[], &c, 14)));
     assert_eq!(rules.base, Setpoint::Temp(7.0));
+    assert_eq!(rules.blocks.len(), 1);
     assert_eq!(rules.blocks[0].setpoint, Setpoint::Temp(20.0));
+    assert_eq!(
+        (rules.blocks[0].from, rules.blocks[0].to),
+        (HhMm(480), HhMm(1200))
+    );
 }
 
 #[test]
 fn deterministic() {
-    let h = history(28, standard_day);
+    let mut h = history(28, standard_day);
+    let mut second = history(28, |d| {
+        day_of(d, &[("00:00", 17.0), ("08:00", 20.0), ("20:00", 17.0)])
+    });
+    second[0].entity = "climate.other".into();
+    h.extend(second);
+    let engine: Vec<EngineCommand> = (0..28)
+        .map(|i| monday() + Duration::days(i))
+        .map(|d| cmd(d, "07:00", 20.5, Source::Schedule))
+        .collect();
     let c = caps();
-    let inp = input(&h, &[], &c, 28);
-    assert_eq!(learn(&inp), learn(&inp));
-    assert_eq!(timeline(&inp).len(), 28);
-    assert_eq!(timeline(&inp)[0].1.len(), SLOTS);
+    let first = learn(&input(&h, &engine, &c, 28));
+    assert_eq!(first, learn(&input(&h, &engine, &c, 28)));
+
+    let mut shuffled = h.clone();
+    shuffled.reverse();
+    for dev in &mut shuffled {
+        dev.samples.reverse();
+        dev.samples.rotate_left(7);
+    }
+    let mut engine2 = engine.clone();
+    engine2.reverse();
+    assert_eq!(first, learn(&input(&shuffled, &engine2, &c, 28)));
+}
+
+#[test]
+fn base_is_weighted_by_duration_not_run_count() {
+    let h = history(28, |d| {
+        if is_weekday(d) {
+            day_of(
+                d,
+                &[
+                    ("00:00", 17.0),
+                    ("07:00", 20.0),
+                    ("08:00", 18.0),
+                    ("09:00", 20.0),
+                    ("10:00", 18.0),
+                    ("11:00", 20.0),
+                    ("12:00", 17.0),
+                ],
+            )
+        } else {
+            day_of(d, &[("00:00", 17.0)])
+        }
+    });
+    let c = caps();
+    let rules = rules_of(learn(&input(&h, &[], &c, 28)));
+    assert_eq!(rules.base, Setpoint::Temp(17.0));
+}
+
+#[test]
+fn split_group_merges_identical_day_blocks() {
+    let h = history(28, |d| {
+        if matches!(d.weekday(), Weekday::Mon | Weekday::Wed) {
+            day_of(d, &[("00:00", 17.0), ("06:00", 21.0), ("22:00", 17.0)])
+        } else {
+            day_of(d, &[("00:00", 17.0)])
+        }
+    });
+    let c = caps();
+    let mut inp = input(&h, &[], &c, 28);
+    inp.support = 0.8;
+    let rules = rules_of(learn(&inp));
+    assert_eq!(rules.blocks.len(), 1, "{rules:?}");
+    let b = &rules.blocks[0];
+    assert_eq!(b.days, vec![Day::Mon, Day::Wed]);
+    assert_eq!((b.from, b.to), (HhMm(360), HhMm(1320)));
+    assert_eq!(b.evidence, Some(Evidence { agree: 8, of: 8 }));
 }
 
 #[test]
