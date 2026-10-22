@@ -40,10 +40,13 @@ struct Call {
 }
 
 /// Records every per-token send and answers from a per-token script (default `Sent`).
+/// `delays` slows the next sends down, one entry per call; `delivered` logs completions.
 #[derive(Default)]
 struct FakeFcm {
     calls: Mutex<Vec<Call>>,
+    delivered: Mutex<Vec<Call>>,
     script: Mutex<HashMap<String, VecDeque<Outcome>>>,
+    delays: Mutex<VecDeque<Duration>>,
 }
 
 impl FakeFcm {
@@ -61,6 +64,20 @@ impl FakeFcm {
     fn tokens(&self) -> Vec<String> {
         self.calls().into_iter().map(|c| c.token).collect()
     }
+
+    fn delay_next(&self, d: Duration) {
+        self.delays.lock().unwrap().push_back(d);
+    }
+
+    /// `(id, cancel)` of each completed send, in completion order.
+    fn delivered(&self) -> Vec<(String, bool)> {
+        self.delivered
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|c| (c.data["id"].clone(), c.data.contains_key("cancel")))
+            .collect()
+    }
 }
 
 impl FcmTransport for FakeFcm {
@@ -71,12 +88,14 @@ impl FcmTransport for FakeFcm {
         priority: Priority,
         ttl: u32,
     ) -> BoxFuture<'a, Outcome> {
-        self.calls.lock().unwrap().push(Call {
+        let call = Call {
             token: token.to_string(),
             data: data.clone(),
             priority,
             ttl,
-        });
+        };
+        self.calls.lock().unwrap().push(call.clone());
+        let delay = self.delays.lock().unwrap().pop_front();
         let outcome = self
             .script
             .lock()
@@ -84,7 +103,13 @@ impl FcmTransport for FakeFcm {
             .get_mut(token)
             .and_then(VecDeque::pop_front)
             .unwrap_or(Outcome::Sent);
-        Box::pin(async move { outcome })
+        Box::pin(async move {
+            if let Some(d) = delay {
+                tokio::time::sleep(d).await;
+            }
+            self.delivered.lock().unwrap().push(call);
+            outcome
+        })
     }
 }
 
@@ -944,4 +969,62 @@ async fn a_valid_loc_reaches_fcm() {
         h.fcm.calls()[0].data["loc"],
         r#"{"key":"frigate.object","args":{"label":"car"}}"#
     );
+}
+
+// ---------- ordering ----------
+
+#[tokio::test(start_paused = true)]
+async fn an_alert_and_its_cancel_reach_fcm_in_order() {
+    let h = harness().ready().await;
+    h.register(&tok("inst-a"), "tokA");
+    h.fcm.delay_next(Duration::from_secs(1));
+    h.notify("frigate", &v1(json!({})));
+    h.notify("frigate", &json!({"v": 1, "id": "a1", "cancel": true}));
+    flush().await;
+    assert!(
+        h.fcm.delivered().is_empty(),
+        "the slow first send holds the queue"
+    );
+    assert_eq!(h.fcm.calls().len(), 1, "the cancel waits for the alert");
+    advance(1.0).await;
+    assert_eq!(
+        h.fcm.delivered(),
+        [("a1".to_string(), false), ("a1".to_string(), true)]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn held_alerts_are_sent_in_arrival_order_at_the_first_settle() {
+    let h = harness();
+    h.svc.on_connected();
+    h.notify("frigate", &v1(json!({})));
+    h.notify("frigate", &json!({"v": 1, "id": "a1", "cancel": true}));
+    h.register(&tok("inst-a"), "tokA");
+    h.fcm.delay_next(Duration::from_millis(500));
+    h.svc.on_subscribed();
+    advance(2.0).await;
+    advance(0.5).await;
+    assert_eq!(
+        h.fcm.delivered(),
+        [("a1".to_string(), false), ("a1".to_string(), true)]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn dropping_the_service_ends_the_sender_task() {
+    let Harness { svc, rx, fcm } = harness().ready().await;
+    svc.on_message(&tok("inst-a"), br#"{"token":"tokA"}"#, true);
+    svc.submit("t", &json!({"v": 1, "id": "a", "title": "A"}))
+        .unwrap();
+    flush().await;
+    assert_eq!(fcm.calls().len(), 1, "the sender task ran");
+    let weak = Arc::downgrade(&svc);
+    drop(svc);
+    flush().await;
+    assert!(
+        weak.upgrade().is_none(),
+        "the sender task holds no strong reference"
+    );
+    assert_eq!(Arc::strong_count(&fcm), 1, "the transport was released too");
+    drop(rx);
 }

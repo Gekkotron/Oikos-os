@@ -3,7 +3,7 @@
 //! service publishes through the hub's channel. The broker is the database: the history is
 //! adopted from the retained `<prefix>/history` at the first sync, the queue is memory only.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use oikos_core::command::Publish;
@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 
-use crate::fcm::{FcmTransport, send_data};
+use crate::fcm::{FcmTransport, SendResult, send_data};
 use crate::history::History;
 use crate::normalize::{Alert, Rejected, android_priority, normalize, to_fcm_data, ttl_seconds};
 use crate::queue::{Pending, RetryQueue};
@@ -77,8 +77,13 @@ struct State {
     queue: RetryQueue,
 }
 
-/// One FCM send to run off the lock: the item and the tokens to send it to now.
-type Job = (Pending, Vec<String>);
+/// One FCM send for the sender task: the item, the tokens to send it to now, and whether it
+/// came from the retry queue (a failure then counts as one more attempt).
+struct Job {
+    pending: Pending,
+    tokens: Vec<String>,
+    retry: bool,
+}
 
 pub struct PushService {
     prefix: String,
@@ -88,6 +93,11 @@ pub struct PushService {
     transport: Option<Arc<dyn FcmTransport>>,
     clock: fn() -> u64,
     state: Mutex<State>,
+    /// FIFO of sends, drained by one task so alerts reach FCM in the order they were taken
+    /// (an alert, then its update or cancel). Fed under the state lock.
+    jobs: mpsc::UnboundedSender<Job>,
+    /// Taken by the first send, which spawns the sender task (so `new` needs no runtime).
+    jobs_rx: Mutex<Option<mpsc::UnboundedReceiver<Job>>>,
 }
 
 impl PushService {
@@ -109,6 +119,7 @@ impl PushService {
             tokens: Tokens::default(),
             queue: RetryQueue::new(settings.retry_interval, settings.max_retries),
         };
+        let (jobs, jobs_rx) = mpsc::unbounded_channel();
         Arc::new(PushService {
             prefix: settings.prefix.trim_matches('/').to_string(),
             legacy_prefix: settings.legacy_prefix.trim_matches('/').to_string(),
@@ -117,6 +128,8 @@ impl PushService {
             transport,
             clock,
             state: Mutex::new(state),
+            jobs,
+            jobs_rx: Mutex::new(Some(jobs_rx)),
         })
     }
 
@@ -250,19 +263,15 @@ impl PushService {
             tracing::warn!(id = %alert.id, "ignoring invalid loc");
         }
         let id = alert.id.clone();
-        let job = {
-            let mut st = self.lock();
-            if !st.loaded {
-                st.held.push(alert);
-                None
-            } else {
-                st.history.apply(&alert, (self.clock)());
-                self.publish_history(&st);
-                self.outgoing(&mut st, &alert)
+        let mut st = self.lock();
+        if !st.loaded {
+            st.held.push(alert);
+        } else {
+            st.history.apply(&alert, (self.clock)());
+            self.publish_history(&st);
+            if let Some(job) = self.outgoing(&mut st, &alert) {
+                self.enqueue(job);
             }
-        };
-        if let Some(job) = job {
-            self.spawn_send(job, false);
         }
         Ok(id)
     }
@@ -292,7 +301,11 @@ impl PushService {
             return None;
         }
         pending.tokens = Some(tokens.clone());
-        Some((pending, tokens))
+        Some(Job {
+            pending,
+            tokens,
+            retry: false,
+        })
     }
 
     pub fn on_connected(&self) {
@@ -325,25 +338,22 @@ impl PushService {
     }
 
     fn settle(self: &Arc<Self>, epoch: u64) {
-        let jobs = {
-            let mut st = self.lock();
-            if st.epoch != epoch || st.settle_epoch != Some(epoch) {
-                return;
-            }
-            st.settle_epoch = None;
-            let held = if st.loaded {
-                Vec::new()
-            } else {
-                self.load(&mut st)
-            };
-            st.synced = true;
-            tracing::info!(installs = st.tokens.len(), "push token map synced");
-            held.iter()
-                .filter_map(|alert| self.outgoing(&mut st, alert))
-                .collect::<Vec<_>>()
+        let mut st = self.lock();
+        if st.epoch != epoch || st.settle_epoch != Some(epoch) {
+            return;
+        }
+        st.settle_epoch = None;
+        let held = if st.loaded {
+            Vec::new()
+        } else {
+            self.load(&mut st)
         };
-        for job in jobs {
-            self.spawn_send(job, false);
+        st.synced = true;
+        tracing::info!(installs = st.tokens.len(), "push token map synced");
+        for alert in &held {
+            if let Some(job) = self.outgoing(&mut st, alert) {
+                self.enqueue(job);
+            }
         }
     }
 
@@ -396,76 +406,82 @@ impl PushService {
         if self.transport.is_none() {
             return;
         }
-        let jobs = {
-            let mut st = self.lock();
-            if !st.synced {
-                return;
+        let mut st = self.lock();
+        if !st.synced {
+            return;
+        }
+        let live = st.tokens.tokens();
+        for pending in st.queue.take_due((self.clock)()) {
+            let tokens: Vec<String> = match &pending.tokens {
+                None => live.clone(),
+                Some(wanted) => wanted
+                    .iter()
+                    .filter(|t| live.contains(t))
+                    .cloned()
+                    .collect(),
+            };
+            if tokens.is_empty() {
+                if pending.tokens.is_none() {
+                    tracing::info!(id = %pending.id, "no registered tokens; alert kept in history only");
+                }
+                continue;
             }
-            let live = st.tokens.tokens();
-            st.queue
-                .take_due((self.clock)())
-                .into_iter()
-                .filter_map(|p| {
-                    let tokens: Vec<String> = match &p.tokens {
-                        None => live.clone(),
-                        Some(wanted) => wanted.iter().filter(|t| live.contains(t)).cloned().collect(),
-                    };
-                    if tokens.is_empty() {
-                        if p.tokens.is_none() {
-                            tracing::info!(id = %p.id, "no registered tokens; alert kept in history only");
-                        }
-                        return None;
-                    }
-                    Some((p, tokens))
-                })
-                .collect::<Vec<_>>()
-        };
-        for job in jobs {
-            self.spawn_send(job, true);
+            self.enqueue(Job {
+                pending,
+                tokens,
+                retry: true,
+            });
         }
     }
 
-    /// Sends off the lock, then applies the outcome: dead tokens are cleared on the broker
-    /// and in the map, transient ones re-queued alone, message errors logged and dropped.
-    fn spawn_send(self: &Arc<Self>, (mut pending, tokens): Job, retry: bool) {
-        let Some(transport) = self.transport.clone() else {
-            return;
-        };
-        let me = Arc::clone(self);
-        tokio::spawn(async move {
-            let result = send_data(
-                &*transport,
-                &pending.data,
-                &tokens,
-                pending.priority,
-                pending.ttl,
-            )
-            .await;
-            let now = (me.clock)();
-            let mut st = me.lock();
-            for token in &result.invalid {
-                for topic in st.tokens.topics_for_token(token) {
-                    me.publish(Publish {
-                        topic: topic.clone(),
-                        payload: String::new(),
-                        retain: true,
-                    });
-                    st.tokens.remove(&topic);
-                    tracing::warn!(%topic, "cleared invalid token");
-                }
+    /// Hands a send to the sender task, spawning it on first use. Called under the state lock,
+    /// so the FIFO order is the order in which the history saw the alerts.
+    fn enqueue(self: &Arc<Self>, job: Job) {
+        let rx = self
+            .jobs_rx
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(rx) = rx {
+            tokio::spawn(run_sender(Arc::downgrade(self), rx));
+        }
+        // The receiver lives in the sender task until this service is dropped; an error means
+        // that task panicked.
+        if self.jobs.send(job).is_err() {
+            tracing::error!("push sender task is gone; alert not sent");
+        }
+    }
+
+    /// Applies one send's outcome: dead tokens are cleared on the broker and in the map,
+    /// transient ones re-queued alone, message errors logged and dropped.
+    fn apply_result(&self, job: Job, result: SendResult) {
+        let Job {
+            mut pending, retry, ..
+        } = job;
+        let now = (self.clock)();
+        let mut st = self.lock();
+        for token in &result.invalid {
+            for topic in st.tokens.topics_for_token(token) {
+                self.publish(Publish {
+                    topic: topic.clone(),
+                    payload: String::new(),
+                    retain: true,
+                });
+                st.tokens.remove(&topic);
+                tracing::warn!(%topic, "cleared invalid token");
             }
-            if result.message_errors > 0 {
-                tracing::error!(id = %pending.id, error = %result.last_message_error, "FCM rejected alert");
+        }
+        if result.message_errors > 0 {
+            tracing::error!(id = %pending.id, error = %result.last_message_error, "FCM rejected alert");
+        }
+        if !result.transient.is_empty() {
+            pending.tokens = Some(result.transient);
+            if retry {
+                st.queue.put_back(pending, now);
+            } else {
+                st.queue.add(pending);
             }
-            if !result.transient.is_empty() {
-                pending.tokens = Some(result.transient);
-                if retry {
-                    st.queue.put_back(pending, now);
-                } else {
-                    st.queue.add(pending);
-                }
-            }
-        });
+        }
     }
 
     fn publish_history(&self, st: &State) {
@@ -487,5 +503,21 @@ impl PushService {
             };
             tracing::warn!(%topic, %error, "push publish dropped");
         }
+    }
+}
+
+/// The single sender task: one send at a time, in FIFO order, off the state lock. It holds
+/// the service weakly between jobs, so dropping the service closes the channel and ends it.
+async fn run_sender(service: Weak<PushService>, mut jobs: mpsc::UnboundedReceiver<Job>) {
+    while let Some(job) = jobs.recv().await {
+        let Some(me) = service.upgrade() else {
+            break;
+        };
+        let Some(transport) = me.transport.clone() else {
+            continue;
+        };
+        let p = &job.pending;
+        let result = send_data(&*transport, &p.data, &job.tokens, p.priority, p.ttl).await;
+        me.apply_result(job, result);
     }
 }
