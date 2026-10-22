@@ -385,6 +385,22 @@ body {
   color: var(--accent-amber);
 }
 
+/* Unread-count pill on a nav entry (currently only the Alerts tab). Sits inline next to the
+   glyph, so it stays visible when the label is hidden on inactive tabs. */
+.nav__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--warning);
+  color: var(--bg);
+  font: 700 11px/1 var(--font-body);
+  pointer-events: none;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -5060,6 +5076,24 @@ html:has(.flow-canvas-screen) {
 .room-menu {
   position: relative;
   display: inline-block;
+}
+
+/* The ⋯ trigger is a quiet round icon, not a bordered pill */
+.room-menu__button {
+  flex: none;
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 50%;
+  font-size: 18px;
+  opacity: 0.7;
+}
+
+.room-menu__button:hover,
+.room-menu__button[aria-expanded="true"] {
+  background: var(--card-bg);
+  opacity: 1;
 }
 
 .room-menu__pop {

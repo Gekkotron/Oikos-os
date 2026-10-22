@@ -28,6 +28,9 @@ pub struct House {
     pub dashboards: RwSignal<Vec<DashboardView>>,
     /// The last rejected command as `(entity id, reason)`.
     pub command_failed: RwSignal<Option<(String, String)>>,
+    /// Unix seconds of the user's last visit to the Alerts tab. The nav badge counts alerts
+    /// newer than this. Persisted to `localStorage` by [`crate::alerts::install_alerts_badge`].
+    pub last_alerts_seen: RwSignal<u64>,
 }
 
 impl House {
@@ -45,6 +48,7 @@ impl House {
             groups: RwSignal::new(BTreeMap::new()),
             dashboards: RwSignal::new(Vec::new()),
             command_failed: RwSignal::new(None),
+            last_alerts_seen: RwSignal::new(0),
         }
     }
 

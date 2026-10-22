@@ -3,8 +3,70 @@
 
 use std::collections::BTreeMap;
 
+use leptos::prelude::*;
+use leptos_router::hooks::use_location;
 use oikos_api::{AlertChannel, AlertView, EntityView};
 use time::{Date, OffsetDateTime};
+
+use crate::components::now::unix_now;
+use crate::house::House;
+
+/// Storage key for the "last visit to the Alerts tab" marker.
+#[cfg(target_arch = "wasm32")]
+const SEEN_STORAGE_KEY: &str = "oikos.alerts.last_seen";
+
+/// `localStorage`, or `None` when it is missing, blocked or throws (private window, denied
+/// permission): the badge then stops persisting, but never panics.
+#[cfg(target_arch = "wasm32")]
+fn storage() -> Option<web_sys::Storage> {
+    web_sys::window().and_then(|w| w.local_storage().ok().flatten())
+}
+
+/// Loads the stored "last visit" marker into [`House::last_alerts_seen`] and keeps the stored
+/// value in sync with it. A brand-new browser (nothing stored) starts the marker at now, so a
+/// first visit never shows a badge for historic alerts.
+pub fn install_alerts_badge(house: House) {
+    let initial = load_initial_marker();
+    house.last_alerts_seen.set(initial);
+    #[cfg(target_arch = "wasm32")]
+    Effect::new(move |_| {
+        let value = house.last_alerts_seen.get();
+        if let Some(s) = storage() {
+            let _ = s.set_item(SEEN_STORAGE_KEY, &value.to_string());
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_initial_marker() -> u64 {
+    storage()
+        .and_then(|s| s.get_item(SEEN_STORAGE_KEY).ok().flatten())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or_else(unix_now)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_initial_marker() -> u64 {
+    unix_now()
+}
+
+/// Keeps [`House::last_alerts_seen`] at `now` whenever the current route is the Alerts page or
+/// an alert detail, so the top-bar badge disappears on entry, stays cleared while the user is
+/// looking, and resumes counting from the latest alert on the way out. Render it once inside
+/// the router.
+#[component]
+pub fn TrackAlertsSeen() -> impl IntoView {
+    let house = expect_context::<House>();
+    let location = use_location();
+    Effect::new(move |_| {
+        let on_alerts = location.pathname.get().starts_with("/alerts");
+        // Subscribe to arrivals too, so new alerts during the visit also move the marker.
+        house.alerts.with(|_| {});
+        if on_alerts {
+            house.last_alerts_seen.set(unix_now());
+        }
+    });
+}
 
 /// How many alerts the Home section shows.
 pub const RECENT_LIMIT: usize = 5;
@@ -33,6 +95,22 @@ pub fn filtered(alerts: &[AlertView], channel: Option<AlertChannel>) -> Vec<Aler
         .filter(|a| channel.is_none_or(|c| a.channel == c))
         .cloned()
         .collect()
+}
+
+/// How many alerts were sent strictly after `last_seen_s` (both unix seconds). The Alerts tab
+/// shows this count as a badge; entering `/alerts` moves `last_seen_s` to the current time.
+pub fn unseen_count(alerts: &[AlertView], last_seen_s: u64) -> usize {
+    alerts.iter().filter(|a| a.sent_at > last_seen_s).count()
+}
+
+/// The badge label for a count: `None` for zero (badge hidden), the number for 1..=99, `"99+"`
+/// for 100 or more.
+pub fn badge_text(count: usize) -> Option<String> {
+    match count {
+        0 => None,
+        1..=99 => Some(count.to_string()),
+        _ => Some("99+".to_string()),
+    }
 }
 
 /// How long ago `sent_at` was at `now` (both unix seconds). A time in the future is "Just now".
@@ -148,7 +226,10 @@ mod tests {
     use oikos_api::{AlertChannel, AlertSeverity, AlertView, EntityView};
     use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
 
-    use super::{DayLabel, day_label, filtered, group_by_day, match_entity, recent, relative_time};
+    use super::{
+        DayLabel, badge_text, day_label, filtered, group_by_day, match_entity, recent,
+        relative_time, unseen_count,
+    };
 
     fn alert(id: &str, channel: AlertChannel, sent_at: u64) -> AlertView {
         AlertView {
@@ -328,5 +409,28 @@ mod tests {
     fn slug_collapses_runs_and_trims() {
         assert_eq!(super::slug("  Front -- Door! "), "front_door");
         assert_eq!(super::slug("!!!"), "");
+    }
+
+    #[test]
+    fn unseen_count_takes_strictly_newer_alerts() {
+        let alerts = [
+            alert("a", AlertChannel::Camera, 110),
+            alert("b", AlertChannel::Camera, 100),
+            alert("c", AlertChannel::Camera, 90),
+        ];
+        // An alert whose sent_at equals the marker is treated as seen (strict >).
+        assert_eq!(unseen_count(&alerts, 100), 1);
+        assert_eq!(unseen_count(&alerts, 50), 3);
+        assert_eq!(unseen_count(&alerts, 200), 0);
+        assert_eq!(unseen_count(&[], 100), 0);
+    }
+
+    #[test]
+    fn badge_text_hides_zero_and_caps_at_99() {
+        assert_eq!(badge_text(0), None);
+        assert_eq!(badge_text(1).as_deref(), Some("1"));
+        assert_eq!(badge_text(99).as_deref(), Some("99"));
+        assert_eq!(badge_text(100).as_deref(), Some("99+"));
+        assert_eq!(badge_text(9999).as_deref(), Some("99+"));
     }
 }

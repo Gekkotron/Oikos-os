@@ -71,6 +71,7 @@ pub fn App() -> impl IntoView {
         }
     });
     install_nav();
+    crate::alerts::install_alerts_badge(house);
     install_history_refresh(house);
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
     Effect::new(move |_| {
@@ -93,6 +94,14 @@ pub fn App() -> impl IntoView {
             .entities
             .with(|m| crate::energy::any_solar_active(m.values()))
     });
+    // Count of alerts received since the user's last visit to /alerts. The badge in the top bar
+    // uses this: hidden at zero, capped at "99+".
+    let alerts_badge = Memo::new(move |_| {
+        let count = house
+            .alerts
+            .with(|list| crate::alerts::unseen_count(list, house.last_alerts_seen.get()));
+        crate::alerts::badge_text(count)
+    });
     #[cfg(target_arch = "wasm32")]
     crate::ws::connect("/ws", house);
     #[cfg(target_arch = "wasm32")]
@@ -111,6 +120,7 @@ pub fn App() -> impl IntoView {
     view! {
         <Router>
             <TrackReturnPath />
+            <crate::alerts::TrackAlertsSeen />
             <header class="topbar">
                 <span class="topbar__brand">
                     <img
@@ -147,6 +157,14 @@ pub fn App() -> impl IntoView {
                     <A href="/alerts">
                         <span class="nav__glyph" inner_html=BELL></span>
                         <span class="nav__label">"Alerts"</span>
+                        {move || alerts_badge.get().map(|text| {
+                            let label = format!("{text} unseen alerts");
+                            view! {
+                                <span class="nav__badge" aria-label=label>
+                                    {text}
+                                </span>
+                            }
+                        })}
                     </A>
                     <A href="/flows">
                         <span class="nav__glyph" inner_html=FLOW_NODES></span>
