@@ -4,6 +4,7 @@ pub mod alerts;
 pub mod cli;
 pub mod clock;
 pub mod config;
+pub mod dashboards;
 pub mod flows;
 pub mod groups;
 pub mod history;

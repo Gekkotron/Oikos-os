@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use leptos::prelude::*;
 use oikos_api::{
-    AlertView, AreaView, BridgeView, ConnectionStatus, DeviceView, EntityView, FlowView,
-    FlowsConfigView, GroupView, IgnoredView, WsEvent,
+    AlertView, AreaView, BridgeView, ConnectionStatus, DashboardView, DeviceView, EntityView,
+    FlowView, FlowsConfigView, GroupView, IgnoredView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -24,6 +24,8 @@ pub struct House {
     pub flows_config: RwSignal<Option<FlowsConfigView>>,
     /// The hand-made groups by id (without the `group_` prefix), for the member counts on Home.
     pub groups: RwSignal<BTreeMap<String, GroupView>>,
+    /// The dashboards, fetched once at start-up: the hub does not push their structure.
+    pub dashboards: RwSignal<Vec<DashboardView>>,
     /// The last rejected command as `(entity id, reason)`.
     pub command_failed: RwSignal<Option<(String, String)>>,
 }
@@ -41,6 +43,7 @@ impl House {
             flows: RwSignal::new(Vec::new()),
             flows_config: RwSignal::new(None),
             groups: RwSignal::new(BTreeMap::new()),
+            dashboards: RwSignal::new(Vec::new()),
             command_failed: RwSignal::new(None),
         }
     }
@@ -75,6 +78,12 @@ impl House {
                 .cloned()
                 .collect()
         })
+    }
+
+    /// The dashboard with matching `id`, read without subscribing.
+    pub fn dashboard(&self, id: &str) -> Option<DashboardView> {
+        self.dashboards
+            .with_untracked(|v| v.iter().find(|d| d.dashboard.id == id).cloned())
     }
 
     /// Fans `event` out to the signals the way `HouseState::apply` patches its fields.

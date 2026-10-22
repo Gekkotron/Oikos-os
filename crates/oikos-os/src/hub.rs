@@ -10,6 +10,7 @@ use std::sync::{
 use std::time::Duration;
 
 use crate::alerts::{AlertStore, Applied};
+use crate::dashboards::DashboardStore;
 use crate::flows::FlowStore;
 use crate::groups::{self, ApplyOutcome, GroupStore};
 use crate::history::History;
@@ -61,6 +62,8 @@ pub enum HubError {
     UnknownFlow(String),
     #[error("unknown area `{0}`")]
     UnknownArea(String),
+    #[error("unknown dashboard `{0}`")]
+    UnknownDashboard(String),
     /// The flow cannot be saved or run: it does not validate, or names something the house
     /// does not have.
     #[error("invalid flow: {0}")]
@@ -141,6 +144,8 @@ pub struct Hub {
     group_store: Mutex<GroupStore>,
     /// `[groups] enabled`: group writes and listing are refused while it is false.
     groups_enabled: bool,
+    /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
+    dashboard_store: Mutex<DashboardStore>,
     /// The topic prefix flows are retained under, one topic per flow id.
     automation_prefix: String,
     /// The time zone schedules and their preview run in.
@@ -230,6 +235,7 @@ impl Hub {
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             group_store: Mutex::new(GroupStore::default()),
             groups_enabled: cfg.groups.enabled,
+            dashboard_store: Mutex::new(DashboardStore::new()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
             house_point: cfg.flows.house_point(),
@@ -262,6 +268,12 @@ impl Hub {
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
         if topic == self.history_topic {
             self.ingest_history(topic, payload);
+            return Vec::new();
+        }
+        if let Some(id) = self.dashboard_id_of(topic) {
+            // Dashboard structure is not pushed over the WebSocket, so there is nothing to
+            // broadcast; the store is read on demand.
+            self.ingest_dashboard(id, payload);
             return Vec::new();
         }
         if let Some(id) = self.flow_id_of(topic) {
@@ -1533,6 +1545,30 @@ impl Hub {
             .strip_prefix(self.automation_prefix.as_str())?
             .strip_prefix('/')?;
         (!id.is_empty() && !id.contains('/')).then_some(id)
+    }
+
+    pub(crate) fn dashboard_store(&self) -> MutexGuard<'_, DashboardStore> {
+        self.dashboard_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The topic of dashboard `id`.
+    pub fn dashboard_topic(&self, id: &str) -> String {
+        format!("{}/dashboards/{id}", self.ui_prefix)
+    }
+
+    /// The dashboard id when `topic` is exactly `<ui_prefix>/dashboards/<id>`.
+    fn dashboard_id_of<'a>(&self, topic: &'a str) -> Option<&'a str> {
+        let id = topic
+            .strip_prefix(self.ui_prefix.as_str())?
+            .strip_prefix("/dashboards/")?;
+        (!id.is_empty() && !id.contains('/')).then_some(id)
+    }
+
+    /// Applies a retained dashboard payload to the store.
+    pub(crate) fn ingest_dashboard(&self, id: &str, payload: &[u8]) {
+        self.dashboard_store().apply(id, payload);
     }
 
     /// The receiving end of the engine requests, handed out once.

@@ -2,8 +2,9 @@
 
 use gloo_net::http::{Request, Response};
 use oikos_api::{
-    ApiError, CommandResponse, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec,
-    GroupView, OverridePatch, RunView, SchedulePreview,
+    ApiError, CommandResponse, Dashboard, DashboardReorder, DashboardView, EntityView, FlowView,
+    FlowWriteOutcome, FlowsConfigView, GroupSpec, GroupView, OverridePatch, RunView,
+    SchedulePreview,
 };
 use oikos_core::flow::Flow;
 use oikos_core::model::{AreasDocument, Command};
@@ -171,6 +172,46 @@ pub async fn rename_area(id: &str, name: &str) -> Result<Vec<oikos_api::AreaView
 pub async fn set_areas(doc: AreasDocument) -> Result<Vec<oikos_api::AreaView>, ApiError> {
     let response = check(Request::put("/api/v1/areas").json(&doc), None).await?;
     read_json(response).await
+}
+
+/// House first at index 0, then the authored dashboards by `order`.
+pub async fn fetch_dashboards() -> Result<Vec<DashboardView>, ApiError> {
+    let response = check(Request::get("/api/v1/dashboards").build(), None).await?;
+    read_json(response).await
+}
+
+/// One dashboard by id; House is at `house`.
+pub async fn fetch_dashboard(id: &str) -> Result<DashboardView, ApiError> {
+    let url = format!("/api/v1/dashboards/{}", encode_id(id));
+    let response = check(Request::get(&url).build(), None).await?;
+    read_json(response).await
+}
+
+/// Create-or-replace; the reply carries the hub's normalized state (notably `order`).
+pub async fn put_dashboard(d: &Dashboard) -> Result<Dashboard, ApiError> {
+    let url = format!("/api/v1/dashboards/{}", encode_id(&d.id));
+    let response = check(Request::put(&url).json(d), None).await?;
+    // Plain serde would reject widget kinds this build does not know; decode_dashboard drops them.
+    let value: Value = read_json(response).await?;
+    oikos_api::decode_dashboard(value).map_err(|e| ApiError {
+        error: format!("decode dashboard: {e}"),
+    })
+}
+
+/// House cannot be deleted (the hub answers 403), so the client hides its delete UI.
+pub async fn delete_dashboard(id: &str) -> Result<(), ApiError> {
+    let url = format!("/api/v1/dashboards/{}", encode_id(id));
+    check(Request::delete(&url).build(), None).await?;
+    Ok(())
+}
+
+/// Reorders the authored dashboards; House stays at index 0. A drifted list comes back as a 422.
+pub async fn reorder_dashboards(order: &[String]) -> Result<(), ApiError> {
+    let body = DashboardReorder {
+        order: order.to_vec(),
+    };
+    check(Request::post("/api/v1/dashboards/order").json(&body), None).await?;
+    Ok(())
 }
 
 #[cfg(test)]

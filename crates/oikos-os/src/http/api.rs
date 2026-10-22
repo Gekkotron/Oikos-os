@@ -12,10 +12,10 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
-    AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, EnergyKind, EntityView,
-    FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec, GroupView, HistoryDaily, HistoryRange,
-    HistorySeries, HistoryToday, IgnoredView, LastChange, OverridePatch, RunView, SchedulePreview,
-    Snapshot, VirtualSpec,
+    AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, Dashboard, DashboardReorder,
+    DashboardView, EnergyKind, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec,
+    GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, IgnoredView, LastChange,
+    OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec,
 };
 use oikos_core::flow::{Flow, Schedule};
 use oikos_core::model::{AreasDocument, Command};
@@ -56,6 +56,14 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/flows/{id}/run", post(run_flow))
         .route("/groups", get(list_groups))
         .route("/groups/{id}", put(put_group).delete(delete_group))
+        .route("/dashboards", get(list_dashboards))
+        .route("/dashboards/order", post(reorder_dashboards))
+        .route(
+            "/dashboards/{id}",
+            get(get_dashboard)
+                .put(put_dashboard)
+                .delete(delete_dashboard),
+        )
         .route("/virtual/{id}", put(put_virtual).delete(delete_virtual))
         .route("/history/series", get(history_series))
         .route("/history/daily", get(history_daily))
@@ -161,7 +169,8 @@ impl From<HubError> for HttpError {
             | HubError::UnknownAlert(_)
             | HubError::UnknownAction(_)
             | HubError::UnknownFlow(_)
-            | HubError::UnknownArea(_) => StatusCode::NOT_FOUND,
+            | HubError::UnknownArea(_)
+            | HubError::UnknownDashboard(_) => StatusCode::NOT_FOUND,
             HubError::Rejected(_) | HubError::Command(_) | HubError::InvalidFlow(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
@@ -450,6 +459,65 @@ async fn delete_flow(
 ) -> Result<StatusCode, HttpError> {
     hub.delete_flow(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_dashboards(State(hub): HubState) -> Json<Vec<DashboardView>> {
+    Json(hub.dashboards())
+}
+
+async fn get_dashboard(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<Json<DashboardView>, HttpError> {
+    hub.dashboard(&id)
+        .map(Json)
+        .ok_or_else(|| HttpError::from(HubError::UnknownDashboard(id)))
+}
+
+/// `403` for the reserved `house` id, `422` when the path and body ids differ or a widget
+/// does not validate, `503` while the broker link is down.
+async fn put_dashboard(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<Dashboard>,
+) -> Result<Json<Dashboard>, HttpError> {
+    reject_house(&id)?;
+    let Json(dashboard) = body?;
+    if dashboard.id != id {
+        return Err(HttpError {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            error: format!("path id `{id}` does not match body id `{}`", dashboard.id),
+        });
+    }
+    Ok(Json(hub.set_dashboard(dashboard).await?))
+}
+
+async fn delete_dashboard(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    reject_house(&id)?;
+    hub.delete_dashboard(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn reorder_dashboards(
+    State(hub): HubState,
+    body: Body<DashboardReorder>,
+) -> Result<StatusCode, HttpError> {
+    let Json(body) = body?;
+    hub.reorder_dashboards(&body.order).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn reject_house(id: &str) -> Result<(), HttpError> {
+    if id == oikos_api::HOUSE_ID {
+        return Err(HttpError {
+            status: StatusCode::FORBIDDEN,
+            error: format!("`{id}` is reserved"),
+        });
+    }
+    Ok(())
 }
 
 /// The `POST /flows/{id}/enabled` body.

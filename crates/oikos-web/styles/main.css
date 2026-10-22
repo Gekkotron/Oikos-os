@@ -4223,3 +4223,163 @@ html:has(.flow-canvas-screen) {
 .device__update-badge {
   color: var(--accent, inherit);
 }
+
+/* Dashboard grid: 2 columns on phones, 4 on tablets, 6 on desktop. Spans that exceed the
+   column count would create implicit columns, so they are clamped to the full row. */
+.dashboard-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 12px;
+}
+@media (min-width: 601px) {
+  .dashboard-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1201px) {
+  .dashboard-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+.widget-span-1x1 { grid-column: span 1; grid-row: span 1; }
+.widget-span-2x1 { grid-column: span 2; grid-row: span 1; }
+.widget-span-2x2 { grid-column: span 2; grid-row: span 2; }
+.widget-span-1x2 { grid-column: span 1; grid-row: span 2; }
+
+.widget-unavailable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--card-min-height);
+  padding: var(--card-padding);
+  border: 1px dashed var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  color: var(--ink);
+  opacity: 0.5;
+}
+.widget-unavailable-label { overflow-wrap: anywhere; }
+
+/* The dashboards picker replaces the Home tab. The menu is position: fixed with no offsets so it
+   sits at its static position yet escapes the nav's overflow-x clipping. */
+.dashboards-picker {
+  flex: 1 0 auto;
+  display: flex;
+}
+
+.dashboards-picker__trigger {
+  flex: 1 0 auto;
+  min-height: var(--touch-min);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-nav);
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.dashboards-picker__menu {
+  position: fixed;
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  min-width: 180px;
+  background: var(--card-bg, Canvas);
+  border: 1px solid var(--card-border, currentColor);
+  border-radius: var(--radius-nav);
+}
+
+.dashboards-picker__menu li {
+  display: flex;
+}
+
+.dashboards-picker__menu a,
+.dashboards-picker__new button {
+  flex: 1;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 0 12px;
+  min-height: var(--touch-min);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  cursor: pointer;
+}
+
+.dashboards-picker__new {
+  border-top: 1px solid var(--card-border, currentColor);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+/* Edit mode: toolbar sits above the grid; per-tile tools overlay the tile's top-right corner. */
+.dashboard-edit-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+.dashboard-edit-toolbar button {
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+}
+.dashboard-edit-toolbar__pencil[aria-pressed="true"] { font-weight: bold; }
+.widget { position: relative; }
+.widget__tools {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  gap: 4px;
+  z-index: 2;
+}
+.widget__tools button { min-height: 32px; min-width: 32px; }
+
+.widget-add { display: flex; align-items: center; justify-content: center; position: relative; min-height: 4rem; }
+.dashboard-add-picker { position: relative; }
+.dashboard-add-picker__trigger {
+  padding: 0.6rem 1rem; border-radius: 0.75rem; cursor: pointer;
+  border: 1px dashed currentColor; background: transparent; color: inherit;
+}
+.dashboard-add-picker__panel {
+  position: absolute; bottom: 100%; left: 0; z-index: 20;
+  width: min(20rem, 85vw); max-height: 60vh; overflow-y: auto;
+  padding: 0.75rem; border-radius: 0.75rem;
+  background: var(--card-bg, #1e1e1e); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+.dashboard-add-picker__group h4 { margin: 0.5rem 0 0.25rem; font-size: 0.8rem; opacity: 0.7; }
+.dashboard-add-picker__group ul { list-style: none; margin: 0; padding: 0; }
+.dashboard-add-picker__group li button {
+  width: 100%; text-align: left; padding: 0.4rem 0.5rem;
+  background: transparent; border: 0; color: inherit; cursor: pointer; border-radius: 0.4rem;
+}
+.dashboard-add-picker__group li button:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* Edit-mode side sheets: right-anchored over the grid. */
+.widget-config-sheet,
+.dashboard-settings-sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 100vw;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface, #fff);
+  color: inherit;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.2);
+  z-index: 50;
+}
+.widget-config-sheet label,
+.dashboard-settings-sheet label { display: flex; flex-direction: column; gap: 4px; }
+.widget-config-sheet button,
+.dashboard-settings-sheet button { min-height: var(--touch-min); }
+.widget-config-sheet__delete { color: #c0392b; }
+.dashboard-settings-sheet__reorder { display: flex; gap: 8px; }
+.dashboard-settings-sheet__reorder button { flex: 1; }
+.widget__edit-overlay { position: absolute; inset: 0; z-index: 1; cursor: pointer; pointer-events: auto; }

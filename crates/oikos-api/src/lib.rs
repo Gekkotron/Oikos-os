@@ -3,6 +3,7 @@
 //! snapshot, WebSocket events and REST bodies. Pure data, no I/O, no clock.
 
 mod alerts;
+mod dashboards;
 mod events;
 mod flows;
 mod groups;
@@ -12,6 +13,10 @@ mod views;
 mod virtual_entities;
 
 pub use alerts::{AlertAction, AlertChannel, AlertSeverity, AlertView, parse_history};
+pub use dashboards::{
+    Dashboard, DashboardReorder, DashboardView, HOUSE_ID, HOUSE_NAME, Span, Widget, WidgetConfig,
+    WidgetKind, allowed_spans, decode_dashboard,
+};
 pub use events::{ApiError, CommandResponse, ConnectionStatus, OverridePatch, WsEvent};
 pub use flows::{
     FlowView, FlowWriteOutcome, FlowsConfigView, RunStatus, RunView, SchedulePreview, StepOutcome,

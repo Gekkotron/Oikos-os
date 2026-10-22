@@ -2,6 +2,7 @@
 
 use leptos::prelude::*;
 use leptos_router::components::{A, Route, Router, Routes};
+use leptos_router::hooks::use_navigate;
 use leptos_router::path;
 use oikos_core::model::{Kind, StateValue};
 
@@ -15,6 +16,7 @@ use crate::icons::{BOLT, SHIELD};
 use crate::nav::{TrackReturnPath, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
+use crate::screens::dashboard::DashboardScreen;
 use crate::screens::devices::DevicesScreen;
 use crate::screens::energy::{EnergyScreen, install_history_refresh};
 use crate::screens::entity_sheet::EntitySheetScreen;
@@ -23,10 +25,22 @@ use crate::screens::flows::FlowsScreen;
 use crate::screens::group_sheet_v2::GroupSheetV2Screen;
 use crate::screens::group_wizard::GroupWizardScreen;
 use crate::screens::history_detail::HistoryDetailScreen;
-use crate::screens::home::HomeScreen;
 use crate::screens::security::SecurityScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::theme::{Theme, install_theme};
+
+/// Landing and unknown paths go to the House dashboard, the first picker entry. `replace` keeps
+/// Back from bouncing off the redirect.
+#[component]
+fn HouseRedirect() -> impl IntoView {
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        navigate(
+            &format!("/dashboards/{}", oikos_api::HOUSE_ID),
+            leptos_router::NavigateOptions { replace: true, ..Default::default() },
+        );
+    });
+}
 
 /// True while any alarm panel is other than disarmed: armed, arming, pending or triggered. The
 /// Security tab glyph takes the warning colour then, as the app's tab icon does.
@@ -57,6 +71,13 @@ pub fn App() -> impl IntoView {
     provide_context(Pending::new());
     provide_context(Confirming::new());
     provide_context(install_now());
+    // Dashboards are not pushed over the socket, so the shell fetches them once at start-up.
+    leptos::task::spawn_local(async move {
+        match crate::api::fetch_dashboards().await {
+            Ok(list) => house.dashboards.set(list),
+            Err(err) => toasts.push(format!("Could not load dashboards: {}", err.error)),
+        }
+    });
     install_nav();
     install_history_refresh(house);
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
@@ -122,7 +143,7 @@ pub fn App() -> impl IntoView {
                     {move || theme.get().as_str()}
                 </button>
                 <nav class="topbar__nav">
-                    <A href="/" exact=true>"Home"</A>
+                    <crate::dashboards::picker::DashboardsPicker />
                     <A href="/energy">
                         <span
                             class="nav__glyph"
@@ -146,8 +167,9 @@ pub fn App() -> impl IntoView {
                 </nav>
             </header>
             <main class="screen">
-                <Routes fallback=HomeScreen>
-                    <Route path=path!("/") view=HomeScreen />
+                <Routes fallback=HouseRedirect>
+                    <Route path=path!("/") view=HouseRedirect />
+                    <Route path=path!("/dashboards/:id") view=DashboardScreen />
                     <Route path=path!("/entity/:id") view=EntitySheetScreen />
                     <Route path=path!("/history/:id") view=HistoryDetailScreen />
                     <Route path=path!("/group/:id") view=GroupSheetV2Screen />
