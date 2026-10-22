@@ -89,7 +89,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `DELETE /api/v1/flows/{id}` | Removes the flow (204), or `404`. |
 | `POST /api/v1/flows/{id}/enabled` | `{"enabled": bool}`; returns the flow. |
 | `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or already running. |
-| `POST /api/v1/flows/{id}/area` | `{"area": "<id>" \| null}` sets the room the flow is listed under; returns the flow. `422` for an unknown room or an invalid flow, `404` for an unknown flow. |
+| `POST /api/v1/flows/{id}/area` | `{"area": "<id>" \| null}` sets the room the flow is listed under (`null` clears it; the key is required); returns the flow. `422` for an unknown room, a body without `area` or an invalid flow, `404` for an unknown flow. |
 | `GET /api/v1/history/series?entity=&range=` | A chart series over `24h`, `7d`, `30d` or `1y`: `{window, points:[[t,mean,min,max],…]}`. See [History](#history). |
 | `GET /api/v1/history/daily?entity=&days=&kind=` | kWh per calendar day for the last `days` days (7, 30 or 365), with `kind` (`counter` or `power`). |
 | `GET /api/v1/history/today?entity=&kind=` | kWh since local midnight: `{kwh, since}`. |

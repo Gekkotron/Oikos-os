@@ -537,9 +537,12 @@ async fn set_flow_enabled(
     Ok(Json(hub.set_flow_enabled(&id, enabled).await?))
 }
 
-/// The `POST /flows/{id}/area` body; `null` clears the room.
+/// The `POST /flows/{id}/area` body; `null` clears the room. The key is required (`{}` or a
+/// misspelt key is a `422`, not a silent clear): `deserialize_with` stops serde from defaulting
+/// a missing `Option` field to `None`.
 #[derive(serde::Deserialize)]
 struct AreaBody {
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     area: Option<String>,
 }
 

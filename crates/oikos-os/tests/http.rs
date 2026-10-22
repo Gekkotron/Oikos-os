@@ -1235,6 +1235,26 @@ async fn post_flow_area_sets_clears_and_rejects() {
 
     let res = post("/api/v1/flows/nope/area", json!({"area": null})).await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // A missing (or misspelt) key is refused rather than read as "clear the room".
+    let res = post("/api/v1/flows/living/area", json!({"area": "living"})).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    for body in [json!({}), json!({"aera": null})] {
+        let res = post("/api/v1/flows/living/area", body.clone()).await;
+        assert!(res.status().is_client_error(), "{body}: {}", res.status());
+        let text = res.text().await.expect("text");
+        assert!(text.contains("area"), "{text}");
+    }
+    let flow: Value = server
+        .client
+        .get(server.url("/api/v1/flows/living"))
+        .send()
+        .await
+        .expect("GET flow")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(flow["definition"]["area"], "living");
 }
 
 #[tokio::test]
