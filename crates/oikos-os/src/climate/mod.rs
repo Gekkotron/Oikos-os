@@ -93,4 +93,6 @@ pub(crate) struct ClimateRuntime {
     pub learn_status: HashMap<String, LearnStatus>,
     /// Zone -> when its last proposal push went out, at most one a day.
     pub last_proposal_push: HashMap<String, u64>,
+    /// Zones whose learning run is in progress.
+    pub learning_now: HashSet<String>,
 }

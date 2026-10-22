@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use oikos_climate::doc::{
-    Override, OverrideOrigin, Proposal, ProposalKind, Rejection, Rules, ZoneState,
+    ModeRules, Override, OverrideOrigin, Proposal, ProposalKind, Rejection, Rules, ZoneState,
 };
 use oikos_climate::topics::{self, ZoneDoc};
 use oikos_climate::view::LearnStatus;
@@ -42,21 +42,27 @@ pub(crate) fn publish(hub: &Hub, zone: &str, proposal: Proposal, now: u64) {
     if !hub.climate_enabled() {
         return;
     }
-    let replaced = hub
+    let pending = hub
         .climate_store()
         .zones
         .get(zone)
-        .and_then(|docs| docs.proposal.as_ref().map(|old| old.id.clone()))
-        .filter(|old| *old != proposal.id);
+        .and_then(|docs| docs.proposal.clone());
+    let replaced = pending
+        .as_ref()
+        .filter(|old| old.id != proposal.id || old.fingerprint != proposal.fingerprint)
+        .map(|old| old.id.clone());
     hub.write_zone_doc(zone, ZoneDoc::Proposal, Some(&proposal));
     if let Some(old) = replaced {
         cancel_alert(hub, &old);
     }
+    // After a restart nothing is remembered: the pending proposal says when the user was told.
     let due = hub
         .climate_runtime()
         .last_proposal_push
         .get(zone)
-        .is_none_or(|at| now.saturating_sub(*at) >= PUSH_EVERY_S);
+        .copied()
+        .or(pending.as_ref().map(|old| old.created))
+        .is_none_or(|at| now.saturating_sub(at) >= PUSH_EVERY_S);
     if !due {
         return;
     }
@@ -185,12 +191,17 @@ impl Hub {
                 )));
             }
         }
-        if let Some(oikos_climate::doc::Setpoint::Temp(t)) = ov.setpoint
-            && !(0.0..=40.0).contains(&t)
-        {
-            return Err(HubError::Rejected(format!(
-                "setpoint {t} is outside 0..=40"
-            )));
+        if let Some(setpoint) = ov.setpoint {
+            // The same range check as a schedule's setpoints.
+            Rules {
+                heat: Some(ModeRules {
+                    base: setpoint,
+                    blocks: Vec::new(),
+                }),
+                cool: None,
+            }
+            .validate()
+            .map_err(HubError::Rejected)?;
         }
         let ov = Override {
             origin: OverrideOrigin::User,
@@ -449,5 +460,138 @@ mod tests {
             true,
         );
         assert_eq!(learn(&hub), LearnStatus::Proposed);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_new_fingerprint_under_the_same_id_replaces_the_alert() {
+        let (hub, mut rx) = hub();
+        settle(&hub).await;
+        let first = proposal("p-1", ProposalKind::Initial, &["Base: 17.0 °C"]);
+        publish(&hub, "living", first.clone(), 1_000_000);
+        let mut again = first;
+        again.fingerprint = "other".to_owned();
+        publish(&hub, "living", again, 1_000_010);
+        echo(&hub, &mut rx);
+        let alerts = alerts_of(&hub);
+        assert_eq!(alerts.len(), 1);
+        assert!(alerts[0].resolved, "the old rules' alert was cancelled");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_daily_limit_survives_a_restart() {
+        let (hub, mut rx) = hub();
+        settle(&hub).await;
+        // A proposal was pushed an hour ago, before the restart: nothing is remembered but it.
+        let mut old = proposal("p-old", ProposalKind::Initial, &[]);
+        old.created = 1_000_000 - 3_600;
+        hub.ingest_message(
+            "oikos/climate/zone/living/proposal",
+            serde_json::to_string(&old).unwrap().as_bytes(),
+            true,
+        );
+        publish(
+            &hub,
+            "living",
+            proposal("p-new", ProposalKind::Change, &[]),
+            1_000_000,
+        );
+        echo(&hub, &mut rx);
+        assert!(
+            alerts_of(&hub)
+                .iter()
+                .all(|a| a.id != "climate-proposal-p-new"),
+            "no second push within a day"
+        );
+    }
+
+    #[tokio::test]
+    async fn history_off_runs_clear_a_stale_status() {
+        let (hub, _rx) = hub();
+        hub.climate_runtime()
+            .learn_status
+            .insert("living".to_owned(), LearnStatus::Rejected);
+        // No history configured.
+        assert_eq!(
+            learning::learn_zone(&hub, "living", 1_000).await,
+            LearnStatus::HistoryOff
+        );
+        assert_eq!(
+            hub.climate_runtime().learn_status["living"],
+            LearnStatus::HistoryOff
+        );
+        // Configured but unreachable.
+        let (history, _in) = crate::history::History::detached(8, chrono_tz::UTC);
+        hub.set_history(history);
+        hub.climate_runtime().learn_status.insert(
+            "living".to_owned(),
+            LearnStatus::NotEnough {
+                days: 1,
+                needed: 10,
+            },
+        );
+        assert_eq!(
+            learning::learn_zone(&hub, "living", 1_000).await,
+            LearnStatus::HistoryOff
+        );
+        assert_eq!(
+            hub.climate_runtime().learn_status["living"],
+            LearnStatus::HistoryOff
+        );
+    }
+
+    fn settings_doc(state: oikos_climate::doc::ZoneState) -> String {
+        serde_json::to_string(&ZoneSettings {
+            state,
+            ..ZoneSettings::default()
+        })
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_zone_leaving_off_is_learned_at_once() {
+        use oikos_climate::doc::ZoneState;
+        let (hub, _rx) = hub();
+        let topic = "oikos/climate/zone/attic/settings";
+        hub.ingest_message(topic, settings_doc(ZoneState::Off).as_bytes(), true);
+        hub.climate_runtime()
+            .learn_status
+            .insert("attic".to_owned(), LearnStatus::Rejected);
+        // Still off: nothing runs.
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            hub.climate_runtime().learn_status["attic"],
+            LearnStatus::Rejected
+        );
+        hub.ingest_message(topic, settings_doc(ZoneState::Pending).as_bytes(), true);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            hub.climate_runtime().learn_status["attic"],
+            LearnStatus::HistoryOff,
+            "the run replaced the stale status"
+        );
+        assert!(hub.climate_runtime().learning_now.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_zone_already_being_learned_is_skipped() {
+        let (hub, _rx) = hub();
+        hub.climate_runtime()
+            .learning_now
+            .insert("attic".to_owned());
+        learning::spawn_zone_learning(&hub, "attic");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!hub.climate_runtime().learn_status.contains_key("attic"));
+        assert!(
+            hub.climate_runtime().learning_now.contains("attic"),
+            "not ours to clear"
+        );
+        hub.climate_runtime().learning_now.clear();
+        learning::spawn_zone_learning(&hub, "attic");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(hub.climate_runtime().learn_status.contains_key("attic"));
+        assert!(
+            hub.climate_runtime().learning_now.is_empty(),
+            "the guard clears it"
+        );
     }
 }

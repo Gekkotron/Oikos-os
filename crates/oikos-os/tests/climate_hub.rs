@@ -1159,6 +1159,50 @@ mod engine {
         task.abort();
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn approving_a_proposal_commands_the_device() {
+        let mut rig = Rig::new(None).await;
+        let proposal = oikos_climate::doc::Proposal {
+            id: "p-1".to_owned(),
+            zone: "living".to_owned(),
+            kind: oikos_climate::doc::ProposalKind::Initial,
+            created: rig.t0,
+            window: oikos_climate::doc::Window {
+                from: 0,
+                to: 1,
+                days: 28,
+            },
+            rules: heat_rules(17.0).rules,
+            changes: Vec::new(),
+            fingerprint: "fp".to_owned(),
+        };
+        rig.hub.ingest_message(
+            "oikos/climate/zone/living/proposal",
+            serde_json::to_string(&proposal).unwrap().as_bytes(),
+            true,
+        );
+        let hub = Arc::clone(&rig.hub);
+        let mut task =
+            tokio::spawn(async move { hub.approve_climate_proposal("living", None).await });
+        let mut out = Vec::new();
+        loop {
+            tokio::select! {
+                published = rig.rx.recv() => {
+                    let published = published.expect("publisher open");
+                    rig.sim.on_publish(&rig.hub, &published);
+                    out.push(published);
+                }
+                done = &mut task => {
+                    done.expect("task").expect("approved");
+                    break;
+                }
+            }
+        }
+        out.extend(drain(&mut rig.rx));
+        assert_eq!(temperature_commands(&out), vec![17.0], "{out:?}");
+        assert_eq!(rig.zone().settings.state, ZoneState::Active);
+    }
+
     #[tokio::test]
     async fn no_loop_while_disabled() {
         let (hub, _rx) = hub(false);

@@ -165,7 +165,7 @@ struct AclWatchdog {
 
 pub struct Hub {
     /// The hub's own `Arc`, so a message handler can spawn work that outlives its `&self`.
-    me: Weak<Hub>,
+    pub(crate) me: Weak<Hub>,
     registry: RwLock<Registry>,
     events: broadcast::Sender<WsEvent>,
     /// The ids whose state was reported, changed or not: Zigbee2MQTT echoes the whole device

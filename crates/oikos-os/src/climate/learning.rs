@@ -184,13 +184,18 @@ pub(crate) fn verdict(
             }
             LearnOutcome::Rules(rules) => {
                 learned = true;
-                changed |= settings
+                // A mode that only jitters within tolerance keeps its approved rules: no
+                // edit slips in unseen, and the fingerprint stays the same from run to run.
+                let moved = settings
                     .rules
                     .get(*mode)
                     .is_none_or(|approved| differs(approved, rules));
-                match mode {
-                    Mode::Heat => candidate.heat = Some(rules.clone()),
-                    Mode::Cool => candidate.cool = Some(rules.clone()),
+                if moved {
+                    changed = true;
+                    match mode {
+                        Mode::Heat => candidate.heat = Some(rules.clone()),
+                        Mode::Cool => candidate.cool = Some(rules.clone()),
+                    }
                 }
             }
         }
@@ -230,9 +235,9 @@ pub(crate) fn verdict(
     }
 }
 
-/// `p-<YYYYMMDD-HHMM local>-<zone>`.
+/// `p-<YYYYMMDD-HHMMSS local>-<zone>`.
 pub(crate) fn proposal_id(tz: Tz, now: u64, zone: &str) -> String {
-    format!("p-{}-{zone}", local_time(tz, now).format("%Y%m%d-%H%M"))
+    format!("p-{}-{zone}", local_time(tz, now).format("%Y%m%d-%H%M%S"))
 }
 
 fn micros(secs: u64) -> Micros {
@@ -253,10 +258,10 @@ pub(crate) async fn learn_zone(hub: &Arc<Hub>, zone: &str, now: u64) -> LearnSta
         return LearnStatus::Off;
     }
     let Some(history) = hub.history().cloned() else {
-        return LearnStatus::HistoryOff;
+        return history_off(hub, zone);
     };
     let Ok(db) = history.db() else {
-        return LearnStatus::HistoryOff;
+        return history_off(hub, zone);
     };
     let house = hub.climate_store().house.clone();
     let tz = hub.zone();
@@ -266,9 +271,11 @@ pub(crate) async fn learn_zone(hub: &Arc<Hub>, zone: &str, now: u64) -> LearnSta
     let (from, to) = (micros(window.from), micros(window.to));
 
     // Only devices that list a mode the learner knows are read.
+    // The ids first: `zone_entity_ids` reads the registry itself, and a read is never nested.
+    let entity_ids = zone_entity_ids(hub, zone, &settings);
     let learnable: Vec<(String, DeviceCaps)> = {
         let reg = hub.read();
-        zone_entity_ids(hub, zone, &settings)
+        entity_ids
             .into_iter()
             .filter_map(|id| {
                 let c = &reg.entity(&id)?.capabilities;
@@ -297,7 +304,7 @@ pub(crate) async fn learn_zone(hub: &Arc<Hub>, zone: &str, now: u64) -> LearnSta
             )),
             Err(err) => {
                 tracing::warn!(zone, entity = %id, error = %err, "climate learning could not read history");
-                return LearnStatus::HistoryOff;
+                return history_off(hub, zone);
             }
         }
     }
@@ -306,7 +313,7 @@ pub(crate) async fn learn_zone(hub: &Arc<Hub>, zone: &str, now: u64) -> LearnSta
         Ok(rows) => commands_from_rows(tz, &rows),
         Err(err) => {
             tracing::warn!(zone, error = %err, "climate learning could not read decisions");
-            return LearnStatus::HistoryOff;
+            return history_off(hub, zone);
         }
     };
 
@@ -336,6 +343,14 @@ pub(crate) async fn learn_zone(hub: &Arc<Hub>, zone: &str, now: u64) -> LearnSta
         outcomes.push((mode, learn(&input)));
     }
     conclude(hub, zone, &outcomes, window, now).await
+}
+
+/// The run could not read history: the view must stop showing what an earlier run said.
+fn history_off(hub: &Hub, zone: &str) -> LearnStatus {
+    hub.climate_runtime()
+        .learn_status
+        .insert(zone.to_owned(), LearnStatus::HistoryOff);
+    LearnStatus::HistoryOff
 }
 
 /// Applies the outcomes under the engine's pass lock, against the settings as they are now: an
@@ -391,18 +406,42 @@ async fn conclude(
     status
 }
 
-/// Learns every zone that is not `off`, one after the other.
-pub(crate) async fn learn_all(hub: &Arc<Hub>, now: u64) {
-    for zone in hub.climate_zone_ids() {
-        let status = learn_zone(hub, &zone, now).await;
-        tracing::debug!(%zone, ?status, "climate learning run");
+/// Clears a zone's "learning now" mark when dropped, so a cancelled run cannot leave it set.
+struct RunGuard {
+    hub: Arc<Hub>,
+    zone: String,
+}
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        self.hub.climate_runtime().learning_now.remove(&self.zone);
     }
 }
 
-/// Starts a learning run of every zone without waiting for it.
+/// Starts a learning run of `zone` without waiting for it; nothing starts while one is
+/// already running for that zone.
+pub(crate) fn spawn_zone_learning(hub: &Arc<Hub>, zone: &str) {
+    if hub.climate.is_none() || tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    if !hub.climate_runtime().learning_now.insert(zone.to_owned()) {
+        return;
+    }
+    let guard = RunGuard {
+        hub: Arc::clone(hub),
+        zone: zone.to_owned(),
+    };
+    tokio::spawn(async move {
+        let status = learn_zone(&guard.hub, &guard.zone, clock::now()).await;
+        tracing::debug!(zone = %guard.zone, ?status, "climate learning run");
+    });
+}
+
+/// Starts a learning run of every zone that is not already being learned.
 pub(crate) fn spawn_learning(hub: &Arc<Hub>) {
-    let hub = Arc::clone(hub);
-    tokio::spawn(async move { learn_all(&hub, clock::now()).await });
+    for zone in hub.climate_zone_ids() {
+        spawn_zone_learning(hub, &zone);
+    }
 }
 
 #[cfg(test)]
@@ -563,7 +602,10 @@ mod tests {
     #[test]
     fn proposal_id_is_local_minute_and_zone() {
         let now = local_to_unix(PARIS, at("2026-10-23 03:30:12")).unwrap();
-        assert_eq!(proposal_id(PARIS, now, "living"), "p-20261023-0330-living");
+        assert_eq!(
+            proposal_id(PARIS, now, "living"),
+            "p-20261023-033012-living"
+        );
     }
 
     fn settings_with(rules: Rules) -> ZoneSettings {
@@ -654,6 +696,40 @@ mod tests {
             panic!("cool differs");
         };
         assert_eq!(rules.heat, approved.heat);
+    }
+
+    #[test]
+    fn a_mode_within_tolerance_keeps_its_approved_rules_and_a_stable_fingerprint() {
+        let approved = heat(rules(17.0, Some(20.5)));
+        let settings = settings_with(approved.clone());
+        // Heat jitters by a quarter of a degree and some minutes; cool is new.
+        let run = |jitter: f64| {
+            let outcomes = vec![
+                (
+                    Mode::Heat,
+                    LearnOutcome::Rules(rules(17.0 + jitter, Some(20.5 + jitter))),
+                ),
+                (Mode::Cool, LearnOutcome::Rules(rules_cool())),
+            ];
+            let Verdict::Propose {
+                rules, fingerprint, ..
+            } = verdict(&settings, &outcomes, None, 100)
+            else {
+                panic!("cool changed");
+            };
+            (rules, fingerprint)
+        };
+        let (first, fp_first) = run(0.2);
+        let (second, fp_second) = run(-0.3);
+        assert_eq!(
+            first.heat, approved.heat,
+            "sub-threshold heat is not edited"
+        );
+        assert_eq!(second.heat, approved.heat);
+        assert_eq!(
+            fp_first, fp_second,
+            "the same proposal on consecutive nights"
+        );
     }
 
     fn rules_cool() -> ModeRules {

@@ -178,7 +178,21 @@ impl Hub {
         let Some(parsed) = topics::parse(prefix, topic) else {
             return false;
         };
+        let was_off = matches!(
+            &parsed,
+            ClimateTopic::Zone { zone, doc: ZoneDoc::Settings }
+                if self.climate_store().zones.get(zone)
+                    .is_some_and(|docs| docs.settings.state == ZoneState::Off)
+        );
         let applied = self.climate_store().apply(&parsed, payload);
+        if was_off
+            && let ClimateTopic::Zone { zone, .. } = &parsed
+            && self.zone_settings(zone).state != ZoneState::Off
+            && let Some(hub) = self.me.upgrade()
+        {
+            // "On enable": a zone that just left `off` is learned at once.
+            super::learning::spawn_zone_learning(&hub, zone);
+        }
         match &applied {
             Applied::Changed => {}
             Applied::Invalid(reason) => {
@@ -254,9 +268,11 @@ fn zone_view(
         LearnStatus::HistoryOff
     } else {
         match ran {
-            Some(status @ (LearnStatus::NotEnough { .. } | LearnStatus::Rejected)) => {
-                status.clone()
-            }
+            Some(
+                status @ (LearnStatus::NotEnough { .. }
+                | LearnStatus::Rejected
+                | LearnStatus::HistoryOff),
+            ) => status.clone(),
             _ => LearnStatus::UpToDate,
         }
     };
