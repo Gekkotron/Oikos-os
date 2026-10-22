@@ -4614,3 +4614,8 @@ html:has(.flow-canvas-screen) {
   flex-direction: row;
   align-items: center;
 }
+
+/* Handles never cover more than a quarter of a bar each, so its middle stays clickable. */
+.climate-timeline__handle {
+  width: min(14px, 25%);
+}

@@ -69,10 +69,26 @@ pub fn move_edge(rules: &ModeRules, block: usize, edge: Edge, to: HhMm) -> ModeR
                 .unwrap_or(DAY_END),
         ),
     };
-    if lo > hi {
+    let at = if lo <= hi {
+        want.clamp(lo, hi)
+    } else {
+        // No grid step fits between the block's own edge and an off-grid neighbour edge: the
+        // neighbour's exact edge is the one place the end can still go.
+        match edge {
+            Edge::From if lo < b.to.0 => lo,
+            Edge::To if hi > b.from.0 => hi,
+            _ => return out,
+        }
+    };
+    let at = HhMm(at);
+    let same = match edge {
+        Edge::From => at == b.from,
+        Edge::To => at == b.to,
+    };
+    if same {
         return out;
     }
-    let at = HhMm(want.clamp(lo, hi));
+    out.blocks[block].evidence = None;
     match edge {
         Edge::From => out.blocks[block].from = at,
         Edge::To => out.blocks[block].to = at,
@@ -84,13 +100,45 @@ pub fn move_edge(rules: &ModeRules, block: usize, edge: Edge, to: HhMm) -> ModeR
 pub fn set_setpoint(rules: &ModeRules, block: usize, sp: Setpoint) -> ModeRules {
     let mut out = rules.clone();
     if let Some(b) = out.blocks.get_mut(block) {
-        b.setpoint = match sp {
+        let next = match sp {
             Setpoint::Temp(t) if t.is_finite() => Setpoint::Temp(t.clamp(MIN_TEMP, MAX_TEMP)),
             Setpoint::Temp(_) => return rules.clone(),
             Setpoint::Off => Setpoint::Off,
         };
+        if b.setpoint != next {
+            b.setpoint = next;
+            // The learner's evidence no longer describes this block.
+            b.evidence = None;
+        }
     }
     out
+}
+
+/// The temperature an Off block goes back to: the mode's base when it is a temperature, else
+/// the temperature of the nearest other block in time.
+pub fn restore_temp(rules: &ModeRules, block: usize) -> Option<f64> {
+    if let Setpoint::Temp(t) = rules.base {
+        return Some(t);
+    }
+    let b = rules.blocks.get(block)?;
+    let gap = |o: &oikos_climate::doc::Block| {
+        if o.from >= b.to {
+            o.from.0 - b.to.0
+        } else {
+            b.from.0.saturating_sub(o.to.0)
+        }
+    };
+    rules
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != block)
+        .filter_map(|(_, o)| match o.setpoint {
+            Setpoint::Temp(t) => Some((gap(o), t)),
+            Setpoint::Off => None,
+        })
+        .min_by_key(|(g, _)| *g)
+        .map(|(_, t)| t)
 }
 
 /// Removes `rules.blocks[block]`; the other blocks keep their order.
@@ -104,7 +152,7 @@ pub fn delete_block(rules: &ModeRules, block: usize) -> ModeRules {
 
 /// The minute under the pointer along the day track the handle sits in.
 fn minute_at(ev: &web_sys::PointerEvent) -> Option<u16> {
-    let handle = ev.current_target()?.dyn_into::<web_sys::Element>().ok()?;
+    let handle = ev.target()?.dyn_into::<web_sys::Element>().ok()?;
     let track = handle.closest(".climate-timeline__track").ok()??;
     let rect = track.get_bounding_client_rect();
     if rect.width() <= 0.0 {
@@ -116,7 +164,7 @@ fn minute_at(ev: &web_sys::PointerEvent) -> Option<u16> {
 
 fn capture(ev: &web_sys::PointerEvent) {
     if let Some(target) = ev
-        .current_target()
+        .target()
         .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
     {
         let _ = target.set_pointer_capture(ev.pointer_id());
@@ -131,8 +179,10 @@ fn Handle(
     edge: Edge,
     rules: Signal<ModeRules>,
     on_change: Callback<ModeRules>,
+    selected: RwSignal<Option<usize>>,
 ) -> impl IntoView {
     let dragging = RwSignal::new(false);
+    let moved = RwSignal::new(false);
     let label = match edge {
         Edge::From => "Drag the start",
         Edge::To => "Drag the end",
@@ -147,6 +197,7 @@ fn Handle(
                 ev.stop_propagation();
                 ev.prevent_default();
                 capture(&ev);
+                moved.set(false);
                 dragging.set(true);
             }
             on:pointermove=move |ev: web_sys::PointerEvent| {
@@ -157,11 +208,18 @@ fn Handle(
                     let current = rules.get_untracked();
                     let next = move_edge(&current, block, edge, HhMm(minute));
                     if next != current {
+                        moved.set(true);
                         on_change.run(next);
                     }
                 }
             }
-            on:pointerup=move |_| dragging.set(false)
+            on:pointerup=move |_| {
+                // A press without a drag opens the block, so a narrow block is never covered.
+                if dragging.get_untracked() && !moved.get_untracked() {
+                    selected.set(Some(block));
+                }
+                dragging.set(false);
+            }
             on:pointercancel=move |_| dragging.set(false)
             on:click=|ev| ev.stop_propagation()
         ></span>
@@ -230,8 +288,8 @@ fn Bar(
                 {editable
                     .then(|| {
                         view! {
-                            <Handle block=block edge=Edge::From rules=rules on_change=on_change />
-                            <Handle block=block edge=Edge::To rules=rules on_change=on_change />
+                            <Handle block=block edge=Edge::From rules=rules on_change=on_change selected=selected />
+                            <Handle block=block edge=Edge::To rules=rules on_change=on_change selected=selected />
                         }
                     })}
             </div>
@@ -239,10 +297,23 @@ fn Bar(
     }
 }
 
-fn time_options(selected: u16, from: u16) -> impl IntoView {
-    (from..=DAY_END)
-        .step_by(usize::from(STEP))
-        .map(|m| view! { <option value=m.to_string() selected=m == selected>{hhmm_text(m)}</option> })
+/// The 15-minute choices from `from` to 24:00, plus `current` when it is off the grid (a
+/// neighbour's edge), in order.
+fn time_choices(current: u16, from: u16) -> Vec<u16> {
+    let mut all: Vec<u16> = (from..=DAY_END).step_by(usize::from(STEP)).collect();
+    if !all.contains(&current) {
+        all.push(current);
+        all.sort_unstable();
+    }
+    all
+}
+
+fn time_options(current: u16, from: u16) -> impl IntoView {
+    time_choices(current, from)
+        .into_iter()
+        .map(
+            |m| view! { <option value=m.to_string() selected=m == current>{hhmm_text(m)}</option> },
+        )
         .collect_view()
 }
 
@@ -255,8 +326,12 @@ fn BlockEditor(
     selected: RwSignal<Option<usize>>,
 ) -> impl IntoView {
     let setpoint = move || rules.with(|r| r.blocks.get(block).map(|b| b.setpoint));
+    // Bumped after each pick so the controls show the real value even when the rules did not
+    // change (the move was refused).
+    let refresh = RwSignal::new(0u32);
     let edge_at = move |edge: Edge| {
-        rules.with_untracked(|r| {
+        refresh.track();
+        rules.with(|r| {
             r.blocks.get(block).map_or(0, |b| match edge {
                 Edge::From => b.from.0,
                 Edge::To => b.to.0,
@@ -271,10 +346,14 @@ fn BlockEditor(
                 if next != current {
                     on_change.run(next);
                 }
+                refresh.update(|n| *n += 1);
             }
         }
     };
-    let is_off = move || setpoint() == Some(Setpoint::Off);
+    let is_off = move || {
+        refresh.track();
+        setpoint() == Some(Setpoint::Off)
+    };
     let temp = move || match setpoint() {
         Some(Setpoint::Temp(t)) => t.to_string(),
         _ => String::new(),
@@ -285,13 +364,13 @@ fn BlockEditor(
                 <span class="climate-field__label">"From"</span>
                 // A block can start up to one step before its end.
                 <select class="field" on:change=pick(Edge::From)>
-                    {time_options(edge_at(Edge::From), 0)}
+                    {move || time_options(edge_at(Edge::From), 0)}
                 </select>
             </label>
             <label class="climate-field">
                 <span class="climate-field__label">"To"</span>
                 <select class="field" on:change=pick(Edge::To)>
-                    {time_options(edge_at(Edge::To), STEP)}
+                    {move || time_options(edge_at(Edge::To), STEP)}
                 </select>
             </label>
             <label class="climate-field">
@@ -302,7 +381,6 @@ fn BlockEditor(
                     step="0.5"
                     min="0"
                     max="40"
-                    disabled=is_off
                     prop:value=temp
                     on:change=move |ev| {
                         if let Ok(t) = event_target_value(&ev).trim().parse::<f64>() {
@@ -317,12 +395,17 @@ fn BlockEditor(
                     type="checkbox"
                     prop:checked=is_off
                     on:change=move |ev| {
+                        let current = rules.get_untracked();
                         let sp = if event_target_checked(&ev) {
-                            Setpoint::Off
+                            Some(Setpoint::Off)
                         } else {
-                            Setpoint::Temp(20.0)
+                            restore_temp(&current, block).map(Setpoint::Temp)
                         };
-                        on_change.run(set_setpoint(&rules.get_untracked(), block, sp));
+                        // With no temperature to go back to, the block stays Off until one is typed.
+                        if let Some(sp) = sp {
+                            on_change.run(set_setpoint(&current, block, sp));
+                        }
+                        refresh.update(|n| *n += 1);
                     }
                 />
                 <span>"Off"</span>
@@ -495,6 +578,71 @@ mod tests {
         for r in [a, b, c] {
             valid(&r);
         }
+    }
+
+    #[test]
+    fn move_edge_reaches_an_off_grid_neighbour_edge() {
+        // Block 0 ends at 08:12; the next one starts at 08:14, so no 15-minute step fits.
+        let m = mode(vec![
+            block(&[Day::Mon], "08:10", "08:12", 21.0),
+            block(&[Day::Mon], "08:14", "09:00", 19.0),
+        ]);
+        let out = move_edge(&m, 0, Edge::To, at("09:00"));
+        assert_eq!(out.blocks[0].to, at("08:14"));
+        valid(&out);
+        // And the other way: block 1 can still go back to 08:12.
+        let m = mode(vec![
+            block(&[Day::Mon], "07:00", "08:10", 21.0),
+            block(&[Day::Mon], "08:12", "08:14", 19.0),
+        ]);
+        let out = move_edge(&m, 1, Edge::From, at("06:00"));
+        assert_eq!(out.blocks[1].from, at("08:10"));
+        valid(&out);
+    }
+
+    #[test]
+    fn editing_a_block_drops_its_evidence_only() {
+        let mut m = mode(vec![
+            block(&[Day::Mon], "07:00", "09:00", 21.0),
+            block(&[Day::Tue], "07:00", "09:00", 21.0),
+        ]);
+        for b in &mut m.blocks {
+            b.evidence = Some(oikos_climate::doc::Evidence { agree: 17, of: 20 });
+        }
+        let moved = move_edge(&m, 0, Edge::To, at("10:00"));
+        assert_eq!(moved.blocks[0].evidence, None);
+        assert!(moved.blocks[1].evidence.is_some());
+        // A refused move or an unchanged value keeps it.
+        assert_eq!(move_edge(&m, 0, Edge::To, at("09:00")), m);
+        assert_eq!(set_setpoint(&m, 0, Setpoint::Temp(21.0)), m);
+        let off = set_setpoint(&m, 1, Setpoint::Off);
+        assert_eq!(off.blocks[1].evidence, None);
+        assert!(off.blocks[0].evidence.is_some());
+    }
+
+    #[test]
+    fn restore_temp_prefers_base_then_nearest_block() {
+        let mut m = mode(vec![
+            block(&[Day::Mon], "06:00", "07:00", 19.0),
+            block(&[Day::Mon], "08:00", "09:00", 21.0),
+            block(&[Day::Mon], "20:00", "22:00", 23.0),
+        ]);
+        m.blocks[1].setpoint = Setpoint::Off;
+        assert_eq!(restore_temp(&m, 1), Some(17.0));
+        m.base = Setpoint::Off;
+        // 06:00-07:00 is an hour before 08:00; 20:00 is eleven hours after 09:00.
+        assert_eq!(restore_temp(&m, 1), Some(19.0));
+        m.blocks.truncate(2);
+        m.blocks[0].setpoint = Setpoint::Off;
+        assert_eq!(restore_temp(&m, 1), None);
+    }
+
+    #[test]
+    fn time_choices_include_an_off_grid_edge() {
+        let c = time_choices(490, 0);
+        assert!(c.contains(&490));
+        assert!(c.windows(2).all(|w| w[0] < w[1]));
+        assert_eq!(time_choices(495, 15).len(), 96);
     }
 
     #[test]

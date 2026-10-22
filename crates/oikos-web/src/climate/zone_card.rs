@@ -248,7 +248,7 @@ pub fn ZoneCard(
         proposal_key.get().and_then(|_| {
             zone.with_untracked(|z| {
                 z.proposal.clone().map(|p| {
-                    let approved = z.settings.rules.clone();
+                    let approved = Signal::derive(move || zone.with(|z| z.settings.rules.clone()));
                     view! { <ProposalPanel zone=z.zone.clone() proposal=p approved=approved on_changed=on_changed /> }
                 })
             })

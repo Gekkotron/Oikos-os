@@ -101,7 +101,7 @@ fn report(toasts: Toasts, result: Result<(), ApiError>, on_changed: Callback<()>
 pub fn ProposalPanel(
     zone: String,
     proposal: Proposal,
-    approved: Rules,
+    approved: Signal<Rules>,
     /// Called after an approval or rejection so the screen refetches.
     on_changed: Callback<()>,
 ) -> impl IntoView {
@@ -119,11 +119,10 @@ pub fn ProposalPanel(
         move || edited.with(|e| *e != learned)
     };
     let changes = {
-        let approved = approved.clone();
         let learned = proposal.changes.clone();
         move || {
             if editing.get() {
-                edited.with(|e| diff(Some(&approved), e))
+                approved.with_untracked(|a| edited.with(|e| diff(Some(a), e)))
             } else {
                 learned.clone()
             }
@@ -187,12 +186,17 @@ pub fn ProposalPanel(
     view! {
         <section class="climate-proposal" aria-label=title>
             <h3 class="climate-proposal__title">{title}</h3>
-            {changes_view}
+            // The learned changes read above the week; while editing, the live diff sits under it.
+            {
+                let learned = changes_view.clone();
+                move || (!editing.get()).then(&learned)
+            }
             <RulesTimeline
                 rules=edited.into()
                 editable=editing.into()
                 on_change=Callback::new(move |next| edited.set(next))
             />
+            {move || editing.get().then(&changes_view)}
             <div class="climate-proposal__actions">
                 {move || {
                     if editing.get() {
