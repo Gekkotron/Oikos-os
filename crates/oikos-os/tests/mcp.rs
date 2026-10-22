@@ -662,6 +662,7 @@ async fn set_flow_then_get_and_list() {
     assert_eq!(flows[0]["enabled"], true);
     assert_eq!(flows[0]["nodes"], 5);
     assert_eq!(flows[0]["last_run"], Value::Null);
+    assert_eq!(flows[0]["area"], Value::Null);
 
     let missing = call(&client, "get_flow", json!({ "id": "nope" })).await;
     assert_eq!(missing.is_error, Some(true));
@@ -670,6 +671,34 @@ async fn set_flow_then_get_and_list() {
         "{}",
         text_of(&missing)
     );
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn set_flow_with_area_lists_it() {
+    let server = Server::start_with_flows().await;
+    let client = server.client().await;
+
+    call(
+        &client,
+        "set_areas",
+        json!({"areas": [{"id": "living", "name": "Living room"}]}),
+    )
+    .await;
+
+    let mut flow = reference_flow();
+    flow["area"] = json!("living");
+    let set = call(&client, "set_flow", json!({ "flow": flow.clone() })).await;
+    assert_ne!(set.is_error, Some(true), "{}", text_of(&set));
+
+    let list = json_of("list_flows", &call(&client, "list_flows", json!({})).await);
+    assert_eq!(list["flows"][0]["area"], "living");
+
+    flow["area"] = json!("ghost");
+    let bad = call(&client, "set_flow", json!({ "flow": flow })).await;
+    assert_eq!(bad.is_error, Some(true));
+    assert!(text_of(&bad).contains("unknown area"), "{}", text_of(&bad));
 
     client.cancel().await.expect("close");
 }

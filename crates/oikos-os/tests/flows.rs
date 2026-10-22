@@ -8,7 +8,7 @@ use std::time::Duration;
 use oikos_api::{ConnectionStatus, RunStatus, RunView, StepOutcome, StepView, WsEvent};
 use oikos_core::command::Publish;
 use oikos_core::flow::{Flow, NodeKind};
-use oikos_core::model::Command;
+use oikos_core::model::{Area, AreasDocument, Command};
 use oikos_os::config::Config;
 use oikos_os::hub::{Hub, HubError};
 use tokio::sync::mpsc;
@@ -773,6 +773,55 @@ async fn replacing_cancels_the_run() {
     assert_cancelled_without_off(&mut events, &log, &run).await;
 }
 
+/// The run waiting in its delay is still running after an edit that does not change what the
+/// flow does, then finishes and turns the LED off.
+async fn assert_run_survives(
+    hub: &Hub,
+    events: &mut tokio::sync::broadcast::Receiver<WsEvent>,
+    log: &Arc<Mutex<Vec<String>>>,
+    run: &RunView,
+) {
+    settle().await;
+    while let Ok(event) = events.try_recv() {
+        if let WsEvent::FlowRunChanged { run: seen, .. } = event {
+            assert_ne!(seen.status, RunStatus::Cancelled, "{seen:?}");
+        }
+    }
+    let view = hub.flow("living").expect("flow");
+    assert_eq!(view.active_run.as_deref(), Some(run.id.as_str()));
+    let current = view.runs.iter().find(|r| r.id == run.id).expect("the run");
+    assert_eq!(current.status, RunStatus::Running);
+
+    tokio::time::advance(Duration::from_secs(5 * 60 + 1)).await;
+    let done = next_run_event(events, RunStatus::Done).await;
+    assert_eq!(done.id, run.id);
+    assert_eq!(step_nodes(&done), ["motion", "moving", "wait", "off"]);
+    let log = published(log);
+    assert!(log.last().is_some_and(|p| p.contains("OFF")), "{log:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn moving_to_another_room_keeps_the_run() {
+    let (hub, publisher, _engine) = engine_hub();
+    with_living_area(&hub).await;
+    let (mut events, log, run) = waiting_flow(&hub, publisher).await;
+    hub.set_flow_area("living", Some("living".into()))
+        .await
+        .expect("move");
+    assert_run_survives(&hub, &mut events, &log, &run).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn renaming_keeps_the_run() {
+    let (hub, publisher, _engine) = engine_hub();
+    let (mut events, log, run) = waiting_flow(&hub, publisher).await;
+    let mut flow = reference_flow();
+    flow.name = "Living LED, renamed".to_owned();
+    flow.description = Some("now with a description".to_owned());
+    hub.set_flow(flow).await.expect("set_flow");
+    assert_run_survives(&hub, &mut events, &log, &run).await;
+}
+
 #[tokio::test]
 async fn gt_on_a_bool_fails_the_run() {
     let (hub, publisher, _engine) = engine_hub();
@@ -1457,6 +1506,155 @@ fn remote_state(hub: &Hub) -> oikos_core::model::EntityState {
         .find(|e| e.id == REMOTE_ID)
         .map(|e| e.state)
         .expect("remote state")
+}
+
+async fn with_living_area(hub: &Hub) {
+    hub.set_areas(AreasDocument {
+        areas: vec![Area {
+            id: "living".into(),
+            name: "Living room".into(),
+            ..Area::default()
+        }],
+    })
+    .await
+    .expect("set_areas");
+}
+
+fn in_area(area: &str) -> Flow {
+    let mut flow = reference_flow();
+    flow.area = Some(area.to_owned());
+    flow
+}
+
+#[tokio::test]
+async fn set_flow_keeps_known_area() {
+    let (hub, mut publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    while publisher.try_recv().is_ok() {}
+    let outcome = hub.set_flow(in_area("living")).await.expect("set_flow");
+    assert_eq!(outcome.flow.definition.area.as_deref(), Some("living"));
+    let publish = publisher.try_recv().expect("the definition");
+    assert!(
+        publish.payload.contains("\"area\":\"living\""),
+        "{}",
+        publish.payload
+    );
+}
+
+#[tokio::test]
+async fn area_name_resolves_to_id() {
+    let (hub, _publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    let outcome = hub
+        .set_flow(in_area("Living room"))
+        .await
+        .expect("set_flow");
+    assert_eq!(outcome.flow.definition.area.as_deref(), Some("living"));
+}
+
+#[tokio::test]
+async fn unknown_area_is_rejected() {
+    let (hub, _publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    match hub.set_flow(in_area("ghost")).await {
+        Err(HubError::InvalidFlow(reason)) => assert!(reason.contains("unknown area"), "{reason}"),
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn unassigned_is_not_a_flow_area() {
+    let (hub, _publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    assert!(matches!(
+        hub.set_flow(in_area("Unassigned")).await,
+        Err(HubError::InvalidFlow(_))
+    ));
+}
+
+/// `kitchen` is declared but no entity lives there, so once the document drops it the room is
+/// gone for good (`living` would stay an implicit area through the fixture's topics).
+#[tokio::test]
+async fn stale_area_is_kept_on_resave() {
+    let (hub, _publisher) = hub_with_entities();
+    hub.set_areas(AreasDocument {
+        areas: vec![Area {
+            id: "kitchen".into(),
+            name: "Kitchen".into(),
+            ..Area::default()
+        }],
+    })
+    .await
+    .expect("set_areas");
+    hub.set_flow(in_area("kitchen")).await.expect("first save");
+    hub.set_areas(AreasDocument::default())
+        .await
+        .expect("set_areas");
+    assert!(
+        hub.snapshot().areas.iter().all(|area| area.id != "kitchen"),
+        "kitchen must be gone"
+    );
+
+    let outcome = hub
+        .set_flow(in_area("kitchen"))
+        .await
+        .expect("resave keeps the stale area");
+    assert_eq!(outcome.flow.definition.area.as_deref(), Some("kitchen"));
+
+    let mut other = in_area("kitchen");
+    other.id = "other".to_owned();
+    match hub.set_flow(other).await {
+        Err(HubError::InvalidFlow(reason)) => assert!(reason.contains("unknown area"), "{reason}"),
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+
+    let view = hub.set_flow_enabled("living", false).await.expect("toggle");
+    assert!(!view.definition.enabled);
+    assert_eq!(view.definition.area.as_deref(), Some("kitchen"));
+}
+
+#[tokio::test]
+async fn set_flow_area_moves_and_clears() {
+    let (hub, mut publisher) = hub_with_entities();
+    with_living_area(&hub).await;
+    hub.set_flow(reference_flow()).await.expect("set_flow");
+    while publisher.try_recv().is_ok() {}
+
+    let view = hub
+        .set_flow_area("living", Some("living".into()))
+        .await
+        .expect("move");
+    assert_eq!(view.definition.area.as_deref(), Some("living"));
+    publisher.try_recv().expect("a publish");
+
+    let view = hub.set_flow_area("living", None).await.expect("clear");
+    assert_eq!(view.definition.area, None);
+    let publish = publisher.try_recv().expect("a publish");
+    assert!(!publish.payload.contains("\"area\""), "{}", publish.payload);
+
+    assert!(matches!(
+        hub.set_flow_area("living", Some("ghost".into())).await,
+        Err(HubError::InvalidFlow(_))
+    ));
+    assert!(matches!(
+        hub.set_flow_area("nobody", None).await,
+        Err(HubError::UnknownFlow(_))
+    ));
+    hub.ingest("oikos/automation/broken", b"not json");
+    assert!(matches!(
+        hub.set_flow_area("broken", None).await,
+        Err(HubError::InvalidFlow(_))
+    ));
+}
+
+#[tokio::test]
+async fn retained_unknown_area_loads_valid() {
+    let (hub, _publisher) = hub_with_entities();
+    let mut value: serde_json::Value = serde_json::from_str(&reference_json()).unwrap();
+    value["area"] = "ghost".into();
+    hub.ingest(FLOW_TOPIC, value.to_string().as_bytes());
+    let view = hub.flow("living").expect("flow");
+    assert!(view.invalid.is_none(), "{:?}", view.invalid);
 }
 
 /// Runs flow `id` (a lone notify node, `params`) once and returns the retained history list the

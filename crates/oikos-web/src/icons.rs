@@ -127,6 +127,33 @@ pub const PYLON: &str = svg!(
 );
 pub const HOUSE: &str =
     svg!(r#"<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-6h4v6"/>"#);
+
+/// Nav rail: alerts, flows, devices, settings — plus moon for the theme toggle.
+pub const BELL: &str = svg!(
+    r#"<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/>"#
+);
+pub const FLOW_NODES: &str = svg!(
+    r#"<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6.5 7.4 10.5 16.6"/><path d="M17.5 7.4 13.5 16.6"/>"#
+);
+pub const LAYERS: &str = svg!(
+    r#"<path d="M12 3 3 7.5l9 4.5 9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/>"#
+);
+pub const DEVICES_GRID: &str = svg!(
+    r#"<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>"#
+);
+pub const GEAR: &str = svg!(
+    r#"<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>"#
+);
+pub const MOON: &str = svg!(
+    r#"<path d="M20 14A9 9 0 1 1 10 4a7 7 0 0 0 10 10"/>"#
+);
+pub const PLUS: &str = svg!(r#"<path d="M12 5v14"/><path d="M5 12h14"/>"#);
+pub const MAGNIFIER: &str = svg!(
+    r#"<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/>"#
+);
+pub const TRASH: &str = svg!(
+    r#"<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7v13h12V7"/><path d="M10 11v6"/><path d="M14 11v6"/>"#
+);
 pub const PLUG: &str = svg!(
     r#"<path d="M9 3v5"/><path d="M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>"#
 );
@@ -247,6 +274,22 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::Command(_) => NODE_PLAY,
         NodeKind::FlowEnable(_) => NODE_SWITCH,
         NodeKind::Notify(_) => CHANNEL_ALARM,
+    }
+}
+
+const NODE_SIGNAL: &str = svg!(
+    r#"<circle cx="12" cy="12" r="2.5"/><path d="M7.5 7.5a6.4 6.4 0 0 0 0 9"/><path d="M16.5 7.5a6.4 6.4 0 0 1 0 9"/>"#
+);
+
+/// The icon of a flow in the Flows list, by its first trigger kind.
+pub fn trigger_icon(kind: crate::flow_list::TriggerKind) -> &'static str {
+    use crate::flow_list::TriggerKind;
+    match kind {
+        TriggerKind::State => NODE_BOLT,
+        TriggerKind::Schedule => NODE_CLOCK,
+        TriggerKind::Sun => SUN,
+        TriggerKind::Signal => NODE_SIGNAL,
+        TriggerKind::Manual => NODE_PLAY,
     }
 }
 

@@ -5,6 +5,7 @@ use leptos::task::spawn_local;
 use oikos_core::dashboard::{allowed_spans, Dashboard, Widget};
 
 use crate::api;
+use crate::icons::{CHECK, GEAR, PENCIL, X_MARK};
 
 /// Reactive state for the edit mode: active flag, the editable draft, and the saved baseline
 /// for Discard. House never gets one of these.
@@ -73,7 +74,9 @@ pub fn add_widget_handler(state: EditState) -> Callback<Widget> {
     })
 }
 
-/// The pencil / Discard / Save bar shown on authored dashboards.
+/// The pencil / Discard / Save bar shown on authored dashboards. Pencil toggles edit mode and
+/// lights amber when on; in edit mode a gear opens the dashboard settings sheet, and Discard /
+/// Save book-end the row with Save as the primary action.
 #[component]
 pub fn EditToolbar(state: EditState) -> impl IntoView {
     let dirty = state.dirty();
@@ -81,7 +84,9 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
         <div class="dashboard-edit-toolbar">
             <button
                 type="button"
-                class="dashboard-edit-toolbar__pencil"
+                class="btn btn--round dashboard-edit-toolbar__pencil"
+                class:btn--active=move || state.active.get()
+                aria-label="Toggle edit mode"
                 aria-pressed=move || state.active.get().to_string()
                 on:click=move |_| {
                     let now_active = !state.active.get_untracked();
@@ -92,28 +97,29 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                     }
                 }
             >
-                "✎"
+                <span class="btn__glyph" inner_html=PENCIL></span>
             </button>
             <Show when=move || state.active.get()>
                 <button
                     type="button"
-                    class="dashboard-edit-toolbar__gear"
+                    class="btn btn--round dashboard-edit-toolbar__gear"
                     aria-label="Dashboard settings"
                     on:click=move |_| state.settings_open.update(|o| *o = !*o)
                 >
-                    "⚙"
+                    <span class="btn__glyph" inner_html=GEAR></span>
                 </button>
                 <button
                     type="button"
-                    class="dashboard-edit-toolbar__discard"
+                    class="btn btn--with-icon dashboard-edit-toolbar__discard"
                     on:click=move |_| state.discard()
                     disabled=move || !dirty.get()
                 >
+                    <span class="btn__glyph" inner_html=X_MARK></span>
                     "Discard"
                 </button>
                 <button
                     type="button"
-                    class="dashboard-edit-toolbar__save"
+                    class="btn btn--with-icon btn--primary dashboard-edit-toolbar__save"
                     on:click=move |_| {
                         let d = state.draft.get_untracked();
                         spawn_local(async move {
@@ -127,6 +133,7 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                     }
                     disabled=move || !dirty.get()
                 >
+                    <span class="btn__glyph" inner_html=CHECK></span>
                     "Save"
                 </button>
             </Show>

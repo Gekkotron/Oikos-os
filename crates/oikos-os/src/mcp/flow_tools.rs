@@ -89,6 +89,7 @@ fn summary(view: FlowView) -> FlowSummary {
         id: view.definition.id,
         name: view.definition.name,
         enabled: view.definition.enabled,
+        area: view.definition.area,
         invalid: view.invalid,
         nodes: view.definition.nodes.len(),
         last_run: view.runs.first().map(|run| LastRun {

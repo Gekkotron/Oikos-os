@@ -15,7 +15,7 @@ use crate::components::card_frame::open_entity;
 use crate::components::toast::Toasts;
 use crate::format::{display_value, is_on};
 use crate::house::House;
-use crate::icons::kind_icon;
+use crate::icons::{PENCIL, TRASH, kind_icon};
 use crate::nav::{HomeRoom, home_room_for};
 use crate::screens::group_wizard::kind_word;
 use crate::screens::home::card_for;
@@ -327,12 +327,20 @@ fn Settings(
                     />
                 }
             }}
-            <A href=edit_href attr:class="btn">
-                "Edit group"
-            </A>
-            <button type="button" class="btn" on:click=move |_| confirming.set(true)>
-                "Delete group"
-            </button>
+            <div class="sheet__actions">
+                <A href=edit_href attr:class="btn btn--with-icon">
+                    <span class="btn__glyph" inner_html=PENCIL></span>
+                    "Edit group"
+                </A>
+                <button
+                    type="button"
+                    class="btn btn--with-icon btn--danger"
+                    on:click=move |_| confirming.set(true)
+                >
+                    <span class="btn__glyph" inner_html=TRASH></span>
+                    "Delete group"
+                </button>
+            </div>
             <Show when=move || confirming.get()>
                 <section class="sheet__panel" role="alertdialog" aria-label="Delete group">
                     <h3 class="sheet__subheading">

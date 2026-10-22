@@ -30,6 +30,9 @@ pub struct Flow {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The room the UI lists the flow under (an area id); it does not change what the flow does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub area: Option<String>,
     /// A disabled flow keeps its definition but never runs. Defaults to `true`.
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -54,6 +57,7 @@ impl Default for Flow {
             id: String::new(),
             name: String::new(),
             description: None,
+            area: None,
             enabled: true,
             mode: FlowMode::default(),
             nodes: Vec::new(),
@@ -421,6 +425,23 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn area_round_trips_and_is_omitted_when_none() {
+        let flow = Flow::decode(br#"{"id":"a","name":"A","area":"living"}"#).unwrap();
+        assert_eq!(flow.area.as_deref(), Some("living"));
+        assert!(flow.encode().contains(r#""area":"living""#));
+        let bare = Flow::decode(br#"{"id":"a","name":"A"}"#).unwrap();
+        assert_eq!(bare.area, None);
+        assert!(!bare.encode().contains("area"));
+        assert!(bare.extra.is_empty());
+    }
+
+    #[test]
+    fn null_area_reads_as_none() {
+        let flow = Flow::decode(br#"{"id":"a","name":"A","area":null}"#).unwrap();
+        assert_eq!(flow.area, None);
+    }
 
     #[test]
     fn notify_node_round_trips() {

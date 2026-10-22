@@ -30,6 +30,15 @@
   --solar: #ffc457;
   --danger: #ff7a9a;
 
+  /* Lit-room (active) and picker-selection accents layered on surfaces. */
+  --accent-soft: rgb(255 196 87 / 22%);
+  --accent-ring: rgb(255 196 87 / 55%);
+  --select: #8cb4ff;
+  --select-soft: rgb(140 180 255 / 10%);
+  --raised: rgb(255 255 255 / 4%);
+  --menu-bg: #182141;
+  --menu-shadow: 0 12px 28px rgb(0 0 0 / 45%);
+
   /* Shape */
   --radius-card: 20px;
   --radius-nav: 24px;
@@ -82,6 +91,13 @@
   --font-display: "Fraunces", Georgia, "Times New Roman", serif;
   --type-display: 500 28px/34px var(--font-display);
   --type-display-spacing: 0;
+  --accent-soft: rgb(217 139 58 / 20%);
+  --accent-ring: rgb(217 139 58 / 55%);
+  --select: #3f5fa0;
+  --select-soft: rgb(63 95 160 / 10%);
+  --raised: #fffdf6;
+  --menu-bg: #fffdf9;
+  --menu-shadow: 0 10px 24px rgb(60 40 10 / 15%);
 }
 
 @media (prefers-color-scheme: light) {
@@ -110,5 +126,12 @@
     --font-display: "Fraunces", Georgia, "Times New Roman", serif;
     --type-display: 500 28px/34px var(--font-display);
     --type-display-spacing: 0;
+    --accent-soft: rgb(217 139 58 / 20%);
+    --accent-ring: rgb(217 139 58 / 55%);
+    --select: #3f5fa0;
+    --select-soft: rgb(63 95 160 / 10%);
+    --raised: #fffdf6;
+    --menu-bg: #fffdf9;
+    --menu-shadow: 0 10px 24px rgb(60 40 10 / 15%);
   }
 }

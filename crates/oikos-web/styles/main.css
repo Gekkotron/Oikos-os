@@ -282,10 +282,13 @@ body {
   letter-spacing: var(--type-display-spacing);
 }
 
+/* Icon rail. Each entry is a 44x44 glyph by default; the active page expands into a pill
+   with its label in the amber-soft "lit room" wash. The Energy and Security glyphs still
+   recolour themselves when the house is producing or armed. */
 .topbar__nav {
   display: flex;
   flex: 1 0 100%;
-  gap: 4px;
+  gap: 2px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -294,37 +297,74 @@ body {
   display: none;
 }
 
-.topbar__nav a {
-  flex: 1 0 auto;
-  white-space: nowrap;
+.topbar__nav a,
+.topbar__nav .dashboards-picker__trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
+  flex: 0 0 auto;
   min-height: var(--touch-min);
-  padding: 0 12px;
+  min-width: var(--touch-min);
+  padding: 0 10px;
+  border: 1px solid transparent;
   border-radius: var(--radius-nav);
-  color: inherit;
+  background: transparent;
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
   font: var(--type-label);
   text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
   transition:
     background var(--motion-short) var(--ease),
-    color var(--motion-short) var(--ease);
+    color var(--motion-short) var(--ease),
+    border-color var(--motion-short) var(--ease);
 }
 
-.topbar__nav a[aria-current="page"] {
-  background: var(--warning-bg);
+.topbar__nav a:hover,
+.topbar__nav .dashboards-picker__trigger:hover {
+  color: var(--ink);
+  background: var(--raised);
+}
+
+.topbar__nav a:focus-visible,
+.topbar__nav .dashboards-picker__trigger:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 2px;
+}
+
+.topbar__nav a .nav__label {
+  display: none;
+}
+
+/* The picker trigger always shows its label (dashboard name or "Dashboards") because it is a
+   dropdown opener, not a nav target. Regular nav items only show the label when active. */
+.topbar__nav .dashboards-picker__trigger .nav__label {
+  display: inline;
+}
+
+.topbar__nav a[aria-current="page"],
+.topbar__nav .dashboards-picker__trigger--active {
+  padding: 0 16px 0 12px;
   color: var(--accent-amber);
+  background: var(--accent-soft);
+  border-color: var(--accent-ring);
 }
 
-/* The Energy and Security links carry a glyph that lights with the house: solar producing,
-   alarm armed. The text stays, so the bar reads without colour. */
+.topbar__nav a[aria-current="page"] .nav__label,
+.topbar__nav .dashboards-picker__trigger--active .nav__label {
+  display: inline;
+  font-weight: 600;
+}
+
+/* The nav rail glyph is a 20px line icon that inherits the link's text colour.
+   The Energy and Security entries override that when the house is lit. */
 .nav__glyph {
   display: inline-flex;
-  width: 16px;
-  height: 16px;
-  margin-right: 4px;
-  color: var(--ink);
-  opacity: 0.6;
+  width: 20px;
+  height: 20px;
+  color: inherit;
+  opacity: 1;
 }
 
 .nav__glyph svg {
@@ -334,20 +374,23 @@ body {
 
 .nav__glyph--solar {
   color: var(--solar);
-  opacity: 1;
 }
 
 .nav__glyph--armed {
   color: var(--warning);
-  opacity: 1;
 }
 
-a[aria-current="page"] .nav__glyph {
-  color: inherit;
-  opacity: 1;
+.topbar__nav a[aria-current="page"] .nav__glyph,
+.topbar__nav .dashboards-picker__trigger--active .nav__glyph {
+  color: var(--accent-amber);
 }
 
+/* Theme toggle sits in the status cluster next to the StatusPill: a moon-icon chip whose label
+   is the active theme. One click cycles Auto -> Night -> Warm. */
 .theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   min-height: var(--touch-min);
   padding: 0 14px;
   border: 1px solid var(--chip-border);
@@ -356,7 +399,32 @@ a[aria-current="page"] .nav__glyph {
   color: inherit;
   font: var(--type-label);
   text-transform: capitalize;
+  white-space: nowrap;
   cursor: pointer;
+  transition:
+    background var(--motion-short) var(--ease),
+    border-color var(--motion-short) var(--ease);
+}
+
+.theme-toggle:hover {
+  background: var(--raised);
+  border-color: color-mix(in srgb, var(--chip-border) 60%, var(--ink));
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 2px;
+}
+
+.theme-toggle__glyph {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.theme-toggle__glyph svg {
+  width: 100%;
+  height: 100%;
 }
 
 .pill {
@@ -464,6 +532,54 @@ a[aria-current="page"] .nav__glyph {
   font-size: 11px;
   line-height: 16px;
   text-align: center;
+}
+
+/* Chip-row: wrapping flex of chips. The '+ New group' variant is a dashed chip so it reads
+   as an action in the same vocabulary as the group chips next to it. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+a.chip {
+  text-decoration: none;
+}
+
+.chip:hover {
+  background: var(--raised);
+  border-color: color-mix(in srgb, var(--chip-border) 50%, var(--ink));
+}
+
+.chip--add {
+  color: var(--ink);
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.9;
+}
+
+.chip--add:hover {
+  opacity: 1;
+  border-style: dashed;
+}
+
+/* Groups card: a sheet panel laid out with a titled head + a chip row. */
+.groups-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.groups-card__head .sheet__heading {
+  margin: 0;
+}
+
+.groups-card__count {
+  font: var(--type-label);
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
 }
 
 .room__title {
@@ -838,6 +954,204 @@ a[aria-current="page"] .nav__glyph {
   color: var(--accent-amber);
 }
 
+/* Matched button pair at the bottom of a sheet panel (Edit group / Delete group).
+   Each button is a flex item that shares the row equally. */
+.sheet__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--card-border);
+}
+
+.btn--with-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.btn__glyph {
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+}
+
+.btn__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Danger-tinted ghost button: destructive without changing shape. */
+.btn--danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--chip-border));
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.btn--danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* Primary action: filled amber, used on the wizard's Save/Create button and anywhere a flow
+   has one committing action. */
+.btn--primary {
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.btn--primary:hover {
+  background: color-mix(in srgb, var(--accent-amber) 90%, white);
+  border-color: color-mix(in srgb, var(--accent-amber) 90%, white);
+}
+
+.btn--primary:disabled {
+  background: color-mix(in srgb, var(--accent-amber) 50%, transparent);
+  border-color: transparent;
+  color: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+/* Wizard panel: a header row with the step name on the left and the step indicator
+   (count + pips) on the right. Three dash-pips track progress. */
+.wizard__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.wizard__head .sheet__heading {
+  margin: 0;
+}
+
+.wizard__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: var(--type-label);
+}
+
+.wizard__step-count {
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.wizard__pips {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.wizard__pips span {
+  width: 22px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--chip-border);
+}
+
+.wizard__pips span.lit {
+  background: var(--accent-amber);
+}
+
+/* Member picker: outline-selection, with a small check in the top-right of a chosen card.
+   Overrides the global .card--on warm gradient only inside the wizard. */
+.wizard__members {
+  min-width: 0;
+}
+
+.member-card {
+  position: relative;
+  padding-right: 36px;
+}
+
+.member-card__check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-border);
+  background: transparent;
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--motion-short) var(--ease),
+    border-color var(--motion-short) var(--ease),
+    color var(--motion-short) var(--ease);
+}
+
+.member-card__check svg {
+  width: 12px;
+  height: 12px;
+}
+
+.wizard .member-card.card--on {
+  background: linear-gradient(180deg, var(--select-soft), transparent 70%),
+    color-mix(in srgb, var(--select) 6%, var(--card-bg));
+  border-color: var(--select);
+  color: var(--ink);
+}
+
+.wizard .member-card.card--on .member-card__check {
+  background: var(--select);
+  border-color: var(--select);
+  color: var(--bg);
+}
+
+/* Labeled form field used by the wizard's Name and Room step. The label floats above an
+   input shaped like the search pill, consistent with the rest of the design. */
+.field {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.field__caption {
+  padding-left: 2px;
+  font: var(--type-label);
+  opacity: 0.7;
+}
+
+.field__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 0 16px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-nav);
+  background: var(--card-bg);
+  color: inherit;
+  font: var(--type-body);
+  appearance: none;
+  outline: none;
+  transition: border-color var(--motion-short) var(--ease);
+}
+
+.field__input:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-mint) 50%, var(--chip-border));
+}
+
+.field__select {
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) 50%,
+    calc(100% - 15px) 50%;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
 .stepper {
   display: flex;
   align-items: center;
@@ -1094,6 +1408,16 @@ a[aria-current="page"] .nav__glyph {
   gap: 10px;
   min-width: 0;
   text-align: center;
+}
+
+.readout__link {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
 }
 
 .readout__temp {
@@ -1787,6 +2111,9 @@ p.override__hint {
 
 .devices__search {
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   min-height: var(--touch-min);
   padding: 0 16px;
@@ -1795,11 +2122,38 @@ p.override__hint {
   background: var(--card-bg);
   color: inherit;
   font: var(--type-body);
+  transition:
+    border-color var(--motion-short) var(--ease),
+    background var(--motion-short) var(--ease);
 }
 
-.devices__search:focus-visible {
-  outline: 2px solid var(--accent-mint);
-  outline-offset: 2px;
+.devices__search:focus-within {
+  border-color: color-mix(in srgb, var(--accent-mint) 50%, var(--chip-border));
+  background: color-mix(in srgb, var(--accent-mint) 6%, var(--card-bg));
+}
+
+.devices__search-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  opacity: 0.6;
+  flex: none;
+}
+
+.devices__search-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.devices__search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
 }
 
 .devices__count {
@@ -2156,14 +2510,123 @@ p.override__hint {
   opacity: 0.6;
 }
 
-/* Flows list */
-.flow-list {
+/* Flows page */
+.flow-bar {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin: 24px 0 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  margin: 20px 0 0;
+}
+
+.flow-bar__search {
+  flex: 1 1 240px;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-nav);
+  background: var(--card-bg);
+  color: inherit;
+  font: var(--type-body);
+}
+
+.flow-bar__label {
+  font: var(--type-label);
+  opacity: 0.55;
+}
+
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-nav);
+}
+
+.seg__btn {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-nav);
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  cursor: pointer;
+}
+
+.seg__btn--on {
+  background: var(--accent-amber);
+  color: var(--bg);
+}
+
+.flow-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 12px 0 4px;
+}
+
+.flow-chips__set {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.flow-section {
+  margin-top: 18px;
+}
+
+.flow-section__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  letter-spacing: 0.06em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flow-section__title {
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+.flow-section__dot,
+.flow-section__count {
+  opacity: 0.5;
+}
+
+.flow-section__caret {
+  display: inline-block;
+  opacity: 0.55;
+  transition: transform var(--motion-short) var(--ease);
+}
+
+.flow-section__caret--folded {
+  transform: rotate(-90deg);
+}
+
+.flow-section__warn {
+  color: var(--danger);
+}
+
+.flow-list,
+.flow-grid {
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
+}
+
+.flow-list {
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
 }
 
 .flow-list__empty {
@@ -2172,83 +2635,243 @@ p.override__hint {
   text-align: center;
 }
 
-.flow-card {
-  display: flex;
-  align-items: stretch;
+.flow-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px minmax(140px, 1.2fr) minmax(0, 1.6fr) minmax(0, 1fr) auto 32px;
+  align-items: center;
   gap: 12px;
+  padding: 12px 16px;
+  font: var(--type-body);
+}
+
+.flow-row + .flow-row {
+  border-top: 1px solid var(--card-border);
+}
+
+.flow-row--off .flow-icon,
+.flow-row--off .flow-row__name,
+.flow-row--off .flow-row__trigger,
+.flow-row--off .flow-row__run,
+.flow-tile--off .flow-icon,
+.flow-tile--off .flow-tile__name,
+.flow-tile--off .flow-tile__trigger,
+.flow-tile--off .flow-row__run {
+  opacity: 0.5;
+}
+
+.flow-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cyan) 16%, transparent);
+  color: var(--accent-cyan);
+}
+
+.flow-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.flow-icon--warn {
+  background: color-mix(in srgb, var(--accent-rose) 22%, transparent);
+  color: var(--accent-rose);
+}
+
+.flow-row__name,
+.flow-tile__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* The name link stretches over the whole row or card; the switch, the menu, the Invalid tag
+   and the last run sit above it (the last two so their tooltips show). */
+.flow-row__link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.flow-row__link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.flow-row__switch,
+.flow-row__menu,
+.flow-tile__switch,
+.flow-tile__menu,
+.flow-row__name .badge--invalid,
+.flow-tile__name .badge--invalid,
+.flow-row__run {
+  position: relative;
+  z-index: 1;
+}
+
+/* Faded parts (opacity makes them paint above the link) let a press through to it. */
+.flow-icon,
+.flow-tag,
+.flow-row__trigger,
+.flow-tile__trigger {
+  pointer-events: none;
+}
+
+.flow-tag {
+  padding: 1px 8px;
+  border-radius: var(--radius-nav);
+  background: color-mix(in srgb, currentcolor 12%, transparent);
+  font: var(--type-label);
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+/* Desktop: the wrapper vanishes so trigger and last run keep their own columns. */
+.flow-row__sub {
+  display: contents;
+}
+
+.flow-row__dot {
+  display: none;
+}
+
+.flow-row__trigger,
+.flow-row__run {
+  min-width: 0;
+  font: var(--type-label);
+  overflow-wrap: anywhere;
+}
+
+.flow-row__trigger {
+  opacity: 0.7;
+}
+
+.flow-row__run--failed {
+  color: var(--danger);
+  opacity: 1 !important;
+}
+
+.flow-row--invalid,
+.flow-tile--attention {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-rose) 55%, transparent);
+}
+
+.flow-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--grid-gap);
+}
+
+.flow-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   box-sizing: border-box;
-  padding: 14px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-card);
   background: var(--card-bg);
 }
 
-.flow-card--invalid {
+.flow-tile--attention {
+  box-shadow: none;
   border-color: color-mix(in srgb, var(--accent-rose) 55%, var(--card-border));
 }
 
-.flow-card__title-link {
-  flex: 1;
-  min-width: 0;
+.flow-tile__top,
+.flow-tile__bottom {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  color: inherit;
-  text-decoration: none;
+  align-items: center;
+  gap: 8px;
 }
 
-.flow-card__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.flow-card__title {
+.flow-tile__name {
   flex: 1;
-  min-width: 0;
-  margin: 0;
   font: var(--type-body);
   font-weight: 700;
-  overflow-wrap: anywhere;
 }
 
-.flow-card__mode {
-  margin-left: 8px;
-  font-weight: 400;
-  font-size: 0.85em;
-  opacity: 0.5;
-  letter-spacing: 0.02em;
-}
-
-.flow-card__meta {
-  display: grid;
-  grid-template-columns: minmax(80px, auto) 1fr;
-  column-gap: 16px;
-  row-gap: 4px;
+.flow-tile__trigger {
   margin: 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--card-border);
   font: var(--type-label);
-}
-
-.flow-card__meta-row {
-  display: contents;
-}
-
-.flow-card__meta dt {
-  opacity: 0.55;
-}
-
-.flow-card__meta dd {
-  margin: 0;
+  opacity: 0.7;
   overflow-wrap: anywhere;
 }
 
-.flow-card__switch {
-  display: flex;
-  align-items: flex-start;
-  padding-top: 2px;
+.flow-tile__bottom {
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.flow-tile__menu {
+  margin-left: auto;
+}
+
+@media (max-width: 600px) {
+  .flow-row {
+    grid-template-columns: 28px minmax(0, 1fr) auto 32px;
+    grid-template-areas:
+      "icon name switch menu"
+      ". sub sub sub";
+    gap: 4px 10px;
+  }
+
+  .flow-row > .flow-icon {
+    grid-area: icon;
+  }
+
+  .flow-row__name {
+    grid-area: name;
+  }
+
+  .flow-row__sub {
+    display: block;
+    grid-area: sub;
+    min-width: 0;
+  }
+
+  .flow-row__sub > * {
+    display: inline;
+  }
+
+  .flow-row__switch {
+    grid-area: switch;
+  }
+
+  .flow-row__menu {
+    grid-area: menu;
+  }
+
+  .flow-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .flow-bar__label {
+    display: none;
+  }
+
+  .flow-chips {
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .flow-chips__set {
+    flex-wrap: nowrap;
+    min-width: 0;
+    max-width: 100%;
+    padding-bottom: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
 }
 
 .badge--invalid {
@@ -4257,24 +4880,31 @@ html:has(.flow-canvas-screen) {
 }
 .widget-unavailable-label { overflow-wrap: anywhere; }
 
-/* The dashboards picker replaces the Home tab. The menu is position: fixed with no offsets so it
-   sits at its static position yet escapes the nav's overflow-x clipping. */
+/* The dashboards picker replaces the Home tab. The menu is position: fixed with its coordinates
+   set from the trigger's bounding rect in Rust, which escapes .topbar__nav's overflow-x
+   clipping — an absolute-positioned dropdown would get hidden on viewports narrow enough that
+   the nav scrolls horizontally. */
 .dashboards-picker {
-  flex: 1 0 auto;
   display: flex;
+  flex: 0 0 auto;
 }
 
 .dashboards-picker__trigger {
-  flex: 1 0 auto;
-  min-height: var(--touch-min);
-  padding: 0 12px;
-  border: 0;
-  border-radius: var(--radius-nav);
-  background: transparent;
-  color: inherit;
-  font: var(--type-label);
-  white-space: nowrap;
-  cursor: pointer;
+  /* Inherits the icon-rail chrome from .topbar__nav .dashboards-picker__trigger so the picker
+     reads as part of the nav. --active lights it when the user is on a dashboard page. */
+}
+
+.dashboards-picker__chevron {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  margin-left: 2px;
+  opacity: 0.6;
+}
+
+.dashboards-picker__chevron svg {
+  width: 100%;
+  height: 100%;
 }
 
 .dashboards-picker__menu {
@@ -4283,10 +4913,11 @@ html:has(.flow-canvas-screen) {
   margin: 0;
   padding: 4px;
   list-style: none;
-  min-width: 180px;
-  background: var(--card-bg, Canvas);
-  border: 1px solid var(--card-border, currentColor);
+  min-width: 220px;
+  background: var(--menu-bg);
+  border: 1px solid var(--card-border);
   border-radius: var(--radius-nav);
+  box-shadow: var(--menu-shadow);
 }
 
 .dashboards-picker__menu li {
@@ -4313,18 +4944,21 @@ html:has(.flow-canvas-screen) {
   padding-top: 4px;
 }
 
-/* Edit mode: toolbar sits above the grid; per-tile tools overlay the tile's top-right corner. */
+/* Edit mode: toolbar sits above the grid, right-aligned, as a cluster of .btn controls. The
+   pencil is a round icon toggle that lights amber (.btn--active) when edit mode is on; the gear
+   opens the dashboard settings sheet; Discard and Save share the .btn--with-icon shape with
+   Save as the primary amber action. Per-tile tools overlay each tile's top-right corner. */
 .dashboard-edit-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   padding: 8px 12px 0;
 }
-.dashboard-edit-toolbar button {
-  min-height: var(--touch-min);
-  min-width: var(--touch-min);
+
+.dashboard-edit-toolbar .btn {
+  flex: 0 0 auto;
 }
-.dashboard-edit-toolbar__pencil[aria-pressed="true"] { font-weight: bold; }
 .widget { position: relative; }
 .widget__tools {
   position: absolute;
@@ -4383,3 +5017,94 @@ html:has(.flow-canvas-screen) {
 .dashboard-settings-sheet__reorder { display: flex; gap: 8px; }
 .dashboard-settings-sheet__reorder button { flex: 1; }
 .widget__edit-overlay { position: absolute; inset: 0; z-index: 1; cursor: pointer; pointer-events: auto; }
+
+/* ⋯ menu on a flow row or card */
+.room-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.room-menu__pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-nav);
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.room-menu__head {
+  margin: 0;
+  padding: 8px 8px 4px;
+  font: 600 10px/14px var(--font-body);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.room-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--touch-min);
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: 400 13px/18px var(--font-body);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.room-menu__item:hover:not(:disabled),
+.room-menu__item:focus-visible {
+  background: var(--card-bg);
+}
+
+.room-menu__item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.room-menu__check {
+  flex: none;
+  width: 1em;
+  color: var(--accent-mint);
+}
+
+.flow-toolbar__room {
+  flex: none;
+  max-width: 160px;
+  min-height: 0;
+  padding: 2px 8px;
+  font: var(--type-label);
+}
+
+/* An open menu rises above the neighbouring rows' switches. */
+.flow-row__menu:has(.room-menu__pop),
+.flow-tile__menu:has(.room-menu__pop) {
+  z-index: 8;
+}
+
+/* The list panel no longer clips (the ⋯ popover must overflow), so its first and last rows
+   follow the panel's corners themselves. */
+.flow-row:first-child {
+  border-top-left-radius: var(--radius-card);
+  border-top-right-radius: var(--radius-card);
+}
+
+.flow-row:last-child {
+  border-bottom-left-radius: var(--radius-card);
+  border-bottom-right-radius: var(--radius-card);
+}

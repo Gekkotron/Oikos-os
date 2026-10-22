@@ -54,6 +54,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
             get(get_flow).put(put_flow).delete(delete_flow),
         )
         .route("/flows/{id}/enabled", post(set_flow_enabled))
+        .route("/flows/{id}/area", post(set_flow_area))
         .route("/flows/{id}/run", post(run_flow))
         .route("/groups", get(list_groups))
         .route("/groups/{id}", put(put_group).delete(delete_group))
@@ -541,6 +542,25 @@ async fn set_flow_enabled(
 ) -> Result<Json<FlowView>, HttpError> {
     let Json(EnabledBody { enabled }) = body?;
     Ok(Json(hub.set_flow_enabled(&id, enabled).await?))
+}
+
+/// The `POST /flows/{id}/area` body; `null` clears the room. The key is required (`{}` or a
+/// misspelt key is a `422`, not a silent clear): `deserialize_with` stops serde from defaulting
+/// a missing `Option` field to `None`.
+#[derive(serde::Deserialize)]
+struct AreaBody {
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    area: Option<String>,
+}
+
+/// Files a flow under a room (or clears it) and returns it as it now stands.
+async fn set_flow_area(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<AreaBody>,
+) -> Result<Json<FlowView>, HttpError> {
+    let Json(AreaBody { area }) = body?;
+    Ok(Json(hub.set_flow_area(&id, area).await?))
 }
 
 /// Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or busy.

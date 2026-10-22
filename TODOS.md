@@ -54,4 +54,23 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ## Other backlog ideas (unrelated to dashboards)
 
-(blank — add here as they come up)
+### In progress
+
+- [ ] Flexible groups — hand-made groups across rooms (e.g. "all upstairs lights"), with their own MQTT discovery and state topics. Branch: `feat/flexible-groups` (5 commits ahead of main: design, plan, MQTT contract, API `GroupSpec`, hub group id/discovery/state).
+
+### Homey-gap features
+
+- [ ] Category views — the Home grouped by what a device *does*, not just by room. Branch: `feat/category-views` (worktree exists, no commits yet).
+
+### Hub & web polish
+
+- [ ] Dashboard-wide search bar — the current search is only on the Z2M diagnostics screen (`screens/devices.rs`); add an equivalent on the dashboard/Home so any entity can be found by name across rooms.
+- [ ] Card titles break mid-word on the entity sheet readout card.
+- [ ] Address the ~47 deferred minors from the flow-canvas redesign SDD ledger (`.superpowers/sdd/2026-10-20-flow-canvas-redesign/`).
+- [ ] Housekeeping: cap/clean `target/` so it stops filling the disk.
+
+### Flows
+
+- [ ] Bulk actions on the Flows page — enable, disable, delete or move several flows at once from the list. Deferred from the flow-list redesign (2026-10-22): the list acts on one flow at a time.
+- [ ] Automatic room detection for flows — suggest a flow's `area` from its trigger and action entities instead of leaving it unassigned; today the room is set by hand only.
+- [ ] Android app support for a flow's `area` — the app does not read or write it yet; the hub and web UI do.

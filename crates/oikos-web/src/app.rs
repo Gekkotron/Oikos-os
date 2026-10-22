@@ -1,4 +1,4 @@
-//! The shell: top bar (name, connection pill, theme toggle, navigation) around the router.
+//! The shell: top bar (name, connection pill, navigation) around the router.
 
 use leptos::prelude::*;
 use leptos_router::components::{A, Route, Router, Routes};
@@ -12,7 +12,7 @@ use crate::components::now::install_now;
 use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
-use crate::icons::{BOLT, SHIELD};
+use crate::icons::{BELL, BOLT, FLOW_NODES, GEAR, LAYERS, SHIELD};
 use crate::nav::{TrackReturnPath, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
@@ -23,11 +23,12 @@ use crate::screens::entity_sheet::EntitySheetScreen;
 use crate::screens::flow_canvas::{FlowCanvasScreen, NewFlowScreen};
 use crate::screens::flows::FlowsScreen;
 use crate::screens::group_sheet_v2::GroupSheetV2Screen;
+use crate::screens::groups::GroupsScreen;
 use crate::screens::group_wizard::GroupWizardScreen;
 use crate::screens::history_detail::HistoryDetailScreen;
 use crate::screens::security::SecurityScreen;
 use crate::screens::settings::SettingsScreen;
-use crate::theme::{Theme, install_theme};
+use crate::theme::install_theme;
 
 /// Landing and unknown paths go to the House dashboard, the first picker entry. `replace` keeps
 /// Back from bouncing off the redirect.
@@ -51,15 +52,6 @@ pub(crate) fn any_alarm_armed<'a>(
         e.kind == Kind::AlarmPanel
             && matches!(&e.state.value, StateValue::Alarm(s) if !matches!(s.as_str(), "disarmed" | "disarming" | "unknown" | ""))
     })
-}
-
-/// The next theme in the Auto, Night, Warm cycle.
-fn next_theme(theme: Theme) -> Theme {
-    match theme {
-        Theme::Auto => Theme::Night,
-        Theme::Night => Theme::Warm,
-        Theme::Warm => Theme::Auto,
-    }
 }
 
 #[component]
@@ -134,15 +126,7 @@ pub fn App() -> impl IntoView {
                     <span class="topbar__name">"Oikos"</span>
                 </span>
                 <StatusPill />
-                <button
-                    type="button"
-                    class="theme-toggle"
-                    title="Switch theme"
-                    on:click=move |_| theme.update(|t| *t = next_theme(*t))
-                >
-                    {move || theme.get().as_str()}
-                </button>
-                <nav class="topbar__nav">
+                <nav class="topbar__nav" aria-label="Main">
                     <crate::dashboards::picker::DashboardsPicker />
                     <A href="/energy">
                         <span
@@ -150,7 +134,7 @@ pub fn App() -> impl IntoView {
                             class:nav__glyph--solar=move || solar_active.get()
                             inner_html=BOLT
                         ></span>
-                        "Energy"
+                        <span class="nav__label">"Energy"</span>
                     </A>
                     <A href="/security">
                         <span
@@ -158,12 +142,24 @@ pub fn App() -> impl IntoView {
                             class:nav__glyph--armed=move || alarm_armed.get()
                             inner_html=SHIELD
                         ></span>
-                        "Security"
+                        <span class="nav__label">"Security"</span>
                     </A>
-                    <A href="/alerts">"Alerts"</A>
-                    <A href="/flows">"Flows"</A>
-                    <A href="/devices">"Devices"</A>
-                    <A href="/settings">"Settings"</A>
+                    <A href="/alerts">
+                        <span class="nav__glyph" inner_html=BELL></span>
+                        <span class="nav__label">"Alerts"</span>
+                    </A>
+                    <A href="/flows">
+                        <span class="nav__glyph" inner_html=FLOW_NODES></span>
+                        <span class="nav__label">"Flows"</span>
+                    </A>
+                    <A href="/groups">
+                        <span class="nav__glyph" inner_html=LAYERS></span>
+                        <span class="nav__label">"Groups"</span>
+                    </A>
+                    <A href="/settings">
+                        <span class="nav__glyph" inner_html=GEAR></span>
+                        <span class="nav__label">"Settings"</span>
+                    </A>
                 </nav>
             </header>
             <main class="screen">
@@ -180,6 +176,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/flows") view=FlowsScreen />
                     <Route path=path!("/flows/new") view=NewFlowScreen />
                     <Route path=path!("/flows/:id") view=FlowCanvasScreen />
+                    <Route path=path!("/groups") view=GroupsScreen />
                     <Route path=path!("/groups/new") view=GroupWizardScreen />
                     <Route path=path!("/groups/:id/edit") view=GroupWizardScreen />
                     <Route path=path!("/devices") view=DevicesScreen />
