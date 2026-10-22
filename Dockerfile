@@ -42,16 +42,19 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM base AS builder
 
 # Cook native (release) deps — this layer is reused unless Cargo.lock
-# or any Cargo.toml changes.
+# or any Cargo.toml changes. Scoped to the hub so the feature set
+# matches the final `cargo build -p oikos-os`.
 COPY --from=planner /src/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo chef cook --release --recipe-path recipe.json
+    cargo chef cook --release -p oikos-os --recipe-path recipe.json
 
-# Cook wasm deps for the Leptos UI compiled by trunk.
+# Cook wasm deps for the Leptos UI compiled by trunk. Scoped to
+# oikos-web: the hub crates pull tokio's `net` (mio), which does not
+# build for wasm32-unknown-unknown.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo chef cook --release --target wasm32-unknown-unknown --recipe-path recipe.json
+    cargo chef cook --release --target wasm32-unknown-unknown -p oikos-web --recipe-path recipe.json
 
 # Bring the real source in and build the workspace crates against the
 # cooked target/ directory.
