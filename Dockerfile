@@ -1,14 +1,21 @@
 # syntax=docker/dockerfile:1.6
 #
 # Multi-stage build of the Oikos-os hub.
-# Stage 1 compiles the Leptos web UI with Trunk and then the hub binary
-# that embeds its `dist/` via rust-embed. Stage 2 ships only the binary
-# on debian:bookworm-slim.
+# Uses cargo-chef to cache the dependency graph in its own layer so
+# incremental rebuilds only recompile the workspace crates (oikos-*),
+# not the hundreds of crates they pull in from crates.io.
+#
+# Stage layout:
+#   base     — toolchain + system deps + cargo-chef + trunk (rarely rebuilt)
+#   planner  — emits recipe.json from the current Cargo.toml/Cargo.lock
+#   builder  — cooks deps (cached layer), then compiles web + hub
+#   runtime  — ships only the binary on debian:bookworm-slim
 
 ARG RUST_IMAGE=rust:1-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
-FROM ${RUST_IMAGE} AS builder
+# ---------- base ----------
+FROM ${RUST_IMAGE} AS base
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -21,14 +28,44 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN rustup target add wasm32-unknown-unknown
+RUN cargo install cargo-chef --locked --version "^0.1"
 RUN cargo install trunk --locked --version "^0.21"
 
 WORKDIR /src
+
+# ---------- planner ----------
+FROM base AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# ---------- builder ----------
+FROM base AS builder
+
+# Cook native (release) deps — this layer is reused unless Cargo.lock
+# or any Cargo.toml changes.
+COPY --from=planner /src/recipe.json recipe.json
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo chef cook --release --recipe-path recipe.json
+
+# Cook wasm deps for the Leptos UI compiled by trunk.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo chef cook --release --target wasm32-unknown-unknown --recipe-path recipe.json
+
+# Bring the real source in and build the workspace crates against the
+# cooked target/ directory.
 COPY . .
 
-RUN cd crates/oikos-web && trunk build --release
-RUN cargo build --release -p oikos-os
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cd crates/oikos-web && trunk build --release
 
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo build --release -p oikos-os
+
+# ---------- runtime ----------
 FROM ${RUNTIME_IMAGE} AS runtime
 
 RUN apt-get update \
