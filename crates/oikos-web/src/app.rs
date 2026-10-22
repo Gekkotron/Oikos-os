@@ -12,7 +12,7 @@ use crate::components::now::install_now;
 use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
-use crate::icons::{BOLT, SHIELD};
+use crate::icons::{BELL, BOLT, DEVICES_GRID, FLOW_NODES, GEAR, MOON, SHIELD};
 use crate::nav::{TrackReturnPath, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
@@ -140,9 +140,10 @@ pub fn App() -> impl IntoView {
                     title="Switch theme"
                     on:click=move |_| theme.update(|t| *t = next_theme(*t))
                 >
+                    <span class="theme-toggle__glyph" inner_html=MOON></span>
                     {move || theme.get().as_str()}
                 </button>
-                <nav class="topbar__nav">
+                <nav class="topbar__nav" aria-label="Main">
                     <crate::dashboards::picker::DashboardsPicker />
                     <A href="/energy">
                         <span
@@ -150,7 +151,7 @@ pub fn App() -> impl IntoView {
                             class:nav__glyph--solar=move || solar_active.get()
                             inner_html=BOLT
                         ></span>
-                        "Energy"
+                        <span class="nav__label">"Energy"</span>
                     </A>
                     <A href="/security">
                         <span
@@ -158,12 +159,24 @@ pub fn App() -> impl IntoView {
                             class:nav__glyph--armed=move || alarm_armed.get()
                             inner_html=SHIELD
                         ></span>
-                        "Security"
+                        <span class="nav__label">"Security"</span>
                     </A>
-                    <A href="/alerts">"Alerts"</A>
-                    <A href="/flows">"Flows"</A>
-                    <A href="/devices">"Devices"</A>
-                    <A href="/settings">"Settings"</A>
+                    <A href="/alerts">
+                        <span class="nav__glyph" inner_html=BELL></span>
+                        <span class="nav__label">"Alerts"</span>
+                    </A>
+                    <A href="/flows">
+                        <span class="nav__glyph" inner_html=FLOW_NODES></span>
+                        <span class="nav__label">"Flows"</span>
+                    </A>
+                    <A href="/devices">
+                        <span class="nav__glyph" inner_html=DEVICES_GRID></span>
+                        <span class="nav__label">"Devices"</span>
+                    </A>
+                    <A href="/settings">
+                        <span class="nav__glyph" inner_html=GEAR></span>
+                        <span class="nav__label">"Settings"</span>
+                    </A>
                 </nav>
             </header>
             <main class="screen">

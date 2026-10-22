@@ -4,27 +4,54 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::A;
-use leptos_router::hooks::use_navigate;
+use leptos_router::hooks::{use_location, use_navigate};
 use oikos_api::DashboardView;
 use oikos_core::dashboard::Dashboard;
 
 use crate::api;
 use crate::house::House;
+use crate::icons::{CHEVRON_DOWN, HOUSE};
 
 #[component]
 pub fn DashboardsPicker() -> impl IntoView {
     let house = expect_context::<House>();
     let open = RwSignal::new(false);
     let navigate = use_navigate();
+    let location = use_location();
+
+    // The dashboard id in the current URL path, if the user is on a dashboard page.
+    // Used both to light the picker trigger and to show the active dashboard's name on it.
+    let active_id = Memo::new(move |_| {
+        location
+            .pathname
+            .get()
+            .strip_prefix("/dashboards/")
+            .map(|rest| rest.split('/').next().unwrap_or("").to_owned())
+    });
+
+    let label = move || match active_id.get() {
+        Some(id) => house.dashboards.with(|list| {
+            list.iter()
+                .find(|d| d.dashboard.id == id)
+                .map(|d| d.dashboard.name.clone())
+                .unwrap_or_else(|| "Dashboards".to_owned())
+        }),
+        None => "Dashboards".to_owned(),
+    };
+
+    let is_active = move || active_id.get().is_some();
 
     view! {
         <div class="dashboards-picker">
             <button
                 type="button"
                 class="dashboards-picker__trigger"
+                class:dashboards-picker__trigger--active=is_active
                 on:click=move |_| open.update(|o| *o = !*o)
             >
-                "Dashboards ▾"
+                <span class="nav__glyph" inner_html=HOUSE></span>
+                <span class="nav__label">{label}</span>
+                <span class="dashboards-picker__chevron" inner_html=CHEVRON_DOWN></span>
             </button>
             <Show when=move || open.get()>
                 <ul class="dashboards-picker__menu" on:click=move |_| open.set(false)>
