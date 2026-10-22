@@ -222,8 +222,10 @@ async fn outbound(
                     // Subscribe to everything, whether or not the broker resumed the session:
                     // the registry may have moved on while the link was down.
                     subscribed = hub.subscription_topics();
+                    let mut extra = hub.push().filters();
+                    extra.extend(hub.extra_filters());
                     let filters = valid_filters(
-                        static_filters(&topics, &hub.push().filters())
+                        static_filters(&topics, &extra)
                             .into_iter()
                             .chain(subscribed.iter().cloned())
                             .collect(),

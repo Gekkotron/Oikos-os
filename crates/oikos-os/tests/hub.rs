@@ -1737,3 +1737,59 @@ async fn migration_honours_group_names() {
     let views = hub.list_groups().expect("enabled");
     assert_eq!(views[0].name, "Main lamps");
 }
+
+// ----- Frigate bridge -----
+
+const FRIGATE_EVENT: &str = r#"{"type":"new","before":{},"after":{"id":"1696.5-abc","camera":"front_door","label":"person","has_clip":false,"false_positive":false,"entered_zones":[]}}"#;
+
+/// A hub with the Frigate bridge on or off, its push sync already settled.
+async fn frigate_hub(bridge: bool) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.frigate.url = Some("http://192.168.1.20:5000".to_owned());
+    cfg.frigate.bridge = bridge;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    hub.on_connected();
+    hub.on_suback();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    tokio::task::yield_now().await;
+    (hub, rx)
+}
+
+#[tokio::test(start_paused = true)]
+async fn frigate_event_becomes_history_alert_when_bridge_on() {
+    let (hub, mut publisher) = frigate_hub(true).await;
+    assert_eq!(hub.extra_filters(), vec!["frigate/events".to_owned()]);
+
+    hub.ingest_message("frigate/events", FRIGATE_EVENT.as_bytes(), false);
+
+    let published = drain(&mut publisher);
+    let last = published
+        .iter()
+        .rev()
+        .find(|p| p.topic == "oikos/push/history")
+        .unwrap_or_else(|| panic!("a history publish in {published:?}"));
+    let list: serde_json::Value = serde_json::from_str(&last.payload).expect("json");
+    assert_eq!(list[0]["id"], "frigate-1696.5-abc", "{list}");
+    assert_eq!(list[0]["title"], "Front Door");
+    assert_eq!(list[0]["loc"]["key"], "frigate.object");
+    assert_eq!(
+        list[0]["image_url"],
+        "http://192.168.1.20:5000/api/events/1696.5-abc/snapshot.jpg"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn frigate_events_ignored_when_bridge_off() {
+    let (hub, mut publisher) = frigate_hub(false).await;
+    assert!(hub.extra_filters().is_empty());
+
+    hub.ingest_message("frigate/events", FRIGATE_EVENT.as_bytes(), false);
+
+    let published = drain(&mut publisher);
+    assert!(
+        !published.iter().any(|p| p.payload.contains("frigate-")),
+        "{published:?}"
+    );
+}

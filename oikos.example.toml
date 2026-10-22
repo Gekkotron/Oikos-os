@@ -59,6 +59,18 @@ history_days = 7
 url = ""
 user = ""
 password = ""
+# The Frigate event bridge: turns `<topic_prefix>/events` into push alerts (needs `url` or
+# `media_url`). `media_url` is the base URL the *phone* fetches snapshots and clips from,
+# `url` when unset; use the unauthenticated port (5000), the app sends no login.
+# bridge = true
+# media_url = "http://192.168.1.20:5000"
+# labels = ["person", "car"]     # empty: all
+# cameras = []                   # empty: all
+# zones = []                     # empty: any; otherwise alert once the object enters one
+# cooldown = 0                   # seconds to ignore new events on a camera after an alert
+# severity = "warning"           # info, warning or critical
+# ttl = 43200                    # seconds
+# topic_prefix = "frigate"       # Frigate's MQTT topic_prefix
 
 # TimescaleDB connection for the entity-state history. An empty url turns history off (the
 # house keeps running, the /api/v1/history/* routes answer 503). `buffer_rows` is how many

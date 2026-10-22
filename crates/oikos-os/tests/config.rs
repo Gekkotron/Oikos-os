@@ -284,3 +284,30 @@ fn example_config_loads() {
         Ok(())
     });
 }
+
+#[test]
+fn frigate_bridge_defaults_and_string_env() {
+    Jail::expect_with(|jail| {
+        let cfg = Config::load(None)?;
+        let f = &cfg.frigate;
+        assert!(!f.bridge && f.media_url.is_none());
+        assert!(f.labels.is_empty() && f.cameras.is_empty() && f.zones.is_empty());
+        assert_eq!((f.cooldown, f.ttl), (0, 43200));
+        assert_eq!(
+            (f.severity.as_str(), f.topic_prefix.as_str()),
+            ("warning", "frigate")
+        );
+        assert!(f.bridge_settings().is_none());
+
+        jail.set_env("OIKOS_FRIGATE__SEVERITY", "123");
+        jail.set_env("OIKOS_FRIGATE__TOPIC_PREFIX", "007");
+        jail.set_env("OIKOS_FRIGATE__MEDIA_URL", "http://192.168.1.20:5000/");
+        jail.set_env("OIKOS_FRIGATE__BRIDGE", "true");
+        let cfg = Config::load(None)?;
+        assert_eq!(cfg.frigate.severity, "123");
+        assert_eq!(cfg.frigate.events_topic(), "007/events");
+        let settings = cfg.frigate.bridge_settings().expect("bridge on");
+        assert_eq!(settings.media_url, "http://192.168.1.20:5000");
+        Ok(())
+    });
+}

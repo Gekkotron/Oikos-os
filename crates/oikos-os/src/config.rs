@@ -195,6 +195,25 @@ pub struct FrigateConfig {
     pub password: Option<String>,
     /// How long a connection to Frigate may take before the media request fails.
     pub connect_timeout_ms: u64,
+    /// The base URL the phone uses to fetch media in the alerts the bridge raises; `url` when
+    /// unset.
+    pub media_url: Option<String>,
+    /// Turns Frigate events (`<topic_prefix>/events`) into push alerts. Needs a URL.
+    pub bridge: bool,
+    /// Labels to alert on; empty means all.
+    pub labels: Vec<String>,
+    /// Cameras to alert on; empty means all.
+    pub cameras: Vec<String>,
+    /// Alert only once the object enters one of these zones; empty means any.
+    pub zones: Vec<String>,
+    /// Seconds to ignore new events on a camera after an alert.
+    pub cooldown: u64,
+    /// The v1 `severity` of the alerts.
+    pub severity: String,
+    /// The v1 `ttl` of the alerts, in seconds.
+    pub ttl: u32,
+    /// Frigate's MQTT `topic_prefix`.
+    pub topic_prefix: String,
 }
 
 impl Default for FrigateConfig {
@@ -204,7 +223,50 @@ impl Default for FrigateConfig {
             user: None,
             password: None,
             connect_timeout_ms: 5000,
+            media_url: None,
+            bridge: false,
+            labels: Vec::new(),
+            cameras: Vec::new(),
+            zones: Vec::new(),
+            cooldown: 0,
+            severity: "warning".to_owned(),
+            ttl: 43200,
+            topic_prefix: "frigate".to_owned(),
         }
+    }
+}
+
+impl FrigateConfig {
+    /// The bridge's settings, or `None` when it is off or no URL is set.
+    pub fn bridge_settings(&self) -> Option<oikos_frigate::FrigateSettings> {
+        let present = |s: &&String| !s.trim().is_empty();
+        let url = self
+            .media_url
+            .as_ref()
+            .filter(present)
+            .or(self.url.as_ref().filter(present))?;
+        if !self.bridge {
+            return None;
+        }
+        let set = |list: &[String]| {
+            list.iter()
+                .map(|v| v.trim().to_owned())
+                .filter(|v| !v.is_empty())
+                .collect()
+        };
+        let mut settings = oikos_frigate::FrigateSettings::new(url.trim());
+        settings.labels = set(&self.labels);
+        settings.cameras = set(&self.cameras);
+        settings.zones = set(&self.zones);
+        settings.cooldown = self.cooldown;
+        settings.severity = self.severity.clone();
+        settings.ttl = self.ttl;
+        Some(settings)
+    }
+
+    /// The MQTT topic Frigate publishes its events on.
+    pub fn events_topic(&self) -> String {
+        format!("{}/events", self.topic_prefix.trim_matches('/'))
     }
 }
 
@@ -216,6 +278,15 @@ impl fmt::Debug for FrigateConfig {
             .field("user", &self.user)
             .field("password", &password)
             .field("connect_timeout_ms", &self.connect_timeout_ms)
+            .field("media_url", &self.media_url)
+            .field("bridge", &self.bridge)
+            .field("labels", &self.labels)
+            .field("cameras", &self.cameras)
+            .field("zones", &self.zones)
+            .field("cooldown", &self.cooldown)
+            .field("severity", &self.severity)
+            .field("ttl", &self.ttl)
+            .field("topic_prefix", &self.topic_prefix)
             .finish()
     }
 }
@@ -359,6 +430,9 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "frigate.url",
     "frigate.user",
     "frigate.password",
+    "frigate.media_url",
+    "frigate.severity",
+    "frigate.topic_prefix",
     "history.url",
 ];
 

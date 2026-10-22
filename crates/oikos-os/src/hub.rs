@@ -178,6 +178,8 @@ pub struct Hub {
     /// broker's echo of it for the web and the API.
     push: Arc<PushService>,
     alerts: Mutex<AlertStore>,
+    /// The Frigate event bridge and the topic it reads, when `[frigate] bridge` is on.
+    frigate: Option<(String, Mutex<oikos_frigate::FrigateBridge>)>,
     /// The retained flow definitions and their runs.
     flow_store: Mutex<FlowStore>,
     group_store: Mutex<GroupStore>,
@@ -276,6 +278,12 @@ impl Hub {
                 .unwrap_or_else(|| "oikos".to_owned()),
             push,
             alerts: Mutex::new(alerts),
+            frigate: cfg.frigate.bridge_settings().map(|settings| {
+                (
+                    cfg.frigate.events_topic(),
+                    Mutex::new(oikos_frigate::FrigateBridge::new(settings)),
+                )
+            }),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             group_store: Mutex::new(GroupStore::default()),
             groups_enabled: cfg.groups.enabled,
@@ -445,6 +453,12 @@ impl Hub {
         if self.push.wants(topic) {
             // Then on: the history echo still feeds the alert store below.
             self.push.on_message(topic, payload, retain);
+        }
+        if let Some((events, _)) = &self.frigate
+            && topic == events
+            && !retain
+        {
+            self.on_frigate_event(payload);
         }
         self.capture_pictures(topic, payload);
         if !retain {
@@ -642,6 +656,30 @@ impl Hub {
     /// retained tokens are on their way, the push service starts its settle delay.
     pub fn on_suback(&self) {
         self.push.on_subscribed();
+    }
+
+    /// The bridge's lock is released before the alert goes to the push service.
+    fn on_frigate_event(&self, payload: &[u8]) {
+        let Some((_, bridge)) = &self.frigate else {
+            return;
+        };
+        let alert = bridge
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .on_event(payload, clock::now());
+        if let Some(alert) = alert
+            && let Err(rejected) = self.notify("frigate", &alert)
+        {
+            tracing::warn!(?rejected, "a Frigate alert was rejected");
+        }
+    }
+
+    /// Topics to subscribe to beyond the push ones: Frigate's events when the bridge is on.
+    pub fn extra_filters(&self) -> Vec<String> {
+        self.frigate
+            .iter()
+            .map(|(topic, _)| topic.clone())
+            .collect()
     }
 
     /// Raises a push alert from inside the hub (Frigate bridge, watchdogs, flows, MCP), as if

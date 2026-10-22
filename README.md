@@ -44,6 +44,23 @@ user = "oikos"
 password = "…"
 ```
 
+The hub also replaces OikosPush's Frigate bridge: with `bridge = true` (and a `url` or `media_url`) it reads `<topic_prefix>/events` (subscribed only then) and raises a `camera` alert for each tracked object that qualifies. The first qualifying message (`new`, or the `update` that enters a watched zone) rings with the snapshot; `end` with a clip re-sends the same alert id silently with the clip; an event that only qualifies at `end` gets one audible alert with its clip. The title is the camera, the body `Person detected`, `Person in Porch` or `Alice (person) detected`, and `loc` (`frigate.object`) lets the app write it in the phone's language.
+
+```toml
+[frigate]
+bridge = true
+media_url = "http://192.168.1.20:5000"  # what the phone fetches media from; `url` when unset
+labels = ["person", "car"]              # empty: all
+cameras = []                            # empty: all
+zones = []                              # empty: any; otherwise alert once the object enters one
+cooldown = 0                            # seconds to ignore new events on a camera after an alert
+severity = "warning"
+ttl = 43200
+topic_prefix = "frigate"                # Frigate's MQTT topic_prefix
+```
+
+The broker user needs read on `<topic_prefix>/events`. Frigate needs `snapshots.enabled: true`, and event clips retained (`record.enabled`) for the clip update.
+
 ## Zigbee2MQTT
 
 The hub discovers entities under the `oikos` prefix. In Zigbee2MQTT's `configuration.yaml`:
