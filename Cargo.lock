@@ -2261,6 +2261,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oikos-push"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha1 0.10.7",
+]
+
+[[package]]
 name = "oikos-web"
 version = "0.1.0"
 dependencies = [
