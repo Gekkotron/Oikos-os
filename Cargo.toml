@@ -52,10 +52,15 @@ jsonwebtoken = { version = "10", default-features = false, features = ["aws_lc_r
 sha1 = "0.10"
 
 # Keep `target/` small: line tables only for our crates, no debug info and a little
-# optimisation for dependencies (native and wasm). Release builds are untouched.
+# optimisation for dependencies (native and wasm).
 [profile.dev]
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
 opt-level = 1
+
+# Repeat release builds reuse incremental artifacts: slight target-size growth,
+# much faster `cargo build --release` after small edits.
+[profile.release]
+incremental = true

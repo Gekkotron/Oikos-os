@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Build the web UI and the hub, stop the running hub, start the new one.
 #
-# Usage: tools/restart.sh [--no-web] [--debug] [--sweep]
+# Usage: tools/restart.sh [--no-web] [--debug] [--fast] [--sweep]
 #   --no-web  skip `trunk build` (reuse crates/oikos-web/dist)
 #   --debug   build and run the debug profile instead of release
+#   --fast    debug profile + trunk dev build (no wasm-opt); fastest dev loop
 #   --sweep   first delete build artifacts untouched for 14 days (needs
 #             `cargo install cargo-sweep`); the current builds are kept
 #
@@ -17,10 +18,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE=release
 BUILD_WEB=1
 SWEEP=0
+WEB_RELEASE=1
 for arg in "$@"; do
   case "$arg" in
     --no-web) BUILD_WEB=0 ;;
     --debug) PROFILE=debug ;;
+    --fast) PROFILE=debug; WEB_RELEASE=0 ;;
     --sweep) SWEEP=1 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -35,8 +38,8 @@ LOG="${OIKOS_LOG:-$TARGET_DIR/oikos-os.log}"
 BIND="$(sed -n 's/^bind *= *"\(.*\)"/\1/p' "$ROOT/oikos.toml" 2>/dev/null | head -1)"
 HEALTH="http://${BIND:-127.0.0.1:8081}/health"
 
-cargo_flags=()
-[ "$PROFILE" = release ] && cargo_flags+=(--release)
+# Inline branches below instead of arrays: macOS's system bash 3.2 treats an
+# empty array under `set -u` as unbound and aborts on `"${arr[@]}"`.
 
 # 0. Keep target/ in check: stale artifacts pile up because cargo never deletes old ones.
 if [ "$SWEEP" = 1 ]; then
@@ -56,13 +59,22 @@ fi
 
 # 1. Build the web UI first: the hub embeds dist/ at compile time.
 if [ "$BUILD_WEB" = 1 ]; then
-  echo "==> trunk build ($PROFILE)"
-  (cd "$ROOT/crates/oikos-web" && trunk build "${cargo_flags[@]}")
+  if [ "$WEB_RELEASE" = 1 ] && [ "$PROFILE" = release ]; then
+    echo "==> trunk build (release)"
+    (cd "$ROOT/crates/oikos-web" && trunk build --release)
+  else
+    echo "==> trunk build (dev)"
+    (cd "$ROOT/crates/oikos-web" && trunk build)
+  fi
 fi
 
 # 2. Build the hub.
 echo "==> cargo build -p oikos-os ($PROFILE)"
-(cd "$ROOT" && cargo build "${cargo_flags[@]}" -p oikos-os)
+if [ "$PROFILE" = release ]; then
+  (cd "$ROOT" && cargo build --release -p oikos-os)
+else
+  (cd "$ROOT" && cargo build -p oikos-os)
+fi
 
 # 3. Stop the previous hub: SIGTERM, wait up to 10 s, then SIGKILL.
 pids="$(pgrep -f 'oikos-os run' || true)"
