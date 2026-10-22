@@ -17,6 +17,9 @@ pub struct Commanded {
     pub setpoint: Option<f64>,
     pub mode: String,
     pub at: u64,
+    /// The engine sent this itself. An entry that only acknowledges what a device holds (a hand
+    /// change, or a device already at its target) has no echo window.
+    pub ours: bool,
 }
 
 /// How an observed device state relates to the last command.
@@ -40,11 +43,11 @@ pub struct Ledger {
 }
 
 impl Ledger {
-    /// Seed from applied decisions, skipping held entities. Later decisions override earlier ones
-    /// for the same entity.
+    /// Seed from each zone's latest decision, applied or not, skipping held entities. Later
+    /// decisions override earlier ones for the same entity, so pass them oldest first.
     pub fn from_decisions<'a>(decisions: impl IntoIterator<Item = &'a Decision>) -> Ledger {
         let mut ledger = Ledger::default();
-        for d in decisions.into_iter().filter(|d| d.applied) {
+        for d in decisions {
             for (entity, target) in d.entities.iter().filter(|(_, t)| !t.held) {
                 ledger.record(entity, target, d.at);
             }
@@ -52,13 +55,26 @@ impl Ledger {
         ledger
     }
 
+    /// The engine commanded `entity`.
     pub fn record(&mut self, entity: &str, target: &DeviceTarget, at: u64) {
+        self.put(entity, target, at, true);
+    }
+
+    /// The engine saw `entity` in this state and takes it as the baseline (a hand change, or a
+    /// device already at its target). Unlike [`Ledger::record`], a later difference is a hand
+    /// change right away.
+    pub fn acknowledge(&mut self, entity: &str, target: &DeviceTarget, at: u64) {
+        self.put(entity, target, at, false);
+    }
+
+    fn put(&mut self, entity: &str, target: &DeviceTarget, at: u64, ours: bool) {
         self.last.insert(
             entity.to_string(),
             Commanded {
                 setpoint: target.setpoint,
                 mode: target.mode.clone(),
                 at,
+                ours,
             },
         );
     }
@@ -84,15 +100,17 @@ impl Ledger {
         let Some(c) = self.last.get(entity) else {
             return Observed::Unknown;
         };
-        let same_target = match (c.setpoint, observed_target) {
-            (None, None) => true,
-            (Some(a), Some(b)) => (a - b).abs() <= step / 2.0,
-            _ => false,
-        };
+        // A device that is off has no meaningful target: whatever it reports is the same.
+        let same_target = c.mode == "off"
+            || match (c.setpoint, observed_target) {
+                (None, None) => true,
+                (Some(a), Some(b)) => (a - b).abs() <= step / 2.0,
+                _ => false,
+            };
         if same_target && observed_mode == Some(c.mode.as_str()) {
             return Observed::Matches;
         }
-        if at.saturating_sub(c.at) <= ECHO_WINDOW_S {
+        if c.ours && at.saturating_sub(c.at) <= ECHO_WINDOW_S {
             return Observed::Echo;
         }
         if online_since.is_some_and(|t| at.saturating_sub(t) <= DRIFT_WINDOW_S) {
@@ -134,6 +152,8 @@ mod tests {
             mode: Some(Mode::Heat),
             setpoint: None,
             source: Source::Schedule,
+
+            cause: None,
             reason: String::new(),
             reading: None,
             reading_age_s: None,
@@ -172,15 +192,6 @@ mod tests {
         assert_eq!(
             l.classify("climate.a", None, Some("heat"), 0.5, 5000, None),
             Observed::HandChange
-        );
-        let l = ledger_with(None, "off", 1000);
-        assert_eq!(
-            l.classify("climate.a", Some(20.0), Some("off"), 0.5, 5000, None),
-            Observed::HandChange
-        );
-        assert_eq!(
-            l.classify("climate.a", None, Some("off"), 0.5, 5000, None),
-            Observed::Matches
         );
     }
 
@@ -234,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn ledger_rebuilt_from_applied_decisions_only() {
+    fn ledger_rebuilt_from_every_latest_decision() {
         let ds = [
             decision(
                 true,
@@ -257,7 +268,64 @@ mod tests {
             (Some(20.0), "heat", 1000)
         );
         assert!(l.get("climate.held").is_none());
-        assert!(l.get("climate.b").is_none());
+        let b = l.get("climate.b").unwrap();
+        assert_eq!((b.setpoint, b.at), (Some(21.0), 2000));
+    }
+
+    #[test]
+    fn a_later_decision_wins_for_the_same_entity() {
+        let ds = [
+            decision(
+                true,
+                1000,
+                vec![("climate.a", target(Some(20.0), "heat", false))],
+            ),
+            decision(
+                false,
+                2000,
+                vec![("climate.a", target(Some(18.0), "heat", false))],
+            ),
+        ];
+        assert_eq!(
+            Ledger::from_decisions(&ds)
+                .get("climate.a")
+                .unwrap()
+                .setpoint,
+            Some(18.0)
+        );
+    }
+
+    #[test]
+    fn off_ignores_the_setpoint() {
+        let l = ledger_with(None, "off", 1000);
+        assert_eq!(
+            l.classify("climate.a", Some(21.0), Some("off"), 0.5, 5000, None),
+            Observed::Matches
+        );
+        let l = ledger_with(Some(10.0), "off", 1000);
+        assert_eq!(
+            l.classify("climate.a", None, Some("off"), 0.5, 5000, None),
+            Observed::Matches
+        );
+        // Another mode still differs.
+        assert_eq!(
+            l.classify("climate.a", Some(10.0), Some("heat"), 0.5, 5000, None),
+            Observed::HandChange
+        );
+    }
+
+    #[test]
+    fn an_acknowledged_state_has_no_echo_window() {
+        let mut l = Ledger::default();
+        l.acknowledge("climate.a", &target(Some(22.0), "heat", false), 1000);
+        assert_eq!(
+            l.classify("climate.a", Some(23.0), Some("heat"), 0.5, 1005, None),
+            Observed::HandChange
+        );
+        assert_eq!(
+            l.classify("climate.a", Some(22.0), Some("heat"), 0.5, 1005, None),
+            Observed::Matches
+        );
     }
 
     #[test]

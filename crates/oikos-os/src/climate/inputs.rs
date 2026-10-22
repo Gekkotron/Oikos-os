@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use chrono::NaiveDateTime;
 use chrono_tz::Tz;
 use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
-use oikos_climate::doc::{HouseSettings, Mode, Override, ZoneSettings};
+use oikos_climate::doc::{HouseSettings, Mode, Override, SafetyCause, ZoneSettings};
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
 use oikos_core::model::{Availability, EntityState, Kind, StateValue};
 
@@ -38,6 +38,8 @@ pub(crate) struct OwnedZoneInputs {
     pub local_now: NaiveDateTime,
     pub now: u64,
     pub safety_memory: Option<SafetyMemory>,
+    /// The cause of the zone's previous safety decision, set by the caller.
+    pub previous_cause: Option<SafetyCause>,
 }
 
 impl OwnedZoneInputs {
@@ -56,6 +58,7 @@ impl OwnedZoneInputs {
             local_now: self.local_now,
             now: self.now,
             safety_memory: self.safety_memory.as_ref(),
+            previous_cause: self.previous_cause,
         }
     }
 }
@@ -70,9 +73,14 @@ pub(crate) fn local_time(tz: Tz, now: u64) -> NaiveDateTime {
         .naive_local()
 }
 
+/// The temperature step a device advertises, or the default.
+pub(crate) fn step_from(advertised: Option<f64>) -> f64 {
+    advertised.filter(|s| *s > 0.0).unwrap_or(DEFAULT_STEP)
+}
+
 /// The device's temperature step, or the default.
 pub(crate) fn step_of(caps: &DeviceCaps) -> f64 {
-    caps.temp_step.filter(|s| *s > 0.0).unwrap_or(DEFAULT_STEP)
+    step_from(caps.temp_step)
 }
 
 /// The climate entities of `zone`: `settings.entities`, else the area's, never a group.
@@ -299,5 +307,6 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         local_now: local_time(hub.zone(), now),
         now,
         safety_memory,
+        previous_cause: None,
     })
 }

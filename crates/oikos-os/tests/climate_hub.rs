@@ -559,16 +559,19 @@ mod engine {
             vec![("/ha/mode/set".to_owned(), "off".to_owned())],
             "{out:?}"
         );
-        assert!(
-            alert(&rig.hub, "climate-safety-living-frost")
-                .unwrap()
-                .resolved
-        );
-
         // Restored once.
         let out = rig.pass(183).await;
         assert!(commands(&out).is_empty(), "{out:?}");
         assert!(!rig.zone().decision.unwrap().applied);
+
+        // The alert resolves only after its cause has been gone for ten minutes.
+        let hub = Arc::clone(&rig.hub);
+        let frost_alert = move || alert(&hub, "climate-safety-living-frost").unwrap();
+        assert!(!frost_alert().resolved);
+        rig.pass(122 + 599).await;
+        assert!(!frost_alert().resolved, "not before ten minutes");
+        rig.pass(122 + 601).await;
+        assert!(frost_alert().resolved);
     }
 
     #[tokio::test(start_paused = true)]
@@ -687,6 +690,8 @@ mod engine {
             mode: Some(Mode::Heat),
             setpoint: Some(Setpoint::Temp(20.0)),
             source: Source::Schedule,
+
+            cause: None,
             reason: "Schedule base: 20.0 °C".into(),
             reading: Some(19.0),
             reading_age_s: Some(30),
@@ -745,6 +750,8 @@ mod engine {
                 mode: Some(Mode::Heat),
                 setpoint: None,
                 source: Source::Schedule,
+
+                cause: None,
                 reason: String::new(),
                 reading: None,
                 reading_age_s: None,
@@ -803,24 +810,212 @@ mod engine {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn failed_publish_is_not_recorded() {
+    async fn failed_command_is_not_recorded() {
+        let mut rig = Rig::new(None).await;
+        load_push(&rig.hub).await;
+        // Already at target: acknowledged (the Matches path), nothing sent.
+        rig.sim.set(&rig.hub, 0, "heat", 17.0, 20.0);
+        rig.settings(heat_rules(17.0));
+        assert!(commands(&rig.pass(0).await).is_empty());
+        // The device stops answering: three refused commands are counted (the alert) and none
+        // is written to the ledger.
+        rig.settings(heat_rules(19.0));
+        rig.sim.echo = false;
+        for at in [61, 122, 183] {
+            assert_eq!(temperature_commands(&rig.pass(at).await), vec![19.0]);
+        }
+        let alert_id = format!("climate-command-{}", rig.id);
+        assert!(
+            alert(&rig.hub, &alert_id).is_some(),
+            "failures were counted"
+        );
+        // The device still reports what it had: that matches the ledger, so no hand change.
+        rig.hub.observe_climate(&rig.id, rig.t0 + 400);
+        assert!(rig.zone().overrides.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn nothing_is_sent_or_counted_without_the_broker() {
+        let mut rig = Rig::new(None).await;
+        load_push(&rig.hub).await;
+        rig.settings(heat_rules(17.0));
+        rig.hub.set_connection(ConnectionStatus::Offline {
+            reason: "test".into(),
+        });
+        for at in [0, 61, 122, 183] {
+            let out = rig.pass(at).await;
+            assert!(commands(&out).is_empty(), "{out:?}");
+        }
+        assert!(alert(&rig.hub, &format!("climate-command-{}", rig.id)).is_none());
+        // Back online: sent at once, not paused.
+        rig.hub.set_connection(ConnectionStatus::Online);
+        assert_eq!(temperature_commands(&rig.pass(184).await), vec![17.0]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn hand_change_on_a_device_already_at_target() {
+        let mut rig = Rig::new(None).await;
+        rig.sim.set(&rig.hub, 0, "heat", 17.0, 20.0);
+        rig.settings(heat_rules(17.0));
+        assert!(commands(&rig.pass(0).await).is_empty());
+        rig.sim.set(&rig.hub, 0, "heat", 22.0, 20.0);
+        rig.hub.observe_climate(&rig.id, rig.t0 + 600);
+        let overrides = rig.zone().overrides;
+        assert_eq!(overrides.len(), 1, "{overrides:?}");
+        assert_eq!(overrides[0].setpoint, Some(Setpoint::Temp(22.0)));
+        let out = rig.pass(602).await;
+        assert!(commands(&out).is_empty(), "never reverted: {out:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn restart_with_an_unapplied_decision_still_seeds_the_ledger() {
+        let mut rig = Rig::new(None).await;
+        rig.sim.set(&rig.hub, 0, "heat", 22.0, 20.0);
+        rig.hub.ingest_message(
+            "oikos/climate/zone/living/settings",
+            serde_json::to_string(&heat_rules(20.0)).unwrap().as_bytes(),
+            true,
+        );
+        let decision = Decision {
+            zone: "living".into(),
+            mode: Some(Mode::Heat),
+            setpoint: Some(Setpoint::Temp(20.0)),
+            source: Source::Schedule,
+            cause: None,
+            reason: "Schedule base: 20.0 °C".into(),
+            reading: None,
+            reading_age_s: None,
+            outdoor_mean: None,
+            home: true,
+            applied: false,
+            at: rig.t0 - 3600,
+            entities: BTreeMap::from([(
+                rig.id.clone(),
+                DeviceTarget {
+                    setpoint: Some(20.0),
+                    mode: "heat".into(),
+                    held: false,
+                },
+            )]),
+        };
+        rig.hub.ingest_message(
+            "oikos/climate/zone/living/decision",
+            serde_json::to_string(&decision).unwrap().as_bytes(),
+            true,
+        );
+        let out = rig.pass(0).await;
+        assert_eq!(rig.zone().overrides.len(), 1);
+        assert!(commands(&out).is_empty(), "{out:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn after_the_ledger_forgets_the_next_pass_acknowledges_again() {
         let mut rig = Rig::new(None).await;
         rig.sim.set(&rig.hub, 0, "heat", 17.0, 20.0);
         rig.settings(heat_rules(17.0));
         rig.pass(0).await;
-        rig.settings(heat_rules(19.0));
-        rig.hub.set_connection(ConnectionStatus::Offline {
-            reason: "test".into(),
-        });
-        let out = rig.pass(61).await;
-        assert!(commands(&out).is_empty(), "{out:?}");
-        // The broker is back; the device still reports what it has.
-        rig.hub.set_connection(ConnectionStatus::Online);
-        rig.hub.observe_climate(&rig.id, rig.t0 + 200);
+        // The device leaves the house (the ledger forgets it) and comes back.
+        rig.hub
+            .ingest("oikos/climate/daikin_192_168_1_150/climate/config", b"");
+        rig.pass(61).await;
+        feed_daikin(&rig.hub, 0, "living").await;
+        rig.sim.set(&rig.hub, 0, "heat", 17.0, 20.0);
+        assert!(commands(&rig.pass(122).await).is_empty());
+        rig.sim.set(&rig.hub, 0, "heat", 24.0, 20.0);
+        rig.hub.observe_climate(&rig.id, rig.t0 + 700);
+        assert_eq!(rig.zone().overrides.len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn off_mode_ignores_the_reported_setpoint() {
+        let mut rig = Rig::new(None).await;
+        let off = ZoneSettings {
+            rules: Rules {
+                heat: Some(ModeRules {
+                    base: Setpoint::Off,
+                    blocks: Vec::new(),
+                }),
+                ..Rules::default()
+            },
+            ..active()
+        };
+        rig.settings(off);
+        let out = rig.pass(0).await;
+        assert_eq!(
+            commands(&out),
+            vec![("/ha/mode/set".to_owned(), "off".to_owned())]
+        );
+        // The unit reports a target again, along with a new room temperature.
+        rig.sim.set(&rig.hub, 0, "off", 22.0, 19.0);
+        rig.hub.observe_climate(&rig.id, rig.t0 + 600);
         assert!(
             rig.zone().overrides.is_empty(),
-            "nothing was commanded, so nothing differs from the ledger"
+            "{:?}",
+            rig.zone().overrides
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rapid_presses_keep_the_last_value() {
+        let mut rig = Rig::new(None).await;
+        rig.settings(heat_rules(17.0));
+        rig.pass(0).await;
+        rig.sim.set(&rig.hub, 0, "heat", 22.0, 20.0);
+        rig.hub.observe_climate(&rig.id, rig.t0 + 600);
+        rig.sim.set(&rig.hub, 0, "heat", 23.0, 20.0);
+        rig.hub.observe_climate(&rig.id, rig.t0 + 605);
+        let overrides = rig.zone().overrides;
+        assert_eq!(overrides.len(), 1, "{overrides:?}");
+        assert_eq!(overrides[0].setpoint, Some(Setpoint::Temp(23.0)));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn frost_hovering_at_the_limit_does_not_restore_until_back_inside() {
+        let mut rig = Rig::new(None).await;
+        // A heater switched off in a cold room: frost turns it on, clearing turns it off.
+        rig.sim.set(&rig.hub, 0, "off", 10.0, 6.9);
+        let out = rig.pass(0).await;
+        assert_eq!(
+            commands(&out),
+            vec![("/ha/mode/set".to_owned(), "heat".to_owned())]
+        );
+        for (at, reading) in [(61, 7.0), (122, 6.9), (183, 7.2), (244, 7.4)] {
+            rig.sim.set(&rig.hub, 0, "heat", 10.0, reading);
+            let out = rig.pass(at).await;
+            assert!(commands(&out).is_empty(), "{reading}: {out:?}");
+            assert_eq!(rig.zone().decision.unwrap().source, Source::Safety);
+        }
+        rig.sim.set(&rig.hub, 0, "heat", 10.0, 7.5);
+        let out = rig.pass(305).await;
+        assert_eq!(
+            commands(&out),
+            vec![("/ha/mode/set".to_owned(), "off".to_owned())],
+            "{out:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_dropped_pass_does_not_leave_a_device_in_flight() {
+        let mut rig = Rig::new(None).await;
+        rig.settings(heat_rules(17.0));
+        rig.pass(0).await;
+        rig.settings(heat_rules(19.0));
+        rig.sim.echo = false;
+        let hub = Arc::clone(&rig.hub);
+        let now = rig.t0 + 61;
+        let task = tokio::spawn(async move { hub.evaluate_climate(now).await });
+        loop {
+            let published = rig.rx.recv().await.expect("publisher open");
+            if published.topic.ends_with("/ha/temperature/set") {
+                break;
+            }
+        }
+        task.abort();
+        let _ = task.await;
+        // The device is turned up by hand; the abandoned command must not hide it.
+        rig.sim.set(&rig.hub, 0, "heat", 24.0, 20.0);
+        rig.hub.observe_climate(&rig.id, rig.t0 + 700);
+        assert_eq!(rig.zone().overrides.len(), 1);
     }
 
     #[tokio::test(start_paused = true)]
@@ -981,6 +1176,8 @@ mod engine {
             mode: Some(Mode::Heat),
             setpoint: None,
             source: Source::Idle,
+
+            cause: None,
             reason: String::new(),
             reading: Some(99.0),
             reading_age_s: Some(9999),

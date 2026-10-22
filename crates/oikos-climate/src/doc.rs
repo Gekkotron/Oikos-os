@@ -413,6 +413,17 @@ pub enum Source {
     Idle,
 }
 
+/// Why the safety row of the decision tree acted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub enum SafetyCause {
+    Frost,
+    Overheat,
+    Overcool,
+    Stale,
+}
+
 /// What the engine wants one device to do. `mode` is the device's hvac mode string.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -430,6 +441,9 @@ pub struct Decision {
     pub mode: Option<Mode>,
     pub setpoint: Option<Setpoint>,
     pub source: Source,
+    /// Why safety acted; set on every `Source::Safety` decision.
+    #[serde(default)]
+    pub cause: Option<SafetyCause>,
     pub reason: String,
     pub reading: Option<f64>,
     pub reading_age_s: Option<u64>,
@@ -448,6 +462,7 @@ impl Decision {
             && self.mode == other.mode
             && self.setpoint == other.setpoint
             && self.source == other.source
+            && self.cause == other.cause
             && self.reason == other.reason
             && self.home == other.home
             && self.applied == other.applied
@@ -680,6 +695,8 @@ mod tests {
             mode: Some(Mode::Heat),
             setpoint: Some(Setpoint::Temp(20.0)),
             source: Source::Schedule,
+
+            cause: None,
             reason: "r".into(),
             reading: Some(19.0),
             reading_age_s: Some(5),

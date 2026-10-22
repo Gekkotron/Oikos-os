@@ -27,6 +27,9 @@ pub struct ClimateHub {
     pub(crate) runtime: Mutex<ClimateRuntime>,
     /// Held for a whole evaluation pass, so two callers never command the same device at once.
     pub(crate) pass: tokio::sync::Mutex<()>,
+    /// Held while an override list is read, changed and written, so two writers never lose
+    /// each other's change. Never held across an `await`.
+    pub(crate) overrides_write: Mutex<()>,
 }
 
 impl ClimateHub {
@@ -36,6 +39,7 @@ impl ClimateHub {
             store: Mutex::new(ClimateStore::default()),
             runtime: Mutex::new(ClimateRuntime::default()),
             pass: tokio::sync::Mutex::new(()),
+            overrides_write: Mutex::new(()),
         }
     }
 }
@@ -73,6 +77,8 @@ pub(crate) struct ClimateRuntime {
     pub outdoor_live: VecDeque<(u64, f64)>,
     /// Alert ids currently raised.
     pub active_alerts: HashSet<String>,
+    /// Safety alert id -> since when its cause has been absent; it resolves after a while.
+    pub absent_since: HashMap<String, u64>,
     /// Entities whose changes matter to the engine; rebuilt each pass.
     pub watched: HashSet<String>,
     /// The ledger was seeded from the retained decisions.

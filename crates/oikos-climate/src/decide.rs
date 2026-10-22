@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use chrono::{Duration, NaiveDateTime};
 
 use crate::doc::{
-    Decision, DeviceTarget, HouseSettings, Mode, Override, Setpoint, Source, ZoneSettings,
-    ZoneState,
+    Decision, DeviceTarget, HouseSettings, Mode, Override, SafetyCause, Setpoint, Source,
+    ZoneSettings, ZoneState,
 };
 use crate::schedule::Reading;
 
@@ -74,7 +74,13 @@ pub struct ZoneInputs<'a> {
     pub local_now: NaiveDateTime,
     pub now: u64,
     pub safety_memory: Option<&'a SafetyMemory>,
+    /// The cause of the zone's previous safety decision, so a limit that was crossed holds
+    /// until the reading is clearly back inside it.
+    pub previous_cause: Option<SafetyCause>,
 }
+
+/// How far back inside a limit the reading must be before a latched safety cause clears.
+pub const SAFETY_HYSTERESIS: f64 = 0.5;
 
 /// Clamp to the device's range and round to its step (0.5 when it has none).
 pub fn fit(t: f64, caps: &DeviceCaps) -> f64 {
@@ -158,6 +164,7 @@ fn base_decision(inp: &ZoneInputs, source: Source, reason: String) -> Decision {
         mode: inp.mode,
         setpoint: None,
         source,
+        cause: None,
         reason,
         reading,
         reading_age_s,
@@ -167,6 +174,12 @@ fn base_decision(inp: &ZoneInputs, source: Source, reason: String) -> Decision {
         at: inp.now,
         entities: BTreeMap::new(),
     }
+}
+
+fn safety_decision(inp: &ZoneInputs, cause: SafetyCause, reason: String) -> Decision {
+    let mut d = base_decision(inp, Source::Safety, reason);
+    d.cause = Some(cause);
+    d
 }
 
 /// Decide what the zone's devices should do now. `applied` is left `false` for the hub to set.
@@ -196,13 +209,22 @@ pub fn decide(inp: &ZoneInputs) -> Decision {
 fn safety(inp: &ZoneInputs) -> Option<Decision> {
     let house = inp.house;
     match inp.reading {
-        Reading::Fresh { value, .. } if value < house.frost => {
+        Reading::Fresh { value, .. }
+            if value < house.frost
+                || (latched(inp, SafetyCause::Frost)
+                    && value < house.frost + SAFETY_HYSTERESIS) =>
+        {
             let sp = Setpoint::Temp(house.frost + 2.0);
-            let mut d = base_decision(
-                inp,
-                Source::Safety,
-                format!("Frost protection: {} < {}", temp(value), temp(house.frost)),
-            );
+            let reason = if value < house.frost {
+                format!("Frost protection: {} < {}", temp(value), temp(house.frost))
+            } else {
+                format!(
+                    "Frost protection: {}, holding until {}",
+                    temp(value),
+                    temp(house.frost + SAFETY_HYSTERESIS)
+                )
+            };
+            let mut d = safety_decision(inp, SafetyCause::Frost, reason);
             d.mode = Some(Mode::Heat);
             d.setpoint = Some(sp);
             d.entities = inp
@@ -220,7 +242,12 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
                 .collect();
             Some(d)
         }
-        Reading::Fresh { value, .. } if inp.mode == Some(Mode::Heat) && value > house.overheat => {
+        Reading::Fresh { value, .. }
+            if inp.mode == Some(Mode::Heat)
+                && (value > house.overheat
+                    || (latched(inp, SafetyCause::Overheat)
+                        && value > house.overheat - SAFETY_HYSTERESIS)) =>
+        {
             let base = inp
                 .settings
                 .rules
@@ -230,9 +257,9 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
                     Setpoint::Temp(t) if t <= house.overheat => Some(Setpoint::Temp(t)),
                     _ => None,
                 });
-            let mut d = base_decision(
+            let mut d = safety_decision(
                 inp,
-                Source::Safety,
+                SafetyCause::Overheat,
                 format!(
                     "Overheat protection: {} > {}",
                     temp(value),
@@ -263,10 +290,15 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
             }
             Some(d)
         }
-        Reading::Fresh { value, .. } if inp.mode == Some(Mode::Cool) && value < house.overcool => {
-            let mut d = base_decision(
+        Reading::Fresh { value, .. }
+            if inp.mode == Some(Mode::Cool)
+                && (value < house.overcool
+                    || (latched(inp, SafetyCause::Overcool)
+                        && value < house.overcool + SAFETY_HYSTERESIS)) =>
+        {
+            let mut d = safety_decision(
                 inp,
-                Source::Safety,
+                SafetyCause::Overcool,
                 format!(
                     "Overcool protection: {} < {}",
                     temp(value),
@@ -292,6 +324,10 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
     }
 }
 
+fn latched(inp: &ZoneInputs, cause: SafetyCause) -> bool {
+    inp.previous_cause == Some(cause)
+}
+
 /// The stale-reading row: no usable reading, so never let a schedule, override or away setpoint
 /// through in an active zone.
 fn stale(inp: &ZoneInputs) -> Option<Decision> {
@@ -301,25 +337,25 @@ fn stale(inp: &ZoneInputs) -> Option<Decision> {
         _ => "No temperature reading".to_string(),
     };
     if inp.settings.state != ZoneState::Active {
-        return Some(base_decision(
+        return Some(safety_decision(
             inp,
-            Source::Safety,
+            SafetyCause::Stale,
             format!("{what}: not acting until approved rules exist"),
         ));
     }
     let house = inp.house;
     let rules = inp.mode.and_then(|m| inp.settings.rules.get(m));
     let (Some(mode), Some(rules)) = (inp.mode, rules) else {
-        return Some(base_decision(
+        return Some(safety_decision(
             inp,
-            Source::Safety,
+            SafetyCause::Stale,
             format!("{what}: no rules to fall back on, not acting"),
         ));
     };
     let base = rules.base;
-    let mut d = base_decision(
+    let mut d = safety_decision(
         inp,
-        Source::Safety,
+        SafetyCause::Stale,
         format!("{what}: holding the safer of the current target and base"),
     );
     match mode {
@@ -612,6 +648,7 @@ mod tests {
         overrides: Vec<Override>,
         devices: Vec<Device>,
         memory: Option<SafetyMemory>,
+        previous: Option<SafetyCause>,
     }
 
     impl Case {
@@ -626,6 +663,7 @@ mod tests {
                 overrides: vec![],
                 devices: vec![trv()],
                 memory: None,
+                previous: None,
             }
         }
 
@@ -644,6 +682,7 @@ mod tests {
                 local_now: local(),
                 now: NOW,
                 safety_memory: self.memory.as_ref(),
+                previous_cause: self.previous,
             })
         }
     }
@@ -691,6 +730,65 @@ mod tests {
         assert_eq!(d.entities["trv"], target(Some(9.0), "heat", false));
         assert_eq!(d.reading, Some(6.5));
         assert_eq!(d.reading_age_s, Some(30));
+    }
+
+    #[test]
+    fn every_safety_decision_names_its_cause() {
+        let mut c = Case::new();
+        c.reading = fresh(6.5);
+        assert_eq!(c.run().cause, Some(SafetyCause::Frost));
+        c.reading = fresh(31.0);
+        assert_eq!(c.run().cause, Some(SafetyCause::Overheat));
+        c.mode = Some(Mode::Cool);
+        c.reading = fresh(15.0);
+        assert_eq!(c.run().cause, Some(SafetyCause::Overcool));
+        c.reading = Reading::Missing;
+        assert_eq!(c.run().cause, Some(SafetyCause::Stale));
+        c.reading = fresh(19.0);
+        assert_eq!(c.run().cause, None);
+    }
+
+    #[test]
+    fn frost_holds_until_half_a_degree_above() {
+        let mut c = Case::new();
+        c.devices = vec![dev("trv", &["off", "heat"], Some(5.0))];
+        c.previous = Some(SafetyCause::Frost);
+        for (reading, safety) in [
+            (6.9, true),
+            (7.0, true),
+            (7.2, true),
+            (7.49, true),
+            (7.5, false),
+        ] {
+            c.reading = fresh(reading);
+            assert_eq!(c.run().source == Source::Safety, safety, "{reading}");
+        }
+        // Not latched: the limit itself.
+        c.previous = None;
+        c.reading = fresh(7.0);
+        assert_ne!(c.run().source, Source::Safety);
+        c.reading = fresh(6.99);
+        assert_eq!(c.run().source, Source::Safety);
+        // Another latched cause does not hold frost.
+        c.previous = Some(SafetyCause::Stale);
+        c.reading = fresh(7.2);
+        assert_ne!(c.run().source, Source::Safety);
+    }
+
+    #[test]
+    fn overheat_and_overcool_hold_with_hysteresis() {
+        let mut c = Case::new();
+        c.previous = Some(SafetyCause::Overheat);
+        for (reading, safety) in [(30.1, true), (29.6, true), (29.5, false)] {
+            c.reading = fresh(reading);
+            assert_eq!(c.run().source == Source::Safety, safety, "{reading}");
+        }
+        c.mode = Some(Mode::Cool);
+        c.previous = Some(SafetyCause::Overcool);
+        for (reading, safety) in [(15.9, true), (16.4, true), (16.5, false)] {
+            c.reading = fresh(reading);
+            assert_eq!(c.run().source == Source::Safety, safety, "{reading}");
+        }
     }
 
     #[test]

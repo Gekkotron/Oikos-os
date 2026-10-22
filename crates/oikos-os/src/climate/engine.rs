@@ -21,7 +21,7 @@ use tokio::task::JoinHandle;
 
 use super::inputs::{
     OUTDOOR_CACHE_S, OwnedZoneInputs, local_time, outdoor_mean, outdoor_reading, presence_home_now,
-    step_of, zone_entity_ids, zone_inputs_owned,
+    step_from, step_of, zone_entity_ids, zone_inputs_owned,
 };
 use super::{GROUP_PREFIX, alerts};
 use crate::clock;
@@ -55,6 +55,18 @@ const GAP_STEPS: i64 = 4;
 struct Outcome {
     needed: usize,
     accepted: usize,
+}
+
+/// Clears an entity's in-flight mark when dropped, so a cancelled pass cannot leave it set.
+struct InflightGuard<'a> {
+    hub: &'a Hub,
+    id: &'a str,
+}
+
+impl Drop for InflightGuard<'_> {
+    fn drop(&mut self) {
+        self.hub.climate_runtime().inflight.remove(self.id);
+    }
 }
 
 impl Outcome {
@@ -131,7 +143,7 @@ impl Hub {
         if !active {
             return;
         }
-        let step = temp_step.filter(|s| *s > 0.0).unwrap_or(0.5);
+        let step = step_from(temp_step);
         let verdict = {
             let mut rt = self.climate_runtime();
             if rt.inflight.contains(id) {
@@ -402,12 +414,16 @@ impl Hub {
             return;
         };
         if inp.entity_ids.is_empty() {
-            alerts::sync_safety(self, zone, String::new, &no_safety(zone));
+            alerts::sync_safety(self, zone, String::new, &no_safety(zone), now);
             return;
         }
         self.tidy_zone(&mut inp);
+        inp.previous_cause = self.last_decision(zone).and_then(|d| d.cause);
         let mut decision = decide(&inp.borrowed());
         let state = inp.settings.state;
+        if state == ZoneState::Active {
+            self.acknowledge_at_target(&inp, &decision, now);
+        }
         if state != ZoneState::Pending {
             self.climate_runtime().safety_memory.remove(zone);
         }
@@ -437,7 +453,7 @@ impl Hub {
                 }
             }
         }
-        alerts::sync_safety(self, zone, || self.zone_display_name(zone), &decision);
+        alerts::sync_safety(self, zone, || self.zone_display_name(zone), &decision, now);
         self.publish_decision(zone, decision, now);
     }
 
@@ -465,14 +481,68 @@ impl Hub {
             }
             alerts::resolve(self, &alerts::command_id(id));
         }
-        let before = inp.overrides.len();
         let now = inp.now;
-        let ids = &inp.entity_ids;
-        inp.overrides.retain(|o| {
-            o.until > now && o.entity.as_ref().is_none_or(|entity| ids.contains(entity))
+        let ids = inp.entity_ids.clone();
+        inp.overrides = self.update_overrides(&inp.zone, |list| {
+            list.retain(|o| {
+                o.until > now && o.entity.as_ref().is_none_or(|entity| ids.contains(entity))
+            });
         });
-        if inp.overrides.len() != before {
-            self.write_overrides(&inp.zone, &inp.overrides);
+    }
+
+    /// Changes the zone's override list under the write lock, from what the store holds now,
+    /// so it never undoes a change made meanwhile by another writer. Writes only when the list
+    /// changed; returns the list.
+    fn update_overrides(
+        &self,
+        zone: &str,
+        change: impl FnOnce(&mut Vec<Override>),
+    ) -> Vec<Override> {
+        let Some(climate) = &self.climate else {
+            return Vec::new();
+        };
+        let _write = climate
+            .overrides_write
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let before = self
+            .climate_store()
+            .zones
+            .get(zone)
+            .map(|docs| docs.overrides.clone())
+            .unwrap_or_default();
+        let mut list = before.clone();
+        change(&mut list);
+        if list != before {
+            self.write_overrides(zone, &list);
+        }
+        list
+    }
+
+    /// A device already at what the decision wants is taken as the engine's baseline, so a hand
+    /// change on it later is seen as one, even though the engine never had to command it.
+    fn acknowledge_at_target(&self, inp: &OwnedZoneInputs, decision: &Decision, now: u64) {
+        let mut rt = self.climate_runtime();
+        for device in &inp.devices {
+            let (Some(target), Some(mode)) = (decision.entities.get(&device.id), &device.mode)
+            else {
+                continue;
+            };
+            if target.held || needs_command(device, target) {
+                continue;
+            }
+            let step = step_of(&device.caps);
+            let known = rt
+                .ledger
+                .classify(&device.id, device.target, Some(mode), step, now, None);
+            if known != Observed::Matches {
+                let state = DeviceTarget {
+                    setpoint: device.target,
+                    mode: mode.clone(),
+                    held: false,
+                };
+                rt.ledger.acknowledge(&device.id, &state, now);
+            }
         }
     }
 
@@ -519,6 +589,10 @@ impl Hub {
     /// Commands one device unless it was tried less than a minute ago or is paused. True when
     /// everything it needed was accepted.
     async fn command_device(&self, device: &Device, target: &DeviceTarget, now: u64) -> bool {
+        // No broker link: nothing can be sent, and that is not the device's fault.
+        if !matches!(*self.connection().borrow(), ConnectionStatus::Online) {
+            return false;
+        }
         {
             let mut rt = self.climate_runtime();
             let paused = rt
@@ -536,13 +610,16 @@ impl Hub {
             rt.last_sent.insert(device.id.clone(), now);
             rt.inflight.insert(device.id.clone());
         }
+        let _inflight = InflightGuard {
+            hub: self,
+            id: &device.id,
+        };
         let result = self.send_target(device, target, now).await;
         let alert = alerts::command_id(&device.id);
         match result {
             Ok(()) => {
                 {
                     let mut rt = self.climate_runtime();
-                    rt.inflight.remove(&device.id);
                     rt.failures.remove(&device.id);
                     rt.unconfirmed.remove(&device.id);
                 }
@@ -552,7 +629,6 @@ impl Hub {
             Err(reason) => {
                 let failures = {
                     let mut rt = self.climate_runtime();
-                    rt.inflight.remove(&device.id);
                     let entry = rt.failures.entry(device.id.clone()).or_insert((0, None));
                     entry.0 += 1;
                     if entry.0 >= MAX_FAILURES {
@@ -653,21 +729,17 @@ impl Hub {
     /// change, at most `manual_hold_max`, and acknowledges the state in the ledger so the
     /// events that follow are not hand changes again.
     fn record_hand_change(&self, zone: &str, id: &str, target: Option<f64>, mode: &str, now: u64) {
-        let (settings, mut overrides) = {
-            let store = self.climate_store();
-            let docs = store.zones.get(zone);
-            (
-                docs.map(|d| d.settings.clone()).unwrap_or_default(),
-                docs.map(|d| d.overrides.clone()).unwrap_or_default(),
-            )
-        };
+        let settings = self.zone_settings(zone);
         let hint = match mode {
             "heat" => Some(Mode::Heat),
             "cool" => Some(Mode::Cool),
             _ => None,
         };
-        let zone_mode = hint.or(self.climate_runtime().previous_mode);
-        let rules = zone_mode.and_then(|m| settings.rules.get(m));
+        // "Until the next scheduled change" is the zone's schedule for the season's mode, not
+        // whatever mode the device was put in.
+        let rules = self
+            .season_mode_now(now)
+            .and_then(|m| settings.rules.get(m));
         let tz = self.zone();
         let until = hold_until(
             now,
@@ -679,16 +751,17 @@ impl Hub {
         } else {
             target.map(Setpoint::Temp)
         };
-        overrides.retain(|o| o.until > now && o.entity.as_deref() != Some(id));
-        overrides.push(Override {
-            entity: Some(id.to_owned()),
-            setpoint,
-            mode: hint,
-            until,
-            origin: OverrideOrigin::Hand,
+        self.update_overrides(zone, |list| {
+            list.retain(|o| o.until > now && o.entity.as_deref() != Some(id));
+            list.push(Override {
+                entity: Some(id.to_owned()),
+                setpoint,
+                mode: hint,
+                until,
+                origin: OverrideOrigin::Hand,
+            });
         });
-        self.write_overrides(zone, &overrides);
-        self.climate_runtime().ledger.record(
+        self.climate_runtime().ledger.acknowledge(
             id,
             &DeviceTarget {
                 setpoint: target,
@@ -698,6 +771,14 @@ impl Hub {
             now,
         );
         tracing::info!(zone, entity = id, until, "hand change held");
+    }
+
+    /// The mode the house's season runs in now.
+    fn season_mode_now(&self, now: u64) -> Option<Mode> {
+        let house = self.climate_store().house.clone();
+        let outdoor = outdoor_mean(self, now);
+        let previous = self.climate_runtime().previous_mode;
+        oikos_climate::schedule::season_mode(&house, outdoor, previous)
     }
 
     fn write_overrides(&self, zone: &str, overrides: &[Override]) {
@@ -776,6 +857,8 @@ fn no_safety(zone: &str) -> Decision {
         mode: None,
         setpoint: None,
         source: Source::Idle,
+
+        cause: None,
         reason: String::new(),
         reading: None,
         reading_age_s: None,
@@ -833,11 +916,13 @@ fn needs_command(device: &Device, target: &DeviceTarget) -> bool {
 
 /// Whether an observed state is the one `sent`.
 fn same_target(sent: &DeviceTarget, target: Option<f64>, mode: &str, step: f64) -> bool {
-    let same = match (sent.setpoint, target) {
-        (None, None) => true,
-        (Some(a), Some(b)) => (a - b).abs() <= step / 2.0,
-        _ => false,
-    };
+    // An off device has no meaningful target.
+    let same = sent.mode == "off"
+        || match (sent.setpoint, target) {
+            (None, None) => true,
+            (Some(a), Some(b)) => (a - b).abs() <= step / 2.0,
+            _ => false,
+        };
     same && sent.mode == mode
 }
 
