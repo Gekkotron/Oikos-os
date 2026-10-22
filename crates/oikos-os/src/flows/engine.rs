@@ -152,6 +152,19 @@ struct Engine {
     tasks: JoinSet<Finished>,
 }
 
+/// Whether two definitions of a flow do the same thing: they may differ only in how the UI
+/// presents the flow (`name`, `description`, `area`), so renaming it or moving it to another room
+/// never cancels its run.
+fn same_behaviour(a: &Flow, b: &Flow) -> bool {
+    let behaviour = |flow: &Flow| Flow {
+        name: String::new(),
+        description: None,
+        area: None,
+        ..flow.clone()
+    };
+    behaviour(a) == behaviour(b)
+}
+
 impl Engine {
     fn handle_request(&mut self, request: EngineRequest) {
         match request {
@@ -165,7 +178,7 @@ impl Engine {
 
     /// Re-reads the definitions, seeds the values of newly watched entities from the hub (so a
     /// flow written while the entity already has a value fires on its very next change) and
-    /// cancels runs whose flow was removed, disabled or edited.
+    /// cancels runs whose flow was removed, disabled or changed in what it does.
     fn reload(&mut self) {
         let definitions = self.hub.flow_definitions();
         self.flows = definitions
@@ -189,7 +202,10 @@ impl Engine {
             .active
             .iter()
             .filter(|(id, active)| {
-                let unchanged = self.flows.iter().any(|f| f.id == **id && *f == active.flow);
+                let unchanged = self
+                    .flows
+                    .iter()
+                    .any(|f| f.id == **id && same_behaviour(f, &active.flow));
                 !(unchanged || self.survives_self_disable(id, active, &definitions))
             })
             .map(|(id, _)| id.clone())
@@ -202,18 +218,18 @@ impl Engine {
     }
 
     /// Whether `active` is a run that disabled its own flow (announced by `KeepRun`) and whose
-    /// flow differs from the definition it started with in nothing but `enabled`.
+    /// flow behaves like the definition it started with but for `enabled`.
     fn survives_self_disable(&self, id: &str, active: &Active, definitions: &[Flow]) -> bool {
         if !self.keep.contains(&(id.to_owned(), active.run_id.clone())) {
             return false;
         }
-        let normalised = |flow: &Flow| Flow {
+        let enabled = |flow: &Flow| Flow {
             enabled: true,
             ..flow.clone()
         };
         definitions
             .iter()
-            .any(|f| f.id == id && normalised(f) == normalised(&active.flow))
+            .any(|f| f.id == id && same_behaviour(&enabled(f), &enabled(&active.flow)))
     }
 
     /// Arms every schedule node of an enabled flow that is not armed with the same expression

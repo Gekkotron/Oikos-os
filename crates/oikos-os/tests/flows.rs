@@ -773,6 +773,55 @@ async fn replacing_cancels_the_run() {
     assert_cancelled_without_off(&mut events, &log, &run).await;
 }
 
+/// The run waiting in its delay is still running after an edit that does not change what the
+/// flow does, then finishes and turns the LED off.
+async fn assert_run_survives(
+    hub: &Hub,
+    events: &mut tokio::sync::broadcast::Receiver<WsEvent>,
+    log: &Arc<Mutex<Vec<String>>>,
+    run: &RunView,
+) {
+    settle().await;
+    while let Ok(event) = events.try_recv() {
+        if let WsEvent::FlowRunChanged { run: seen, .. } = event {
+            assert_ne!(seen.status, RunStatus::Cancelled, "{seen:?}");
+        }
+    }
+    let view = hub.flow("living").expect("flow");
+    assert_eq!(view.active_run.as_deref(), Some(run.id.as_str()));
+    let current = view.runs.iter().find(|r| r.id == run.id).expect("the run");
+    assert_eq!(current.status, RunStatus::Running);
+
+    tokio::time::advance(Duration::from_secs(5 * 60 + 1)).await;
+    let done = next_run_event(events, RunStatus::Done).await;
+    assert_eq!(done.id, run.id);
+    assert_eq!(step_nodes(&done), ["motion", "moving", "wait", "off"]);
+    let log = published(log);
+    assert!(log.last().is_some_and(|p| p.contains("OFF")), "{log:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn moving_to_another_room_keeps_the_run() {
+    let (hub, publisher, _engine) = engine_hub();
+    with_living_area(&hub).await;
+    let (mut events, log, run) = waiting_flow(&hub, publisher).await;
+    hub.set_flow_area("living", Some("living".into()))
+        .await
+        .expect("move");
+    assert_run_survives(&hub, &mut events, &log, &run).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn renaming_keeps_the_run() {
+    let (hub, publisher, _engine) = engine_hub();
+    let (mut events, log, run) = waiting_flow(&hub, publisher).await;
+    let mut flow = reference_flow();
+    flow.name = "Living LED, renamed".to_owned();
+    flow.description = Some("now with a description".to_owned());
+    hub.set_flow(flow).await.expect("set_flow");
+    assert_run_survives(&hub, &mut events, &log, &run).await;
+}
+
 #[tokio::test]
 async fn gt_on_a_bool_fails_the_run() {
     let (hub, publisher, _engine) = engine_hub();
