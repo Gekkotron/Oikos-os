@@ -417,15 +417,15 @@ mod tests {
         let a = handle(
             &mut b,
             new_event(json!({"label": "car", "entered_zones": ["drive_way"],
-                "sub_label": ["Bedroom 1", 0.9]})),
+                "sub_label": ["Alice", 0.9]})),
         )
         .expect("alert");
         assert_eq!(
             a["loc"],
             json!({"key": "frigate.object",
-                "args": {"label": "car", "zone": "Drive Way", "who": "Bedroom 1"}})
+                "args": {"label": "car", "zone": "Drive Way", "who": "Alice"}})
         );
-        assert_eq!(a["body"], "Bedroom 1 (car) in Drive Way");
+        assert_eq!(a["body"], "Alice (car) in Drive Way");
     }
 
     #[test]
