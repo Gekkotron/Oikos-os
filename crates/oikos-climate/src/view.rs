@@ -109,7 +109,8 @@ impl OverrideRequest {
         }
         let until = match (self.minutes, self.until) {
             (Some(minutes), None) if minutes > 0 => now + u64::from(minutes) * 60,
-            (None, Some(until)) => until,
+            (None, Some(until)) if until > now => until,
+            (None, Some(_)) => return Err("until is already past".to_owned()),
             (Some(_), None) => return Err("minutes must be above 0".to_owned()),
             _ => return Err("give exactly one of minutes and until".to_owned()),
         };
@@ -145,6 +146,12 @@ mod tests {
             ..base.clone()
         };
         assert_eq!(timed.into_override(100).expect("ok").until, 1900);
+        let past = OverrideRequest {
+            until: Some(100),
+            ..base.clone()
+        };
+        assert!(past.clone().into_override(100).is_err());
+        assert_eq!(past.into_override(99).expect("ok").until, 100);
         let bare = OverrideRequest {
             minutes: Some(30),
             ..OverrideRequest::default()

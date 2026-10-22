@@ -506,8 +506,9 @@ pub struct ApproveClimateProposalParams {
     pub rules: Option<oikos_climate::doc::Rules>,
 }
 
+/// No `deny_unknown_fields` here: serde does not support it beside `flatten`; the flattened
+/// request denies unknown fields itself.
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub struct SetClimateOverrideParams {
     /// The zone id.
     pub zone: String,

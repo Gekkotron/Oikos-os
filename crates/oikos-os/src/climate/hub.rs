@@ -4,8 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::MutexGuard;
 
 use oikos_api::WsEvent;
-use oikos_climate::doc::Decision;
-use oikos_climate::doc::{HouseSettings, ZoneSettings, ZoneState};
+use oikos_climate::doc::{Decision, HouseSettings, ZoneSettings, ZoneState};
 use oikos_climate::topics::{self, ClimateTopic, ZoneDoc};
 use oikos_climate::view::{ClimateView, DecisionLog, DecisionRow, LearnStatus, ZoneView};
 use oikos_core::command::Publish;
@@ -135,29 +134,36 @@ impl Hub {
             .get(zone)
             .map(|log| log.iter().rev().take(limit).cloned().collect())
             .unwrap_or_default();
+        // Rows of `recent` are in the database too: take only what is older than them.
+        let before = recent.last().map(|d| {
+            i64::try_from(d.at)
+                .unwrap_or(i64::MAX)
+                .saturating_mul(1_000_000)
+        });
         let mut older = Vec::new();
-        if let Some(history) = self.history().cloned()
-            && let Ok(db) = history.db()
-        {
-            match db
-                .climate_decisions(zone, i64::try_from(limit).unwrap_or(i64::MAX))
-                .await
-            {
-                Ok(rows) => {
-                    older = rows
-                        .into_iter()
-                        .map(|row| DecisionRow {
-                            at: u64::try_from(row.at / 1_000_000).unwrap_or(0),
-                            entity_id: row.entity_id,
-                            mode: row.mode,
-                            setpoint: row.setpoint,
-                            source: row.source,
-                            reason: row.reason,
-                            applied: row.applied,
-                        })
-                        .collect();
-                }
-                Err(err) => tracing::warn!(%zone, error = %err, "climate decisions not read"),
+        if let Some(history) = self.history().cloned() {
+            match history.db() {
+                Ok(db) => match db
+                    .climate_decisions(zone, before, i64::try_from(limit).unwrap_or(i64::MAX))
+                    .await
+                {
+                    Ok(rows) => {
+                        older = rows
+                            .into_iter()
+                            .map(|row| DecisionRow {
+                                at: u64::try_from(row.at / 1_000_000).unwrap_or(0),
+                                entity_id: row.entity_id,
+                                mode: row.mode,
+                                setpoint: row.setpoint,
+                                source: row.source,
+                                reason: row.reason,
+                                applied: row.applied,
+                            })
+                            .collect();
+                    }
+                    Err(err) => tracing::warn!(%zone, error = %err, "climate decisions not read"),
+                },
+                Err(err) => tracing::warn!(%zone, error = %err, "climate history unavailable"),
             }
         }
         Ok(DecisionLog { recent, older })

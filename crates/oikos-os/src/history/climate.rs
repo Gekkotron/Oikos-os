@@ -74,21 +74,24 @@ impl Db {
         Ok(())
     }
 
-    /// The latest `limit` decision rows of a zone, newest first.
+    /// The latest `limit` decision rows of a zone, newest first; with `before`, only rows
+    /// strictly earlier than it.
     pub async fn climate_decisions(
         &self,
         zone: &str,
+        before: Option<Micros>,
         limit: i64,
     ) -> Result<Vec<ClimateDecisionRow>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT time, zone, entity_id, mode, setpoint, source, reason, applied
              FROM climate_decision
-             WHERE zone = $1
+             WHERE zone = $1 AND ($3::timestamptz IS NULL OR time < $3)
              ORDER BY time DESC, seq DESC
              LIMIT $2",
         )
         .bind(zone)
         .bind(limit)
+        .bind(before.map(micros_to_dt))
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.iter().map(decision_from_row).collect())

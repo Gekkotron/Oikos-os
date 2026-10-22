@@ -1216,3 +1216,21 @@ async fn climate_status_enabled_returns_zones() {
     .await;
     assert_eq!(nothing.is_error, Some(true));
 }
+
+#[tokio::test]
+async fn set_climate_override_schema_accepts_zone_with_the_fields() {
+    let server = Server::start().await;
+    let client = server.client().await;
+    let tools = client.list_all_tools().await.expect("list tools");
+    let tool = tools
+        .iter()
+        .find(|t| t.name == "set_climate_override")
+        .expect("tool");
+    let schema = Value::Object((*tool.input_schema).clone());
+    let props = schema["properties"].as_object().expect("properties");
+    for field in ["zone", "setpoint", "mode", "minutes", "until"] {
+        assert!(props.contains_key(field), "{field} missing: {schema}");
+    }
+    // `additionalProperties: false` is fine only because every field is listed above.
+    assert_eq!(schema["required"], json!(["zone"]), "{schema}");
+}

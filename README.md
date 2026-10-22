@@ -169,7 +169,6 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `GET /api/v1/history/daily?entity=&days=&kind=` | kWh per calendar day for the last `days` days (7, 30 or 365), with `kind` (`counter` or `power`). |
 | `GET /api/v1/history/today?entity=&kind=` | kWh since local midnight: `{kwh, since}`. |
 | `GET /api/v1/history/last_change?entity=&entity=…` | Last change time of 1 to 50 entities, in request order. |
-
 | `GET /api/v1/climate` | The climate engine: house settings and every zone with its reading, decision and why, overrides, pending proposal and learner state. `503` while `[climate] enabled` is false. |
 | `PUT /api/v1/climate/house` | Replaces the house settings (204); `422` when they do not validate. |
 | `PUT /api/v1/climate/zones/{id}` | Replaces a zone's settings (204); `404` for an area that is not a zone, `422` when they do not validate. |

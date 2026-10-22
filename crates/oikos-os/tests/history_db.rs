@@ -484,12 +484,19 @@ async fn climate_decisions_round_trip() {
     ];
     tdb.db.insert_climate_decisions(&rows).await.unwrap();
 
-    let got = tdb.db.climate_decisions("z1", 10).await.unwrap();
+    let got = tdb.db.climate_decisions("z1", None, 10).await.unwrap();
     assert_eq!(got.len(), 3);
     assert_eq!(got[0], empty);
     assert_eq!(got[1], rows[1]);
     assert_eq!(got[2], rows[0]);
-    let limited = tdb.db.climate_decisions("z1", 1).await.unwrap();
+    let earlier = tdb
+        .db
+        .climate_decisions("z1", Some(2_000_000), 10)
+        .await
+        .unwrap();
+    assert_eq!(earlier.len(), 1, "strictly before the bound");
+    assert_eq!(earlier[0].at, 1_000_000);
+    let limited = tdb.db.climate_decisions("z1", None, 1).await.unwrap();
     assert_eq!(limited, vec![empty]);
 
     tdb.drop_db().await;
