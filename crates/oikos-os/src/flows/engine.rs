@@ -14,7 +14,7 @@ use std::sync::Arc;
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
 use oikos_core::flow::sun::is_dark_at;
 use oikos_core::flow::{
-    Flow, Missing, Node, NodeKind, Op, Scalar, Schedule, compare, parse_duration,
+    Flow, Missing, Node, NodeKind, Op, Scalar, Schedule, compare, format_duration, pick_duration,
 };
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
@@ -726,6 +726,20 @@ fn step(node: &str, outcome: StepOutcome, detail: String) -> StepView {
     }
 }
 
+/// A random number for a random delay. std's `RandomState` is seeded from the OS and hashing
+/// the clock into it gives a fresh value per call; good enough for picking a wait, no crate.
+fn random_roll() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+    hasher.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    );
+    hasher.finish()
+}
+
 /// Runs one node: its outcome, the detail to record and the output port to follow.
 async fn run_node(
     hub: &Hub,
@@ -845,12 +859,23 @@ async fn run_node(
                 Err(err) => failed(err.to_string()),
             }
         }
-        NodeKind::Delay(params) => match parse_duration(&params.for_) {
-            Ok(duration) => {
-                tokio::time::sleep(duration).await;
+        NodeKind::Delay(params) => match params.bounds() {
+            Ok((low, None)) => {
+                tokio::time::sleep(low).await;
                 (StepOutcome::Ok, format!("waited {}", params.for_), None)
             }
-            Err(err) => failed(err.to_string()),
+            Ok((low, Some(high))) => {
+                let duration = pick_duration(low, Some(high), random_roll());
+                tokio::time::sleep(duration).await;
+                let detail = format!(
+                    "waited {} ({} to {})",
+                    format_duration(duration),
+                    params.for_,
+                    params.up_to.as_deref().unwrap_or_default()
+                );
+                (StepOutcome::Ok, detail, None)
+            }
+            Err(reason) => failed(reason),
         },
         NodeKind::Command(params) => {
             match hub

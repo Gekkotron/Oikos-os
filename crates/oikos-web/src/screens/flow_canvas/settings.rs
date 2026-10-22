@@ -747,11 +747,19 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Notify(p) => notify_fields(form, id, p).into_any(),
         NodeKind::Delay(p) => {
-            let for_id = id;
+            let for_id = id.clone();
             let for_write = Callback::new(move |value: Option<String>| {
                 form.update(&for_id, |n| {
                     if let NodeKind::Delay(ref mut d) = n.kind {
                         d.for_ = value.unwrap_or_default();
+                    }
+                });
+            });
+            let up_to_id = id;
+            let up_to_write = Callback::new(move |value: Option<String>| {
+                form.update(&up_to_id, |n| {
+                    if let NodeKind::Delay(ref mut d) = n.kind {
+                        d.up_to = value;
                     }
                 });
             });
@@ -762,6 +770,13 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     placeholder="5m, 1h30m, 45s".into()
                     optional=false
                     write=for_write
+                />
+                <TextField
+                    label="Up to (random)".into()
+                    initial=p.up_to.unwrap_or_default()
+                    placeholder="(exact duration)".into()
+                    optional=true
+                    write=up_to_write
                 />
             }
             .into_any()

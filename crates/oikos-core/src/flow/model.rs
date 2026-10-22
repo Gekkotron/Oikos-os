@@ -357,8 +357,31 @@ pub struct DelayParams {
     /// A duration such as `90s`, `5m` or `1h30m`.
     #[serde(rename = "for")]
     pub for_: String,
+    /// When set, each run waits a random duration between `for` and this one (same
+    /// format, not shorter than `for`) instead of exactly `for`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub up_to: Option<String>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
+}
+
+impl DelayParams {
+    /// Parses `for` and `up_to`, refusing an `up_to` shorter than `for`.
+    pub fn bounds(&self) -> Result<(std::time::Duration, Option<std::time::Duration>), String> {
+        use super::parse_duration;
+        let low = parse_duration(&self.for_).map_err(|e| e.to_string())?;
+        let Some(up_to) = self.up_to.as_deref() else {
+            return Ok((low, None));
+        };
+        let high = parse_duration(up_to).map_err(|e| format!("up_to: {e}"))?;
+        if high < low {
+            return Err(format!(
+                "`up_to` ({up_to}) is shorter than `for` ({})",
+                self.for_
+            ));
+        }
+        Ok((low, Some(high)))
+    }
 }
 
 /// Params of `command`.
@@ -601,7 +624,10 @@ mod tests {
             other => panic!("expected if, got {other:?}"),
         }
         match &flow.nodes[3].kind {
-            NodeKind::Delay(p) => assert_eq!(p.for_, "5m"),
+            NodeKind::Delay(p) => {
+                assert_eq!(p.for_, "5m");
+                assert_eq!(p.up_to, None);
+            }
             other => panic!("expected delay, got {other:?}"),
         }
         assert_eq!(flow.edges[1].port.as_deref(), Some("true"));
@@ -610,6 +636,25 @@ mod tests {
         let wire: Value = serde_json::from_str(&flow.encode()).unwrap();
         assert_eq!(wire["nodes"][3]["params"]["for"], json!("5m"));
         assert_eq!(wire["nodes"][3]["type"], json!("delay"));
+        assert!(wire["nodes"][3]["params"].get("up_to").is_none());
+    }
+
+    #[test]
+    fn delay_up_to_round_trips() {
+        let node: Node =
+            serde_json::from_str(r#"{"id":"w","type":"delay","params":{"for":"1m","up_to":"2h"}}"#)
+                .unwrap();
+        match &node.kind {
+            NodeKind::Delay(p) => {
+                assert_eq!(p.up_to.as_deref(), Some("2h"));
+                assert!(p.extra.is_empty());
+            }
+            other => panic!("expected delay, got {other:?}"),
+        }
+        assert_eq!(
+            serde_json::to_value(&node).unwrap()["params"]["up_to"],
+            "2h"
+        );
     }
 
     #[test]

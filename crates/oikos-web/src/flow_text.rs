@@ -187,7 +187,14 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
                 op => format!("{e} {} {v}?", op_words(op)),
             }
         }
-        NodeKind::Delay(p) => format!("Wait {}", duration_words(&p.for_)),
+        NodeKind::Delay(p) => match &p.up_to {
+            Some(up_to) => format!(
+                "Wait {} to {}",
+                duration_words(&p.for_),
+                duration_words(up_to)
+            ),
+            None => format!("Wait {}", duration_words(&p.for_)),
+        },
         NodeKind::Command(p) => command_sentence(&p.command, &p.entity, ctx),
         NodeKind::Notify(p) => {
             if p.title.trim().is_empty() {
@@ -401,6 +408,8 @@ mod tests {
         assert_eq!(d("1h30m"), "Wait 1 h 30 min");
         assert_eq!(duration_words("45s"), "45 s");
         assert_eq!(duration_words("junk"), "junk");
+        let random = text(r#"{"id":"a","type":"delay","params":{"for":"1m","up_to":"2h"}}"#);
+        assert_eq!(random, "Wait 1 min to 2 h");
     }
 
     #[test]

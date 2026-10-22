@@ -9,7 +9,7 @@ mod schedule;
 pub mod sun;
 mod validate;
 
-pub use duration::{DurationError, parse_duration};
+pub use duration::{DurationError, format_duration, parse_duration, pick_duration};
 pub use model::{
     CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, Missing, Node,
     NodeKind, NotifyParams, Op, Position, SunWhich, TriggerScheduleParams, TriggerSignalParams,

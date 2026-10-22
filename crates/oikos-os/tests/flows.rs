@@ -524,6 +524,41 @@ async fn motion_false_turns_off_after_the_delay() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn random_delay_waits_within_its_range() {
+    let (hub, publisher, _engine) = engine_hub();
+    let log = echo(publisher, Arc::clone(&hub));
+    let json = reference_json().replace(r#""for":"5m""#, r#""for":"1m","up_to":"2m""#);
+    assert!(json.contains("up_to"), "{json}");
+    hub.ingest(FLOW_TOPIC, json.as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    motion(&hub, true);
+    motion(&hub, false);
+    next_run(&mut events, |r| {
+        r.status == RunStatus::Running && step_nodes(r) == ["motion", "moving"]
+    })
+    .await;
+    settle().await;
+
+    tokio::time::advance(Duration::from_secs(59)).await;
+    settle().await;
+    assert!(
+        published(&log).iter().all(|p| !p.contains("OFF")),
+        "still waiting at 59s"
+    );
+    tokio::time::advance(Duration::from_secs(62)).await;
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(step_nodes(&run), ["motion", "moving", "wait", "off"]);
+    assert!(
+        run.steps[2].detail.starts_with("waited ") && run.steps[2].detail.ends_with(" (1m to 2m)"),
+        "{}",
+        run.steps[2].detail
+    );
+    assert!(published(&log).last().is_some_and(|p| p.contains("OFF")));
+}
+
+#[tokio::test(start_paused = true)]
 async fn motion_back_cancels_the_pending_off() {
     let (hub, publisher, _engine) = engine_hub();
     let log = echo(publisher, Arc::clone(&hub));

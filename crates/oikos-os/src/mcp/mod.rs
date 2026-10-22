@@ -143,7 +143,8 @@ fn instructions() -> String {
          the first run is at the next tick), `flow.enable` (sets another flow's `enabled`, or its own flow when `flow` is absent; a flow \
          that disables itself still finishes the current run), `if` (compares a value; edges \
          leaving it name the port `true` or `false`; `missing` is `fail` (the default), `true` \
-         or `false` and picks that port when the value is unknown), `delay` (`5m`, `1h30m`), \
+         or `false` and picks that port when the value is unknown), `delay` (`for`: `5m`, `1h30m`; \
+         with `up_to` it waits a random time between the two), \
          `command` (the same JSON as `send_command`) and `notify` (a phone push: `title`, optional `body`, `channel`, `severity`, `entity_id`, `image_url`, `silent`, `id`). Entity ids come from `search` or \
          `list_entities`. For \"N minutes after the last motion\" use `mode: restart`, so \
          every new trigger restarts the wait; the default `single` ignores triggers while a \

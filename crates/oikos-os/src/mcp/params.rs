@@ -199,7 +199,8 @@ pub struct SetFlowParams {
     ///   compares the triggering entity's live value, the one that fired the run; with it, that
     ///   entity's current value. It has two output ports, `true` and `false`.
     /// - `delay` waits. params: `for`, a duration such as `90s`, `5m` or `1h30m` (units `s`, `m`,
-    ///   `h`, combined without spaces).
+    ///   `h`, combined without spaces), and optional `up_to` (same format, not shorter than
+    ///   `for`): each run then waits a random duration between `for` and `up_to`.
     /// - `command` sends a command to an entity. params: `entity` (an id) and `command`, the same
     ///   JSON as `send_command`'s, e.g. `{"type": "turn_on", "brightness": 200}` or
     ///   `{"type": "turn_off"}`. The entity must exist and support the command.

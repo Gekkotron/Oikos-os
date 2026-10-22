@@ -44,7 +44,10 @@ fn summary_label(node: &Node) -> String {
         NodeKind::TriggerSun(_) => "Sun".into(),
         NodeKind::TriggerSignal(_) => "Signal".into(),
         NodeKind::If(_) => "If".into(),
-        NodeKind::Delay(p) => format!("Delay {}", p.for_),
+        NodeKind::Delay(p) => match &p.up_to {
+            Some(up_to) => format!("Delay {}–{up_to}", p.for_),
+            None => format!("Delay {}", p.for_),
+        },
         NodeKind::Command(p) => humanise(command_name(&p.command)),
         NodeKind::FlowEnable(p) => flow_switch_text(p),
         NodeKind::Notify(_) => "Notify".into(),
@@ -151,12 +154,14 @@ pub fn parked_node(flow: &Flow, run: &RunView) -> Option<(String, u64)> {
         .map(|n| (n.id.clone(), step.at))
 }
 
-/// The second a parked delay ends at: `since` plus the delay's duration.
+/// The second a parked delay ends at: `since` plus the delay's duration. A random delay's
+/// pick stays on the hub, so it counts down to the latest it can end (`up_to`).
 pub fn parked_deadline(flow: &Flow, node_id: &str, since: u64) -> Option<u64> {
     let NodeKind::Delay(p) = &flow.node(node_id)?.kind else {
         return None;
     };
-    Some(since + parse_duration(&p.for_).ok()?.as_secs())
+    let longest = p.up_to.as_deref().unwrap_or(&p.for_);
+    Some(since + parse_duration(longest).ok()?.as_secs())
 }
 
 /// What a run touched: the latest outcome of each visited node and the edges it followed.
@@ -340,6 +345,16 @@ mod tests {
         let run = running(vec![step("motion", StepOutcome::Ok, ""), moving]);
         assert_eq!(parked_node(&flow, &run), Some(("wait".to_owned(), 100)));
         assert_eq!(parked_deadline(&flow, "wait", 100), Some(400));
+        // A random delay counts down to the latest it can end.
+        let mut random = flow.clone();
+        for node in &mut random.nodes {
+            if let NodeKind::Delay(p) = &mut node.kind {
+                p.up_to = Some("10m".into());
+            }
+        }
+        assert_eq!(parked_deadline(&random, "wait", 100), Some(700));
+        let label = random.node("wait").map(summary_label);
+        assert_eq!(label.as_deref(), Some("Delay 5m–10m"));
         // The true branch leads to a command, not a delay.
         let run = running(vec![step("moving", StepOutcome::Ok, "true")]);
         assert_eq!(parked_node(&flow, &run), None);

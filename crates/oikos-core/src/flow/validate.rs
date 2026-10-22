@@ -89,7 +89,7 @@ pub fn is_valid_node_id(id: &str) -> bool {
 /// Checks the structure of a flow: ids, edges and ports, params, at least one trigger and no
 /// cycle. It does not look at entities, which only the hub can resolve.
 pub fn validate(flow: &Flow) -> Result<(), FlowError> {
-    use super::{NodeKind, Op, Scalar, Schedule, parse_duration};
+    use super::{NodeKind, Op, Scalar, Schedule};
 
     if !is_valid_flow_id(&flow.id) {
         return Err(FlowError::BadFlowId(flow.id.clone()));
@@ -106,10 +106,10 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     for node in &flow.nodes {
         match &node.kind {
             NodeKind::Delay(p) => {
-                if let Err(e) = parse_duration(&p.for_) {
+                if let Err(reason) = p.bounds() {
                     return Err(FlowError::BadDuration {
                         node: node.id.clone(),
-                        reason: e.to_string(),
+                        reason,
                     });
                 }
             }
@@ -411,6 +411,27 @@ mod tests {
     }
 
     #[test]
+    fn random_delay_needs_an_upper_bound_at_least_the_lower_one() {
+        let mut f = reference_flow();
+        if let NodeKind::Delay(p) = &mut f.nodes[3].kind {
+            p.up_to = Some("2h".into());
+        }
+        assert_eq!(validate(&f), Ok(()));
+        if let NodeKind::Delay(p) = &mut f.nodes[3].kind {
+            p.up_to = Some("5m".into());
+        }
+        assert_eq!(validate(&f), Ok(()));
+        if let NodeKind::Delay(p) = &mut f.nodes[3].kind {
+            p.up_to = Some("4m".into());
+        }
+        let err = validate(&f).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "node `wait`: `up_to` (4m) is shorter than `for` (5m)"
+        );
+    }
+
+    #[test]
     fn bad_duration_and_bad_if_value() {
         let mut f = reference_flow();
         if let NodeKind::Delay(p) = &mut f.nodes[3].kind {
@@ -419,6 +440,15 @@ mod tests {
         assert!(matches!(
             validate(&f),
             Err(FlowError::BadDuration { node, .. }) if node == "wait"
+        ));
+        let mut f = reference_flow();
+        if let NodeKind::Delay(p) = &mut f.nodes[3].kind {
+            p.up_to = Some("2x".into());
+        }
+        assert!(matches!(
+            validate(&f),
+            Err(FlowError::BadDuration { node, reason })
+                if node == "wait" && reason.starts_with("up_to: ")
         ));
         let mut f = reference_flow();
         if let NodeKind::If(p) = &mut f.nodes[1].kind {
