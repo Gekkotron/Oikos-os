@@ -97,6 +97,7 @@ impl Hub {
                 house: store.house.clone(),
                 house_invalid: store.house_invalid.clone(),
                 history,
+                timezone: self.zone().name().to_owned(),
                 zones,
             }
         };

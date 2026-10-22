@@ -99,8 +99,16 @@ pub fn App() -> impl IntoView {
     Effect::new(move |_| {
         house.climate_rev.track();
         leptos::task::spawn_local(async move {
-            let ok = crate::api::climate::get_climate().await.is_ok();
-            climate_on.try_set(ok);
+            // Only the engine being disabled hides the link; any other failure keeps it as it was.
+            match crate::api::climate::get_climate().await {
+                Ok(_) => {
+                    climate_on.try_set(true);
+                }
+                Err(e) if e.error == crate::api::climate::CLIMATE_DISABLED => {
+                    climate_on.try_set(false);
+                }
+                Err(_) => {}
+            }
         });
     });
     let theme = install_theme();

@@ -53,6 +53,8 @@ pub struct ClimateView {
     pub house_invalid: Option<String>,
     /// Whether the history database is configured.
     pub history: bool,
+    /// The house time zone as an IANA name, for the clock times the UI shows.
+    pub timezone: String,
     pub zones: Vec<ZoneView>,
 }
 

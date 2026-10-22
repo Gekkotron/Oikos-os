@@ -4,6 +4,8 @@ pub mod entity_field;
 pub mod settings_sheet;
 pub mod zone_card;
 
+use chrono::{DateTime, Datelike, Timelike};
+use chrono_tz::Tz;
 use oikos_climate::doc::{Day, Decision, Mode, Rules, Setpoint, Source};
 use oikos_climate::view::{DecisionRow, LearnStatus};
 
@@ -45,6 +47,24 @@ pub fn setpoint_text(sp: Option<Setpoint>) -> String {
     }
 }
 
+trait ShortDay {
+    fn short(self) -> &'static str;
+}
+
+impl ShortDay for Day {
+    fn short(self) -> &'static str {
+        match self {
+            Day::Mon => "Mon",
+            Day::Tue => "Tue",
+            Day::Wed => "Wed",
+            Day::Thu => "Thu",
+            Day::Fri => "Fri",
+            Day::Sat => "Sat",
+            Day::Sun => "Sun",
+        }
+    }
+}
+
 pub fn mode_word(mode: Option<Mode>) -> &'static str {
     match mode {
         Some(Mode::Heat) => "Heat",
@@ -64,45 +84,51 @@ pub fn source_word(source: Source) -> &'static str {
     }
 }
 
-/// Unix seconds as the browser's local "HH:MM" (UTC off the browser).
-#[cfg(target_arch = "wasm32")]
-pub fn clock_text(unix: u64) -> String {
-    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(unix as f64 * 1000.0));
-    format!("{:02}:{:02}", d.get_hours(), d.get_minutes())
+/// The house zone from its IANA name; UTC when the name is unknown.
+pub fn parse_zone(name: &str) -> Tz {
+    name.parse().unwrap_or(Tz::UTC)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn clock_text(unix: u64) -> String {
-    let m = unix / 60 % 1440;
-    format!("{:02}:{:02}", m / 60, m % 60)
+fn local(unix: u64, tz: Tz) -> Option<DateTime<Tz>> {
+    DateTime::from_timestamp(i64::try_from(unix).ok()?, 0).map(|t| t.with_timezone(&tz))
 }
 
-/// The current local weekday and minute of the day, from the browser.
-#[cfg(target_arch = "wasm32")]
-pub fn local_week_minute() -> (Day, u16) {
-    let d = js_sys::Date::new_0();
-    let day = match d.get_day() {
-        1 => Day::Mon,
-        2 => Day::Tue,
-        3 => Day::Wed,
-        4 => Day::Thu,
-        5 => Day::Fri,
-        6 => Day::Sat,
-        _ => Day::Sun,
+/// Unix seconds as "HH:MM" in `tz`.
+pub fn clock_text(unix: u64, tz: Tz) -> String {
+    local(unix, tz).map_or_else(
+        || "—".into(),
+        |t| format!("{:02}:{:02}", t.hour(), t.minute()),
+    )
+}
+
+/// When a hold ends, in `tz`: "07:00" today, "tomorrow 07:00", else "Mon 07:00".
+pub fn until_text(until: u64, now: u64, tz: Tz) -> String {
+    let (Some(end), Some(start)) = (local(until, tz), local(now, tz)) else {
+        return "—".into();
     };
-    (day, (d.get_hours() * 60 + d.get_minutes()) as u16)
+    let clock = format!("{:02}:{:02}", end.hour(), end.minute());
+    match (end.date_naive() - start.date_naive()).num_days() {
+        0 => clock,
+        1 => format!("tomorrow {clock}"),
+        _ => format!("{} {clock}", Day::from_chrono(end.weekday()).short()),
+    }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-pub fn local_week_minute() -> (Day, u16) {
-    (Day::Mon, 0)
+/// The weekday and minute of the day at `now` in `tz`.
+pub fn week_minute(now: u64, tz: Tz) -> (Day, u16) {
+    local(now, tz).map_or((Day::Mon, 0), |t| {
+        (
+            Day::from_chrono(t.weekday()),
+            (t.hour() * 60 + t.minute()) as u16,
+        )
+    })
 }
 
 /// One decision as a list line: "14:05 · Schedule · Heat 21° · reason".
-pub fn decision_line(d: &Decision) -> String {
+pub fn decision_line(d: &Decision, tz: Tz) -> String {
     format!(
         "{} · {} · {} {} · {}",
-        clock_text(d.at),
+        clock_text(d.at, tz),
         source_word(d.source),
         mode_word(d.mode),
         setpoint_text(d.setpoint),
@@ -111,11 +137,11 @@ pub fn decision_line(d: &Decision) -> String {
 }
 
 /// An older history row as a list line.
-pub fn row_line(r: &DecisionRow) -> String {
+pub fn row_line(r: &DecisionRow, tz: Tz) -> String {
     let setpoint = r.setpoint.map_or_else(|| "—".to_owned(), degrees_text);
     format!(
         "{} · {} · {} {} · {}",
-        clock_text(r.at),
+        clock_text(r.at, tz),
         crate::format::word(&r.source),
         crate::format::word(&r.mode),
         setpoint,
@@ -179,6 +205,43 @@ mod tests {
         assert_eq!(age_text(600), "10 min ago");
         assert_eq!(age_text(7200), "2 h ago");
         assert_eq!(age_text(3 * 86_400), "3 d ago");
+    }
+
+    fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> u64 {
+        use chrono::TimeZone;
+        chrono::Utc
+            .with_ymd_and_hms(y, mo, d, h, mi, 0)
+            .unwrap()
+            .timestamp() as u64
+    }
+
+    #[test]
+    fn clock_and_week_follow_the_house_zone() {
+        let paris = parse_zone("Europe/Paris");
+        // Monday 2026-01-05 23:30 UTC is Tuesday 00:30 in Paris (UTC+1).
+        let now = at(2026, 1, 5, 23, 30);
+        assert_eq!(clock_text(now, paris), "00:30");
+        assert_eq!(clock_text(now, Tz::UTC), "23:30");
+        assert_eq!(week_minute(now, paris), (Day::Tue, 30));
+        assert_eq!(week_minute(now, Tz::UTC), (Day::Mon, 23 * 60 + 30));
+        assert_eq!(parse_zone("nowhere"), Tz::UTC);
+    }
+
+    #[test]
+    fn until_text_names_the_day_when_not_today() {
+        let paris = parse_zone("Europe/Paris");
+        let now = at(2026, 1, 5, 10, 0); // Monday 11:00 in Paris
+        assert_eq!(until_text(at(2026, 1, 5, 12, 0), now, paris), "13:00");
+        assert_eq!(
+            until_text(at(2026, 1, 6, 6, 0), now, paris),
+            "tomorrow 07:00"
+        );
+        assert_eq!(until_text(at(2026, 1, 8, 6, 0), now, paris), "Thu 07:00");
+        // 23:30 UTC is already tomorrow in Paris.
+        assert_eq!(
+            until_text(at(2026, 1, 5, 23, 30), now, paris),
+            "tomorrow 00:30"
+        );
     }
 
     #[test]
