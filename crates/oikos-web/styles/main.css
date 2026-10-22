@@ -4718,3 +4718,15 @@ html:has(.flow-canvas-screen) {
 .flow-tile__menu:has(.room-menu__pop) {
   z-index: 8;
 }
+
+/* The list panel no longer clips (the ⋯ popover must overflow), so its first and last rows
+   follow the panel's corners themselves. */
+.flow-row:first-child {
+  border-top-left-radius: var(--radius-card);
+  border-top-right-radius: var(--radius-card);
+}
+
+.flow-row:last-child {
+  border-bottom-left-radius: var(--radius-card);
+  border-bottom-right-radius: var(--radius-card);
+}
