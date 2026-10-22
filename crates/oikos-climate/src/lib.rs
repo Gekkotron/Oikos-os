@@ -2,6 +2,7 @@
 //!
 //! Pure data: no I/O, builds for `wasm32-unknown-unknown`. The hub and the web UI share these types.
 
+pub mod decide;
 pub mod doc;
 pub mod schedule;
 pub mod topics;
