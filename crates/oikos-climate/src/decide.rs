@@ -44,15 +44,15 @@ impl SafetyMemory {
     pub fn capture(devices: &[Device]) -> SafetyMemory {
         let found = devices
             .iter()
-            .map(|d| {
-                (
+            .filter_map(|d| {
+                Some((
                     d.id.clone(),
                     DeviceTarget {
                         setpoint: d.target,
-                        mode: d.mode.clone().unwrap_or_default(),
+                        mode: d.mode.clone()?,
                         held: false,
                     },
-                )
+                ))
             })
             .collect();
         SafetyMemory { found }
@@ -205,7 +205,19 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
             );
             d.mode = Some(Mode::Heat);
             d.setpoint = Some(sp);
-            d.entities = targets(inp.devices, sp, Mode::Heat);
+            d.entities = inp
+                .devices
+                .iter()
+                .filter_map(|dev| {
+                    let t = dev
+                        .target
+                        .map_or(house.frost + 2.0, |c| c.max(house.frost + 2.0));
+                    Some((
+                        dev.id.clone(),
+                        device_target(Setpoint::Temp(t), Mode::Heat, &dev.caps)?,
+                    ))
+                })
+                .collect();
             Some(d)
         }
         Reading::Fresh { value, .. } if inp.mode == Some(Mode::Heat) && value > house.overheat => {
@@ -263,6 +275,16 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
             );
             d.setpoint = Some(Setpoint::Off);
             d.entities = targets(inp.devices, Setpoint::Off, Mode::Cool);
+            let stuck: Vec<&str> = inp
+                .devices
+                .iter()
+                .filter(|dev| can(&dev.caps, "cool") && !d.entities.contains_key(&dev.id))
+                .map(|dev| dev.id.as_str())
+                .collect();
+            if !stuck.is_empty() {
+                d.reason
+                    .push_str(&format!("; cannot stop cooling: {}", stuck.join(", ")));
+            }
             Some(d)
         }
         Reading::Fresh { .. } => None,
@@ -285,9 +307,16 @@ fn stale(inp: &ZoneInputs) -> Option<Decision> {
             format!("{what}: not acting until approved rules exist"),
         ));
     }
-    let mode = inp.mode?;
     let house = inp.house;
-    let base = inp.settings.rules.get(mode).map(|r| r.base);
+    let rules = inp.mode.and_then(|m| inp.settings.rules.get(m));
+    let (Some(mode), Some(rules)) = (inp.mode, rules) else {
+        return Some(base_decision(
+            inp,
+            Source::Safety,
+            format!("{what}: no rules to fall back on, not acting"),
+        ));
+    };
+    let base = rules.base;
     let mut d = base_decision(
         inp,
         Source::Safety,
@@ -296,13 +325,14 @@ fn stale(inp: &ZoneInputs) -> Option<Decision> {
     match mode {
         Mode::Heat => {
             let base_t = match base {
-                Some(Setpoint::Temp(b)) => b,
+                Setpoint::Temp(b) => b,
                 _ => house.frost,
             };
             d.setpoint = Some(Setpoint::Temp(base_t.max(house.frost)));
             d.entities = inp
                 .devices
                 .iter()
+                .filter(|dev| dev.mode.as_deref() != Some("off"))
                 .filter_map(|dev| {
                     let t = dev
                         .target
@@ -316,14 +346,15 @@ fn stale(inp: &ZoneInputs) -> Option<Decision> {
                 .collect();
         }
         Mode::Cool => {
-            d.setpoint = Some(base.unwrap_or(Setpoint::Off));
+            d.setpoint = Some(base);
             d.entities = inp
                 .devices
                 .iter()
+                .filter(|dev| dev.mode.as_deref() != Some("off"))
                 .filter_map(|dev| {
                     let sp = match (base, dev.target) {
-                        (Some(Setpoint::Temp(b)), Some(c)) => Setpoint::Temp(c.max(b)),
-                        (Some(Setpoint::Temp(b)), None) => Setpoint::Temp(b),
+                        (Setpoint::Temp(b), Some(c)) => Setpoint::Temp(c.max(b)),
+                        (Setpoint::Temp(b), None) => Setpoint::Temp(b),
                         _ => Setpoint::Off,
                     };
                     Some((dev.id.clone(), device_target(sp, Mode::Cool, &dev.caps)?))
@@ -348,7 +379,7 @@ fn pending(inp: &ZoneInputs) -> Option<Decision> {
         d.entities = mem.found.clone();
         return Some(d);
     }
-    let choice = choose(inp);
+    let choice = choose(inp, inp.mode);
     let mut d = base_decision(inp, Source::Idle, "Waiting for approved rules".to_string());
     if let Some(sp) = choice.setpoint {
         d.setpoint = Some(sp);
@@ -381,7 +412,7 @@ fn zone_override(inp: &ZoneInputs) -> Option<Decision> {
             .filter(|o| o.entity.is_none() && live(o, inp.now)),
     )?;
     let mode = ov.mode.or(inp.mode)?;
-    let sp = ov.setpoint.or_else(|| choose(inp).setpoint)?;
+    let sp = ov.setpoint.or_else(|| choose(inp, Some(mode)).setpoint)?;
     let mut d = base_decision(
         inp,
         Source::Override,
@@ -394,6 +425,7 @@ fn zone_override(inp: &ZoneInputs) -> Option<Decision> {
     d.mode = Some(mode);
     d.setpoint = Some(sp);
     d.entities = targets(inp.devices, sp, mode);
+    hold_devices(inp, &mut d, Some(sp));
     Some(d)
 }
 
@@ -404,13 +436,13 @@ struct Choice {
     reason: String,
 }
 
-fn choose(inp: &ZoneInputs) -> Choice {
+fn choose(inp: &ZoneInputs, mode: Option<Mode>) -> Choice {
     let idle = |reason: &str| Choice {
         source: Source::Idle,
         setpoint: None,
         reason: reason.to_string(),
     };
-    let Some(mode) = inp.mode else {
+    let Some(mode) = mode else {
         return idle("No heating or cooling season");
     };
     if inp.holiday {
@@ -455,12 +487,19 @@ fn choose(inp: &ZoneInputs) -> Choice {
 
 /// Holiday, away and schedule, then per-device overrides on top.
 fn rules(inp: &ZoneInputs) -> Decision {
-    let choice = choose(inp);
+    let choice = choose(inp, inp.mode);
     let mut d = base_decision(inp, choice.source, choice.reason);
     if let (Some(mode), Some(sp)) = (inp.mode, choice.setpoint) {
         d.setpoint = Some(sp);
         d.entities = targets(inp.devices, sp, mode);
     }
+    hold_devices(inp, &mut d, choice.setpoint);
+    d
+}
+
+/// Per-device overrides (hand changes) hold their device whatever the zone does (§7).
+fn hold_devices(inp: &ZoneInputs, d: &mut Decision, fallback: Option<Setpoint>) {
+    let zone_mode = d.mode.or(inp.mode);
     for dev in inp.devices {
         let Some(ov) = latest(
             inp.overrides
@@ -469,7 +508,7 @@ fn rules(inp: &ZoneInputs) -> Decision {
         ) else {
             continue;
         };
-        let (Some(mode), Some(sp)) = (ov.mode.or(inp.mode), ov.setpoint.or(choice.setpoint)) else {
+        let (Some(mode), Some(sp)) = (ov.mode.or(zone_mode), ov.setpoint.or(fallback)) else {
             continue;
         };
         if let Some(mut t) = device_target(sp, mode, &dev.caps) {
@@ -479,7 +518,6 @@ fn rules(inp: &ZoneInputs) -> Decision {
                 .push_str(&format!("; {} held until {}", dev.id, clock(inp, ov.until)));
         }
     }
-    d
 }
 
 #[cfg(test)]
@@ -644,6 +682,7 @@ mod tests {
     #[test]
     fn frost_beats_override_in_active_zone() {
         let mut c = Case::new();
+        c.devices = vec![dev("trv", &["off", "heat"], Some(5.0))];
         c.reading = fresh(6.5);
         c.overrides = vec![zone_ov(22.0, NOW + 600)];
         let d = c.run();
@@ -658,6 +697,7 @@ mod tests {
     fn frost_acts_in_pending_zone() {
         let mut c = Case::new();
         c.settings.state = ZoneState::Pending;
+        c.devices = vec![dev("trv", &["off", "heat"], Some(5.0))];
         c.reading = fresh(6.5);
         let d = c.run();
         assert_eq!(d.source, Source::Safety);
@@ -773,7 +813,126 @@ mod tests {
         c.mode = None;
         c.reading = Reading::Missing;
         let d = c.run();
+        assert_eq!(d.source, Source::Safety);
         assert!(d.entities.is_empty());
+    }
+
+    fn device_ov(id: &str, sp: f64) -> Override {
+        Override {
+            entity: Some(id.into()),
+            setpoint: Some(Setpoint::Temp(sp)),
+            mode: Some(Mode::Heat),
+            until: NOW + 600,
+            origin: OverrideOrigin::Hand,
+        }
+    }
+
+    #[test]
+    fn stale_no_season_beats_overrides() {
+        let mut c = Case::new();
+        c.mode = None;
+        c.reading = Reading::Stale { last: Some(19.0) };
+        let mut zone = zone_ov(25.0, NOW + 600);
+        zone.mode = Some(Mode::Heat);
+        c.overrides = vec![zone];
+        let d = c.run();
+        assert_eq!(d.source, Source::Safety);
+        assert!(d.entities.is_empty());
+        c.overrides = vec![device_ov("trv", 25.0)];
+        let d = c.run();
+        assert_eq!(d.source, Source::Safety);
+        assert!(d.entities.is_empty());
+    }
+
+    #[test]
+    fn stale_without_rules_for_mode_only_notifies() {
+        let mut c = Case::new();
+        c.settings.rules.heat = None;
+        c.reading = Reading::Missing;
+        let d = c.run();
+        assert_eq!(d.source, Source::Safety);
+        assert!(d.entities.is_empty());
+    }
+
+    #[test]
+    fn stale_leaves_off_devices_alone() {
+        let mut c = Case::new();
+        c.reading = Reading::Missing;
+        let mut off = dev("off", &["off", "heat"], Some(5.0));
+        off.mode = Some("off".into());
+        c.devices = vec![trv(), off];
+        let d = c.run();
+        assert!(d.entities.contains_key("trv"));
+        assert!(!d.entities.contains_key("off"));
+    }
+
+    #[test]
+    fn capture_skips_devices_with_unknown_mode() {
+        let mut unknown = dev("u", &["heat"], Some(20.0));
+        unknown.mode = None;
+        let m = SafetyMemory::capture(&[trv(), unknown]);
+        assert!(m.found.contains_key("trv"));
+        assert!(!m.found.contains_key("u"));
+    }
+
+    #[test]
+    fn device_override_holds_under_zone_override() {
+        let mut c = Case::new();
+        c.devices = vec![trv(), dev("trv2", &["off", "heat"], Some(21.0))];
+        c.overrides = vec![zone_ov(22.0, NOW + 3600), device_ov("trv2", 24.0)];
+        let d = c.run();
+        assert_eq!(d.source, Source::Override);
+        assert_eq!(d.entities["trv"], target(Some(22.0), "heat", false));
+        assert_eq!(d.entities["trv2"], target(Some(24.0), "heat", true));
+    }
+
+    #[test]
+    fn zone_override_mode_without_setpoint_uses_its_own_mode_rules() {
+        let mut c = Case::new();
+        c.devices = vec![dev("ac", &["off", "cool"], Some(24.0))];
+        c.overrides = vec![Override {
+            entity: None,
+            setpoint: None,
+            mode: Some(Mode::Cool),
+            until: NOW + 600,
+            origin: OverrideOrigin::User,
+        }];
+        let d = c.run(); // heat season, cool rules block 20.5
+        assert_eq!(d.source, Source::Override);
+        assert_eq!(d.mode, Some(Mode::Cool));
+        assert_eq!(d.entities["ac"], target(Some(20.5), "cool", false));
+    }
+
+    #[test]
+    fn frost_never_lowers_a_warmer_device() {
+        let mut c = Case::new();
+        c.reading = fresh(6.5);
+        c.devices = vec![
+            dev("hot", &["heat"], Some(21.0)),
+            dev("cold", &["heat"], Some(3.0)),
+        ];
+        let d = c.run();
+        assert_eq!(d.entities["hot"].setpoint, Some(21.0));
+        assert_eq!(d.entities["cold"].setpoint, Some(9.0));
+        assert_eq!(d.reason, "Frost protection: 6.5 °C < 7.0 °C");
+    }
+
+    #[test]
+    fn overcool_names_devices_it_cannot_stop() {
+        let mut c = Case::new();
+        c.mode = Some(Mode::Cool);
+        c.reading = fresh(15.0);
+        let mut stuck = dev("stuck", &["cool"], Some(24.0));
+        stuck.caps.max_temp = None;
+        c.devices = vec![dev("ac", &["off", "cool"], Some(24.0)), stuck];
+        let d = c.run();
+        assert!(d.entities.contains_key("ac"));
+        assert!(!d.entities.contains_key("stuck"));
+        assert!(
+            d.reason.contains("cannot stop cooling: stuck"),
+            "{}",
+            d.reason
+        );
     }
 
     #[test]
