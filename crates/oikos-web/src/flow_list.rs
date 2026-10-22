@@ -107,8 +107,9 @@ pub struct Section {
     pub attention: bool,
 }
 
-/// What the page remembers between visits (`localStorage`); a missing or broken value falls
-/// back to the defaults field by field.
+/// What the page remembers between visits (`localStorage`). A missing field takes its default;
+/// a value that does not decode (wrong type, unknown variant) resets all of them, see
+/// [`decode_prefs`].
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FlowListPrefs {

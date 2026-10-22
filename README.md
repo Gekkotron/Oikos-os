@@ -95,7 +95,7 @@ The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 a
 | `GET /api/v1/history/today?entity=&kind=` | kWh since local midnight: `{kwh, since}`. |
 | `GET /api/v1/history/last_change?entity=&entity=…` | Last change time of 1 to 50 entities, in request order. |
 
-Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` differs from the path: `id mismatch`), 404 (unknown entity, flow, virtual entity or route), 422 (command refused, a bad virtual id or spec, or a flow that is invalid, disabled or already running) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
+Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` differs from the path: `id mismatch`), 404 (unknown entity, flow, virtual entity or route), 422 (command refused, a bad virtual id or spec, a flow that is invalid, disabled or already running, or an unknown room) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
 
 ## MCP
 

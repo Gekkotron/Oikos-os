@@ -54,6 +54,6 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ## Other backlog ideas (unrelated to dashboards)
 
-- **Bulk actions on the Flows page.** Enable, disable, delete or move several flows at once from the list (landed with the flow-list redesign on `feat/flow-list-redesign`, 2026-10-22; the list is single-item only).
+- **Bulk actions on the Flows page.** Enable, disable, delete or move several flows at once from the list. Deferred from the flow-list redesign (2026-10-22): the list acts on one flow at a time.
 - **Automatic room detection for flows.** Suggest a flow's `area` from its trigger and action entities instead of leaving it unassigned; today the room is set by hand only.
 - **Android app support for a flow's `area`.** The app does not read or write a flow's `area` yet; the hub and web UI do.
