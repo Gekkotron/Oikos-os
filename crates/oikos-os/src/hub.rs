@@ -33,6 +33,7 @@ use oikos_push::fcm::{FcmError, FcmTransport, HttpFcm, ServiceAccount};
 use oikos_push::{PushService, Rejected};
 use tokio::sync::{broadcast, mpsc, watch};
 
+use crate::climate::ClimateHub;
 use crate::clock;
 use crate::config::{AclSource, Config};
 pub use crate::flows::EngineRequest;
@@ -195,6 +196,8 @@ pub struct Hub {
     group_store: Mutex<GroupStore>,
     /// `[groups] enabled`: group writes and listing are refused while it is false.
     groups_enabled: bool,
+    /// The climate engine's documents, present only while `[climate] enabled`.
+    pub(crate) climate: Option<ClimateHub>,
     /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
     dashboard_store: Mutex<DashboardStore>,
     /// The topic prefix flows are retained under, one topic per flow id.
@@ -308,6 +311,10 @@ impl Hub {
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             group_store: Mutex::new(GroupStore::default()),
             groups_enabled: cfg.groups.enabled,
+            climate: cfg
+                .climate
+                .enabled
+                .then(|| ClimateHub::new(&cfg.climate.prefix)),
             dashboard_store: Mutex::new(DashboardStore::new()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
@@ -471,6 +478,10 @@ impl Hub {
     /// event: a non-retained message on the command topic of a button some flow watches
     /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.
     pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
+        // Climate documents are the engine's own data, never devices.
+        if self.ingest_climate(topic, payload) {
+            return Vec::new();
+        }
         if self.push.wants(topic) {
             // Then on: the history echo still feeds the alert store below.
             self.push.on_message(topic, payload, retain);
@@ -747,11 +758,16 @@ impl Hub {
                 .filter()
         });
         let acl = self.acl_watchdog.iter().filter_map(|acl| acl.topic.clone());
+        let climate = self
+            .climate_prefix()
+            .into_iter()
+            .flat_map(oikos_climate::topics::filters);
         self.frigate
             .iter()
             .map(|(topic, _)| topic.clone())
             .chain(gateway)
             .chain(acl)
+            .chain(climate)
             .collect()
     }
 
@@ -1362,6 +1378,13 @@ impl Hub {
         } else {
             Err(HubError::Publish("groups disabled".to_owned()))
         }
+    }
+
+    /// Fails with a `Publish` error (503 over HTTP) while `[climate] enabled` is false.
+    pub(crate) fn require_climate(&self) -> Result<&ClimateHub, HubError> {
+        self.climate
+            .as_ref()
+            .ok_or_else(|| HubError::Publish("climate disabled".to_owned()))
     }
 
     /// Creates or replaces group `id`: validates everything first, then publishes the

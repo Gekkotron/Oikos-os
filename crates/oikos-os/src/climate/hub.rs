@@ -1,0 +1,222 @@
+//! The climate side of the hub: the read view and the writers behind the REST and MCP layers.
+
+use std::collections::BTreeMap;
+use std::sync::MutexGuard;
+
+use oikos_api::WsEvent;
+use oikos_climate::doc::{HouseSettings, ZoneSettings, ZoneState};
+use oikos_climate::topics::{self, ClimateTopic, ZoneDoc};
+use oikos_climate::view::{ClimateView, LearnStatus, ZoneView};
+use oikos_core::command::Publish;
+use oikos_core::model::{Kind, UNASSIGNED_AREA};
+use serde::Serialize;
+
+use super::store::{Applied, ClimateStore, ZoneDocs};
+use crate::hub::{Hub, HubError};
+
+/// Group entities are published by the hub itself; they are never a zone's device.
+const GROUP_PREFIX: &str = "group_";
+
+impl Hub {
+    /// Whether `[climate] enabled` is on.
+    pub fn climate_enabled(&self) -> bool {
+        self.climate.is_some()
+    }
+
+    /// The topic prefix of the climate documents, `None` while the engine is off.
+    pub(crate) fn climate_prefix(&self) -> Option<&str> {
+        self.climate.as_ref().map(|c| c.prefix.as_str())
+    }
+
+    /// The retained documents. Callers have checked [`Hub::climate_enabled`] (or went through
+    /// `require_climate`); the store only exists while the engine is on.
+    pub(crate) fn climate_store(&self) -> MutexGuard<'_, ClimateStore> {
+        self.climate
+            .as_ref()
+            .expect("climate_store is only used while [climate] is enabled")
+            .store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The whole engine as one document: the settings, and one entry per zone.
+    pub fn climate_view(&self) -> Result<ClimateView, HubError> {
+        self.require_climate()?;
+        let areas = self.climate_areas();
+        let history = self.history_configured();
+        let store = self.climate_store();
+        let mut zones: Vec<ZoneView> = areas
+            .iter()
+            .map(|(zone, (name, devices))| {
+                let docs = store.zones.get(zone);
+                zone_view(zone, name, false, devices.clone(), docs, history)
+            })
+            .collect();
+        for (zone, docs) in &store.zones {
+            if !areas.contains_key(zone) {
+                let devices = default_entities(&docs.settings, &[]);
+                zones.push(zone_view(zone, zone, true, devices, Some(docs), history));
+            }
+        }
+        zones.sort_by(|a, b| a.orphan.cmp(&b.orphan).then_with(|| a.name.cmp(&b.name)));
+        Ok(ClimateView {
+            enabled: true,
+            house: store.house.clone(),
+            house_invalid: store.house_invalid.clone(),
+            history,
+            zones,
+        })
+    }
+
+    /// Replaces the house settings: validates, publishes retained and applies locally.
+    pub fn set_climate_house(&self, house: HouseSettings) -> Result<(), HubError> {
+        let prefix = self.require_climate()?.prefix.clone();
+        house.validate().map_err(HubError::Rejected)?;
+        self.publish_climate(topics::house_topic(&prefix), Some(&house))
+    }
+
+    /// Replaces the settings of `zone`, an area with climate entities: validates, publishes
+    /// retained and applies locally.
+    pub fn set_climate_zone(&self, zone: &str, settings: ZoneSettings) -> Result<(), HubError> {
+        let prefix = self.require_climate()?.prefix.clone();
+        if zone.is_empty() || zone.contains(['/', '+', '#']) {
+            return Err(HubError::Rejected(format!("invalid zone id `{zone}`")));
+        }
+        settings.validate().map_err(HubError::Rejected)?;
+        let known = zone != UNASSIGNED_AREA
+            && self
+                .read()
+                .effective_areas()
+                .iter()
+                .any(|area| area.id == zone);
+        if !known {
+            return Err(HubError::UnknownArea(zone.to_owned()));
+        }
+        self.publish_climate(
+            topics::zone_topic(&prefix, zone, ZoneDoc::Settings),
+            Some(&settings),
+        )
+    }
+
+    /// Publishes one climate document retained (`None` publishes the empty payload that deletes
+    /// it), applies it locally so the next read sees it before the broker echo, then tells the
+    /// UI.
+    pub(crate) fn publish_climate(
+        &self,
+        topic: String,
+        value: Option<&impl Serialize>,
+    ) -> Result<(), HubError> {
+        let payload = match value {
+            Some(value) => serde_json::to_string(value)
+                .map_err(|err| HubError::Rejected(format!("serialize: {err}")))?,
+            None => String::new(),
+        };
+        self.publish(Publish {
+            topic: topic.clone(),
+            payload: payload.clone(),
+            retain: true,
+        })?;
+        self.ingest_climate(&topic, payload.as_bytes());
+        Ok(())
+    }
+
+    /// Feeds a message to the climate store when `topic` is one of its documents; false when it
+    /// is not, so the message goes on to the registry.
+    pub(crate) fn ingest_climate(&self, topic: &str, payload: &[u8]) -> bool {
+        let Some(prefix) = self.climate_prefix() else {
+            return false;
+        };
+        let Some(parsed) = topics::parse(prefix, topic) else {
+            return false;
+        };
+        let applied = self.climate_store().apply(&parsed, payload);
+        match &applied {
+            Applied::Changed => {}
+            Applied::Invalid(reason) => {
+                tracing::warn!(%topic, %reason, "climate document refused, keeping the previous one");
+            }
+            Applied::Unchanged => return true,
+        }
+        let zone = match parsed {
+            ClimateTopic::House => None,
+            ClimateTopic::Zone { zone, .. } => Some(zone),
+        };
+        self.broadcast(WsEvent::ClimateChanged { zone });
+        true
+    }
+
+    /// The areas that can be zones, by id: each with its name and the climate entities it holds.
+    fn climate_areas(&self) -> BTreeMap<String, (String, Vec<String>)> {
+        let reg = self.read();
+        let mut out: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
+        for entity in reg.entities() {
+            if entity.kind != Kind::Climate
+                || entity.unique_id.starts_with(GROUP_PREFIX)
+                || entity.area == UNASSIGNED_AREA
+            {
+                continue;
+            }
+            let area = &entity.area;
+            let name = reg
+                .effective_areas()
+                .into_iter()
+                .find(|a| a.id == *area)
+                .map_or_else(|| area.clone(), |a| a.name);
+            out.entry(area.clone())
+                .or_insert_with(|| (name, Vec::new()))
+                .1
+                .push(entity.unique_id.clone());
+        }
+        for (_, devices) in out.values_mut() {
+            devices.sort();
+        }
+        out
+    }
+
+    fn history_configured(&self) -> bool {
+        self.history().is_some()
+    }
+}
+
+/// `settings.entities`, or the zone's climate entities.
+fn default_entities(settings: &ZoneSettings, area_entities: &[String]) -> Vec<String> {
+    settings
+        .entities
+        .clone()
+        .unwrap_or_else(|| area_entities.to_vec())
+}
+
+fn zone_view(
+    zone: &str,
+    name: &str,
+    orphan: bool,
+    area_entities: Vec<String>,
+    docs: Option<&ZoneDocs>,
+    history: bool,
+) -> ZoneView {
+    let empty = ZoneDocs::default();
+    let docs = docs.unwrap_or(&empty);
+    let learn = if docs.settings.state == ZoneState::Off {
+        LearnStatus::Off
+    } else if !history {
+        LearnStatus::HistoryOff
+    } else if docs.proposal.is_some() {
+        LearnStatus::Proposed
+    } else {
+        LearnStatus::UpToDate
+    };
+    ZoneView {
+        zone: zone.to_owned(),
+        name: name.to_owned(),
+        orphan,
+        entities: default_entities(&docs.settings, &area_entities),
+        settings: docs.settings.clone(),
+        settings_invalid: docs.settings_invalid.clone(),
+        reading: docs.decision.as_ref().and_then(|d| d.reading),
+        reading_age_s: docs.decision.as_ref().and_then(|d| d.reading_age_s),
+        decision: docs.decision.clone(),
+        overrides: docs.overrides.clone(),
+        proposal: docs.proposal.clone(),
+        learn,
+    }
+}

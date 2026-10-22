@@ -8,3 +8,4 @@ pub mod learn;
 pub mod ledger;
 pub mod schedule;
 pub mod topics;
+pub mod view;

@@ -50,6 +50,9 @@ async fn main() -> anyhow::Result<ExitCode> {
             cfg.watchdog
                 .validate()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
+            cfg.climate
+                .validate()
+                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
             logging::init(&cfg.log);
             tracing::info!(host = %cfg.mqtt.host, port = cfg.mqtt.port, "starting oikos-os");
 

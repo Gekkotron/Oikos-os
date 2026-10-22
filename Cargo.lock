@@ -2288,6 +2288,7 @@ dependencies = [
  "iana-time-zone",
  "mime_guess",
  "oikos-api",
+ "oikos-climate",
  "oikos-core",
  "oikos-frigate",
  "oikos-push",

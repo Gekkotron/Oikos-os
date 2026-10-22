@@ -95,3 +95,10 @@ password = ""
 [history]
 # url = "postgres://oikos:change-me@192.168.1.91:5432/oikos"
 # buffer_rows = 100000
+
+# The climate engine: learns each room's heating/cooling rules from history (needs [history]),
+# asks before applying them (push + web), and keeps managed rooms on them. Everything except
+# this switch is edited through MCP and the web Climate screen, as retained JSON under `prefix`.
+[climate]
+enabled = false
+# prefix = "oikos/climate"
