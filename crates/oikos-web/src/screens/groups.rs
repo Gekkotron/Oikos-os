@@ -7,7 +7,7 @@ use oikos_api::GroupView;
 
 use crate::components::toast::Toasts;
 use crate::format::wrap_id;
-use crate::icons::PLUS;
+use crate::icons::{kind_icon, PLUS};
 
 #[component]
 pub fn GroupsScreen() -> impl IntoView {
@@ -30,25 +30,45 @@ pub fn GroupsScreen() -> impl IntoView {
                         {move || groups.with(Vec::len)} " groups"
                     </span>
                 </div>
-                <div class="chip-row">
+                <Show
+                    when=move || groups.with(|g| !g.is_empty())
+                    fallback=|| view! {
+                        <p class="groups-card__empty">
+                            "No groups yet. Create one to control several entities together."
+                        </p>
+                    }
+                >
+                    <ul class="group-list">
+                        <For
+                            each=move || groups.get()
+                            key=|g| (g.id.clone(), g.name.clone(), g.members.len())
+                            children=|g| {
+                                let href = format!("/group/{}", crate::api::encode_id(&g.id));
+                                let glyph = kind_icon(g.kind, None);
+                                let count = g.members.len();
+                                let count_label = if count == 1 {
+                                    "1 member".to_owned()
+                                } else {
+                                    format!("{count} members")
+                                };
+                                view! {
+                                    <li>
+                                        <A href=href attr:class="group-list__row">
+                                            <span class="group-list__glyph" inner_html=glyph></span>
+                                            <span class="group-list__name">{wrap_id(&g.name)}</span>
+                                            <span class="group-list__count">{count_label}</span>
+                                        </A>
+                                    </li>
+                                }
+                            }
+                        />
+                    </ul>
+                </Show>
+                <div class="groups-card__actions">
                     <A href="/groups/new" attr:class="chip chip--add">
                         <span class="chip__glyph" inner_html=PLUS></span>
                         "New group"
                     </A>
-                    <For
-                        each=move || groups.get()
-                        key=|g| (g.id.clone(), g.name.clone(), g.members.len())
-                        children=|g| {
-                            view! {
-                                <A
-                                    href=format!("/group/{}", crate::api::encode_id(&g.id))
-                                    attr:class="chip"
-                                >
-                                    {wrap_id(&g.name)}
-                                </A>
-                            }
-                        }
-                    />
                 </div>
             </section>
         </div>
