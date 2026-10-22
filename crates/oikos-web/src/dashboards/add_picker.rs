@@ -3,7 +3,7 @@
 
 use leptos::prelude::*;
 use oikos_core::dashboard::{
-    allowed_spans, DashboardHistoryRange, Span, Widget, WidgetConfig, WidgetKind,
+    DashboardHistoryRange, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
 };
 use oikos_core::model::Kind;
 
@@ -29,7 +29,12 @@ fn new_widget_id() -> String {
 /// Smallest allowed span keeps a fresh widget from crowding the grid; the user resizes later.
 fn make_widget_with_id(id: String, kind: WidgetKind, config: WidgetConfig) -> Widget {
     let span = allowed_spans(kind).first().copied().unwrap_or(Span::X1x1);
-    Widget { id, kind, span, config }
+    Widget {
+        id,
+        kind,
+        span,
+        config,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -73,7 +78,11 @@ pub fn AddWidgetPicker(on_add: Callback<Widget>) -> impl IntoView {
             let open_up = space_above > space_below;
             // When opening upward, top anchors the panel's bottom (translateY(-100%))
             // six pixels above the trigger; downward, top is six pixels below it.
-            let top = if open_up { rect.top() - 6.0 } else { rect.bottom() + 6.0 };
+            let top = if open_up {
+                rect.top() - 6.0
+            } else {
+                rect.bottom() + 6.0
+            };
             panel_pos.set((rect.left(), top, open_up));
         }
         open.update(|o| *o = !*o);
@@ -91,14 +100,22 @@ pub fn AddWidgetPicker(on_add: Callback<Widget>) -> impl IntoView {
     };
     let entity_pick = move |kind: WidgetKind| {
         Callback::new(move |(id, _name): (String, String)| {
-            add(make_widget(kind, WidgetConfig::Entity { entity_id: id, title: None }));
+            add(make_widget(
+                kind,
+                WidgetConfig::Entity {
+                    entity_id: id,
+                    title: None,
+                },
+            ));
         })
     };
 
     let areas = Memo::new(move |_| {
-        house
-            .areas
-            .with(|a| a.iter().map(|x| (x.id.clone(), x.name.clone())).collect::<Vec<_>>())
+        house.areas.with(|a| {
+            a.iter()
+                .map(|x| (x.id.clone(), x.name.clone()))
+                .collect::<Vec<_>>()
+        })
     });
     let flows = Memo::new(move |_| {
         house.flows.with(|f| {
@@ -251,13 +268,19 @@ mod tests {
     fn adding_a_light_builds_entity_config_with_smallest_allowed_span() {
         let w = make_widget(
             WidgetKind::Light,
-            WidgetConfig::Entity { entity_id: "light.a".into(), title: None },
+            WidgetConfig::Entity {
+                entity_id: "light.a".into(),
+                title: None,
+            },
         );
         assert_eq!(w.kind, WidgetKind::Light);
         assert_eq!(w.span, Span::X1x1);
         assert_eq!(
             w.config,
-            WidgetConfig::Entity { entity_id: "light.a".into(), title: None }
+            WidgetConfig::Entity {
+                entity_id: "light.a".into(),
+                title: None
+            }
         );
     }
 
@@ -265,12 +288,18 @@ mod tests {
     fn adding_a_history_chart_defaults_to_2x1_and_24h_range() {
         let w = make_widget(
             WidgetKind::HistoryChart,
-            WidgetConfig::History { entity_id: "x".into(), range: DashboardHistoryRange::H24 },
+            WidgetConfig::History {
+                entity_id: "x".into(),
+                range: DashboardHistoryRange::H24,
+            },
         );
         assert_eq!(w.span, Span::X2x1);
         assert!(matches!(
             w.config,
-            WidgetConfig::History { range: DashboardHistoryRange::H24, .. }
+            WidgetConfig::History {
+                range: DashboardHistoryRange::H24,
+                ..
+            }
         ));
     }
 }

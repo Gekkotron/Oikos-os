@@ -199,7 +199,11 @@ const FIRMWARE_ID: &str = "fw1";
 
 /// A Z2M `update` entity (the recorded discovery shape) on the Bedroom 2 light's device, fed
 /// the device payload carrying both versions.
-fn bedroom2_update(registry: &mut Registry, installed: &str, latest: &str) -> oikos_api::DeviceView {
+fn bedroom2_update(
+    registry: &mut Registry,
+    installed: &str,
+    latest: &str,
+) -> oikos_api::DeviceView {
     let mut config: serde_json::Value = serde_json::from_str(include_str!(
         "../../oikos-core/tests/fixtures/discovery/update__0x20a716fffea4e8de__update.json"
     ))

@@ -453,7 +453,12 @@ mod tests {
 
     #[test]
     fn group_kinds_are_the_controllable_ones() {
-        for k in [Kind::Sensor, Kind::BinarySensor, Kind::AlarmPanel, Kind::Generic] {
+        for k in [
+            Kind::Sensor,
+            Kind::BinarySensor,
+            Kind::AlarmPanel,
+            Kind::Generic,
+        ] {
             assert!(!GROUP_KINDS.contains(&k));
         }
         assert_eq!(GROUP_KINDS.len(), Kind::ALL.len() - 4);

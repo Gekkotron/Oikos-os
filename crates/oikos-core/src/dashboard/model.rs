@@ -130,7 +130,9 @@ pub fn is_valid_dashboard_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
         && id != HOUSE_ID
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 #[cfg(test)]
@@ -147,7 +149,10 @@ mod tests {
         ] {
             assert_eq!(s.as_str(), w);
             assert_eq!(serde_json::to_string(&s).unwrap(), format!("\"{w}\""));
-            assert_eq!(serde_json::from_str::<Span>(&format!("\"{w}\"")).unwrap(), s);
+            assert_eq!(
+                serde_json::from_str::<Span>(&format!("\"{w}\"")).unwrap(),
+                s
+            );
         }
     }
 
@@ -219,14 +224,16 @@ mod tests {
         assert_eq!(w.span, Span::X1x1);
         assert_eq!(
             w.config,
-            WidgetConfig::Entity { entity_id: "lamp".into(), title: None }
+            WidgetConfig::Entity {
+                entity_id: "lamp".into(),
+                title: None
+            }
         );
     }
 
     #[test]
     fn widget_config_history_decodes_before_entity() {
-        let h: WidgetConfig =
-            serde_json::from_str(r#"{"entity_id":"t","range":"24h"}"#).unwrap();
+        let h: WidgetConfig = serde_json::from_str(r#"{"entity_id":"t","range":"24h"}"#).unwrap();
         assert_eq!(
             h,
             WidgetConfig::History {
@@ -237,7 +244,10 @@ mod tests {
         let e: WidgetConfig = serde_json::from_str(r#"{"entity_id":"t"}"#).unwrap();
         assert_eq!(
             e,
-            WidgetConfig::Entity { entity_id: "t".into(), title: None }
+            WidgetConfig::Entity {
+                entity_id: "t".into(),
+                title: None
+            }
         );
     }
 

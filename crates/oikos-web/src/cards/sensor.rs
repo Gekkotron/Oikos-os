@@ -101,9 +101,9 @@ fn temperature_body(entity: &EntityView, house: House) -> impl IntoView + use<> 
     let device_id = entity.device_id.clone();
     let device_id_val = device_id.clone();
     let humidity_id: Memo<Option<String>> = Memo::new(move |_| {
-        house.entities.with(|m| {
-            partner(m.values(), device_id.as_deref(), "humidity").map(|e| e.id.clone())
-        })
+        house
+            .entities
+            .with(|m| partner(m.values(), device_id.as_deref(), "humidity").map(|e| e.id.clone()))
     });
     let humidity_value: Memo<Option<f64>> = Memo::new(move |_| {
         house.entities.with(|m| {

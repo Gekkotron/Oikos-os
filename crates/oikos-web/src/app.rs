@@ -24,8 +24,8 @@ use crate::screens::entity_sheet::EntitySheetScreen;
 use crate::screens::flow_canvas::{FlowCanvasScreen, NewFlowScreen};
 use crate::screens::flows::FlowsScreen;
 use crate::screens::group_sheet_v2::GroupSheetV2Screen;
-use crate::screens::groups::GroupsScreen;
 use crate::screens::group_wizard::GroupWizardScreen;
+use crate::screens::groups::GroupsScreen;
 use crate::screens::history_detail::HistoryDetailScreen;
 use crate::screens::security::SecurityScreen;
 use crate::screens::settings::SettingsScreen;
@@ -39,7 +39,10 @@ fn HouseRedirect() -> impl IntoView {
     Effect::new(move |_| {
         navigate(
             &format!("/dashboards/{}", oikos_api::HOUSE_ID),
-            leptos_router::NavigateOptions { replace: true, ..Default::default() },
+            leptos_router::NavigateOptions {
+                replace: true,
+                ..Default::default()
+            },
         );
     });
 }

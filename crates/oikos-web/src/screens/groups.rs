@@ -7,7 +7,7 @@ use oikos_api::GroupView;
 
 use crate::components::toast::Toasts;
 use crate::format::wrap_id;
-use crate::icons::{kind_icon, PLUS};
+use crate::icons::{PLUS, kind_icon};
 
 #[component]
 pub fn GroupsScreen() -> impl IntoView {

@@ -2,7 +2,7 @@ use leptos::prelude::*;
 use oikos_core::dashboard::Widget;
 
 use super::add_picker::AddWidgetPicker;
-use super::edit::{add_widget_handler, EditState};
+use super::edit::{EditState, add_widget_handler};
 use super::widget::WidgetView;
 
 /// Column grid that places widgets by their declared span. Column counts per breakpoint

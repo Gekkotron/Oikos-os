@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
 use oikos_api::HOUSE_ID;
-use oikos_core::dashboard::{allowed_spans, Dashboard, Span, Widget, WidgetConfig, WidgetKind};
+use oikos_core::dashboard::{Dashboard, Span, Widget, WidgetConfig, WidgetKind, allowed_spans};
 
 use crate::api;
 use crate::dashboards::edit::EditState;
@@ -13,11 +13,7 @@ use crate::house::House;
 /// Per-widget sheet: title override, size and delete. Swapping the widget's target
 /// entity is deferred; delete + re-add covers it for v1.
 #[component]
-pub fn WidgetConfigSheet(
-    state: EditState,
-    index: usize,
-    on_close: Callback<()>,
-) -> impl IntoView {
+pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>) -> impl IntoView {
     // Kind and span are tracked separately so typing in the title does not rebuild the
     // inputs (which would drop focus on every keystroke).
     let kind = Memo::new(move |_| state.draft.with(|d| d.widgets.get(index).map(|w| w.kind)));
@@ -156,7 +152,9 @@ fn move_dashboard(house: House, id: String, delta: isize) {
         if api::reorder_dashboards(&ids).await.is_ok() {
             house.dashboards.update(|v| {
                 v.sort_by_key(|dv| {
-                    ids.iter().position(|i| *i == dv.dashboard.id).map_or(0, |p| p + 1)
+                    ids.iter()
+                        .position(|i| *i == dv.dashboard.id)
+                        .map_or(0, |p| p + 1)
                 });
             });
         }
@@ -231,7 +229,10 @@ mod tests {
             id: id.into(),
             kind: WidgetKind::Light,
             span: Span::X1x1,
-            config: WidgetConfig::Entity { entity_id: "light.a".into(), title: None },
+            config: WidgetConfig::Entity {
+                entity_id: "light.a".into(),
+                title: None,
+            },
         }
     }
 

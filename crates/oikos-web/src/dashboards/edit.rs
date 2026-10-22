@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use oikos_core::dashboard::{allowed_spans, Dashboard, Widget};
+use oikos_core::dashboard::{Dashboard, Widget, allowed_spans};
 
 use crate::api;
 use crate::icons::{CHECK, GEAR, PENCIL, X_MARK};
@@ -151,13 +151,21 @@ mod tests {
             id: id.into(),
             kind,
             span,
-            config: WidgetConfig::Entity { entity_id: "light.a".into(), title: None },
+            config: WidgetConfig::Entity {
+                entity_id: "light.a".into(),
+                title: None,
+            },
         }
     }
 
     fn state(widgets: Vec<Widget>) -> EditState {
         EditState::new(
-            Dashboard { id: "d".into(), name: "D".into(), order: 0, widgets },
+            Dashboard {
+                id: "d".into(),
+                name: "D".into(),
+                order: 0,
+                widgets,
+            },
             true,
         )
     }
