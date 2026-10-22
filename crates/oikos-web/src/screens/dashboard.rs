@@ -2,7 +2,7 @@
 //! verbatim; for any other id render the generic widget grid.
 
 use leptos::prelude::*;
-use leptos_router::hooks::{use_params_map, use_query_map};
+use leptos_router::hooks::{use_navigate, use_params_map, use_query_map};
 use oikos_api::HOUSE_ID;
 
 use crate::dashboards::config_sheet::{DashboardSettingsSheet, WidgetConfigSheet};
@@ -19,9 +19,33 @@ pub fn DashboardScreen() -> impl IntoView {
     let query = use_query_map();
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
 
+    // House hands off to the first authored dashboard once there is one; the rooms-overview
+    // fallback below only shows while the user has no authored dashboard yet.
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        if id.get() != HOUSE_ID {
+            return;
+        }
+        let first = house.dashboards.with(|list| {
+            list.iter()
+                .find(|d| d.dashboard.id != HOUSE_ID)
+                .map(|d| d.dashboard.id.clone())
+        });
+        if let Some(first) = first {
+            navigate(
+                &format!("/dashboards/{first}"),
+                leptos_router::NavigateOptions {
+                    replace: true,
+                    ..Default::default()
+                },
+            );
+        }
+    });
+
     view! {
         <Show
             when=move || id.get() == HOUSE_ID
+                && house.dashboards.with(|list| list.iter().all(|d| d.dashboard.id == HOUSE_ID))
             fallback=move || {
                 // Re-reading `house.dashboards` here keeps the fallback reactive to the
                 // retained-topic fetch landing after first paint.

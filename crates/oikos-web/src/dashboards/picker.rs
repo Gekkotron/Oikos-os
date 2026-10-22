@@ -34,6 +34,13 @@ pub fn DashboardsPicker() -> impl IntoView {
             .map(|rest| rest.split('/').next().unwrap_or("").to_owned())
     });
 
+    // Any route change closes the menu, so clicking another top-nav tab (or any link that
+    // navigates) does not leave the dropdown hovering over the new page.
+    Effect::new(move |_| {
+        location.pathname.track();
+        open.set(false);
+    });
+
     let label = move || match active_id.get() {
         Some(id) => house.dashboards.with(|list| {
             list.iter()
