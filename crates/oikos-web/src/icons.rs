@@ -249,6 +249,22 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
     }
 }
 
+const NODE_SIGNAL: &str = svg!(
+    r#"<circle cx="12" cy="12" r="2.5"/><path d="M7.5 7.5a6.4 6.4 0 0 0 0 9"/><path d="M16.5 7.5a6.4 6.4 0 0 1 0 9"/>"#
+);
+
+/// The icon of a flow in the Flows list, by its first trigger kind.
+pub fn trigger_icon(kind: crate::flow_list::TriggerKind) -> &'static str {
+    use crate::flow_list::TriggerKind;
+    match kind {
+        TriggerKind::State => NODE_BOLT,
+        TriggerKind::Schedule => NODE_CLOCK,
+        TriggerKind::Sun => SUN,
+        TriggerKind::Signal => NODE_SIGNAL,
+        TriggerKind::Manual => NODE_PLAY,
+    }
+}
+
 const CHANNEL_ALARM: &str =
     svg!(r#"<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 21h4"/>"#);
 const CHANNEL_SECURITY: &str = svg!(r#"<path d="M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z"/>"#);

@@ -109,6 +109,15 @@ pub async fn set_flow_enabled(id: &str, enabled: bool) -> Result<FlowView, ApiEr
     read_json(response).await
 }
 
+/// Moves flow `id` to room `area`, or out of any room with `None`; the reply is the flow as
+/// the hub now has it.
+pub async fn set_flow_area(id: &str, area: Option<&str>) -> Result<FlowView, ApiError> {
+    let url = format!("/api/v1/flows/{}/area", encode_id(id));
+    let body = serde_json::json!({ "area": area });
+    let response = check(Request::post(&url).json(&body), None).await?;
+    read_json(response).await
+}
+
 /// Replaces flow `id`'s definition on the hub. The id in `flow` must match the path. The reply
 /// is the flow as stored and the hub's warning, when it has one (the Paris sun fallback).
 pub async fn put_flow(flow: &Flow) -> Result<(FlowView, Option<String>), ApiError> {

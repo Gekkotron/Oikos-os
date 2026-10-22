@@ -1,6 +1,6 @@
 //! Pure logic behind the Flows page: the rows, search, filters, counts, sorting, grouping by
 //! room and the remembered preferences. No leptos and no browser types, so everything here is
-//! tested natively (the screen lives in `screens/flows.rs`).
+//! tested natively (the screen lives in `screens/flows/`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
