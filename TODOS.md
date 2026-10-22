@@ -70,7 +70,7 @@ Origin: `Athena-Hestia/docs/VISION.md` (Python prototype, prior art only — no 
 ### Next step
 
 - Design written: `docs/superpowers/specs/2026-10-22-climate-engine-design.md` (builder check done, its answers folded in as Claude's calls in §13). Hand-change hold settled as: until the next scheduled change, max 4 h, per device.
-- **Waiting on the user's review/approval of the design.** Then `superpowers:writing-plans`.
+- Design approved 2026-10-22. Plan: `docs/superpowers/plans/2026-10-22-climate-engine.md` (12 tasks). **Waiting on the user's plan review + execution choice.**
 
 ## Other backlog ideas (unrelated to dashboards)
 
