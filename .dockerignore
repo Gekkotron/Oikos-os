@@ -1,0 +1,13 @@
+.git
+.gitignore
+target/
+crates/oikos-web/dist/
+.DS_Store
+.superpowers/
+.vscode/
+.idea/
+docs/
+tools/
+firepit-log.txt
+oikos.toml
+*.log

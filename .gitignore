@@ -3,3 +3,8 @@ oikos.toml
 crates/oikos-web/dist
 .DS_Store
 .superpowers/
+firepit-log.txt
+firebase-service-account*.json
+*.pem
+*.key
+

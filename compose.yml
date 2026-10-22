@@ -1,0 +1,21 @@
+# Oikos-os single-host Docker Compose.
+# See docs/install-on-linux.md for the full install.
+#
+# The hub only needs its own container. Mosquitto, TimescaleDB and
+# (optionally) Frigate are expected to run on the same host; `network_mode:
+# host` makes `localhost` inside the container the host's localhost.
+
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: oikos-os:local
+    container_name: oikos-hub
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./oikos.toml:/etc/oikos/oikos.toml:ro
+      # Push notifications (optional). Point `[push] credentials` at this
+      # path in oikos.toml and uncomment the line below:
+      # - ./firebase-service-account.json:/etc/oikos/firebase.json:ro

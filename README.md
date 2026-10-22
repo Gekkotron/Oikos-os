@@ -6,6 +6,8 @@ Oikos-os is the Rust home-automation hub that replaces Jeedom. It runs on the ho
 
 Status: v1 hub with its web UI: registry, API, WebSocket, MCP and the browser app.
 
+**Installing on a Linux host?** See [docs/install-on-linux.md](docs/install-on-linux.md) for the Docker install (uses the `Dockerfile` and `compose.yml` at the repo root).
+
 ## Run
 
 ```sh
