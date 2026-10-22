@@ -144,6 +144,13 @@ pub const GEAR: &str = svg!(
 pub const MOON: &str = svg!(
     r#"<path d="M20 14A9 9 0 1 1 10 4a7 7 0 0 0 10 10"/>"#
 );
+pub const PLUS: &str = svg!(r#"<path d="M12 5v14"/><path d="M5 12h14"/>"#);
+pub const MAGNIFIER: &str = svg!(
+    r#"<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/>"#
+);
+pub const TRASH: &str = svg!(
+    r#"<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7v13h12V7"/><path d="M10 11v6"/><path d="M14 11v6"/>"#
+);
 pub const PLUG: &str = svg!(
     r#"<path d="M9 3v5"/><path d="M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>"#
 );

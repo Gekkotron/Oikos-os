@@ -7,6 +7,7 @@ use oikos_api::{DeviceView, GroupView};
 use crate::components::toast::Toasts;
 use crate::format::{list_label, wrap_id};
 use crate::house::House;
+use crate::icons::{MAGNIFIER, PLUS};
 use crate::screens::entity_sheet::{availability_class, availability_word};
 
 /// True when the device's name, model, vendor or IEEE address contains `query`, ignoring case.
@@ -150,35 +151,45 @@ pub fn DevicesScreen() -> impl IntoView {
     view! {
         <div class="devices">
             <h1 class="devices__title">"Devices"</h1>
-            <section class="sheet__panel">
-                <h2 class="sheet__heading">"Groups"</h2>
-                <A href="/groups/new" attr:class="btn">
-                    "＋ New group"
-                </A>
-                <ul class="sheet__links">
+            <section class="sheet__panel groups-card">
+                <div class="groups-card__head">
+                    <h2 class="sheet__heading">"Groups"</h2>
+                    <span class="groups-card__count">
+                        {move || groups.with(Vec::len)} " groups"
+                    </span>
+                </div>
+                <div class="chip-row">
+                    <A href="/groups/new" attr:class="chip chip--add">
+                        <span class="chip__glyph" inner_html=PLUS></span>
+                        "New group"
+                    </A>
                     <For
                         each=move || groups.get()
                         key=|g| (g.id.clone(), g.name.clone(), g.members.len())
                         children=|g| {
                             view! {
-                                <li>
-                                    <A href=format!("/group/{}", crate::api::encode_id(&g.id))>
-                                        {wrap_id(&g.name)}
-                                    </A>
-                                </li>
+                                <A
+                                    href=format!("/group/{}", crate::api::encode_id(&g.id))
+                                    attr:class="chip"
+                                >
+                                    {wrap_id(&g.name)}
+                                </A>
                             }
                         }
                     />
-                </ul>
+                </div>
             </section>
-            <input
-                class="devices__search"
-                type="search"
-                placeholder="Search name, model, vendor or IEEE"
-                aria-label="Search devices"
-                prop:value=move || query.get()
-                on:input=move |ev| query.set(event_target_value(&ev))
-            />
+            <label class="devices__search">
+                <span class="devices__search-icon" inner_html=MAGNIFIER></span>
+                <input
+                    class="devices__search-input"
+                    type="search"
+                    placeholder="Search name, model, vendor or IEEE"
+                    aria-label="Search devices"
+                    prop:value=move || query.get()
+                    on:input=move |ev| query.set(event_target_value(&ev))
+                />
+            </label>
             <p class="devices__count">
                 {move || filtered.with(Vec::len)} " of " {move || total.get()} " devices"
             </p>

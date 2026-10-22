@@ -10,10 +10,12 @@ use oikos_api::{AreaView, EntityView, GroupSpec};
 use oikos_core::model::Kind;
 
 use crate::api::{encode_id, list_groups, set_group, set_override};
+use crate::cards::PowerToggle;
 use crate::components::toast::Toasts;
 use crate::flow_edit::fold_accents;
 use crate::format::list_label;
 use crate::house::House;
+use crate::icons::{CHECK, MAGNIFIER};
 
 /// The kinds a group can be made of: every controllable kind.
 pub const GROUP_KINDS: &[Kind] = &[
@@ -231,14 +233,26 @@ pub fn GroupWizardScreen() -> impl IntoView {
                 {if editing { "Edit group" } else { "New group" }}
             </h1>
             <Show when=move || !loading.get() fallback=|| view! { <p>"Loading…"</p> }>
-                <section class="sheet__panel">
-                    <h2 class="sheet__heading">
-                        {move || match step.get() {
-                            1 => "1 of 3 · Type",
-                            2 => "2 of 3 · Members",
-                            _ => "3 of 3 · Name and room",
-                        }}
-                    </h2>
+                <section class="sheet__panel wizard">
+                    <div class="wizard__head">
+                        <h2 class="sheet__heading">
+                            {move || match step.get() {
+                                1 => "Type",
+                                2 => "Members",
+                                _ => "Name and room",
+                            }}
+                        </h2>
+                        <div class="wizard__step" aria-label="Progress">
+                            <span class="wizard__step-count">
+                                {move || format!("Step {} of 3", step.get())}
+                            </span>
+                            <span class="wizard__pips" aria-hidden="true">
+                                <span class:lit=move || { step.get() >= 1 }></span>
+                                <span class:lit=move || { step.get() >= 2 }></span>
+                                <span class:lit=move || { step.get() >= 3 }></span>
+                            </span>
+                        </div>
+                    </div>
                     {move || match step.get() {
                         1 => {
                             view! {
@@ -271,14 +285,17 @@ pub fn GroupWizardScreen() -> impl IntoView {
                         }
                         2 => {
                             view! {
-                                <input
-                                    class="devices__search"
-                                    type="search"
-                                    placeholder="Filter members"
-                                    aria-label="Filter members"
-                                    prop:value=move || filter.get()
-                                    on:input=move |ev| filter.set(event_target_value(&ev))
-                                />
+                                <label class="devices__search">
+                                    <span class="devices__search-icon" inner_html=MAGNIFIER></span>
+                                    <input
+                                        class="devices__search-input"
+                                        type="search"
+                                        placeholder="Filter members"
+                                        aria-label="Filter members"
+                                        prop:value=move || filter.get()
+                                        on:input=move |ev| filter.set(event_target_value(&ev))
+                                    />
+                                </label>
                                 {move || {
                                     rooms
                                         .get()
@@ -286,7 +303,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                         .map(|(room, list)| {
                                             view! {
                                                 <h3 class="sheet__subheading">{room}</h3>
-                                                <div class="card__controls card__controls--grid">
+                                                <div class="card__controls card__controls--grid wizard__members">
                                                     {list
                                                         .into_iter()
                                                         .map(|(id, label)| {
@@ -298,7 +315,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                                             view! {
                                                                 <button
                                                                     type="button"
-                                                                    class="card"
+                                                                    class="card member-card"
                                                                     class:card--on=on
                                                                     aria-pressed=move || pressed().to_string()
                                                                     on:click=move |_| {
@@ -311,6 +328,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                                                     }
                                                                 >
                                                                     <span class="card__name">{label}</span>
+                                                                    <span class="member-card__check" aria-hidden="true" inner_html=CHECK></span>
                                                                 </button>
                                                             }
                                                         })
@@ -325,20 +343,20 @@ pub fn GroupWizardScreen() -> impl IntoView {
                         }
                         _ => {
                             view! {
-                                <label class="pick">
-                                    <span class="pick__caption">"Name"</span>
+                                <label class="field">
+                                    <span class="field__caption">"Name"</span>
                                     <input
-                                        class="devices__search"
+                                        class="field__input"
                                         type="text"
                                         aria-label="Group name"
                                         prop:value=move || name.get()
                                         on:input=move |ev| name.set(event_target_value(&ev))
                                     />
                                 </label>
-                                <label class="pick">
-                                    <span class="pick__caption">"Room"</span>
+                                <label class="field">
+                                    <span class="field__caption">"Room"</span>
                                     <select
-                                        class="pick__select"
+                                        class="field__input field__select"
                                         prop:value=move || area.get()
                                         on:change=move |ev| area.set(event_target_value(&ev))
                                     >
@@ -346,23 +364,19 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                         {area_options()}
                                     </select>
                                 </label>
-                                <label class="pick">
-                                    <span class="pick__caption">"Hide members on Home"</span>
-                                    <input
-                                        type="checkbox"
-                                        aria-label="Hide members on Home"
-                                        prop:checked=move || hide_members.get()
-                                        on:change=move |ev| hide_members.set(event_target_checked(&ev))
-                                    />
-                                </label>
+                                <PowerToggle
+                                    on=hide_members.get()
+                                    label="Hide members on Home"
+                                    on_toggle=Callback::new(move |()| hide_members.update(|v| *v = !*v))
+                                />
                             }
                                 .into_any()
                         }
                     }}
-                    <div class="card__controls">
+                    <div class="sheet__actions">
                         <button
                             type="button"
-                            class="btn"
+                            class="btn btn--with-icon"
                             disabled=move || step.get() == if editing { 2 } else { 1 }
                             on:click=move |_| step.update(|s| *s = s.saturating_sub(1).max(1))
                         >
@@ -370,7 +384,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                         </button>
                         <button
                             type="button"
-                            class="btn"
+                            class="btn btn--with-icon btn--primary"
                             disabled=move || !can_next()
                             on:click=move |_| {
                                 if step.get_untracked() < 3 {
@@ -384,9 +398,9 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                 if step.get() < 3 {
                                     "Next"
                                 } else if editing {
-                                    "Save"
+                                    "Save group"
                                 } else {
-                                    "Create"
+                                    "Create group"
                                 }
                             }}
                         </button>

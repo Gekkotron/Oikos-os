@@ -534,6 +534,54 @@ body {
   text-align: center;
 }
 
+/* Chip-row: wrapping flex of chips. The '+ New group' variant is a dashed chip so it reads
+   as an action in the same vocabulary as the group chips next to it. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+a.chip {
+  text-decoration: none;
+}
+
+.chip:hover {
+  background: var(--raised);
+  border-color: color-mix(in srgb, var(--chip-border) 50%, var(--ink));
+}
+
+.chip--add {
+  color: var(--ink);
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.9;
+}
+
+.chip--add:hover {
+  opacity: 1;
+  border-style: dashed;
+}
+
+/* Groups card: a sheet panel laid out with a titled head + a chip row. */
+.groups-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.groups-card__head .sheet__heading {
+  margin: 0;
+}
+
+.groups-card__count {
+  font: var(--type-label);
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
 .room__title {
   margin: 4px 0 12px;
   font: var(--type-display);
@@ -904,6 +952,204 @@ body {
 .btn--active {
   border-color: var(--accent-amber);
   color: var(--accent-amber);
+}
+
+/* Matched button pair at the bottom of a sheet panel (Edit group / Delete group).
+   Each button is a flex item that shares the row equally. */
+.sheet__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--card-border);
+}
+
+.btn--with-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.btn__glyph {
+  display: inline-flex;
+  width: 15px;
+  height: 15px;
+}
+
+.btn__glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Danger-tinted ghost button: destructive without changing shape. */
+.btn--danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--chip-border));
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+
+.btn--danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* Primary action: filled amber, used on the wizard's Save/Create button and anywhere a flow
+   has one committing action. */
+.btn--primary {
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.btn--primary:hover {
+  background: color-mix(in srgb, var(--accent-amber) 90%, white);
+  border-color: color-mix(in srgb, var(--accent-amber) 90%, white);
+}
+
+.btn--primary:disabled {
+  background: color-mix(in srgb, var(--accent-amber) 50%, transparent);
+  border-color: transparent;
+  color: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+/* Wizard panel: a header row with the step name on the left and the step indicator
+   (count + pips) on the right. Three dash-pips track progress. */
+.wizard__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.wizard__head .sheet__heading {
+  margin: 0;
+}
+
+.wizard__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font: var(--type-label);
+}
+
+.wizard__step-count {
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+.wizard__pips {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.wizard__pips span {
+  width: 22px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--chip-border);
+}
+
+.wizard__pips span.lit {
+  background: var(--accent-amber);
+}
+
+/* Member picker: outline-selection, with a small check in the top-right of a chosen card.
+   Overrides the global .card--on warm gradient only inside the wizard. */
+.wizard__members {
+  min-width: 0;
+}
+
+.member-card {
+  position: relative;
+  padding-right: 36px;
+}
+
+.member-card__check {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--chip-border);
+  background: transparent;
+  color: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--motion-short) var(--ease),
+    border-color var(--motion-short) var(--ease),
+    color var(--motion-short) var(--ease);
+}
+
+.member-card__check svg {
+  width: 12px;
+  height: 12px;
+}
+
+.wizard .member-card.card--on {
+  background: linear-gradient(180deg, var(--select-soft), transparent 70%),
+    color-mix(in srgb, var(--select) 6%, var(--card-bg));
+  border-color: var(--select);
+  color: var(--ink);
+}
+
+.wizard .member-card.card--on .member-card__check {
+  background: var(--select);
+  border-color: var(--select);
+  color: var(--bg);
+}
+
+/* Labeled form field used by the wizard's Name and Room step. The label floats above an
+   input shaped like the search pill, consistent with the rest of the design. */
+.field {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.field__caption {
+  padding-left: 2px;
+  font: var(--type-label);
+  opacity: 0.7;
+}
+
+.field__input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 0 16px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-nav);
+  background: var(--card-bg);
+  color: inherit;
+  font: var(--type-body);
+  appearance: none;
+  outline: none;
+  transition: border-color var(--motion-short) var(--ease);
+}
+
+.field__input:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-mint) 50%, var(--chip-border));
+}
+
+.field__select {
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) 50%,
+    calc(100% - 15px) 50%;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 36px;
+  cursor: pointer;
 }
 
 .stepper {
@@ -1865,6 +2111,9 @@ p.override__hint {
 
 .devices__search {
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   min-height: var(--touch-min);
   padding: 0 16px;
@@ -1873,11 +2122,38 @@ p.override__hint {
   background: var(--card-bg);
   color: inherit;
   font: var(--type-body);
+  transition:
+    border-color var(--motion-short) var(--ease),
+    background var(--motion-short) var(--ease);
 }
 
-.devices__search:focus-visible {
-  outline: 2px solid var(--accent-mint);
-  outline-offset: 2px;
+.devices__search:focus-within {
+  border-color: color-mix(in srgb, var(--accent-mint) 50%, var(--chip-border));
+  background: color-mix(in srgb, var(--accent-mint) 6%, var(--card-bg));
+}
+
+.devices__search-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  opacity: 0.6;
+  flex: none;
+}
+
+.devices__search-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.devices__search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
 }
 
 .devices__count {
