@@ -11,11 +11,11 @@ use oikos_core::command::Publish;
 use oikos_core::model::{Kind, UNASSIGNED_AREA};
 use serde::Serialize;
 
+use super::inputs;
 use super::store::{Applied, ClimateStore, ZoneDocs};
+use super::{ClimateRuntime, GROUP_PREFIX};
+use crate::clock;
 use crate::hub::{Hub, HubError};
-
-/// Group entities are published by the hub itself; they are never a zone's device.
-const GROUP_PREFIX: &str = "group_";
 
 impl Hub {
     /// Whether `[climate] enabled` is on.
@@ -39,33 +39,63 @@ impl Hub {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// The engine's runtime state; same rules as [`Hub::climate_store`], and never held across
+    /// an `await`.
+    pub(crate) fn climate_runtime(&self) -> MutexGuard<'_, ClimateRuntime> {
+        self.climate
+            .as_ref()
+            .expect("climate_runtime is only used while [climate] is enabled")
+            .runtime
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// The whole engine as one document: the settings, and one entry per zone.
     pub fn climate_view(&self) -> Result<ClimateView, HubError> {
         self.require_climate()?;
         let areas = self.climate_areas();
         let history = self.history_configured();
-        let store = self.climate_store();
-        let mut zones: Vec<ZoneView> = areas
-            .iter()
-            .map(|(zone, (name, devices))| {
-                let docs = store.zones.get(zone);
-                zone_view(zone, name, false, devices.clone(), docs, history)
-            })
-            .collect();
-        for (zone, docs) in &store.zones {
-            if !areas.contains_key(zone) {
-                let devices = default_entities(&docs.settings, &[]);
-                zones.push(zone_view(zone, zone, true, devices, Some(docs), history));
+        let now = clock::now();
+        let seen = self.climate_runtime().seen_at.clone();
+        let mut view = {
+            let store = self.climate_store();
+            let mut zones: Vec<ZoneView> = areas
+                .iter()
+                .map(|(zone, (name, devices))| {
+                    let docs = store.zones.get(zone);
+                    zone_view(zone, name, false, devices.clone(), docs, history)
+                })
+                .collect();
+            for (zone, docs) in &store.zones {
+                if !areas.contains_key(zone) {
+                    let devices = default_entities(&docs.settings, &[]);
+                    zones.push(zone_view(zone, zone, true, devices, Some(docs), history));
+                }
             }
+            zones.sort_by(|a, b| a.orphan.cmp(&b.orphan).then_with(|| a.name.cmp(&b.name)));
+            ClimateView {
+                enabled: true,
+                house: store.house.clone(),
+                house_invalid: store.house_invalid.clone(),
+                history,
+                zones,
+            }
+        };
+        // The reading and its age are what the engine sees now, not what the last decision froze.
+        let stale_after_s = u64::from(view.house.stale_after_min) * 60;
+        for zone in &mut view.zones {
+            let (reading, age) = inputs::view_reading(
+                self,
+                &zone.settings,
+                &zone.entities,
+                stale_after_s,
+                now,
+                &seen,
+            );
+            zone.reading = reading;
+            zone.reading_age_s = age;
         }
-        zones.sort_by(|a, b| a.orphan.cmp(&b.orphan).then_with(|| a.name.cmp(&b.name)));
-        Ok(ClimateView {
-            enabled: true,
-            house: store.house.clone(),
-            house_invalid: store.house_invalid.clone(),
-            history,
-            zones,
-        })
+        Ok(view)
     }
 
     /// Replaces the house settings: validates, publishes retained and applies locally.
@@ -146,7 +176,7 @@ impl Hub {
     }
 
     /// The areas that can be zones, by id: each with its name and the climate entities it holds.
-    fn climate_areas(&self) -> BTreeMap<String, (String, Vec<String>)> {
+    pub(crate) fn climate_areas(&self) -> BTreeMap<String, (String, Vec<String>)> {
         let reg = self.read();
         let mut out: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
         for entity in reg.entities() {
@@ -212,8 +242,8 @@ fn zone_view(
         entities: default_entities(&docs.settings, &area_entities),
         settings: docs.settings.clone(),
         settings_invalid: docs.settings_invalid.clone(),
-        reading: docs.decision.as_ref().and_then(|d| d.reading),
-        reading_age_s: docs.decision.as_ref().and_then(|d| d.reading_age_s),
+        reading: None,
+        reading_age_s: None,
         decision: docs.decision.clone(),
         overrides: docs.overrides.clone(),
         proposal: docs.proposal.clone(),
