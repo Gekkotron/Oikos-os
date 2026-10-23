@@ -95,16 +95,63 @@ body {
   cursor: progress;
 }
 
+.card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--touch-min);
+  margin: calc(var(--card-padding) * -1) calc(var(--card-padding) * -1) 0;
+  padding: 0 var(--card-padding);
+  box-sizing: content-box;
+  border: 0;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: transparent;
+  color: inherit;
+  font: var(--type-card-name);
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
 
 .card__header:focus-visible {
   outline: 2px solid var(--accent-mint);
   outline-offset: -2px;
 }
 
+.card__icon {
+  display: inline-flex;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  color: var(--accent-amber);
+  transition: color var(--motion-short) var(--ease);
+}
 
+.card--on .card__icon {
+  color: inherit;
+}
 
+.card__icon svg {
+  width: 100%;
+  height: 100%;
+}
 
+.card__name {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+}
 
+.card__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .card__body {
   font: var(--type-card-value);
@@ -843,6 +890,10 @@ a.chip {
   --type-card-value: 600 20px/26px var(--font-body);
 }
 
+.grid--home .card__icon {
+  width: 28px;
+  height: 28px;
+}
 
 @media (min-width: 720px) {
   .grid--home {

@@ -166,6 +166,11 @@ fn climate(mode: &str) -> EntityView {
 /// Mounts `entity` the way a room section does: from the house, rebuilt on every change of it.
 /// Returns the host, the house and the toasts (a refused command leaves one).
 fn mount_live(entity: EntityView) -> (web_sys::Element, House, Toasts) {
+    mount_copies(entity, 1)
+}
+
+/// Like [`mount_live`], with the card shown `copies` times (Favorites and its room on Home).
+fn mount_copies(entity: EntityView, copies: usize) -> (web_sys::Element, House, Toasts) {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -182,7 +187,10 @@ fn mount_live(entity: EntityView) -> (web_sys::Element, House, Toasts) {
             provide_context(toasts);
             provide_context(Pending::new());
             let card = Memo::new(move |_| house.entities.with(|m| m.get(&id).cloned()));
-            view! { <Router>{move || card.get().map(card_for)}</Router> }
+            let cards = (0..copies)
+                .map(|_| view! { {move || card.get().map(card_for)} })
+                .collect_view();
+            view! { <Router>{cards}</Router> }
         },
     ));
     (host, house, toasts)
@@ -206,16 +214,29 @@ fn key(el: &web_sys::Element, key: &str) {
 
 /// A pointer event at `deg` on the ring's circle (clockwise from the right).
 fn pointer(target: &web_sys::EventTarget, kind: &str, el: &web_sys::Element, deg: f64) {
+    let buttons = if kind == "pointerup" { 0 } else { 1 };
+    pointer_at(target, kind, el, deg, 1.0 / 3.0, buttons);
+}
+
+/// A pointer event at `deg`, `share` of the ring element's width from its centre.
+fn pointer_at(
+    target: &web_sys::EventTarget,
+    kind: &str,
+    el: &web_sys::Element,
+    deg: f64,
+    share: f64,
+    buttons: u16,
+) {
     let rect = el.get_bounding_client_rect();
     let (cx, cy) = (
         rect.left() + rect.width() / 2.0,
         rect.top() + rect.height() / 2.0,
     );
-    let r = rect.width() / 3.0;
+    let r = rect.width() * share;
     let init = web_sys::PointerEventInit::new();
     init.set_client_x((cx + r * deg.to_radians().cos()) as i32);
     init.set_client_y((cy + r * deg.to_radians().sin()) as i32);
-    init.set_buttons(if kind == "pointerup" { 0 } else { 1 });
+    init.set_buttons(buttons);
     init.set_pointer_id(1);
     init.set_bubbles(true);
     let ev = web_sys::PointerEvent::new_with_event_init_dict(kind, &init).unwrap();
@@ -364,4 +385,115 @@ async fn vacuum_sheet_has_full_controls() {
     assert!(has(&host, "select"));
     assert!(has(&host, "button[aria-label=\"Spot\"]"));
     assert!(host.text_content().unwrap().contains("Pause"));
+}
+
+fn rings(host: &web_sys::Element) -> Vec<web_sys::Element> {
+    let list = host.query_selector_all("[role=slider]").unwrap();
+    (0..list.length())
+        .map(|i| list.item(i).unwrap().dyn_into().unwrap())
+        .collect()
+}
+
+fn window_target() -> web_sys::EventTarget {
+    web_sys::window().unwrap().into()
+}
+
+#[wasm_bindgen_test]
+async fn the_ring_you_drag_shows_the_value_when_shown_twice() {
+    let (host, _house, toasts) = mount_copies(climate("heat"), 2);
+    tick().await;
+    let first = rings(&host)[0].clone();
+    pointer(&first, "pointerdown", &first, 270.0);
+    tick().await;
+    for r in rings(&host) {
+        assert_eq!(
+            attr(&r, "aria-valuenow"),
+            "18.5",
+            "every copy follows the drag"
+        );
+    }
+    pointer(&window_target(), "pointerup", &first, 270.0);
+    wait(500).await;
+    assert_eq!(
+        toasts.0.with_untracked(Vec::len),
+        1,
+        "one command for two copies"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn keys_move_the_ring_when_shown_twice() {
+    let (host, _house, _toasts) = mount_copies(climate("heat"), 2);
+    tick().await;
+    for _ in 0..3 {
+        key(&rings(&host)[0], "ArrowUp");
+        tick().await;
+    }
+    assert_eq!(attr(&rings(&host)[0], "aria-valuenow"), "17");
+}
+
+#[wasm_bindgen_test]
+async fn a_tap_on_the_centre_sends_nothing() {
+    let (host, _house, toasts) = mount_live(climate("heat"));
+    tick().await;
+    let r = ring(&host);
+    pointer_at(&r, "pointerdown", &r, 0.0, 0.02, 1);
+    tick().await;
+    pointer_at(&window_target(), "pointerup", &r, 0.0, 0.02, 0);
+    wait(500).await;
+    assert_eq!(attr(&ring(&host), "aria-valuenow"), "15.5");
+    assert_eq!(toasts.0.with_untracked(Vec::len), 0);
+}
+
+#[wasm_bindgen_test]
+async fn a_lost_release_is_sent_at_once_not_on_a_later_tap() {
+    let (host, _house, toasts) = mount_live(climate("heat"));
+    tick().await;
+    let r = ring(&host);
+    pointer(&r, "pointerdown", &r, 270.0);
+    tick().await;
+    // The button came up outside the window: the next move has no button down.
+    pointer_at(&window_target(), "pointermove", &r, 300.0, 1.0 / 3.0, 0);
+    wait(500).await;
+    assert_eq!(
+        toasts.0.with_untracked(Vec::len),
+        1,
+        "sent when the drag was seen to end"
+    );
+    pointer(&window_target(), "pointerup", &r, 300.0);
+    wait(500).await;
+    assert_eq!(
+        toasts.0.with_untracked(Vec::len),
+        1,
+        "a later release sends nothing more"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn focus_stays_on_the_ring_across_a_remount() {
+    let (host, house, _toasts) = mount_live(climate("heat"));
+    tick().await;
+    ring(&host)
+        .dyn_into::<web_sys::SvgElement>()
+        .unwrap()
+        .focus()
+        .unwrap();
+    house.entities.update(|m| {
+        if let Some(StateValue::Climate(c)) =
+            m.get_mut("climate.bedroom").map(|e| &mut e.state.value)
+        {
+            c.current = Some(23.5);
+        }
+    });
+    wait(50).await;
+    let active = web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .active_element()
+        .unwrap();
+    assert!(
+        active.is_same_node(Some(&ring(&host))),
+        "focus is on the new ring"
+    );
 }

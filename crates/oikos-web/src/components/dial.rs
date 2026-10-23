@@ -71,7 +71,9 @@ const KEY_PAUSE_MS: u32 = 600;
 struct Edit {
     key: String,
     value: f64,
-    by_pointer: bool,
+    /// The ring's centre in client coordinates for a drag (the page cannot scroll under a
+    /// ring being dragged), `None` for the arrow keys.
+    centre: Option<(f64, f64)>,
 }
 
 /// What the ring currently mounted for a key offers the edit in progress.
@@ -85,7 +87,7 @@ struct Hooks {
 
 thread_local! {
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
-    static HOOKS: RefCell<HashMap<String, Hooks>> = RefCell::new(HashMap::new());
+    static HOOKS: RefCell<HashMap<String, Vec<Hooks>>> = RefCell::new(HashMap::new());
     static KEY_TIMER: RefCell<Option<Timeout>> = const { RefCell::new(None) };
     static GENERATION: Cell<u64> = const { Cell::new(0) };
     static LISTENING: Cell<bool> = const { Cell::new(false) };
@@ -101,63 +103,59 @@ fn draft(key: &str) -> Option<f64> {
     })
 }
 
-fn hooks(key: &str) -> Option<Hooks> {
-    HOOKS.with(|h| h.borrow().get(key).cloned())
+/// Every ring mounted for `key`, oldest first (the same entity can show twice on a page).
+fn hooks(key: &str) -> Vec<Hooks> {
+    HOOKS.with(|h| h.borrow().get(key).cloned().unwrap_or_default())
 }
 
-/// Ends the edit in progress and sends its value through the ring mounted for it now.
+/// Ends the edit in progress and sends its value once, through the newest ring mounted for it.
 fn finish_edit() {
     let Some(edit) = EDIT.with(|e| e.borrow_mut().take()) else {
         return;
     };
-    if let Some(hooks) = hooks(&edit.key) {
+    if let Some(hooks) = hooks(&edit.key).last() {
         (hooks.commit)(edit.value);
     }
 }
 
-/// Moves the edit in progress to `value` and shows it on the mounted ring.
-fn set_edit(key: &str, value: f64, by_pointer: bool) {
+/// Moves the edit in progress to `value` and shows it on every ring of `key`.
+fn set_edit(key: &str, value: f64, centre: Option<(f64, f64)>) {
     EDIT.with(|e| {
         *e.borrow_mut() = Some(Edit {
             key: key.to_owned(),
             value,
-            by_pointer,
+            centre,
         });
     });
-    if let Some(hooks) = hooks(key) {
+    for hooks in hooks(key) {
         (hooks.show)(value);
     }
 }
 
-/// The value under a pointer event on the ring element `el`.
+/// The centre of the ring element `el` and the radius of its arc, in client pixels.
+fn client_circle(el: &web_sys::Element) -> ((f64, f64), f64) {
+    let rect = el.get_bounding_client_rect();
+    let centre = (
+        rect.left() + rect.width() / 2.0,
+        rect.top() + rect.height() / 2.0,
+    );
+    (centre, rect.width().min(rect.height()) / 2.0 * R / C)
+}
+
+/// The value under a pointer event for a ring centred at `centre`.
 fn value_from_pointer(
-    el: &web_sys::Element,
+    centre: (f64, f64),
     e: &web_sys::PointerEvent,
     range: (f64, f64, f64),
 ) -> f64 {
-    let rect = el.get_bounding_client_rect();
-    let dx = f64::from(e.client_x()) - (rect.left() + rect.width() / 2.0);
-    let dy = f64::from(e.client_y()) - (rect.top() + rect.height() / 2.0);
+    let dx = f64::from(e.client_x()) - centre.0;
+    let dy = f64::from(e.client_y()) - centre.1;
     value_at(dy.atan2(dx).to_degrees(), range.0, range.1, range.2)
 }
 
-/// The ring element of `key` a pointer event is about: the ring under the pointer (or holding
-/// its capture) when it is that one, else the first mounted ring of `key`.
-fn ring_element(key: &str, e: &web_sys::PointerEvent) -> Option<web_sys::Element> {
-    let under = e
-        .target()
-        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-        .and_then(|el| el.closest("[data-dial-key]").ok().flatten())
-        .filter(|el| el.get_attribute("data-dial-key").as_deref() == Some(key));
-    under.or_else(|| first_ring(key))
-}
-
-/// The first mounted ring of `key`.
-fn first_ring(key: &str) -> Option<web_sys::Element> {
-    let list = document().query_selector_all("[data-dial-key]").ok()?;
-    (0..list.length())
-        .filter_map(|i| list.item(i)?.dyn_into::<web_sys::Element>().ok())
-        .find(|el| el.get_attribute("data-dial-key").as_deref() == Some(key))
+/// Whether a press at `distance` from the centre is on the arc (a tap on the number is not).
+fn on_the_arc(distance: f64, radius: f64) -> bool {
+    (0.6 * radius..=1.25 * radius).contains(&distance)
 }
 
 /// Window listeners shared by every ring, installed once: they follow a drag wherever the
@@ -167,24 +165,30 @@ fn listen_to_window() {
         return;
     }
     let on_move = Closure::<dyn FnMut(web_sys::PointerEvent)>::new(|e: web_sys::PointerEvent| {
-        let Some(key) = EDIT.with(|d| {
+        let Some((key, centre)) = EDIT.with(|d| {
             d.borrow()
                 .as_ref()
-                .filter(|d| d.by_pointer)
-                .map(|d| d.key.clone())
+                .and_then(|d| Some((d.key.clone(), d.centre?)))
         }) else {
             return;
         };
+        // No button down: the release happened where we could not see it. End the drag now
+        // rather than on some later, unrelated release.
         if e.buttons() == 0 {
+            finish_edit();
             return;
         }
-        let (Some(hooks), Some(el)) = (hooks(&key), ring_element(&key, &e)) else {
+        let Some(hooks) = hooks(&key).pop() else {
             return;
         };
-        set_edit(&key, value_from_pointer(&el, &e, hooks.range), true);
+        set_edit(
+            &key,
+            value_from_pointer(centre, &e, hooks.range),
+            Some(centre),
+        );
     });
     let on_up = Closure::<dyn FnMut(web_sys::PointerEvent)>::new(|_: web_sys::PointerEvent| {
-        let by_pointer = EDIT.with(|d| d.borrow().as_ref().is_some_and(|d| d.by_pointer));
+        let by_pointer = EDIT.with(|d| d.borrow().as_ref().is_some_and(|d| d.centre.is_some()));
         if by_pointer {
             finish_edit();
         }
@@ -229,27 +233,28 @@ pub fn Dial(
         g.get()
     });
     HOOKS.with(|h| {
-        h.borrow_mut().insert(
-            draft_key.clone(),
-            Hooks {
+        h.borrow_mut()
+            .entry(draft_key.clone())
+            .or_default()
+            .push(Hooks {
                 generation,
                 show: Rc::new(move |v| {
                     shown.try_set(Some(v));
                 }),
                 commit: Rc::new(move |v| on_commit.run(v)),
                 range,
-            },
-        );
+            });
     });
     {
         let key = draft_key.clone();
         on_cleanup(move || {
             HOOKS.with(|h| {
                 let mut h = h.borrow_mut();
-                if h.get(&key)
-                    .is_some_and(|hooks| hooks.generation == generation)
-                {
-                    h.remove(&key);
+                if let Some(rings) = h.get_mut(&key) {
+                    rings.retain(|hooks| hooks.generation != generation);
+                    if rings.is_empty() {
+                        h.remove(&key);
+                    }
                 }
             });
         });
@@ -260,23 +265,36 @@ pub fn Dial(
         if disabled || value.is_none() {
             return;
         }
-        e.prevent_default();
-        KEY_TIMER.with(|t| t.borrow_mut().take());
         let Some(el) = e
             .current_target()
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
         else {
             return;
         };
+        let (centre, radius) = client_circle(&el);
+        let (dx, dy) = (
+            f64::from(e.client_x()) - centre.0,
+            f64::from(e.client_y()) - centre.1,
+        );
+        if !on_the_arc(dx.hypot(dy), radius) {
+            return;
+        }
+        e.prevent_default();
+        KEY_TIMER.with(|t| t.borrow_mut().take());
         let _ = el.set_pointer_capture(e.pointer_id());
-        set_edit(&pointer_key, value_from_pointer(&el, &e, range), true);
+        set_edit(
+            &pointer_key,
+            value_from_pointer(centre, &e, range),
+            Some(centre),
+        );
     };
     let keys_key = draft_key.clone();
     let on_keydown = move |e: web_sys::KeyboardEvent| {
         if disabled {
             return;
         }
-        let Some(current) = shown.get_untracked() else {
+        // Another copy of this ring may hold the edit in progress: start from it.
+        let Some(current) = draft(&keys_key).or_else(|| shown.get_untracked()) else {
             return;
         };
         let next = match e.key().as_str() {
@@ -289,7 +307,7 @@ pub fn Dial(
             _ => return,
         };
         e.prevent_default();
-        set_edit(&keys_key, next.clamp(min, max), false);
+        set_edit(&keys_key, next.clamp(min, max), None);
         let timer = Timeout::new(KEY_PAUSE_MS, finish_edit);
         KEY_TIMER.with(|t| *t.borrow_mut() = Some(timer));
     };
