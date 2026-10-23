@@ -1,0 +1,55 @@
+---
+title: Talking to the house (MCP)
+sidebar_position: 7
+description: Connect an AI assistant to the hub over MCP and ask it, in plain words, to inspect or change the house.
+---
+
+The hub runs an MCP server, so an AI assistant can inspect and change the house instead of a rules editor. The server is served at `http://<host>:8081/mcp` (streamable HTTP), on the same port as the REST API. Like that API, it is LAN-trusted with no auth in v1; see [Security](security.md).
+
+The assistant gets the house's tools and one resource, `oikos://snapshot`, which is the whole house as one JSON document. The full tool list is in [MCP tools](../reference/mcp-tools.md).
+
+## Connect a client
+
+Claude Code:
+
+```sh
+claude mcp add --transport http oikos http://<host>:8081/mcp
+```
+
+Codex CLI, in `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.oikos]
+url = "http://<host>:8081/mcp"
+```
+
+Claude Desktop only speaks stdio, so it launches `oikos-os mcp-stdio`, a proxy that relays every request to the running hub. In its config JSON, with the path of a built binary (`cargo build --release -p oikos-os`):
+
+```json
+{
+  "mcpServers": {
+    "oikos": {"command": "<path>/oikos-os", "args": ["mcp-stdio", "--server", "http://<host>:8081"]}
+  }
+}
+```
+
+The proxy exits with `cannot reach Oikos-os MCP server at …` when the hub is down; its logs go to stderr, stdout carries the protocol.
+
+The web UI's Settings screen builds the same snippets from the address you opened it at (see [The web UI](web-ui.md#settings)).
+
+## When a call fails
+
+A failed tool call answers in-band (`isError: true` with the reason) so the assistant can retry with better arguments.
+
+## Example requests
+
+You can ask in plain words, for example:
+
+- "Which lights are on in the living room?"
+- "Turn off every light on the ground floor."
+- "Send my phone a notification saying the laundry is done."
+- "Make a flow that turns the hall light on when the hall motion sensor sees movement, and off five minutes after the last movement."
+- "Show me the energy the house used today."
+- "Hold the bedroom at 19 degrees for the next two hours."
+
+Flows made this way appear on the [Flows](flows.md) page. Energy questions need `[history]` set, and climate requests need `[climate] enabled = true`; without them the tools answer with an error.

@@ -1,0 +1,48 @@
+---
+title: MQTT topics
+sidebar_position: 6
+description: Every MQTT topic the hub reads or writes, with its direction, retention, payload and the setting that moves it.
+---
+
+The table lists every topic the hub reads or writes, with its default prefix. "In" means the hub subscribes; "out" means the hub publishes. A prefix is shown in `<angle brackets>` or as its default, and the last column names the `oikos.toml` key that moves it (see [Configuration](configuration.md)). The broker user in `[mqtt] user` needs read and/or write on each topic accordingly.
+
+| Topic | Direction | Retained | Payload | Moved by |
+| --- | --- | --- | --- | --- |
+| `<discovery prefix>/<component>/[<node_id>/]<object_id>/config`, default `oikos/…` | in | yes (by the publisher) | Home Assistant discovery JSON; an empty payload removes the entity | `[topics] discovery_prefixes` |
+| Device state topics named by the discovery configs | in | by the device | Device state; subscribed on demand | discovery |
+| Device command topics named by the discovery configs | out | only when the config says `"retain": true` | The device's command payload | discovery |
+| `<z2m_base>/bridge/devices`, `/info`, `/state` | in | yes (by Zigbee2MQTT) | Zigbee2MQTT device list, bridge info and state | `[topics] z2m_base` |
+| `<ha_status_topic>`, default `homeassistant/status` | out | no | `online`, once per connect | `[mqtt] send_ha_birth`, `[mqtt] ha_status_topic` |
+| `oikos/ui/<entity id>` | in, out | yes | The entity's [override](entity-types.md#overrides) JSON; empty clears it | `[topics] ui_prefix` |
+| `oikos/ui/_areas` | in, out | yes | The declared rooms (`{"areas": […]}`) | `[topics] ui_prefix` |
+| `oikos/ui/_types` | out | yes | The whole [type table](entity-types.md#the-type-table) | `[topics] ui_prefix` |
+| `oikos/ui/dashboards/<id>` | in, out | yes | A dashboard definition; empty removes it | `[topics] ui_prefix` |
+| `oikos/automation/<flow id>` | in, out | yes | A [flow](flow-nodes.md) document; empty removes it | `[topics] automation_prefix` |
+| `<first discovery prefix>/<switch\|number\|button>/virtual/<id>/config` | out | yes | Discovery of a virtual entity | `[topics] discovery_prefixes` (first entry) |
+| `<first discovery prefix>/virtual/<id>` | in, out | yes for a switch or number; no for a button | `ON` / `OFF`, a number, or `PRESS`; the state and the command topic | `[topics] discovery_prefixes` (first entry) |
+| `<first discovery prefix>/<component>/group/<id>/config` | out | yes | Discovery of a group entity | `[groups] enabled`, `[topics] discovery_prefixes` |
+| `<first discovery prefix>/group/<id>` | in, out | yes (state) | The combined state; commands arrive here as JSON | `[groups] enabled` |
+| `<first discovery prefix>/group/<id>/definition` | in, out | yes | `{kind, name, members, hideMembers}` | `[groups] enabled` |
+| `<first discovery prefix>/group/<id>/avail` | out | yes | `online` | `[groups] enabled` |
+| `<first discovery prefix>/group/_migrated` | in, out | yes | `1`, the marker that the one-time room-group migration ran | `[groups] enabled` |
+| `oikos/push/notification/<source>` | in | no | An alert, v1 or legacy payload | `[push] prefix` |
+| `oikos/push/tokens/<installId>` | in; out to clear | yes | `{token, device_name, lang, updated_at}`; empty unregisters. The hub publishes an empty payload to clear a dead token | `[push] prefix` |
+| `oikos/push/responses` | in (climate), out | no | `{id, action, install_id, ts}`, a tapped alert button | `[push] prefix` |
+| `oikos/push/history` | in, out | yes | JSON array of the normalised alerts, newest first | `[push] prefix` |
+| `oikos-push/notification/+`, `oikos-push/tokens/+`, `oikos-push/history` | in; out to clear tokens | as above | OikosPush's topics, read during the switch-over. The hub only ever publishes an empty retained payload on `oikos-push/tokens/<id>` to clear a dead token | `[push] legacy_prefix` (empty turns them off) |
+| `oikos/climate/house` | in, out | yes | The house settings document | `[climate] prefix` |
+| `oikos/climate/zone/<zone>/<doc>`, `<doc>` being `settings`, `proposal`, `override` or `decision` | in, out | yes | A zone document | `[climate] prefix` |
+| `<topic_prefix>/events`, default `frigate/events` | in | no | Frigate event JSON; subscribed only with the bridge on | `[frigate] bridge`, `[frigate] topic_prefix` |
+| `<prefix>/+`, default `encryption-gateway/health/+` | in | yes (by the gateway) | `{"status": "ok" \| "fail" \| "config_error", …}` per component | `[watchdog.gateway] enabled`, `prefix` |
+| `$SYS/broker/log/#` | in | no | Mosquitto log lines | `[watchdog.acl] source = "topic"`, `log_topic` |
+
+## Notes
+
+- **Reserved sub-trees.** Under a discovery prefix, the segments `ui`, `automation`, `virtual` and `push` are reserved: never publish discovery there. A topic in them is never read as discovery and never shows under `GET /api/v1/ignored`.
+- **Climate documents never end in `/config`.** They cannot be read as discovery. The hub subscribes to `<prefix>/house` and `<prefix>/zone/+/+`, never `<prefix>/#`. `oikos/push/responses` is subscribed only while the climate engine is on, so a tapped proposal button reaches it.
+- **Overlapping subscriptions.** The hub subscribes to `<discovery prefix>/#`, `<z2m_base>/bridge/#`, `<ui_prefix>/#` and `<automation_prefix>/#`. A push filter that falls inside one of those wildcards (the default `oikos/push/…` under `oikos/#`) is left out, so the broker does not deliver a notification twice.
+- **Alerts raised inside the hub** (the Frigate bridge, watchdogs, flows, MCP) go to the push service in process, without the broker.
+- **Retained history.** `oikos/push/history` is the history itself: the hub adopts it at its first sync, and only when that topic holds no list yet does it seed it once from `oikos-push/history`.
+- **After each (re)connect** the hub waits for its subscription to be acknowledged, then 2 s more for the retained tokens, before it sends; alerts arriving meanwhile wait in the queue.
+- **Flows and dashboards read as written.** An invalid flow or dashboard document is kept and shown with its reason, never run.
+- **Broker permissions.** Give the hub user read and write on `oikos/#` (or the narrower sets above), read on `<topic_prefix>/events` and `<gateway prefix>/+`, and for the ACL watchdog read on `$SYS/broker/log/#`. Mosquitto denies silently.
