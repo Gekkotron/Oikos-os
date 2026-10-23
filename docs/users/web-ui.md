@@ -151,9 +151,20 @@ History (`/history/<id>`): a full-screen chart of one entity over 24 h, 7 d, 30 
 
 Groups (`/groups`): the hand-made groups, with a wizard to create one (`/groups/new`) or edit it, and a group sheet (`/group/<id>`) with its controls. See [Groups and virtual entities](groups-and-virtual-entities.md).
 
+## Cards
+
+Every device card has the same frame: an icon tile, the room (left out under a room's own heading and in a sheet, where the room is already plain), the name, a short state line ("On · 14 %" / "Allumé · 14 %") and, at the top right, the card's main control (a toggle, a badge or a ⋯ menu). The words follow the FR/EN switch. A tile shows what you use every day; its sheet shows the same card with every control the device has.
+
+- **Light**: toggle at the top right, brightness slider and colour swatch at the bottom.
+- **Switch**: toggle and its state.
+- **Climate**: the target sits in a ring. Drag the ring, or focus it and use the arrow keys (Page Up/Down: 1 °C, Home/End: the ends); the value is sent when you let go, or 0.6 s after the last key. − and + step at once. The ring follows the mode's colour and is greyed out while the mode is off. The mode is a badge you can change in place; the fan speed is in the sheet.
+- **Temperature**: the value large, the humidity of the same device, and a small curve of the last 24 hours (it needs the history database; without it the card simply has no curve). The badge reads "Live" while the sensor reports, and "3 h ago" / "2 d ago" once it has been quiet for 3 hours, which is how a flat battery shows.
+- **Vacuum**: two columns wide (a full row on a phone), a sentence for what the robot is doing ("At home.", "Cleaning.", "Needs help."), its battery, Start / Pause / Resume and Send home. Other actions and the fan speed are in the sheet.
+- **Water heater**: the tank, the temperature and its caption; ⋯ opens the sheet with the target and the mode.
+
 ## Entity sheet
 
-Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor.
+Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor. The controls are the device's card with all its controls (see [Cards](#cards)).
 
 Back, on every sheet and detail page, returns to the page it was opened from, one step at a time: dashboard → group → member → history unwinds in that order. A form you saved (new or edited group, new flow) is skipped. A page opened directly, from a link or after a reload, goes back to its parent: Alerts for an alert, Flows for a flow, Groups for the group wizard, the entity for its history, the first dashboard for the rest.
 

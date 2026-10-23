@@ -137,6 +137,42 @@ pub enum Key {
     Navigation,
     Breadcrumb,
     RoomGone,
+    LightOn,
+    LightOff,
+    SwitchOn,
+    SwitchOff,
+    Brightness,
+    More,
+    Live,
+    AgoHours,
+    AgoDays,
+    ModeHeat,
+    ModeCool,
+    ModeAuto,
+    ModeDry,
+    ModeFan,
+    ModeOff,
+    Mode,
+    ItIs,
+    TargetTemperature,
+    Decrease,
+    Increase,
+    VacDocked,
+    VacCleaning,
+    VacReturning,
+    VacPaused,
+    VacIdle,
+    VacError,
+    VacOnDock,
+    VacRunning,
+    VacFan,
+    VacOffDock,
+    VacCheck,
+    Start,
+    Pause,
+    Resume,
+    SendHome,
+    Battery,
 }
 
 impl Key {
@@ -177,6 +213,42 @@ impl Key {
         Key::Navigation,
         Key::Breadcrumb,
         Key::RoomGone,
+        Key::LightOn,
+        Key::LightOff,
+        Key::SwitchOn,
+        Key::SwitchOff,
+        Key::Brightness,
+        Key::More,
+        Key::Live,
+        Key::AgoHours,
+        Key::AgoDays,
+        Key::ModeHeat,
+        Key::ModeCool,
+        Key::ModeAuto,
+        Key::ModeDry,
+        Key::ModeFan,
+        Key::ModeOff,
+        Key::Mode,
+        Key::ItIs,
+        Key::TargetTemperature,
+        Key::Decrease,
+        Key::Increase,
+        Key::VacDocked,
+        Key::VacCleaning,
+        Key::VacReturning,
+        Key::VacPaused,
+        Key::VacIdle,
+        Key::VacError,
+        Key::VacOnDock,
+        Key::VacRunning,
+        Key::VacFan,
+        Key::VacOffDock,
+        Key::VacCheck,
+        Key::Start,
+        Key::Pause,
+        Key::Resume,
+        Key::SendHome,
+        Key::Battery,
     ];
 }
 
@@ -219,6 +291,45 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Navigation => ("Main", "Navigation principale"),
         Key::Breadcrumb => ("Breadcrumb", "Fil d'Ariane"),
         Key::RoomGone => ("This room is gone.", "Cette pièce n'existe plus."),
+        Key::LightOn => ("On", "Allumé"),
+        Key::LightOff => ("Off", "Éteint"),
+        Key::SwitchOn => ("On", "Activé"),
+        Key::SwitchOff => ("Off", "Désactivé"),
+        Key::Brightness => ("Brightness", "Luminosité"),
+        Key::More => ("More options", "Plus d'options"),
+        Key::Live => ("Live", "En direct"),
+        Key::AgoHours => ("{n} h ago", "Il y a {n} h"),
+        Key::AgoDays => ("{n} d ago", "Il y a {n} j"),
+        Key::ModeHeat => ("Heat", "Chauffage"),
+        Key::ModeCool => ("Cool", "Clim"),
+        Key::ModeAuto => ("Auto", "Auto"),
+        Key::ModeDry => ("Dry", "Déshumidification"),
+        Key::ModeFan => ("Fan", "Ventilation"),
+        Key::ModeOff => ("Off", "Arrêt"),
+        Key::Mode => ("Mode", "Mode"),
+        Key::ItIs => ("It's", "Il fait"),
+        Key::TargetTemperature => ("Target temperature", "Température souhaitée"),
+        Key::Decrease => ("Decrease", "Baisser"),
+        Key::Increase => ("Increase", "Monter"),
+        Key::VacDocked => ("At home.", "À la maison."),
+        Key::VacCleaning => ("Cleaning.", "En plein ménage."),
+        Key::VacReturning => ("Heading home.", "Rentre à la base."),
+        Key::VacPaused => ("Paused.", "En pause."),
+        Key::VacIdle => ("Idle.", "Au repos."),
+        Key::VacError => ("Needs help.", "Besoin d'aide."),
+        Key::VacOnDock => (
+            "On its dock · Ready to clean",
+            "Sur sa base · Prêt à nettoyer",
+        ),
+        Key::VacRunning => ("Running", "En cours"),
+        Key::VacFan => ("fan", "ventilateur"),
+        Key::VacOffDock => ("Off its dock", "Hors de sa base"),
+        Key::VacCheck => ("Check the robot", "Vérifiez le robot"),
+        Key::Start => ("Start", "Démarrer"),
+        Key::Pause => ("Pause", "Pause"),
+        Key::Resume => ("Resume", "Reprendre"),
+        Key::SendHome => ("Send home", "Renvoyer à la base"),
+        Key::Battery => ("Battery", "Batterie"),
     };
     match lang {
         Lang::En => en,
@@ -235,6 +346,12 @@ pub fn unseen_alerts(lang: Lang, badge: &str) -> String {
         (Lang::Fr, true) => format!("{badge} alerte non lue"),
         (Lang::Fr, false) => format!("{badge} alertes non lues"),
     }
+}
+
+/// The language in context, read reactively; English when there is none.
+pub fn use_lang() -> impl Fn() -> Lang + Copy + 'static {
+    let lang = use_context::<RwSignal<Lang>>();
+    move || lang.map_or(Lang::En, |l| l.get())
 }
 
 /// A translator bound to the language signal in context (reactive), or English when there is none.
@@ -827,7 +944,43 @@ mod tests {
             | Key::ChangeLanguage
             | Key::Navigation
             | Key::Breadcrumb
-            | Key::RoomGone => Key::ALL.contains(&k),
+            | Key::RoomGone
+            | Key::LightOn
+            | Key::LightOff
+            | Key::SwitchOn
+            | Key::SwitchOff
+            | Key::Brightness
+            | Key::More
+            | Key::Live
+            | Key::AgoHours
+            | Key::AgoDays
+            | Key::ModeHeat
+            | Key::ModeCool
+            | Key::ModeAuto
+            | Key::ModeDry
+            | Key::ModeFan
+            | Key::ModeOff
+            | Key::Mode
+            | Key::ItIs
+            | Key::TargetTemperature
+            | Key::Decrease
+            | Key::Increase
+            | Key::VacDocked
+            | Key::VacCleaning
+            | Key::VacReturning
+            | Key::VacPaused
+            | Key::VacIdle
+            | Key::VacError
+            | Key::VacOnDock
+            | Key::VacRunning
+            | Key::VacFan
+            | Key::VacOffDock
+            | Key::VacCheck
+            | Key::Start
+            | Key::Pause
+            | Key::Resume
+            | Key::SendHome
+            | Key::Battery => Key::ALL.contains(&k),
         }
     }
     #[test]
@@ -835,7 +988,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 36);
+        assert_eq!(Key::ALL.len(), 72);
     }
     fn window(room: Option<&str>) -> Activity {
         Activity::Open(Opening {

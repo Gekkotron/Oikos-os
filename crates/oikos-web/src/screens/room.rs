@@ -5,6 +5,7 @@ use leptos_router::hooks::use_params_map;
 use oikos_core::model::UNASSIGNED_AREA;
 
 use crate::api::encode_id;
+use crate::components::card_place::{CardPlace, provide_card_place};
 use crate::components::room_title::RoomTitle;
 use crate::groups::{HomeItem, home_items};
 use crate::house::House;
@@ -43,6 +44,10 @@ pub(crate) fn RoomSection(id: String, #[prop(optional)] anchored: bool) -> impl 
             }
         }
     };
+    // Under its own heading a card does not repeat the room; Favorites mixes rooms.
+    if id != FAVORITES {
+        provide_card_place(CardPlace::Room);
+    }
     let chip = id.clone();
     let items = Memo::new(move |_| {
         house.areas.with(|a| {

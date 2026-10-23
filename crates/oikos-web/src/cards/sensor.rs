@@ -6,9 +6,13 @@ use oikos_api::EntityView;
 use oikos_core::model::{EntityState, Kind, StateValue};
 
 use super::Sender;
+use super::text::{decimal, freshness};
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::{degrees, display_value, short_name, value_class};
+use crate::components::now::{Now, unix_now};
+use crate::components::sparkline::Sparkline;
+use crate::format::{display_value, short_name, value_class};
 use crate::house::House;
+use crate::i18n::use_lang;
 use crate::icons::DROP;
 use crate::rooms::shows_on_home;
 
@@ -87,16 +91,22 @@ fn history_href(id: &str) -> String {
     format!("/history/{}", crate::api::encode_id(id))
 }
 
-/// The body of a temperature card: the temperature, tinted by comfort, and the humidity of the
-/// same device under it when Home shows one. The temperature readout and the humidity bar are
-/// separate links so each opens its own history chart.
+/// The body of a temperature card: the temperature large, then the humidity of the same device
+/// (when Home shows one) and the curve of the last 24 hours. The value and the curve open the
+/// temperature's history, the humidity its own.
 fn temperature_body(entity: &EntityView, house: House) -> impl IntoView + use<> {
+    let lang = use_lang();
     let value = numeric(&entity.state);
     let class = match value {
-        Some(v) => format!("readout__temp {}", comfort_class(v)),
-        None => "readout__temp".into(),
+        Some(v) => format!("temp__value {}", comfort_class(v)),
+        None => "temp__value".into(),
     };
-    let text = degrees(value, entity.unit.as_deref());
+    let unit = entity
+        .unit
+        .clone()
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| "°C".into());
+    let number = move || value.map_or_else(|| "—".to_owned(), |v| decimal(lang(), v));
     let temp_href = history_href(&entity.id);
     let device_id = entity.device_id.clone();
     let device_id_val = device_id.clone();
@@ -111,19 +121,27 @@ fn temperature_body(entity: &EntityView, house: House) -> impl IntoView + use<> 
                 .and_then(|e| numeric(&e.state))
         })
     });
+    let id = entity.id.clone();
     view! {
-        <div class="readout">
-            <A href=temp_href attr:class="readout__link">
-                <span class=class>{text}</span>
+        <div class="temp">
+            <A href=temp_href.clone() attr:class=class>
+                {number}
+                {value.map(|_| view! { " " <small class="temp__unit">{unit}</small> })}
             </A>
-            {move || humidity_id.get().map(|id| {
-                let href = history_href(&id);
-                view! {
-                    <A href=href attr:class="readout__link">
-                        {humidity_view(move || humidity_value.get())}
-                    </A>
-                }
-            })}
+            <div class="temp__foot">
+                {move || humidity_id.get().map(|id| {
+                    let href = history_href(&id);
+                    view! {
+                        <A href=href attr:class="temp__humidity">
+                            <span class="readout__drop" inner_html=DROP></span>
+                            {move || humidity_text(humidity_value.get())}
+                        </A>
+                    }
+                })}
+                <A href=temp_href attr:class="temp__spark">
+                    <Sparkline entity_id=id />
+                </A>
+            </div>
         </div>
     }
 }
@@ -165,8 +183,26 @@ pub fn SensorCard(entity: EntityView) -> impl IntoView {
                     String::new()
                 };
                 let body = temperature_body(&entity, house);
+                let lang = use_lang();
+                let now = use_context::<Now>();
+                let last_update = entity.state.last_update;
+                let fresh = Signal::derive(move || {
+                    let now = now.map_or_else(unix_now, |n| n.0.get());
+                    freshness(lang(), now, last_update)
+                });
+                let trailing = view! {
+                    {move || fresh.get().map(|t| view! { <span class="card__badge">{t}</span> })}
+                }
+                .into_any();
                 return view! {
-                    <CardFrame entity=entity on_click=on_click pending=pending title=title>
+                    <CardFrame
+                        entity=entity
+                        on_click=on_click
+                        pending=pending
+                        title=title
+                        tint="cool"
+                        trailing=trailing
+                    >
                         {body}
                     </CardFrame>
                 }

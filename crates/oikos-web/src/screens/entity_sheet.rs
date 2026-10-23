@@ -13,6 +13,7 @@ use crate::cards::Sender;
 use crate::cards::light::has_colour;
 use crate::components::hs_wheel::HsWheel;
 
+use crate::components::card_place::InSheet;
 use crate::format::{format_timestamp, list_label, title_suffix, type_word, wrap_id};
 use crate::house::House;
 use crate::icons::entity_icon;
@@ -271,7 +272,9 @@ pub fn SheetBody(id: String) -> impl IntoView {
             {header}
         </header>
         <Panel title="Controls">
-            <div class="sheet__controls">{move || entity.get().map(card_for)}</div>
+            <div class="sheet__controls">
+                <InSheet>{move || entity.get().map(card_for)}</InSheet>
+            </div>
             <A href=history_href attr:class="chip sheet__history">
                 "View history →"
             </A>
