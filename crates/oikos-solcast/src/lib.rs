@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod budget;
 pub mod forecast;
 pub mod period;
 
