@@ -127,6 +127,13 @@ pub async fn put_flow(flow: &Flow) -> Result<(FlowView, Option<String>), ApiErro
     Ok((outcome.flow, outcome.warning))
 }
 
+/// Removes flow `id` from the hub; the hub's flows push then drops it from the list.
+pub async fn delete_flow(id: &str) -> Result<(), ApiError> {
+    let url = format!("/api/v1/flows/{}", encode_id(id));
+    check(Request::delete(&url).build(), None).await?;
+    Ok(())
+}
+
 /// The `[flows]` settings: the house point, the time zone and whether the Paris fallback is on.
 pub async fn get_flows_config() -> Result<FlowsConfigView, ApiError> {
     let response = check(Request::get("/api/v1/config/flows").build(), None).await?;

@@ -1,4 +1,4 @@
-//! The ⋯ menu of a flow row or card: open the flow, or move it to a room.
+//! The ⋯ menu of a flow row or card: open the flow, move it to a room, or delete it.
 
 use leptos::ev;
 use leptos::prelude::*;
@@ -46,9 +46,16 @@ pub fn provide_open_menu() {
 }
 
 /// A ⋯ button over a small popover. `current` is the flow's room (a known area id), `invalid`
-/// flows cannot be moved. Esc or a press outside the menu closes it (see [`OpenMenu`]).
+/// flows cannot be moved (they can still be deleted). Delete asks first, inside the popover,
+/// naming the flow by `name`. Esc or a press outside the menu closes it (see [`OpenMenu`]).
 #[component]
-pub fn RoomMenu(id: String, href: String, current: Option<String>, invalid: bool) -> impl IntoView {
+pub fn RoomMenu(
+    id: String,
+    name: String,
+    href: String,
+    current: Option<String>,
+    invalid: bool,
+) -> impl IntoView {
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
     let OpenMenu(open_menu) = expect_context::<OpenMenu>();
@@ -56,6 +63,14 @@ pub fn RoomMenu(id: String, href: String, current: Option<String>, invalid: bool
         let id = id.clone();
         Memo::new(move |_| open_menu.with(|o| o.as_deref() == Some(id.as_str())))
     };
+
+    // Asking whether to delete; dropped whenever the menu closes.
+    let confirming = RwSignal::new(false);
+    Effect::new(move |_| {
+        if !open.get() {
+            confirming.set(false);
+        }
+    });
 
     let id = StoredValue::new(id);
     // The hub's push refreshes the list, like the enable switch.
@@ -104,6 +119,17 @@ pub fn RoomMenu(id: String, href: String, current: Option<String>, invalid: bool
         }
     };
     let none_checked = current.is_none();
+    // The hub's push drops the row; a refusal shows as a toast and the row stays.
+    let delete = move |_| {
+        open_menu.set(None);
+        let id = id.get_value();
+        spawn_local(async move {
+            if let Err(e) = api::delete_flow(&id).await {
+                toasts.push(e.error);
+            }
+        });
+    };
+    let prompt = StoredValue::new(format!("Delete “{name}”?"));
 
     view! {
         <span class="room-menu">
@@ -123,13 +149,58 @@ pub fn RoomMenu(id: String, href: String, current: Option<String>, invalid: bool
             </button>
             <Show when=move || open.get()>
                 <div class="room-menu__pop" role="menu">
-                    <A href=href.clone() attr:class="room-menu__item" attr:role="menuitem">
-                        <span class="room-menu__check" aria-hidden="true"></span>
-                        "Open"
-                    </A>
-                    <p class="room-menu__head" role="presentation">"Move to room"</p>
-                    {rooms.clone()}
-                    {item("No room".to_owned(), None, none_checked)}
+                    <Show
+                        when=move || confirming.get()
+                        fallback={
+                            let href = href.clone();
+                            let rooms = rooms.clone();
+                            move || {
+                                view! {
+                                    <A
+                                        href=href.clone()
+                                        attr:class="room-menu__item"
+                                        attr:role="menuitem"
+                                    >
+                                        <span class="room-menu__check" aria-hidden="true"></span>
+                                        "Open"
+                                    </A>
+                                    <p class="room-menu__head" role="presentation">
+                                        "Move to room"
+                                    </p>
+                                    {rooms.clone()}
+                                    {item("No room".to_owned(), None, none_checked)}
+                                    <button
+                                        type="button"
+                                        role="menuitem"
+                                        class="room-menu__item room-menu__item--danger"
+                                        on:click=move |_| confirming.set(true)
+                                    >
+                                        <span class="room-menu__check" aria-hidden="true"></span>
+                                        "Delete flow…"
+                                    </button>
+                                }
+                            }
+                        }
+                    >
+                        <div class="room-menu__confirm" role="alertdialog" aria-label="Delete flow">
+                            <p class="room-menu__prompt">
+                                <strong>{move || prompt.get_value()}</strong>
+                                " This can't be undone."
+                            </p>
+                            <div class="room-menu__actions">
+                                <button
+                                    type="button"
+                                    class="btn btn--ghost"
+                                    on:click=move |_| confirming.set(false)
+                                >
+                                    "Cancel"
+                                </button>
+                                <button type="button" class="btn btn--danger" on:click=delete.clone()>
+                                    "Delete"
+                                </button>
+                            </div>
+                        </div>
+                    </Show>
                 </div>
             </Show>
         </span>
