@@ -1,0 +1,83 @@
+name: CI
+
+# The checks from docs/contributors/development.md, on every pull request and
+# on main after a merge.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the run still going for the old one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  lint:
+    name: fmt, clippy, wasm32 check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # oikos-core and oikos-api are shared with the web UI and must keep
+      # building for the browser.
+      - run: cargo check -p oikos-core --target wasm32-unknown-unknown
+      - run: cargo check -p oikos-api --target wasm32-unknown-unknown
+      - run: cargo check -p oikos-web --target wasm32-unknown-unknown
+
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    # The history tests skip themselves without TEST_DATABASE_URL; give them a
+    # throwaway TimescaleDB so they run here.
+    services:
+      timescaledb:
+        image: timescale/timescaledb:latest-pg17
+        env:
+          POSTGRES_USER: oikos
+          POSTGRES_PASSWORD: oikos
+          POSTGRES_DB: oikos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oikos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://oikos:oikos@localhost:5432/oikos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  web:
+    name: web UI browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+      # The runner image ships Chrome and a matching chromedriver.
+      - run: wasm-pack test --headless --chrome --chromedriver "$CHROMEWEBDRIVER/chromedriver"
+        working-directory: crates/oikos-web
