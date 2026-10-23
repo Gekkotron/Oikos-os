@@ -54,10 +54,10 @@ pub fn Grid(
                                         class="widget__move"
                                         aria-label="Move earlier"
                                         on:click=move |_| {
-                                            if let Some(i) = position.run(()) {
-                                                if i > 0 {
-                                                    state.reorder(i, i - 1);
-                                                }
+                                            if let Some(i) = position.run(())
+                                                && i > 0
+                                            {
+                                                state.reorder(i, i - 1);
                                             }
                                         }
                                     >
