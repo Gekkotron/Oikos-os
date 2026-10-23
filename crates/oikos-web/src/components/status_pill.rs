@@ -1,4 +1,4 @@
-//! The connection pill in the top bar.
+//! The connection pill at the foot of the sidebar.
 
 use leptos::prelude::*;
 use oikos_api::ConnectionStatus;

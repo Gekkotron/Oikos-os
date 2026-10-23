@@ -1,0 +1,106 @@
+//! The content header: the breadcrumb of the page, then the theme and language buttons.
+
+use leptos::prelude::*;
+use leptos_router::hooks::use_location;
+
+use super::route::{Lookup, crumbs};
+use crate::house::House;
+use crate::i18n::{Key, Lang, use_text};
+use crate::icons::{HOUSE, MOON, SUN, SUN_MOON};
+use crate::theme::Theme;
+
+/// The name the user gave the item a crumb points at, from what the house already holds.
+fn name_of(house: House, lookup: Lookup) -> Option<String> {
+    match lookup {
+        Lookup::Dashboard(id) => house.dashboards.with(|list| {
+            list.iter()
+                .find(|d| d.dashboard.id == id)
+                .map(|d| d.dashboard.name.clone())
+        }),
+        Lookup::Room(id) => house
+            .areas
+            .with(|list| list.iter().find(|a| a.id == id).map(|a| a.name.clone())),
+        Lookup::Flow(id) => house.flows.with(|list| {
+            list.iter()
+                .find(|f| f.definition.id == id)
+                .map(|f| f.definition.name.clone())
+        }),
+        Lookup::Group(id) => house
+            .groups
+            .with(|groups| groups.get(id).map(|g| g.name.clone())),
+        Lookup::Entity(id) => house
+            .entities
+            .with(|entities| entities.get(id).map(|e| e.name.clone())),
+        Lookup::Alert(id) => house
+            .alerts
+            .with(|list| list.iter().find(|a| a.id == id).map(|a| a.title.clone())),
+    }
+}
+
+#[component]
+pub fn ContentHeader() -> impl IntoView {
+    let t = use_text();
+    let house = expect_context::<House>();
+    let theme = expect_context::<RwSignal<Theme>>();
+    let lang = use_context::<RwSignal<Lang>>().unwrap_or_else(|| RwSignal::new(Lang::En));
+    let location = use_location();
+
+    let trail = Memo::new(move |_| {
+        let path = location.pathname.get();
+        crumbs(&path, lang.get(), |lookup| name_of(house, lookup))
+    });
+    let theme_icon = move || match theme.get() {
+        Theme::Auto => SUN_MOON,
+        Theme::Night => MOON,
+        Theme::Ivoire => SUN,
+    };
+
+    view! {
+        <header class="content-header">
+            <nav class="breadcrumb" aria-label=move || t(Key::Breadcrumb)>
+                <ol class="breadcrumb__list">
+                    {move || {
+                        trail
+                            .get()
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, crumb)| {
+                                let home = (i == 0)
+                                    .then(|| view! { <span class="breadcrumb__home" inner_html=HOUSE></span> });
+                                let label = crumb.label;
+                                let item = match crumb.href.filter(|href| !href.is_empty()) {
+                                    Some(href) => view! { <a href=href>{label}</a> }.into_any(),
+                                    None => view! { <span aria-current="page">{label}</span> }.into_any(),
+                                };
+                                view! { <li class="breadcrumb__item">{home}{item}</li> }
+                            })
+                            .collect_view()
+                    }}
+                </ol>
+            </nav>
+            <div class="content-header__tools">
+                <button
+                    type="button"
+                    class="content-header__theme"
+                    aria-label=move || t(Key::ChangeTheme)
+                    title=move || theme.get().label()
+                    inner_html=theme_icon
+                    on:click=move |_| theme.update(|th| *th = th.next())
+                ></button>
+                // The label names the language the button switches to, in that language.
+                <button
+                    type="button"
+                    class="content-header__lang"
+                    aria-label=move || t(Key::ChangeLanguage)
+                    title=move || t(Key::ChangeLanguage)
+                    lang=move || lang.get().next().as_str()
+                    on:click=move |_| lang.update(|l| *l = l.next())
+                >
+                    <span class:content-header__lang--on=move || lang.get() == Lang::Fr>"FR"</span>
+                    <span aria-hidden="true">"·"</span>
+                    <span class:content-header__lang--on=move || lang.get() == Lang::En>"EN"</span>
+                </button>
+            </div>
+        </header>
+    }
+}

@@ -121,6 +121,7 @@ pub enum Key {
     /// Names the language you switch TO.
     ChangeLanguage,
     Navigation,
+    Breadcrumb,
     RoomGone,
 }
 
@@ -153,6 +154,7 @@ impl Key {
         Key::ChangeTheme,
         Key::ChangeLanguage,
         Key::Navigation,
+        Key::Breadcrumb,
         Key::RoomGone,
     ];
 }
@@ -187,6 +189,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::ChangeTheme => ("Change theme", "Changer de thème"),
         Key::ChangeLanguage => ("Français", "English"),
         Key::Navigation => ("Main", "Navigation principale"),
+        Key::Breadcrumb => ("Breadcrumb", "Fil d'Ariane"),
         Key::RoomGone => ("This room is gone.", "Cette pièce n'existe plus."),
     };
     match lang {
@@ -279,6 +282,7 @@ mod tests {
             | Key::ChangeTheme
             | Key::ChangeLanguage
             | Key::Navigation
+            | Key::Breadcrumb
             | Key::RoomGone => Key::ALL.contains(&k),
         }
     }
@@ -287,6 +291,6 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 28);
+        assert_eq!(Key::ALL.len(), 29);
     }
 }

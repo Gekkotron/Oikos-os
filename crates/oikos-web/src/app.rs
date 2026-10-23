@@ -1,18 +1,18 @@
-//! The shell: top bar (name, connection pill, navigation) around the router.
+//! The app root: house state, contexts and the routes, framed by the sidebar shell.
 
 use leptos::prelude::*;
-use leptos_router::components::{A, Route, Router, Routes};
+use leptos_router::components::{Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
+use oikos_api::DashboardView;
 use oikos_core::model::{Kind, StateValue};
 
 use crate::commands::Pending;
 use crate::components::confirm::Confirming;
 use crate::components::now::install_now;
-use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
-use crate::icons::{BELL, BOLT, FLOW_NODES, GEAR, LAYERS, SHIELD, THERMOMETER};
+use crate::i18n::install_lang;
 use crate::nav::{TrackBackStack, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
@@ -29,29 +29,32 @@ use crate::screens::groups::GroupsScreen;
 use crate::screens::history_detail::HistoryDetailScreen;
 use crate::screens::security::SecurityScreen;
 use crate::screens::settings::SettingsScreen;
+use crate::shell::Shell;
 use crate::theme::install_theme;
 
-/// Landing and unknown paths go to the first authored dashboard if there is one, else to
-/// House. Waits for the dashboards fetch to resolve before deciding, so an authored dashboard
-/// is honoured even when the user opens the app directly on `/`. `replace` keeps Back from
-/// bouncing off the redirect.
+/// Where landing goes: the first authored dashboard if there is one, else House; `None` while the
+/// list is still empty (not fetched yet).
+pub(crate) fn landing_dashboard(list: &[DashboardView]) -> Option<String> {
+    if list.is_empty() {
+        return None;
+    }
+    Some(
+        list.iter()
+            .find(|d| d.dashboard.id != oikos_api::HOUSE_ID)
+            .map(|d| d.dashboard.id.clone())
+            .unwrap_or_else(|| oikos_api::HOUSE_ID.to_owned()),
+    )
+}
+
+/// Landing and unknown paths go to [`landing_dashboard`]. Waits for the dashboards fetch to
+/// resolve before deciding, so an authored dashboard is honoured even when the user opens the app
+/// directly on `/`. `replace` keeps Back from bouncing off the redirect.
 #[component]
 fn HouseRedirect() -> impl IntoView {
     let house = expect_context::<House>();
     let navigate = use_navigate();
     Effect::new(move |_| {
-        let target = house.dashboards.with(|list| {
-            if list.is_empty() {
-                return None;
-            }
-            Some(
-                list.iter()
-                    .find(|d| d.dashboard.id != oikos_api::HOUSE_ID)
-                    .map(|d| d.dashboard.id.clone())
-                    .unwrap_or_else(|| oikos_api::HOUSE_ID.to_owned()),
-            )
-        });
-        if let Some(id) = target {
+        if let Some(id) = house.dashboards.with(|list| landing_dashboard(list)) {
             navigate(
                 &format!("/dashboards/{id}"),
                 leptos_router::NavigateOptions {
@@ -125,13 +128,14 @@ pub fn App() -> impl IntoView {
     });
     let theme = install_theme();
     provide_context(theme);
+    provide_context(install_lang());
     let alarm_armed = Memo::new(move |_| house.entities.with(|m| any_alarm_armed(m.values())));
     let solar_active = Memo::new(move |_| {
         house
             .entities
             .with(|m| crate::energy::any_solar_active(m.values()))
     });
-    // Count of alerts received since the user's last visit to /alerts. The badge in the top bar
+    // Count of alerts received since the user's last visit to /alerts. The badge in the sidebar
     // uses this: hidden at zero, capped at "99+".
     let alerts_badge = Memo::new(move |_| {
         let count = house
@@ -143,90 +147,11 @@ pub fn App() -> impl IntoView {
     crate::ws::connect("/ws", house);
     #[cfg(target_arch = "wasm32")]
     house.refresh_flows_config();
-    // Easter egg: double-clicking the logo rings the doorbell and gives the house a little shake.
-    let ringing = RwSignal::new(false);
-    let ring = move |_| {
-        crate::chime::ring();
-        ringing.set(true);
-        gloo_timers::callback::Timeout::new(1200, move || {
-            ringing.try_set(false);
-        })
-        .forget();
-    };
-
     view! {
         <Router>
             <TrackBackStack />
             <crate::alerts::TrackAlertsSeen />
-            <header class="topbar">
-                <span class="topbar__brand">
-                    <img
-                        class="topbar__logo"
-                        class:topbar__logo--ringing=move || ringing.get()
-                        src="/assets/icon.svg"
-                        alt=""
-                        width="28"
-                        height="28"
-                        draggable="false"
-                        on:dblclick=ring
-                    />
-                    <span class="topbar__name">"Oikos"</span>
-                </span>
-                <StatusPill />
-                <nav class="topbar__nav" aria-label="Main">
-                    <crate::dashboards::picker::DashboardsPicker />
-                    <A href="/energy">
-                        <span
-                            class="nav__glyph"
-                            class:nav__glyph--solar=move || solar_active.get()
-                            inner_html=BOLT
-                        ></span>
-                        <span class="nav__label">"Energy"</span>
-                    </A>
-                    <A href="/security">
-                        <span
-                            class="nav__glyph"
-                            class:nav__glyph--armed=move || alarm_armed.get()
-                            inner_html=SHIELD
-                        ></span>
-                        <span class="nav__label">"Security"</span>
-                    </A>
-                    <Show when=move || climate_on.get()>
-                        <A href="/climate">
-                            <span class="nav__glyph" inner_html=THERMOMETER></span>
-                            <span class="nav__label">"Climate"</span>
-                            <span class="nav__badge nav__badge--beta">
-                                "Beta"
-                            </span>
-                        </A>
-                    </Show>
-                    <A href="/alerts">
-                        <span class="nav__glyph" inner_html=BELL></span>
-                        <span class="nav__label">"Alerts"</span>
-                        {move || alerts_badge.get().map(|text| {
-                            let label = format!("{text} unseen alerts");
-                            view! {
-                                <span class="nav__badge" aria-label=label>
-                                    {text}
-                                </span>
-                            }
-                        })}
-                    </A>
-                    <A href="/flows">
-                        <span class="nav__glyph" inner_html=FLOW_NODES></span>
-                        <span class="nav__label">"Flows"</span>
-                    </A>
-                    <A href="/groups">
-                        <span class="nav__glyph" inner_html=LAYERS></span>
-                        <span class="nav__label">"Groups"</span>
-                    </A>
-                    <A href="/settings">
-                        <span class="nav__glyph" inner_html=GEAR></span>
-                        <span class="nav__label">"Settings"</span>
-                    </A>
-                </nav>
-            </header>
-            <main class="screen">
+            <Shell climate_on alarm_armed solar_active alerts_badge>
                 <Routes fallback=HouseRedirect>
                     <Route path=path!("/") view=HouseRedirect />
                     <Route path=path!("/dashboards/:id") view=DashboardScreen />
@@ -247,7 +172,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/devices") view=DevicesScreen />
                     <Route path=path!("/settings") view=SettingsScreen />
                 </Routes>
-            </main>
+            </Shell>
             <ToastQueue />
         </Router>
     }

@@ -128,7 +128,7 @@ pub const PYLON: &str = svg!(
 pub const HOUSE: &str =
     svg!(r#"<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-6h4v6"/>"#);
 
-/// Nav rail: alerts, flows, devices, settings — plus moon for the theme toggle.
+/// Nav rail: alerts, flows, devices, settings — plus moon, sun and sun-moon for the theme button.
 pub const BELL: &str = svg!(
     r#"<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/>"#
 );
@@ -145,6 +145,10 @@ pub const GEAR: &str = svg!(
     r#"<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>"#
 );
 pub const MOON: &str = svg!(r#"<path d="M20 14A9 9 0 1 1 10 4a7 7 0 0 0 10 10"/>"#);
+/// Half-lit disc: the theme follows the system.
+pub const SUN_MOON: &str = svg!(
+    r#"<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor"/>"#
+);
 pub const PLUS: &str = svg!(r#"<path d="M12 5v14"/><path d="M5 12h14"/>"#);
 pub const MAGNIFIER: &str = svg!(r#"<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/>"#);
 pub const TRASH: &str = svg!(
