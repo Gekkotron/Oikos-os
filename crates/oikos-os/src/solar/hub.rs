@@ -87,6 +87,11 @@ impl Hub {
         self.solar_slot().forecast.is_some()
     }
 
+    /// A copy of the held forecast, if any.
+    pub fn solar_forecast(&self) -> Option<Forecast> {
+        self.solar_slot().forecast.clone()
+    }
+
     /// The view of the held forecast now, with `stale` computed now.
     pub fn solar_view(&self) -> Result<SolarView, HubError> {
         let unavailable = || HubError::Publish("solar unavailable".to_owned());

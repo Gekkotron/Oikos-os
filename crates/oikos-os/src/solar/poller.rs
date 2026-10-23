@@ -210,6 +210,10 @@ async fn fetch_round(hub: &Hub, client: &Client, sites: &[String], warned: &mut 
         )
         .earliest()
         .map_or(now, |t| t.with_timezone(&Utc));
+    if let Some(previous) = hub.solar_forecast() {
+        // Solcast only returns the periods from now on: keep what today already had.
+        forecast.keep_past(&previous, midnight);
+    }
     forecast.trim(midnight, midnight + ChronoDuration::days(KEEP_DAYS));
     hub.apply_solar_forecast(forecast);
     let calls_today = hub.solar_ledger().calls_on(now);

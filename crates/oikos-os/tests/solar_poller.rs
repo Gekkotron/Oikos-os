@@ -14,7 +14,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use chrono::Utc;
+use chrono::{DateTime, TimeZone, Utc};
 use oikos_api::{ConnectionStatus, SolarView};
 use oikos_core::command::Publish;
 use oikos_os::config::Config;
@@ -42,6 +42,16 @@ struct Stub {
 
 impl Stub {
     fn new(answers: &[(&str, Answer)], scale: f64) -> Arc<Stub> {
+        Self::with_body(answers, solcast_body(scale, None))
+    }
+
+    /// Like [`Stub::new`], but serving only the periods that start at or after `from`, as
+    /// Solcast does once part of the day is over.
+    fn from_instant(scale: f64, from: DateTime<Utc>) -> Arc<Stub> {
+        Self::with_body(&[], solcast_body(scale, Some(from)))
+    }
+
+    fn with_body(answers: &[(&str, Answer)], body: String) -> Arc<Stub> {
         Arc::new(Stub {
             answers: Mutex::new(
                 answers
@@ -51,7 +61,7 @@ impl Stub {
             ),
             calls: Mutex::new(BTreeMap::new()),
             total: AtomicUsize::new(0),
-            body: solcast_body(scale),
+            body,
         })
     }
 
@@ -65,11 +75,12 @@ impl Stub {
 }
 
 /// The shifted fixture, serialised back to Solcast's JSON shape, every estimate times `scale`.
-fn solcast_body(scale: f64) -> String {
+fn solcast_body(scale: f64, from: Option<DateTime<Utc>>) -> String {
     let forecast = common::solar::forecast_today();
     let forecasts: Vec<_> = forecast
         .periods
         .iter()
+        .filter(|p| from.is_none_or(|from| p.start() >= from))
         .map(|p| {
             json!({
                 "pv_estimate": p.estimate * scale,
@@ -298,6 +309,50 @@ async fn one_failing_site_keeps_previous_forecast() {
     let today = view.today.estimate.unwrap();
     assert!((today - hub_estimate()).abs() < 0.01, "{today}");
     assert_eq!(view.fetched_at, u64::try_from(before.fetched_at).unwrap());
+    task.abort();
+}
+
+#[tokio::test]
+async fn second_refresh_keeps_morning_periods() {
+    let app = app(true, &["a"], 10).await;
+    let before = common::solar::forecast_today();
+    let noon = chrono_tz::Europe::Paris
+        .from_local_datetime(
+            &Utc::now()
+                .with_timezone(&chrono_tz::Europe::Paris)
+                .date_naive()
+                .and_hms_opt(12, 0, 0)
+                .unwrap(),
+        )
+        .earliest()
+        .unwrap()
+        .with_timezone(&Utc);
+    let stub = Stub::from_instant(2.0, noon);
+    let base = serve_stub(Arc::clone(&stub)).await;
+    // A held full-day forecast and no recorded attempt: a slot is due, so the poller calls.
+    feed_cache(&app.hub, Some(&before), &oikos_solcast::Ledger::default());
+    let task = spawn_with(&app.hub, base, Duration::ZERO);
+
+    until("the call", || stub.total() >= 1).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let morning: f64 = before
+        .periods
+        .iter()
+        .filter(|p| p.start() < noon)
+        .map(|p| p.kwh())
+        .sum();
+    let afternoon: f64 = before
+        .periods
+        .iter()
+        .filter(|p| p.start() >= noon)
+        .map(|p| 2.0 * p.kwh())
+        .sum();
+    let view: SolarView = get_solar(&app).await.json().await.unwrap();
+    let today = view.today.estimate.expect("today estimate");
+    assert!(
+        (today - (morning + afternoon)).abs() < 0.01,
+        "{today} vs {morning} + {afternoon}"
+    );
     task.abort();
 }
 

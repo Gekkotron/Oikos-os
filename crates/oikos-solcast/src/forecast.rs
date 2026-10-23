@@ -48,6 +48,34 @@ impl Forecast {
             site.retain(keep);
         }
     }
+
+    /// Prepend the periods of `previous` that a fresh fetch no longer returns: every period
+    /// with `start() >= from` that ends at or before the first period of `self`. Done on the
+    /// merged series and per site (a site missing from `previous` keeps nothing; a site with
+    /// no period now keeps nothing). The series stay sorted by `end` without duplicates.
+    pub fn keep_past(&mut self, previous: &Forecast, from: DateTime<Utc>) {
+        prepend_past(&mut self.periods, &previous.periods, from);
+        for (site, before) in self.sites.iter_mut().zip(&previous.sites) {
+            prepend_past(site, before, from);
+        }
+    }
+}
+
+/// Puts the periods of `before` that start at or after `from` and end by the first start of
+/// `now` in front of `now`.
+fn prepend_past(now: &mut Vec<Period>, before: &[Period], from: DateTime<Utc>) {
+    let Some(first_start) = now.first().map(Period::start) else {
+        return;
+    };
+    let mut kept: Vec<Period> = before
+        .iter()
+        .filter(|p| p.start() >= from && p.end <= first_start)
+        .cloned()
+        .collect();
+    kept.sort_by_key(|p| p.end);
+    kept.dedup_by_key(|p| p.end);
+    kept.append(now);
+    *now = kept;
 }
 
 /// Energy forecast for one local calendar day, in kWh.
@@ -356,5 +384,87 @@ mod tests {
             assert_eq!(site.len(), 2);
             assert_eq!(site[0].end, t("2026-10-23T11:00:00Z"));
         }
+    }
+
+    fn paris_midnight() -> DateTime<Utc> {
+        t("2026-10-22T22:00:00Z")
+    }
+
+    /// 48 periods of the fixture day, estimate 1.0 each.
+    fn full_day() -> Vec<Period> {
+        series("2026-10-22T22:30:00Z", &[1.0; 48])
+    }
+
+    #[test]
+    fn keep_past_prepends_morning_from_previous() {
+        let previous = merge(vec![full_day()], 1);
+        // Noon local is 10:00Z; the new fetch starts there with doubled estimates.
+        let mut new = merge(vec![series("2026-10-23T10:30:00Z", &[2.0; 24])], 2);
+        new.keep_past(&previous, paris_midnight());
+        assert_eq!(new.periods.len(), 48);
+        assert_eq!(new.periods[0].end, t("2026-10-22T22:30:00Z"));
+        assert!(new.periods.windows(2).all(|w| w[0].end < w[1].end));
+        assert_eq!(new.periods[23].estimate, 1.0);
+        assert_eq!(new.periods[24].estimate, 2.0);
+        assert_eq!(new.sites[0].len(), 48);
+        let total = day_totals(&new.periods, PARIS)[0].estimate;
+        assert!((total - (24.0 * 0.5 + 24.0 * 1.0)).abs() < 1e-9, "{total}");
+    }
+
+    #[test]
+    fn keep_past_ignores_periods_before_from() {
+        let yesterday = series("2026-10-21T22:30:00Z", &[1.0; 48]);
+        let previous = merge(vec![yesterday], 1);
+        let mut new = merge(vec![series("2026-10-23T10:30:00Z", &[2.0; 4])], 2);
+        new.keep_past(&previous, paris_midnight());
+        assert_eq!(new.periods.len(), 4);
+        assert_eq!(new.sites[0].len(), 4);
+    }
+
+    #[test]
+    fn keep_past_per_site() {
+        let a = series("2026-10-22T22:30:00Z", &[1.0; 48]);
+        let b = series("2026-10-22T22:30:00Z", &[3.0; 48]);
+        let previous = merge(vec![a, b], 1);
+        let mut new = merge(
+            vec![
+                series("2026-10-23T10:30:00Z", &[2.0; 4]),
+                // Site B's fetch starts later than A's.
+                series("2026-10-23T11:30:00Z", &[6.0; 2]),
+            ],
+            2,
+        );
+        new.keep_past(&previous, paris_midnight());
+        assert_eq!(new.sites[0].len(), 24 + 4);
+        assert_eq!(new.sites[1].len(), 26 + 2);
+        assert_eq!(new.sites[1][25].estimate, 3.0);
+        assert_eq!(new.sites[1][26].estimate, 6.0);
+        // The merged series starts at the earliest site start.
+        assert_eq!(new.periods.len(), 24 + 4);
+        assert!(new.periods.windows(2).all(|w| w[0].end < w[1].end));
+    }
+
+    #[test]
+    fn keep_past_skips_sites_missing_from_previous() {
+        let previous = merge(vec![full_day()], 1);
+        let mut new = merge(
+            vec![
+                series("2026-10-23T10:30:00Z", &[2.0; 2]),
+                series("2026-10-23T10:30:00Z", &[2.0; 2]),
+            ],
+            2,
+        );
+        new.keep_past(&previous, paris_midnight());
+        assert_eq!(new.sites[0].len(), 26);
+        assert_eq!(new.sites[1].len(), 2);
+    }
+
+    #[test]
+    fn keep_past_with_empty_new_keeps_nothing() {
+        let previous = merge(vec![full_day()], 1);
+        let mut new = merge(vec![vec![]], 2);
+        new.keep_past(&previous, paris_midnight());
+        assert!(new.periods.is_empty());
+        assert!(new.sites[0].is_empty());
     }
 }
