@@ -1534,3 +1534,37 @@ async fn canvas_ignores_an_off_canvas_sidebar() {
     assert!(style.contains("--flow-left:0px"), "{style}");
     chrome.remove();
 }
+
+#[wasm_bindgen_test]
+async fn canvas_resets_the_scroll_before_measuring() {
+    let chrome = fake_chrome("sticky");
+    // The header scrolls with the page, as the real one does.
+    chrome
+        .query_selector(".content-header")
+        .unwrap()
+        .unwrap()
+        .set_attribute(
+            "style",
+            "position:absolute;left:210px;top:0;height:46px;width:300px",
+        )
+        .unwrap();
+    let document = web_sys::window().unwrap().document().unwrap();
+    let spacer = document.create_element("div").unwrap();
+    spacer.set_attribute("style", "height:5000px").unwrap();
+    document.body().unwrap().append_child(&spacer).unwrap();
+    let window = web_sys::window().unwrap();
+    window.scroll_to_with_x_and_y(0.0, 1200.0);
+    assert!(window.scroll_y().unwrap() > 0.0);
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    assert_eq!(window.scroll_y().unwrap(), 0.0);
+    let style = flow_style(&host);
+    assert!(style.contains("--flow-top:46px"), "{style}");
+    spacer.remove();
+    chrome.remove();
+}

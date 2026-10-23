@@ -9,7 +9,9 @@ pub(crate) fn top_offset() -> f64 {
         .query_selector(".content-header")
         .ok()
         .flatten()
-        .map_or(0.0, |header| header.get_bounding_client_rect().bottom())
+        .map_or(0.0, |header| {
+            header.get_bounding_client_rect().bottom().max(0.0)
+        })
 }
 
 /// Where a floating panel starts horizontally: the sidebar's right edge while it sits in the page
@@ -32,8 +34,10 @@ pub(crate) fn left_offset() -> f64 {
 }
 
 /// The `--flow-top` / `--flow-left` style for a fixed canvas, kept current across resizes.
-/// Must be called while building a component.
+/// The page scrolls back to the top first: the header is not sticky, so its position depends on
+/// the scroll, and the canvas freezes the page there. Must be called while building a component.
 pub(crate) fn canvas_inset_style() -> impl Fn() -> String {
+    window().scroll_to_with_x_and_y(0.0, 0.0);
     let inset = RwSignal::new((0.0_f64, 0.0_f64));
     let measure = move || inset.set((top_offset(), left_offset()));
     Effect::new(move |_| measure());
