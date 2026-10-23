@@ -1,6 +1,5 @@
 pub mod alarm_hero;
 pub mod alert_row;
-pub mod area_chip;
 pub mod card_frame;
 pub mod confirm;
 pub mod flow_switch;

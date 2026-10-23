@@ -10,7 +10,7 @@ use crate::components::card_frame::{CardFrame, open_entity};
 use crate::format::{degrees, display_value, short_name, value_class};
 use crate::house::House;
 use crate::icons::DROP;
-use crate::screens::home::shows_on_home;
+use crate::rooms::shows_on_home;
 
 /// The text a sensor shows: the value with its unit, "—" while unknown or unavailable.
 pub fn sensor_text(state: &EntityState, unit: Option<&str>) -> String {

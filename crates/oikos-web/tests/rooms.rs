@@ -54,26 +54,7 @@ fn area(id: &str, count: usize) -> AreaView {
     }
 }
 
-struct Mounted {
-    _app: Box<dyn std::any::Any>,
-    host: web_sys::Element,
-}
-
-/// A house with rooms a and b (one light each) and an unassigned switch, opened at `path`.
-async fn mount(path: &str) -> Mounted {
-    let window = web_sys::window().unwrap();
-    window
-        .history()
-        .unwrap()
-        .push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(path))
-        .unwrap();
-    let document = window.document().unwrap();
-    let host = document.create_element("div").unwrap();
-    document.body().unwrap().append_child(&host).unwrap();
-    let house = House::new();
-    house
-        .areas
-        .set(vec![area("a", 1), area("b", 1), area(UNASSIGNED_AREA, 1)]);
+fn add_entities(house: House) {
     house.entities.set(
         [
             entity("light.a", "Lamp a", Kind::Light, "a"),
@@ -84,6 +65,39 @@ async fn mount(path: &str) -> Mounted {
         .map(|e| (e.id.clone(), e))
         .collect(),
     );
+}
+
+struct Mounted {
+    _app: Box<dyn std::any::Any>,
+    host: web_sys::Element,
+}
+
+/// A house with rooms a and b (one light each) and an unassigned switch, opened at `path`.
+async fn mount(path: &str) -> Mounted {
+    mount_with(path, true).await.0
+}
+
+/// As [`mount`]; without `with_entities` the areas are there but no entity has arrived yet.
+async fn mount_with(path: &str, with_entities: bool) -> (Mounted, House) {
+    let window = web_sys::window().unwrap();
+    window
+        .history()
+        .unwrap()
+        .push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(path))
+        .unwrap();
+    let document = window.document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let house = House::new();
+    house.areas.set(vec![
+        area("a", 1),
+        area("b", 1),
+        area("c", 0),
+        area(UNASSIGNED_AREA, 1),
+    ]);
+    if with_entities {
+        add_entities(house);
+    }
     let app = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         provide_context(house);
         provide_context(RwSignal::new(Theme::Auto));
@@ -112,10 +126,13 @@ async fn mount(path: &str) -> Mounted {
     });
     tick().await;
     tick().await;
-    Mounted {
-        _app: Box::new(app),
-        host,
-    }
+    (
+        Mounted {
+            _app: Box::new(app),
+            host,
+        },
+        house,
+    )
 }
 
 fn texts(host: &web_sys::Element, selector: &str) -> Vec<String> {
@@ -172,4 +189,27 @@ async fn sidebar_lists_rooms_with_counts() {
         assert_eq!(count.text_content().as_deref(), Some("1"));
     }
     assert_eq!(rooms.query_selector_all("a").unwrap().length(), 2);
+}
+
+#[wasm_bindgen_test]
+async fn room_page_waits_for_its_cards_without_calling_the_room_gone() {
+    // The areas are in, the entities are not: the room exists and is empty for now.
+    let (m, house) = mount_with("/rooms/a", false).await;
+    assert!(m.host.query_selector(".room__gone").unwrap().is_none());
+    assert_eq!(texts(&m.host, ".room .room__empty"), ["Nothing here yet."]);
+    add_entities(house);
+    tick().await;
+    assert!(m.host.query_selector(".room__gone").unwrap().is_none());
+    assert_eq!(
+        m.host.query_selector_all(".room .card").unwrap().length(),
+        1
+    );
+}
+
+#[wasm_bindgen_test]
+async fn room_with_nothing_on_home_is_empty_not_gone() {
+    // The hub knows the room c, where nothing shows on Home.
+    let (m, _house) = mount_with("/rooms/c", true).await;
+    assert!(m.host.query_selector(".room__gone").unwrap().is_none());
+    assert_eq!(texts(&m.host, ".room .room__empty"), ["Nothing here yet."]);
 }

@@ -7,8 +7,8 @@ use oikos_core::model::{Availability, Command, CoverState, StateValue};
 
 use crate::cards::cover::is_moving;
 use crate::format::is_on;
-use crate::rooms::FAVORITES;
-use crate::screens::home::{shows_on_home, without_paired_humidity};
+use crate::rooms::{FAVORITES, shows_on_home};
+use crate::screens::home::without_paired_humidity;
 
 /// One card on Home: a single entity (a hand-made group is an entity too).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use oikos_api::EntityView;
-use oikos_core::model::{Kind, Placement, SwitchType};
+use oikos_core::model::{Kind, SwitchType};
 use oikos_core::types::Placement as TypePlacement;
 use std::collections::HashSet;
 
@@ -28,16 +28,8 @@ use crate::cards::vacuum::VacuumCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::alert_row::RecentAlerts;
 use crate::components::card_frame::GROUP_PREFIX;
-use crate::rooms::{use_group_refresh, use_loaded, use_room_chips};
+use crate::rooms::{generic_placement, use_group_refresh, use_loaded, use_room_chips};
 use crate::screens::room::{RoomSection, RoomsSkeleton};
-
-/// True when Home shows `e`: a primary entity that the app's placement rule keeps on Home (an
-/// entity with an energy role or shown on Security leaves Home unless it is pinned).
-pub(crate) fn shows_on_home(e: &EntityView) -> bool {
-    e.is_primary()
-        && (e.kind != Kind::Generic || generic_placement(e) == TypePlacement::Card)
-        && Placement::on_home(e.kind, e.device_class.as_deref(), &e.ui)
-}
 
 fn is_sensor_of_class(e: &EntityView, class: &str) -> bool {
     e.kind == Kind::Sensor && e.device_class.as_deref() == Some(class)
@@ -58,11 +50,6 @@ pub(crate) fn without_paired_humidity(mut shown: Vec<&EntityView>) -> Vec<&Entit
                 .is_some_and(|d| with_temperature.contains(d)))
     });
     shown
-}
-
-/// Where the type table places a generic entity; unknown components stay cards.
-fn generic_placement(e: &EntityView) -> TypePlacement {
-    oikos_core::types::type_def(&e.component).map_or(TypePlacement::Card, |d| d.placement)
 }
 
 /// The card component for an entity's kind.

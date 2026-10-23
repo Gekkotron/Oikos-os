@@ -8,7 +8,7 @@ use crate::components::room_title::RoomTitle;
 use crate::groups::{HomeItem, home_items};
 use crate::house::House;
 use crate::i18n::{Key, use_text};
-use crate::rooms::{FAVORITES, use_group_refresh, use_loaded, use_room_chips};
+use crate::rooms::{FAVORITES, use_group_refresh, use_room_chips};
 use crate::screens::home::card_for;
 
 /// The placeholder cards shown until the house has said anything.
@@ -80,18 +80,25 @@ pub(crate) fn RoomSection(id: String) -> impl IntoView {
     }
 }
 
-/// `/rooms/:id`: one room, or a note that it is gone once the house has loaded.
+/// `/rooms/:id`: one room, or a note that it is gone once the areas have loaded.
 #[component]
 pub fn RoomScreen() -> impl IntoView {
     let t = use_text();
     let params = use_params_map();
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
     let chips = use_room_chips();
-    let loaded = use_loaded();
+    let house = expect_context::<House>();
+    // The room pages wait for the areas: until they arrive, no id can be called gone.
+    let loaded = Memo::new(move |_| house.areas.with(|a| !a.is_empty()));
     use_group_refresh();
-    // Only flips when the room appears or goes, so a card's state echo never rebuilds the page.
-    let known =
-        Memo::new(move |_| id.with(|id| chips.with(|list| list.iter().any(|c| c.id == *id))));
+    // A room is any area the hub knows (even one with nothing on Home) or a pseudo-room with a
+    // chip (Favorites). Only flips when it appears or goes, so a state echo never rebuilds the page.
+    let known = Memo::new(move |_| {
+        id.with(|id| {
+            house.areas.with(|a| a.iter().any(|a| a.id == *id))
+                || chips.with(|list| list.iter().any(|c| c.id == *id))
+        })
+    });
 
     view! {
         <Show when=move || loaded.get() fallback=|| view! { <RoomsSkeleton /> }>

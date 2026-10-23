@@ -3,16 +3,29 @@
 
 use leptos::prelude::*;
 use oikos_api::{AreaView, EntityView};
-use oikos_core::model::UNASSIGNED_AREA;
+use oikos_core::model::{Kind, Placement, UNASSIGNED_AREA};
+use oikos_core::types::Placement as TypePlacement;
 use std::collections::BTreeMap;
 
 use crate::components::card_frame::GROUP_PREFIX;
 use crate::groups::favorites_count;
 use crate::house::House;
-use crate::screens::home::shows_on_home;
 
 /// The id of the virtual "Favorites" chip.
 pub(crate) const FAVORITES: &str = "__favorites__";
+
+/// True when Home shows `e`: a primary entity that the app's placement rule keeps on Home (an
+/// entity with an energy role or shown on Security leaves Home unless it is pinned).
+pub(crate) fn shows_on_home(e: &EntityView) -> bool {
+    e.is_primary()
+        && (e.kind != Kind::Generic || generic_placement(e) == TypePlacement::Card)
+        && Placement::on_home(e.kind, e.device_class.as_deref(), &e.ui)
+}
+
+/// Where the type table places a generic entity; unknown components stay cards.
+pub(crate) fn generic_placement(e: &EntityView) -> TypePlacement {
+    oikos_core::types::type_def(&e.component).map_or(TypePlacement::Card, |d| d.placement)
+}
 
 /// How many entities Home shows per area id.
 pub(crate) fn home_counts<'a>(
