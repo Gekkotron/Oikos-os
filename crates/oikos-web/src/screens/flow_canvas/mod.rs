@@ -28,7 +28,9 @@ pub use graph::{Graph, Mode, Selection};
 pub use viewport::{Camera, CanvasControls, Minimap, Viewport};
 
 use crate::flow_edit::{History, add_node, duplicate_node, remove_edge, remove_node};
-use crate::flow_layout::{NODE_H, NODE_W, Pt, bounds, free_spot, positions};
+use crate::flow_layout::{
+    NODE_H, NODE_W, Pt, bounds, free_spot, positions, with_resolved_positions,
+};
 use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot, free_area};
 use crate::flows::{highlight, parked_deadline, parked_node, step_offset};
 use crate::house::House;
@@ -147,10 +149,15 @@ fn FlowBody(
     provide_context(editor);
     let camera = Camera::provide();
 
-    // Entering or leaving edit mode drops the selection.
+    // Leaving edit mode drops the selection; entering keeps it, so a tapped card opens (the
+    // Edit button clears it first).
     Effect::watch(
         move || editing.get(),
-        move |_, _, _| selection.set(None),
+        move |on, _, _| {
+            if !*on {
+                selection.set(None);
+            }
+        },
         false,
     );
     let side = Memo::new(move |_| {
@@ -296,12 +303,17 @@ fn FlowBody(
     });
     on_cleanup(move || keys.remove());
 
-    // A tap on the canvas: in view mode a card only gets the selection ring; on empty canvas
-    // (edit-mode cards and wires take their own clicks) it clears the selection.
+    // A tap on the canvas: in view mode a card opens its settings in edit mode (a phone only
+    // rings it); on empty canvas (edit-mode cards and wires take their own clicks) it clears
+    // the selection.
     let on_tap = Callback::new(move |target: Option<web_sys::Element>| {
         let card = target
             .and_then(|t| t.closest("[data-node]").ok().flatten())
             .and_then(|card| card.get_attribute("data-node"));
+        if card.is_some() && !editing.get_untracked() && can_edit() {
+            editor.reset(flow.with_untracked(with_resolved_positions));
+            editing.set(true);
+        }
         selection.set(card.map(Selection::Node));
     });
 
@@ -397,6 +409,16 @@ fn FlowBody(
             </Drawer>
         </div>
     }
+}
+
+/// Whether this screen edits flows: a phone or a touch-only screen only views them (the
+/// same media query hides the Edit button in `main.css`).
+fn can_edit() -> bool {
+    !window()
+        .match_media("(max-width: 719px), (hover: none) and (pointer: coarse)")
+        .ok()
+        .flatten()
+        .is_some_and(|q| q.matches())
 }
 
 /// Marks card `id` as just added, and unmarks it after [`FRESH_MS`] unless another card took

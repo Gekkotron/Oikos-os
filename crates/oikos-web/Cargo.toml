@@ -49,6 +49,7 @@ web-sys = { workspace = true, features = [
     "GainNode",
     "HtmlElement",
     "KeyboardEvent",
+    "MediaQueryList",
     "MouseEvent",
     "Navigator",
     "OscillatorNode",

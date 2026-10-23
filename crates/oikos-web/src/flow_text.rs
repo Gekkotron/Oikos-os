@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::command::command_name;
 use oikos_core::flow::{Node, NodeKind, Op, SunWhich, parse_duration};
-use oikos_core::model::Command;
+use oikos_core::model::{Command, Hs};
 use serde_json::Value;
 
 use crate::flows::{humanise, value_text};
@@ -107,17 +107,53 @@ fn control_sentence(control: &str, value: Option<&Value>, e: &str) -> String {
     }
 }
 
+/// A colour word for a hue (0..360) and saturation (0..100): "white" when barely saturated.
+fn colour_name(hs: Hs) -> &'static str {
+    if hs.s < 15.0 {
+        return "white";
+    }
+    match hs.h.rem_euclid(360.0) {
+        h if h < 15.0 => "red",
+        h if h < 45.0 => "orange",
+        h if h < 70.0 => "yellow",
+        h if h < 165.0 => "green",
+        h if h < 195.0 => "cyan",
+        h if h < 255.0 => "blue",
+        h if h < 285.0 => "purple",
+        h if h < 330.0 => "magenta",
+        h if h < 345.0 => "pink",
+        _ => "red",
+    }
+}
+
+/// "Turn on LED", "Turn on LED at 39 % in magenta with breathe".
+fn turn_on_sentence(
+    e: &str,
+    brightness: Option<u8>,
+    color: Option<Hs>,
+    effect: Option<&str>,
+) -> String {
+    let mut s = format!("Turn on {e}");
+    if let Some(b) = brightness {
+        s += &format!(" at {} %", (f64::from(b) * 100.0 / 255.0).round());
+    }
+    if let Some(c) = color {
+        s += &format!(" in {}", colour_name(c));
+    }
+    if let Some(fx) = effect {
+        s += &format!(" with {}", fx.replace('_', " "));
+    }
+    s
+}
+
 fn command_sentence(command: &Command, entity: &str, ctx: &Ctx) -> String {
     let e = entity_text(entity, ctx);
     match command {
         Command::TurnOn {
-            brightness: Some(b),
-            ..
-        } => format!(
-            "Turn on {e} at {} %",
-            (f64::from(*b) * 100.0 / 255.0).round()
-        ),
-        Command::TurnOn { .. } => format!("Turn on {e}"),
+            brightness,
+            color,
+            effect,
+        } => turn_on_sentence(&e, *brightness, *color, effect.as_deref()),
         Command::TurnOff => format!("Turn off {e}"),
         Command::Toggle => format!("Toggle {e}"),
         Command::Open => format!("Open {e}"),
@@ -383,6 +419,28 @@ mod tests {
     fn command_turn_off() {
         let n = r#"{"id":"a","type":"command","params":{"entity":"led","command":{"type":"turn_off"}}}"#;
         assert_eq!(text(n), "Turn off LED");
+    }
+
+    #[test]
+    fn command_turn_on_names_colour_and_effect() {
+        let on = |cmd: &str| {
+            text(&format!(
+                r#"{{"id":"a","type":"command","params":{{"entity":"led","command":{cmd}}}}}"#
+            ))
+        };
+        assert_eq!(on(r#"{"type":"turn_on"}"#), "Turn on LED");
+        assert_eq!(
+            on(r#"{"type":"turn_on","brightness":100,"color":{"h":295.0,"s":100.0}}"#),
+            "Turn on LED at 39 % in magenta"
+        );
+        assert_eq!(
+            on(r#"{"type":"turn_on","color":{"h":30.0,"s":4.0}}"#),
+            "Turn on LED in white"
+        );
+        assert_eq!(
+            on(r#"{"type":"turn_on","color":{"h":355.0,"s":90.0},"effect":"breathe"}"#),
+            "Turn on LED in red with breathe"
+        );
     }
 
     #[test]

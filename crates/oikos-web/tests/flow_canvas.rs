@@ -598,7 +598,7 @@ async fn click_card_opens_settings() {
 }
 
 #[wasm_bindgen_test]
-async fn view_mode_click_only_selects() {
+async fn view_mode_click_opens_settings() {
     let host = host();
     let _mounted = mount(
         &host,
@@ -606,19 +606,23 @@ async fn view_mode_click_only_selects() {
         "/flows/living_led_motion",
     );
     tick().await;
+    // Keys do nothing outside edit mode.
+    press(&body(), "Backspace", false, false);
+    tick().await;
+    assert_eq!(count(&host, "[data-node=moving]"), 1);
     select_card(&host, "moving").await;
     let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-graph--editing"), 1, "{html}");
     assert_eq!(
         count(&host, "[data-node=moving].flow-node--selected"),
         1,
         "{html}"
     );
-    assert_eq!(count(&host, ".flow-drawer--open"), 0, "{html}");
-    assert_eq!(count(&host, ".flow-drawer .field"), 0, "{html}");
-    // Keys do nothing outside edit mode.
-    press(&body(), "Backspace", false, false);
-    tick().await;
-    assert_eq!(count(&host, "[data-node=moving]"), 1);
+    assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
+    assert_eq!(
+        element(&host, ".node-editor__id").text_content().as_deref(),
+        Some("moving")
+    );
 }
 
 #[wasm_bindgen_test]
