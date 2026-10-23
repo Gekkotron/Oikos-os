@@ -76,7 +76,9 @@ impl HouseState {
             WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
             WsEvent::ClimateChanged { .. } => {}
             // The home header (a later project) will use these.
-            WsEvent::WeatherChanged | WsEvent::HomeSettingsChanged { .. } => {}
+            WsEvent::WeatherChanged
+            | WsEvent::SolarChanged
+            | WsEvent::HomeSettingsChanged { .. } => {}
         }
     }
 }

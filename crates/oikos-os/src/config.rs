@@ -24,6 +24,7 @@ pub struct Config {
     pub climate: ClimateConfig,
     pub history: HistoryConfig,
     pub weather: WeatherConfig,
+    pub solcast: SolcastConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -458,6 +459,91 @@ impl WeatherConfig {
     }
 }
 
+/// The Solcast rooftop solar forecast. Nothing leaves the LAN while `enabled` is false.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SolcastConfig {
+    pub enabled: bool,
+    /// Rooftop resource ids from the Solcast Toolkit; one request per site per refresh.
+    pub sites: Vec<String>,
+    /// This hub's share of the account's daily requests.
+    pub daily_limit: u32,
+    /// The file holding the API key; `load` defaults it to [`SOLCAST_KEY_FILE`] next to the config.
+    pub api_key_file: Option<PathBuf>,
+}
+
+impl Default for SolcastConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            sites: Vec::new(),
+            daily_limit: 10,
+            api_key_file: None,
+        }
+    }
+}
+
+/// Reads an API key file: its trimmed content. Errors never include that content.
+pub(crate) fn read_key_file(path: &Path) -> Result<String, String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    Ok(text.trim().to_owned())
+}
+
+impl SolcastConfig {
+    /// While enabled: at least one site, every id non-empty and made of letters, digits, `-` and
+    /// `_` (it goes into a URL path), a daily limit covering one call per site, and a readable,
+    /// non-empty key file.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.sites.is_empty() {
+            return Err("[solcast] sites needs at least one rooftop resource id".to_owned());
+        }
+        if self.sites.iter().any(|s| s.trim().is_empty()) {
+            return Err("[solcast] sites has an empty id".to_owned());
+        }
+        if self.sites.iter().any(|s| {
+            !s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        }) {
+            return Err(
+                "[solcast] sites has an id with characters other than letters, digits, - and _"
+                    .to_owned(),
+            );
+        }
+        if (self.daily_limit as usize) < self.sites.len() {
+            return Err(format!(
+                "[solcast] daily_limit is {}: it must be at least the number of sites ({})",
+                self.daily_limit,
+                self.sites.len()
+            ));
+        }
+        self.read_key().map(|_| ())
+    }
+
+    /// The API key: the trimmed content of the key file.
+    pub fn read_key(&self) -> Result<String, String> {
+        let path = self
+            .api_key_file
+            .as_deref()
+            .unwrap_or(Path::new(SOLCAST_KEY_FILE));
+        let key = read_key_file(path).map_err(|e| {
+            format!(
+                "[solcast] cannot read the API key file {}: {e}",
+                path.display()
+            )
+        })?;
+        if key.is_empty() {
+            return Err(format!(
+                "[solcast] the API key file {} is empty",
+                path.display()
+            ));
+        }
+        Ok(key)
+    }
+}
+
 /// Flow scheduling.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -629,10 +715,14 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "climate.prefix",
     "weather.city",
     "weather.country",
+    "solcast.api_key_file",
 ];
 
 /// The push key `load` falls back to, relative to the config file's folder (git-ignored).
 pub const PUSH_KEY_FILE: &str = "secrets/firebase.json";
+
+/// The Solcast key `load` falls back to, relative to the config file's folder (git-ignored).
+pub const SOLCAST_KEY_FILE: &str = "secrets/solcast.key";
 
 impl Config {
     /// The `OIKOS_*` env layer for non-string fields; string fields are
@@ -663,6 +753,14 @@ impl Config {
         if cfg.push.credentials.is_none() {
             let key = file.parent().unwrap_or(Path::new("")).join(PUSH_KEY_FILE);
             cfg.push.credentials = key.is_file().then_some(key);
+        }
+        if cfg.solcast.api_key_file.is_none() {
+            // Always set, so a missing key's error names the path that was looked at.
+            cfg.solcast.api_key_file = Some(
+                file.parent()
+                    .unwrap_or(Path::new(""))
+                    .join(SOLCAST_KEY_FILE),
+            );
         }
         Ok(cfg)
     }

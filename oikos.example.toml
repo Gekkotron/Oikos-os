@@ -103,3 +103,10 @@ password = ""
 [climate]
 enabled = false
 # prefix = "oikos/climate"
+
+# Rooftop solar forecast from Solcast (needs the API key in secrets/solcast.key).
+# [solcast]
+# enabled = false
+# sites = ["xxxx-xxxx-xxxx-xxxx"]   # rooftop resource ids from the Solcast Toolkit
+# daily_limit = 10                   # this hub's share of the account's daily requests
+# api_key_file = "secrets/solcast.key"
