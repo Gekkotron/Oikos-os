@@ -77,6 +77,7 @@ impl HouseState {
             WsEvent::ClimateChanged { .. } => {}
             // The weather and home settings live in `House` only; the header reads them from there.
             WsEvent::WeatherChanged | WsEvent::HomeSettingsChanged { .. } => {}
+            WsEvent::AmbiancesChanged { .. } | WsEvent::AmbianceApplied { .. } => {}
         }
     }
 }
