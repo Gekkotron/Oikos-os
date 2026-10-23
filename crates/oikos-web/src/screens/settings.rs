@@ -1,4 +1,4 @@
-//! Settings: a short list of sub-pages (appearance, the Zigbee2MQTT bridge, the broker, how to
+//! Settings: a short list of sub-pages (the home header settings, appearance, the Zigbee2MQTT bridge, the broker, how to
 //! connect an AI assistant over MCP, about), each opened at `/settings/<slug>`.
 
 use leptos::prelude::*;
@@ -13,6 +13,7 @@ use crate::house::House;
 use crate::i18n::{Key, Lang, text};
 use crate::nav::BackLink;
 use crate::screens::entity_sheet::{availability_class, availability_word};
+use crate::screens::home_settings_panel::HomeSettingsPanel;
 use crate::theme::Theme;
 
 const DASH: &str = "—";
@@ -148,6 +149,7 @@ fn ThemeSwitch() -> impl IntoView {
 /// A Settings sub-page, at `/settings/<slug>`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsPage {
+    Home,
     Appearance,
     Zigbee2mqtt,
     Broker,
@@ -157,7 +159,8 @@ pub enum SettingsPage {
 
 impl SettingsPage {
     /// In the order the Settings list shows them.
-    pub const ALL: [SettingsPage; 5] = [
+    pub const ALL: [SettingsPage; 6] = [
+        SettingsPage::Home,
         SettingsPage::Appearance,
         SettingsPage::Zigbee2mqtt,
         SettingsPage::Broker,
@@ -167,6 +170,7 @@ impl SettingsPage {
 
     pub fn slug(self) -> &'static str {
         match self {
+            SettingsPage::Home => "home",
             SettingsPage::Appearance => "appearance",
             SettingsPage::Zigbee2mqtt => "zigbee2mqtt",
             SettingsPage::Broker => "broker",
@@ -182,6 +186,7 @@ impl SettingsPage {
     /// The page's name, translated in the breadcrumb; the screen itself shows the English one.
     pub fn key(self) -> Key {
         match self {
+            SettingsPage::Home => Key::HomeSection,
             SettingsPage::Appearance => Key::Appearance,
             SettingsPage::Zigbee2mqtt => Key::Zigbee2mqtt,
             SettingsPage::Broker => Key::Broker,
@@ -196,6 +201,7 @@ impl SettingsPage {
 
     fn hint(self) -> &'static str {
         match self {
+            SettingsPage::Home => "Eco setpoint, house mode, indoor temperature",
             SettingsPage::Appearance => "Theme",
             SettingsPage::Zigbee2mqtt => "Bridge, firmware updates and devices",
             SettingsPage::Broker => "MQTT connection",
@@ -246,6 +252,7 @@ pub fn SettingsScreen() -> impl IntoView {
     let house = expect_context::<House>();
     let theme = expect_context::<RwSignal<Theme>>();
     let status = move |page: SettingsPage| match page {
+        SettingsPage::Home => String::new(),
         SettingsPage::Appearance => theme.get().label().to_owned(),
         SettingsPage::Zigbee2mqtt => zigbee_status(
             house.devices.with(|ds| pending_updates(ds).len()),
@@ -306,6 +313,7 @@ pub fn SettingsPageScreen() -> impl IntoView {
                 </div>
             </header>
             {move || match page.get() {
+                Some(SettingsPage::Home) => view! { <HomeSettingsPanel /> }.into_any(),
                 Some(SettingsPage::Appearance) => view! { <AppearancePage /> }.into_any(),
                 Some(SettingsPage::Zigbee2mqtt) => view! { <ZigbeePage /> }.into_any(),
                 Some(SettingsPage::Broker) => view! { <BrokerPage /> }.into_any(),

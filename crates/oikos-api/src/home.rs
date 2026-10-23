@@ -13,6 +13,10 @@ pub struct HomeSettings {
     pub mode_entity: Option<String>,
     /// The entity id of the sensor shown as the indoor temperature.
     pub indoor_entity: Option<String>,
+    /// °C, below this the house reads cold; unset = 15.
+    pub cold_below: Option<f64>,
+    /// °C, above this it reads warm; unset = 26.
+    pub hot_above: Option<f64>,
 }
 
 #[cfg(test)]
@@ -30,9 +34,16 @@ mod tests {
                 ..HomeSettings::default()
             }
         );
+        assert_eq!((s.cold_below, s.hot_above), (None, None));
         assert_eq!(
             serde_json::to_value(HomeSettings::default()).unwrap(),
-            json!({"eco_setpoint": null, "mode_entity": null, "indoor_entity": null})
+            json!({
+                "eco_setpoint": null,
+                "mode_entity": null,
+                "indoor_entity": null,
+                "cold_below": null,
+                "hot_above": null
+            })
         );
     }
 }

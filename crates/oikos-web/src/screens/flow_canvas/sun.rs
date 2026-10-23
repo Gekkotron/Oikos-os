@@ -82,7 +82,7 @@ pub fn fallback_badge_visible(cfg: &FlowsConfigView) -> bool {
 }
 
 /// The house point and zone a preview is computed for: the configured ones, Paris otherwise.
-fn house_place(cfg: Option<&FlowsConfigView>) -> ((f64, f64), Tz) {
+pub(crate) fn house_place(cfg: Option<&FlowsConfigView>) -> ((f64, f64), Tz) {
     let zone = cfg
         .and_then(|c| c.timezone.parse::<Tz>().ok())
         .unwrap_or(chrono_tz::Europe::Paris);

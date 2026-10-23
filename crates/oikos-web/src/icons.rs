@@ -149,6 +149,7 @@ pub const MOON: &str = svg!(r#"<path d="M20 14A9 9 0 1 1 10 4a7 7 0 0 0 10 10"/>
 pub const SUN_MOON: &str = svg!(
     r#"<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor"/>"#
 );
+pub const ARROW_UP: &str = svg!(r#"<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>"#);
 pub const PLUS: &str = svg!(r#"<path d="M12 5v14"/><path d="M5 12h14"/>"#);
 pub const MAGNIFIER: &str = svg!(r#"<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/>"#);
 pub const TRASH: &str = svg!(
@@ -191,6 +192,37 @@ pub const THERMOMETER: &str = CHANNEL_CLIMATE;
 pub const BOLT: &str = CHANNEL_ENERGY;
 pub const DROP: &str = HUMIDITY;
 pub const WATER_HEATER_GLYPH: &str = WATER_HEATER;
+// Weather conditions (clear reuses SUN and MOON).
+pub const PARTLY_CLOUDY_DAY: &str = svg!(
+    r#"<circle cx="8" cy="8" r="2.5"/><path d="M8 2.5v1.5"/><path d="M2.5 8H4"/><path d="m4.1 4.1 1 1"/><path d="m11.9 4.1-1 1"/><path d="M18 20.5h-8a3.5 3.5 0 0 1-.3-7A4.7 4.7 0 0 1 18.3 12.6 3.9 3.9 0 0 1 18 20.5z"/>"#
+);
+pub const PARTLY_CLOUDY_NIGHT: &str = svg!(
+    r#"<path d="M10.5 3.5a4.5 4.5 0 1 0 5.5 6.2 3.5 3.5 0 0 1-5.5-6.2z"/><path d="M18 20.5h-8a3.5 3.5 0 0 1-.3-7A4.7 4.7 0 0 1 18.3 12.6 3.9 3.9 0 0 1 18 20.5z"/>"#
+);
+pub const CLOUDY: &str = svg!(
+    r#"<path d="M17.5 19H8a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18.9 9.9 4.6 4.6 0 0 1 17.5 19z"/>"#
+);
+pub const FOG: &str = svg!(
+    r#"<path d="M17.5 14.5H8a3.5 3.5 0 0 1-.4-6.98A5 5 0 0 1 17.3 7 3.8 3.8 0 0 1 17.5 14.5z"/><path d="M5 18h14"/><path d="M8 21h8"/>"#
+);
+pub const DRIZZLE: &str = svg!(
+    r#"<path d="M17.5 14.5H8a3.5 3.5 0 0 1-.4-6.98A5 5 0 0 1 17.3 7 3.8 3.8 0 0 1 17.5 14.5z"/><path d="M9 18v.5"/><path d="M12 18v.5"/><path d="M15 18v.5"/><path d="M10.5 21v.5"/><path d="M13.5 21v.5"/>"#
+);
+pub const RAIN: &str = svg!(
+    r#"<path d="M17.5 14.5H8a3.5 3.5 0 0 1-.4-6.98A5 5 0 0 1 17.3 7 3.8 3.8 0 0 1 17.5 14.5z"/><path d="M9 17.5l-1 3"/><path d="M13 17.5l-1 3"/><path d="M17 17.5l-1 3"/>"#
+);
+pub const FREEZING_RAIN: &str = svg!(
+    r#"<path d="M17.5 14.5H8a3.5 3.5 0 0 1-.4-6.98A5 5 0 0 1 17.3 7 3.8 3.8 0 0 1 17.5 14.5z"/><path d="M9 17.5l-1 3"/><path d="M16 17.5l-1 3"/><path d="M12 17v4"/><path d="m10.5 18.5 3 1"/><path d="m13.5 18.5-3 1"/>"#
+);
+pub const SNOW: &str = svg!(
+    r#"<path d="M17.5 14.5H8a3.5 3.5 0 0 1-.4-6.98A5 5 0 0 1 17.3 7 3.8 3.8 0 0 1 17.5 14.5z"/><path d="M8.5 18v3"/><path d="M7 19.5h3"/><path d="M15.5 18v3"/><path d="M14 19.5h3"/>"#
+);
+pub const SHOWERS: &str = svg!(
+    r#"<path d="M17.5 14.5H8a3.5 3.5 0 0 1-.4-6.98A5 5 0 0 1 17.3 7 3.8 3.8 0 0 1 17.5 14.5z"/><path d="M8 17.5l-1.5 4"/><path d="M12.5 17.5 11 21.5"/><path d="M17 17.5l-1.5 4"/><path d="M10 17.5l-.5 1.5"/>"#
+);
+pub const THUNDERSTORM: &str = svg!(
+    r#"<path d="M17.5 14.5H8a3.5 3.5 0 0 1-.4-6.98A5 5 0 0 1 17.3 7 3.8 3.8 0 0 1 17.5 14.5z"/><path d="m12.5 15-2.5 3.5h3.5L11 22"/>"#
+);
 pub const HEAT_PUMP: &str = svg!(
     r#"<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="3.5"/><path d="M12 8.5v7"/><path d="M8.5 12h7"/>"#
 );
