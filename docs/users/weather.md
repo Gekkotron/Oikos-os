@@ -59,7 +59,7 @@ The Weather device has no room. Move an entity to a room with the usual override
 
 - The hub fetches every `refresh_minutes`, with about 10 % random jitter. A failed fetch is logged once per outage and the last good values stay.
 - When the last success is older than twice `refresh_minutes`, `stale` is `true` in `GET /api/v1/weather`.
-- After one hour without a success, the weather entities go **unavailable**, so a flow sees "unavailable" and not an old number. `GET /api/v1/weather` keeps serving the last document with `stale: true`.
+- After one hour without a success, whatever `refresh_minutes` is, the weather entities go **unavailable**, so a flow sees "unavailable" and not an old number. `GET /api/v1/weather` keeps serving the last document, with `stale` set by the rule above.
 - The entities come back as soon as a fetch succeeds.
 - Turning weather off removes the Weather device: on the next start the hub clears what it left on the broker. History rows are kept.
 

@@ -45,7 +45,9 @@ impl Hub {
 
     /// The configured country filter.
     pub fn weather_country(&self) -> Option<String> {
-        self.weather_country.clone()
+        self.weather_country
+            .as_ref()
+            .map(|c| c.to_ascii_uppercase())
     }
 
     /// Minutes between two fetches.

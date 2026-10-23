@@ -87,7 +87,8 @@ pub async fn run(hub: Arc<Hub>, endpoints: Endpoints) {
     }
 }
 
-/// Geocodes `city`, retrying network and HTTP errors with a doubling backoff. `None` when the
+/// Geocodes `city`, retrying any failed request (network, HTTP status or an undecodable body)
+/// with a doubling backoff. `None` when the
 /// city does not exist: weather then stays unavailable.
 async fn resolve(
     client: &reqwest::Client,

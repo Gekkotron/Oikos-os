@@ -164,6 +164,7 @@ async fn poller_publishes_offline_first_then_online_and_states() {
             .filter(|(t, _)| t == "oikos/weather/availability")
             .map(|(_, p)| p.as_str())
             .collect();
+        assert!(availability.len() >= 2, "{availability:?}");
         assert_eq!(availability[..2], ["offline", "online"], "{availability:?}");
         assert!(published[0].0.ends_with("/config"), "{:?}", published[0]);
     }
@@ -243,8 +244,12 @@ async fn get_weather_mcp_tool_matches_rest() {
     let task = spawn_with(&app.hub, endpoints);
     let hub = Arc::clone(&app.hub);
     until("the first view", || hub.weather_view().is_ok()).await;
-    // Stop refreshing so the REST and MCP reads see the same document.
+    // Stop refreshing, then pin `fetched_at` far in the past: `stale` is computed at each read,
+    // so with refresh_minutes = 0 both reads are stale for certain, whatever the second.
     task.abort();
+    let mut old = app.hub.weather_view().unwrap();
+    old.fetched_at = 1_000;
+    app.hub.apply_weather(old);
 
     let rest: Value = get_weather(&app).await.json().await.unwrap();
     let transport = StreamableHttpClientTransport::from_uri(format!("http://{}/mcp", app.addr));
@@ -260,4 +265,13 @@ async fn get_weather_mcp_tool_matches_rest() {
         .expect("structured content");
     assert_eq!(body, rest);
     client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn lowercase_country_is_sent_uppercase() {
+    let mut cfg = Config::default();
+    cfg.weather.country = Some("fr".to_owned());
+    let (tx, _rx) = mpsc::channel::<Publish>(1);
+    let hub = Hub::new(&cfg, tx);
+    assert_eq!(hub.weather_country().as_deref(), Some("FR"));
 }
