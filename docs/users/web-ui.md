@@ -30,7 +30,7 @@ Security (`/security`): the alarm panel as a hero card (arm modes, Disarm, inlin
 
 ## Climate
 
-Climate (`/climate`, beta): one card per zone with its reading, target, state, overrides, learning and recent decisions, a quick hold of a setpoint for a while, the house settings sheet and the engine's banners. See [Climate](climate.md).
+Climate (`/climate`, beta): one card per zone with its reading, target, state, overrides, learning and recent decisions, a quick hold of a setpoint for a while, the house settings sheet and the engine's banners. The room thermometer picker lists the temperature sensors grouped by room. See [Climate](climate.md).
 
 ## History
 
@@ -46,7 +46,7 @@ Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and 
 
 ## Devices
 
-Devices: the administration view of the Zigbee devices.
+Devices: the administration view of the Zigbee devices. Each row shows the device's room (the rooms of its entities, or "No room"), its model and vendor, and badges for firmware updates, battery, link quality and entity count. The search matches the name, room, model, vendor and IEEE address.
 
 ## Settings
 
