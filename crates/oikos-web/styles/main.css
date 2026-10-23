@@ -2280,6 +2280,7 @@ p.override__hint {
 }
 
 .device__name,
+.device__room,
 .device__model {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2289,6 +2290,10 @@ p.override__hint {
 .device__model {
   font: var(--type-label);
   opacity: 0.7;
+}
+
+.device__room {
+  font: var(--type-label);
 }
 
 .device__badges {

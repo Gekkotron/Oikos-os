@@ -1,7 +1,7 @@
 //! Human-readable state values for cards.
 
-use oikos_api::EntityView;
-use oikos_core::model::{EntityState, GenericValue, Kind, StateValue, SwitchType};
+use oikos_api::{AreaView, EntityView};
+use oikos_core::model::{EntityState, GenericValue, Kind, StateValue, SwitchType, UNASSIGNED_AREA};
 use oikos_core::types::{GenericCaps, TypeDef};
 
 const DASH: &str = "—";
@@ -180,6 +180,17 @@ pub fn list_label(entity: &EntityView) -> String {
         return short;
     }
     format!("{short} · {tail}")
+}
+
+/// The name of room `area`, or `None` outside any room. An id the house no longer lists stands
+/// for its own name.
+pub fn room_name(areas: &[AreaView], area: &str) -> Option<String> {
+    (area != UNASSIGNED_AREA).then(|| {
+        areas
+            .iter()
+            .find(|a| a.id == area)
+            .map_or_else(|| area.to_owned(), |a| a.name.clone())
+    })
 }
 
 /// An RFC 3339 date-time as "2026-10-19 09:41" (the time as sent, no zone conversion).
@@ -641,5 +652,24 @@ mod ts_tests {
             generic_value(oikos_core::types::type_def("text"), Some(&caps), &s),
             "••••"
         );
+    }
+
+    #[test]
+    fn room_name_resolves_ids_and_skips_unassigned() {
+        use super::room_name;
+        use oikos_api::AreaView;
+        let areas = vec![AreaView {
+            id: "salon".into(),
+            name: "Living room".into(),
+            icon: None,
+            order: None,
+            entity_count: 0,
+            primary_count: 0,
+            group_names: Default::default(),
+            group_favorites: Default::default(),
+        }];
+        assert_eq!(room_name(&areas, "salon").as_deref(), Some("Living room"));
+        assert_eq!(room_name(&areas, "gone").as_deref(), Some("gone"));
+        assert_eq!(room_name(&areas, oikos_core::model::UNASSIGNED_AREA), None);
     }
 }

@@ -3,18 +3,20 @@
 //! Admin / diagnostics screen reached from Settings; the top nav no longer links to it, and
 //! user-facing groups moved to [`crate::screens::groups`].
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use leptos::prelude::*;
 use leptos_router::components::A;
-use oikos_api::DeviceView;
+use oikos_api::{AreaView, DeviceView, EntityView};
 
-use crate::format::{list_label, wrap_id};
+use crate::format::{list_label, room_name, wrap_id};
 use crate::house::House;
 use crate::icons::MAGNIFIER;
 use crate::screens::entity_sheet::{availability_class, availability_word};
 
-/// True when the device's name, model, vendor or IEEE address contains `query`, ignoring case.
-/// A blank query matches everything.
-fn matches(device: &DeviceView, query: &str) -> bool {
+/// True when the device's name, model, vendor, IEEE address or one of its `rooms` contains
+/// `query`, ignoring case. A blank query matches everything.
+fn matches(device: &DeviceView, rooms: &[String], query: &str) -> bool {
     let query = query.trim().to_lowercase();
     query.is_empty()
         || [
@@ -25,7 +27,32 @@ fn matches(device: &DeviceView, query: &str) -> bool {
         ]
         .into_iter()
         .flatten()
+        .chain(rooms.iter().map(String::as_str))
         .any(|field| field.to_lowercase().contains(&query))
+}
+
+/// The rooms of the device's entities by name, sorted and without repeats.
+fn device_rooms(
+    device: &DeviceView,
+    entities: &BTreeMap<String, EntityView>,
+    areas: &[AreaView],
+) -> Vec<String> {
+    let rooms: BTreeSet<String> = device
+        .entity_ids
+        .iter()
+        .filter_map(|id| entities.get(id))
+        .filter_map(|e| room_name(areas, &e.area))
+        .collect();
+    rooms.into_iter().collect()
+}
+
+/// The rooms as one line, "No room" when the device has none.
+fn room_line(rooms: &[String]) -> String {
+    if rooms.is_empty() {
+        "No room".to_owned()
+    } else {
+        rooms.join(", ")
+    }
 }
 
 /// "Model · Vendor", whichever of the two is known.
@@ -59,6 +86,16 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
             }
         });
     };
+    let room = {
+        let device = device.clone();
+        move || {
+            house.entities.with(|m| {
+                house
+                    .areas
+                    .with(|a| room_line(&device_rooms(&device, m, a)))
+            })
+        }
+    };
     let ids = device.entity_ids.clone();
     let links = move || {
         house.entities.with(|m| {
@@ -82,6 +119,7 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
                 ></span>
                 <span class="device__titles">
                     <span class="device__name">{wrap_id(&device.friendly_name)}</span>
+                    <span class="device__room">{room}</span>
                     <span class="device__model">{model_line(&device)}</span>
                 </span>
                 <span class="device__badges">
@@ -134,9 +172,16 @@ pub fn DevicesScreen() -> impl IntoView {
     let expanded = RwSignal::new(None::<String>);
     let filtered = Memo::new(move |_| {
         let query = query.get();
-        let mut devices: Vec<DeviceView> = house
-            .devices
-            .with(|d| d.iter().filter(|d| matches(d, &query)).cloned().collect());
+        let mut devices: Vec<DeviceView> = house.devices.with(|d| {
+            house.entities.with(|m| {
+                house.areas.with(|a| {
+                    d.iter()
+                        .filter(|d| matches(d, &device_rooms(d, m, a), &query))
+                        .cloned()
+                        .collect()
+                })
+            })
+        });
         devices.sort_by_key(|d| d.friendly_name.to_lowercase());
         devices
     });
@@ -150,7 +195,7 @@ pub fn DevicesScreen() -> impl IntoView {
                 <input
                     class="devices__search-input"
                     type="search"
-                    placeholder="Search name, model, vendor or IEEE"
+                    placeholder="Search name, room, model, vendor or IEEE"
                     aria-label="Search devices"
                     prop:value=move || query.get()
                     on:input=move |ev| query.set(event_target_value(&ev))
@@ -191,7 +236,7 @@ pub fn DevicesScreen() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::matches;
+    use super::{matches, room_line};
     use oikos_api::DeviceView;
     use oikos_core::model::Availability;
 
@@ -217,13 +262,13 @@ mod tests {
     #[test]
     fn filter_matches_name_model_vendor_and_ieee_ignoring_case() {
         let d = device();
-        assert!(matches(&d, ""));
-        assert!(matches(&d, "  "));
-        assert!(matches(&d, "salon"));
-        assert!(matches(&d, "ts06"));
-        assert!(matches(&d, "TUYA"));
-        assert!(matches(&d, "abcdef"));
-        assert!(!matches(&d, "ikea"));
+        assert!(matches(&d, &[], ""));
+        assert!(matches(&d, &[], "  "));
+        assert!(matches(&d, &[], "salon"));
+        assert!(matches(&d, &[], "ts06"));
+        assert!(matches(&d, &[], "TUYA"));
+        assert!(matches(&d, &[], "abcdef"));
+        assert!(!matches(&d, &[], "ikea"));
     }
 
     #[test]
@@ -233,7 +278,24 @@ mod tests {
             vendor: None,
             ..device()
         };
-        assert!(!matches(&d, "tuya"));
-        assert!(matches(&d, "lamp"));
+        assert!(!matches(&d, &[], "tuya"));
+        assert!(matches(&d, &[], "lamp"));
+    }
+
+    #[test]
+    fn filter_matches_the_device_rooms() {
+        let d = device();
+        let rooms = vec!["Bedroom".to_owned()];
+        assert!(matches(&d, &rooms, "bed"));
+        assert!(!matches(&d, &[], "bed"));
+    }
+
+    #[test]
+    fn room_line_joins_rooms_or_says_no_room() {
+        assert_eq!(room_line(&[]), "No room");
+        assert_eq!(
+            room_line(&["Bedroom".to_owned(), "Office".to_owned()]),
+            "Bedroom, Office"
+        );
     }
 }
