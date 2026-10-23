@@ -4,9 +4,11 @@ use leptos::prelude::*;
 use oikos_api::EntityView;
 use oikos_core::model::{Command, EntityState, StateValue};
 
-use super::{PowerToggle, Sender};
+use super::text::{brightness_percent, light_state_line};
+use super::{Sender, ToggleSwitch};
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::display_value;
+use crate::format::entity_title;
+use crate::i18n::{Key, use_lang, use_text};
 
 /// Whether the entity is on: from `OnOff` (a native switch, or a switch shown as a light) or
 /// from `Light`; `None` while the state is unknown.
@@ -59,12 +61,15 @@ pub(crate) fn power_command(on: bool) -> Command {
 #[component]
 pub fn LightCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let on = read_on(&entity.state).unwrap_or(false);
+    let lang = use_lang();
+    let t = use_text();
+    let known = read_on(&entity.state);
+    let on = known.unwrap_or(false);
     let light = match &entity.state.value {
         StateValue::Light(light) => Some(light.clone()),
         _ => None,
     };
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let brightness = light.as_ref().and_then(|l| l.brightness);
 
     let toggle = {
         let id = entity.id.clone();
@@ -103,14 +108,23 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
                 guess,
             );
         };
+        let percent = if on {
+            brightness.map_or(0, brightness_percent)
+        } else {
+            0
+        };
         view! {
+            <div class="level">
+                <span class="level__label">{move || t(Key::Brightness)}</span>
+                <span class="level__value">{format!("{percent} %")}</span>
+            </div>
             <input
                 class="slider"
                 type="range"
                 min="1"
                 max="255"
                 step="1"
-                aria-label="Brightness"
+                aria-label=move || t(Key::Brightness)
                 prop:value=level.to_string()
                 on:change=on_change
             />
@@ -135,12 +149,20 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
         }
     });
 
+    let name = entity_title(&entity);
+    let trailing = view! { <ToggleSwitch on=on aria_label=name on_toggle=toggle /> }.into_any();
+    let state_line = Signal::derive(move || light_state_line(lang(), known, brightness));
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
-        <CardFrame entity=entity on_click=on_click pending=pending>
-            <PowerToggle on=on label=label on_toggle=toggle />
-            <div class="card__controls">{slider}{swatch}</div>
+        <CardFrame
+            entity=entity
+            on_click=on_click
+            pending=pending
+            trailing=trailing
+            state_line=state_line
+        >
+            <div class="light__level">{slider}{swatch}</div>
         </CardFrame>
     }
 }

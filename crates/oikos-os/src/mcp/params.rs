@@ -531,7 +531,8 @@ pub struct ClimateAck {
 #[serde(deny_unknown_fields)]
 pub struct SetHomeSettingsParams {
     /// The whole home settings document; it replaces the current one. `eco_setpoint` is in
-    /// 5..=30 °C, `mode_entity` a select entity id, `indoor_entity` a temperature sensor id;
-    /// `null` or absent clears a field.
+    /// 5..=30 °C, `mode_entity` a select entity id, `indoor_entity` a temperature sensor id,
+    /// `cold_below` and `hot_above` 5..=35 °C with `cold_below` lower; `null` or absent clears
+    /// a field.
     pub settings: oikos_api::HomeSettings,
 }

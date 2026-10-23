@@ -184,20 +184,30 @@ pub fn EntityListField(
 /// The thermometer that reads a room: "Automatic" first, then the house's temperature sensors
 /// grouped by room.
 /// `auto` is what Automatic resolves to now; none means the climate devices' own reading.
+/// `label` and `auto_text` replace the climate screen's wording ("Room thermometer",
+/// "Automatic · …") when given.
 #[component]
 pub fn ThermometerField(
     value: Signal<Option<String>>,
     auto: Signal<Option<String>>,
     on_change: Callback<Option<String>>,
+    #[prop(strip_option, into, default = None)] label: Option<Signal<String>>,
+    #[prop(strip_option, into, default = None)] auto_text: Option<Signal<String>>,
 ) -> impl IntoView {
     let house = expect_context::<House>();
-    let auto_text = move || match auto.get() {
-        Some(id) => format!("Automatic · {}", label_with_room(house, &id)),
-        None => "Automatic · climate device".to_owned(),
+    let label = move || label.map_or_else(|| "Room thermometer".to_owned(), |l| l.get());
+    let auto_text = move || {
+        if let Some(text) = auto_text {
+            return text.get();
+        }
+        match auto.get() {
+            Some(id) => format!("Automatic · {}", label_with_room(house, &id)),
+            None => "Automatic · climate device".to_owned(),
+        }
     };
     view! {
         <label class="climate-field">
-            <span class="climate-field__label">"Room thermometer"</span>
+            <span class="climate-field__label">{label}</span>
             <select
                 class="field"
                 on:change=move |ev| {

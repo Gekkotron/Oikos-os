@@ -107,8 +107,8 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 
 | Tool | What it does |
 | --- | --- |
-| `get_home_settings` | The home settings: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a temperature sensor); a field that is not set is `null`. |
-| `set_home_settings` | Replaces the home settings (retained on `oikos/ui/_home`) and returns them. Read them with `get_home_settings` first and send the whole document back. Args: `settings`. `eco_setpoint` must be from 5 to 30; an entity of the wrong kind is refused with the reason. |
+| `get_home_settings` | The home settings: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a temperature sensor), `cold_below` and `hot_above` (°C); a field that is not set is `null`. |
+| `set_home_settings` | Replaces the home settings (retained on `oikos/ui/_home`) and returns them. Read them with `get_home_settings` first and send the whole document back. Args: `settings`. `eco_setpoint` must be from 5 to 30, `cold_below` and `hot_above` from 5 to 35 with `cold_below` lower (the web uses 15 and 26 when unset); an entity of the wrong kind is refused with the reason. |
 
 ## Climate
 

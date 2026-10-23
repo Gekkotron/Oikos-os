@@ -1,0 +1,518 @@
+/* Rich device cards: the shared frame (tile, room, name, trailing control, state line) and the
+   per-kind bodies. Colours come from tokens.css, so both themes share this file. */
+
+/* Frame */
+.card__top {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Scoped to the new frame: older markup (Energy, the group wizard) keeps main.css's look. */
+.card__top > .card__header {
+  display: flex;
+  flex: 1;
+  box-sizing: border-box;
+  width: auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  min-height: var(--touch-min);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.card--row-header .card__top > .card__header {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.card__tile {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--tile-bg);
+  transition: background var(--motion-medium) var(--ease);
+}
+
+.card--on .card__tile {
+  background: var(--tile-on-bg);
+}
+
+.card__tile .card__icon {
+  width: 22px;
+  height: 22px;
+}
+
+/* Status dots sit on the tile's corner; "online" is the normal case and stays quiet. */
+.card__tile .card__dots {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: inline-flex;
+  gap: 3px;
+}
+
+.card__tile .dot--online {
+  display: none;
+}
+
+.card__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.card__room {
+  font: 400 11px/14px var(--font-body);
+  color: var(--muted);
+}
+
+.card__titles .card__name {
+  display: -webkit-box;
+  overflow: hidden;
+  font: 600 15px/20px var(--font-body);
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.card--on .card__room {
+  color: inherit;
+}
+
+.card__trailing {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-height: 40px;
+}
+
+.card__state {
+  margin: 0;
+  font: 400 13px/18px var(--font-body);
+  color: var(--muted);
+}
+
+.card--on .card__state {
+  color: var(--card-on-ink);
+}
+
+.card--sage {
+  background: var(--card-sage-bg);
+}
+
+.card--cool {
+  background: var(--card-cool-bg);
+}
+
+/* The compact toggle at a card's top right: the pill alone, with a thumb-sized target. */
+.power--compact {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--touch-min);
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.power--compact .switch--on {
+  background: var(--toggle-on);
+}
+
+/* Light: brightness label and slider at the bottom, the colour swatch beside the slider. */
+.card .light__level {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: auto;
+}
+
+.light__level .level {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  font: 500 11px/14px var(--font-body);
+  color: var(--muted);
+}
+
+.card--on .light__level .level {
+  color: var(--card-on-ink);
+}
+
+.light__level .slider {
+  width: 100%;
+}
+
+/* The ⋯ button that opens a card's sheet. */
+.card__more {
+  min-width: 40px;
+  min-height: 40px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+/* Badges at a card's top right ("Live", the climate mode). */
+.card__badge {
+  display: inline-block;
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 3px 8px;
+  border: 1px solid var(--badge-border);
+  border-radius: 8px;
+  font: 500 11px/14px var(--font-body);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Temperature: the value large, humidity and the 24 h curve at the bottom. */
+.temp {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.temp__value {
+  font: 500 36px/40px var(--font-display);
+  letter-spacing: -0.02em;
+  color: inherit;
+  text-decoration: none;
+}
+
+.temp__unit {
+  font: 400 15px/20px var(--font-body);
+  color: var(--muted);
+}
+
+.temp__foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.temp__humidity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 400 12px/16px var(--font-body);
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.temp__spark {
+  flex: 0 1 110px;
+  min-width: 60px;
+}
+
+.spark-wrap {
+  display: block;
+  height: 28px;
+}
+
+.spark {
+  width: 100%;
+  height: 28px;
+  overflow: visible;
+}
+
+.spark polyline {
+  fill: none;
+  stroke: var(--ring-cool);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Climate: the ring, then − / "It's 22°" / +. */
+.climate {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.dial {
+  width: min(100%, 170px);
+  height: auto;
+  aspect-ratio: 1;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.dial:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.dial[aria-disabled="true"] {
+  cursor: default;
+}
+
+.dial__track,
+.dial__fill {
+  fill: none;
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+
+.dial__track {
+  stroke: var(--ring-track);
+}
+
+.dial__fill {
+  stroke: var(--ring-other);
+}
+
+.dial--heat .dial__fill {
+  stroke: var(--ring-heat);
+}
+
+.dial--cool .dial__fill {
+  stroke: var(--ring-cool);
+}
+
+.dial__knob {
+  fill: #fff;
+  stroke: currentcolor;
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 25%));
+}
+
+.dial__value {
+  fill: var(--ink);
+  font: 500 30px var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.dial__caption {
+  fill: var(--muted);
+  font: 400 9px var(--font-body);
+}
+
+.dial--off .dial__value {
+  fill: var(--muted);
+  font-size: 22px;
+}
+
+.climate__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  align-self: stretch;
+  gap: 8px;
+}
+
+.climate__now {
+  font: 400 12px/16px var(--font-body);
+  color: var(--muted);
+}
+
+.climate__foot .btn--round {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+}
+
+.card__badge--select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Vacuum: a sentence and the buttons on the left, the robot drawing on the right. */
+.vacuum {
+  display: flex;
+  flex: 1;
+  align-items: stretch;
+  gap: 16px;
+}
+
+.vacuum__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.vacuum__sentence {
+  margin: 0;
+  font: 500 26px/32px var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.vacuum__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.vacuum__primary {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--btn-dark-bg);
+  color: var(--btn-dark-ink);
+}
+
+.vacuum__home {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+}
+
+.vacuum__picture {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 170px;
+}
+
+.vacuum__caption {
+  font: 400 10.5px/14px var(--font-body);
+  color: var(--muted);
+  text-align: center;
+}
+
+.robot {
+  width: 150px;
+  max-width: 100%;
+  height: auto;
+}
+
+.robot__ring {
+  fill: none;
+  stroke: var(--card-border);
+}
+
+.robot__body {
+  fill: var(--tile-bg);
+  stroke: var(--card-border);
+  stroke-width: 2;
+}
+
+.robot__top {
+  fill: var(--card-bg);
+  stroke: var(--card-border);
+  stroke-width: 2;
+}
+
+.robot__sensor {
+  fill: var(--muted);
+}
+
+.robot--error .robot__body {
+  stroke: var(--danger);
+}
+
+.robot--cleaning .robot__ring {
+  transform-origin: 75px 75px;
+  animation: robot-pulse 2.4s var(--ease) infinite;
+}
+
+.robot--cleaning .robot__ring--outer {
+  animation-delay: 0.6s;
+}
+
+@keyframes robot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.35;
+    transform: scale(1.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .robot--cleaning .robot__ring {
+    animation: none;
+  }
+}
+
+/* A phone gives the drawing less room. */
+@media (max-width: 600px) {
+  .vacuum__picture {
+    width: 110px;
+  }
+
+  .vacuum__sentence {
+    font-size: 22px;
+    line-height: 28px;
+  }
+}
+
+/* Beside the tile the name has less room: wrap between words, never inside one. */
+.card--row-header .card__titles .card__name {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.vacuum .vacuum__primary {
+  flex: none;
+  width: auto;
+  border-color: transparent;
+}
+
+.vacuum__home {
+  display: inline-grid;
+  place-items: center;
+}
+
+.vacuum__home svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* A narrow card puts the badge under the tile and name rather than squeezing the name out. */
+.card--row-header .card__top {
+  flex-wrap: wrap;
+}
+
+.card--row-header .card__top > .card__header {
+  flex: 1 1 130px;
+}
+
+.card--row-header .card__trailing {
+  margin-left: auto;
+  min-height: 0;
+}
+
+.climate__now,
+.temp__humidity {
+  white-space: nowrap;
+}

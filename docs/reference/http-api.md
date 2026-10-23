@@ -42,8 +42,8 @@ Ids in paths are the entity, flow, group or dashboard ids the API returns. Bodie
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/v1/home/settings` | The home settings document `{eco_setpoint, mode_entity, indoor_entity}` (all three `null` until saved). |
-| `PUT /api/v1/home/settings` | Replaces the document and returns it as stored (retained on `oikos/ui/_home`). `eco_setpoint` is a number from 5 to 30 (°C), `mode_entity` the id of a `select` entity, `indoor_entity` the id of a temperature sensor; `null` clears a field. `422` for a value that does not validate (the error names the field), `503` while the broker link is down. |
+| `GET /api/v1/home/settings` | The home settings document `{eco_setpoint, mode_entity, indoor_entity, cold_below, hot_above}` (all `null` until saved). |
+| `PUT /api/v1/home/settings` | Replaces the document and returns it as stored (retained on `oikos/ui/_home`). `eco_setpoint` is a number from 5 to 30 (°C), `mode_entity` the id of a `select` entity, `indoor_entity` the id of a temperature sensor; `cold_below` and `hot_above` are numbers from 5 to 35 (°C) with `cold_below` lower than `hot_above` (the web reads cold below 15 and warm above 26 when unset); `null` clears a field. `422` for a value that does not validate (the error names the field), `503` while the broker link is down. |
 
 ## Groups
 

@@ -75,10 +75,9 @@ impl HouseState {
             WsEvent::CommandFailed { .. } => {}
             WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
             WsEvent::ClimateChanged { .. } => {}
-            // The home header (a later project) will use these.
-            WsEvent::WeatherChanged
-            | WsEvent::SolarChanged
-            | WsEvent::HomeSettingsChanged { .. } => {}
+            // The weather and home settings live in `House` only; the header reads them from there.
+            WsEvent::WeatherChanged | WsEvent::HomeSettingsChanged { .. } => {}
+            WsEvent::SolarChanged => {}
         }
     }
 }

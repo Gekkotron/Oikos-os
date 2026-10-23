@@ -15,6 +15,7 @@ pub mod select;
 pub mod sensor;
 pub mod siren;
 pub mod switch;
+pub mod text;
 pub mod vacuum;
 pub mod water_heater;
 
@@ -99,6 +100,33 @@ pub fn PowerToggle(
             on:click=move |_| on_toggle.run(())
         >
             <span class="power__label">{label}</span>
+            <span class="switch" class:switch--on=on>
+                <span class="switch__knob"></span>
+            </span>
+        </button>
+    }
+}
+
+/// The bare pill toggle a card shows at its top right; the entity's name is its accessible name.
+#[component]
+pub fn ToggleSwitch(
+    on: bool,
+    #[prop(into)] aria_label: String,
+    on_toggle: Callback<()>,
+    /// Greys the switch out and ignores taps.
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="power power--compact"
+            role="switch"
+            aria-label=aria_label
+            aria-checked=on.to_string()
+            disabled=move || disabled.get()
+            on:click=move |_| on_toggle.run(())
+        >
             <span class="switch" class:switch--on=on>
                 <span class="switch__knob"></span>
             </span>

@@ -5,6 +5,7 @@ use leptos_router::hooks::use_params_map;
 use oikos_core::model::UNASSIGNED_AREA;
 
 use crate::api::encode_id;
+use crate::components::card_place::{CardPlace, provide_card_place};
 use crate::components::room_title::RoomTitle;
 use crate::groups::{HomeItem, home_items};
 use crate::house::House;
@@ -43,6 +44,10 @@ pub(crate) fn RoomSection(id: String, #[prop(optional)] anchored: bool) -> impl 
             }
         }
     };
+    // Under its own heading a card does not repeat the room; Favorites mixes rooms.
+    if id != FAVORITES {
+        provide_card_place(CardPlace::Room);
+    }
     let chip = id.clone();
     let items = Memo::new(move |_| {
         house.areas.with(|a| {
@@ -106,23 +111,22 @@ pub fn RoomScreen() -> impl IntoView {
     // The room pages wait for the areas: until they arrive, no id can be called gone.
     let loaded = Memo::new(move |_| house.areas.with(|a| !a.is_empty()));
     use_group_refresh();
-    // A room is any area the hub knows (even one with nothing on Home) or a pseudo-room with a
-    // chip (Favorites). Only flips when it appears or goes, so a state echo never rebuilds the page.
-    let known = Memo::new(move |_| {
-        id.with(|id| {
-            house.areas.with(|a| a.iter().any(|a| a.id == *id))
-                || chips.with(|list| list.iter().any(|c| c.id == *id))
-        })
+    // The room on screen: `Some(id)` for any area the hub knows (even one with nothing on Home)
+    // or a pseudo-room with a chip (Favorites), `None` once it is gone. One memo carrying the id,
+    // so a room-to-room link rebuilds the page (a bare known/gone flag stays `true` and the page
+    // kept the first room), yet a card's state echo never does.
+    let room = Memo::new(move |_| {
+        let id = id.get();
+        let known = house.areas.with(|a| a.iter().any(|a| a.id == id))
+            || chips.with(|list| list.iter().any(|c| c.id == id));
+        known.then_some(id)
     });
 
     view! {
         <Show when=move || loaded.get() fallback=|| view! { <RoomsSkeleton /> }>
-            {move || {
-                if known.get() {
-                    view! { <RoomSection id=id.get() /> }.into_any()
-                } else {
-                    view! { <p class="room__gone">{move || t(Key::RoomGone)}</p> }.into_any()
-                }
+            {move || match room.get() {
+                Some(id) => view! { <RoomSection id=id /> }.into_any(),
+                None => view! { <p class="room__gone">{move || t(Key::RoomGone)}</p> }.into_any(),
             }}
         </Show>
     }

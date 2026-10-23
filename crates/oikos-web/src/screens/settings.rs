@@ -1,13 +1,19 @@
-//! Status of the hub and its links, how to connect an AI assistant over MCP, and the theme switch.
+//! Settings: a short list of sub-pages (the home header settings, appearance, the Zigbee2MQTT bridge, the broker, how to
+//! connect an AI assistant over MCP, about), each opened at `/settings/<slug>`.
 
 use leptos::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use leptos::task::spawn_local;
 use leptos_router::components::A;
+use leptos_router::hooks::use_params_map;
 use oikos_api::{ConnectionStatus, DeviceView, UpdateView};
+use oikos_core::model::Availability;
 
 use crate::house::House;
+use crate::i18n::{Key, Lang, text};
+use crate::nav::BackLink;
 use crate::screens::entity_sheet::{availability_class, availability_word};
+use crate::screens::home_settings_panel::HomeSettingsPanel;
 use crate::theme::Theme;
 
 const DASH: &str = "—";
@@ -140,147 +146,342 @@ fn ThemeSwitch() -> impl IntoView {
     }
 }
 
+/// A Settings sub-page, at `/settings/<slug>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SettingsPage {
+    Home,
+    Appearance,
+    Zigbee2mqtt,
+    Broker,
+    Mcp,
+    About,
+}
+
+impl SettingsPage {
+    /// In the order the Settings list shows them.
+    pub const ALL: [SettingsPage; 6] = [
+        SettingsPage::Home,
+        SettingsPage::Appearance,
+        SettingsPage::Zigbee2mqtt,
+        SettingsPage::Broker,
+        SettingsPage::Mcp,
+        SettingsPage::About,
+    ];
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            SettingsPage::Home => "home",
+            SettingsPage::Appearance => "appearance",
+            SettingsPage::Zigbee2mqtt => "zigbee2mqtt",
+            SettingsPage::Broker => "broker",
+            SettingsPage::Mcp => "mcp",
+            SettingsPage::About => "about",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.slug() == slug)
+    }
+
+    /// The page's name, translated in the breadcrumb; the screen itself shows the English one.
+    pub fn key(self) -> Key {
+        match self {
+            SettingsPage::Home => Key::HomeSection,
+            SettingsPage::Appearance => Key::Appearance,
+            SettingsPage::Zigbee2mqtt => Key::Zigbee2mqtt,
+            SettingsPage::Broker => Key::Broker,
+            SettingsPage::Mcp => Key::AiAssistants,
+            SettingsPage::About => Key::About,
+        }
+    }
+
+    fn title(self) -> &'static str {
+        text(Lang::En, self.key())
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            SettingsPage::Home => "Eco setpoint, house mode, indoor temperature",
+            SettingsPage::Appearance => "Theme",
+            SettingsPage::Zigbee2mqtt => "Bridge, firmware updates and devices",
+            SettingsPage::Broker => "MQTT connection",
+            SettingsPage::Mcp => "Connect Claude, Codex and other assistants",
+            SettingsPage::About => "Version and hub address",
+        }
+    }
+
+    fn href(self) -> String {
+        format!("/settings/{}", self.slug())
+    }
+}
+
+const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
+
+fn connection_word(status: &ConnectionStatus) -> String {
+    match status {
+        ConnectionStatus::Connecting => "Connecting…",
+        ConnectionStatus::Online => "Online",
+        ConnectionStatus::Offline { .. } => "Offline",
+    }
+    .to_owned()
+}
+
+/// The devices with a firmware update waiting, with that update.
+fn pending_updates(devices: &[DeviceView]) -> Vec<(DeviceView, UpdateView)> {
+    devices
+        .iter()
+        .filter_map(|d| {
+            let u = d.update.clone().filter(|u| u.available)?;
+            Some((d.clone(), u))
+        })
+        .collect()
+}
+
+/// The Zigbee2MQTT row's status: the waiting updates when there are any, else the bridge state.
+fn zigbee_status(updates: usize, state: Availability) -> String {
+    match updates {
+        0 => availability_word(state).to_owned(),
+        1 => "1 update".to_owned(),
+        n => format!("{n} updates"),
+    }
+}
+
+/// The Settings list: one row per sub-page, with its status on the right.
 #[component]
 pub fn SettingsScreen() -> impl IntoView {
     let house = expect_context::<House>();
+    let theme = expect_context::<RwSignal<Theme>>();
+    let status = move |page: SettingsPage| match page {
+        SettingsPage::Home => String::new(),
+        SettingsPage::Appearance => theme.get().label().to_owned(),
+        SettingsPage::Zigbee2mqtt => zigbee_status(
+            house.devices.with(|ds| pending_updates(ds).len()),
+            house.bridge.with(|b| b.state),
+        ),
+        SettingsPage::Broker => house.connection.with(connection_word),
+        SettingsPage::Mcp => String::new(),
+        SettingsPage::About => VERSION.to_owned(),
+    };
+
+    view! {
+        <div class="sheet">
+            <h1 class="settings__title">"Settings"</h1>
+            <ul class="settings__list">
+                {SettingsPage::ALL
+                    .into_iter()
+                    .map(|page| {
+                        view! {
+                            <li>
+                                <A href=page.href() attr:class="settings__item">
+                                    <span class="settings__item-text">
+                                        <span class="settings__item-title">{page.title()}</span>
+                                        <span class="settings__item-hint">{page.hint()}</span>
+                                    </span>
+                                    <span class="settings__item-status">{move || status(page)}</span>
+                                    <span class="settings__item-chevron" aria-hidden="true">
+                                        "›"
+                                    </span>
+                                </A>
+                            </li>
+                        }
+                    })
+                    .collect_view()}
+            </ul>
+        </div>
+    }
+}
+
+/// A Settings sub-page (`/settings/:page`), with a Back link to where it was opened from.
+#[component]
+pub fn SettingsPageScreen() -> impl IntoView {
+    let params = use_params_map();
+    let page = Memo::new(move |_| {
+        params
+            .read()
+            .get("page")
+            .as_deref()
+            .and_then(SettingsPage::from_slug)
+    });
+    view! {
+        <div class="sheet">
+            <header class="sheet__header">
+                <BackLink />
+                <div class="sheet__titles">
+                    <h1 class="sheet__title">
+                        {move || page.get().map_or("Settings", SettingsPage::title)}
+                    </h1>
+                </div>
+            </header>
+            {move || match page.get() {
+                Some(SettingsPage::Home) => view! { <HomeSettingsPanel /> }.into_any(),
+                Some(SettingsPage::Appearance) => view! { <AppearancePage /> }.into_any(),
+                Some(SettingsPage::Zigbee2mqtt) => view! { <ZigbeePage /> }.into_any(),
+                Some(SettingsPage::Broker) => view! { <BrokerPage /> }.into_any(),
+                Some(SettingsPage::Mcp) => view! { <McpPage /> }.into_any(),
+                Some(SettingsPage::About) => view! { <AboutPage /> }.into_any(),
+                None => {
+                    view! {
+                        <p class="settings__empty">"There is no such settings page."</p>
+                        <A href="/settings" attr:class="chip settings__all">
+                            "All settings"
+                        </A>
+                    }
+                        .into_any()
+                }
+            }}
+        </div>
+    }
+}
+
+#[component]
+fn AppearancePage() -> impl IntoView {
+    view! {
+        <Panel title="Theme">
+            <ThemeSwitch />
+            <p class="settings__hint">"The theme button in the header switches it too."</p>
+        </Panel>
+    }
+}
+
+/// The Zigbee2MQTT sub-page: the bridge, the firmware updates waiting, the counts and the way
+/// to the devices list.
+#[component]
+pub fn ZigbeePage() -> impl IntoView {
+    let house = expect_context::<House>();
     let bridge = house.bridge;
-    let connection = move || match house.connection.get() {
-        ConnectionStatus::Connecting => "Connecting…".to_owned(),
-        ConnectionStatus::Online => "Online".to_owned(),
-        ConnectionStatus::Offline { .. } => "Offline".to_owned(),
-    };
-    let reason = move || match house.connection.get() {
-        ConnectionStatus::Offline { reason } => Some(reason),
-        _ => None,
-    };
     let primary = move || {
         house
             .areas
             .with(|areas| areas.iter().map(|a| a.primary_count).sum::<usize>())
     };
+    view! {
+        <Panel title="Bridge">
+            <dl class="sheet__rows">
+                <Row
+                    label="Version"
+                    value=move || bridge.with(|b| b.version.clone().unwrap_or_else(|| DASH.to_owned()))
+                />
+                <Row
+                    label="Coordinator"
+                    value=move || {
+                        bridge.with(|b| b.coordinator.clone().unwrap_or_else(|| DASH.to_owned()))
+                    }
+                />
+                <Row label="Permit join" value=move || yes_no(bridge.with(|b| b.permit_join)) />
+                <div class="sheet__row">
+                    <dt>"State"</dt>
+                    <dd>
+                        <span class="settings__state">
+                            <span class=move || availability_class(bridge.with(|b| b.state))></span>
+                            {move || availability_word(bridge.with(|b| b.state))}
+                        </span>
+                    </dd>
+                </div>
+            </dl>
+        </Panel>
+        <Panel title="Updates available">
+            {move || {
+                let pending = house.devices.with(|ds| pending_updates(ds));
+                if pending.is_empty() {
+                    view! { <p class="settings__empty">"All devices are up to date"</p> }
+                        .into_any()
+                } else {
+                    view! {
+                        <ul class="settings__updates">
+                            {pending
+                                .into_iter()
+                                .map(|(d, u)| {
+                                    view! {
+                                        <li>
+                                            <A href="/devices">{d.friendly_name.clone()}</A>
+                                            <span>
+                                                {format!(
+                                                    "{} → {}",
+                                                    u.installed.unwrap_or_default(),
+                                                    u.latest.unwrap_or_default(),
+                                                )}
+                                            </span>
+                                        </li>
+                                    }
+                                })
+                                .collect_view()}
+                        </ul>
+                    }
+                        .into_any()
+                }
+            }}
+        </Panel>
+        <Panel title="Counts">
+            <dl class="sheet__rows">
+                <Row label="Devices" value=move || house.devices.with(Vec::len).to_string() />
+                <Row label="Entities" value=move || house.entities.with(|m| m.len()).to_string() />
+                <Row label="Primary entities" value=move || primary().to_string() />
+                <Row label="Areas" value=move || house.areas.with(Vec::len).to_string() />
+                <Row label="Ignored topics" value=move || house.ignored.with(Vec::len).to_string() />
+            </dl>
+        </Panel>
+        <Panel title="Devices">
+            <p class="settings__hint">
+                "Zigbee2MQTT devices, firmware updates and ignored discovery topics."
+            </p>
+            <A href="/devices" attr:class="chip">
+                "Open Z2M devices"
+            </A>
+        </Panel>
+    }
+}
 
+#[component]
+fn BrokerPage() -> impl IntoView {
+    let house = expect_context::<House>();
+    let reason = move || match house.connection.get() {
+        ConnectionStatus::Offline { reason } => Some(reason),
+        _ => None,
+    };
+    view! {
+        <Panel title="Connection">
+            <dl class="sheet__rows">
+                <Row label="Status" value=move || house.connection.with(connection_word) />
+                {move || {
+                    reason()
+                        .map(|r| {
+                            view! { <Row label="Reason" value=r /> }
+                        })
+                }}
+            </dl>
+        </Panel>
+    }
+}
+
+#[component]
+fn McpPage() -> impl IntoView {
     let origin = origin();
     let endpoint = format!("{origin}/mcp");
-    let claude_code = claude_code_snippet(&origin);
-    let codex = codex_snippet(&origin);
-    let claude_desktop = claude_desktop_snippet(&origin);
-
     view! {
-        <div class="sheet">
-            <h1 class="settings__title">"Settings"</h1>
-            <Panel title="Broker connection">
-                <dl class="sheet__rows">
-                    <Row label="Status" value=connection />
-                    {move || {
-                        reason()
-                            .map(|r| {
-                                view! { <Row label="Reason" value=r /> }
-                            })
-                    }}
-                </dl>
-            </Panel>
-            <Panel title="Zigbee2MQTT bridge">
-                <dl class="sheet__rows">
-                    <Row
-                        label="Version"
-                        value=move || bridge.with(|b| b.version.clone().unwrap_or_else(|| DASH.to_owned()))
-                    />
-                    <Row
-                        label="Coordinator"
-                        value=move || {
-                            bridge.with(|b| b.coordinator.clone().unwrap_or_else(|| DASH.to_owned()))
-                        }
-                    />
-                    <Row label="Permit join" value=move || yes_no(bridge.with(|b| b.permit_join)) />
-                    <div class="sheet__row">
-                        <dt>"State"</dt>
-                        <dd>
-                            <span class="settings__state">
-                                <span class=move || availability_class(bridge.with(|b| b.state))></span>
-                                {move || availability_word(bridge.with(|b| b.state))}
-                            </span>
-                        </dd>
-                    </div>
-                </dl>
-            </Panel>
-            <Panel title="Counts">
-                <dl class="sheet__rows">
-                    <Row label="Devices" value=move || house.devices.with(Vec::len).to_string() />
-                    <Row label="Entities" value=move || house.entities.with(|m| m.len()).to_string() />
-                    <Row label="Primary entities" value=move || primary().to_string() />
-                    <Row label="Areas" value=move || house.areas.with(Vec::len).to_string() />
-                    <Row label="Ignored topics" value=move || house.ignored.with(Vec::len).to_string() />
-                </dl>
-            </Panel>
-            <Panel title="Updates available">
-                {move || {
-                    let pending: Vec<(DeviceView, UpdateView)> = house
-                        .devices
-                        .with(|ds| {
-                            ds.iter()
-                                .filter_map(|d| {
-                                    let u = d.update.clone().filter(|u| u.available)?;
-                                    Some((d.clone(), u))
-                                })
-                                .collect()
-                        });
-                    if pending.is_empty() {
-                        view! { <p class="settings__empty">"All devices are up to date"</p> }
-                            .into_any()
-                    } else {
-                        view! {
-                            <ul class="settings__updates">
-                                {pending
-                                    .into_iter()
-                                    .map(|(d, u)| {
-                                        view! {
-                                            <li>
-                                                <A href="/devices">{d.friendly_name.clone()}</A>
-                                                <span>
-                                                    {format!(
-                                                        "{} → {}",
-                                                        u.installed.unwrap_or_default(),
-                                                        u.latest.unwrap_or_default(),
-                                                    )}
-                                                </span>
-                                            </li>
-                                        }
-                                    })
-                                    .collect_view()}
-                            </ul>
-                        }
-                            .into_any()
-                    }
-                }}
-            </Panel>
-            <Panel title="MCP">
-                <dl class="sheet__rows">
-                    <Row label="Endpoint" value=endpoint />
-                    <Row label="Transport" value="Streamable HTTP, no auth (LAN only)" />
-                </dl>
-                <Snippet title="Claude Code" text=claude_code />
-                <Snippet title="Codex CLI (~/.codex/config.toml)" text=codex />
-                <Snippet title="Claude Desktop (stdio proxy)" text=claude_desktop />
-            </Panel>
-            <Panel title="Diagnostics">
-                <p class="settings__hint">
-                    "Zigbee2MQTT devices, firmware updates and ignored discovery topics."
-                </p>
-                <A href="/devices" attr:class="chip">
-                    "Open Z2M devices"
-                </A>
-            </Panel>
-            <Panel title="Theme">
-                <ThemeSwitch />
-            </Panel>
-            <Panel title="About">
-                <dl class="sheet__rows">
-                    <Row label="Product" value="Oikos-os" />
-                    <Row label="Version" value=concat!("v", env!("CARGO_PKG_VERSION")) />
-                    <Row label="Hub: this page's origin" value=origin />
-                </dl>
-            </Panel>
-        </div>
+        <Panel title="Endpoint">
+            <dl class="sheet__rows">
+                <Row label="Endpoint" value=endpoint />
+                <Row label="Transport" value="Streamable HTTP, no auth (LAN only)" />
+            </dl>
+        </Panel>
+        <Panel title="Set up an assistant">
+            <Snippet title="Claude Code" text=claude_code_snippet(&origin) />
+            <Snippet title="Codex CLI (~/.codex/config.toml)" text=codex_snippet(&origin) />
+            <Snippet title="Claude Desktop (stdio proxy)" text=claude_desktop_snippet(&origin) />
+        </Panel>
+    }
+}
+
+#[component]
+fn AboutPage() -> impl IntoView {
+    view! {
+        <Panel title="Hub">
+            <dl class="sheet__rows">
+                <Row label="Product" value="Oikos-os" />
+                <Row label="Version" value=VERSION />
+                <Row label="Hub: this page's origin" value=origin() />
+            </dl>
+        </Panel>
     }
 }
 
@@ -313,5 +514,23 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["mcpServers"]["oikos"]["args"][2], ORIGIN);
         assert_eq!(v["mcpServers"]["oikos"]["command"], "<path>/oikos-os");
+    }
+
+    #[test]
+    fn every_page_round_trips_its_slug() {
+        for page in SettingsPage::ALL {
+            assert_eq!(SettingsPage::from_slug(page.slug()), Some(page));
+            assert_eq!(page.href(), format!("/settings/{}", page.slug()));
+        }
+        assert_eq!(SettingsPage::from_slug("nope"), None);
+        assert_eq!(SettingsPage::Zigbee2mqtt.title(), "Zigbee2MQTT");
+    }
+
+    #[test]
+    fn zigbee_status_prefers_updates_over_the_bridge_state() {
+        assert_eq!(zigbee_status(0, Availability::Online), "Online");
+        assert_eq!(zigbee_status(0, Availability::Offline), "Offline");
+        assert_eq!(zigbee_status(1, Availability::Online), "1 update");
+        assert_eq!(zigbee_status(3, Availability::Offline), "3 updates");
     }
 }

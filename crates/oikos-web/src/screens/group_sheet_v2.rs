@@ -13,6 +13,7 @@ use crate::api::{delete_group, encode_id, list_groups, set_group, set_override};
 use crate::cards::light::power_command;
 use crate::cards::{PowerToggle, Sender};
 use crate::components::card_frame::open_entity;
+use crate::components::card_place::InSheet;
 use crate::components::toast::Toasts;
 use crate::format::{display_value, is_on};
 use crate::house::House;
@@ -165,7 +166,9 @@ fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
         </header>
         <section class="sheet__panel">
             <h2 class="sheet__heading">"Controls"</h2>
-            <div class="sheet__controls">{move || card_for(entity.get())}</div>
+            <div class="sheet__controls">
+                <InSheet>{move || card_for(entity.get())}</InSheet>
+            </div>
         </section>
         <section class="sheet__panel">
             <h2 class="sheet__heading">"Members"</h2>

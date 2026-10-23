@@ -168,8 +168,9 @@ fn instructions() -> String {
          `[weather] enabled`. `get_solar` returns the Solcast solar forecast (today, tomorrow, the \
 next days, the request budget) when `[solcast] enabled`; its `solar_…` entities carry the same \
 numbers. `get_home_settings` and `set_home_settings` read and replace the whole \
-home settings document: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a \
-temperature sensor).",
+home settings document: `eco_setpoint` (°C), `mode_entity` (a select), `indoor_entity` (a \
+temperature sensor), `cold_below` and `hot_above` (°C, the web reads cold below 15 and warm \
+above 26 when unset).",
         fields = UiOverride::FIELDS.join(", ")
     )
 }

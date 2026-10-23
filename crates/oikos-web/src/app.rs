@@ -29,7 +29,8 @@ use crate::screens::groups::GroupsScreen;
 use crate::screens::history_detail::HistoryDetailScreen;
 use crate::screens::room::RoomScreen;
 use crate::screens::security::SecurityScreen;
-use crate::screens::settings::SettingsScreen;
+use crate::screens::settings::{SettingsPageScreen, SettingsScreen};
+use crate::screens::weather::WeatherScreen;
 use crate::shell::Shell;
 use crate::theme::install_theme;
 
@@ -147,7 +148,11 @@ pub fn App() -> impl IntoView {
     #[cfg(target_arch = "wasm32")]
     crate::ws::connect("/ws", house);
     #[cfg(target_arch = "wasm32")]
-    house.refresh_flows_config();
+    {
+        house.refresh_flows_config();
+        house.refresh_weather();
+        house.refresh_home_settings();
+    }
     view! {
         <Router>
             <TrackBackStack />
@@ -163,6 +168,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/energy") view=EnergyScreen />
                     <Route path=path!("/security") view=SecurityScreen />
                     <Route path=path!("/climate") view=ClimateScreen />
+                    <Route path=path!("/weather") view=WeatherScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
                     <Route path=path!("/flows") view=FlowsScreen />
@@ -173,6 +179,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/groups/:id/edit") view=GroupWizardScreen />
                     <Route path=path!("/devices") view=DevicesScreen />
                     <Route path=path!("/settings") view=SettingsScreen />
+                    <Route path=path!("/settings/:page") view=SettingsPageScreen />
                 </Routes>
             </Shell>
             <ToastQueue />

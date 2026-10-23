@@ -15,6 +15,10 @@ use crate::hub::{Hub, HubError};
 const ECO_MIN: f64 = 5.0;
 /// The highest accepted eco setpoint, in °C.
 const ECO_MAX: f64 = 30.0;
+/// The lowest accepted cold or hot threshold, in °C.
+const THRESHOLD_MIN: f64 = 5.0;
+/// The highest accepted cold or hot threshold, in °C.
+const THRESHOLD_MAX: f64 = 35.0;
 
 /// The topic the document is retained on.
 pub fn topic(ui_prefix: &str) -> String {
@@ -22,7 +26,8 @@ pub fn topic(ui_prefix: &str) -> String {
 }
 
 /// Checks the document against the house: the setpoint is a sane temperature, the mode is a
-/// select and the indoor entity is a temperature sensor. The message names the field.
+/// select, the indoor entity is a temperature sensor and the cold threshold is below the hot one.
+/// The message names the field.
 pub fn validate(settings: &HomeSettings, reg: &Registry) -> Result<(), String> {
     if let Some(eco) = settings.eco_setpoint
         && !(eco.is_finite() && (ECO_MIN..=ECO_MAX).contains(&eco))
@@ -30,6 +35,23 @@ pub fn validate(settings: &HomeSettings, reg: &Registry) -> Result<(), String> {
         return Err(format!(
             "eco_setpoint must be between {ECO_MIN} and {ECO_MAX} °C"
         ));
+    }
+    for (name, value) in [
+        ("cold_below", settings.cold_below),
+        ("hot_above", settings.hot_above),
+    ] {
+        if let Some(v) = value
+            && !(v.is_finite() && (THRESHOLD_MIN..=THRESHOLD_MAX).contains(&v))
+        {
+            return Err(format!(
+                "{name} must be between {THRESHOLD_MIN} and {THRESHOLD_MAX} °C"
+            ));
+        }
+    }
+    if let (Some(cold), Some(hot)) = (settings.cold_below, settings.hot_above)
+        && cold >= hot
+    {
+        return Err("cold_below must be lower than hot_above".to_owned());
     }
     if let Some(id) = &settings.mode_entity {
         match reg.entity(id) {
@@ -160,6 +182,37 @@ mod tests {
             let err = validate(&eco(Some(bad)), &reg).expect_err("out of range");
             assert!(err.contains("eco_setpoint"), "{err}");
         }
+    }
+
+    #[test]
+    fn thresholds_bounds_and_order() {
+        let reg = registry();
+        let cold = |v: Option<f64>| HomeSettings {
+            cold_below: v,
+            ..HomeSettings::default()
+        };
+        let hot = |v: Option<f64>| HomeSettings {
+            hot_above: v,
+            ..HomeSettings::default()
+        };
+        for ok in [5.0, 35.0] {
+            assert!(validate(&cold(Some(ok)), &reg).is_ok());
+            assert!(validate(&hot(Some(ok)), &reg).is_ok());
+        }
+        for bad in [4.9, 35.1, f64::NAN] {
+            let err = validate(&cold(Some(bad)), &reg).expect_err("out of range");
+            assert!(err.contains("cold_below"), "{err}");
+            let err = validate(&hot(Some(bad)), &reg).expect_err("out of range");
+            assert!(err.contains("hot_above"), "{err}");
+        }
+        let both = |c: f64, h: f64| HomeSettings {
+            cold_below: Some(c),
+            hot_above: Some(h),
+            ..HomeSettings::default()
+        };
+        let err = validate(&both(20.0, 20.0), &reg).expect_err("not ordered");
+        assert!(err.contains("cold_below"), "{err}");
+        assert!(validate(&both(15.0, 26.0), &reg).is_ok());
     }
 
     #[test]

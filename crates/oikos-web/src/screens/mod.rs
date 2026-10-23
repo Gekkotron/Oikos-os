@@ -14,6 +14,8 @@ pub mod group_wizard;
 pub mod groups;
 pub mod history_detail;
 pub mod home;
+pub mod home_settings_panel;
 pub mod room;
 pub mod security;
 pub mod settings;
+pub mod weather;

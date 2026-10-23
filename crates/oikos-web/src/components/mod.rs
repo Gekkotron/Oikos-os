@@ -1,11 +1,15 @@
 pub mod alarm_hero;
 pub mod alert_row;
 pub mod card_frame;
+pub mod card_place;
 pub mod confirm;
+pub mod dial;
 pub mod flow_switch;
 pub mod history_chart;
 pub mod hs_wheel;
 pub mod now;
+pub mod robot;
 pub mod room_title;
+pub mod sparkline;
 pub mod status_pill;
 pub mod toast;

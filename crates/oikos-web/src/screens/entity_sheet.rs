@@ -13,6 +13,7 @@ use crate::cards::Sender;
 use crate::cards::light::has_colour;
 use crate::components::hs_wheel::HsWheel;
 
+use crate::components::card_place::InSheet;
 use crate::format::{format_timestamp, list_label, title_suffix, type_word, wrap_id};
 use crate::house::House;
 use crate::icons::entity_icon;
@@ -271,7 +272,9 @@ pub fn SheetBody(id: String) -> impl IntoView {
             {header}
         </header>
         <Panel title="Controls">
-            <div class="sheet__controls">{move || entity.get().map(card_for)}</div>
+            <div class="sheet__controls">
+                <InSheet>{move || entity.get().map(card_for)}</InSheet>
+            </div>
             <A href=history_href attr:class="chip sheet__history">
                 "View history →"
             </A>
@@ -316,7 +319,13 @@ pub fn EntitySheetScreen() -> impl IntoView {
     let house = expect_context::<House>();
     let params = use_params_map();
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
-    let known = Memo::new(move |_| house.entities.with(|m| m.contains_key(&id.get())));
+    // `Some(id)` while the house has the entity. One memo carrying the id, so a sheet-to-sheet
+    // link rebuilds the body (a bare known flag stays `true` and the sheet kept the first
+    // entity), yet a state echo never does.
+    let shown = Memo::new(move |_| {
+        let id = id.get();
+        house.entities.with(|m| m.contains_key(&id)).then_some(id)
+    });
     let loaded = Memo::new(move |_| {
         house.entities.with(|m| !m.is_empty())
             || matches!(house.connection.get(), oikos_api::ConnectionStatus::Online)
@@ -325,8 +334,8 @@ pub fn EntitySheetScreen() -> impl IntoView {
     view! {
         <div class="sheet">
             {move || {
-                if known.get() {
-                    view! { <SheetBody id=id.get() /> }.into_any()
+                if let Some(id) = shown.get() {
+                    view! { <SheetBody id=id /> }.into_any()
                 } else if loaded.get() {
                     view! {
                         <header class="sheet__header">

@@ -4,6 +4,8 @@ use leptos::prelude::*;
 use oikos_api::EntityView;
 use oikos_core::model::Availability;
 
+use crate::components::card_place::{CardPlace, use_card_place};
+use crate::format::room_name;
 use crate::house::House;
 use crate::icons::entity_icon;
 
@@ -34,8 +36,10 @@ pub fn open_entity(id: &str) -> Callback<()> {
     Callback::new(move |()| navigate(&path, Default::default()))
 }
 
-/// A card for one entity. `on_click` fires from the header tap target; `children` is the body
-/// (value, controls). `pending` shows a pulsing dot while a command awaits its state echo.
+/// A card for one entity: the icon tile, the room (when the place does not already say it) and
+/// the name form the header that opens the sheet; `trailing` (a toggle, a badge, a menu) sits
+/// beside it, outside the button; `state_line` reads under it; `children` is the body.
+/// `pending` shows a pulsing dot while a command awaits its state echo.
 #[component]
 pub fn CardFrame(
     entity: EntityView,
@@ -47,7 +51,24 @@ pub fn CardFrame(
     /// Draws the card in the alarm colour (a ringing siren).
     #[prop(optional)]
     alert: bool,
-    children: Children,
+    /// The control at the top right, beside the header.
+    #[prop(optional)]
+    trailing: Option<AnyView>,
+    /// The short state under the name ("On · 14 %"); a signal so it follows the language.
+    #[prop(optional, into)]
+    state_line: Option<Signal<String>>,
+    /// A background tint, as the class `card--<tint>` (`sage`, `cool`).
+    #[prop(optional)]
+    tint: Option<&'static str>,
+    /// Spans two columns (a full row on a phone).
+    #[prop(optional)]
+    wide: bool,
+    /// Puts the room and name beside the tile instead of under it.
+    #[prop(optional)]
+    row_header: bool,
+    /// The body; a card whose state line says everything has none.
+    #[prop(optional)]
+    children: Option<Children>,
 ) -> impl IntoView {
     let icon = entity_icon(&entity);
     let availability = entity.state.availability;
@@ -63,34 +84,59 @@ pub fn CardFrame(
     // A group's entity spans like the derived group card and carries its `×N` badge.
     let group = entity.id.strip_prefix(GROUP_PREFIX).map(str::to_owned);
     let is_group = group.is_some();
+    let house = use_context::<House>();
     let count = Signal::derive(move || {
         let group = group.as_deref()?;
-        use_context::<House>()?
+        house?
             .groups
             .with(|g| g.get(group).map(|g| g.members.len()))
     });
+    // The room line, only where no heading names the room already.
+    let room = (use_card_place() == CardPlace::Overview)
+        .then_some(())
+        .and(house)
+        .map(|house| {
+            let area = entity.area.clone();
+            Signal::derive(move || house.areas.with(|a| room_name(a, &area)))
+        });
+    let class = match tint {
+        Some(tint) => format!("card card--{tint}"),
+        None => "card".to_owned(),
+    };
 
     view! {
         <article
-            class="card"
-            class:card--wide=is_group
+            class=class
+            class:card--wide=wide || is_group
+            class:card--row-header=row_header
             class:card--on=is_on
             class:card--offline=offline
             class:card--pending=move || pending.get()
             class:card--alert=alert
         >
-            <button type="button" class="card__header" on:click=move |_| on_click.run(())>
-                <span class="card__icon" inner_html=icon></span>
-                <span class="card__name" title=full_name>{short}</span>
-                {move || {
-                    count.get().map(|n| view! { <span class="group__count">{format!("×{n}")}</span> })
-                }}
-                <span class="card__dots">
-                    <span class="dot dot--pending" class:dot--active=move || pending.get()></span>
-                    <span class=availability_class(availability)></span>
-                </span>
-            </button>
-            <div class="card__body">{children()}</div>
+            <div class="card__top">
+                <button type="button" class="card__header" on:click=move |_| on_click.run(())>
+                    <span class="card__tile">
+                        <span class="card__icon" inner_html=icon></span>
+                        <span class="card__dots">
+                            <span class="dot dot--pending" class:dot--active=move || pending.get()></span>
+                            <span class=availability_class(availability)></span>
+                        </span>
+                    </span>
+                    <span class="card__titles">
+                        {room.map(|room| {
+                            move || room.get().map(|r| view! { <span class="card__room">{r}</span> })
+                        })}
+                        <span class="card__name" title=full_name>{short}</span>
+                    </span>
+                    {move || {
+                        count.get().map(|n| view! { <span class="group__count">{format!("×{n}")}</span> })
+                    }}
+                </button>
+                {trailing.map(|t| view! { <div class="card__trailing">{t}</div> })}
+            </div>
+            {state_line.map(|s| view! { <p class="card__state">{move || s.get()}</p> })}
+            {children.map(|c| view! { <div class="card__body">{c()}</div> })}
         </article>
     }
 }
