@@ -195,6 +195,9 @@ pub fn App() -> impl IntoView {
                         <A href="/climate">
                             <span class="nav__glyph" inner_html=THERMOMETER></span>
                             <span class="nav__label">"Climate"</span>
+                            <span class="nav__badge nav__badge--beta">
+                                "Beta"
+                            </span>
                         </A>
                     </Show>
                     <A href="/alerts">

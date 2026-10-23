@@ -401,6 +401,15 @@ body {
   pointer-events: none;
 }
 
+/* A feature still being tested (the Climate tab). Quieter than an unread count. */
+.nav__badge--beta {
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -5186,6 +5195,12 @@ html:has(.flow-canvas-screen) {
 }
 
 /* Climate */
+/* The engine is in beta: the badge sits on the title's baseline. */
+.climate__beta {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
 .climate {
   display: flex;
   flex-direction: column;

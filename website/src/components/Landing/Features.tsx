@@ -3,7 +3,14 @@ import Link from '@docusaurus/Link';
 import Heading from '@theme/Heading';
 import styles from './Landing.module.css';
 
-type Feature = { title: string; text: string; to: string; color: string; icon: ReactNode };
+type Feature = {
+  title: string;
+  text: string;
+  to: string;
+  color: string;
+  icon: ReactNode;
+  beta?: boolean;
+};
 
 const sv = {
   viewBox: '0 0 24 24',
@@ -62,6 +69,7 @@ const FEATURES: Feature[] = [
     text: 'Heating and cooling by zone. The engine learns each room from history and proposes changes you approve or reject.',
     to: '/docs/users/climate',
     color: 'var(--oikos-cyan)',
+    beta: true,
     icon: (
       <svg {...sv}>
         <path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z" />
@@ -109,7 +117,10 @@ export default function Features() {
               <span className={styles.icon} style={{ color: f.color }}>
                 {f.icon}
               </span>
-              <h3 className={styles.cardTitle}>{f.title}</h3>
+              <h3 className={styles.cardTitle}>
+                {f.title}
+                {f.beta && <span className={styles.beta}>Beta</span>}
+              </h3>
               <p className={styles.cardText}>{f.text}</p>
               <Link to={f.to} className={styles.cardLink}>
                 Read more <span aria-hidden="true">→</span>

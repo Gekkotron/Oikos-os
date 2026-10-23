@@ -57,6 +57,18 @@
   font-size: 1.1rem;
   font-weight: 600;
 }
+.beta {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--oikos-amber) 18%, transparent);
+  color: var(--oikos-amber);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
 .cardText {
   flex: 1;
   margin: 0 0 1rem;

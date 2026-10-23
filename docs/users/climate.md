@@ -4,6 +4,10 @@ sidebar_position: 10
 description: How the climate engine decides each zone's heating or cooling, what it learns from history, and how proposals, overrides and hand changes work.
 ---
 
+:::caution Beta
+The climate engine is still being tested. Its rules, settings and decisions may change between releases, and it commands real heating and cooling: watch what it decides before you leave a zone on it.
+:::
+
 With `[climate] enabled = true` the hub heats and cools by zone. The engine is off by default:
 
 ```toml
