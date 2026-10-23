@@ -29,22 +29,24 @@ pub fn Shell(
         location.pathname.track();
         drawer_open.set(false);
     });
-    let _escape = window_event_listener(ev::keydown, move |event| {
+    let escape = window_event_listener(ev::keydown, move |event| {
         // `try_`: the listener can outlive an unmounted shell for a moment.
         if event.key() == "Escape" && drawer_open.try_get_untracked() == Some(true) {
             drawer_open.try_set(false);
         }
     });
     // Widening past the phone layout (rotating, resizing) leaves nothing to close by hand.
-    let _widen = window_event_listener(ev::resize, move |_| {
-        let wide = window()
-            .inner_width()
-            .ok()
-            .and_then(|w| w.as_f64())
-            .is_some_and(|w| w >= 900.0);
-        if wide {
+    let widen = window_event_listener(ev::resize, move |_| {
+        let width = window().inner_width().ok().and_then(|w| w.as_f64());
+        let open = drawer_open.try_get_untracked() == Some(true);
+        if width.is_some_and(|w| closes_on_resize(open, w)) {
             drawer_open.try_set(false);
         }
+    });
+    // The listeners go with the shell.
+    on_cleanup(move || {
+        escape.remove();
+        widen.remove();
     });
     // Focus follows the drawer: into it when it opens, back to the menu button when it closes.
     Effect::new(move |was_open: Option<bool>| {
@@ -79,5 +81,25 @@ pub fn Shell(
                 <main class="screen">{children()}</main>
             </div>
         </div>
+    }
+}
+
+/// Whether a resize to `width` closes the drawer: only an open one, once the sidebar is back.
+fn closes_on_resize(open: bool, width: f64) -> bool {
+    open && width >= 900.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::closes_on_resize;
+
+    #[test]
+    fn widening_closes_only_an_open_drawer() {
+        assert!(closes_on_resize(true, 900.0));
+        assert!(closes_on_resize(true, 1400.0));
+        // A closed drawer is left alone: no write, so nothing that reads it re-runs.
+        assert!(!closes_on_resize(false, 1400.0));
+        assert!(!closes_on_resize(true, 899.0));
+        assert!(!closes_on_resize(false, 600.0));
     }
 }
