@@ -72,7 +72,7 @@ Activity:
 | # | When | FR | EN |
 |---|------|----|----|
 | 1 | At least one unseen alert (same count as the Alerts badge, `alerts::unseen_count`) | « Quelque chose demande ton attention » | "Something needs your attention" |
-| 2 | One door or window open | « La fenêtre de la cuisine est ouverte » (entity title, room when known) | "The kitchen window is open" |
+| 2 | One door or window open | « Ouverture : Fenêtre (Cuisine) » (entity title, room when known; neutral form because French titles cannot be inflected generically) | "Open: Window (Kitchen)" |
 | 2b | Several open | « 2 ouvertures » | "2 doors or windows open" |
 | 3 | Dark (civil dusk to dawn, from `[flows]`) **and** 22:00–5:59 **and** no light on | « La maison dort » | "The house is asleep" |
 | 4 | No light on | « La maison est calme » | "The house is quiet" |
@@ -86,7 +86,7 @@ Temperature (indoor temperature T, see below; thresholds from §7, defaults cold
 | T > hot | « il fait chaud » | "it's warm" |
 | otherwise | « il fait bon » | "it's comfortable" |
 
-- Examples: « La maison est calme, il fait bon. » « La maison dort, il fait froid. » « La fenêtre de la cuisine est ouverte, il fait froid. »
+- Examples: « La maison est calme, il fait bon. » « La maison dort, il fait froid. » « Ouverture : Fenêtre (Cuisine), il fait froid. »
 - No indoor temperature → the sentence stops after the activity half.
 - **Indoor temperature T** (hub spec §7): the `indoor_entity` value when set and numeric; else the mean of the primary temperature sensors (`device_class == "temperature"`, `°C`) that have an area other than Unassigned and are not offline (`state.availability != Offline`, so `Unknown` counts, with a numeric value; no staleness check on `last_update`, my call). The weather entities (`weather_*`) are excluded: they are in Unassigned, and the builder also excludes the hub's weather device explicitly. Rounded to 0.1 °C for display; the comparison uses the unrounded value.
 - "Light on": an entity whose `kind` is `Kind::Light` (the hub already sends the effective kind, so a switch with `showAs` light is included, see `SwitchType::effective_kind`), not a group (`group_*` id), not hidden by the user (`ui.hidden`), not a diagnostic or config entity, and on. A light folded into a group with `hideMembers` still counts; the group entity itself does not (my call, so a light is never counted twice nor missed).
