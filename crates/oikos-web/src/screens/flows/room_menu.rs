@@ -71,6 +71,23 @@ pub fn RoomMenu(
             confirming.set(false);
         }
     });
+    // The swap removes the focused button, so focus follows it: the confirm opens on Cancel
+    // and Cancel goes back to Delete flow…. Each returns whether it was confirming.
+    let cancel_button = NodeRef::<leptos::html::Button>::new();
+    let delete_item = NodeRef::<leptos::html::Button>::new();
+    Effect::new(move |was: Option<bool>| {
+        let now = confirming.get();
+        if now {
+            if let Some(button) = cancel_button.get() {
+                let _ = button.focus();
+            }
+        } else if was == Some(true)
+            && let Some(button) = delete_item.get()
+        {
+            let _ = button.focus();
+        }
+        now
+    });
 
     let id = StoredValue::new(id);
     // The hub's push refreshes the list, like the enable switch.
@@ -173,6 +190,7 @@ pub fn RoomMenu(
                                         type="button"
                                         role="menuitem"
                                         class="room-menu__item room-menu__item--danger"
+                                        node_ref=delete_item
                                         on:click=move |_| confirming.set(true)
                                     >
                                         <span class="room-menu__check" aria-hidden="true"></span>
@@ -191,6 +209,7 @@ pub fn RoomMenu(
                                 <button
                                     type="button"
                                     class="btn btn--ghost"
+                                    node_ref=cancel_button
                                     on:click=move |_| confirming.set(false)
                                 >
                                     "Cancel"

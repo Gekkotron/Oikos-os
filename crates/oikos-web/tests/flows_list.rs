@@ -193,6 +193,33 @@ async fn menu_offers_delete_with_confirmation() {
     assert_eq!(count(&host, ".room-menu__head"), 1, "{}", host.inner_html());
 }
 
+/// The text of the focused element.
+fn focused_text() -> String {
+    web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .active_element()
+        .and_then(|el| el.text_content())
+        .unwrap_or_default()
+}
+
+#[wasm_bindgen_test]
+async fn delete_confirm_keeps_the_keyboard_focus() {
+    let host = host();
+    let _mounted = mount(&host, vec![reference()]);
+    tick().await;
+    click(&host, ".room-menu__button");
+    tick().await;
+    click(&host, ".room-menu__item--danger");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    // The confirm opens on its safe choice.
+    assert_eq!(focused_text(), "Cancel");
+    click_text(&host, ".room-menu__confirm button", "Cancel");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(focused_text(), "Delete flow…");
+}
+
 #[wasm_bindgen_test]
 async fn failed_delete_keeps_the_row() {
     let host = host();
