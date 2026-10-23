@@ -1,0 +1,220 @@
+/* Landing: a night sky over a lit house. */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  padding: clamp(4rem, 10vw, 7.5rem) 0 clamp(7rem, 14vw, 11rem);
+  text-align: center;
+}
+
+/* Sky: warm wash in light mode, night gradient with stars in dark mode. */
+.sky {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60% 50% at 50% 100%, rgb(217 139 58 / 22%), transparent 70%),
+    linear-gradient(180deg, #f5f1ea 0%, #f5f1ea 100%);
+}
+:global([data-theme='dark']) .sky {
+  background:
+    radial-gradient(55% 45% at 50% 100%, rgb(255 196 87 / 20%), transparent 70%),
+    radial-gradient(120% 90% at 50% 0%, #1d2b55 0%, #0b1020 100%);
+}
+:global([data-theme='dark']) .sky::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.5px 1.5px at 12% 22%, #fff4dc 90%, transparent),
+    radial-gradient(1px 1px at 27% 61%, #fff4dc 80%, transparent),
+    radial-gradient(1px 1px at 38% 14%, #fff4dc 70%, transparent),
+    radial-gradient(1.5px 1.5px at 56% 30%, #fff4dc 80%, transparent),
+    radial-gradient(1px 1px at 71% 18%, #fff4dc 70%, transparent),
+    radial-gradient(1.5px 1.5px at 84% 52%, #fff4dc 80%, transparent),
+    radial-gradient(1px 1px at 91% 12%, #fff4dc 70%, transparent),
+    radial-gradient(1px 1px at 6% 74%, #fff4dc 60%, transparent),
+    radial-gradient(1px 1px at 64% 70%, #fff4dc 50%, transparent);
+  opacity: 0.8;
+}
+
+.heroInner { max-width: 880px; }
+
+.preamble {
+  display: inline-flex;
+  gap: 0.6rem;
+  margin: 0 0 1.6rem;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--oikos-amber-text);
+  opacity: 0;
+  animation: rise 700ms ease-out 80ms forwards;
+}
+.dot { opacity: 0.6; }
+
+.headline {
+  margin: 0 auto;
+  font-size: clamp(2.6rem, 7.5vw, 5rem);
+  line-height: 1.04;
+  letter-spacing: -0.025em;
+  font-weight: 500;
+  color: var(--oikos-ink);
+}
+.line1, .line2 {
+  display: block;
+  opacity: 0;
+  animation: rise 800ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.line1 { animation-delay: 180ms; }
+.line2 {
+  animation-delay: 340ms;
+  font-style: italic;
+  color: var(--oikos-amber);
+}
+
+.subhead {
+  max-width: 40rem;
+  margin: 1.6rem auto 2.2rem;
+  font-size: clamp(1rem, 2.2vw, 1.2rem);
+  line-height: 1.6;
+  color: var(--oikos-ink-soft);
+  opacity: 0;
+  animation: rise 800ms ease-out 480ms forwards;
+}
+
+.ctas {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem 1.2rem;
+  opacity: 0;
+  animation: rise 800ms ease-out 620ms forwards;
+}
+.ctaPrimary {
+  background: var(--oikos-amber);
+  border-color: var(--oikos-amber);
+  color: #1f1b16;
+  font-weight: 600;
+  box-shadow: 0 10px 30px -12px rgb(255 196 87 / 55%);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+.ctaPrimary:hover {
+  color: #1f1b16;
+  transform: translateY(-1px);
+  background: var(--ifm-color-primary-light);
+  box-shadow: 0 14px 36px -12px rgb(255 196 87 / 70%);
+}
+.ctaGhost {
+  background: transparent;
+  color: var(--oikos-ink);
+  border: 1px solid var(--oikos-chip-border);
+  font-weight: 500;
+}
+.ctaGhost:hover {
+  color: var(--oikos-ink);
+  border-color: var(--oikos-amber);
+  background: var(--oikos-card);
+}
+.ctaText {
+  font-weight: 500;
+  color: var(--oikos-ink-soft);
+}
+.ctaText:hover { color: var(--oikos-amber-text); text-decoration: none; }
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 2.2rem 0 0;
+  padding: 0;
+  list-style: none;
+  opacity: 0;
+  animation: rise 800ms ease-out 760ms forwards;
+}
+.chip {
+  padding: 0.28rem 0.85rem;
+  border: 1px solid var(--oikos-chip-border);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--oikos-ink-soft);
+}
+
+/* Product shot overlaps the hero's lower edge. */
+.shotSection {
+  position: relative;
+  z-index: 1;
+  margin-top: clamp(-7rem, -10vw, -4rem);
+  padding-bottom: clamp(3rem, 8vw, 6rem);
+}
+.frame {
+  max-width: 1100px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--oikos-card-border);
+  border-radius: var(--oikos-radius);
+  background: #0b1020;
+  box-shadow: 0 30px 80px -20px rgb(0 0 0 / 55%), 0 0 0 1px rgb(255 196 87 / 6%);
+  opacity: 0;
+  animation: rise 900ms cubic-bezier(0.2, 0.7, 0.2, 1) 800ms forwards;
+}
+.chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.65rem 0.9rem;
+  background: #141b36;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+}
+.light { width: 10px; height: 10px; border-radius: 50%; background: rgb(255 255 255 / 20%); }
+.url {
+  margin-left: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: #8f98c0;
+}
+.shot { display: block; width: 100%; height: auto; }
+
+/* Closing */
+.closing {
+  padding: clamp(3rem, 8vw, 6rem) 0 clamp(4rem, 9vw, 7rem);
+  text-align: center;
+  background: radial-gradient(60% 80% at 50% 100%, rgb(255 196 87 / 12%), transparent 70%);
+}
+.closingTitle {
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  letter-spacing: -0.02em;
+  margin-bottom: 0.6rem;
+}
+.closingText { color: var(--oikos-ink-soft); margin-bottom: 1.8rem; }
+.closing .ctas { opacity: 1; animation: none; }
+.note {
+  max-width: 34rem;
+  margin: 2rem auto 0;
+  font-size: 0.92rem;
+  color: var(--oikos-ink-soft);
+}
+
+@media (max-width: 600px) {
+  .preamble { letter-spacing: 0.12em; font-size: 0.68rem; }
+  .url { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .preamble, .line1, .line2, .subhead, .ctas, .chips, .frame {
+    opacity: 1;
+    animation: none;
+  }
+}

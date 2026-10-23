@@ -1,4 +1,8 @@
-# Install Oikos-os on Linux (Docker)
+---
+title: Install on Linux (Docker)
+sidebar_position: 2
+description: Install Oikos-os on a Linux host from a git clone with Docker Compose, then configure, upgrade and run it.
+---
 
 Oikos-os is published only as source. On the Linux box that will run it,
 `git clone` the repo and build the image locally with the `Dockerfile`
@@ -78,7 +82,7 @@ LAN interface before pointing the Android app at the hub.
 ## Push notifications (optional)
 
 The hub sends Firebase Cloud Messaging alerts with a service-account
-key file. Drop the key next to `compose.yml`, uncomment the second
+key file (see [Push notifications](push-notifications.md)). Drop the key next to `compose.yml`, uncomment the second
 volume mount in `compose.yml`, and set `[push] credentials` in
 `oikos.toml` to `/etc/oikos/firebase.json`. The key must never be
 committed; `.gitignore` and `.dockerignore` cover the usual names.

@@ -59,7 +59,7 @@ fn codex_snippet(origin: &str) -> String {
 }
 
 fn claude_desktop_snippet(origin: &str) -> String {
-    // Written by hand so the keys keep the README's order (`command` before `args`).
+    // Written by hand so the keys keep the order of docs/users/assistants-mcp.md (`command` before `args`).
     format!(
         "{{\n  \"mcpServers\": {{\n    \"oikos\": {{\n      \"command\": \"<path>/oikos-os\",\n      \"args\": [\"mcp-stdio\", \"--server\", {}]\n    }}\n  }}\n}}",
         serde_json::Value::String(origin.to_owned())

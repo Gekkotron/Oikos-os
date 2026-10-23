@@ -1,373 +1,63 @@
-# Oikos-os
+<p align="center">
+  <img src="website/static/img/logo.svg" width="96" alt="Oikos-os icon: a lit house under a night sky">
+</p>
 
-Author: Gekkotron
+<h1 align="center">Oikos-os</h1>
 
-Oikos-os is the Rust home-automation hub that replaces Jeedom. It runs on the home server next to Mosquitto, owns the device registry built from Zigbee2MQTT and Home Assistant MQTT discovery, and is the brain behind the Oikos Android app. It is configured through conversation: an MCP server lets an AI assistant inspect and change the house instead of a rules editor. The MCP server is served at `/mcp` and, like the REST API on the same port, is LAN-trusted with no auth in v1.
+<p align="center">
+  Your house, one hub. Ask it anything.<br>
+  <a href="https://gekkotron.github.io/Oikos-os/"><b>Documentation</b></a> ·
+  <a href="https://gekkotron.github.io/Oikos-os/docs/users/getting-started">Getting started</a> ·
+  <a href="https://gekkotron.github.io/Oikos-os/docs/users/install-on-linux">Install with Docker</a>
+</p>
 
-Status: v1 hub with its web UI: registry, API, WebSocket, MCP and the browser app.
+Oikos-os is a home-automation hub written in Rust. It runs on the home server next to Mosquitto, builds the device registry from Zigbee2MQTT and Home Assistant MQTT discovery, and serves a web UI, a REST and WebSocket API, and the Oikos Android app. It is configured through conversation: an MCP server lets an AI assistant inspect and change the house instead of a rules editor.
 
-**Installing on a Linux host?** See [docs/install-on-linux.md](docs/install-on-linux.md) for the Docker install (uses the `Dockerfile` and `compose.yml` at the repo root).
+![The House dashboard](website/static/img/screens/house.webp)
 
-## Run
+## What it does
 
-```sh
-cp oikos.example.toml oikos.toml   # then edit the [mqtt] credentials
-cargo run -p oikos-os -- run
-```
+- **Dashboards**: a House overview built from your rooms, plus your own dashboards made of widgets. [Web UI](https://gekkotron.github.io/Oikos-os/docs/users/web-ui)
+- **Flows**: automations as small graphs of triggers (state, signal, schedule, sun), checks, waits and actions, edited on a canvas that replays every run. [Flows](https://gekkotron.github.io/Oikos-os/docs/users/flows)
+- **Energy**: the live power flow between solar, grid, battery, the house and its consumers, with kWh per day. [Web UI](https://gekkotron.github.io/Oikos-os/docs/users/web-ui#energy)
+- **Climate**: heating and cooling by zone; the engine learns a weekly schedule from history and proposes it for approval. [Climate](https://gekkotron.github.io/Oikos-os/docs/users/climate)
+- **Phone alerts and cameras**: push notifications to the Android app through Firebase, with Frigate snapshots and clips. [Push notifications](https://gekkotron.github.io/Oikos-os/docs/users/push-notifications)
+- **History**: every state change in TimescaleDB, for charts and energy totals. [History](https://gekkotron.github.io/Oikos-os/docs/users/history)
+- **Talk to it**: an MCP server for Claude Code, Codex, Claude Desktop and any MCP client. [MCP](https://gekkotron.github.io/Oikos-os/docs/users/assistants-mcp)
 
-`oikos.toml` is git-ignored and read from the working directory (`run --config <path>` reads another file). Every key can be overridden from the environment as `OIKOS_<SECTION>__<KEY>`, for example `OIKOS_MQTT__PASSWORD=… cargo run -p oikos-os -- run`; `RUST_LOG` wins over `[log] level`.
+![A flow on the canvas](website/static/img/screens/flow-canvas.webp)
 
-The hub keeps a persistent MQTT session under `[mqtt] client_id` (default `oikos-os`), so a write queued just before a connection blip is retransmitted on reconnect. Two hubs on the same broker must not share a `client_id`: the broker would bounce them off each other and hand one the other's session.
+## Quick start
 
-Until Zigbee2MQTT publishes under `oikos`, list the Home Assistant prefix next to it so the discovery topics it still retains under `homeassistant/` are picked up too:
-
-```toml
-[topics]
-discovery_prefixes = ["oikos", "homeassistant"]
-```
-
-The hub sends the house's push notifications to the Android app through Firebase Cloud Messaging (see [Push notifications](#push-notifications)). Without `credentials` it keeps the alert history and sends nothing, with one warning at start; a key file that is missing or unreadable is the same, and the warning names its path. The hub starts either way.
-
-```toml
-[push]
-prefix = "oikos/push"            # <prefix>/notification/<source>, /tokens/<installId>, /responses, /history
-legacy_prefix = "oikos-push"     # OikosPush's topics, still read during the switch-over; "" turns them off
-credentials = "/path/to/firebase-service-account.json"  # git-ignored, never logged; leave out to send nothing
-```
-
-`retry_interval` (60 s), `max_retries` (10), `history_size` (100 alerts) and `history_days` (7) keep OikosPush's values. The old `history_topic` and `responses_topic` keys are refused at start: the error names the keys `[push]` takes.
-
-Alert snapshots and clips are URLs on Frigate. When they point at Frigate's login port (8971) the browser cannot load them, so give the hub the Frigate login and it serves them itself: media on that origin is rewritten to `/api/v1/media?url=…`, and the hub fetches it with Frigate's session cookie (logging in on demand, once more on a 401). Any other origin is refused. Leave `user` and `password` out for the unauthenticated port (5000).
-
-```toml
-[frigate]
-url = "http://192.168.1.20:8971"
-user = "oikos"
-password = "…"
-```
-
-The hub also replaces OikosPush's Frigate bridge: with `bridge = true` (and a `url` or `media_url`) it reads `<topic_prefix>/events` (subscribed only then) and raises a `camera` alert for each tracked object that qualifies. The first qualifying message (`new`, or the `update` that enters a watched zone) rings with the snapshot; `end` with a clip re-sends the same alert id silently with the clip; an event that only qualifies at `end` gets one audible alert with its clip. The title is the camera, the body `Person detected`, `Person in Porch` or `Alice (person) detected`, and `loc` (`frigate.object`) lets the app write it in the phone's language.
-
-```toml
-[frigate]
-bridge = true
-media_url = "http://192.168.1.20:5000"  # what the phone fetches media from; `url` when unset
-labels = ["person", "car"]              # empty: all
-cameras = []                            # empty: all
-zones = []                              # empty: any; otherwise alert once the object enters one
-cooldown = 0                            # seconds to ignore new events on a camera after an alert
-severity = "warning"
-ttl = 43200
-topic_prefix = "frigate"                # Frigate's MQTT topic_prefix
-```
-
-The broker user needs read on `<topic_prefix>/events`. Frigate needs `snapshots.enabled: true`, and event clips retained (`record.enabled`) for the clip update.
-
-## Zigbee2MQTT
-
-The hub discovers entities under the `oikos` prefix. In Zigbee2MQTT's `configuration.yaml`:
-
-```yaml
-homeassistant:
-  enabled: true
-  discovery_topic: oikos
-```
-
-Restart Zigbee2MQTT, then set the Oikos app's discovery prefix to `oikos` as well.
-
-Devices that Zigbee2MQTT does not cover reach the hub through a bridge publishing the same discovery: see [Adding a device](docs/adding-a-device.md).
-
-The [WaterHeaterController](https://github.com/Gekkotron/WaterHeaterController) firmware publishes no discovery, so publish it once, retained, for its existing `water-heater/*` topics:
+On a Linux host with Docker, Mosquitto and Zigbee2MQTT:
 
 ```sh
-mosquitto_pub -h 192.168.1.91 -u <user> -P <password> -r -t oikos/device/water_heater/config -m '{"dev":{"ids":["water_heater_controller"],"name":"Water heater","mf":"Gekkotron","mdl":"WaterHeaterController"},"stat_t":"water-heater/data","cmps":{"heater":{"p":"water_heater","name":null,"uniq_id":"water_heater","unit_of_meas":"°C","modes":[],"curr_temp_t":"water-heater/data","curr_temp_tpl":"{{ (80 + (0.35 - value_json.adc_result_mv / 1000) * 86.67) | round(1) }}","mode_stat_t":"water-heater/data","mode_stat_tpl":"{{ \"heat\" if (value_json.triac_0_power + value_json.triac_1_power + value_json.triac_2_power) > 0 else \"off\" }}","json_attr_t":"water-heater/data","json_attr_tpl":"{{ {\"inlet_temperature\": value_json.temp_0 | round(1), \"power\": ((value_json.triac_0_power + value_json.triac_1_power + value_json.triac_2_power) / 3) | round | int} | tojson }}"},"tank_temp":{"p":"sensor","name":"Tank temperature","uniq_id":"water_heater_tank_temp","dev_cla":"temperature","stat_cla":"measurement","unit_of_meas":"°C","val_tpl":"{{ (80 + (0.35 - value_json.adc_result_mv / 1000) * 86.67) | round(1) }}"},"power_0":{"p":"number","name":"Power 1","uniq_id":"water_heater_power_0","cmd_t":"water-heater/control","cmd_tpl":"{\"power0\": {{ value | int }}}","val_tpl":"{{ value_json.triac_0_power }}","min":0,"max":100,"step":1,"unit_of_meas":"%"},"power_1":{"p":"number","name":"Power 2","uniq_id":"water_heater_power_1","cmd_t":"water-heater/control","cmd_tpl":"{\"power1\": {{ value | int }}}","val_tpl":"{{ value_json.triac_1_power }}","min":0,"max":100,"step":1,"unit_of_meas":"%"},"power_2":{"p":"number","name":"Power 3","uniq_id":"water_heater_power_2","cmd_t":"water-heater/control","cmd_tpl":"{\"power2\": {{ value | int }}}","val_tpl":"{{ value_json.triac_2_power }}","min":0,"max":100,"step":1,"unit_of_meas":"%"},"temp_0":{"p":"sensor","name":"Cold water inlet temperature","uniq_id":"water_heater_temp_0","dev_cla":"temperature","stat_cla":"measurement","unit_of_meas":"°C","val_tpl":"{{ value_json.temp_0 | round(1) }}"},"temp_1":{"p":"sensor","name":"Triac temperature","uniq_id":"water_heater_temp_1","dev_cla":"temperature","stat_cla":"measurement","unit_of_meas":"°C","val_tpl":"{{ value_json.temp_1 | round(1) }}","ent_cat":"diagnostic"},"frequency":{"p":"sensor","name":"Mains frequency","uniq_id":"water_heater_frequency","dev_cla":"frequency","stat_cla":"measurement","unit_of_meas":"Hz","ent_cat":"diagnostic","val_tpl":"{{ value_json.measuredFrequency | round(1) }}"},"frequency_error":{"p":"binary_sensor","name":"Mains frequency error","uniq_id":"water_heater_frequency_error","dev_cla":"problem","ent_cat":"diagnostic","pl_on":"1","pl_off":"0","val_tpl":"{{ value_json.frequencyError }}"}}}'
+git clone https://github.com/Gekkotron/Oikos-os.git
+cd Oikos-os
+cp oikos.example.toml oikos.toml   # set the [mqtt] credentials
+docker compose up -d --build
 ```
 
-## Push notifications
-
-The hub took over from OikosPush. Producers publish an alert (OikosPush's v1 or legacy payload) on `oikos/push/notification/<source>`; the hub normalises it, adds it to its history and sends it through FCM to every app install registered on `oikos/push/tokens/<installId>`. Sends that fail for a transient reason are retried from memory every `retry_interval` seconds, up to `max_retries` times; a dead token is cleared on the broker. Parts of the hub that raise alerts themselves hand them to the same path in process, without the broker.
-
-| Topic | Direction | Retained | Content |
-| --- | --- | --- | --- |
-| `oikos/push/notification/<source>` | producer → hub | no | v1 or legacy payload |
-| `oikos/push/tokens/<installId>` | app → hub | yes | `{token, device_name, lang, updated_at}`; an empty payload unregisters |
-| `oikos/push/responses` | app / web → producer | no | `{id, action, install_id, ts}` |
-| `oikos/push/history` | hub → app, web | yes | JSON array of the normalised alerts, newest first |
-
-After each (re)connect the hub waits for its subscription to be acknowledged, then 2 s more for the retained tokens, before it sends; alerts arriving meanwhile wait in the queue. The history is the retained `oikos/push/history` itself: the hub adopts it at its first sync, and only when that topic holds no list yet does it seed it once from OikosPush's `oikos-push/history`.
-
-While `legacy_prefix` is set the hub also reads `oikos-push/notification/+`, `oikos-push/tokens/+` and `oikos-push/history`, so producers outside this repo and an app build that is not updated yet keep working; a token registered on both topics is sent to once. The hub never publishes there, except an empty retained payload clearing a dead token that came from `oikos-push/tokens/<id>`.
-
-### Switching over from OikosPush
-
-0. **Broker ACL.** The hub connects as the `[mqtt] user` of `oikos.toml`. That user needs:
-   - [ ] read and write on `oikos/push/#`;
-   - [ ] read on `oikos-push/notification/+` and `oikos-push/history`;
-   - [ ] read and write on `oikos-push/tokens/+` (the hub clears dead tokens there);
-   - [ ] read on `<frigate prefix>/events` and `encryption-gateway/health/+`.
-
-   Mosquitto denies silently, but the Python ACL watchdog keeps running throughout, so a missing grant shows up on the phone as a system alert. The ACL file lives on the broker host, outside this repo.
-1. Ship the hub with push on but **no `[push] credentials`**, and the Frigate bridge and the gateway watchdog **off**: it builds its history from the producers' notifications and shows alerts, and sends nothing. OikosPush is still the sender. Check that the hub's history matches OikosPush's: for alerts received while both run, the same ids in the same order with the same `cancel` state. A mismatch is a bug to fix before step 2.
-2. Stop the OikosPush core, the Frigate bridge container and the gateway watchdog container (`docker compose down` on the broker host). Leave the ACL watchdog container running: it stays the Python container until the hub runs next to Mosquitto (or can read its log or `$SYS` topic), and `[watchdog.acl]` is left off until then.
-3. Set `[push] credentials` (copy the service-account key from the OikosPush deploy directory, git-ignored, never printed), turn `[frigate] bridge` and `[watchdog.gateway]` on (`[watchdog.acl]` stays off, see above), and restart the hub.
-4. Send a test notification over MCP and check that it arrives once. Trigger a camera event and check the snapshot, then the clip.
-
-Until step 3 both the hub and OikosPush publish a retained history, on different topics (`oikos/push/history` and `oikos-push/history`); the current app reads the old one, so nothing changes for the phone.
-
-## Watchdogs
-
-Two opt-in watchdogs raise `system` alerts (ported from OikosPush's `gateway_health_watchdog` and `broker_acl_watchdog`).
-
-**Gateway health.** `[watchdog.gateway] enabled = true` subscribes to `<prefix>/+` (default `encryption-gateway/health`), where the gateway publishes one retained state per component (`{"status": "ok" | "fail" | "config_error", ...}`). The hub alerts on a change only: `ok` to non-ok ("<component> down", `warning`), non-ok to `ok` ("<component> recovered", `info`), `fail` to `config_error`, and a first message that is not `ok`. A first `ok`, and a retained state replayed unchanged on reconnect, stay silent.
-
-**Broker ACL.** Mosquitto acknowledges an ACL-denied PUBLISH and drops it with only a log line. `[watchdog.acl] enabled = true` turns each `Denied PUBLISH/SUBSCRIBE/UNSUBSCRIBE` line (and the older `Client X is not authorised to ...` wording) into a `warning` alert "MQTT ACL denial". A client, topic and action alert once per `cooldown` seconds (default 300); later denials are counted and named in the next alert (`+N more in last 300s`). Two sources:
-
-- `source = "topic"` (default) reads `log_topic` (`$SYS/broker/log/#`; needs `log_dest topic` in `mosquitto.conf`, and a broker that forwards ACL denials there);
-- `source = "file"` tails `log_file` from its end, follows rotation and truncation, and needs the hub to read the Mosquitto log; a file source without `log_file` is a config error.
-
-```toml
-[watchdog.gateway]
-enabled = true
-prefix = "encryption-gateway/health"
-
-[watchdog.acl]
-enabled = true
-source = "topic"
-cooldown = 300
-```
-
-The broker user needs read on `<prefix>/+` and, for the topic source, on `$SYS/broker/log/#`.
-
-## HTTP API
-
-The hub listens on `[http] bind` (default `0.0.0.0:8081`: next to Jeedom on 80 and clear of Zigbee2MQTT on 8080 on the same server), CORS open to any origin, JSON in and out.
-
-| Route | What it does |
-| --- | --- |
-| `GET /health` | `status`, the broker connection state and the entity count. |
-| `GET /api/v1/snapshot` | The whole house: connection, bridge, areas, devices, entities with their state, ignored topics. |
-| `POST /api/v1/entities/{id}/command` | Sends a command (`{"type": "turn_on", …}`) and reports whether the device confirmed it. |
-| `PATCH /api/v1/entities/{id}/override` | Changes fields of the entity's `oikos/ui/<id>` override and returns the entity as it now appears. |
-| `DELETE /api/v1/entities/{id}/override` | Removes the override (204). |
-| `GET /api/v1/entities/{id}/picture` | The picture of a camera or image entity: the stored bytes, or the bytes of its URL fetched by the hub now (10 s timeout, 5 MiB cap, no redirects followed). See [Entity types](#entity-types). |
-| `PUT /api/v1/areas` | Replaces the declared rooms (`oikos/ui/_areas`) and returns the resulting list. |
-| `PATCH /api/v1/areas/{id}/groups/{kind}` | Sets or clears (`null`) the room group card name and the favourite flag of one kind (`cover` or `light`) in the area. `200` with the area list, `422` for a kind other than `cover`/`light`, `Unassigned` or an empty body, `404` for an unknown area, `503` while the broker link is down. |
-| `PUT /api/v1/virtual/{id}` | Creates or replaces a virtual switch, number or button (`{"kind", "name", …}`) and returns the entity `virtual_<id>`; the initial state is published only when it is new. `422` for a bad id or spec, `503` while the broker link is down. See [Adding a device](docs/adding-a-device.md#virtual-entities). |
-| `DELETE /api/v1/virtual/{id}` | Removes a virtual entity and clears its retained topics (204), or `404`. |
-| `GET /api/v1/ignored` | The discovery topics that did not become an entity, each with the reason. |
-| `GET /ws` | WebSocket: a snapshot first, then every hub event as a JSON text frame. |
-| `GET /api/v1/alerts` | The push alerts the hub keeps in its retained history (`oikos/push/history`), newest first. |
-| `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on `oikos/push/responses`); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
-| `GET /api/v1/push` | Push status: `{"state","installs","queued"}`, `state` being `off` (no usable `[push] credentials`), `syncing` (rebuilding the token map after a connect) or `ready`; `installs` counts the registered app installs, `queued` the alerts waiting in the retry queue. |
-| `GET /api/v1/media?url=…` | A Frigate snapshot or clip fetched by the hub with the Frigate login (`[frigate]`); `Range` is passed through so clips seek. `400` without a valid URL, `403` off the Frigate origin, `502` when Frigate is unreachable. |
-| `GET /api/v1/schedule?cron=…&count=…` | Previews a 5-field cron in the house local time: the next `count` ticks. `200` with the preview, `422` for a bad cron. |
-| `GET /api/v1/flows` | Every flow with its engine state: definition, why it is invalid, the active run and the recent runs. |
-| `GET /api/v1/flows/{id}` | One flow; `404` for an unknown id. |
-| `PUT /api/v1/flows/{id}` | Creates or replaces a flow (`oikos/automation/<id>`). The path id wins: a body without `id` takes it, another one is `400 id mismatch`. `422` for a flow that does not validate, `503` while the broker link is down. |
-| `DELETE /api/v1/flows/{id}` | Removes the flow (204), or `404`. |
-| `POST /api/v1/flows/{id}/enabled` | `{"enabled": bool}`; returns the flow. |
-| `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or already running. |
-| `POST /api/v1/flows/{id}/area` | `{"area": "<id>" \| null}` sets the room the flow is listed under (`null` clears it; the key is required); returns the flow. `422` for an unknown room, a body without `area` or an invalid flow, `404` for an unknown flow. |
-| `GET /api/v1/history/series?entity=&range=` | A chart series over `24h`, `7d`, `30d` or `1y`: `{window, points:[[t,mean,min,max],…]}`. See [History](#history). |
-| `GET /api/v1/history/daily?entity=&days=&kind=` | kWh per calendar day for the last `days` days (7, 30 or 365), with `kind` (`counter` or `power`). |
-| `GET /api/v1/history/today?entity=&kind=` | kWh since local midnight: `{kwh, since}`. |
-| `GET /api/v1/history/last_change?entity=&entity=…` | Last change time of 1 to 50 entities, in request order. |
-| `GET /api/v1/climate` | The climate engine: house settings and every zone with its reading, decision and why, overrides, pending proposal and learner state. `503` while `[climate] enabled` is false. |
-| `PUT /api/v1/climate/house` | Replaces the house settings (204); `422` when they do not validate. |
-| `PUT /api/v1/climate/zones/{id}` | Replaces a zone's settings (204); `404` for an area that is not a zone, `422` when they do not validate. |
-| `POST /api/v1/climate/zones/{id}/override` | `{setpoint?, mode?, minutes?, until?}` — holds a target and/or mode, with exactly one of `minutes` and `until` (204, else `422`). `DELETE` on the same path clears the zone's overrides (204). |
-| `POST /api/v1/climate/zones/{id}/proposal/approve` | Approves the pending proposal, optionally with edited `Rules` as the body (204); `422` when there is none. `…/reject` drops it. |
-| `POST /api/v1/climate/zones/{id}/learn` | Learns the zone now; `200` with the learner state. |
-| `GET /api/v1/climate/zones/{id}/decisions?limit=` | `{recent, older}`: the latest decisions from memory, then older rows from history when it is on (`limit` 50 by default, 500 at most). |
-
-Errors are `{"error": "…"}` with 400 (bad patch, or a flow body whose `id` differs from the path: `id mismatch`), 404 (unknown entity, flow, virtual entity or route), 422 (command refused, a bad virtual id or spec, a flow that is invalid, disabled or already running, or an unknown room) or 503 (the broker link is down, so the write was refused and nothing was applied; the same publish refusal is an in-band tool error over MCP). Every other path serves the web UI (see [Web UI](#web-ui)).
-
-## MCP
-
-The MCP server at `http://<host>:8081/mcp` (streamable HTTP) offers thirty-four tools and one resource:
-
-- `bridge_info` — the Zigbee2MQTT bridge and the state of the link to the broker.
-- `list_areas` — the rooms, each with its entity count and the count of entities shown by default (`primary_count`).
-- `set_areas` — replaces the declared rooms and returns the resulting list.
-- `list_devices` — the Zigbee devices with availability, battery and link quality, optionally filtered by area or by name, model or vendor.
-- `list_entities` — a page of entities with their state; by default only what the app shows (`include: "all"` for everything).
-- `get_entity` — one entity with its state, its MQTT bindings and its raw override.
-- `set_override` — changes fields of the app's `oikos/ui/<id>` override (`null` clears a field).
-- `clear_override` — removes the override entirely.
-- `send_command` — publishes a command and reports `accepted` once the device echoes the change.
-- `search` — devices (name, model, vendor) and entities (name, id, or belonging to a matching device) containing the query.
-- `list_ignored` — the discovery topics that did not become an entity, with the reason.
-- `list_flows` — the automations (flows) with name, enabled state, node count, room (`area`) and latest run.
-- `get_flow` — one flow with its definition (including `area`) and recent runs.
-- `set_flow` — creates or replaces a flow (`trigger.state`, `trigger.schedule`, `flow.enable`, `if`, `delay`, `command` and `notify` nodes; `mode: restart` for "N minutes after the last …"), validated against the house; `area` sets the room it is listed under. A `trigger.schedule` fires only while the flow is enabled; `flow.enable` turns another flow (or its own) on or off.
-- `delete_flow` — removes a flow.
-- `send_notification` — sends a phone push (`title`, optional `body`, `channel`, `severity`, `entity_id`, `image_url`, `silent`, `id`) and returns its alert id.
-- `list_alerts` — the recent push alerts, newest first (`limit` 20 by default, optional `channel` filter).
-- `set_flow_enabled` — turns a flow on or off.
-- `run_flow` — starts a manual run of a flow.
-- `set_virtual` — creates or replaces a virtual switch, number or button the hub owns.
-- `delete_virtual` — removes a virtual entity.
-- `get_history` — one slice of an entity's history: a chart `series` over a `range`, kWh per `daily` with `days` and `kind`, kWh `today` with `kind`, or `last_change`. Available only when `[history] url` is set.
-- `climate_status`, `get_climate_zone`, `set_climate_settings`, `set_climate_zone`, `approve_climate_proposal`, `reject_climate_proposal`, `set_climate_override`, `clear_climate_override`, `learn_climate_zone` — the climate engine (see [Climate](#climate)); each answers `climate disabled` while `[climate] enabled` is false.
-- Resource `oikos://snapshot` — the whole house as one JSON document.
-
-A failed tool call answers in-band (`isError: true` with the reason) so the assistant can retry with better arguments.
-
-Claude Code:
+Open `http://<host>:8081`, then connect an assistant:
 
 ```sh
 claude mcp add --transport http oikos http://<host>:8081/mcp
 ```
 
-Codex CLI, in `~/.codex/config.toml`:
+From source, see [Getting started](https://gekkotron.github.io/Oikos-os/docs/users/getting-started).
 
-```toml
-[mcp_servers.oikos]
-url = "http://<host>:8081/mcp"
-```
+> [!WARNING]
+> Version 1 has no authentication. Any device on the LAN can read the house and send commands, alarm included. Keep the hub off the internet. See [Security](https://gekkotron.github.io/Oikos-os/docs/users/security).
 
-Claude Desktop only speaks stdio, so it launches `oikos-os mcp-stdio`, a proxy that relays every request to the running hub. In its config JSON, with the path of a built binary (`cargo build --release -p oikos-os`):
+## Documentation
 
-```json
-{
-  "mcpServers": {
-    "oikos": {"command": "<path>/oikos-os", "args": ["mcp-stdio", "--server", "http://<host>:8081"]}
-  }
-}
-```
+The site at **[gekkotron.github.io/Oikos-os](https://gekkotron.github.io/Oikos-os/)** is built from [`docs/`](docs/) by Docusaurus in [`website/`](website/):
 
-The proxy exits with `cannot reach Oikos-os MCP server at …` when the hub is down; its logs go to stderr, stdout carries the protocol.
+- [User guide](docs/users/): install, Zigbee2MQTT, the web UI, flows, groups, MCP, push, cameras, climate, history, watchdogs, security.
+- [Reference](docs/reference/): `oikos.toml`, the HTTP API, MCP tools, flow nodes, entity types, MQTT topics.
+- [Contributors](docs/contributors/): development, architecture, adding a device.
 
-## Web UI
-
-The web UI is a Leptos app that runs in the browser as wasm, built with Trunk. The hub embeds its build output, `crates/oikos-web/dist/`, with rust-embed and serves it on the hub's port for every path that is not `/api`, `/ws` or `/mcp`. Unknown paths fall back to `index.html`, so a deep link such as `/entity/<id>` loads the app. `index.html` is never cached; the hashed assets are.
-
-Screens:
-
-- Dashboards (`/dashboards/<id>`): the top nav opens a `Dashboards ▾` picker. House is always the first entry — the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6). On a user-authored dashboard the header's pencil enters edit mode: click a widget to open its config sheet (title, size, delete), use move left/right to reorder, cycle the span with the resize button, Save or Discard. The gear opens the dashboard settings sheet (name, delete, move up/down in the picker), and `＋ New dashboard` at the bottom of the picker creates a new one at `max(order) + 1`. Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>` (the Home section's placement rule still applies on House — an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before).
-- Energy (`/energy`): the live power flow as in the app. Solar on top, the house in the centre, the grid on the left, consumers on an arc to the right, the battery or the water meter bottom-left; lines thicken and run faster with power and follow import or export. Under the diagram, one card per node with the live value and the lifetime kWh of its paired energy counter. Roles come from the `energyRole` override (`solar`, `grid`, `grid_export`, `battery`, `house`, `consumer`, `water`), set from the entity sheet or over MCP.
-- Security (`/security`): the alarm panel as a hero card (arm modes, Disarm, inline code when the panel asks for one), the opted-in actions (`securityAction`, asking first unless `securityAsk` is off), a summary line ("1 smoke · 2 open" or "All clear"), the safety and intrusion sensors in sections (Openings, Motion, Fire, Water, Other) as two-column tiles, and the recent alerts. `securityHidden` takes a sensor off the tab.
-- Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor.
-- Devices: the administration view of the Zigbee devices.
-- Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night, Warm).
-- Alerts (`/alerts`): the push alerts the hub keeps in `oikos/push/history`, with channel chips and day groups, and a "Recent alerts" section on Home; the detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". Same screens as the Android app; the body stays in the producer's language.
-- Flows (`/flows`, `/flows/<id>`): the flows list, grouped by room, with search, status and trigger filters, sorting and a List/Cards view; an enable switch per flow and a **New flow** button; and a full-bleed canvas per flow (see [Flows](#flows)).
-
-Development runs in two terminals:
-
-```sh
-cargo run -p oikos-os -- run       # the hub on 8081
-cd crates/oikos-web && trunk serve # the UI on 127.0.0.1:3000, rebuilt on save
-```
-
-Open `http://127.0.0.1:3000`. Trunk proxies `/api`, `/ws` and `/mcp` to the hub on 8081.
-
-Release builds embed the UI, so build it before the hub:
-
-```sh
-cd crates/oikos-web && trunk build --release
-cd ../.. && cargo build --release -p oikos-os
-```
-
-The hub reads `dist/` when it is compiled. Rebuild the hub after every `trunk build`. A binary built before `trunk build` serves a 503 page that says the UI has not been built.
-
-`tools/restart.sh` does both builds, stops the running hub and starts the new one (`--debug` for the debug profile, `--no-web` to reuse `dist/`). It warns when `target/` passes 10 GB; `--sweep` first deletes build artifacts untouched for 14 days (`cargo install cargo-sweep`).
-
-The smoke test mounts the app in headless Chrome and checks the shell:
-
-```sh
-cd crates/oikos-web && wasm-pack test --headless --chrome
-```
-
-Install the tools with `cargo install trunk --locked` and `cargo install wasm-pack --locked`. `wasm-pack` fetches a matching chromedriver on first use; Google Chrome must be installed.
-
-## Entity types
-
-Components beyond the hand-written kinds are described by a JSON type table, `crates/oikos-core/src/types/table.json`, compiled into the hub. Each entry says where the entity shows (`placement`), which field is its primary state, which controls it offers, what puts it in alert style and how its history is charted. Sixteen components are covered: `camera`, `device_automation`, `device_tracker`, `event`, `fan`, `humidifier`, `image`, `lawn_mower`, `lock`, `notify`, `scene`, `siren`, `tag`, `text`, `update` and `valve`. Only `device` (device-based discovery) is folded by routing; any other component the table does not describe is reported as `ignored component <name>` under `GET /api/v1/ignored`.
-
-Some behaviour to know about:
-
-- Secret text (`mode: password`) is masked as `••••` on every state path out of the hub, and it is left out of history.
-- Several `device_automation` configs for one device fold into a single remote entity, whose `capabilities.generic.signals` lists their payloads. `trigger.signal` in a flow fires on those remotes, on events and on tags.
-- A per-entity override `mainControl` names one announced control, or `"none"` to hide the main control.
-- `update` entities feed the firmware marks (`installed`, `latest`, `available`) that the device view shows.
-
-The hub publishes the table retained on `oikos/ui/_types` (`{ui_prefix}/_types`) on every connection, next to `oikos/ui/_areas` and the per-entity `oikos/ui/<id>` overrides, so the Android app can read it. Its own echo is ignored. The table's vocabulary is explained in [Adding a device](docs/adding-a-device.md#a-type-table-entry-json-no-rust).
-
-## Flows
-
-A flow is an n8n-style automation: a small graph of nodes stored as one retained JSON document under `oikos/automation/<id>` on the broker (the id is `[a-z0-9_-]{1,64}`). The hub subscribes to that prefix, validates every document it reads, and runs the valid, enabled ones. An invalid document is kept and shown with the reason, but never runs.
-
-```json
-{
-  "id": "living_led_motion", "name": "Living LED on motion", "enabled": true, "mode": "restart",
-  "nodes": [
-    { "id": "motion", "type": "trigger.state", "params": { "entity": "0x00158d00044c4d4c_occupancy_zigbee2mqtt" } },
-    { "id": "moving", "type": "if", "params": { "op": "eq", "value": true } },
-    { "id": "on", "type": "command", "params": { "entity": "<light id>", "command": { "type": "turn_on" } } },
-    { "id": "wait", "type": "delay", "params": { "for": "5m" } },
-    { "id": "off", "type": "command", "params": { "entity": "<light id>", "command": { "type": "turn_off" } } }
-  ],
-  "edges": [
-    { "from": "motion", "to": "moving" },
-    { "from": "moving", "port": "true", "to": "on" },
-    { "from": "moving", "port": "false", "to": "wait" },
-    { "from": "wait", "to": "off" }
-  ]
-}
-```
-
-| Type | Params | Outputs | Behaviour |
-| --- | --- | --- | --- |
-| `trigger.state` | `entity` (id), optional `to`, optional `from` | one | Starts a run when the entity's scalar changes to a different value. `to`/`from` filter on the new/previous scalar. The replayed value after boot or reconnect arms the entity silently; it never fires on that replay, on an availability-only change, or on an equal-value report. |
-| `trigger.schedule` | `cron` (5 fields, house local time) | one | Starts a run at each wall-clock tick while the flow is enabled; the first run is at the next tick. |
-| `flow.enable` | optional `flow` (id), `enabled` (bool) | one | Enables or disables the target flow, its own by default. A flow that disables itself still finishes the current run. |
-| `notify` | `title` (required), optional `body`, `channel` (`alarm`, `security`, `camera`, `energy`, `climate`, `system`, `misc`; default `misc`), `severity` (`info`, `warning`, `critical`; default `info`), `entity_id`, `image_url`, `silent`, `id` | one | Sends a phone push notification. The alert id is `flow-<flow id>-<run id>` unless `id` is set; a fixed `id` makes each run replace the previous alert. |
-| `if` | `op` one of `eq ne gt lt gte lte`, `value` (bool, number or string), optional `entity`, optional `missing` (`fail`, `true` or `false`) | `true`, `false` | Compares the scalar of `entity` (default: the entity that triggered the run, read live) to `value`. `gt lt gte lte` need both sides numeric, otherwise the node fails. When the value is unknown, `missing` picks that port; the default `fail` fails the node. |
-| `delay` | `for`: `"90s"`, `"5m"`, `"1h30m"` | one | Pauses the run. Cancelled with the run. |
-| `command` | `entity` (id), `command` (the API's `Command` JSON) | one | Sends the command through the hub's command path, confirmed by the entity's state echo within `confirm_timeout_ms`, exactly like the API's `send_command`. No echo, a rejection or an offline entity fails the node. |
-
-A run follows the graph from the trigger that fired, depth first. A failing node ends the run as `failed` at that step. A non-trigger node with no incoming edge never runs.
-
-The scalar is the one value of a state that triggers and `if` compare: the on/off bool, the number, the text, a light's `on`, a cover's `state`.
-
-`mode` says what a trigger does while a run of the same flow is still active. `single` (the default) ignores the new trigger and records a skipped run. `restart` cancels the active run and starts a new one, which is what makes "5 minutes after the last motion" work: motion coming back cancels the pending `delay`.
-
-Two config keys: `[topics] automation_prefix` (default `oikos/automation`) and `[automation] runs_kept` (recent runs remembered per flow, default 20). Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker.
-
-A flow can sit in a room: its optional `area` is an area id, and it only decides where the Flows page lists the flow; what the flow runs does not change. The hub checks it on save. An unknown room is refused, a room name is resolved to its id, and `Unassigned` is not a room for a flow. A room id already stored and since deleted is kept as it is, so it never blocks a save. Invalid flows keep their real name and room in listings.
-
-The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `run_flow` and friends), and the web UI shows them at `/flows`. The Flows page searches name, description, trigger devices and room (ignoring case and accents), filters by status (All, On, Off, ⚠ Needs attention) and trigger (Device state, Schedule, Sun, Button / event, Manual), sorts by name or last run, and groups by room (with a "No room" section last) or not at all. Room sections fold; a folded section that hides a flow needing attention shows ⚠. The **⋯** menu on a row or card moves a flow to another room, and the flow editor has the same room picker. The view, grouping, sort, filters and folded sections are remembered per browser; the search is not. See [HTTP API](#http-api) for the REST routes.
-
-The flow page (`/flows/<id>`) is a full-bleed canvas: each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of a check. The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live. The **Edit** button switches to a React Flow-style editor: click a card to select it (amber ring) and edit its settings in the drawer, drag it to move it, drag from an output pin onto another card to wire it, click a wire for its ✕, press ⌫ to delete the selection and ⌘/Ctrl-Z to undo. **＋ Add** opens a searchable picker grouped WHEN / AND / THEN / WAIT / FLOW (type an entity name to list its triggers, checks and actions), **Tidy** re-lays the graph out, and nothing reaches the hub until **Save** (**Cancel** discards the draft). **New flow** on `/flows` opens an unsaved draft in edit mode; its first Save creates the flow, disabled, under a slug of its name. On a phone (narrow or touch-only screens) the canvas is view-only: Edit and New flow are hidden, while pan, pinch-zoom, the drawer, the switch and Run still work.
-
-## Climate
-
-With `[climate] enabled = true` the hub heats and cools by zone: each area with a climate device is a zone (`off`, `pending`, `active`). The engine decides per zone from a priority tree (safety, override, holiday, away, schedule), and every decision carries its `source` and `reason`. It learns a weekly schedule from the history database and proposes it with the evidence; nothing applies until it is approved (REST, MCP or the push button). Safety (frost, overheat, stale readings) always acts, and a temperature set by hand on a device holds until the zone's next scheduled change, at most `manual_hold_max_min`. Settings are retained documents under `[climate] prefix` (`oikos/climate` by default), edited over REST and MCP. The engine keeps deciding when history is off; only the learner pauses.
-
-## History
-
-The hub records every entity state change in TimescaleDB for years, so the web UI and MCP can answer "what did this sensor read" and "how much energy today". History is off by default; point the hub at a TimescaleDB instance by adding `[history]` to `oikos.toml`:
-
-```toml
-[history]
-url = "postgres://oikos:<password>@<host>:<port>/oikos"
-buffer_rows = 100000       # states queued when the database is down
-```
-
-Any TimescaleDB 2.17+ on Postgres 17 works, as long as the role can log in and `CREATE EXTENSION timescaledb` has been run inside the target database (the extension itself must be in `shared_preload_libraries` on the server). The hub applies its own schema migrations on first connect, writes every state change inline from `Hub::ingest` (never on the hot MQTT path — the writer runs in a bounded, try-send queue) and rolls each hour up into `history_hourly` every five minutes. A down database never blocks the house: up to `buffer_rows` states wait, past that the oldest are dropped with one warning per outage.
-
-Routes under `/api/v1/history/*` (see the table above): `series` for charts, `daily` for kWh per day over 7, 30 or 365 days, `today` for kWh since local midnight, and `last_change` for 1 to 50 entities. Errors are `400 bad_request`, `404 not_recorded` (the entity has no rows) and `503 history_unavailable` (`[history] url` not set, or the database is down). MCP exposes the same through `get_history`.
-
-Back up with `pg_dump` from any client that can reach the database:
-
-```sh
-pg_dump -h <host> -p <port> -U oikos -Fc oikos > oikos-history-$(date +%F).dump
-```
-
-## Security
-
-There is none yet, and that is deliberate for v1: the hub binds on `0.0.0.0`, answers any origin (CORS `*`) and its MCP endpoint accepts any `Host` header. Any device on the LAN, and any web page open in a browser on the LAN (through DNS rebinding), can therefore read the whole house and send commands, alarm arming and disarming included. Keep the hub off the internet: no port forwarding, no exposure through a reverse proxy without authentication in front of it. `get_entity` and the `bindings` it returns hand out the raw discovery config; for a bridge other than Zigbee2MQTT that config could carry credentials in topics or templates. With a `[frigate]` section the hub also fetches alert media from Frigate with the configured login; it only ever requests an event's `snapshot.jpg`, `clip.mp4` or `thumbnail.jpg` on that origin and follows no redirect, but any LAN client can request those, so give it a Frigate *viewer* account, not the admin. Flows are retained on the broker in clear, so the hub refuses a flow whose `command` node carries an alarm code; arm and disarm from a flow only on a panel that needs none. Authentication and TLS arrive in a later phase.
+To preview it: `cd website && npm ci && npm start`.
 
 ## Development
 
@@ -375,12 +65,9 @@ There is none yet, and that is deliberate for v1: the hub binds on `0.0.0.0`, an
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
-cargo check -p oikos-core --target wasm32-unknown-unknown
-cargo check -p oikos-api --target wasm32-unknown-unknown
-cargo check -p oikos-web --target wasm32-unknown-unknown
 ```
 
-The `wasm32-unknown-unknown` target comes with `rust-toolchain.toml`. The tests run against recorded broker messages under `crates/oikos-core/tests/fixtures` and never need a broker; refresh the recording from the house with `MQTT_HOST=<broker> MQTT_USER=… MQTT_PASS=… tools/record-fixtures.sh` (credentials are read from the environment only).
+The web UI dev loop, release builds and fixtures are in [Development](docs/contributors/development.md).
 
 ## License
 

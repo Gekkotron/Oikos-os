@@ -1,5 +1,5 @@
 # Oikos-os single-host Docker Compose.
-# See docs/install-on-linux.md for the full install.
+# See docs/users/install-on-linux.md for the full install.
 #
 # The hub only needs its own container. Mosquitto, TimescaleDB and
 # (optionally) Frigate are expected to run on the same host; `network_mode:

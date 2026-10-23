@@ -1,4 +1,8 @@
-# Adding a device
+---
+title: Adding a device
+sidebar_position: 3
+description: How a new device reaches the hub as MQTT discovery, and when a type-table entry or a Rust kind is needed.
+---
 
 The hub speaks Home Assistant MQTT discovery. It holds no per-device code. Each device reaches the hub as discovery configs on the MQTT broker, and each discovered component becomes an entity of a `Kind`. MQTT discovery is the plugin API, so adding a device usually means changing whatever publishes its discovery, not the hub.
 
@@ -21,7 +25,7 @@ Zigbee2MQTT (Z2M) holds the per-device code for thousands of Zigbee devices. Whe
 1. Write an external converter for local use. It is a JavaScript file referenced in Z2M's configuration.
 2. Contribute it upstream to `Koenkk/zigbee-herdsman-converters` so every user gets it.
 
-Z2M publishes discovery under the `oikos` prefix. Once Z2M exposes the device, Oikos picks it up with no change. See the README section "Zigbee2MQTT".
+Z2M publishes discovery under the `oikos` prefix. Once Z2M exposes the device, Oikos picks it up with no change. See [Zigbee2MQTT](../users/zigbee2mqtt.md).
 
 ## Writing a bridge
 
@@ -50,7 +54,7 @@ Rules:
 - The hub expands Home Assistant abbreviations (`stat_t`, `cmd_t`, `dev`, `~`, and so on).
 - Device-based discovery is supported: component `device` with a `cmps` or `components` map, one entry per entity, each with a `platform`.
 - Remove an entity by publishing an empty retained payload on its config topic.
-- `ui` and `automation` directly under the prefix are reserved. `oikos/ui/<id>` holds overrides and `oikos/automation/<id>` holds flows. Never publish discovery there.
+- `ui`, `automation`, `virtual` and `push` directly under the prefix are reserved. `oikos/ui/<id>` holds overrides, `oikos/automation/<id>` holds flows, `oikos/virtual/<id>` the state of virtual entities and `oikos/push/...` the push topics. Never publish discovery there. See [MQTT topics](../reference/mqtt-topics.md).
 
 Hand-written kinds (each becomes an entity):
 
@@ -124,7 +128,7 @@ Vacuum wire format:
 
 A second example is Suez2Mqtt (https://github.com/Gekkotron/Suez2Mqtt). It reads a water meter from the Suez cloud and publishes `sensor` entities with `device_class: water`. It publishes no availability topic, so its availability shows `unknown`.
 
-A device whose firmware already speaks MQTT but publishes no discovery needs no bridge at all: publish its discovery once, retained, by hand. WaterHeaterController (https://github.com/Gekkotron/WaterHeaterController) works this way; the README section "Zigbee2MQTT" holds its one-line `mosquitto_pub`. Its `water_heater` entity derives everything from the firmware's `water-heater/data` JSON with templates: the tank temperature, a mode of `heat` or `off`, and the card attributes below.
+A device whose firmware already speaks MQTT but publishes no discovery needs no bridge at all: publish its discovery once, retained, by hand. WaterHeaterController (https://github.com/Gekkotron/WaterHeaterController) works this way; [Zigbee2MQTT](../users/zigbee2mqtt.md) holds its one-line `mosquitto_pub`. Its `water_heater` entity derives everything from the firmware's `water-heater/data` JSON with templates: the tank temperature, a mode of `heat` or `off`, and the card attributes below.
 
 Water heater card attributes, read from `json_attributes_topic` (after `json_attributes_template`) when present:
 
@@ -153,7 +157,7 @@ Two routes. Most components need only a type-table entry. Write a Rust kind only
 
 ### A type-table entry (JSON, no Rust)
 
-Find or add the entry in `crates/oikos-core/src/types/table.json`. Entries sit under the top-level `types` object, keyed by component name, inside a file shaped `{"version": 1, "types": {"<component>": {...}}}`:
+Find or add the entry in `crates/oikos-core/src/types/table.json` (the covered components are listed in [Entity types](../reference/entity-types.md#the-type-table)). Entries sit under the top-level `types` object, keyed by component name, inside a file shaped `{"version": 1, "types": {"<component>": {...}}}`:
 
 | Key | Meaning |
 |---|---|
@@ -161,7 +165,7 @@ Find or add the entry in `crates/oikos-core/src/types/table.json`. Entries sit u
 | `icon` | A glyph name for the card. |
 | `primary` | The field name shown on the card, or `null`. |
 | `requires_state` | When `true`, discovery is rejected without the primary field's topic. |
-| `fields` | A map of `field_name` to `{ shape, topic, template?, values?, options?, range?, on? }`. `shape` is `on_off`, `number`, `choice`, `text`, `picture` or `version`. `topic` is the config key holding the state topic, `template` the config key holding its value template. `values` lists the allowed values, each with the config `key` that may override its payload and the Home Assistant `default`. `options` names a list in the config (such as `preset_modes`). `range` is `{min, max, step}`. `on` is the value that counts as on. |
+| `fields` | A map of `field_name` to `{ shape, topic, template?, values?, options?, range?, on? }`. `shape` is `on_off`, `number`, `choice`, `text`, `picture` or `version`. `topic` is the config key holding the state topic, `template` the config key holding its value template. `values` lists the allowed values, each with the config `key` that may override its payload and the Home Assistant `default`. `options` names a list in the config (such as `preset_modes`). `range` is `{min, max, step}`. `on` is the value that counts as on. `json_path`, for a `text` or `version` shape, reads one top-level key when the rendered template produces a JSON object. |
 | `controls` | A map of `control_name` to `{ shape, topic, template?, field?, press?, payload?, payload_on?, payload_off?, json_key?, requires?, labels? }`. `topic` is the config key of the command topic. `press: true` makes a button, which has no state. `payload` is a WordDef `{value, default}`, which may also carry an optional `key` as the other WordDefs do. `field` ties the control to a field it changes. |
 | `main` | The default main control, in preference order. |
 | `alerts` | `[{field, any_of}]`: field values that put the card in alert style. |
@@ -213,17 +217,17 @@ The Android app needs the matching card.
 
 Tests run against recorded broker messages in `crates/oikos-core/tests/fixtures`. Add cases to `crates/oikos-core/tests/state.rs`.
 
-Before opening the PR, run the commands in the README section "Development": `cargo test`, `clippy -D warnings`, `fmt --check`, and the wasm32 checks for `oikos-core`, `oikos-api` and `oikos-web`.
+Before opening the PR, run the commands in [Development](development.md#checks): `cargo test`, `clippy -D warnings`, `fmt --check`, and the wasm32 checks for `oikos-core`, `oikos-api` and `oikos-web`.
 
 ## Overrides
 
-Override fields: `name`, `area`, `hidden`, `cardStyle`, `showAs` (a switch shown as another type), `favorite`, `energyRole` and `mainControl` (the name of an announced control, or `"none"` to hide the main control).
+The override has twenty fields (`name`, `area`, `hidden`, `order`, `cardStyle`, `favorite`, `energyRole`, `energyInvert`, `securityHidden`, `energyIcon`, `energyMeter`, `homePinned`, `securityAction`, `securityAsk`, `ungrouped`, `showAs`, `lightOnPreset`, `lightOnBrightness`, `climatePresets`, `mainControl`). `showAs` makes a switch show as a light, door, siren, chime or plug; `mainControl` is the name of an announced control, or `"none"` to hide the main control. [Entity types](../reference/entity-types.md#overrides) lists every field with its values.
 
 Overrides are retained messages under `oikos/ui/<entity id>`. Set them from the web device sheet, `PATCH /api/v1/entities/{id}/override`, or MCP `set_override`.
 
 ## Virtual entities
 
-A virtual entity is a switch, a number or a button the hub owns, with no device behind it: a "force heating" flag, a setpoint, a manual trigger for a flow. Create one with `PUT /api/v1/virtual/{id}` (body `{"kind": "switch" | "number" | "button", "name": "…"}`, plus `min`, `max`, `step`, `unit` for a number and `initial` for either state) or MCP `set_virtual`; remove it with `DELETE /api/v1/virtual/{id}` or `delete_virtual`. The id is 1 to 48 characters of `a-z`, `0-9` and `_`, and the entity becomes `virtual_<id>`, on the device `Virtual`.
+A virtual entity (see also [Groups and virtual entities](../users/groups-and-virtual-entities.md)) is a switch, a number or a button the hub owns, with no device behind it: a "force heating" flag, a setpoint, a manual trigger for a flow. Create one with `PUT /api/v1/virtual/{id}` (body `{"kind": "switch" | "number" | "button", "name": "…"}`, plus `min`, `max`, `step`, `unit` for a number and `initial` for either state) or MCP `set_virtual`; remove it with `DELETE /api/v1/virtual/{id}` or `delete_virtual`. The id is 1 to 48 characters of `a-z`, `0-9` and `_`, and the entity becomes `virtual_<id>`, on the device `Virtual`.
 
 Under the first discovery prefix `P` (normally `oikos`), the hub publishes, retained:
 
