@@ -37,14 +37,16 @@ pub struct RegistryConfig {
 }
 
 impl RegistryConfig {
-    /// The reserved sub-trees under a discovery prefix: `ui`, `automation`, `virtual` and
-    /// `push` (the hub's notification topics, `oikos/push/...`).
+    /// The reserved sub-trees under a discovery prefix: `ui`, `automation`, `virtual`,
+    /// `push` (the hub's notification topics, `oikos/push/...`) and `weather` (the hub's weather
+    /// states and availability).
     pub fn default_reserved() -> Vec<String> {
         vec![
             "ui".to_owned(),
             "automation".to_owned(),
             "virtual".to_owned(),
             "push".to_owned(),
+            "weather".to_owned(),
         ]
     }
 }

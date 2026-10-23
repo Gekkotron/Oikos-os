@@ -23,6 +23,7 @@ pub struct Config {
     pub groups: GroupsConfig,
     pub climate: ClimateConfig,
     pub history: HistoryConfig,
+    pub weather: WeatherConfig,
 }
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -397,6 +398,30 @@ pub struct AutomationConfig {
 impl Default for AutomationConfig {
     fn default() -> Self {
         Self { runs_kept: 20 }
+    }
+}
+
+/// Outdoor weather from Open-Meteo. Nothing leaves the LAN while `enabled` is false.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct WeatherConfig {
+    pub enabled: bool,
+    /// The city to resolve; required when enabled.
+    pub city: String,
+    /// An ISO 3166-1 alpha-2 filter for the geocoding, such as `FR`.
+    pub country: Option<String>,
+    /// Minutes between two fetches.
+    pub refresh_minutes: u64,
+}
+
+impl Default for WeatherConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            city: String::new(),
+            country: None,
+            refresh_minutes: 15,
+        }
     }
 }
 

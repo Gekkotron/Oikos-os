@@ -1,0 +1,295 @@
+//! The weather device: pure builders for the retained discovery configs and the state payloads.
+//!
+//! Topics, for the first discovery prefix `P`: the config is
+//! `P/<sensor|binary_sensor>/weather/<key>/config`, the state `P/weather/<key>` (a plain number,
+//! enum text or `ON`/`OFF`) and the availability `P/weather/availability`. The `weather`
+//! sub-tree is reserved, so the state topics are never read as discovery.
+
+use oikos_api::{WeatherCondition, WeatherView};
+use serde_json::{Value, json};
+
+/// The entity keys, in the order of the spec.
+pub const KEYS: [&str; 19] = [
+    "temperature",
+    "apparent_temperature",
+    "humidity",
+    "condition",
+    "daylight",
+    "cloud_cover",
+    "precipitation",
+    "wind_speed",
+    "wind_gusts",
+    "wind_direction",
+    "pressure",
+    "uv_index",
+    "today_min",
+    "today_max",
+    "today_precipitation",
+    "today_precipitation_probability",
+    "today_wind_gusts_max",
+    "rain_next_hour",
+    "tonight_min",
+];
+
+const DEVICE_ID: &str = "oikos_weather";
+
+/// Name, unit, device class and whether it is a "now" measurement, per key.
+fn describe(
+    key: &str,
+) -> (
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+    bool,
+) {
+    match key {
+        "temperature" => ("Outdoor temperature", Some("°C"), Some("temperature"), true),
+        "apparent_temperature" => ("Feels like", Some("°C"), Some("temperature"), true),
+        "humidity" => ("Outdoor humidity", Some("%"), Some("humidity"), true),
+        "condition" => ("Condition", None, Some("enum"), false),
+        "daylight" => ("Daylight", None, None, false),
+        "cloud_cover" => ("Cloud cover", Some("%"), None, true),
+        "precipitation" => ("Precipitation", Some("mm"), Some("precipitation"), true),
+        "wind_speed" => ("Wind speed", Some("km/h"), Some("wind_speed"), true),
+        "wind_gusts" => ("Wind gusts", Some("km/h"), Some("wind_speed"), true),
+        "wind_direction" => ("Wind direction", Some("°"), None, true),
+        "pressure" => ("Pressure", Some("hPa"), Some("atmospheric_pressure"), true),
+        "uv_index" => ("UV index", None, None, true),
+        "today_min" => ("Today's minimum", Some("°C"), Some("temperature"), false),
+        "today_max" => ("Today's maximum", Some("°C"), Some("temperature"), false),
+        "today_precipitation" => (
+            "Today's precipitation",
+            Some("mm"),
+            Some("precipitation"),
+            false,
+        ),
+        "today_precipitation_probability" => {
+            ("Today's precipitation probability", Some("%"), None, false)
+        }
+        "today_wind_gusts_max" => (
+            "Today's strongest gust",
+            Some("km/h"),
+            Some("wind_speed"),
+            false,
+        ),
+        "rain_next_hour" => ("Rain next hour", Some("mm"), Some("precipitation"), false),
+        _ => ("Tonight's minimum", Some("°C"), Some("temperature"), false),
+    }
+}
+
+fn component(key: &str) -> &'static str {
+    if key == "daylight" {
+        "binary_sensor"
+    } else {
+        "sensor"
+    }
+}
+
+/// The retained discovery config topic of `key`.
+pub fn config_topic(prefix: &str, key: &str) -> String {
+    format!("{prefix}/{}/weather/{key}/config", component(key))
+}
+
+/// The retained state topic of `key`.
+pub fn state_topic(prefix: &str, key: &str) -> String {
+    format!("{prefix}/weather/{key}")
+}
+
+/// The retained `online` / `offline` topic of the whole device.
+pub fn availability_topic(prefix: &str) -> String {
+    format!("{prefix}/weather/availability")
+}
+
+fn config(prefix: &str, key: &str) -> Value {
+    let (name, unit, class, measurement) = describe(key);
+    let mut config = json!({
+        "name": name,
+        "unique_id": format!("weather_{key}"),
+        "state_topic": state_topic(prefix, key),
+        "availability_topic": availability_topic(prefix),
+        "device": { "identifiers": [DEVICE_ID], "name": "Weather" },
+    });
+    if let Some(unit) = unit {
+        config["unit_of_measurement"] = json!(unit);
+    }
+    if let Some(class) = class {
+        config["device_class"] = json!(class);
+    }
+    if measurement {
+        config["state_class"] = json!("measurement");
+    }
+    match key {
+        "condition" => {
+            config["options"] = json!(WeatherCondition::ALL.map(WeatherCondition::as_str));
+        }
+        "daylight" => {
+            config["payload_on"] = json!("ON");
+            config["payload_off"] = json!("OFF");
+        }
+        _ => {}
+    }
+    config
+}
+
+/// Every entity's (config topic, config).
+pub fn configs(prefix: &str) -> Vec<(String, Value)> {
+    KEYS.iter()
+        .map(|key| (config_topic(prefix, key), config(prefix, key)))
+        .collect()
+}
+
+/// One (key, payload) per key that has a value.
+pub fn states(view: &WeatherView) -> Vec<(&'static str, String)> {
+    let c = &view.current;
+    let t = &view.today;
+    let numbers = |v: Option<f64>| v.map(|v| v.to_string());
+    let values: [Option<String>; 19] = [
+        numbers(c.temperature),
+        numbers(c.apparent_temperature),
+        numbers(c.humidity),
+        c.condition.map(|c| c.as_str().to_owned()),
+        c.daylight
+            .map(|up| if up { "ON" } else { "OFF" }.to_owned()),
+        numbers(c.cloud_cover),
+        numbers(c.precipitation),
+        numbers(c.wind_speed),
+        numbers(c.wind_gusts),
+        numbers(c.wind_direction),
+        numbers(c.pressure),
+        numbers(c.uv_index),
+        numbers(t.min),
+        numbers(t.max),
+        numbers(t.precipitation),
+        numbers(t.precipitation_probability),
+        numbers(t.wind_gusts_max),
+        numbers(view.rain_next_hour),
+        numbers(view.tonight_min),
+    ];
+    KEYS.iter()
+        .zip(values)
+        .filter_map(|(key, value)| value.map(|value| (*key, value)))
+        .collect()
+}
+
+/// Whether a discovery payload is one of the weather device's own configs.
+pub fn is_own_config(payload: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(payload)
+        .ok()
+        .and_then(|config| {
+            config["device"]["identifiers"]
+                .as_array()
+                .map(|ids| ids.iter().any(|id| id == DEVICE_ID))
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::weather::{is_expired, is_stale};
+    use oikos_api::{WeatherCurrent, WeatherPlace, WeatherToday};
+
+    fn view() -> WeatherView {
+        WeatherView {
+            place: WeatherPlace {
+                name: "Paris".into(),
+                admin: None,
+                country: None,
+            },
+            fetched_at: 0,
+            stale: false,
+            current: WeatherCurrent {
+                temperature: Some(13.4),
+                apparent_temperature: None,
+                humidity: Some(81.0),
+                cloud_cover: None,
+                precipitation: None,
+                wind_speed: None,
+                wind_gusts: None,
+                wind_direction: None,
+                pressure: None,
+                uv_index: None,
+                condition: Some(WeatherCondition::Rain),
+                daylight: Some(true),
+            },
+            today: WeatherToday {
+                min: None,
+                max: None,
+                precipitation: None,
+                precipitation_probability: None,
+                wind_gusts_max: None,
+            },
+            rain_next_hour: None,
+            tonight_min: None,
+            days: vec![],
+        }
+    }
+
+    #[test]
+    fn there_are_nineteen_configs_with_own_device() {
+        let all = configs("oikos");
+        assert_eq!(all.len(), 19);
+        for ((_, config), key) in all.iter().zip(KEYS) {
+            assert_eq!(config["device"]["identifiers"], json!(["oikos_weather"]));
+            assert_eq!(config["unique_id"], json!(format!("weather_{key}")));
+            assert_eq!(
+                config["availability_topic"],
+                json!("oikos/weather/availability")
+            );
+            assert_eq!(config["state_topic"], json!(format!("oikos/weather/{key}")));
+        }
+    }
+
+    #[test]
+    fn config_topics_use_the_component() {
+        assert_eq!(
+            config_topic("oikos", "daylight"),
+            "oikos/binary_sensor/weather/daylight/config"
+        );
+        assert_eq!(
+            config_topic("oikos", "temperature"),
+            "oikos/sensor/weather/temperature/config"
+        );
+        let all = configs("oikos");
+        let daylight = &all[4].1;
+        assert_eq!(daylight["payload_on"], json!("ON"));
+        assert_eq!(daylight["payload_off"], json!("OFF"));
+    }
+
+    #[test]
+    fn condition_is_an_enum_sensor() {
+        let all = configs("oikos");
+        let condition = &all[3].1;
+        assert_eq!(condition["device_class"], json!("enum"));
+        let options: Vec<&str> = WeatherCondition::ALL.iter().map(|c| c.as_str()).collect();
+        assert_eq!(condition["options"], json!(options));
+        assert_eq!(options.len(), 10);
+    }
+
+    #[test]
+    fn states_skip_missing_values() {
+        let states = states(&view());
+        assert!(states.iter().all(|(key, _)| *key != "uv_index"));
+        assert!(states.contains(&("daylight", "ON".to_owned())));
+        assert!(states.contains(&("condition", "rain".to_owned())));
+        assert!(states.contains(&("temperature", "13.4".to_owned())));
+        assert!(states.contains(&("humidity", "81".to_owned())));
+        assert_eq!(states.len(), 4);
+    }
+
+    #[test]
+    fn own_config_is_recognised() {
+        let own = configs("oikos")[0].1.to_string();
+        assert!(is_own_config(own.as_bytes()));
+        assert!(!is_own_config(br#"{"device":{"identifiers":["0x1234"]}}"#));
+        assert!(!is_own_config(b"garbage"));
+    }
+
+    #[test]
+    fn freshness_rules() {
+        assert!(!is_stale(0, 1800, 15));
+        assert!(is_stale(0, 1801, 15));
+        assert!(!is_expired(0, 3600));
+        assert!(is_expired(0, 3601));
+    }
+}

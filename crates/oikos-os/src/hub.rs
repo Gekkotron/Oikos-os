@@ -180,7 +180,7 @@ pub struct Hub {
     publisher: mpsc::Sender<Publish>,
     ui_prefix: String,
     /// The first discovery prefix: virtual entities are published under it.
-    discovery_prefix: String,
+    pub(crate) discovery_prefix: String,
     /// Push notifications: the service owns `<prefix>/history`; the alert store decodes the
     /// broker's echo of it for the web and the API.
     push: Arc<PushService>,
@@ -198,6 +198,10 @@ pub struct Hub {
     groups_enabled: bool,
     /// The climate engine's documents, present only while `[climate] enabled`.
     pub(crate) climate: Option<ClimateHub>,
+    /// `[weather] enabled` and `refresh_minutes`.
+    pub(crate) weather_enabled: bool,
+    pub(crate) weather_refresh_minutes: u64,
+    pub(crate) weather: Mutex<crate::weather::hub::WeatherSlot>,
     /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
     dashboard_store: Mutex<DashboardStore>,
     /// The topic prefix flows are retained under, one topic per flow id.
@@ -315,6 +319,9 @@ impl Hub {
                 .climate
                 .enabled
                 .then(|| ClimateHub::new(&cfg.climate.prefix)),
+            weather_enabled: cfg.weather.enabled,
+            weather_refresh_minutes: cfg.weather.refresh_minutes,
+            weather: Mutex::default(),
             dashboard_store: Mutex::new(DashboardStore::new()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
@@ -478,6 +485,10 @@ impl Hub {
     /// event: a non-retained message on the command topic of a button some flow watches
     /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.
     pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
+        // A weather device left on the broker by an earlier run is cleared, not applied.
+        if self.clear_disabled_weather(topic, payload, retain) {
+            return Vec::new();
+        }
         // Climate documents are the engine's own data, never devices.
         if self.ingest_climate(topic, payload) {
             return Vec::new();
