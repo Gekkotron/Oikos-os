@@ -20,7 +20,7 @@ Oikos-os is a home-automation hub written in Rust. It runs on the home server ne
 - **Dashboards**: a House overview built from your rooms, plus your own dashboards made of widgets. [Web UI](https://gekkotron.github.io/Oikos-os/docs/users/web-ui)
 - **Flows**: automations as small graphs of triggers (state, signal, schedule, sun), checks, waits and actions, edited on a canvas that replays every run. [Flows](https://gekkotron.github.io/Oikos-os/docs/users/flows)
 - **Energy**: the live power flow between solar, grid, battery, the house and its consumers, with kWh per day. [Web UI](https://gekkotron.github.io/Oikos-os/docs/users/web-ui#energy)
-- **Climate**: heating and cooling by zone; the engine learns a weekly schedule from history and proposes it for approval. [Climate](https://gekkotron.github.io/Oikos-os/docs/users/climate)
+- **Climate** (beta): heating and cooling by zone; the engine learns a weekly schedule from history and proposes it for approval. [Climate](https://gekkotron.github.io/Oikos-os/docs/users/climate)
 - **Phone alerts and cameras**: push notifications to the Android app through Firebase, with Frigate snapshots and clips. [Push notifications](https://gekkotron.github.io/Oikos-os/docs/users/push-notifications)
 - **History**: every state change in TimescaleDB, for charts and energy totals. [History](https://gekkotron.github.io/Oikos-os/docs/users/history)
 - **Talk to it**: an MCP server for Claude Code, Codex, Claude Desktop and any MCP client. [MCP](https://gekkotron.github.io/Oikos-os/docs/users/assistants-mcp)

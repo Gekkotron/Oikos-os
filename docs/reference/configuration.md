@@ -232,7 +232,7 @@ buffer_rows = 100000
 
 ## `[climate]`
 
-The climate engine. Everything except these two keys is edited through MCP, REST and the web Climate screen, as retained JSON under `prefix`. See [Climate](../users/climate.md).
+The climate engine (beta, still being tested). Everything except these two keys is edited through MCP, REST and the web Climate screen, as retained JSON under `prefix`. See [Climate](../users/climate.md).
 
 | Key | Default | Description |
 | --- | --- | --- |

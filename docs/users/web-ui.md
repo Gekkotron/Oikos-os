@@ -30,7 +30,7 @@ Security (`/security`): the alarm panel as a hero card (arm modes, Disarm, inlin
 
 ## Climate
 
-Climate (`/climate`): one card per zone with its reading, target, state, overrides, learning and recent decisions, a quick hold of a setpoint for a while, the house settings sheet and the engine's banners. See [Climate](climate.md).
+Climate (`/climate`, beta): one card per zone with its reading, target, state, overrides, learning and recent decisions, a quick hold of a setpoint for a while, the house settings sheet and the engine's banners. See [Climate](climate.md).
 
 ## History
 

@@ -61,7 +61,12 @@ pub fn ClimateScreen() -> impl IntoView {
         <div class="climate">
             <header class="sheet__header">
                 <div class="sheet__titles">
-                    <h1 class="sheet__title">"Climate"</h1>
+                    <h1 class="sheet__title">
+                        "Climate" <span class="badge climate__beta">"Beta"</span>
+                    </h1>
+                    <p class="sheet__subtitle">
+                        "Still being tested: check what the engine decides before you rely on it."
+                    </p>
                 </div>
                 <button
                     type="button"
