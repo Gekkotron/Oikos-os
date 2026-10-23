@@ -88,7 +88,7 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
     // The mode as a badge: a picker when the unit lists its modes.
     let trailing = if caps.hvac_modes.is_empty() {
         mode.clone().map(|m| {
-            view! { <span class="badge">{move || mode_label(lang(), &m)}</span> }.into_any()
+            view! { <span class="card__badge">{move || mode_label(lang(), &m)}</span> }.into_any()
         })
     } else {
         let id = entity.id.clone();
@@ -112,7 +112,7 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
         };
         Some(
             view! {
-                <select class="badge badge--select" aria-label=move || t(Key::Mode) on:change=on_change>
+                <select class="card__badge card__badge--select" aria-label=move || t(Key::Mode) on:change=on_change>
                     {options}
                 </select>
             }

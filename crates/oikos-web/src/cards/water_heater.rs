@@ -138,21 +138,29 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
 
     let t = use_text();
     let open = open_entity(&entity.id);
-    let trailing = view! {
-        <button
-            type="button"
-            class="btn btn--icon card__more"
-            aria-label=move || t(Key::More)
-            on:click=move |_| open.run(())
-        >
-            "⋯"
-        </button>
-    }
-    .into_any();
+    // The menu leads to the sheet, so the sheet has none.
+    let trailing = (!in_sheet).then(|| {
+        view! {
+            <button
+                type="button"
+                class="btn btn--icon card__more"
+                aria-label=move || t(Key::More)
+                on:click=move |_| open.run(())
+            >
+                "⋯"
+            </button>
+        }
+        .into_any()
+    });
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
-        <CardFrame entity=entity on_click=on_click pending=pending trailing=trailing>
+        <CardFrame
+            entity=entity
+            on_click=on_click
+            pending=pending
+            trailing=trailing.unwrap_or_else(|| ().into_any())
+        >
             <div class="heater">
                 <div class="heater__main">
                     <span

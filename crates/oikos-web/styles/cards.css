@@ -179,7 +179,11 @@
 }
 
 /* Badges at a card's top right ("Live", the climate mode). */
-.badge {
+.card__badge {
+  display: inline-block;
+  max-width: 104px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 3px 8px;
   border: 1px solid var(--badge-border);
   border-radius: 8px;
@@ -343,7 +347,7 @@
   min-height: var(--touch-min);
 }
 
-.badge--select {
+.card__badge--select {
   appearance: none;
   -webkit-appearance: none;
   background: transparent;
@@ -477,4 +481,45 @@
     font-size: 22px;
     line-height: 28px;
   }
+}
+
+/* Beside the tile the name has less room: wrap between words, never inside one. */
+.card--row-header .card__name {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.vacuum .vacuum__primary {
+  flex: none;
+  width: auto;
+  border-color: transparent;
+}
+
+.vacuum__home {
+  display: inline-grid;
+  place-items: center;
+}
+
+.vacuum__home svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* A narrow card puts the badge under the tile and name rather than squeezing the name out. */
+.card--row-header .card__top {
+  flex-wrap: wrap;
+}
+
+.card--row-header .card__header {
+  flex: 1 1 130px;
+}
+
+.card--row-header .card__trailing {
+  margin-left: auto;
+  min-height: 0;
+}
+
+.climate__now,
+.temp__humidity {
+  white-space: nowrap;
 }

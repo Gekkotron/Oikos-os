@@ -191,7 +191,7 @@ pub fn SensorCard(entity: EntityView) -> impl IntoView {
                     freshness(lang(), now, last_update)
                 });
                 let trailing = view! {
-                    {move || fresh.get().map(|t| view! { <span class="badge">{t}</span> })}
+                    {move || fresh.get().map(|t| view! { <span class="card__badge">{t}</span> })}
                 }
                 .into_any();
                 return view! {

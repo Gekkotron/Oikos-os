@@ -99,6 +99,8 @@ async fn water_heater_sheet_has_full_controls() {
     let host = mount(water_heater(), Some(CardPlace::Sheet));
     tick().await;
     assert!(has(&host, ".stepper"));
+    // The sheet is where the menu leads: no menu there.
+    assert!(!has(&host, ".card__more"));
     assert!(has(&host, "select"));
 }
 
@@ -131,14 +133,14 @@ async fn temperature_badge_from_last_update() {
     let host = mount(temperature(Some(now_s() - 60)), None);
     tick().await;
     let badge = host
-        .query_selector(".card__trailing .badge")
+        .query_selector(".card__trailing .card__badge")
         .unwrap()
         .unwrap();
     assert_eq!(badge.text_content().unwrap(), "Live");
 
     let host = mount(temperature(None), None);
     tick().await;
-    assert!(!has(&host, ".badge"));
+    assert!(!has(&host, ".card__badge"));
 }
 
 fn climate(mode: &str) -> EntityView {
@@ -320,7 +322,7 @@ async fn climate_sheet_has_full_controls() {
     let host = mount(climate("heat"), None);
     tick().await;
     assert!(!has(&host, ".pick__select"));
-    assert!(has(&host, ".card__trailing select.badge"));
+    assert!(has(&host, ".card__trailing select.card__badge"));
 }
 
 fn vacuum(activity: &str) -> EntityView {
