@@ -36,6 +36,13 @@ impl OikosMcp {
         Ok(Json(self.hub.weather_view()?))
     }
 
+    /// The Solcast solar forecast: today, tomorrow, the next 7 days, 30-minute periods and the
+    /// request budget; `solar unavailable` while `[solcast]` is off or before the first fetch.
+    #[tool(name = "get_solar", annotations(read_only_hint = true))]
+    async fn get_solar(&self) -> ToolResult<oikos_api::SolarView> {
+        Ok(Json(self.hub.solar_view_with_history().await?))
+    }
+
     /// The home settings: the eco setpoint (°C), the house mode select and the indoor
     /// temperature sensor the home header uses. Empty fields are unset.
     #[tool(name = "get_home_settings", annotations(read_only_hint = true))]

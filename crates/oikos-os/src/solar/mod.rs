@@ -1,6 +1,7 @@
 //! Solar forecast from Solcast.
 
 pub mod entities;
+pub mod hub;
 pub mod view;
 
 use oikos_solcast::Forecast;

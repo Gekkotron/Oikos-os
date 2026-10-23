@@ -204,6 +204,12 @@ pub struct Hub {
     pub(crate) weather_city: String,
     pub(crate) weather_country: Option<String>,
     pub(crate) weather: Mutex<crate::weather::hub::WeatherSlot>,
+    /// `[solcast]`: `enabled`, `sites`, `daily_limit` and `api_key_file`.
+    pub(crate) solar_enabled: bool,
+    pub(crate) solar_sites: Vec<String>,
+    pub(crate) solar_daily_limit: u32,
+    pub(crate) solar_key_file: Option<std::path::PathBuf>,
+    pub(crate) solar: Mutex<crate::solar::hub::SolarSlot>,
     /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
     dashboard_store: Mutex<DashboardStore>,
     /// The home settings document, retained on `<ui_prefix>/_home`.
@@ -328,6 +334,11 @@ impl Hub {
             weather_city: cfg.weather.city.trim().to_owned(),
             weather_country: cfg.weather.country.clone(),
             weather: Mutex::default(),
+            solar_enabled: cfg.solcast.enabled,
+            solar_sites: cfg.solcast.sites.clone(),
+            solar_daily_limit: cfg.solcast.daily_limit,
+            solar_key_file: cfg.solcast.api_key_file.clone(),
+            solar: Mutex::default(),
             dashboard_store: Mutex::new(DashboardStore::new()),
             home_settings: Mutex::new(oikos_api::HomeSettings::default()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
@@ -498,6 +509,12 @@ impl Hub {
     pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
         // A weather device left on the broker by an earlier run is cleared, not applied.
         if self.clear_disabled_weather(topic, payload, retain) {
+            return Vec::new();
+        }
+        // The same for a solar forecast device, and the retained cache is the poller's data.
+        if self.clear_disabled_solar(topic, payload, retain)
+            || self.ingest_solar_cache(topic, payload)
+        {
             return Vec::new();
         }
         // Climate documents are the engine's own data, never devices.

@@ -61,6 +61,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/groups", get(list_groups))
         .route("/groups/{id}", put(put_group).delete(delete_group))
         .route("/weather", get(weather))
+        .route("/solar", get(solar))
         .route("/home/settings", get(home_settings).put(put_home_settings))
         .route("/climate", get(climate))
         .route("/climate/house", put(put_climate_house))
@@ -649,6 +650,11 @@ async fn delete_group(
 /// The outdoor weather (`200`); `503` while `[weather]` is off or before the first fetch.
 async fn weather(State(hub): HubState) -> Result<Json<WeatherView>, HttpError> {
     Ok(Json(hub.weather_view()?))
+}
+
+/// The Solcast solar forecast (`200`); `503` while `[solcast]` is off or before the first fetch.
+async fn solar(State(hub): HubState) -> Result<Json<oikos_api::SolarView>, HttpError> {
+    Ok(Json(hub.solar_view_with_history().await?))
 }
 
 /// The home settings document (`200`), defaults until one is saved.
