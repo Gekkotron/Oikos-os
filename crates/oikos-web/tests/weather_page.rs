@@ -45,6 +45,7 @@ async fn mount(weather: Option<WeatherView>) -> web_sys::Element {
     std::mem::forget(leptos::mount::mount_to(
         host.clone().unchecked_into(),
         move || {
+            oikos_web::nav::install_nav();
             provide_context(house);
             view! { <Router><WeatherScreen /></Router> }
         },
@@ -61,6 +62,7 @@ async fn weather_page_shows_tiles_and_days() {
         8
     );
     assert_eq!(host.query_selector_all(".weather-day").unwrap().length(), 5);
+    assert!(host.query_selector(".sheet__back").unwrap().is_some());
     let text = host.text_content().unwrap_or_default();
     assert!(text.contains("Open-Meteo"), "{text}");
     assert!(text.contains("No rain within the hour"), "{text}");

@@ -11,6 +11,7 @@ use crate::home_header::weather_fmt::{compass_index, condition_icon, uv_level};
 use crate::house::House;
 use crate::i18n::{self, Lang, WeatherText as T, weather_text};
 use crate::icons;
+use crate::nav::BackLink;
 use crate::screens::flow_canvas::sun::house_place;
 
 const DASH: &str = "–";
@@ -198,6 +199,7 @@ pub fn WeatherScreen() -> impl IntoView {
     let now = use_context::<Now>().map_or_else(|| RwSignal::new(unix_now()), |n| n.0);
     view! {
         <section class="weather-page">
+            <BackLink />
             {move || {
                 let l = lang.get();
                 let now_s = now.get();
