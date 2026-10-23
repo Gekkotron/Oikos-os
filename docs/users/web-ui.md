@@ -6,15 +6,31 @@ description: The screens of the browser app the hub serves, from dashboards and 
 
 The web UI is a Leptos app that runs in the browser as wasm. The hub serves it on its port for every path that is not `/api`, `/ws` or `/mcp`. Unknown paths fall back to `index.html`, so a deep link such as `/entity/<id>` loads the app. `index.html` is never cached; the hashed assets are. To build and develop the UI, see [Development](../contributors/development.md).
 
+## Layout and themes
+
+A sidebar on the left replaces the old top bar. From top to bottom it holds:
+
+- **Overview**, with House first and your own dashboards under it, plus **＋ New dashboard**.
+- **Automations** (flows) and **Groups**.
+- **My rooms**: one entry per room, with the number of cards Home shows there. A room opens at `/rooms/<id>`; the old room chips on House are gone, and the rooms list lives here instead.
+- **Home**: Energy, Security, Climate (beta), Alerts (with an unseen-count pill) and Settings.
+- A connection badge at the bottom.
+
+The header above the screen carries a breadcrumb, the theme button and the **FR · EN** button. The theme button cycles Auto, Night Glass and Ivoire, and the choice is remembered in the browser. FR · EN switches the shell (sidebar, header and breadcrumb) between French and English; the screens themselves are still in English for now, and the choice is remembered too.
+
+The themes are **Night Glass** (dark), **Ivoire** (a light, warm ivory with sage and honey accents) and **Auto**, which follows the system. The former Warm Minimal theme is gone: a browser that had saved it opens in Ivoire.
+
+On a phone or a narrow window (below 900 px) the sidebar becomes a drawer. The ☰ button at the left of the header opens it over the page; tapping the dimmed page, choosing an entry or widening the window closes it.
+
 ## Dashboards
 
-![The House dashboard: room chips and the Favorites cards](/img/screens/house.webp)
+![The House dashboard: the Favorites cards and the rooms](/img/screens/house.webp)
 
-Dashboards (`/dashboards/<id>`): the top nav opens a `Dashboards ▾` picker. House is always the first entry: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
+Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview. House is always the first entry: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
 
-On a user-authored dashboard the header's pencil enters edit mode: click a widget to open its config sheet (title, size, delete), use move left/right to reorder, cycle the span with the resize button, Save or Discard. In edit mode a panel on the right (at the bottom on a phone) lists what can be added, grouped by kind, each row with its room and device; search narrows it, and clicking a row adds the widget at the end of the grid. The gear opens the dashboard settings sheet (name, delete, move up/down in the picker), and `＋ New dashboard` at the bottom of the picker creates a new one at `max(order) + 1`.
+On a user-authored dashboard the header's pencil enters edit mode: click a widget to open its config sheet (title, size, delete), use move left/right to reorder, cycle the span with the resize button, Save or Discard. In edit mode a panel on the right (at the bottom on a phone) lists what can be added, grouped by kind, each row with its room and device; search narrows it, and clicking a row adds the widget at the end of the grid. The gear opens the dashboard settings sheet (name, delete, move up/down in the sidebar), and `＋ New dashboard` in the sidebar creates a new one at `max(order) + 1`.
 
-Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>`. The Home section's placement rule still applies on House: an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before. A room chip shows only when the room has at least one card under that rule, so a room whose entities are all hidden or all elsewhere drops off House; it stays in the room pickers and comes back once something visible lands in it.
+Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>`. The Home section's placement rule still applies on House: an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before. A room's section shows only when the room has at least one card under that rule, so a room whose entities are all hidden or all elsewhere drops off House; it stays in the sidebar and the room pickers and comes back once something visible lands in it.
 
 ## Energy
 
@@ -52,7 +68,7 @@ Devices: the administration view of the Zigbee devices. Each row shows the devic
 
 ## Settings
 
-Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night, Warm). The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
+Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night Glass, Ivoire). The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
 
 ## Alerts
 
