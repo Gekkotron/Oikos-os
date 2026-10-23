@@ -70,6 +70,7 @@ pub fn indoor_temperature(
         .values()
         .filter(|e| {
             e.kind == Kind::Sensor
+                && e.is_primary()
                 && e.device_class.as_deref() == Some("temperature")
                 && e.area != UNASSIGNED_AREA
                 && e.device_id.as_deref() != Some(WEATHER_DEVICE)
@@ -279,6 +280,16 @@ mod tests {
             weather,
         ]);
         assert_eq!(indoor_temperature(&h, &settings_with(None)), Some(19.0));
+    }
+
+    #[test]
+    fn indoor_mean_skips_diagnostic_and_hidden() {
+        let mut diagnostic = temp("diag", 40.0, "salon");
+        diagnostic.category = EntityCategory::Diagnostic;
+        let mut hidden = temp("hid", 30.0, "salon");
+        hidden.ui.hidden = true;
+        let h = house(vec![temp("a", 20.0, "salon"), diagnostic, hidden]);
+        assert_eq!(indoor_temperature(&h, &settings_with(None)), Some(20.0));
     }
 
     #[test]
