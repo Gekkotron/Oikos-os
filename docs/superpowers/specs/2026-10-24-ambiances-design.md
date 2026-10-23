@@ -87,7 +87,7 @@ Four action types. All of them were played back to the user ("yes"). Their exact
 
 ### 5.1 Storage
 
-Retained MQTT, like dashboards and groups: one topic per ambiance, `<prefix>/<id>`, with the prefix configurable (`[ambiances] prefix`, default `oikos/ambiance`). An empty retained payload deletes the ambiance. The hub keeps a decoded copy. An invalid payload is kept with its reason and listed as invalid, never dropped, following the pattern of `crates/oikos-os/src/dashboards/store.rs`.
+Retained MQTT, like dashboards: one topic per ambiance, `<ui_prefix>/ambiances/<id>` (default `oikos/ui/ambiances/<id>`), already covered by the hub's `<ui_prefix>/#` subscription, so no new config. *(Revised while planning: the first draft had a separate `[ambiances] prefix`.)* An empty retained payload deletes the ambiance. The hub keeps a decoded copy. An invalid payload is kept with its reason and listed as invalid, never dropped, following the pattern of `crates/oikos-os/src/dashboards/store.rs`.
 
 ### 5.2 Apply
 
@@ -107,7 +107,7 @@ Retained MQTT, like dashboards and groups: one topic per ambiance, `<prefix>/<id
   - `POST /api/v1/ambiances/{id}/apply` returns the per-action report.
 - WebSocket: definition changes and apply results are pushed, the same way flows and groups are today.
 - MCP: `list_ambiances`, `set_ambiance`, `delete_ambiance` and `apply_ambiance`, plus a paragraph in the server instructions (`crates/oikos-os/src/mcp/mod.rs`) describing the action types.
-- Shared types live in `oikos-api` (`Ambiance`, `AmbianceAction`, `ApplyReport`). The category resolution and the validation live in `oikos-core`, so the web can show "12 lights" in the editor with the same rules.
+- Shared types, the shape validation and the category resolution live in `oikos-api` (`Ambiance`, `AmbianceAction`, `ApplyReport`), which the hub and the web both use. The web can then show "12 lights" in the editor with the same rules. *(Revised while planning: `EntityView` lives in `oikos-api`, not `oikos-core`.)*
 
 ## 6. Web UI
 
@@ -166,7 +166,7 @@ When the house has no ambiance at all, the Home row invitation and the "Mes ambi
 
 ### A.1 Topic
 
-`<prefix>/<id>`, retained, default prefix `oikos/ambiance`. `id` is `[a-z0-9_]+`, set by the client on create (slug of the name, made unique). Empty payload = deleted.
+`<ui_prefix>/ambiances/<id>`, retained (default `oikos/ui/ambiances/<id>`). `id` is `[a-z0-9_]+`, set by the client on create (slug of the name, made unique). Empty payload = deleted.
 
 ### A.2 Definition
 
@@ -180,7 +180,7 @@ When the house has no ambiance at all, the Home row invitation and the "Mes ambi
   "order": 1,
   "actions": [
     { "type": "category", "what": "lights", "to": "off", "area": null, "except": [] },
-    { "type": "category", "what": "lights", "to": "on", "brightness": 30, "area": "living_room" },
+    { "type": "category", "what": "lights", "to": "on", "brightness": 30, "area": "living_room" },  // brightness in %, 1..=100
     { "type": "category", "what": "plugs", "to": "off" },
     { "type": "category", "what": "covers", "to": "close" },
     { "type": "device", "entity": "select.house_mode", "command": { "type": "select", "option": "night" } },
