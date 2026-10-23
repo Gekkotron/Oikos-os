@@ -5,6 +5,7 @@ use leptos::ev;
 use leptos::prelude::*;
 use oikos_core::flow::NodeKind;
 
+use super::Editor;
 use crate::flow_picker::{Entry, Group, entries};
 use crate::flow_text::{Ctx, Role, role};
 use crate::house::House;
@@ -52,12 +53,17 @@ fn role_suffix(role: Role) -> &'static str {
 /// The library. Clicking a row, or Enter on the highlighted one while the search box has the
 /// focus, calls `on_add`; the library stays as it is so several cards can go in a row. A row
 /// can also be dragged onto the canvas (see [`Dragging`]). Esc in the search box clears it.
+/// Mod-Z in the search box undoes the flow (Shift-Mod-Z redoes) from an Enter until the next
+/// keystroke; otherwise it is the text's own undo.
 #[component]
 pub fn Library(on_add: Callback<NodeKind>) -> impl IntoView {
     let house = expect_context::<House>();
     let Dragging(dragging) = expect_context::<Dragging>();
+    let editor = expect_context::<Editor>();
     let query = RwSignal::new(String::new());
     let highlight = RwSignal::new(0_usize);
+    // Set by an Enter add, cleared by typing: whether Mod-Z belongs to the flow.
+    let added = StoredValue::new(false);
 
     let results = Memo::new(move |_| {
         let query = query.get();
@@ -87,7 +93,12 @@ pub fn Library(on_add: Callback<NodeKind>) -> impl IntoView {
     let add = move |entry: Entry| on_add.run(entry.kind);
     let on_key = move |ev: ev::KeyboardEvent| {
         let last = results.with_untracked(Vec::len).saturating_sub(1);
+        let modifier = ev.meta_key() || ev.ctrl_key();
         match ev.key().as_str() {
+            "z" | "Z" if modifier && added.get_value() => {
+                ev.prevent_default();
+                editor.step(ev.shift_key());
+            }
             "ArrowDown" => {
                 ev.prevent_default();
                 highlight.update(|i| *i = (*i + 1).min(last));
@@ -102,6 +113,7 @@ pub fn Library(on_add: Callback<NodeKind>) -> impl IntoView {
                     results.with_untracked(|r| r.get(highlight.get_untracked()).cloned())
                 {
                     add(entry);
+                    added.set_value(true);
                 }
             }
             "Escape" => query.set(String::new()),
@@ -176,7 +188,10 @@ pub fn Library(on_add: Callback<NodeKind>) -> impl IntoView {
                 placeholder="Search a card or an entity"
                 aria-label="Search cards"
                 prop:value=move || query.get()
-                on:input=move |ev| query.set(event_target_value(&ev))
+                on:input=move |ev| {
+                    added.set_value(false);
+                    query.set(event_target_value(&ev));
+                }
                 on:keydown=on_key
             />
             <ul class="flow-library__list" role="listbox">

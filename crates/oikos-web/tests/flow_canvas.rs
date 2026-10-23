@@ -1087,6 +1087,52 @@ async fn library_enter_adds_highlighted() {
 }
 
 #[wasm_bindgen_test]
+async fn undo_in_library_search_after_enter_undoes_the_add() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    search(&host, "Wait").await;
+    let input = element(&host, ".flow-library__search");
+    press(&input, "Enter", false, false);
+    tick().await;
+    assert_eq!(count(&host, "[data-node=delay_1]"), 1);
+    // The search box keeps the focus, so Mod-Z lands there: it takes the card back out.
+    press(&input, "z", true, false);
+    tick().await;
+    assert_eq!(
+        count(&host, "[data-node=delay_1]"),
+        0,
+        "{}",
+        host.inner_html()
+    );
+    press(&input, "z", true, true);
+    tick().await;
+    assert_eq!(
+        count(&host, "[data-node=delay_1]"),
+        1,
+        "{}",
+        host.inner_html()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn undo_in_library_search_after_typing_leaves_the_flow() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    search(&host, "Wait").await;
+    let input = element(&host, ".flow-library__search");
+    press(&input, "Enter", false, false);
+    tick().await;
+    // Typing again hands Mod-Z back to the text.
+    search(&host, "Wai").await;
+    press(&input, "z", true, false);
+    tick().await;
+    assert_eq!(
+        count(&host, "[data-node=delay_1]"),
+        1,
+        "{}",
+        host.inner_html()
+    );
+}
+
+#[wasm_bindgen_test]
 async fn selecting_a_card_swaps_to_settings_and_back() {
     let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
     select_card(&host, "moving").await;
