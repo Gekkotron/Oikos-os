@@ -1,6 +1,7 @@
 //! The words the cards show, in the chosen language: state lines, numbers with the right
 //! decimal separator and the like. Pure, so they are tested off the browser.
 
+use crate::format::word;
 use crate::i18n::{Key, Lang, text};
 
 /// Shown for a value nobody knows.
@@ -67,9 +68,37 @@ pub fn freshness(lang: Lang, now: u64, last_update: Option<u64>) -> Option<Strin
     Some(text(lang, key).replace("{n}", &n.to_string()))
 }
 
+/// The name of a climate mode; a mode with no translation reads as its words.
+pub fn mode_label(lang: Lang, mode: &str) -> String {
+    let key = match mode {
+        "heat" => Key::ModeHeat,
+        "cool" => Key::ModeCool,
+        "auto" | "heat_cool" => Key::ModeAuto,
+        "dry" => Key::ModeDry,
+        "fan_only" => Key::ModeFan,
+        "off" => Key::ModeOff,
+        other => return word(other),
+    };
+    text(lang, key).to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mode_labels() {
+        assert_eq!(mode_label(Lang::Fr, "heat"), "Chauffage");
+        assert_eq!(mode_label(Lang::En, "heat"), "Heat");
+        assert_eq!(mode_label(Lang::Fr, "cool"), "Clim");
+        assert_eq!(mode_label(Lang::Fr, "heat_cool"), "Auto");
+        assert_eq!(mode_label(Lang::Fr, "auto"), "Auto");
+        assert_eq!(mode_label(Lang::Fr, "dry"), "Déshumidification");
+        assert_eq!(mode_label(Lang::Fr, "fan_only"), "Ventilation");
+        assert_eq!(mode_label(Lang::Fr, "off"), "Arrêt");
+        assert_eq!(mode_label(Lang::En, "off"), "Off");
+        assert_eq!(mode_label(Lang::En, "eco_plus"), "Eco plus");
+    }
 
     #[test]
     fn freshness_cases() {

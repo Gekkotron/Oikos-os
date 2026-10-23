@@ -6,7 +6,8 @@ use leptos::task::tick;
 use leptos_router::components::Router;
 use oikos_api::EntityView;
 use oikos_core::model::{
-    Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride, WaterHeaterState,
+    Capabilities, ClimateState, EntityCategory, EntityState, Kind, StateValue, UiOverride,
+    WaterHeaterState,
 };
 use oikos_web::commands::Pending;
 use oikos_web::components::card_place::{CardPlace, provide_card_place};
@@ -138,4 +139,186 @@ async fn temperature_badge_from_last_update() {
     let host = mount(temperature(None), None);
     tick().await;
     assert!(!has(&host, ".badge"));
+}
+
+fn climate(mode: &str) -> EntityView {
+    let mut e = entity(
+        "climate.bedroom",
+        Kind::Climate,
+        StateValue::Climate(ClimateState {
+            current: Some(22.0),
+            target: Some(15.5),
+            mode: Some(mode.into()),
+            fan_mode: Some("low".into()),
+            action: None,
+        }),
+    );
+    e.capabilities.min_temp = Some(7.0);
+    e.capabilities.max_temp = Some(30.0);
+    e.capabilities.temp_step = Some(0.5);
+    e.capabilities.hvac_modes = vec!["heat".into(), "cool".into(), "off".into()];
+    e.capabilities.fan_modes = vec!["low".into(), "high".into()];
+    e
+}
+
+/// Mounts `entity` the way a room section does: from the house, rebuilt on every change of it.
+/// Returns the host, the house and the toasts (a refused command leaves one).
+fn mount_live(entity: EntityView) -> (web_sys::Element, House, Toasts) {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let house = House::new();
+    let toasts = Toasts::new();
+    let id = entity.id.clone();
+    house.entities.update(|m| {
+        m.insert(id.clone(), entity);
+    });
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(house);
+            provide_context(toasts);
+            provide_context(Pending::new());
+            let card = Memo::new(move |_| house.entities.with(|m| m.get(&id).cloned()));
+            view! { <Router>{move || card.get().map(card_for)}</Router> }
+        },
+    ));
+    (host, house, toasts)
+}
+
+fn ring(host: &web_sys::Element) -> web_sys::Element {
+    host.query_selector("[role=slider]").unwrap().unwrap()
+}
+
+fn attr(el: &web_sys::Element, name: &str) -> String {
+    el.get_attribute(name).unwrap_or_default()
+}
+
+fn key(el: &web_sys::Element, key: &str) {
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key(key);
+    init.set_bubbles(true);
+    let ev = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    el.dispatch_event(&ev).unwrap();
+}
+
+/// A pointer event at `deg` on the ring's circle (clockwise from the right).
+fn pointer(target: &web_sys::EventTarget, kind: &str, el: &web_sys::Element, deg: f64) {
+    let rect = el.get_bounding_client_rect();
+    let (cx, cy) = (
+        rect.left() + rect.width() / 2.0,
+        rect.top() + rect.height() / 2.0,
+    );
+    let r = rect.width() / 3.0;
+    let init = web_sys::PointerEventInit::new();
+    init.set_client_x((cx + r * deg.to_radians().cos()) as i32);
+    init.set_client_y((cy + r * deg.to_radians().sin()) as i32);
+    init.set_buttons(if kind == "pointerup" { 0 } else { 1 });
+    init.set_pointer_id(1);
+    init.set_bubbles(true);
+    let ev = web_sys::PointerEvent::new_with_event_init_dict(kind, &init).unwrap();
+    target.dispatch_event(&ev).unwrap();
+}
+
+async fn wait(ms: u32) {
+    gloo_timers::future::TimeoutFuture::new(ms).await;
+    tick().await;
+}
+
+#[wasm_bindgen_test]
+async fn ring_is_an_accessible_slider() {
+    let host = mount(climate("heat"), None);
+    tick().await;
+    let r = ring(&host);
+    assert_eq!(attr(&r, "aria-valuenow"), "15.5");
+    assert_eq!(attr(&r, "aria-valuemin"), "7");
+    assert_eq!(attr(&r, "aria-valuemax"), "30");
+    assert_eq!(attr(&r, "tabindex"), "0");
+    assert!(host.text_content().unwrap().contains("22"));
+}
+
+#[wasm_bindgen_test]
+async fn keys_send_one_command() {
+    let (host, _house, toasts) = mount_live(climate("heat"));
+    tick().await;
+    for _ in 0..3 {
+        key(&ring(&host), "ArrowUp");
+        tick().await;
+    }
+    assert_eq!(attr(&ring(&host), "aria-valuenow"), "17");
+    wait(300).await;
+    assert_eq!(
+        toasts.0.with_untracked(Vec::len),
+        0,
+        "sent before the pause"
+    );
+    wait(900).await;
+    assert_eq!(
+        toasts.0.with_untracked(Vec::len),
+        1,
+        "one command for three keys"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn drag_survives_a_remount() {
+    let (host, house, toasts) = mount_live(climate("heat"));
+    tick().await;
+    let r = ring(&host);
+    pointer(&r, "pointerdown", &r, 270.0);
+    tick().await;
+    assert_eq!(attr(&ring(&host), "aria-valuenow"), "18.5");
+    // The room temperature changes mid-drag: the card is rebuilt.
+    house.entities.update(|m| {
+        if let Some(StateValue::Climate(c)) =
+            m.get_mut("climate.bedroom").map(|e| &mut e.state.value)
+        {
+            c.current = Some(23.0);
+        }
+    });
+    tick().await;
+    assert_eq!(
+        attr(&ring(&host), "aria-valuenow"),
+        "18.5",
+        "the draft survives"
+    );
+    let r = ring(&host);
+    pointer(&r, "pointermove", &r, 0.0);
+    tick().await;
+    let window: web_sys::EventTarget = web_sys::window().unwrap().into();
+    pointer(&window, "pointerup", &r, 0.0);
+    tick().await;
+    assert_eq!(attr(&ring(&host), "aria-valuenow"), "26");
+    wait(500).await;
+    assert_eq!(
+        toasts.0.with_untracked(Vec::len),
+        1,
+        "one command for the whole drag"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn off_ring_is_disabled() {
+    let (host, _house, toasts) = mount_live(climate("off"));
+    tick().await;
+    let r = ring(&host);
+    assert_eq!(attr(&r, "aria-disabled"), "true");
+    key(&r, "ArrowUp");
+    pointer(&r, "pointerdown", &r, 270.0);
+    tick().await;
+    assert_eq!(attr(&ring(&host), "aria-valuenow"), "15.5");
+    assert!(r.text_content().unwrap().contains("Off"));
+    wait(900).await;
+    assert_eq!(toasts.0.with_untracked(Vec::len), 0);
+}
+
+#[wasm_bindgen_test]
+async fn climate_sheet_has_full_controls() {
+    let host = mount(climate("heat"), Some(CardPlace::Sheet));
+    tick().await;
+    assert!(has(&host, ".pick__select"));
+    let host = mount(climate("heat"), None);
+    tick().await;
+    assert!(!has(&host, ".pick__select"));
+    assert!(has(&host, ".card__trailing select.badge"));
 }

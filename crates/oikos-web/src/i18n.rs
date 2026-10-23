@@ -133,6 +133,17 @@ pub enum Key {
     Live,
     AgoHours,
     AgoDays,
+    ModeHeat,
+    ModeCool,
+    ModeAuto,
+    ModeDry,
+    ModeFan,
+    ModeOff,
+    Mode,
+    ItIs,
+    TargetTemperature,
+    Decrease,
+    Increase,
 }
 
 impl Key {
@@ -176,6 +187,17 @@ impl Key {
         Key::Live,
         Key::AgoHours,
         Key::AgoDays,
+        Key::ModeHeat,
+        Key::ModeCool,
+        Key::ModeAuto,
+        Key::ModeDry,
+        Key::ModeFan,
+        Key::ModeOff,
+        Key::Mode,
+        Key::ItIs,
+        Key::TargetTemperature,
+        Key::Decrease,
+        Key::Increase,
     ];
 }
 
@@ -221,6 +243,17 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Live => ("Live", "En direct"),
         Key::AgoHours => ("{n} h ago", "Il y a {n} h"),
         Key::AgoDays => ("{n} d ago", "Il y a {n} j"),
+        Key::ModeHeat => ("Heat", "Chauffage"),
+        Key::ModeCool => ("Cool", "Clim"),
+        Key::ModeAuto => ("Auto", "Auto"),
+        Key::ModeDry => ("Dry", "Déshumidification"),
+        Key::ModeFan => ("Fan", "Ventilation"),
+        Key::ModeOff => ("Off", "Arrêt"),
+        Key::Mode => ("Mode", "Mode"),
+        Key::ItIs => ("It's", "Il fait"),
+        Key::TargetTemperature => ("Target temperature", "Température souhaitée"),
+        Key::Decrease => ("Decrease", "Baisser"),
+        Key::Increase => ("Increase", "Monter"),
     };
     match lang {
         Lang::En => en,
@@ -336,7 +369,18 @@ mod tests {
             | Key::More
             | Key::Live
             | Key::AgoHours
-            | Key::AgoDays => Key::ALL.contains(&k),
+            | Key::AgoDays
+            | Key::ModeHeat
+            | Key::ModeCool
+            | Key::ModeAuto
+            | Key::ModeDry
+            | Key::ModeFan
+            | Key::ModeOff
+            | Key::Mode
+            | Key::ItIs
+            | Key::TargetTemperature
+            | Key::Decrease
+            | Key::Increase => Key::ALL.contains(&k),
         }
     }
     #[test]
@@ -344,6 +388,6 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 39);
+        assert_eq!(Key::ALL.len(), 50);
     }
 }

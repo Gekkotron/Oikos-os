@@ -249,3 +249,103 @@
   stroke-linecap: round;
   vector-effect: non-scaling-stroke;
 }
+
+/* Climate: the ring, then − / "It's 22°" / +. */
+.climate {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.dial {
+  width: min(100%, 170px);
+  height: auto;
+  aspect-ratio: 1;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.dial:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 2px;
+  border-radius: 50%;
+}
+
+.dial[aria-disabled="true"] {
+  cursor: default;
+}
+
+.dial__track,
+.dial__fill {
+  fill: none;
+  stroke-width: 8;
+  stroke-linecap: round;
+}
+
+.dial__track {
+  stroke: var(--ring-track);
+}
+
+.dial__fill {
+  stroke: var(--ring-other);
+}
+
+.dial--heat .dial__fill {
+  stroke: var(--ring-heat);
+}
+
+.dial--cool .dial__fill {
+  stroke: var(--ring-cool);
+}
+
+.dial__knob {
+  fill: #fff;
+  stroke: currentcolor;
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 25%));
+}
+
+.dial__value {
+  fill: var(--ink);
+  font: 500 30px var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.dial__caption {
+  fill: var(--muted);
+  font: 400 9px var(--font-body);
+}
+
+.dial--off .dial__value {
+  fill: var(--muted);
+  font-size: 22px;
+}
+
+.climate__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  align-self: stretch;
+  gap: 8px;
+}
+
+.climate__now {
+  font: 400 12px/16px var(--font-body);
+  color: var(--muted);
+}
+
+.climate__foot .btn--round {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+}
+
+.badge--select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+}

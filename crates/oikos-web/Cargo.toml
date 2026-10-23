@@ -54,6 +54,7 @@ web-sys = { workspace = true, features = [
     "MediaQueryList",
     "MouseEvent",
     "Navigator",
+    "NodeList",
     "OscillatorNode",
     "OscillatorType",
     "PointerEvent",
