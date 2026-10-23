@@ -143,7 +143,12 @@ fn EditControls(
 }
 
 #[component]
-fn ReadControls(view: Signal<FlowView>, editing: RwSignal<bool>, editor: Editor) -> impl IntoView {
+fn ReadControls(
+    view: Signal<FlowView>,
+    editing: RwSignal<bool>,
+    editor: Editor,
+    selection: RwSignal<Option<Selection>>,
+) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let invalid = Memo::new(move |_| view.with(|v| v.invalid.is_some()));
     let busy = Memo::new(move |_| view.with(|v| v.active_run.is_some()));
@@ -166,8 +171,10 @@ fn ReadControls(view: Signal<FlowView>, editing: RwSignal<bool>, editor: Editor)
             }
         });
     };
+    // The Edit button opens the library: a card ringed in view mode is not carried over.
     let enter_edit = move |_| {
         editor.reset(view.with_untracked(|v| with_resolved_positions(&v.definition)));
+        selection.set(None);
         editing.set(true);
     };
     view! {
@@ -322,7 +329,7 @@ pub fn Toolbar(
         <div class="flow-toolbar flow-toolbar--actions">
             <Show
                 when=move || editing.get()
-                fallback=move || view! { <ReadControls view=view editing=editing editor=editor /> }
+                fallback=move || view! { <ReadControls view=view editing=editing editor=editor selection=selection /> }
             >
                 <EditControls
                     editing=editing
