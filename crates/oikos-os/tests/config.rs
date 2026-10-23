@@ -254,6 +254,60 @@ fn push_keys_are_read() {
 }
 
 #[test]
+fn push_key_in_secrets_next_to_the_config_is_picked_up() {
+    Jail::expect_with(|jail| {
+        assert_eq!(Config::load(None)?.push.credentials, None);
+        jail.create_dir("secrets")?;
+        jail.create_file("secrets/firebase.json", "{}")?;
+        assert_eq!(
+            Config::load(None)?.push.credentials.as_deref(),
+            Some(std::path::Path::new("secrets/firebase.json"))
+        );
+        jail.create_dir("etc")?;
+        jail.create_file("etc/hub.toml", "")?;
+        assert_eq!(
+            Config::load(Some(std::path::Path::new("etc/hub.toml")))?
+                .push
+                .credentials,
+            None,
+            "the key is looked up next to the config file in use"
+        );
+        jail.create_dir("etc/secrets")?;
+        jail.create_file("etc/secrets/firebase.json", "{}")?;
+        assert_eq!(
+            Config::load(Some(std::path::Path::new("etc/hub.toml")))?
+                .push
+                .credentials
+                .as_deref(),
+            Some(std::path::Path::new("etc/secrets/firebase.json"))
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn explicit_push_credentials_win_over_the_secrets_folder() {
+    Jail::expect_with(|jail| {
+        jail.create_dir("secrets")?;
+        jail.create_file("secrets/firebase.json", "{}")?;
+        jail.create_file(
+            "oikos.toml",
+            "[push]\ncredentials = \"/etc/oikos/fcm.json\"\n",
+        )?;
+        assert_eq!(
+            Config::load(None)?.push.credentials.as_deref(),
+            Some(std::path::Path::new("/etc/oikos/fcm.json"))
+        );
+        jail.set_env("OIKOS_PUSH__CREDENTIALS", "/tmp/key.json");
+        assert_eq!(
+            Config::load(None)?.push.credentials.as_deref(),
+            Some(std::path::Path::new("/tmp/key.json"))
+        );
+        Ok(())
+    });
+}
+
+#[test]
 fn old_push_keys_are_rejected() {
     Jail::expect_with(|jail| {
         jail.create_file("oikos.toml", "[push]\nhistory_topic = \"x\"\n")?;

@@ -126,13 +126,13 @@ enabled = true
 
 ## `[push]`
 
-Push notifications, sent by the hub through Firebase Cloud Messaging. Without `credentials` the hub keeps the alert history and sends nothing, with one warning at start; a key file that is missing or unreadable is the same, and the warning names its path. The hub starts either way. See [Push notifications](../users/push-notifications.md).
+Push notifications, sent by the hub through Firebase Cloud Messaging. When `credentials` is not set (in the file or as `OIKOS_PUSH__CREDENTIALS`), the hub uses `secrets/firebase.json` in the config file's folder if that file exists. Without a key the hub keeps the alert history and sends nothing, with one warning at start; a key file that is unreadable is the same, and the warning names its path. The hub starts either way. See [Push notifications](../users/push-notifications.md).
 
 | Key | Default | Description |
 | --- | --- | --- |
 | `prefix` | `"oikos/push"` | Topic prefix: `<prefix>/notification/<source>`, `<prefix>/tokens/<installId>`, `<prefix>/responses`, `<prefix>/history`. |
 | `legacy_prefix` | `"oikos-push"` | OikosPush's topics, still read during the switch-over. An empty string turns them off. |
-| `credentials` | none | Path of the Firebase service-account JSON key. Only the path is ever logged. |
+| `credentials` | `secrets/firebase.json` next to the config file, when it exists | Path of the Firebase service-account JSON key. Only the path is ever logged. |
 | `retry_interval` | `60` | Seconds between two passes of the retry queue. |
 | `max_retries` | `10` | Attempts before a queued alert is given up. |
 | `history_size` | `100` | Alerts kept in the history. |

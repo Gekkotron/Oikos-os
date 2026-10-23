@@ -14,8 +14,12 @@ services:
     container_name: oikos-hub
     restart: unless-stopped
     network_mode: host
+    # Optional, git-ignored: any OIKOS_* override (see oikos.example.toml).
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - ./oikos.toml:/etc/oikos/oikos.toml:ro
-      # Push notifications (optional). Point `[push] credentials` at this
-      # path in oikos.toml and uncomment the line below:
-      # - ./firebase-service-account.json:/etc/oikos/firebase.json:ro
+      # Git-ignored keys. The hub sends push notifications when
+      # secrets/firebase.json is there; see secrets/README.md.
+      - ./secrets:/etc/oikos/secrets:ro

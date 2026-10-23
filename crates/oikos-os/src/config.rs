@@ -146,7 +146,8 @@ impl Default for LogConfig {
 pub struct PushConfig {
     pub prefix: String,
     pub legacy_prefix: String,
-    /// Path of the service-account JSON key; only the path is ever logged.
+    /// Path of the service-account JSON key; only the path is ever logged. When unset, `load`
+    /// uses [`PUSH_KEY_FILE`] next to the config file if it exists.
     pub credentials: Option<PathBuf>,
     /// Seconds between two passes of the retry queue.
     pub retry_interval: u64,
@@ -570,6 +571,9 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "climate.prefix",
 ];
 
+/// The push key `load` falls back to, relative to the config file's folder (git-ignored).
+pub const PUSH_KEY_FILE: &str = "secrets/firebase.json";
+
 impl Config {
     /// The `OIKOS_*` env layer for non-string fields; string fields are
     /// excluded because figment would guess `123456` to be a number.
@@ -579,7 +583,8 @@ impl Config {
 
     /// Loads defaults, merged with the TOML file (`oikos.toml` when `path` is
     /// `None`; a missing file is fine), merged with `OIKOS_` env vars
-    /// (`__` separates nesting levels).
+    /// (`__` separates nesting levels). With no `push.credentials` from either,
+    /// [`PUSH_KEY_FILE`] next to the TOML file is used when it exists.
     #[allow(clippy::result_large_err)] // signature fixed by the spec
     pub fn load(path: Option<&Path>) -> Result<Config, figment::Error> {
         let file = path.unwrap_or_else(|| Path::new("oikos.toml"));
@@ -594,7 +599,12 @@ impl Config {
                 figment = figment.merge(Serialized::default(key, value));
             }
         }
-        figment.extract()
+        let mut cfg: Config = figment.extract()?;
+        if cfg.push.credentials.is_none() {
+            let key = file.parent().unwrap_or(Path::new("")).join(PUSH_KEY_FILE);
+            cfg.push.credentials = key.is_file().then_some(key);
+        }
+        Ok(cfg)
     }
 }
 

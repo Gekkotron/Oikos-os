@@ -10,7 +10,7 @@ and `compose.yml` at the repo root.
 
 ## Prerequisites on the host
 
-- Docker Engine (24+) with the Compose plugin.
+- Docker Engine (24+) with the Compose plugin (2.24+).
 - `git`.
 - An MQTT broker on the host (Mosquitto is the default pairing).
 - Zigbee2MQTT (or any other producer publishing Home Assistant MQTT
@@ -82,7 +82,23 @@ LAN interface before pointing the Android app at the hub.
 ## Push notifications (optional)
 
 The hub sends Firebase Cloud Messaging alerts with a service-account
-key file (see [Push notifications](push-notifications.md)). Drop the key next to `compose.yml`, uncomment the second
-volume mount in `compose.yml`, and set `[push] credentials` in
-`oikos.toml` to `/etc/oikos/firebase.json`. The key must never be
-committed; `.gitignore` and `.dockerignore` cover the usual names.
+key file (see [Push notifications](push-notifications.md)). Copy the key
+to `secrets/firebase.json` in the clone and restart the hub:
+
+```bash
+cp ~/firebase-service-account.json secrets/firebase.json
+docker compose restart hub
+```
+
+`compose.yml` always mounts `secrets/` read-only at
+`/etc/oikos/secrets`, and the hub picks the key up there on its own, so
+no tracked file needs editing. Git and the Docker build ignore
+everything in `secrets/`. Remove the file and restart to turn push off.
+
+## Overrides without editing tracked files
+
+Any setting can also come from an `OIKOS_*` environment variable (`__`
+between levels, for example `OIKOS_MQTT__PASSWORD` or
+`OIKOS_PUSH__CREDENTIALS`). Put them in a `.env` file next to
+`compose.yml`: compose hands it to the hub when it exists, and git
+ignores it.

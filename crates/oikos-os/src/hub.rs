@@ -88,7 +88,7 @@ const FCM_BASE: &str = "https://fcm.googleapis.com/";
 fn push_transport(cfg: &crate::config::PushConfig) -> Option<Arc<dyn FcmTransport>> {
     let Some(path) = cfg.credentials.as_deref() else {
         tracing::warn!(
-            "push sending is off: no [push] credentials; alerts are kept in the history only"
+            "push sending is off: no [push] credentials and no secrets/firebase.json next to the config; alerts are kept in the history only"
         );
         return None;
     };

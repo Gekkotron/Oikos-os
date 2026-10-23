@@ -42,8 +42,9 @@ prefix = "oikos/push"
 # OikosPush's topics (<legacy>/notification/+, /tokens/+, /history), still read during the
 # switch-over. An empty string turns them off.
 legacy_prefix = "oikos-push"
-# The Firebase service-account key file (keep it out of git). Without it the hub keeps the
-# history and sends nothing; a missing or unreadable file is the same, with a warning.
+# The Firebase service-account key file. Left out, the hub uses secrets/firebase.json next to
+# this file when it exists (git-ignored). Without a key the hub keeps the history and sends
+# nothing; an unreadable file is the same, with a warning.
 # credentials = "/path/to/firebase-service-account.json"
 # Seconds between retries of a failed send, and attempts before it is given up.
 retry_interval = 60

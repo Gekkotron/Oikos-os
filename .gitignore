@@ -5,6 +5,9 @@ crates/oikos-web/dist
 .superpowers/
 firepit-log.txt
 firebase-service-account*.json
+secrets/*
+!secrets/README.md
+.env
 *.pem
 *.key
 
