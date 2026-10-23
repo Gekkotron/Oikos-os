@@ -9,11 +9,11 @@ use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, TimeZone, Utc};
 use oikos_api::ConnectionStatus;
 use oikos_core::flow::sun::sun_events;
 use oikos_solcast::{
-    ApiKey, BASE_URL, Client, Decision, SolcastError, decide, merge, refreshes_per_day, slots,
+    ApiKey, BASE_URL, Client, Decision, Ledger, SolcastError, decide, merge, refreshes_per_day,
+    slots,
 };
 use tokio::task::JoinHandle;
 
-use crate::clock;
 use crate::config::read_key_file;
 use crate::hub::Hub;
 
@@ -100,10 +100,9 @@ pub async fn run(hub: Arc<Hub>, base_url: String, cache_grace: Duration) {
     loop {
         let now = Utc::now();
         let day_slots = planned_slots(&hub, now, limit, site_count);
-        let decision = if unauthorized {
-            Decision::SleepUntil(now + ChronoDuration::seconds(FAR_FUTURE.as_secs() as i64))
-        } else {
-            decide(
+        let decide_now = |unauthorized: bool, now: DateTime<Utc>| {
+            next_decision(
+                unauthorized,
                 now,
                 &hub.solar_ledger(),
                 hub.solar_has_forecast(),
@@ -112,30 +111,42 @@ pub async fn run(hub: Arc<Hub>, base_url: String, cache_grace: Duration) {
                 site_count,
             )
         };
-        let mut wake = match decision {
-            Decision::SleepUntil(at) => Some(at),
-            Decision::CallNow => None,
-        };
-        if wake.is_none() {
+        if matches!(decide_now(unauthorized, now), Decision::CallNow) {
             match fetch_round(&hub, &client, &sites, &mut warned).await {
                 Round::Fetched => warned = false,
                 Round::Failed => {}
-                Round::Unauthorized => {
-                    unauthorized = true;
-                    wake = Some(now + ChronoDuration::seconds(FAR_FUTURE.as_secs() as i64));
-                }
+                Round::Unauthorized => unauthorized = true,
             }
         }
+        // Decide again: the round changed the ledger, and what is advertised as the next
+        // refresh must be what the decision really waits for.
         let now = Utc::now();
-        let next = if unauthorized {
-            None
-        } else {
-            day_slots.iter().filter(|s| **s > now).min().copied()
+        let wake = match decide_now(unauthorized, now) {
+            Decision::SleepUntil(at) => Some(at),
+            Decision::CallNow => None,
         };
-        hub.set_solar_next_refresh(next.and_then(|t| u64::try_from(t.timestamp()).ok()));
+        let advertised = if unauthorized { None } else { wake };
+        hub.set_solar_next_refresh(advertised.and_then(|t| u64::try_from(t.timestamp()).ok()));
         hub.refresh_solar_states();
         tokio::time::sleep(sleep_for(now, wake)).await;
     }
+}
+
+/// The decision for this turn: [`decide`], except that a refused key (`unauthorized`) means no
+/// call until a restart, whatever `decide` would say.
+fn next_decision(
+    unauthorized: bool,
+    now: DateTime<Utc>,
+    ledger: &Ledger,
+    has_forecast: bool,
+    slots: &[DateTime<Utc>],
+    daily_limit: u32,
+    sites: u32,
+) -> Decision {
+    if unauthorized {
+        return Decision::SleepUntil(now + ChronoDuration::seconds(FAR_FUTURE.as_secs() as i64));
+    }
+    decide(now, ledger, has_forecast, slots, daily_limit, sites)
 }
 
 /// Refresh slots of local yesterday, today and tomorrow (a day's slots can straddle UTC
@@ -206,11 +217,11 @@ async fn fetch_round(hub: &Hub, client: &Client, sites: &[String], warned: &mut 
     Round::Fetched
 }
 
-/// Time to sleep: until `wake` or the next :00/:30 wall-clock boundary, whichever is first,
-/// and at least [`MIN_SLEEP`].
+/// Time to sleep: until `wake` or the next :00/:30 wall-clock boundary after `now`, whichever
+/// is first, and at least [`MIN_SLEEP`].
 fn sleep_for(now: DateTime<Utc>, wake: Option<DateTime<Utc>>) -> Duration {
-    let boundary = (clock::now() / 1800 + 1) * 1800;
-    let to_boundary = Duration::from_secs(boundary.saturating_sub(clock::now()));
+    let boundary = (now.timestamp().div_euclid(1800) + 1) * 1800;
+    let to_boundary = Duration::from_secs(u64::try_from(boundary - now.timestamp()).unwrap_or(0));
     let to_wake = wake.map_or(to_boundary, |at| {
         (at - now).to_std().unwrap_or(Duration::ZERO)
     });
@@ -221,21 +232,62 @@ fn sleep_for(now: DateTime<Utc>, wake: Option<DateTime<Utc>>) -> Duration {
 mod tests {
     use super::*;
 
+    fn at(s: &str) -> DateTime<Utc> {
+        s.parse().unwrap()
+    }
+
     #[test]
-    fn sleep_is_at_least_a_second() {
-        let now = Utc::now();
+    fn sleep_stops_at_the_half_hour() {
+        let now = at("2026-10-24T10:17:00Z");
+        assert_eq!(sleep_for(now, None), Duration::from_secs(13 * 60));
+        let far = at("2026-10-24T20:00:00Z");
+        assert_eq!(sleep_for(now, Some(far)), Duration::from_secs(13 * 60));
+    }
+
+    #[test]
+    fn sleep_stops_at_an_earlier_wake() {
+        let now = at("2026-10-24T10:17:00Z");
+        let wake = at("2026-10-24T10:20:00Z");
+        assert_eq!(sleep_for(now, Some(wake)), Duration::from_secs(3 * 60));
+    }
+
+    #[test]
+    fn sleep_has_a_one_second_floor() {
+        let now = at("2026-10-24T10:17:00Z");
         assert_eq!(sleep_for(now, Some(now)), MIN_SLEEP);
         assert_eq!(
             sleep_for(now, Some(now - ChronoDuration::hours(1))),
             MIN_SLEEP
         );
+        // One second before the boundary.
+        assert_eq!(sleep_for(at("2026-10-24T10:29:59Z"), None), MIN_SLEEP);
     }
 
     #[test]
-    fn sleep_never_passes_the_half_hour() {
-        let now = Utc::now();
-        let far = now + ChronoDuration::hours(10);
-        assert!(sleep_for(now, Some(far)) <= Duration::from_secs(1800));
-        assert!(sleep_for(now, None) <= Duration::from_secs(1800));
+    fn a_refused_key_never_calls() {
+        let now = at("2026-10-24T10:17:00Z");
+        let slots = [at("2026-10-24T08:00:00Z")];
+        // `decide` alone would call: no forecast, no attempt ever.
+        assert_eq!(
+            decide(now, &Ledger::default(), false, &slots, 10, 1),
+            Decision::CallNow
+        );
+        assert!(matches!(
+            next_decision(true, now, &Ledger::default(), false, &slots, 10, 1),
+            Decision::SleepUntil(t) if t > now
+        ));
+    }
+
+    #[test]
+    fn a_failed_first_round_waits_for_the_next_slot() {
+        let now = at("2026-10-24T10:17:00Z");
+        let next = at("2026-10-24T12:00:00Z");
+        let slots = [at("2026-10-24T08:00:00Z"), next];
+        let mut ledger = Ledger::default();
+        ledger.record_attempt(now);
+        assert_eq!(
+            next_decision(false, now, &ledger, false, &slots, 10, 1),
+            Decision::SleepUntil(next)
+        );
     }
 }

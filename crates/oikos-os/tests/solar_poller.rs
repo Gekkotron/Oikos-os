@@ -198,7 +198,8 @@ async fn first_start_fetches_once_per_site_and_serves_view() {
 
     let hub = Arc::clone(&app.hub);
     until("the first view", || hub.solar_view().is_ok()).await;
-    // A few loop turns: the budget plan makes no second round.
+    // Over a few seconds the poller makes no second round. (The decision logic is unit-tested
+    // in the poller module: a loop turn waits for the next half hour.)
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(stub.calls("a"), 1);
     assert_eq!(stub.calls("b"), 1);
@@ -216,6 +217,21 @@ async fn first_start_fetches_once_per_site_and_serves_view() {
             .iter()
             .any(|(t, p)| t == "oikos/solar/availability" && p == "online")
     );
+    task.abort();
+}
+
+#[tokio::test]
+async fn first_site_server_error_skips_second_site() {
+    let app = app(true, &["a", "b"], 10).await;
+    let stub = Stub::new(&[("a", Answer::Status(500))], 1.0);
+    let base = serve_stub(Arc::clone(&stub)).await;
+    let task = spawn_with(&app.hub, base, Duration::ZERO);
+
+    until("the first call", || stub.total() >= 1).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(stub.calls("a"), 1);
+    assert_eq!(stub.calls("b"), 0);
+    assert_eq!(app.hub.solar_ledger().calls_on(Utc::now()), 1);
     task.abort();
 }
 
@@ -249,6 +265,15 @@ async fn restart_reads_cache_and_makes_no_call() {
     tokio::time::sleep(Duration::from_secs(3)).await;
     assert_eq!(stub.total(), 1, "the restart must not call Solcast");
     assert_eq!(get_solar(&second).await.status(), 200);
+    {
+        let published = second.published.lock().unwrap();
+        assert!(published.iter().any(|(t, _)| t.ends_with("/config")));
+        assert!(
+            published
+                .iter()
+                .any(|(t, p)| t == "oikos/solar/availability" && p == "online")
+        );
+    }
     task.abort();
 }
 
