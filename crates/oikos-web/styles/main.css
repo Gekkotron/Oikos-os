@@ -5830,6 +5830,8 @@ html:has(.flow-canvas-screen) {
     inset: 0 auto 0 0;
     z-index: 30;
     width: min(85vw, 320px);
+    /* Opaque: Night Glass's sidebar tint is translucent, and the page shows through a drawer. */
+    background: linear-gradient(var(--sidebar-bg), var(--sidebar-bg)), var(--menu-bg);
     transform: translateX(-100%);
     visibility: hidden;
     transition:
