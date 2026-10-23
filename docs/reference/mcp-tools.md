@@ -97,6 +97,12 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 | --- | --- |
 | `get_weather` | The outdoor weather from Open-Meteo: now, today, rain in the next hour, tonight's low and the next five days, in metric units, with `stale` set when the data is old. The same document as `GET /api/v1/weather`. Answers `weather unavailable` while `[weather] enabled` is `false` or before the first fetch. See [Weather](../users/weather.md). |
 
+## Solar
+
+| Tool | What it does |
+| --- | --- |
+| `get_solar` | The Solcast solar forecast: today, tomorrow, the next seven days, the 30-minute periods and the request budget, with `stale` set when the data is old. The same document as `GET /api/v1/solar`. Answers `solar unavailable` while `[solcast] enabled` is `false` or before the first fetch. See [Solar forecast](../users/solar-forecast.md). |
+
 ## Home settings
 
 | Tool | What it does |
@@ -122,4 +128,4 @@ The climate engine is in beta. These nine tools answer `climate disabled` while 
 
 ## Count
 
-Twenty-two tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, home settings), six in `flow_tools.rs` and nine in `climate_tools.rs`: 22 + 6 + 9 = 37.
+Twenty-three tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs` and nine in `climate_tools.rs`: 23 + 6 + 9 = 38.

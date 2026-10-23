@@ -10,6 +10,7 @@ mod groups;
 mod history;
 mod home;
 mod snapshot;
+mod solar;
 mod views;
 mod virtual_entities;
 mod weather;
@@ -30,6 +31,10 @@ pub use history::{
 };
 pub use home::HomeSettings;
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
+pub use solar::{
+    SolarDay, SolarForecastDay, SolarHistory, SolarNow, SolarPeak, SolarPeriod, SolarSite,
+    SolarSpan, SolarToday, SolarView,
+};
 pub use views::{
     AreaView, BridgeView, DeviceView, EntityView, IgnoredView, UpdateView, mask_secret,
 };

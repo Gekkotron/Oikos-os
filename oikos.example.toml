@@ -103,3 +103,12 @@ password = ""
 [climate]
 enabled = false
 # prefix = "oikos/climate"
+
+# Rooftop solar forecast from Solcast. The API key is read from secrets/solcast.key next to
+# this config file; `api_key_file = "path"` overrides it (a relative path is resolved against
+# the working directory).
+# [solcast]
+# enabled = false
+# sites = ["xxxx-xxxx-xxxx-xxxx"]   # rooftop resource ids from the Solcast Toolkit
+# daily_limit = 10                   # this hub's share of the account's daily requests
+# api_key_file = "/path/to/solcast.key"

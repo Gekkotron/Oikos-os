@@ -836,3 +836,8 @@ fn remote_subscribes_to_its_action_topics() {
             .contains(topic)
     );
 }
+
+#[test]
+fn solar_is_reserved() {
+    assert!(RegistryConfig::default_reserved().contains(&"solar".to_owned()));
+}

@@ -14,6 +14,7 @@ use oikos_core::model::{Availability, ClimateState, EntityState, StateValue};
 use oikos_os::history::climate::ClimateDecisionRow;
 use oikos_os::history::db::Db;
 use oikos_os::history::rollup::rollup_once;
+use oikos_os::history::solar::SolarForecastRow;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use url::Url;
 
@@ -591,6 +592,63 @@ async fn mean_since_averages_num() {
 }
 
 // ----- climate learning runs -----
+
+mod solar {
+    use super::*;
+    use chrono::{NaiveDate, TimeZone, Utc};
+
+    fn day(d: u32, estimate: f64) -> SolarForecastRow {
+        SolarForecastRow {
+            date: NaiveDate::from_ymd_opt(2026, 10, d).unwrap(),
+            estimate,
+            low: estimate - 1.0,
+            high: estimate + 1.0,
+            made_at: Utc.with_ymd_and_hms(2026, 10, d, 6, 0, 0).unwrap(),
+        }
+    }
+
+    #[tokio::test]
+    async fn solar_forecast_first_row_of_day_wins() {
+        let Some(tdb) = fresh_db().await else { return };
+        assert!(
+            tdb.db
+                .insert_solar_forecast_day(&day(20, 10.0))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !tdb.db
+                .insert_solar_forecast_day(&day(20, 99.0))
+                .await
+                .unwrap()
+        );
+        let rows = tdb
+            .db
+            .solar_forecast_days(day(20, 0.0).date, day(21, 0.0).date)
+            .await
+            .unwrap();
+        assert_eq!(rows, vec![day(20, 10.0)]);
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn solar_forecast_days_range_is_half_open_and_sorted() {
+        let Some(tdb) = fresh_db().await else { return };
+        for d in [22, 20, 21, 23] {
+            tdb.db
+                .insert_solar_forecast_day(&day(d, f64::from(d)))
+                .await
+                .unwrap();
+        }
+        let rows = tdb
+            .db
+            .solar_forecast_days(day(21, 0.0).date, day(23, 0.0).date)
+            .await
+            .unwrap();
+        assert_eq!(rows, vec![day(21, 21.0), day(22, 22.0)]);
+        tdb.drop_db().await;
+    }
+}
 
 mod learning {
     use std::sync::Arc;
