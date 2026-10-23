@@ -35,9 +35,25 @@ pub fn Shell(
             drawer_open.try_set(false);
         }
     });
+    // Widening past the phone layout (rotating, resizing) leaves nothing to close by hand.
+    let _widen = window_event_listener(ev::resize, move |_| {
+        let wide = window()
+            .inner_width()
+            .ok()
+            .and_then(|w| w.as_f64())
+            .is_some_and(|w| w >= 900.0);
+        if wide {
+            drawer_open.try_set(false);
+        }
+    });
     // Focus follows the drawer: into it when it opens, back to the menu button when it closes.
     Effect::new(move |was_open: Option<bool>| {
         let open = drawer_open.get();
+        // The content is inert while the drawer is out; free it before focus goes back to it.
+        if !open && let Some(content) = document().query_selector(".shell__content").ok().flatten()
+        {
+            let _ = content.remove_attribute("inert");
+        }
         let selector = match (was_open, open) {
             (_, true) => Some(".sidebar a"),
             (Some(true), false) => Some(".content-header__menu"),
@@ -56,9 +72,9 @@ pub fn Shell(
         <div class="shell">
             <Sidebar climate_on alarm_armed solar_active alerts_badge drawer_open />
             <Show when=move || drawer_open.get()>
-                <div class="shell__scrim" on:click=move |_| drawer_open.set(false)></div>
+                <div class="shell__scrim" aria-hidden="true" on:click=move |_| drawer_open.set(false)></div>
             </Show>
-            <div class="shell__content">
+            <div class="shell__content" inert=move || drawer_open.get().then_some("")>
                 <ContentHeader drawer_open />
                 <main class="screen">{children()}</main>
             </div>

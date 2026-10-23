@@ -123,6 +123,9 @@ pub fn Sidebar(
             class="sidebar"
             class:sidebar--open=move || drawer_open.get()
             id="sidebar"
+            role=move || drawer_open.get().then_some("dialog")
+            aria-modal=move || drawer_open.get().then_some("true")
+            aria-label=move || drawer_open.get().then(|| t(Key::Navigation))
             on:click=close_on_link
         >
             <div class="sidebar__brand">

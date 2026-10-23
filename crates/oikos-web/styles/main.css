@@ -499,7 +499,8 @@ body {
   margin-left: auto;
 }
 
-.content-header__menu {
+.content-header__menu,
+.shell__scrim {
   display: none;
 }
 
@@ -5845,6 +5846,7 @@ html:has(.flow-canvas-screen) {
   }
 
   .shell__scrim {
+    display: block;
     position: fixed;
     inset: 0;
     z-index: 29;
@@ -5871,6 +5873,12 @@ html:has(.flow-canvas-screen) {
     color: var(--ink);
     font-size: 20px;
     cursor: pointer;
+  }
+
+  .content-header__theme,
+  .content-header__lang {
+    min-width: var(--touch-min);
+    height: var(--touch-min);
   }
 
   .content-header__menu:focus-visible {
