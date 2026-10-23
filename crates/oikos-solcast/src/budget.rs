@@ -114,7 +114,9 @@ pub enum Decision {
 }
 
 /// Decides whether to call now. Never allows a call that could push the UTC day over
-/// `daily_limit` (a refresh costs `sites` requests), whatever else is true.
+/// `daily_limit` (a refresh costs `sites` requests), whatever else is true. Only the very
+/// first call (no attempt ever recorded) is made without a due slot; after a failed first
+/// fetch the next planned slot is the retry, never an immediate one.
 pub fn decide(
     now: DateTime<Utc>,
     ledger: &Ledger,
@@ -125,14 +127,16 @@ pub fn decide(
 ) -> Decision {
     if let Some(until) = ledger.blocked_until
         && until > now.timestamp()
-        && let Some(t) = DateTime::from_timestamp(until, 0)
     {
-        return Decision::SleepUntil(t);
+        // An unrepresentable instant fails closed: wait for the next reset.
+        return Decision::SleepUntil(
+            DateTime::from_timestamp(until, 0).unwrap_or_else(|| next_reset(now)),
+        );
     }
-    if ledger.calls_on(now) + sites > daily_limit {
+    if ledger.calls_on(now).saturating_add(sites) > daily_limit {
         return Decision::SleepUntil(next_reset(now));
     }
-    if !has_forecast {
+    if !has_forecast && ledger.last_attempt.is_none() {
         return Decision::CallNow;
     }
     let due = slots
@@ -299,21 +303,56 @@ mod tests {
     }
 
     #[test]
-    fn restart_storm_never_exceeds_limit() {
+    fn failed_first_call_waits_for_next_slot() {
+        let now = utc("2026-10-24T10:00:00Z");
         let mut l = Ledger::default();
-        let start = utc("2026-10-24T00:00:00Z");
-        let mut reached_limit = false;
-        for step in 0..(24 * 6) {
+        l.record_attempt(now - Duration::minutes(1));
+        let next = utc("2026-10-24T12:00:00Z");
+        let early = [utc("2026-10-24T08:00:00Z"), next];
+        assert_eq!(
+            decide(now, &l, false, &early, 10, 1),
+            Decision::SleepUntil(next)
+        );
+        let due = [utc("2026-10-24T09:59:30Z"), next];
+        assert_eq!(decide(now, &l, false, &due, 10, 1), Decision::CallNow);
+    }
+
+    /// Restarts every 10 minutes with the forecast lost and the ledger persisted.
+    fn storm(start: DateTime<Utc>, hours: i64, sites: u32, slots: &[DateTime<Utc>]) {
+        let mut l = Ledger::default();
+        for step in 0..(hours * 6) {
             let now = start + Duration::minutes(10 * step);
-            // A fresh process each time: forecast lost, ledger persisted.
-            if decide(now, &l, false, &[], 10, 1) == Decision::CallNow {
-                assert!(!reached_limit, "called after the limit was reached");
-                l.record_attempt(now);
+            let prev = l.last_attempt;
+            if decide(now, &l, false, slots, 10, sites) == Decision::CallNow {
+                if let Some(p) = prev {
+                    assert!(
+                        slots.iter().any(|s| s.timestamp() > p && *s <= now),
+                        "call at {now} without a due slot"
+                    );
+                }
+                for _ in 0..sites {
+                    l.record_attempt(now);
+                }
             }
             assert!(l.calls_on(now) <= 10);
-            reached_limit |= l.calls_on(now) == 10;
         }
-        assert_eq!(l.calls_on(start + Duration::hours(23)), 10);
+        assert!(l.calls >= 1);
+    }
+
+    #[test]
+    fn restart_storm_never_exceeds_limit() {
+        let start = utc("2026-10-24T00:00:00Z");
+        let slots: Vec<_> = (0..16).map(|k| start + Duration::minutes(90 * k)).collect();
+        storm(start, 24, 1, &slots);
+    }
+
+    #[test]
+    fn restart_storm_across_utc_midnight_with_two_sites() {
+        let start = utc("2026-10-24T23:00:00Z");
+        let slots: Vec<_> = (0..8)
+            .map(|k| start + Duration::minutes(30 + 30 * k))
+            .collect();
+        storm(start, 4, 2, &slots);
     }
 
     fn week_within_limit(zone: Tz) {
@@ -350,6 +389,13 @@ mod tests {
                 .collect();
             all.sort();
             if decide(now, &ledger, has_forecast, &all, LIMIT, SITES) == Decision::CallNow {
+                if has_forecast {
+                    assert!(
+                        all.iter()
+                            .any(|s| *s <= now && now - *s <= Duration::minutes(5)),
+                        "call at {now} not right after a slot"
+                    );
+                }
                 for _ in 0..SITES {
                     ledger.record_attempt(now);
                     *per_utc_day.entry(now.date_naive()).or_default() += 1;
@@ -362,6 +408,11 @@ mod tests {
         }
 
         assert!(per_utc_day.values().all(|c| *c <= LIMIT), "{per_utc_day:?}");
+        let planned = refreshes * SITES;
+        assert!(
+            per_utc_day.iter().skip(1).all(|(_, c)| *c <= planned),
+            "{per_utc_day:?}"
+        );
         let midnight = |d: NaiveDate| {
             zone.from_local_datetime(&d.and_time(NaiveTime::MIN))
                 .earliest()
