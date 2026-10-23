@@ -54,13 +54,13 @@ fn role_suffix(role: Role) -> &'static str {
 /// focus, calls `on_add`; the library stays as it is so several cards can go in a row. A row
 /// can also be dragged onto the canvas (see [`Dragging`]). Esc in the search box clears it.
 /// Mod-Z in the search box undoes the flow (Shift-Mod-Z redoes) from an Enter until the next
-/// keystroke; otherwise it is the text's own undo.
+/// keystroke; otherwise it is the text's own undo. `query` belongs to the canvas, so the search
+/// survives the panel swapping to a card's settings and back.
 #[component]
-pub fn Library(on_add: Callback<NodeKind>) -> impl IntoView {
+pub fn Library(on_add: Callback<NodeKind>, query: RwSignal<String>) -> impl IntoView {
     let house = expect_context::<House>();
     let Dragging(dragging) = expect_context::<Dragging>();
     let editor = expect_context::<Editor>();
-    let query = RwSignal::new(String::new());
     let highlight = RwSignal::new(0_usize);
     // Set by an Enter add, cleared by typing: whether Mod-Z belongs to the flow.
     let added = StoredValue::new(false);

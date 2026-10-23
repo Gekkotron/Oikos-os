@@ -187,6 +187,18 @@ fn FlowBody(
     });
     let dragging = StoredValue::new(None::<NodeKind>);
     provide_context(Dragging(dragging));
+    // The library search, kept while the panel shows a card's settings; leaving edit mode
+    // clears it.
+    let library_query = RwSignal::new(String::new());
+    Effect::watch(
+        move || editing.get(),
+        move |on, _, _| {
+            if !*on {
+                library_query.set(String::new());
+            }
+        },
+        false,
+    );
     // A library row dropped on the canvas becomes a card centred under the pointer.
     let over_canvas = move |ev: &ev::DragEvent| -> Option<web_sys::Element> {
         let target = ev.target()?.dyn_into::<web_sys::Element>().ok()?;
@@ -374,7 +386,7 @@ fn FlowBody(
                 replay=replay
             >
                 <Show when=move || side.get() == Panel::Library>
-                    <Library on_add=add />
+                    <Library on_add=add query=library_query />
                 </Show>
                 <Show when=move || editing.get()>
                     <NodeEditor editor=editor selected=selection />

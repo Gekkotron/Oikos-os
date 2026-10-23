@@ -1133,6 +1133,32 @@ async fn undo_in_library_search_after_typing_leaves_the_flow() {
 }
 
 #[wasm_bindgen_test]
+async fn library_search_survives_a_trip_to_settings() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    search(&host, "Wait").await;
+    let rows = count(&host, ".flow-library__item");
+    select_card(&host, "moving").await;
+    click(&host, ".node-editor__header .btn");
+    // The new search box picks its value up from an effect.
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let input: web_sys::HtmlInputElement = element(&host, ".flow-library__search").unchecked_into();
+    assert_eq!(input.value(), "Wait", "{}", host.inner_html());
+    assert_eq!(count(&host, ".flow-library__item"), rows);
+}
+
+#[wasm_bindgen_test]
+async fn leaving_edit_mode_clears_the_library_search() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    search(&host, "Wait").await;
+    click(&host, ".flow-toolbar button[aria-label=\"Cancel editing\"]");
+    tick().await;
+    click(&host, ".flow-toolbar__edit");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let input: web_sys::HtmlInputElement = element(&host, ".flow-library__search").unchecked_into();
+    assert_eq!(input.value(), "", "{}", host.inner_html());
+}
+
+#[wasm_bindgen_test]
 async fn selecting_a_card_swaps_to_settings_and_back() {
     let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
     select_card(&host, "moving").await;
