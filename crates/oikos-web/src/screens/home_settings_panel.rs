@@ -64,6 +64,70 @@ fn parse_number(text: &str, field: Field) -> Result<Option<f64>, (Field, &'stati
         .ok_or((field, "not a number"))
 }
 
+/// The draft to save: each field from `draft` when it was edited (differs from `base`, the copy the
+/// edits started from), else from `latest`, so a change made elsewhere meanwhile is not undone.
+pub fn merge(base: &Draft, draft: &Draft, latest: &Draft) -> Draft {
+    Draft {
+        eco: if draft.eco != base.eco {
+            &draft.eco
+        } else {
+            &latest.eco
+        }
+        .clone(),
+        mode: if draft.mode != base.mode {
+            &draft.mode
+        } else {
+            &latest.mode
+        }
+        .clone(),
+        indoor: if draft.indoor != base.indoor {
+            &draft.indoor
+        } else {
+            &latest.indoor
+        }
+        .clone(),
+        cold: if draft.cold != base.cold {
+            &draft.cold
+        } else {
+            &latest.cold
+        }
+        .clone(),
+        hot: if draft.hot != base.hot {
+            &draft.hot
+        } else {
+            &latest.hot
+        }
+        .clone(),
+    }
+}
+
+/// What sits under a field: our own translated text, or the hub's message when unmapped.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // `Raw` is built by the wasm save path
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Message {
+    Key(HomeText),
+    Raw(String),
+}
+
+/// The translated text for a hub validation message on `field`; `None` when it is not one of the
+/// known rules.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // only the wasm save path calls it
+fn message_key(field: Field, message: &str) -> Option<HomeText> {
+    if message.contains("must be between") {
+        match field {
+            Field::Eco => Some(HomeText::EcoRange),
+            Field::Cold | Field::Hot => Some(HomeText::ThresholdRange),
+            _ => None,
+        }
+    } else if message.contains("must be lower than") {
+        Some(HomeText::OrderRule)
+    } else if message.contains(" is not a") {
+        matches!(field, Field::Mode | Field::Indoor).then_some(HomeText::EntityRule)
+    } else {
+        None
+    }
+}
+
 /// The settings document the draft stands for, or the first number that does not parse.
 pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, (Field, &'static str)> {
     Ok(HomeSettings {
@@ -90,11 +154,12 @@ fn field_of_message(message: &str) -> Option<Field> {
     .map(|(_, field)| field)
 }
 
-/// The `select` entities as `(id, label)`: the hub's virtual ones first, then by label.
-fn mode_options(house: House) -> Vec<(String, String)> {
+/// The primary `select` entities as `(id, label)`, plus `keep` (the chosen one) even when it is
+/// not primary: the hub's virtual ones first, then by label.
+fn mode_options(house: House, keep: Option<&str>) -> Vec<(String, String)> {
     let mut list: Vec<(String, String)> = house.entities.with(|m| {
         m.values()
-            .filter(|e| e.kind == Kind::Select)
+            .filter(|e| e.kind == Kind::Select && (e.is_primary() || keep == Some(e.id.as_str())))
             .map(|e| (e.id.clone(), list_label(e)))
             .collect()
     });
@@ -108,27 +173,30 @@ pub fn HomeSettingsPanel() -> impl IntoView {
     let lang = use_context::<RwSignal<Lang>>();
     let t = move |k: HomeText| home_text(lang.map_or(Lang::En, |l| l.get()), k);
 
-    let draft = RwSignal::new(house.home_settings.with_untracked(|s| Draft::from(s)));
-    let error = RwSignal::new(None::<(Field, String)>);
+    let fresh_draft = house.home_settings.with_untracked(|s| Draft::from(s));
+    let draft = RwSignal::new(fresh_draft.clone());
+    // The copy the edits started from, to tell edited fields from untouched ones on Save.
+    let base = RwSignal::new(fresh_draft);
+    let error = RwSignal::new(None::<(Field, Message)>);
     let saving = RwSignal::new(false);
 
     // A change from elsewhere (another tab, the MCP, our own save) refills the form, unless
     // there are edits in progress.
-    Effect::new(move |prev: Option<Draft>| {
+    Effect::new(move |_| {
         let fresh = house.home_settings.with(|s| Draft::from(s));
-        if let Some(prev) = &prev
-            && draft.get_untracked() == *prev
-        {
+        if draft.get_untracked() == base.get_untracked() {
             draft.set(fresh.clone());
+            base.set(fresh);
         }
-        fresh
     });
 
     let save = move |_| {
-        let settings = match draft_to_settings(&draft.get_untracked()) {
+        let latest = house.home_settings.with_untracked(|s| Draft::from(s));
+        let merged = merge(&base.get_untracked(), &draft.get_untracked(), &latest);
+        let settings = match draft_to_settings(&merged) {
             Ok(s) => s,
             Err((field, _)) => {
-                error.set(Some((field, t(HomeText::NotANumber).to_owned())));
+                error.set(Some((field, Message::Key(HomeText::NotANumber))));
                 return;
             }
         };
@@ -140,6 +208,9 @@ pub fn HomeSettingsPanel() -> impl IntoView {
             spawn_local(async move {
                 match crate::api::home::put_home_settings(&settings).await {
                     Ok(stored) => {
+                        let fresh = Draft::from(&stored);
+                        draft.try_set(fresh.clone());
+                        base.try_set(fresh);
                         house.home_settings.set(stored);
                         if let Some(toasts) = toasts {
                             toasts.push(t(HomeText::Saved));
@@ -147,7 +218,9 @@ pub fn HomeSettingsPanel() -> impl IntoView {
                     }
                     Err(e) => match field_of_message(&e.error) {
                         Some(field) => {
-                            error.try_set(Some((field, e.error)));
+                            let message = message_key(field, &e.error)
+                                .map_or(Message::Raw(e.error), Message::Key);
+                            error.try_set(Some((field, message)));
                         }
                         None => {
                             if let Some(toasts) = toasts {
@@ -166,9 +239,13 @@ pub fn HomeSettingsPanel() -> impl IntoView {
     let error_for = move |field: Field| {
         move || {
             error.with(|e| {
-                e.as_ref()
-                    .filter(|(f, _)| *f == field)
-                    .map(|(_, text)| view! { <p class="home-settings__error">{text.clone()}</p> })
+                e.as_ref().filter(|(f, _)| *f == field).map(|(_, message)| {
+                    let text = match message {
+                        Message::Key(k) => t(*k).to_owned(),
+                        Message::Raw(raw) => raw.clone(),
+                    };
+                    view! { <p class="home-settings__error">{text}</p> }
+                })
             })
         }
     };
@@ -227,7 +304,7 @@ pub fn HomeSettingsPanel() -> impl IntoView {
                     </option>
                     {move || {
                         let current = mode_value.get();
-                        let mut list = mode_options(house);
+                        let mut list = mode_options(house, current.as_deref());
                         if let Some(id) = current.as_ref()
                             && !list.iter().any(|(i, _)| i == id)
                         {
@@ -303,6 +380,64 @@ mod tests {
         assert_eq!(field, Field::Eco);
         let (field, _) = draft_to_settings(&draft("", "", "x")).unwrap_err();
         assert_eq!(field, Field::Hot);
+    }
+
+    fn full(eco: &str, mode: Option<&str>) -> Draft {
+        Draft {
+            eco: eco.into(),
+            mode: mode.map(Into::into),
+            indoor: None,
+            cold: "15".into(),
+            hot: "26".into(),
+        }
+    }
+
+    #[test]
+    fn merge_untouched_field_takes_the_latest() {
+        let base = full("15", None);
+        let draft = full("15", Some("virtual_mode"));
+        let latest = full("17", None);
+        let got = merge(&base, &draft, &latest);
+        assert_eq!(got.eco, "17");
+        assert_eq!(got.mode.as_deref(), Some("virtual_mode"));
+    }
+
+    #[test]
+    fn merge_edited_field_keeps_the_edit() {
+        let base = full("15", None);
+        let draft = full("16", None);
+        assert_eq!(merge(&base, &draft, &base).eco, "16");
+    }
+
+    #[test]
+    fn merge_edit_wins_over_a_change_elsewhere() {
+        let base = full("15", None);
+        let draft = full("16", None);
+        let latest = full("18", None);
+        assert_eq!(merge(&base, &draft, &latest).eco, "16");
+    }
+
+    #[test]
+    fn hub_messages_map_to_translated_rules() {
+        let between = "eco_setpoint must be between 5 and 30 °C";
+        assert_eq!(message_key(Field::Eco, between), Some(HomeText::EcoRange));
+        assert_eq!(
+            message_key(Field::Hot, "hot_above must be between 5 and 35 °C"),
+            Some(HomeText::ThresholdRange)
+        );
+        assert_eq!(
+            message_key(Field::Cold, "cold_below must be lower than hot_above"),
+            Some(HomeText::OrderRule)
+        );
+        assert_eq!(
+            message_key(Field::Mode, "mode_entity `x` is not a select"),
+            Some(HomeText::EntityRule)
+        );
+        assert_eq!(
+            message_key(Field::Indoor, "indoor_entity `x` is not an entity"),
+            Some(HomeText::EntityRule)
+        );
+        assert_eq!(message_key(Field::Eco, "boom"), None);
     }
 
     #[test]

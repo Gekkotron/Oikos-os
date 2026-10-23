@@ -96,3 +96,33 @@ async fn panel_lists_selects_and_saves_draft() {
     tick().await;
     assert_eq!(input(&host, "home-Cold").value(), "12");
 }
+
+fn mode_values(host: &web_sys::Element) -> Vec<String> {
+    let options = host.query_selector_all("#home-Mode option").unwrap();
+    (0..options.length())
+        .map(|i| {
+            options
+                .item(i)
+                .unwrap()
+                .unchecked_into::<web_sys::HtmlOptionElement>()
+                .value()
+        })
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn mode_list_hides_non_primary_selects_but_keeps_the_chosen_one() {
+    let (host, house) = mount().await;
+    let mut diag = entity("diag_select", Kind::Select, None);
+    diag.category = EntityCategory::Diagnostic;
+    house.apply(WsEvent::EntityUpserted(diag));
+    tick().await;
+    assert!(!mode_values(&host).contains(&"diag_select".to_owned()));
+    house.home_settings.set(HomeSettings {
+        mode_entity: Some("diag_select".into()),
+        ..Default::default()
+    });
+    tick().await;
+    tick().await;
+    assert!(mode_values(&host).contains(&"diag_select".to_owned()));
+}
