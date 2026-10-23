@@ -158,7 +158,7 @@ Decide (exact order):
 ```
 1. blocked_until > now                              → SleepUntil(blocked_until)
 2. calls_on(now) + sites > daily_limit              → SleepUntil(next UTC midnight + 5 min)
-3. !has_forecast                                    → CallNow
+3. !has_forecast && last_attempt is None            → CallNow   (a failed first call waits for the next slot: step 4)
 4. due = latest slot ≤ now with slot > last_attempt (any slot if None)
    due exists                                       → CallNow
 5. next = earliest slot > now                       → SleepUntil(next), else SleepUntil(now + 1 h)
