@@ -6,7 +6,9 @@
 use chrono::NaiveDate;
 use oikos_api::{HomeSettings, WsEvent};
 use oikos_core::command::Publish;
-use oikos_core::energy::{record_change, validate_windows};
+use oikos_core::energy::{
+    EnergyMeters, GridCounters, OffPeakEntry, record_change, validate_windows,
+};
 use oikos_core::model::Kind;
 use oikos_core::registry::Registry;
 use std::sync::MutexGuard;
@@ -38,6 +40,17 @@ pub fn next_document(
     HomeSettings {
         off_peak_history,
         ..incoming
+    }
+}
+
+/// The dated windows to split days with: the stored history, or the current windows from
+/// `today` (and so, as the oldest entry, every earlier day) for a document saved before the
+/// hub kept a history.
+pub fn effective_history(settings: &HomeSettings, today: NaiveDate) -> Vec<OffPeakEntry> {
+    if settings.off_peak_history.is_empty() {
+        record_change(&[], &settings.off_peak, today)
+    } else {
+        settings.off_peak_history.clone()
     }
 }
 
@@ -101,6 +114,22 @@ impl Hub {
         self.home_slot().clone()
     }
 
+    /// Today's date in the house zone.
+    pub fn house_today(&self) -> NaiveDate {
+        crate::history::query::local_date(self.zone(), crate::clock::now_micros())
+    }
+
+    /// The dated off-peak windows the grid day splits with.
+    pub fn off_peak_history(&self) -> Vec<OffPeakEntry> {
+        effective_history(&self.home_slot(), self.house_today())
+    }
+
+    /// The grid meter's bought and sold counters, from the entities' energy roles.
+    pub fn grid_counters(&self) -> GridCounters {
+        let entities = self.snapshot().entities;
+        EnergyMeters::grid_counters(&oikos_api::energy_entities(&entities))
+    }
+
     /// Validates, publishes the document retained and applies it. Returns the stored document.
     pub fn set_home_settings(&self, settings: HomeSettings) -> Result<HomeSettings, HubError> {
         validate(&settings, &self.read()).map_err(HubError::Rejected)?;
@@ -150,7 +179,7 @@ impl Hub {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
-    use oikos_core::energy::{OffPeakEntry, OffPeakWindow};
+    use oikos_core::energy::OffPeakWindow;
     use oikos_core::registry::RegistryConfig;
 
     const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../oikos-core/tests/fixtures/");
@@ -342,6 +371,18 @@ mod tests {
         };
         let next = next_document(&HomeSettings::default(), forged, day("2026-10-24"));
         assert!(next.off_peak_history.is_empty());
+    }
+
+    #[test]
+    fn history_falls_back_to_current_windows() {
+        let doc = HomeSettings {
+            off_peak: vec![win("01:00", "07:00")],
+            ..HomeSettings::default()
+        };
+        let h = effective_history(&doc, day("2026-10-24"));
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].windows, doc.off_peak);
+        assert!(effective_history(&HomeSettings::default(), day("2026-10-24")).is_empty());
     }
 
     #[test]

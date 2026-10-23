@@ -251,6 +251,32 @@ impl Db {
         Ok(t.map(dt_to_micros))
     }
 
+    /// The latest raw value of `entity` strictly before `at`.
+    pub async fn last_before(&self, entity: &str, at: Micros) -> Result<Option<f64>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT num FROM entity_state
+             WHERE entity_id = $1 AND num IS NOT NULL AND time < $2
+             ORDER BY time DESC, seq DESC LIMIT 1",
+        )
+        .bind(entity)
+        .bind(micros_to_dt(at))
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| r.get(0)))
+    }
+
+    /// Oldest value time over `entities`, if any.
+    pub async fn first_time_of(&self, entities: &[String]) -> Result<Option<Micros>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT MIN(time) FROM entity_state WHERE entity_id = ANY($1::text[]) AND num IS NOT NULL",
+        )
+        .bind(entities)
+        .fetch_one(&self.pool)
+        .await?;
+        let t: Option<DateTime<Utc>> = row.get(0);
+        Ok(t.map(dt_to_micros))
+    }
+
     /// Latest value time per requested id, missing ids absent from the map.
     pub async fn last_changes(
         &self,

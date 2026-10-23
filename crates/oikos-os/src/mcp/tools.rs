@@ -5,7 +5,9 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use oikos_api::{CommandResponse, DeviceView, EntityView, GroupView, HomeSettings, WeatherView};
+use oikos_api::{
+    CommandResponse, DeviceView, EntityView, GridDay, GroupView, HomeSettings, WeatherView,
+};
 use oikos_core::flow::{notify_channel_error, notify_severity_error};
 use oikos_core::model::{AreasDocument, SwitchType};
 use rmcp::handler::server::wrapper::{Json, Parameters};
@@ -16,10 +18,11 @@ use serde_json::Value;
 use super::params::{
     AlertList, AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_ALERTS_LIMIT, DEFAULT_LIMIT,
     DEFAULT_SEARCH_LIMIT, DeleteGroupParams, DeleteVirtualParams, Deleted, DeviceList,
-    EntityDetailView, EntityPage, GetEntityParams, GetHistoryParams, GroupList, HistoryAnswer,
-    HistoryWhat, IgnoredList, Include, ListAlertsParams, ListDevicesParams, ListEntitiesParams,
-    MAX_LIMIT, SearchParams, SearchResult, SendCommandParams, SendNotificationParams, Sent,
-    SetAreasParams, SetGroupParams, SetHomeSettingsParams, SetOverrideParams, SetVirtualParams,
+    EntityDetailView, EntityPage, GetEntityParams, GetGridDayParams, GetHistoryParams, GroupList,
+    HistoryAnswer, HistoryWhat, IgnoredList, Include, ListAlertsParams, ListDevicesParams,
+    ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult, SendCommandParams,
+    SendNotificationParams, Sent, SetAreasParams, SetGroupParams, SetHomeSettingsParams,
+    SetOverrideParams, SetVirtualParams,
 };
 use super::{OikosMcp, ToolError};
 use crate::history::query as history_query;
@@ -408,6 +411,37 @@ impl OikosMcp {
                 }))
             }
         }
+    }
+
+    /// What crossed the grid meter on one house-local day, per half hour: kWh bought off-peak
+    /// and peak, kWh sold. `date` is YYYY-MM-DD, today when absent. The split follows the
+    /// off-peak windows in force that day (`get_home_settings`); the grid meter is the entity
+    /// whose energy role is `grid`.
+    #[tool(name = "get_grid_day", annotations(read_only_hint = true))]
+    async fn get_grid_day(
+        &self,
+        Parameters(params): Parameters<GetGridDayParams>,
+    ) -> ToolResult<GridDay> {
+        let history = self
+            .hub
+            .history()
+            .ok_or_else(|| ToolError("history_unavailable: `[history] url` is not set".into()))?;
+        let date = params
+            .date
+            .as_deref()
+            .map(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d"))
+            .transpose()
+            .map_err(|_| ToolError("bad_request: `date` must be YYYY-MM-DD".into()))?;
+        let day = history_query::grid_day(
+            history,
+            &self.hub.grid_counters(),
+            &self.hub.off_peak_history(),
+            date,
+            crate::clock::now_micros(),
+        )
+        .await
+        .map_err(|e| ToolError(format!("{}: {e}", e.code())))?;
+        Ok(Json(day))
     }
 
     /// Sends a phone push notification and returns its alert id. Only `title` is required;

@@ -790,3 +790,78 @@ mod learning {
         tdb.drop_db().await;
     }
 }
+
+fn paris(s: &str) -> i64 {
+    use chrono::TimeZone;
+    let naive = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap();
+    chrono_tz::Europe::Paris
+        .from_local_datetime(&naive)
+        .single()
+        .unwrap()
+        .timestamp_micros()
+}
+
+fn off_peak_history() -> Vec<oikos_core::energy::OffPeakEntry> {
+    use oikos_core::energy::{OffPeakEntry, OffPeakWindow};
+    let w = |a: &str, b: &str| OffPeakWindow {
+        start: a.into(),
+        end: b.into(),
+    };
+    vec![OffPeakEntry {
+        since: "2026-01-01".into(),
+        windows: vec![w("01:34", "07:04"), w("12:05", "14:34")],
+    }]
+}
+
+#[tokio::test]
+async fn grid_day_totals_match_counter_increase_db() {
+    use oikos_core::energy::GridCounters;
+    use oikos_os::history::{History, query};
+    let Some(tdb) = fresh_db().await else { return };
+    tdb.db
+        .insert(&Rows {
+            values: vec![
+                value_row("bought", paris("2026-10-22 23:50:00"), 100.0),
+                value_row("bought", paris("2026-10-23 01:40:00"), 100.4),
+                value_row("bought", paris("2026-10-23 08:00:00"), 101.0),
+                value_row("bought", paris("2026-10-23 13:00:00"), 101.5),
+                value_row("sold", paris("2026-10-22 23:50:00"), 5.0),
+                value_row("sold", paris("2026-10-23 13:10:00"), 5.6),
+            ],
+            availability: vec![],
+        })
+        .await
+        .unwrap();
+    let h = History::with_db(
+        Db::connect_lazy(&tdb.url).unwrap(),
+        chrono_tz::Europe::Paris,
+    );
+    let counters = GridCounters {
+        bought: vec!["bought".into()],
+        sold: vec!["sold".into()],
+    };
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 23);
+    let now = paris("2026-10-24 09:00:00");
+    let day = query::grid_day(&h, &counters, &off_peak_history(), date, now)
+        .await
+        .unwrap();
+    assert_eq!(day.slots.len(), 48);
+    assert_eq!(
+        (day.totals.off_peak, day.totals.peak, day.totals.export),
+        (0.9, 0.6, 0.6)
+    );
+    assert_eq!(day.slots[3].off_peak, 0.4);
+    assert_eq!(day.first_date.as_deref(), Some("2026-10-22"));
+
+    let future = chrono::NaiveDate::from_ymd_opt(2026, 10, 25);
+    let err = query::grid_day(&h, &counters, &off_peak_history(), future, now)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "bad_request");
+    let err = query::grid_day(&h, &GridCounters::default(), &[], None, now)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "no_grid_meter");
+
+    tdb.drop_db().await;
+}

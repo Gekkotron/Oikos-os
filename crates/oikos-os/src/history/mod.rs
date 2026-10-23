@@ -32,6 +32,8 @@ pub enum HistoryError {
     NotRecorded,
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("no grid meter")]
+    NoGridMeter,
 }
 
 impl HistoryError {
@@ -41,6 +43,7 @@ impl HistoryError {
             HistoryError::Unavailable(_) => "history_unavailable",
             HistoryError::NotRecorded => "not_recorded",
             HistoryError::BadRequest(_) => "bad_request",
+            HistoryError::NoGridMeter => "no_grid_meter",
         }
     }
 }
