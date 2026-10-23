@@ -3,7 +3,11 @@
 #![forbid(unsafe_code)]
 
 pub mod budget;
+pub mod client;
 pub mod forecast;
 pub mod period;
 
+pub use budget::{Decision, Ledger, RESERVE, decide, refreshes_per_day, slots};
+pub use client::{ApiKey, BASE_URL, Client, SolcastError};
+pub use forecast::{DayTotal, Forecast, best_hours, day_totals, merge, peak, power_at, remaining};
 pub use period::{ParseError, Period, parse_forecasts};
