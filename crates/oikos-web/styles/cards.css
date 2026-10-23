@@ -349,3 +349,132 @@
   background: transparent;
   cursor: pointer;
 }
+
+/* Vacuum: a sentence and the buttons on the left, the robot drawing on the right. */
+.vacuum {
+  display: flex;
+  flex: 1;
+  align-items: stretch;
+  gap: 16px;
+}
+
+.vacuum__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.vacuum__sentence {
+  margin: 0;
+  font: 500 26px/32px var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.vacuum__buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.vacuum__primary {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: var(--btn-dark-bg);
+  color: var(--btn-dark-ink);
+}
+
+.vacuum__home {
+  min-width: var(--touch-min);
+  min-height: var(--touch-min);
+}
+
+.vacuum__picture {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 170px;
+}
+
+.vacuum__caption {
+  font: 400 10.5px/14px var(--font-body);
+  color: var(--muted);
+  text-align: center;
+}
+
+.robot {
+  width: 150px;
+  max-width: 100%;
+  height: auto;
+}
+
+.robot__ring {
+  fill: none;
+  stroke: var(--card-border);
+}
+
+.robot__body {
+  fill: var(--tile-bg);
+  stroke: var(--card-border);
+  stroke-width: 2;
+}
+
+.robot__top {
+  fill: var(--card-bg);
+  stroke: var(--card-border);
+  stroke-width: 2;
+}
+
+.robot__sensor {
+  fill: var(--muted);
+}
+
+.robot--error .robot__body {
+  stroke: var(--danger);
+}
+
+.robot--cleaning .robot__ring {
+  transform-origin: 75px 75px;
+  animation: robot-pulse 2.4s var(--ease) infinite;
+}
+
+.robot--cleaning .robot__ring--outer {
+  animation-delay: 0.6s;
+}
+
+@keyframes robot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.35;
+    transform: scale(1.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .robot--cleaning .robot__ring {
+    animation: none;
+  }
+}
+
+/* A phone gives the drawing less room. */
+@media (max-width: 600px) {
+  .vacuum__picture {
+    width: 110px;
+  }
+
+  .vacuum__sentence {
+    font-size: 22px;
+    line-height: 28px;
+  }
+}

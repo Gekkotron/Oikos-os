@@ -144,6 +144,22 @@ pub enum Key {
     TargetTemperature,
     Decrease,
     Increase,
+    VacDocked,
+    VacCleaning,
+    VacReturning,
+    VacPaused,
+    VacIdle,
+    VacError,
+    VacOnDock,
+    VacRunning,
+    VacFan,
+    VacOffDock,
+    VacCheck,
+    Start,
+    Pause,
+    Resume,
+    SendHome,
+    Battery,
 }
 
 impl Key {
@@ -198,6 +214,22 @@ impl Key {
         Key::TargetTemperature,
         Key::Decrease,
         Key::Increase,
+        Key::VacDocked,
+        Key::VacCleaning,
+        Key::VacReturning,
+        Key::VacPaused,
+        Key::VacIdle,
+        Key::VacError,
+        Key::VacOnDock,
+        Key::VacRunning,
+        Key::VacFan,
+        Key::VacOffDock,
+        Key::VacCheck,
+        Key::Start,
+        Key::Pause,
+        Key::Resume,
+        Key::SendHome,
+        Key::Battery,
     ];
 }
 
@@ -254,6 +286,25 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::TargetTemperature => ("Target temperature", "Température souhaitée"),
         Key::Decrease => ("Decrease", "Baisser"),
         Key::Increase => ("Increase", "Monter"),
+        Key::VacDocked => ("At home.", "À la maison."),
+        Key::VacCleaning => ("Cleaning.", "En plein ménage."),
+        Key::VacReturning => ("Heading home.", "Rentre à la base."),
+        Key::VacPaused => ("Paused.", "En pause."),
+        Key::VacIdle => ("Idle.", "Au repos."),
+        Key::VacError => ("Needs help.", "Besoin d'aide."),
+        Key::VacOnDock => (
+            "On its dock · Ready to clean",
+            "Sur sa base · Prêt à nettoyer",
+        ),
+        Key::VacRunning => ("Running", "En cours"),
+        Key::VacFan => ("fan", "ventilateur"),
+        Key::VacOffDock => ("Off its dock", "Hors de sa base"),
+        Key::VacCheck => ("Check the robot", "Vérifiez le robot"),
+        Key::Start => ("Start", "Démarrer"),
+        Key::Pause => ("Pause", "Pause"),
+        Key::Resume => ("Resume", "Reprendre"),
+        Key::SendHome => ("Send home", "Renvoyer à la base"),
+        Key::Battery => ("Battery", "Batterie"),
     };
     match lang {
         Lang::En => en,
@@ -380,7 +431,23 @@ mod tests {
             | Key::ItIs
             | Key::TargetTemperature
             | Key::Decrease
-            | Key::Increase => Key::ALL.contains(&k),
+            | Key::Increase
+            | Key::VacDocked
+            | Key::VacCleaning
+            | Key::VacReturning
+            | Key::VacPaused
+            | Key::VacIdle
+            | Key::VacError
+            | Key::VacOnDock
+            | Key::VacRunning
+            | Key::VacFan
+            | Key::VacOffDock
+            | Key::VacCheck
+            | Key::Start
+            | Key::Pause
+            | Key::Resume
+            | Key::SendHome
+            | Key::Battery => Key::ALL.contains(&k),
         }
     }
     #[test]
@@ -388,6 +455,6 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 50);
+        assert_eq!(Key::ALL.len(), 66);
     }
 }

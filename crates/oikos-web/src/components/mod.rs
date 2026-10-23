@@ -8,6 +8,7 @@ pub mod flow_switch;
 pub mod history_chart;
 pub mod hs_wheel;
 pub mod now;
+pub mod robot;
 pub mod room_title;
 pub mod sparkline;
 pub mod status_pill;

@@ -7,7 +7,7 @@ use leptos_router::components::Router;
 use oikos_api::EntityView;
 use oikos_core::model::{
     Capabilities, ClimateState, EntityCategory, EntityState, Kind, StateValue, UiOverride,
-    WaterHeaterState,
+    VacuumState, WaterHeaterState,
 };
 use oikos_web::commands::Pending;
 use oikos_web::components::card_place::{CardPlace, provide_card_place};
@@ -321,4 +321,45 @@ async fn climate_sheet_has_full_controls() {
     tick().await;
     assert!(!has(&host, ".pick__select"));
     assert!(has(&host, ".card__trailing select.badge"));
+}
+
+fn vacuum(activity: &str) -> EntityView {
+    let mut e = entity(
+        "vacuum.robot",
+        Kind::Vacuum,
+        StateValue::Vacuum(VacuumState {
+            state: Some(activity.into()),
+            battery: Some(100),
+            fan_speed: Some("turbo".into()),
+        }),
+    );
+    e.capabilities.vacuum_actions = ["start", "pause", "return_to_base", "clean_spot"]
+        .map(String::from)
+        .to_vec();
+    e.capabilities.fan_speeds = vec!["quiet".into(), "turbo".into()];
+    e
+}
+
+#[wasm_bindgen_test]
+async fn vacuum_tile_is_wide_with_sentence() {
+    let host = mount(vacuum("docked"), None);
+    tick().await;
+    assert!(has(&host, ".card--wide"));
+    assert!(host.text_content().unwrap().contains("At home."));
+    assert!(host.text_content().unwrap().contains("100"));
+    assert!(has(&host, "svg.robot"));
+    assert!(!has(&host, "select"));
+    // The header, Start and Send home.
+    assert_eq!(host.query_selector_all("button").unwrap().length(), 3);
+    assert!(has(&host, "button[aria-label=\"Send home\"]"));
+}
+
+#[wasm_bindgen_test]
+async fn vacuum_sheet_has_full_controls() {
+    let host = mount(vacuum("cleaning"), Some(CardPlace::Sheet));
+    tick().await;
+    assert!(!has(&host, ".card--wide"));
+    assert!(has(&host, "select"));
+    assert!(has(&host, "button[aria-label=\"Spot\"]"));
+    assert!(host.text_content().unwrap().contains("Pause"));
 }

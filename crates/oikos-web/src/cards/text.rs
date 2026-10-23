@@ -82,9 +82,117 @@ pub fn mode_label(lang: Lang, mode: &str) -> String {
     text(lang, key).to_owned()
 }
 
+/// The sentence a vacuum card says about the robot's activity; `None` for an activity the hub
+/// did not name.
+pub fn vacuum_sentence(lang: Lang, activity: Option<&str>) -> Option<&'static str> {
+    let key = match activity? {
+        "docked" => Key::VacDocked,
+        "cleaning" => Key::VacCleaning,
+        "returning" => Key::VacReturning,
+        "paused" => Key::VacPaused,
+        "idle" => Key::VacIdle,
+        "error" => Key::VacError,
+        _ => return None,
+    };
+    Some(text(lang, key))
+}
+
+/// The small line under the robot drawing: where it is and what it is ready for.
+pub fn vacuum_caption(lang: Lang, activity: Option<&str>, fan: Option<&str>) -> Option<String> {
+    let key = match activity? {
+        "docked" => Key::VacOnDock,
+        "cleaning" => {
+            let running = text(lang, Key::VacRunning);
+            return Some(match fan {
+                Some(fan) => format!("{running} · {} {}", text(lang, Key::VacFan), word(fan)),
+                None => running.to_owned(),
+            });
+        }
+        "idle" => Key::VacOffDock,
+        "error" => Key::VacCheck,
+        _ => return None,
+    };
+    Some(text(lang, key).to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vacuum_sentences() {
+        // activity, French sentence, English sentence, French caption, English caption
+        type Row<'a> = (&'a str, &'a str, &'a str, Option<&'a str>, Option<&'a str>);
+        let rows: &[Row] = &[
+            (
+                "docked",
+                "À la maison.",
+                "At home.",
+                Some("Sur sa base · Prêt à nettoyer"),
+                Some("On its dock · Ready to clean"),
+            ),
+            (
+                "cleaning",
+                "En plein ménage.",
+                "Cleaning.",
+                Some("En cours · ventilateur Turbo"),
+                Some("Running · fan Turbo"),
+            ),
+            (
+                "returning",
+                "Rentre à la base.",
+                "Heading home.",
+                None,
+                None,
+            ),
+            ("paused", "En pause.", "Paused.", None, None),
+            (
+                "idle",
+                "Au repos.",
+                "Idle.",
+                Some("Hors de sa base"),
+                Some("Off its dock"),
+            ),
+            (
+                "error",
+                "Besoin d'aide.",
+                "Needs help.",
+                Some("Vérifiez le robot"),
+                Some("Check the robot"),
+            ),
+        ];
+        for &(activity, fr, en, cap_fr, cap_en) in rows {
+            assert_eq!(
+                vacuum_sentence(Lang::Fr, Some(activity)),
+                Some(fr),
+                "{activity}"
+            );
+            assert_eq!(
+                vacuum_sentence(Lang::En, Some(activity)),
+                Some(en),
+                "{activity}"
+            );
+            assert_eq!(
+                vacuum_caption(Lang::Fr, Some(activity), Some("turbo")).as_deref(),
+                cap_fr
+            );
+            assert_eq!(
+                vacuum_caption(Lang::En, Some(activity), Some("turbo")).as_deref(),
+                cap_en
+            );
+        }
+        assert_eq!(
+            vacuum_caption(Lang::En, Some("cleaning"), None).as_deref(),
+            Some("Running")
+        );
+        assert_eq!(
+            vacuum_caption(Lang::Fr, Some("cleaning"), None).as_deref(),
+            Some("En cours")
+        );
+        assert_eq!(vacuum_sentence(Lang::En, None), None);
+        assert_eq!(vacuum_sentence(Lang::En, Some("mystery")), None);
+        assert_eq!(vacuum_caption(Lang::En, None, None), None);
+    }
 
     #[test]
     fn mode_labels() {
