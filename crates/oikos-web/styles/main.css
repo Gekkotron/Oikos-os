@@ -5668,6 +5668,35 @@ html:has(.flow-canvas-screen) {
   gap: 8px;
 }
 
+.climate-timeline__track--editable {
+  cursor: cell;
+}
+
+.climate-timeline__hint {
+  margin: 4px 0 0;
+  font: var(--type-label);
+  opacity: 0.7;
+}
+
+/* Its own full-width line whichever way the popover (a column `.card`) lays out. */
+.climate-timeline__days {
+  display: flex;
+  flex: none;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.climate-timeline__days .chip {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.climate-timeline__days .chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .climate-field--inline {
   flex-direction: row;
   align-items: center;
