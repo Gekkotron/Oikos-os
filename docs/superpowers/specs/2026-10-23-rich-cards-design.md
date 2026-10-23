@@ -59,7 +59,7 @@ Inherited from project 1 (do not reopen): a theme only changes the look; every f
 
 A card knows where it is through a Leptos context, `CardPlace` (name is the builder's call), with three values:
 - **Overview** (the default): Home, dashboards, anything that doesn't say otherwise.
-- **Room**: provided by the room page (`/rooms/:id`).
+- **Room**: provided by each room section (`RoomSection`, used by Home and by `/rooms/:id`), except the Favorites section.
 - **Sheet**: provided by the entity sheet and the group sheet, where `card_for` renders the sheet's controls.
 
 The sheet has no controls of its own: its "Controls" panel *is* the card. So every control a tile leaves out must reappear when the card is in a Sheet. In the rules below, "**sheet only**" means: rendered when `CardPlace` is Sheet, not on tiles. Nothing is lost — it is one tap away.
@@ -78,7 +78,7 @@ Layout, top to bottom (see the mockup):
 Rules:
 - The tap target that opens the sheet stays a `<button class="card__header">` holding the tile, room and name, with `.card__name` on the name. The trailing control sits **outside** that button (no nested buttons).
 - Pending and offline signals stay visible (small, e.g. a dot on the tile corner or next to the name — builder's call), as do the group `×N` badge and `card--offline/--pending/--alert` modifiers.
-- **Room label:** shown everywhere except on a room page and in a sheet, where the room is already obvious (my call). The name comes from `House` areas by `EntityView.area`. Unassigned entities show no room line.
+- **Room label:** hidden wherever the card sits under its own room's heading — a room section on Home or on `/rooms/:id` (not Favorites) — and in a sheet; shown elsewhere (Favorites, dashboards). Home lists rooms as sections today, so a room line there would repeat the heading (my call). The name comes from `House` areas by `EntityView.area`. Unassigned entities show no room line.
 - New tokens per theme in `styles/tokens.css` (names are the builder's call), e.g. tile, tile-on, card tints for climate (sage) and temperature (cool blue — `--cool-bg` exists), ring track, badge border. Values for Ivoire follow the mockup; Night Glass gets matching translucent values (the browser mockup has a starting set).
 - Cards keep `--card-min-height`; Home grid and dashboard spans are unchanged except where noted.
 
