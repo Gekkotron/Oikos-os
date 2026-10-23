@@ -12,7 +12,7 @@ A sidebar on the left replaces the old top bar. From top to bottom it holds:
 
 - **Overview**, with House first and your own dashboards under it, plus **＋ New dashboard**.
 - **Automations** (flows) and **Groups**.
-- **My rooms**: one entry per room, with the number of primary entities the hub counts in it (the same count as the room's area). A room opens at `/rooms/<id>`; the old room chips on House are gone, and the rooms list lives here instead.
+- **My rooms**: one entry per room that has something on House, with the number of cards House shows in that room. A room opens at `/rooms/<id>`; the old room chips on House are gone, and the rooms list lives here instead.
 - **Home**: Energy, Security, Climate (beta) and Alerts (with an unseen-count pill).
 - **Settings** at the bottom, above the connection badge.
 
@@ -32,7 +32,7 @@ Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview
 
 On a user-authored dashboard the header's pencil enters edit mode: click a widget to open its config sheet (title, size, delete), use move left/right to reorder, cycle the span with the resize button, Save or Discard. In edit mode a panel on the right (at the bottom on a phone) lists what can be added, grouped by kind, each row with its room and device; search narrows it, and clicking a row adds the widget at the end of the grid. The gear opens the dashboard settings sheet (name, delete, move up/down in the sidebar), and `＋ New dashboard` in the sidebar creates a new one at `max(order) + 1`.
 
-Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>`. The Home section's placement rule still applies on House: an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before. A room's section shows only when the room has at least one card under that rule, so a room whose entities are all hidden or all elsewhere drops off House; it stays in the sidebar and the room pickers and comes back once something visible lands in it.
+Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>`. The Home section's placement rule still applies on House: an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before. A room's section shows only when the room has at least one card under that rule, so a room whose entities are all hidden or all elsewhere drops off House and disappears from the sidebar too. Its `/rooms/<id>` page still opens and says "Nothing here yet.", the room pickers still offer it, and it comes back once something visible lands in it.
 
 ## Energy
 
