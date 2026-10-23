@@ -14,7 +14,7 @@ Dashboards (`/dashboards/<id>`): the top nav opens a `Dashboards ▾` picker. Ho
 
 On a user-authored dashboard the header's pencil enters edit mode: click a widget to open its config sheet (title, size, delete), use move left/right to reorder, cycle the span with the resize button, Save or Discard. The gear opens the dashboard settings sheet (name, delete, move up/down in the picker), and `＋ New dashboard` at the bottom of the picker creates a new one at `max(order) + 1`.
 
-Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>`. The Home section's placement rule still applies on House: an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before.
+Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>`. The Home section's placement rule still applies on House: an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before. A room chip shows only when the room has at least one card under that rule, so a room whose entities are all hidden or all elsewhere drops off House; it stays in the room pickers and comes back once something visible lands in it.
 
 ## Energy
 

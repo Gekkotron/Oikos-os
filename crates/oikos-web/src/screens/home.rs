@@ -56,7 +56,8 @@ fn home_counts<'a>(entities: impl Iterator<Item = &'a EntityView>) -> BTreeMap<S
 
 /// The chips in the order they are shown: Favorites first (when `favorites` is non-zero), then
 /// the areas exactly as the hub sent them, except that "Unassigned" moves to the end. Each chip
-/// carries the count of entities Home shows there (`counts`), not the hub's primary count.
+/// carries the count of entities Home shows there (`counts`), not the hub's primary count, and an
+/// area where Home shows nothing has no chip.
 fn chips(areas: &[AreaView], favorites: usize, counts: &BTreeMap<String, usize>) -> Vec<AreaView> {
     let mut chips = Vec::with_capacity(areas.len() + 1);
     if favorites > 0 {
@@ -87,6 +88,7 @@ fn chips(areas: &[AreaView], favorites: usize, counts: &BTreeMap<String, usize>)
             .filter(|a| a.id == UNASSIGNED_AREA)
             .map(counted),
     );
+    chips.retain(|c| c.primary_count > 0);
     chips
 }
 
@@ -473,8 +475,20 @@ mod tests {
         assert_eq!(counts.get(UNASSIGNED_AREA), None);
         let areas = [area("living"), area(UNASSIGNED_AREA)];
         let list = chips(&areas, 0, &counts);
+        assert_eq!(ids(&list), ["living"]);
         assert_eq!(list[0].primary_count, 1);
-        assert_eq!(list[1].primary_count, 0);
+    }
+
+    /// One card in each of `ids`, as `home_counts` would count them.
+    fn counts(ids: &[&str]) -> BTreeMap<String, usize> {
+        ids.iter().map(|id| ((*id).to_owned(), 1)).collect()
+    }
+
+    #[test]
+    fn rooms_with_nothing_on_home_have_no_chip() {
+        let areas = [area("upstairs"), area("living"), area(UNASSIGNED_AREA)];
+        assert_eq!(ids(&chips(&areas, 0, &counts(&["living"]))), ["living"]);
+        assert!(chips(&areas, 0, &BTreeMap::new()).is_empty());
     }
 
     fn area(id: &str) -> AreaView {
@@ -498,7 +512,7 @@ mod tests {
     fn keeps_hub_order_and_moves_unassigned_last() {
         let areas = [area("zeta"), area("Unassigned"), area("alpha")];
         assert_eq!(
-            ids(&chips(&areas, 0, &BTreeMap::new())),
+            ids(&chips(&areas, 0, &counts(&["zeta", "Unassigned", "alpha"]))),
             ["zeta", "alpha", "Unassigned"]
         );
     }
@@ -506,8 +520,8 @@ mod tests {
     #[test]
     fn favorites_chip_comes_first_when_any() {
         let areas = [area("kitchen")];
-        let none = BTreeMap::new();
-        assert_eq!(ids(&chips(&areas, 2, &none)), [FAVORITES, "kitchen"]);
-        assert_eq!(ids(&chips(&areas, 0, &none)), ["kitchen"]);
+        let kitchen = counts(&["kitchen"]);
+        assert_eq!(ids(&chips(&areas, 2, &kitchen)), [FAVORITES, "kitchen"]);
+        assert_eq!(ids(&chips(&areas, 0, &kitchen)), ["kitchen"]);
     }
 }

@@ -4,13 +4,13 @@ sidebar_position: 8
 description: How the hub sends alerts to the Android app through Firebase Cloud Messaging, the topics it uses, its configuration and how to switch over from OikosPush.
 ---
 
-The hub sends the house's push notifications to the Android app through Firebase Cloud Messaging. Without `credentials` it keeps the alert history and sends nothing, with one warning at start; a key file that is missing or unreadable is the same, and the warning names its path. The hub starts either way.
+The hub sends the house's push notifications to the Android app through Firebase Cloud Messaging. The service-account key comes from `credentials` (or `OIKOS_PUSH__CREDENTIALS`); when neither is set, the hub uses `secrets/firebase.json` next to its config file if that file exists, which is where the Docker install expects it. Without a key it keeps the alert history and sends nothing, with one warning at start; a key file that is unreadable is the same, and the warning names its path. The hub starts either way.
 
 ```toml
 [push]
 prefix = "oikos/push"            # <prefix>/notification/<source>, /tokens/<installId>, /responses, /history
 legacy_prefix = "oikos-push"     # OikosPush's topics, still read during the switch-over; "" turns them off
-credentials = "/path/to/firebase-service-account.json"  # git-ignored, never logged; leave out to send nothing
+credentials = "/path/to/firebase-service-account.json"  # never logged; leave out to use secrets/firebase.json if present
 ```
 
 `retry_interval` (60 s), `max_retries` (10), `history_size` (100 alerts) and `history_days` (7) keep OikosPush's values. The old `history_topic` and `responses_topic` keys are refused at start: the error names the keys `[push]` takes.
