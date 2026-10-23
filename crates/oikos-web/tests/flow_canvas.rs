@@ -693,7 +693,9 @@ async fn connect_by_drag() {
         0,
         "{html}"
     );
-    pointer_at(&pin, "pointerup", start);
+    // Released over no card (the test page has no stylesheet, so the pin's own spot on screen
+    // is not where the graph thinks it is).
+    pointer_at(&pin, "pointerup", (1, 1));
     tick().await;
 
     drag_wire(&host, "on", "off").await;
@@ -1075,6 +1077,50 @@ async fn selecting_a_card_swaps_to_settings_and_back() {
     click(&host, ".node-editor__header .btn");
     tick().await;
     assert_eq!(count(&host, ".flow-library"), 1, "{}", host.inner_html());
+}
+
+#[wasm_bindgen_test]
+async fn edit_mode_refits_beside_the_library() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let before = style(&host, ".flow-world");
+    click(&host, ".flow-toolbar__edit");
+    // The panel opens, then the camera refits: two effects.
+    gloo_timers::future::TimeoutFuture::new(20).await;
+    let after = style(&host, ".flow-world");
+    assert_ne!(
+        before, after,
+        "the untouched view refits for the open panel"
+    );
+    // Fit frames the graph in what the panel leaves free.
+    click(&host, ".flow-controls__btn[aria-label=\"Fit view\"]");
+    tick().await;
+    assert_eq!(style(&host, ".flow-world"), after);
+}
+
+#[wasm_bindgen_test]
+async fn runs_button_shows_runs_over_settings() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![done_run()])).await;
+    click(&host, ".flow-toolbar__runs");
+    tick().await;
+    select_card(&host, "moving").await;
+    assert_eq!(count(&host, ".flow-drawer .node-editor"), 1);
+    assert_eq!(
+        element(&host, ".flow-toolbar__runs").get_attribute("aria-expanded"),
+        Some("false".into()),
+        "the button follows what the panel shows"
+    );
+    // One click brings the runs back.
+    click(&host, ".flow-toolbar__runs");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-drawer .run-list"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-drawer .node-editor"), 0, "{html}");
 }
 
 #[wasm_bindgen_test]

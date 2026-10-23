@@ -71,15 +71,45 @@ impl View {
 /// A view framing `content` (inflated by `PAD`), centred, with the zoom in
 /// `[FIT_MIN, FIT_MAX]`.
 pub fn fit(content: Rect, screen_w: f64, screen_h: f64) -> View {
+    fit_beside(content, screen_w, screen_h, 0.0)
+}
+
+/// [`fit`] in the part of the screen a side panel `right_px` wide leaves free on the right,
+/// or in the whole screen when that part is narrower than a card.
+pub fn fit_beside(content: Rect, screen_w: f64, screen_h: f64, right_px: f64) -> View {
+    let free_w = free_width(screen_w, right_px, NODE_W);
     let w = (content.w + 2.0 * PAD).max(1.0);
     let h = (content.h + 2.0 * PAD).max(1.0);
-    let zoom = (screen_w / w).min(screen_h / h).clamp(FIT_MIN, FIT_MAX);
+    let zoom = (free_w / w).min(screen_h / h).clamp(FIT_MIN, FIT_MAX);
     let cx = content.x + content.w / 2.0;
     let cy = content.y + content.h / 2.0;
     View {
-        x: screen_w / 2.0 - cx * zoom,
+        x: free_w / 2.0 - cx * zoom,
         y: screen_h / 2.0 - cy * zoom,
         zoom,
+    }
+}
+
+/// The screen width left of a `panel_px` panel, or all of it when what is left is narrower
+/// than `at_least`.
+fn free_width(screen_w: f64, panel_px: f64, at_least: f64) -> f64 {
+    if screen_w - panel_px >= at_least {
+        screen_w - panel_px
+    } else {
+        screen_w
+    }
+}
+
+/// The world rectangle on screen left of a `panel_px` side panel (all of the screen when what
+/// is left is narrower than a card).
+pub fn free_area(view: &View, screen_w: f64, screen_h: f64, panel_px: f64) -> Rect {
+    let free_w = free_width(screen_w, panel_px, NODE_W * view.zoom);
+    let tl = view.to_world(Pt { x: 0.0, y: 0.0 });
+    Rect {
+        x: tl.x,
+        y: tl.y,
+        w: free_w / view.zoom,
+        h: screen_h / view.zoom,
     }
 }
 
@@ -99,11 +129,7 @@ pub fn visible_world(view: &View, screen_w: f64, screen_h: f64) -> Rect {
 /// than a card.
 pub fn add_spot(view: &View, screen_w: f64, screen_h: f64, panel_px: f64) -> Pt {
     let (card_w, card_h) = (NODE_W * view.zoom, NODE_H * view.zoom);
-    let free_w = if screen_w - panel_px >= card_w {
-        screen_w - panel_px
-    } else {
-        screen_w
-    };
+    let free_w = free_width(screen_w, panel_px, card_w);
     view.to_world(Pt {
         x: (free_w - card_w) / 2.0,
         y: (screen_h - card_h) / 2.0,
@@ -156,6 +182,48 @@ pub fn centre_on(view: &View, world: Pt, screen_w: f64, screen_h: f64) -> View {
 mod tests {
     use super::*;
     use crate::flow_layout::{NODE_H, NODE_W};
+
+    #[test]
+    fn fit_beside_leaves_the_panel_free() {
+        let c = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 1200.0,
+            h: 200.0,
+        };
+        let v = fit_beside(c, 1440.0, 800.0, 384.0);
+        let right = v
+            .to_screen(Pt {
+                x: c.x + c.w,
+                y: 0.0,
+            })
+            .x;
+        let left = v.to_screen(Pt { x: c.x, y: 0.0 }).x;
+        assert!(right <= 1440.0 - 384.0 + 0.01, "right edge at {right}");
+        assert!(left >= 0.0, "left edge at {left}");
+        assert_eq!(fit_beside(c, 1440.0, 800.0, 0.0), fit(c, 1440.0, 800.0));
+    }
+
+    #[test]
+    fn free_area_is_left_of_the_panel() {
+        let view = View {
+            x: -100.0,
+            y: -50.0,
+            zoom: 2.0,
+        };
+        let a = free_area(&view, 1000.0, 600.0, 384.0);
+        assert_eq!(
+            a,
+            Rect {
+                x: 50.0,
+                y: 25.0,
+                w: 616.0 / 2.0,
+                h: 300.0
+            }
+        );
+        // Too narrow for a card beside the panel: the whole screen.
+        assert_eq!(free_area(&view, 500.0, 600.0, 384.0).w, 250.0);
+    }
 
     #[test]
     fn add_spot_centres_left_of_the_panel() {

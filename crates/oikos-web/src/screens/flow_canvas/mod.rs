@@ -29,7 +29,7 @@ pub use viewport::{Camera, CanvasControls, Minimap, Viewport};
 
 use crate::flow_edit::{History, add_node, duplicate_node, remove_edge, remove_node};
 use crate::flow_layout::{NODE_H, NODE_W, Pt, bounds, free_spot, positions};
-use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot};
+use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot, free_area};
 use crate::flows::{highlight, parked_deadline, parked_node, step_offset};
 use crate::house::House;
 use crate::screens::flow_schedule::SaveBlocked;
@@ -159,6 +159,11 @@ fn FlowBody(
             runs_open.get(),
         )
     });
+    // Fitting leaves the open panel's side of the canvas free.
+    Effect::new(move |_| {
+        let open = side.get() != Panel::Closed;
+        camera.inset.set(if open { PANEL_RESERVE_PX } else { 0.0 });
+    });
     // Closing the runs stops a replay (nothing would show why the canvas is dimmed).
     Effect::new(move |_| {
         if !runs_open.get() {
@@ -167,13 +172,15 @@ fn FlowBody(
     });
     let fresh = RwSignal::new(None::<String>);
     provide_context(Fresh(fresh));
-    // A card from the library lands in the middle of the canvas the panel leaves free, below
-    // any card already there; it is not selected, so the library stays.
+    // A card from the library lands in the middle of the canvas the panel leaves free, or the
+    // nearest free spot on screen; it is not selected, so the library stays.
     let add = Callback::new(move |kind: NodeKind| {
         let (w, h) = camera.size.get_untracked();
-        let start = add_spot(&camera.view.get_untracked(), w, h, PANEL_RESERVE_PX);
+        let view = camera.view.get_untracked();
+        let start = add_spot(&view, w, h, PANEL_RESERVE_PX);
+        let area = free_area(&view, w, h, PANEL_RESERVE_PX);
         let id = editor.edit(|f| {
-            let at = free_spot(&positions(f), start);
+            let at = free_spot(&positions(f), start, area);
             add_node(f, kind, at)
         });
         flash(fresh, id);
@@ -358,7 +365,7 @@ fn FlowBody(
             on:drop=on_drop
         >
             {canvas}
-            <Toolbar view=view editing=editing editor=editor saving=saving runs_open=runs_open selection=selection />
+            <Toolbar view=view editing=editing editor=editor saving=saving runs_open=runs_open panel=side.into() selection=selection />
             <Drawer
                 panel=side.into()
                 runs_open=runs_open

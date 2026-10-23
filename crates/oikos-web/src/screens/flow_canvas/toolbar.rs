@@ -11,7 +11,7 @@ use oikos_api::FlowView;
 use oikos_core::flow::{Flow, FlowMode};
 use oikos_core::model::UNASSIGNED_AREA;
 
-use super::{Editor, Selection};
+use super::{Editor, Panel, Selection};
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::toast::Toasts;
@@ -203,8 +203,10 @@ pub fn Toolbar(
     editor: Editor,
     saving: RwSignal<bool>,
     runs_open: RwSignal<bool>,
+    panel: Signal<Panel>,
     selection: RwSignal<Option<Selection>>,
 ) -> impl IntoView {
+    let showing_runs = move || panel.get() == Panel::Runs;
     let name = move || view.with(|v| v.definition.name.clone());
     // The first keystroke after focusing the field records one undo step; the rest join it.
     let armed = StoredValue::new(false);
@@ -330,16 +332,20 @@ pub fn Toolbar(
             <button
                 type="button"
                 class="btn btn--ghost flow-toolbar__runs"
-                class:flow-toolbar__runs--open=move || runs_open.get()
-                aria-expanded=move || runs_open.get().to_string()
+                class:flow-toolbar__runs--open=showing_runs
+                aria-expanded=move || showing_runs().to_string()
                 on:click=move |_| {
+                    if panel.get_untracked() == Panel::Runs {
+                        runs_open.set(false);
+                        return;
+                    }
                     // The runs take the panel over from a card's settings.
-                    if !runs_open.get_untracked()
+                    if editing.get_untracked()
                         && matches!(selection.get_untracked(), Some(Selection::Node(_)))
                     {
                         selection.set(None);
                     }
-                    runs_open.update(|open| *open = !*open);
+                    runs_open.set(true);
                 }
             >
                 "Runs"
