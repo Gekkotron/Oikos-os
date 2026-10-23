@@ -89,7 +89,8 @@
   --accent-mint: #4f6b4a;
   /* Darkened from the spec's #b0801f (3.1:1) to pass AA as text. */
   --accent-amber: #8f6613;
-  --accent-cyan: #3f7f9c;
+  /* Darkened from the spec's #3f7f9c (3.9:1) to pass AA as text. */
+  --accent-cyan: #38738f;
   --accent-violet: #6a5acd;
   /* Darkened from the spec's #b4552f (4.3:1) to pass AA as text. */
   --accent-rose: #ac512b;

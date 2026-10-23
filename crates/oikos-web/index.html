@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<script>
+// Mirrors theme.rs (parse + attribute + Auto); keep in sync. Avoids a flash of the wrong theme before wasm boots.
+try {
+  var t = localStorage.getItem("oikos.theme");
+  document.documentElement.setAttribute("data-theme", t === "night" ? "dark" : t === "ivoire" || t === "warm" ? "light" : matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+} catch (e) {}
+</script>
 <title>Oikos-os</title>
 <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">

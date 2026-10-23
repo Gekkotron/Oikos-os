@@ -195,10 +195,15 @@ mod tests {
 
     /// `(name, value)` for every `--name: value;` declaration in a block.
     fn declarations(body: &str) -> Vec<(String, String)> {
-        body.split(';')
+        let mut text = body.to_owned();
+        while let Some(start) = text.find("/*") {
+            let end = text[start..]
+                .find("*/")
+                .map_or(text.len(), |e| start + e + 2);
+            text.replace_range(start..end, "");
+        }
+        text.split(';')
             .filter_map(|d| {
-                let d = d.trim();
-                let d = d.rfind("*/").map_or(d, |i| d[i + 2..].trim());
                 let (name, value) = d.split_once(':')?;
                 name.trim()
                     .starts_with("--")
@@ -279,14 +284,22 @@ mod tests {
             "--muted",
             "--accent-mint",
             "--accent-amber",
+            "--accent-cyan",
+            "--accent-rose",
+            "--accent-violet",
             "--danger",
             "--offline",
+            "--connected",
+            "--select",
+            "--warning",
         ] {
             for surface in ["--bg", "--card-bg"] {
                 let ratio = contrast(&v[text], &v[surface]);
                 assert!(ratio >= 4.5, "{text} on {surface}: {ratio:.2}");
             }
         }
+        let ratio = contrast(&v["--warning"], &v["--warning-bg"]);
+        assert!(ratio >= 4.5, "--warning on --warning-bg: {ratio:.2}");
         assert!(contrast(&v["--nav-active-ink"], &v["--nav-active-bg"]) >= 4.5);
         assert!(contrast(&v["--card-on-ink"], &v["--card-on-bg"]) >= 4.5);
     }
