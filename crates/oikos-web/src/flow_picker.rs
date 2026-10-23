@@ -134,7 +134,8 @@ fn generic_controls(entity: &EntityView) -> Vec<Command> {
 
 /// The picker entries for `query`, ordered by [`Group`] then entity title. An empty query gives
 /// only the generic cards; otherwise those whose label matches, plus When, And and Then cards for
-/// up to eight primary entities whose title matches (ignoring case and accents).
+/// up to eight primary entities whose title or device name holds every word of the query
+/// (ignoring case and accents).
 pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
     let needle = fold_accents(query.trim());
     let generic = [
@@ -219,12 +220,19 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
         .collect();
 
     if !needle.is_empty() {
+        let words: Vec<&str> = needle.split_whitespace().collect();
         let mut matches: Vec<(String, &_)> = ctx
             .entities
             .values()
             .filter(|e| e.is_primary())
             .map(|e| (entity_title(e), e))
-            .filter(|(title, _)| fold_accents(title).contains(&needle))
+            .filter(|(title, e)| {
+                let hay = fold_accents(&format!(
+                    "{title} {}",
+                    e.device_name.as_deref().unwrap_or_default()
+                ));
+                words.iter().all(|w| hay.contains(w))
+            })
             .collect();
         matches.sort_by(|a, b| a.0.cmp(&b.0));
         matches.truncate(MAX_ENTITIES);
@@ -473,6 +481,27 @@ mod tests {
         let entities = house(vec![ent("l1", "Lumière", Kind::Light)]);
         assert_eq!(count(&run("lumiere", &entities), Group::When), 1);
         assert_eq!(count(&run("LUMIÈRE", &entities), Group::When), 1);
+    }
+
+    #[test]
+    fn device_name_and_words_match() {
+        let weather = |id: &str, name: &str| {
+            let mut e = ent(id, name, Kind::Sensor);
+            e.device_name = Some("Weather".into());
+            e
+        };
+        let entities = house(vec![
+            weather("w1", "Weather Temperature"),
+            weather("w2", "Weather Rain next hour"),
+            ent("l1", "Lumière", Kind::Light),
+        ]);
+        assert_eq!(count(&run("weather", &entities), Group::When), 2);
+        let rain = run("weather rain", &entities);
+        assert_eq!(count(&rain, Group::When), 1);
+        assert_eq!(
+            rain.iter().find(|e| e.group == Group::When).unwrap().label,
+            "When Rain next hour changes"
+        );
     }
 
     #[test]
