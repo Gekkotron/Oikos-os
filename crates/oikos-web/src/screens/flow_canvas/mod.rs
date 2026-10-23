@@ -1,12 +1,13 @@
 //! One flow on a full-bleed canvas, React Flow style: pills and routed wires on a pannable,
-//! zoomable surface, floating toolbars, zoom controls, a minimap and a runs drawer. A running
+//! zoomable surface, floating toolbars, zoom controls, a minimap and a side drawer (the runs, or
+//! the card library and card settings while editing). A running
 //! run lights its path live; clicking a past run replays it. Edit mode works on a local draft:
 //! select, drag, connect, cut, delete, duplicate, tidy and undo, then Save sends it with
 //! `PUT /api/v1/flows/{id}`.
 
 mod drawer;
 mod graph;
-mod picker;
+mod library;
 mod settings;
 pub(crate) mod sun;
 mod toolbar;
@@ -19,18 +20,21 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
 use oikos_api::{FlowView, RunView};
-use oikos_core::flow::{Flow, FlowMode};
+use oikos_core::flow::{Flow, FlowMode, NodeKind};
 use wasm_bindgen::JsCast;
 
-pub use drawer::Drawer;
+pub use drawer::{Drawer, Panel, panel};
 pub use graph::{Graph, Mode, Selection};
 pub use viewport::{Camera, CanvasControls, Minimap, Viewport};
 
-use crate::flow_edit::{History, duplicate_node, remove_edge, remove_node};
-use crate::flow_layout::{bounds, positions};
+use crate::flow_edit::{History, add_node, duplicate_node, remove_edge, remove_node};
+use crate::flow_layout::{bounds, free_spot, positions};
+use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot};
 use crate::flows::{highlight, parked_deadline, parked_node, step_offset};
 use crate::house::House;
 use crate::screens::flow_schedule::SaveBlocked;
+pub use library::Fresh;
+use library::Library;
 use settings::NodeEditor;
 use toolbar::Toolbar;
 
@@ -134,7 +138,7 @@ fn FlowBody(
     let editing = RwSignal::new(start_editing);
     let saving = RwSignal::new(false);
     let selection = RwSignal::new(None::<Selection>);
-    let drawer = RwSignal::new(false);
+    let runs_open = RwSignal::new(false);
     let replay = RwSignal::new(None::<String>);
     provide_context(SaveBlocked(RwSignal::new(false)));
     let editor = Editor::new(flow.get_untracked());
@@ -148,24 +152,31 @@ fn FlowBody(
         move |_, _, _| selection.set(None),
         false,
     );
-    // Selecting a card while editing opens its settings in the drawer.
+    let side = Memo::new(move |_| {
+        panel(
+            editing.get(),
+            matches!(selection.get(), Some(Selection::Node(_))),
+            runs_open.get(),
+        )
+    });
+    // Closing the runs stops a replay (nothing would show why the canvas is dimmed).
     Effect::new(move |_| {
-        let card = matches!(selection.get(), Some(Selection::Node(_)));
-        if card && editing.get_untracked() {
-            drawer.set(true);
+        if !runs_open.get() {
+            replay.set(None);
         }
     });
-    // Closing the drawer stops a replay (nothing would show why the canvas is dimmed) and,
-    // while editing, deselects the card whose settings it showed.
-    Effect::new(move |_| {
-        if !drawer.get() {
-            replay.set(None);
-            if editing.get_untracked()
-                && matches!(selection.get_untracked(), Some(Selection::Node(_)))
-            {
-                selection.set(None);
-            }
-        }
+    let fresh = RwSignal::new(None::<String>);
+    provide_context(Fresh(fresh));
+    // A card from the library lands in the middle of the canvas the panel leaves free, below
+    // any card already there; it is not selected, so the library stays.
+    let add = Callback::new(move |kind: NodeKind| {
+        let (w, h) = camera.size.get_untracked();
+        let start = add_spot(&camera.view.get_untracked(), w, h, PANEL_RESERVE_PX);
+        let id = editor.edit(|f| {
+            let at = free_spot(&positions(f), start);
+            add_node(f, kind, at)
+        });
+        flash(fresh, id);
     });
     // A selection the draft no longer has (undone, deleted) is dropped.
     Effect::new(move |_| {
@@ -305,18 +316,19 @@ fn FlowBody(
         .into_any(),
     };
     view! {
-        <div class="flow-stage" class:flow-stage--drawer=move || drawer.get()>
+        <div class="flow-stage" class:flow-stage--drawer=move || side.get() != Panel::Closed>
             {canvas}
-            <Toolbar view=view editing=editing editor=editor saving=saving drawer=drawer selection=selection />
+            <Toolbar view=view editing=editing editor=editor saving=saving runs_open=runs_open selection=selection />
             <Drawer
-                open=drawer
+                panel=side.into()
+                runs_open=runs_open
                 runs=runs.into()
                 flow=flow.into()
                 replay=replay
-                settings=Signal::derive(move || {
-                    editing.get() && matches!(selection.get(), Some(Selection::Node(_)))
-                })
             >
+                <Show when=move || side.get() == Panel::Library>
+                    <Library on_add=add />
+                </Show>
                 <Show when=move || editing.get()>
                     <NodeEditor editor=editor selected=selection />
                 </Show>
@@ -324,6 +336,21 @@ fn FlowBody(
         </div>
     }
 }
+
+/// Marks card `id` as just added, and unmarks it after [`FRESH_MS`] unless another card took
+/// the mark meanwhile.
+fn flash(fresh: RwSignal<Option<String>>, id: String) {
+    fresh.set(Some(id.clone()));
+    gloo_timers::callback::Timeout::new(FRESH_MS, move || {
+        if fresh.try_get_untracked().flatten().as_deref() == Some(id.as_str()) {
+            fresh.try_set(None);
+        }
+    })
+    .forget();
+}
+
+/// How long a card added from the library glows.
+const FRESH_MS: u32 = 1200;
 
 /// Measures where the canvas starts: just under the sticky top bar.
 fn top_offset() -> f64 {

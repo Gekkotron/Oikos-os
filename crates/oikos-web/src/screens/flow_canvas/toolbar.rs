@@ -1,7 +1,6 @@
 //! The floating bars over the canvas: top-left the back link, the flow's name (a text field
 //! while editing) and its mode;
-//! top-right the enable switch, Run, Edit and Runs (＋ Add, Tidy, Undo, Cancel and Save while
-//! editing).
+//! top-right the enable switch, Run, Edit and Runs (Tidy, Undo, Cancel and Save while editing).
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -9,18 +8,16 @@ use leptos_router::NavigateOptions;
 use leptos_router::components::A;
 use leptos_router::hooks::use_navigate;
 use oikos_api::FlowView;
-use oikos_core::flow::{Flow, FlowMode, NodeKind};
+use oikos_core::flow::{Flow, FlowMode};
 use oikos_core::model::UNASSIGNED_AREA;
 
-use super::picker::Picker;
-use super::{Camera, Editor, Selection};
+use super::{Editor, Selection};
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::toast::Toasts;
-use crate::flow_edit::{add_node, slug_id};
-use crate::flow_layout::{NODE_H, NODE_W, Pt, tidy, with_resolved_positions};
+use crate::flow_edit::slug_id;
+use crate::flow_layout::{tidy, with_resolved_positions};
 use crate::flow_list::clear_stale_area;
-use crate::flow_viewport::visible_world;
 use crate::house::House;
 use crate::icons::{CHECK, PENCIL, PLAY, X_MARK};
 use crate::screens::flow_schedule::SaveBlocked;
@@ -31,22 +28,7 @@ fn EditControls(
     editor: Editor,
     saving: RwSignal<bool>,
     original: Signal<Flow>,
-    selection: RwSignal<Option<Selection>>,
 ) -> impl IntoView {
-    let camera = expect_context::<Camera>();
-    let picker = RwSignal::new(false);
-    // A picked card lands at the middle of what is on screen, and is selected (which opens its
-    // settings).
-    let add = Callback::new(move |kind: NodeKind| {
-        let (w, h) = camera.size.get_untracked();
-        let seen = visible_world(&camera.view.get_untracked(), w, h);
-        let at = Pt {
-            x: seen.x + (seen.w - NODE_W) / 2.0,
-            y: seen.y + (seen.h - NODE_H) / 2.0,
-        };
-        let id = editor.edit(|f| add_node(f, kind, at));
-        selection.set(Some(Selection::Node(id)));
-    });
     let toasts = expect_context::<Toasts>();
     let blocked = use_context::<SaveBlocked>();
     let is_blocked = move || blocked.is_some_and(|b| b.0.get());
@@ -117,19 +99,6 @@ fn EditControls(
         });
     };
     view! {
-        <div class="flow-picker-wrap">
-            <button
-                type="button"
-                class="btn btn--ghost"
-                aria-label="Add card"
-                title="Add card"
-                aria-expanded=move || picker.get().to_string()
-                on:click=move |_| picker.update(|open| *open = !*open)
-            >
-                "＋ Add"
-            </button>
-            <Picker open=picker on_pick=add />
-        </div>
         <button
             type="button"
             class="btn btn--ghost"
@@ -233,7 +202,7 @@ pub fn Toolbar(
     editing: RwSignal<bool>,
     editor: Editor,
     saving: RwSignal<bool>,
-    drawer: RwSignal<bool>,
+    runs_open: RwSignal<bool>,
     selection: RwSignal<Option<Selection>>,
 ) -> impl IntoView {
     let name = move || view.with(|v| v.definition.name.clone());
@@ -356,15 +325,22 @@ pub fn Toolbar(
                     editor=editor
                     saving=saving
                     original=original
-                    selection=selection
                 />
             </Show>
             <button
                 type="button"
                 class="btn btn--ghost flow-toolbar__runs"
-                class:flow-toolbar__runs--open=move || drawer.get()
-                aria-expanded=move || drawer.get().to_string()
-                on:click=move |_| drawer.update(|open| *open = !*open)
+                class:flow-toolbar__runs--open=move || runs_open.get()
+                aria-expanded=move || runs_open.get().to_string()
+                on:click=move |_| {
+                    // The runs take the panel over from a card's settings.
+                    if !runs_open.get_untracked()
+                        && matches!(selection.get_untracked(), Some(Selection::Node(_)))
+                    {
+                        selection.set(None);
+                    }
+                    runs_open.update(|open| *open = !*open);
+                }
             >
                 "Runs"
             </button>

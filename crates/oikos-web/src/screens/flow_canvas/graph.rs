@@ -12,9 +12,9 @@ use oikos_api::StepOutcome;
 use oikos_core::flow::{Flow, NodeKind, Op, Position};
 use wasm_bindgen::JsCast;
 
-use super::Editor;
 use super::sun::fallback_badge_visible;
 use super::viewport::Camera;
+use super::{Editor, Fresh};
 use crate::components::now::Now;
 use crate::flow_edit::{EdgeKey, can_connect, connect, remove_edge};
 use crate::flow_layout::{NODE_H, Pt, out_anchor, positions, route, routes};
@@ -382,12 +382,18 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
     let title_text = move || texts.with(|t| t.as_ref().map(|t| t.0.clone()));
     let sub_text = move || texts.with(|t| t.as_ref().and_then(|t| t.1.clone()));
 
+    let fresh = use_context::<Fresh>();
+    let fresh_id = id.clone();
     let class = move || {
+        let is_fresh = fresh.is_some_and(|f| f.0.with(|f| f.as_deref() == Some(fresh_id.as_str())));
         kind.with(|k| {
             k.as_ref().map_or_else(String::new, |k| {
                 let mut class = format!("flow-node {}", role_class(role(k)));
                 if c.mode == Mode::Edit {
                     class.push_str(" flow-node--editing");
+                }
+                if is_fresh {
+                    class.push_str(" flow-node--fresh");
                 }
                 class
             })
