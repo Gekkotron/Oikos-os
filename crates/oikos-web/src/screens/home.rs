@@ -103,16 +103,42 @@ pub fn HomeScreen() -> impl IntoView {
     let chips = use_room_chips();
     let loaded = use_loaded();
     use_group_refresh();
+    // Back from a card's sheet comes with `#room-<id>` (see `RoomSection`). The router looks the
+    // fragment up too early to find the room, so the overview brings it into view once drawn.
+    Effect::new(move |_| {
+        if loaded.get() {
+            request_animation_frame(scroll_to_fragment);
+        }
+    });
 
     view! {
         <Show when=move || loaded.get() fallback=|| view! { <RoomsSkeleton /> }>
             <For
                 each=move || chips.get()
                 key=|c| c.id.clone()
-                children=|area| view! { <RoomSection id=area.id /> }
+                children=|area| view! { <RoomSection id=area.id anchored=true /> }
             />
             <RecentAlerts />
         </Show>
+    }
+}
+
+/// Scrolls the element the address's fragment names to the top of the view, at once (so reduced
+/// motion has nothing to tone down). The fragment is decoded once, as the router does.
+fn scroll_to_fragment() {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let hash = window.location().hash().unwrap_or_default();
+    let Some(fragment) = hash.strip_prefix('#').filter(|f| !f.is_empty()) else {
+        return;
+    };
+    let id = js_sys::decode_uri(fragment)
+        .ok()
+        .and_then(|d| d.as_string())
+        .unwrap_or_else(|| fragment.to_owned());
+    if let Some(el) = window.document().and_then(|d| d.get_element_by_id(&id)) {
+        el.scroll_into_view();
     }
 }
 

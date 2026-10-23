@@ -18,9 +18,33 @@ pub fn install_nav() {
     provide_context(BackStack(RwSignal::new(Vec::new())));
 }
 
-/// The path of a stack entry, without its query.
+/// The path of a stack entry, without its query or fragment.
 fn path_of(entry: &str) -> &str {
-    entry.split_once('?').map_or(entry, |(path, _)| path)
+    entry.split(['?', '#']).next().unwrap_or(entry)
+}
+
+/// Gives the top entry the fragment `#id` when it is the page at `path`, so Back to it scrolls
+/// to the element with that id (the overview's room a card was opened from) instead of the top.
+/// The router decodes the fragment once before looking the id up, hence the extra escaping.
+fn anchor_top(stack: &mut [String], path: &str, id: &str) {
+    if let Some(top) = stack.last_mut().filter(|top| path_of(top) == path) {
+        top.truncate(top.find('#').unwrap_or(top.len()));
+        top.push('#');
+        top.push_str(&crate::api::encode_id(id));
+    }
+}
+
+/// A function that makes Back to the current page land on the element with the given id (see
+/// [`anchor_top`]). Call it while building a component: the page is read then, because by the
+/// time a click handler above a card runs, the card's `navigate` has already moved the address.
+pub fn use_back_anchor() -> impl Fn(&str) + Clone + 'static {
+    let stack = use_context::<BackStack>().map(|b| b.0);
+    let page = web_sys::window().and_then(|w| w.location().pathname().ok());
+    move |id: &str| {
+        if let (Some(stack), Some(page)) = (stack, page.as_deref()) {
+            stack.try_update(|s| anchor_top(s, page, id));
+        }
+    }
 }
 
 /// A form page: once left, Back never returns to it (saving a new group opens the group, whose
@@ -110,7 +134,7 @@ pub fn BackLink() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEPTH, back_target, parent_of, visit};
+    use super::{DEPTH, anchor_top, back_target, parent_of, visit};
 
     fn walk(pages: &[&str]) -> Vec<String> {
         let mut stack = Vec::new();
@@ -203,5 +227,31 @@ mod tests {
         let stack = walk(&pages);
         assert_eq!(stack.len(), DEPTH);
         assert_eq!(stack.last().map(String::as_str), Some("/entity/e39"));
+    }
+
+    #[test]
+    fn back_returns_to_the_room_a_card_was_opened_from() {
+        let mut stack = walk(&["/dashboards/mine", "/dashboards/house"]);
+        anchor_top(&mut stack, "/dashboards/house", "room-Cuisine");
+        // A later click in another room moves the anchor.
+        anchor_top(&mut stack, "/dashboards/house", "room-Salle%20de%20bain");
+        assert_eq!(
+            stack.last().map(String::as_str),
+            Some("/dashboards/house#room-Salle%2520de%2520bain")
+        );
+        visit(&mut stack, "/entity/lamp", "");
+        assert_eq!(
+            back_target(&stack),
+            "/dashboards/house#room-Salle%2520de%2520bain"
+        );
+        // Landing back on the overview unwinds to it, without the anchor.
+        visit(&mut stack, "/dashboards/house", "");
+        assert_eq!(stack, ["/dashboards/mine", "/dashboards/house"]);
+        // Only the page on top takes an anchor, and a query stays.
+        anchor_top(&mut stack, "/rooms/a", "room-a");
+        assert_eq!(stack.last().map(String::as_str), Some("/dashboards/house"));
+        let mut edit = walk(&["/dashboards/d1?edit=1"]);
+        anchor_top(&mut edit, "/dashboards/d1", "room-a");
+        assert_eq!(edit, ["/dashboards/d1?edit=1#room-a"]);
     }
 }
