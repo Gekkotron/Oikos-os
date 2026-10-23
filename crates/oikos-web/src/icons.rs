@@ -149,6 +149,7 @@ pub const MOON: &str = svg!(r#"<path d="M20 14A9 9 0 1 1 10 4a7 7 0 0 0 10 10"/>
 pub const SUN_MOON: &str = svg!(
     r#"<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor"/>"#
 );
+pub const ARROW_UP: &str = svg!(r#"<path d="M12 19V5"/><path d="m6 11 6-6 6 6"/>"#);
 pub const PLUS: &str = svg!(r#"<path d="M12 5v14"/><path d="M5 12h14"/>"#);
 pub const MAGNIFIER: &str = svg!(r#"<circle cx="11" cy="11" r="7"/><path d="m16.5 16.5 4 4"/>"#);
 pub const TRASH: &str = svg!(

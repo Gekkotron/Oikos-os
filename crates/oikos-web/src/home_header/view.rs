@@ -19,7 +19,7 @@ use crate::icons;
 use crate::screens::flow_canvas::sun::house_place;
 
 /// A temperature rounded to whole degrees, never "-0".
-fn degrees(lang: Lang, t: f64) -> String {
+pub(crate) fn degrees(lang: Lang, t: f64) -> String {
     format!("{}°", i18n::home_number(lang, t.round() + 0.0, 0))
 }
 

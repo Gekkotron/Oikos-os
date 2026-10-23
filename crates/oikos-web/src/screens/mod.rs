@@ -17,3 +17,4 @@ pub mod home;
 pub mod room;
 pub mod security;
 pub mod settings;
+pub mod weather;

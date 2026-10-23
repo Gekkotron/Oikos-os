@@ -89,6 +89,7 @@ pub fn section_for(path: &str, back: &[String]) -> Section {
         ["energy", ..] => Section::Energy,
         ["security", ..] => Section::Security,
         ["climate", ..] => Section::Climate,
+        ["weather", ..] => Section::Overview,
         ["alerts", ..] => Section::Alerts,
         ["settings", ..] | ["devices", ..] => Section::Settings,
         ["entity", ..] | ["history", ..] => back
@@ -142,6 +143,7 @@ pub fn crumbs(path: &str, lang: Lang, name_of: impl Fn(Lookup) -> Option<String>
         ["energy", ..] => push(t(Key::Energy), String::new()),
         ["security", ..] => push(t(Key::Security), String::new()),
         ["climate", ..] => push(t(Key::Climate), String::new()),
+        ["weather", ..] => push(t(Key::Weather), String::new()),
         ["alerts"] => push(t(Key::Alerts), String::new()),
         ["alerts", id, ..] => {
             push(t(Key::Alerts), "/alerts".into());
@@ -232,6 +234,15 @@ mod tests {
         assert_eq!(c[0].href.as_deref(), Some("/"));
         assert_eq!(c[1].href.as_deref(), Some("/flows"));
         assert_eq!(c[2].href, None);
+    }
+
+    #[test]
+    fn weather_route_crumb_and_section() {
+        assert_eq!(section_for("/weather", &[]), Section::Overview);
+        let c = crumbs("/weather", Lang::En, names);
+        assert_eq!(labels(&c), ["My home", "Weather"]);
+        assert_eq!(c[0].href.as_deref(), Some("/"));
+        assert_eq!(c[1].href, None);
     }
 
     #[test]

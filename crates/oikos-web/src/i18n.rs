@@ -110,6 +110,7 @@ pub enum Key {
     Energy,
     Security,
     Climate,
+    Weather,
     Beta,
     Alerts,
     Settings,
@@ -145,6 +146,7 @@ impl Key {
         Key::Energy,
         Key::Security,
         Key::Climate,
+        Key::Weather,
         Key::Beta,
         Key::Alerts,
         Key::Settings,
@@ -181,6 +183,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Energy => ("Energy", "Énergie"),
         Key::Security => ("Security", "Sécurité"),
         Key::Climate => ("Climate", "Climat"),
+        Key::Weather => ("Weather", "Météo"),
         Key::Beta => ("Beta", "Bêta"),
         Key::Alerts => ("Alerts", "Alertes"),
         Key::Settings => ("Settings", "Réglages"),
@@ -517,6 +520,119 @@ pub fn uv_word(lang: Lang, level: UvLevel) -> &'static str {
     }
 }
 
+/// The fixed words of the weather page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WeatherText {
+    Now,
+    NextDays,
+    NoRainSoon,
+    UpdatedAt,
+    Unavailable,
+    EnableHint,
+    Credit,
+    TonightMin,
+    Wind,
+    Humidity,
+    Pressure,
+    Clouds,
+    Rain,
+    MaxGusts,
+    UvIndex,
+    Sun,
+    Today,
+}
+
+/// A fixed word of the weather page.
+pub fn weather_text(lang: Lang, k: WeatherText) -> &'static str {
+    use WeatherText::*;
+    let (en, fr) = match k {
+        Now => ("Now", "Maintenant"),
+        NextDays => ("Next 5 days", "5 prochains jours"),
+        NoRainSoon => ("No rain within the hour", "Pas de pluie dans l'heure"),
+        UpdatedAt => ("Updated at", "Mis à jour à"),
+        Unavailable => (
+            "The weather is unavailable.",
+            "La météo n'est pas disponible.",
+        ),
+        EnableHint => (
+            "Enable [weather] in oikos.toml to see it here.",
+            "Activez [weather] dans oikos.toml pour la voir ici.",
+        ),
+        Credit => (
+            "Data Open-Meteo (CC BY 4.0)",
+            "Données Open-Meteo (CC BY 4.0)",
+        ),
+        TonightMin => ("Tonight, minimum", "Cette nuit, minimum"),
+        Wind => ("Wind", "Vent"),
+        Humidity => ("Humidity", "Humidité"),
+        Pressure => ("Pressure", "Pression"),
+        Clouds => ("Clouds", "Nuages"),
+        Rain => ("Rain", "Pluie"),
+        MaxGusts => ("Max gusts", "Rafales max"),
+        UvIndex => ("UV index", "Indice UV"),
+        Sun => ("Sun", "Soleil"),
+        Today => ("Today", "Aujourd'hui"),
+    };
+    if lang == Lang::Fr { fr } else { en }
+}
+
+/// Rain in the next hour: "Rain within the hour: 1.2 mm".
+pub fn rain_next_hour(lang: Lang, mm: &str) -> String {
+    match lang {
+        Lang::Fr => format!("Pluie dans l'heure : {mm} mm"),
+        Lang::En => format!("Rain within the hour: {mm} mm"),
+    }
+}
+
+/// The sub-line of the rain tile: "today · 93 % chance".
+pub fn rain_sub(lang: Lang, chance: Option<&str>) -> String {
+    match (lang, chance) {
+        (Lang::Fr, Some(c)) => format!("aujourd'hui · risque {c} %"),
+        (Lang::En, Some(c)) => format!("today · {c} % chance"),
+        (Lang::Fr, None) => "aujourd'hui".to_owned(),
+        (Lang::En, None) => "today".to_owned(),
+    }
+}
+
+/// The sub-line of the wind tile: "W · gusts 48".
+pub fn wind_sub(lang: Lang, compass: Option<&str>, gusts: Option<&str>) -> String {
+    let gust = gusts.map(|g| match lang {
+        Lang::Fr => format!("rafales {g}"),
+        Lang::En => format!("gusts {g}"),
+    });
+    [compass.map(str::to_owned), gust]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// The sub-line of the sun tile: "sunrise 8:21 am".
+pub fn sunrise_sub(lang: Lang, at: NaiveTime) -> String {
+    match lang {
+        Lang::Fr => format!("lever {}", home_time(lang, at)),
+        Lang::En => format!("sunrise {}", home_time(lang, at)),
+    }
+}
+
+/// A forecast day's heading: "Sam. 24" / "Sat 24".
+pub fn short_weekday(lang: Lang, date: NaiveDate) -> String {
+    const EN: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const FR: [&str; 7] = ["Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam.", "Dim."];
+    let table = if lang == Lang::Fr { FR } else { EN };
+    let day = table[date.weekday().num_days_from_monday() as usize];
+    format!("{day} {}", date.day())
+}
+
+/// "Updated at 9:02 pm".
+pub fn updated_at(lang: Lang, at: NaiveTime) -> String {
+    format!(
+        "{} {}",
+        weather_text(lang, WeatherText::UpdatedAt),
+        home_time(lang, at)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,6 +673,17 @@ mod tests {
         assert_eq!(unseen_alerts(Lang::Fr, "99+"), "99+ alertes non lues");
     }
     #[test]
+    fn weather_page_copy() {
+        let sat = NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
+        assert_eq!(short_weekday(Lang::Fr, sat), "Sam. 24");
+        assert_eq!(short_weekday(Lang::En, sat), "Sat 24");
+        assert_eq!(wind_sub(Lang::En, Some("W"), Some("48")), "W · gusts 48");
+        assert_eq!(wind_sub(Lang::Fr, None, None), "");
+        for lang in [Lang::En, Lang::Fr] {
+            assert!(!weather_text(lang, WeatherText::Credit).is_empty());
+        }
+    }
+    #[test]
     fn toggles() {
         assert_eq!(Lang::En.next(), Lang::Fr);
         assert_eq!(Lang::Fr.next(), Lang::En);
@@ -575,6 +702,7 @@ mod tests {
             | Key::Energy
             | Key::Security
             | Key::Climate
+            | Key::Weather
             | Key::Beta
             | Key::Alerts
             | Key::Settings
@@ -602,7 +730,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 30);
+        assert_eq!(Key::ALL.len(), 31);
     }
     fn window(room: Option<&str>) -> Activity {
         Activity::Open(Opening {
