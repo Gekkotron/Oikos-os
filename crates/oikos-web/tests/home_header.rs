@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::Router;
-use oikos_api::{EntityView, WeatherView, WsEvent};
+use oikos_api::{EntityView, HomeSettings, WeatherView, WsEvent};
 use oikos_core::model::{
     Capabilities, EntityCategory, EntityState, Kind, LightState, StateValue, UiOverride,
 };
@@ -115,4 +115,51 @@ async fn header_shows_weather_card() {
         .expect("weather card");
     assert_eq!(card.get_attribute("href").as_deref(), Some("/weather"));
     assert!(card.text_content().unwrap().contains("9°"));
+}
+
+#[wasm_bindgen_test]
+async fn mode_pill_shows_the_real_option_after_a_failed_command() {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let house = House::new();
+    let mut mode = entity(
+        "virtual_mode",
+        Kind::Select,
+        None,
+        StateValue::Text("Home".into()),
+    );
+    mode.capabilities.options = vec!["Home".into(), "Away".into()];
+    house.apply(WsEvent::EntityUpserted(mode));
+    house.home_settings.set(HomeSettings {
+        mode_entity: Some("virtual_mode".into()),
+        ..Default::default()
+    });
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(house);
+            provide_context(Toasts::new());
+            provide_context(Pending::new());
+            view! { <Router><HomeHeader /></Router> }
+        },
+    ));
+    tick().await;
+    let select = host.query_selector(".home-chip__select").unwrap().unwrap();
+    let value = |el: &web_sys::Element| {
+        js_sys::Reflect::get(el, &"value".into())
+            .unwrap()
+            .as_string()
+            .unwrap()
+    };
+    assert_eq!(value(&select), "Home");
+    // The user picks another option; the hub gives up on it.
+    js_sys::Reflect::set(&select, &"value".into(), &"Away".into()).unwrap();
+    assert_eq!(value(&select), "Away");
+    house
+        .command_failed
+        .set(Some(("virtual_mode".into(), "nope".into())));
+    tick().await;
+    tick().await;
+    assert_eq!(value(&select), "Home");
 }

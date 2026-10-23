@@ -16,6 +16,7 @@ pub async fn get_weather() -> Result<Option<WeatherView>, ApiError> {
     }
 }
 
+/// The home settings document.
 pub async fn get_home_settings() -> Result<HomeSettings, ApiError> {
     let response = check(Request::get("/api/v1/home/settings").build(), None).await?;
     read_json(response).await

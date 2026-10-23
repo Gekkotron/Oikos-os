@@ -13,7 +13,7 @@ pub const COLD_DEFAULT: f64 = 15.0;
 pub const HOT_DEFAULT: f64 = 26.0;
 
 /// mm of rain in the next hour above which the detail line mentions it.
-const RAIN_MIN_MM: f64 = 0.1;
+pub(crate) const RAIN_MIN_MM: f64 = 0.1;
 /// Local hour from which a freezing night is worth a mention.
 const FROST_FROM_HOUR: u32 = 15;
 /// How long before sunset the detail line starts naming it.
@@ -132,7 +132,8 @@ pub fn details(
 }
 
 /// Sunrise and sunset in house local time, whether it is dark now, and whether the house has no
-/// coordinates (the Paris fallback is in use).
+/// coordinates (the Paris fallback is in use). While the flows config is not fetched yet (`cfg` is
+/// `None`) the sun times and the fallback hint are unknown, so none is reported.
 pub fn sun_today(
     cfg: Option<&FlowsConfigView>,
     now: DateTime<Utc>,
@@ -141,11 +142,12 @@ pub fn sun_today(
     let local_date = now.with_timezone(&zone).date_naive();
     let events = sun_events(lat, lon, local_date);
     let local_time = |at: Option<DateTime<Utc>>| at.map(|at| at.with_timezone(&zone).time());
+    let known = cfg.is_some();
     (
-        local_time(events.sunrise),
-        local_time(events.sunset),
+        local_time(events.sunrise).filter(|_| known),
+        local_time(events.sunset).filter(|_| known),
         is_dark_at(lat, lon, now),
-        cfg.is_none_or(|c| c.fallback_active),
+        cfg.is_some_and(|c| c.fallback_active),
     )
 }
 
@@ -306,6 +308,21 @@ mod tests {
         assert!(set.unwrap() > t(21, 0) && set.unwrap() < t(22, 30));
         let midnight = Utc.with_ymd_and_hms(2026, 6, 21, 23, 30, 0).unwrap();
         assert!(sun_today(Some(&cfg), midnight).2);
-        assert!(sun_today(None, noon).3);
+        assert!(sun_today(Some(&cfg), noon).1.is_some());
+    }
+
+    #[test]
+    fn sun_today_is_unknown_before_the_config_arrives() {
+        use chrono::TimeZone;
+        let noon = Utc.with_ymd_and_hms(2026, 6, 21, 10, 0, 0).unwrap();
+        let (rise, set, _, fallback) = sun_today(None, noon);
+        assert!(rise.is_none() && set.is_none() && !fallback);
+        let unset = FlowsConfigView {
+            latitude: None,
+            longitude: None,
+            timezone: "Europe/Paris".into(),
+            fallback_active: true,
+        };
+        assert!(sun_today(Some(&unset), noon).3);
     }
 }

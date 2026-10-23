@@ -25,6 +25,8 @@ pub struct House {
     pub flows_config: RwSignal<Option<FlowsConfigView>>,
     /// The current weather; `None` while the hub has none or a fetch failed.
     pub weather: RwSignal<Option<WeatherView>>,
+    /// Whether the first weather fetch has answered (with weather or without).
+    pub weather_loaded: RwSignal<bool>,
     /// The home settings; the default document until the first fetch answers.
     pub home_settings: RwSignal<HomeSettings>,
     /// The hand-made groups by id (without the `group_` prefix), for the member counts on Home.
@@ -53,6 +55,7 @@ impl House {
             flows: RwSignal::new(Vec::new()),
             flows_config: RwSignal::new(None),
             weather: RwSignal::new(None),
+            weather_loaded: RwSignal::new(false),
             home_settings: RwSignal::new(HomeSettings::default()),
             groups: RwSignal::new(BTreeMap::new()),
             dashboards: RwSignal::new(Vec::new()),
@@ -88,8 +91,10 @@ impl House {
     /// header hides the card.
     pub fn refresh_weather(&self) {
         let weather = self.weather;
+        let loaded = self.weather_loaded;
         leptos::task::spawn_local(async move {
             weather.set(crate::api::home::get_weather().await.ok().flatten());
+            loaded.set(true);
         });
     }
 

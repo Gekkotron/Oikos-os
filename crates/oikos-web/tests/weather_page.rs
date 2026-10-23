@@ -36,12 +36,13 @@ fn full_weather() -> WeatherView {
     .expect("weather fixture")
 }
 
-async fn mount(weather: Option<WeatherView>) -> web_sys::Element {
+async fn mount(weather: Option<WeatherView>, loaded: bool) -> web_sys::Element {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
     let house = House::new();
     house.weather.set(weather);
+    house.weather_loaded.set(loaded);
     std::mem::forget(leptos::mount::mount_to(
         host.clone().unchecked_into(),
         move || {
@@ -56,7 +57,7 @@ async fn mount(weather: Option<WeatherView>) -> web_sys::Element {
 
 #[wasm_bindgen_test]
 async fn weather_page_shows_tiles_and_days() {
-    let host = mount(Some(full_weather())).await;
+    let host = mount(Some(full_weather()), true).await;
     assert_eq!(
         host.query_selector_all(".weather-tile").unwrap().length(),
         8
@@ -70,11 +71,27 @@ async fn weather_page_shows_tiles_and_days() {
 
 #[wasm_bindgen_test]
 async fn weather_page_unavailable() {
-    let host = mount(None).await;
+    let host = mount(None, true).await;
     assert_eq!(
         host.query_selector_all(".weather-tile").unwrap().length(),
         0
     );
     let text = host.text_content().unwrap_or_default();
     assert!(text.contains("The weather is unavailable."), "{text}");
+}
+
+#[wasm_bindgen_test]
+async fn weather_page_is_empty_before_the_first_fetch() {
+    let host = mount(None, false).await;
+    let text = host.text_content().unwrap_or_default();
+    assert!(!text.contains("unavailable"), "{text}");
+    assert!(host.query_selector(".sheet__back").unwrap().is_some());
+}
+
+#[wasm_bindgen_test]
+async fn weather_page_back_link_is_compact() {
+    let host = mount(Some(full_weather()), true).await;
+    let back = host.query_selector(".sheet__back").unwrap().unwrap();
+    let page = host.query_selector(".weather-page").unwrap().unwrap();
+    assert!(back.get_bounding_client_rect().width() < page.get_bounding_client_rect().width());
 }

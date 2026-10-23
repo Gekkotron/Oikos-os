@@ -50,6 +50,8 @@ fn ModePill(mode: ModeChip, lang: RwSignal<Lang>) -> impl IntoView {
             view! { <option value=option selected=selected>{text}</option> }
         })
         .collect_view();
+    let house: House = expect_context();
+    let current = mode.current.clone();
     let id = mode.entity_id;
     let on_change = move |ev| {
         let option = event_target_value(&ev);
@@ -60,6 +62,12 @@ fn ModePill(mode: ModeChip, lang: RwSignal<Lang>) -> impl IntoView {
             <select
                 class="home-chip__select"
                 aria-label=move || i18n::house_mode_label(lang.get())
+                // Re-asserted on every failed command: the hub left the state alone, so the
+                // select must not keep the option the browser showed.
+                prop:value=move || {
+                    house.command_failed.track();
+                    current.clone()
+                }
                 on:change=on_change
             >
                 {items}

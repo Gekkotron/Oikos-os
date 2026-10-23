@@ -1,11 +1,11 @@
 //! The weather page the header's weather card links to: now, the next five days, the source.
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use leptos::prelude::*;
 use oikos_api::{WeatherDay, WeatherView};
 
 use crate::components::now::{Now, unix_now};
-use crate::home_header::mood::{Detail, sun_today};
+use crate::home_header::mood::{Detail, RAIN_MIN_MM, sun_today};
 use crate::home_header::view::degrees;
 use crate::home_header::weather_fmt::{compass_index, condition_icon, uv_level};
 use crate::house::House;
@@ -61,13 +61,16 @@ fn day_card(lang: Lang, d: &WeatherDay) -> impl IntoView {
     }
 }
 
-/// The page body for one weather document.
-fn content(w: &WeatherView, lang: Lang, now_s: u64, house: House) -> impl IntoView + use<'_> {
+/// The page body for one weather document; `midday` is any instant of the house-local day.
+fn content(
+    w: &WeatherView,
+    lang: Lang,
+    midday: DateTime<Utc>,
+    house: House,
+) -> impl IntoView + use<'_> {
     let cur = &w.current;
     let zone = house.flows_config.with(|c| house_place(c.as_ref()).1);
-    let utc_now = DateTime::<Utc>::from_timestamp(now_s as i64, 0).unwrap_or_default();
-    let (sunrise, sunset, _, fallback) =
-        house.flows_config.with(|c| sun_today(c.as_ref(), utc_now));
+    let (sunrise, sunset, _, fallback) = house.flows_config.with(|c| sun_today(c.as_ref(), midday));
     let fetched = DateTime::<Utc>::from_timestamp(w.fetched_at as i64, 0)
         .map(|t| t.with_timezone(&zone).time());
     let updated = fetched.map(|at| i18n::updated_at(lang, at));
@@ -99,7 +102,7 @@ fn content(w: &WeatherView, lang: Lang, now_s: u64, house: House) -> impl IntoVi
         .tonight_min
         .map(|t| format!("{} {}", weather_text(lang, T::TonightMin), degrees(lang, t)));
     let rain_soon = match w.rain_next_hour {
-        Some(mm) if mm > 0.0 => i18n::rain_next_hour(lang, &i18n::home_number(lang, mm, 1)),
+        Some(mm) if mm > RAIN_MIN_MM => i18n::rain_next_hour(lang, &i18n::home_number(lang, mm, 1)),
         Some(_) => weather_text(lang, T::NoRainSoon).to_owned(),
         None => String::new(),
     };
@@ -138,10 +141,11 @@ fn content(w: &WeatherView, lang: Lang, now_s: u64, house: House) -> impl IntoVi
                 .map(|r| i18n::sunrise_sub(lang, r))
                 .unwrap_or_default(),
         ),
-        _ => (
+        (true, _) => (
             DASH.to_owned(),
             i18n::detail_text(lang, &Detail::SunsetFallback),
         ),
+        _ => (DASH.to_owned(), String::new()),
     };
     let place = [Some(w.place.name.clone()), w.place.admin.clone()]
         .into_iter()
@@ -174,7 +178,7 @@ fn content(w: &WeatherView, lang: Lang, now_s: u64, house: House) -> impl IntoVi
             {tile(weather_text(lang, T::Humidity), measure(lang, cur.humidity, 0, " %").into_any(), String::new())}
             {tile(weather_text(lang, T::Pressure), measure(lang, cur.pressure, 0, " hPa").into_any(), String::new())}
             {tile(weather_text(lang, T::Clouds), measure(lang, cur.cloud_cover, 0, " %").into_any(), String::new())}
-            {tile(weather_text(lang, T::Rain), measure(lang, w.today.precipitation, 0, " mm").into_any(), i18n::rain_sub(lang, chance.as_deref()))}
+            {tile(weather_text(lang, T::Rain), measure(lang, w.today.precipitation, 1, " mm").into_any(), i18n::rain_sub(lang, chance.as_deref()))}
             {tile(weather_text(lang, T::MaxGusts), measure(lang, w.today.wind_gusts_max, 0, " km/h").into_any(), weather_text(lang, T::Today).to_lowercase())}
             {tile(weather_text(lang, T::UvIndex), measure(lang, cur.uv_index, 0, "").into_any(), uv_sub)}
             {tile(weather_text(lang, T::Sun), sun_value.into_any(), sun_sub)}
@@ -197,14 +201,24 @@ pub fn WeatherScreen() -> impl IntoView {
     let house: House = expect_context();
     let lang = use_context::<RwSignal<Lang>>().unwrap_or_else(|| RwSignal::new(Lang::En));
     let now = use_context::<Now>().map_or_else(|| RwSignal::new(unix_now()), |n| n.0);
+    // Re-renders on a new house-local day, not every minute.
+    let midday = Memo::new(move |_| {
+        let zone = house.flows_config.with(|c| house_place(c.as_ref()).1);
+        let utc = DateTime::<Utc>::from_timestamp(now.get() as i64, 0).unwrap_or_default();
+        let date = utc.with_timezone(&zone).date_naive();
+        date.and_hms_opt(12, 0, 0)
+            .and_then(|noon| zone.from_local_datetime(&noon).earliest())
+            .map_or(utc, |t| t.with_timezone(&Utc))
+    });
     view! {
         <section class="weather-page">
             <BackLink />
             {move || {
                 let l = lang.get();
-                let now_s = now.get();
                 match house.weather.get() {
-                    Some(w) => content(&w, l, now_s, house).into_any(),
+                    Some(w) => content(&w, l, midday.get(), house).into_any(),
+                    // Nothing until the first fetch has answered, then the hint.
+                    None if !house.weather_loaded.get() => ().into_any(),
                     None => {
                         view! {
                             <div class="weather-page__empty">

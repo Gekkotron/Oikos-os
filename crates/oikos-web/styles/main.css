@@ -6138,6 +6138,10 @@ html:has(.flow-canvas-screen) {
   color: var(--ink);
 }
 
+.weather-page .sheet__back {
+  align-self: flex-start;
+}
+
 .weather-page__top,
 .weather-tile,
 .weather-day,
