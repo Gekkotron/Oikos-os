@@ -11,13 +11,18 @@ use super::{entities, is_stale};
 use crate::clock;
 use crate::hub::{Hub, HubError};
 
+/// The payload that makes a sensor's state unknown (the registry reads `None` as unknown; an
+/// empty payload would leave the old value in place).
+const UNKNOWN: &str = "None";
+
 /// What the hub knows of the weather. `published` only records payloads the broker link took,
 /// so a failed publish is retried by the next [`Hub::apply_weather`].
 #[derive(Default)]
 pub(crate) struct WeatherSlot {
     view: Option<WeatherView>,
     published: BTreeMap<&'static str, String>,
-    /// The availability last published; `None` until the first success.
+    /// The availability last published (`publish_weather_configs` sets `Some(false)`); `None`
+    /// until the first success.
     online: Option<bool>,
 }
 
@@ -81,10 +86,19 @@ impl Hub {
                 old != view
             });
             slot.view = Some(view.clone());
-            let changed: Vec<(&'static str, String)> = entities::states(&view)
-                .into_iter()
+            let states = entities::states(&view);
+            let mut changed: Vec<(&'static str, String)> = states
+                .iter()
                 .filter(|(key, payload)| slot.published.get(key) != Some(payload))
+                .cloned()
                 .collect();
+            // A value that went missing is published as unknown, never left frozen.
+            changed.extend(
+                slot.published
+                    .keys()
+                    .filter(|key| !states.iter().any(|(k, _)| k == *key))
+                    .map(|key| (*key, UNKNOWN.to_owned())),
+            );
             (changed, data_changed)
         };
         if self.weather_slot().online != Some(true) && self.publish_availability(true) {
@@ -93,7 +107,12 @@ impl Hub {
         for (key, payload) in changed {
             let topic = entities::state_topic(&self.discovery_prefix, key);
             if self.publish_weather(topic, payload.clone()) {
-                self.weather_slot().published.insert(key, payload);
+                let mut slot = self.weather_slot();
+                if payload == UNKNOWN {
+                    slot.published.remove(key);
+                } else {
+                    slot.published.insert(key, payload);
+                }
             }
         }
         if data_changed {
@@ -110,6 +129,8 @@ impl Hub {
 
     /// Publishes every entity's retained config, and `offline` until the first fetch lands.
     pub fn publish_weather_configs(&self) {
+        // A broker that restarted without persistence needs every state again.
+        self.weather_slot().published.clear();
         for (topic, config) in entities::configs(&self.discovery_prefix) {
             self.publish_weather(topic, config.to_string());
         }

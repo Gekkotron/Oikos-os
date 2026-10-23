@@ -73,7 +73,8 @@ fn describe(
             false,
         ),
         "rain_next_hour" => ("Rain next hour", Some("mm"), Some("precipitation"), false),
-        _ => ("Tonight's minimum", Some("°C"), Some("temperature"), false),
+        "tonight_min" => ("Tonight's minimum", Some("°C"), Some("temperature"), false),
+        other => unreachable!("unknown weather key `{other}`"),
     }
 }
 
@@ -275,6 +276,31 @@ mod tests {
         assert!(states.contains(&("temperature", "13.4".to_owned())));
         assert!(states.contains(&("humidity", "81".to_owned())));
         assert_eq!(states.len(), 4);
+    }
+
+    #[test]
+    fn full_view_yields_every_key_in_order() {
+        let mut full = view();
+        let c = &mut full.current;
+        c.apparent_temperature = Some(1.0);
+        c.cloud_cover = Some(1.0);
+        c.precipitation = Some(1.0);
+        c.wind_speed = Some(1.0);
+        c.wind_gusts = Some(1.0);
+        c.wind_direction = Some(1.0);
+        c.pressure = Some(1.0);
+        c.uv_index = Some(1.0);
+        full.today = WeatherToday {
+            min: Some(1.0),
+            max: Some(1.0),
+            precipitation: Some(1.0),
+            precipitation_probability: Some(1.0),
+            wind_gusts_max: Some(1.0),
+        };
+        full.rain_next_hour = Some(1.0);
+        full.tonight_min = Some(1.0);
+        let keys: Vec<&str> = states(&full).iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys, KEYS);
     }
 
     #[test]

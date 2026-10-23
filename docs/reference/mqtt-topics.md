@@ -21,7 +21,7 @@ The table lists every topic the hub reads or writes, with its default prefix. "I
 | `<first discovery prefix>/<switch\|number\|button\|select>/virtual/<id>/config` | out | yes | Discovery of a virtual entity | `[topics] discovery_prefixes` (first entry) |
 | `<first discovery prefix>/virtual/<id>` | in, out | yes for a switch, number or select; no for a button | `ON` / `OFF`, a number, an option name, or `PRESS`; the state and the command topic | `[topics] discovery_prefixes` (first entry) |
 | `<first discovery prefix>/<sensor\|binary_sensor>/weather/<key>/config` | out | yes | Discovery of a weather entity (19 keys, one device) | `[topics] discovery_prefixes` (first entry), `[weather]` |
-| `<first discovery prefix>/weather/<key>` | out | yes | A weather value: a number, an enum name or `ON` / `OFF`; left unpublished while the source reports no value | `[topics] discovery_prefixes` (first entry), `[weather]` |
+| `<first discovery prefix>/weather/<key>` | out | yes | A weather value: a number, an enum name or `ON` / `OFF`; `None` (unknown) once the source stops reporting a value that was published | `[topics] discovery_prefixes` (first entry), `[weather]` |
 | `<first discovery prefix>/weather/availability` | out | yes | `online` once weather was fetched, `offline` before the first fetch and after an hour without one | `[topics] discovery_prefixes` (first entry), `[weather]` |
 | `<first discovery prefix>/<component>/group/<id>/config` | out | yes | Discovery of a group entity | `[groups] enabled`, `[topics] discovery_prefixes` |
 | `<first discovery prefix>/group/<id>` | in, out | yes (state) | The combined state; commands arrive here as JSON | `[groups] enabled` |

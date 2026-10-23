@@ -217,3 +217,59 @@ fn weather_state_topic_is_not_discovery() {
     hub.ingest_message("oikos/weather/availability", b"online", true);
     assert!(hub.ignored().is_empty());
 }
+
+#[test]
+fn weather_value_that_disappears_is_cleared() {
+    let (hub, mut rx) = hub();
+    hub.apply_weather(sample_view());
+    for publish in drain(&mut rx) {
+        hub.ingest_message(&publish.topic, publish.payload.as_bytes(), true);
+    }
+    for (topic, config) in entities::configs("oikos") {
+        hub.ingest_message(&topic, config.to_string().as_bytes(), true);
+    }
+    hub.ingest_message("oikos/weather/uv_index", b"1", true);
+    assert_eq!(
+        hub.entity_view("weather_uv_index")
+            .expect("entity")
+            .state
+            .value,
+        StateValue::Number(1.0)
+    );
+
+    let mut gone = sample_view();
+    gone.current.uv_index = None;
+    hub.apply_weather(gone.clone());
+    let out = drain(&mut rx);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].topic, "oikos/weather/uv_index");
+    assert_eq!(out[0].payload, "None");
+    assert_eq!(
+        hub.entity_view("weather_uv_index")
+            .expect("entity")
+            .state
+            .value,
+        StateValue::Unknown
+    );
+
+    // Cleared once: the same view again publishes nothing.
+    hub.apply_weather(gone);
+    assert!(drain(&mut rx).is_empty());
+}
+
+#[test]
+fn publish_configs_makes_states_republish() {
+    let (hub, mut rx) = hub();
+    hub.apply_weather(sample_view());
+    drain(&mut rx);
+    hub.publish_weather_configs();
+    drain(&mut rx);
+    hub.apply_weather(sample_view());
+    let out = drain(&mut rx);
+    assert_eq!(
+        out.iter()
+            .filter(|p| p.topic != "oikos/weather/availability")
+            .count(),
+        19
+    );
+}
