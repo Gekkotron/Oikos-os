@@ -1159,6 +1159,19 @@ async fn leaving_edit_mode_clears_the_library_search() {
 }
 
 #[wasm_bindgen_test]
+async fn leaving_edit_mode_slides_the_library_out() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    assert_eq!(count(&host, ".flow-library"), 1);
+    click(&host, ".flow-toolbar button[aria-label=\"Cancel editing\"]");
+    tick().await;
+    // The closing drawer keeps the library; the runs do not flash in for the slide.
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-drawer--open"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-drawer .flow-library"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-drawer__close"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
 async fn selecting_a_card_swaps_to_settings_and_back() {
     let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
     select_card(&host, "moving").await;

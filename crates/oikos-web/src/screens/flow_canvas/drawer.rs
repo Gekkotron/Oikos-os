@@ -135,13 +135,22 @@ pub fn panel(editing: bool, card_selected: bool, runs_open: bool) -> Panel {
     }
 }
 
+/// What the drawer holds: the open panel or, while closed, the one it showed last (the runs
+/// if it never opened), so a closing panel slides out with its own content.
+pub fn held(last: Option<Panel>, now: Panel) -> Panel {
+    match now {
+        Panel::Closed => last.unwrap_or(Panel::Runs),
+        open => open,
+    }
+}
+
 /// The drawer, open unless `panel` is [`Panel::Closed`]; it overlays the canvas rather than
-/// pushing it. `replay` is the run whose path the canvas shows. For [`Panel::Runs`] (and while
-/// closed) it lists the runs, whose close button clears `runs_open`; otherwise it shows
-/// `children`.
+/// pushing it. `replay` is the run whose path the canvas shows. When `held` is [`Panel::Runs`]
+/// it lists the runs, whose close button clears `runs_open`; otherwise it shows `children`.
 #[component]
 pub fn Drawer(
     panel: Signal<Panel>,
+    held: Signal<Panel>,
     runs_open: RwSignal<bool>,
     runs: Signal<Vec<RunView>>,
     flow: Signal<Flow>,
@@ -168,7 +177,7 @@ pub fn Drawer(
         <aside
             class="flow-drawer"
             class:flow-drawer--open=move || panel.get() != Panel::Closed
-            aria-label=move || match panel.get() {
+            aria-label=move || match held.get() {
                 Panel::Library => "Card library",
                 Panel::Settings => "Card settings",
                 Panel::Runs | Panel::Closed => "Recent runs",
@@ -176,8 +185,7 @@ pub fn Drawer(
             inert=move || panel.get() == Panel::Closed
         >
             {children()}
-            // Closed, it keeps the runs so they slide out with it.
-            <Show when=move || matches!(panel.get(), Panel::Runs | Panel::Closed)>
+            <Show when=move || held.get() == Panel::Runs>
                 <header class="flow-drawer__header">
                     <h2 class="flow-drawer__title">"Recent runs"</h2>
                     <button
@@ -207,5 +215,14 @@ mod tests {
         assert_eq!(panel(true, false, false), Panel::Library);
         assert_eq!(panel(true, false, true), Panel::Runs);
         assert_eq!(panel(true, true, true), Panel::Settings);
+    }
+
+    #[test]
+    fn held_keeps_the_last_open_panel_while_closed() {
+        assert_eq!(held(None, Panel::Closed), Panel::Runs);
+        assert_eq!(held(Some(Panel::Runs), Panel::Library), Panel::Library);
+        assert_eq!(held(Some(Panel::Library), Panel::Closed), Panel::Library);
+        assert_eq!(held(Some(Panel::Settings), Panel::Closed), Panel::Settings);
+        assert_eq!(held(Some(Panel::Library), Panel::Runs), Panel::Runs);
     }
 }

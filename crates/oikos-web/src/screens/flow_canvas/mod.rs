@@ -23,7 +23,7 @@ use oikos_api::{FlowView, RunView};
 use oikos_core::flow::{Flow, FlowMode, NodeKind};
 use wasm_bindgen::JsCast;
 
-pub use drawer::{Drawer, Panel, panel};
+pub use drawer::{Drawer, Panel, held, panel};
 pub use graph::{Graph, Mode, Selection};
 pub use viewport::{Camera, CanvasControls, Minimap, Viewport};
 
@@ -159,6 +159,7 @@ fn FlowBody(
             runs_open.get(),
         )
     });
+    let held_panel = Memo::new(move |last: Option<&Panel>| held(last.copied(), side.get()));
     // Fitting leaves the open panel's side of the canvas free.
     Effect::new(move |_| {
         let open = side.get() != Panel::Closed;
@@ -380,12 +381,13 @@ fn FlowBody(
             <Toolbar view=view editing=editing editor=editor saving=saving runs_open=runs_open panel=side.into() selection=selection />
             <Drawer
                 panel=side.into()
+                held=held_panel.into()
                 runs_open=runs_open
                 runs=runs.into()
                 flow=flow.into()
                 replay=replay
             >
-                <Show when=move || side.get() == Panel::Library>
+                <Show when=move || held_panel.get() == Panel::Library>
                     <Library on_add=add query=library_query />
                 </Show>
                 <Show when=move || editing.get()>
