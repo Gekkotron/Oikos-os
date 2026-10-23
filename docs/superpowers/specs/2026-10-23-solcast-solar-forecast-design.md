@@ -63,7 +63,6 @@ Contents (shape is the builder's call; behaviour is fixed):
 enabled = false                 # opt-in; nothing leaves the LAN while false
 sites = ["xxxx-xxxx-xxxx-xxxx"] # rooftop resource ids from the Solcast Toolkit, 1 or more
 daily_limit = 10                # the account's requests per UTC day (hobbyist: 10)
-prefix = "oikos/solar"          # retained cache topic root (§5.4)
 # api_key_file = "…"            # optional; default secrets/solcast.key next to the config
 ```
 
@@ -89,12 +88,12 @@ One refresh = one `forecasts` request per site, then the merged forecast is stor
 - The call count and the last call time are part of the retained cache (§5.4), so a restart in a loop does not reset the budget. On start, the hub reads the cache first; it calls Solcast only if the cache is missing, from another UTC day's plan, or a planned slot is due.
 
 ### 5.3 Freshness (my call)
-- `stale` is `true` when the last success is older than 2 × the planned interval, or more than 6 hours old.
-- The entities go **offline** (availability topic) when there is no forecast covering now, or the last success is older than 12 hours; they come back on the next success.
+- `stale` is `true` when a planned refresh has been failing for more than 1 hour, or the last success is older than 18 hours. (Revised while planning: refreshes stop at night, and a winter night leaves ~16 h between the last and the first refresh, so a plain age threshold under 18 h would flag every night.)
+- The entities go **offline** (availability topic) when there is no forecast period covering now, or the last success is older than 24 hours; they come back on the next success.
 - `GET /api/v1/solar` keeps answering with the last forecast and `stale: true`; the web decides (§8.3).
 
 ### 5.4 Cache
-Retained JSON document at `<prefix>/cache` (default `oikos/solar/cache`): the merged periods from local midnight today onward, per-site daily totals, `fetched_at`, the UTC day and call count, the last error kind. Never the key. `oikos/solar` is added to the reserved sub-trees so nothing reads it as discovery. Disabled → the hub deletes the retained cache and discovery configs on start (like weather).
+Retained JSON document at `P/solar/cache` (P = the first discovery prefix, so `oikos/solar/cache` by default; revised while planning: no separate `prefix` key, the `solar` reserved sub-tree of §6.1 already covers it): the merged periods from local midnight today onward, per-site daily totals, `fetched_at`, the UTC day and call count, the last error kind. Never the key. Disabled → the hub deletes the retained cache and discovery configs on start (like weather).
 
 ## 6. Hub: entities, REST, WS, MCP
 
@@ -116,7 +115,7 @@ One device **Solar forecast** (`identifiers: ["oikos_solar"]`), published like t
 
 The entities carry unit `kWh`/`kW` but **no `energy`/`power` device class and no `total_increasing` state class** (my call): they are forecasts, not meters, so the Energy tab, energy-role pickers and the climate learner must never take them for a meter reading. They use the `mdi:solar-power` icon. History records them like any sensor.
 
-`forecast_remaining_today` and `forecast_power_now` are re-evaluated every 30 minutes from the stored forecast, without calling Solcast, as long as the entities are online (§5.3: a day-ahead solar forecast a few hours old is still the best estimate, so the values keep updating until the 12 h offline mark; only the REST view flags `stale`). The low/high values are separate entities rather than attributes because the registry has no free attributes on hub-published sensors (my call; the builder may fold them if that turns out wrong).
+`forecast_remaining_today` and `forecast_power_now` are re-evaluated every 30 minutes from the stored forecast, without calling Solcast, as long as the entities are online (§5.3: a day-ahead solar forecast a few hours old is still the best estimate, so the values keep updating until the 24 h offline mark; only the REST view flags `stale`). The low/high values are separate entities rather than attributes because the registry has no free attributes on hub-published sensors (my call; the builder may fold them if that turns out wrong).
 
 ### 6.2 `GET /api/v1/solar`
 `SolarView` in `oikos-api` (JSON Schema derived like `WeatherView`). 503 `solar_unavailable` when disabled or nothing fetched yet.
@@ -173,8 +172,8 @@ Depends on the home-header web project (branch of `sc-quantum-cryostat`), which 
 - Refreshed on load, on each `SolarChanged`, and every 5 minutes while the header is visible (my call).
 
 ### 8.3 Degrading
-- No `SolarView` (503, error) or `fetched_at` older than 12 h → the solar card is hidden; the weather card returns to its single-card layout from the header spec.
-- `stale` under 12 h → a muted "data from HH:MM" line replaces the bottom line.
+- No `SolarView` (503, error) or `fetched_at` older than 24 h → the solar card is hidden; the weather card returns to its single-card layout from the header spec.
+- `stale` under 24 h → a muted "data from HH:MM" line replaces the bottom line.
 - No solar-role entity, or history off → the filled area is the **forecast** up to now and the title shows "≈ 7,2 / 12,4 kWh" with the forecast-so-far (the approved C2 behaviour before real production).
 - Night: the card keeps showing today until local midnight (the whole day's measured area, no "now" line after the last producing period); tomorrow stays on the bottom line (my call).
 
