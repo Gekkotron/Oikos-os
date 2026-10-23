@@ -8,9 +8,11 @@ mod events;
 mod flows;
 mod groups;
 mod history;
+mod home;
 mod snapshot;
 mod views;
 mod virtual_entities;
+mod weather;
 
 pub use alerts::{AlertAction, AlertChannel, AlertSeverity, AlertView, parse_history};
 pub use dashboards::{
@@ -26,8 +28,12 @@ pub use groups::{GroupMemberView, GroupSpec, GroupView};
 pub use history::{
     EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange, LastChangeItem,
 };
+pub use home::HomeSettings;
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use views::{
     AreaView, BridgeView, DeviceView, EntityView, IgnoredView, UpdateView, mask_secret,
 };
 pub use virtual_entities::{VirtualKind, VirtualSpec};
+pub use weather::{
+    WeatherCondition, WeatherCurrent, WeatherDay, WeatherPlace, WeatherToday, WeatherView,
+};
