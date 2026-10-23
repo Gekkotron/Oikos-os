@@ -70,6 +70,7 @@ fn mount_house(
             provide_context(house);
             provide_context(Toasts::new());
             provide_context(install_now());
+            oikos_web::nav::install_nav();
             view! {
                 <Router>
                     <Routes fallback=|| "fallback">
