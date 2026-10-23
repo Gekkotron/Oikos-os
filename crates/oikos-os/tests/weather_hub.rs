@@ -273,3 +273,20 @@ fn publish_configs_makes_states_republish() {
         19
     );
 }
+
+#[test]
+fn restart_publishes_unknown_for_values_a_previous_run_left_retained() {
+    let (hub, mut rx) = hub();
+    hub.publish_weather_configs();
+    drain(&mut rx);
+    let mut view = sample_view();
+    view.current.uv_index = None;
+    hub.apply_weather(view);
+    let out = drain(&mut rx);
+    let uv = topic(&out, "oikos/weather/uv_index");
+    assert_eq!(uv.len(), 1);
+    assert_eq!(uv[0].payload, "None");
+    assert!(uv[0].retain);
+    // 18 values, the unknown uv_index and the availability: each goes out once.
+    assert_eq!(out.len(), 20);
+}

@@ -38,6 +38,16 @@ impl Hub {
         self.weather_enabled
     }
 
+    /// The configured city, trimmed.
+    pub fn weather_city(&self) -> String {
+        self.weather_city.clone()
+    }
+
+    /// The configured country filter.
+    pub fn weather_country(&self) -> Option<String> {
+        self.weather_country.clone()
+    }
+
     /// Minutes between two fetches.
     pub fn weather_refresh_minutes(&self) -> u64 {
         self.weather_refresh_minutes
@@ -129,8 +139,13 @@ impl Hub {
 
     /// Publishes every entity's retained config, and `offline` until the first fetch lands.
     pub fn publish_weather_configs(&self) {
-        // A broker that restarted without persistence needs every state again.
-        self.weather_slot().published.clear();
+        // Every key is seeded with a payload no state can equal, so the first apply after a
+        // (re)start republishes each present value and sends `None` for each absent one: what a
+        // persistent broker kept from the previous run never stays frozen.
+        self.weather_slot().published = entities::KEYS
+            .iter()
+            .map(|key| (*key, String::new()))
+            .collect();
         for (topic, config) in entities::configs(&self.discovery_prefix) {
             self.publish_weather(topic, config.to_string());
         }
