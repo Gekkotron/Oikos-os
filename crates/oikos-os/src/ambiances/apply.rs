@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use super::override_request;
 use futures_util::future::join_all;
 use oikos_api::{
     ActionReport, AmbianceAction, ApplyReport, CategoryAction, ClimateAction, ConnectionStatus,
@@ -9,7 +10,6 @@ use oikos_api::{
     entity_views, plan_category,
 };
 use oikos_climate::doc::ZoneState;
-use oikos_climate::view::OverrideRequest;
 
 use crate::clock;
 use crate::hub::{Hub, HubError};
@@ -226,13 +226,7 @@ impl Hub {
             return tally;
         }
         // The override is the same for every zone; only its end is fixed per call.
-        let request = (!action.clear).then(|| {
-            serde_json::from_value::<OverrideRequest>(serde_json::json!({
-                "setpoint": action.setpoint,
-                "mode": action.mode,
-                "minutes": action.hours.map(|h| u64::from(h) * 60),
-            }))
-        });
+        let request = (!action.clear).then(|| override_request(action));
         for zone in &zones {
             let result = match &request {
                 None => self.clear_climate_override(zone).await,

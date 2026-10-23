@@ -1,11 +1,10 @@
 //! The ambiance side of the hub: the read views and the writers behind the REST layer.
 
 use oikos_api::{Ambiance, AmbianceAction, AmbianceView, WsEvent, validate_ambiance};
-use oikos_climate::view::OverrideRequest;
 use oikos_core::command::{Publish, map_command};
 use oikos_core::model::{Command, UNASSIGNED_AREA};
 
-use super::StoreApplied;
+use super::{StoreApplied, override_request};
 use crate::hub::{Hub, HubError};
 
 impl Hub {
@@ -120,13 +119,7 @@ impl Hub {
                         return Err(reject(format!("unknown zone `{zone}`")));
                     }
                     if !climate.clear {
-                        let request = serde_json::json!({
-                            "setpoint": climate.setpoint,
-                            "mode": climate.mode,
-                            "minutes": climate.hours.map(|h| u64::from(h) * 60),
-                        });
-                        serde_json::from_value::<OverrideRequest>(request)
-                            .map_err(|err| reject(err.to_string()))?;
+                        override_request(climate).map_err(|err| reject(err.to_string()))?;
                     }
                 }
             }

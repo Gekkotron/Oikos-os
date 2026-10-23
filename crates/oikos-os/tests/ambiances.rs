@@ -575,3 +575,102 @@ async fn apply_unknown_or_invalid_ambiance_is_refused() {
         Err(HubError::Rejected(_))
     ));
 }
+
+// Climate actions on an engine that is on.
+
+fn climate_hub() -> Arc<Hub> {
+    let mut cfg = config();
+    cfg.climate.enabled = true;
+    let (tx, rx) = mpsc::channel(64);
+    // Nothing here reads the publishes.
+    std::mem::forget(rx);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    hub
+}
+
+async fn set_zones(hub: &Hub, zones: &[(&str, oikos_climate::doc::ZoneState)]) {
+    hub.set_areas(AreasDocument {
+        areas: zones
+            .iter()
+            .map(|(id, _)| Area {
+                id: (*id).to_owned(),
+                name: (*id).to_owned(),
+                ..Area::default()
+            })
+            .collect(),
+    })
+    .await
+    .expect("areas");
+    for (zone, state) in zones {
+        hub.set_climate_zone(
+            zone,
+            oikos_climate::doc::ZoneSettings {
+                state: *state,
+                ..Default::default()
+            },
+        )
+        .expect("zone settings");
+    }
+}
+
+fn overrides_of(hub: &Hub, zone: &str) -> usize {
+    hub.climate_view()
+        .expect("climate on")
+        .zones
+        .into_iter()
+        .find(|z| z.zone == zone)
+        .map_or(0, |z| z.overrides.len())
+}
+
+fn hold(zone: Option<&str>) -> AmbianceAction {
+    AmbianceAction::Climate(ClimateAction {
+        zone: zone.map(str::to_owned),
+        setpoint: Some(serde_json::json!(19.0)),
+        hours: Some(2),
+        ..ClimateAction::default()
+    })
+}
+
+#[tokio::test]
+async fn climate_hold_and_clear_on_an_active_zone() {
+    use oikos_climate::doc::ZoneState;
+    let hub = climate_hub();
+    set_zones(&hub, &[("living", ZoneState::Active)]).await;
+    let clear = AmbianceAction::Climate(ClimateAction {
+        zone: Some("living".to_owned()),
+        clear: true,
+        ..ClimateAction::default()
+    });
+    save(&hub, &ambiance("hold", vec![hold(Some("living"))]));
+    save(&hub, &ambiance("clear", vec![clear]));
+
+    let report = hub.apply_ambiance("hold").await.expect("hold");
+    assert_eq!(outcomes(&report), [Outcome::Ok]);
+    assert_eq!(report.actions[0].total, 1);
+    assert_eq!(overrides_of(&hub, "living"), 1);
+
+    let report = hub.apply_ambiance("clear").await.expect("clear");
+    assert_eq!(outcomes(&report), [Outcome::Ok]);
+    assert_eq!(overrides_of(&hub, "living"), 0);
+}
+
+#[tokio::test]
+async fn climate_every_zone_reaches_only_active_zones() {
+    use oikos_climate::doc::ZoneState;
+    let hub = climate_hub();
+    set_zones(
+        &hub,
+        &[("living", ZoneState::Active), ("attic", ZoneState::Pending)],
+    )
+    .await;
+    save(&hub, &ambiance("all", vec![hold(None)]));
+
+    let report = hub.apply_ambiance("all").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Ok]);
+    assert_eq!(report.actions[0].total, 1);
+    assert!(report.actions[0].failed.is_empty());
+    assert_eq!(overrides_of(&hub, "living"), 1);
+    assert_eq!(overrides_of(&hub, "attic"), 0);
+}
