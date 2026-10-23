@@ -44,7 +44,8 @@ impl OikosMcp {
     }
 
     /// Replaces the home settings (`eco_setpoint` 5 to 30 °C, `mode_entity` a select entity,
-    /// `indoor_entity` a temperature sensor). Read them with `get_home_settings` first and send
+    /// `indoor_entity` a temperature sensor, `cold_below` and `hot_above` 5 to 35 °C with
+    /// `cold_below` lower; the web reads cold below 15 and warm above 26 when unset). Read them with `get_home_settings` first and send
     /// the whole document back. The reason of a refusal is returned so you can fix it.
     #[tool(name = "set_home_settings", annotations(idempotent_hint = true))]
     async fn set_home_settings(
