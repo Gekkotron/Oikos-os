@@ -5,15 +5,18 @@ use oikos_api::EntityView;
 
 pub use super::light::read_on;
 use super::light::{power_command, with_on};
-use super::{PowerToggle, Sender};
+use super::text::switch_state_line;
+use super::{Sender, ToggleSwitch};
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::display_value;
+use crate::format::entity_title;
+use crate::i18n::use_lang;
 
 #[component]
 pub fn SwitchCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let on = read_on(&entity.state).unwrap_or(false);
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let lang = use_lang();
+    let known = read_on(&entity.state);
+    let on = known.unwrap_or(false);
     let toggle = {
         let id = entity.id.clone();
         let state = entity.state.clone();
@@ -21,12 +24,19 @@ pub fn SwitchCard(entity: EntityView) -> impl IntoView {
             sender.send(&id, power_command(!on), with_on(&state, !on));
         })
     };
+    let name = entity_title(&entity);
+    let trailing = view! { <ToggleSwitch on=on aria_label=name on_toggle=toggle /> }.into_any();
+    let state_line = Signal::derive(move || switch_state_line(lang(), known));
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
-        <CardFrame entity=entity on_click=on_click pending=pending>
-            <PowerToggle on=on label=label on_toggle=toggle />
-        </CardFrame>
+        <CardFrame
+            entity=entity
+            on_click=on_click
+            pending=pending
+            trailing=trailing
+            state_line=state_line
+        />
     }
 }
 

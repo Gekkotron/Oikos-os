@@ -127,3 +127,44 @@
 .card--cool {
   background: var(--card-cool-bg);
 }
+
+/* The compact toggle at a card's top right: the pill alone, with a thumb-sized target. */
+.power--compact {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--touch-min);
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.power--compact .switch--on {
+  background: var(--toggle-on);
+}
+
+/* Light: brightness label and slider at the bottom, the colour swatch beside the slider. */
+.card .light__level {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: auto;
+}
+
+.light__level .level {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: space-between;
+  font: 500 11px/14px var(--font-body);
+  color: var(--muted);
+}
+
+.card--on .light__level .level {
+  color: var(--card-on-ink);
+}
+
+.light__level .slider {
+  width: 100%;
+}

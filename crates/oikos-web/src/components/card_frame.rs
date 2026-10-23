@@ -54,9 +54,9 @@ pub fn CardFrame(
     /// The control at the top right, beside the header.
     #[prop(optional)]
     trailing: Option<AnyView>,
-    /// The short state under the name ("On · 14 %").
+    /// The short state under the name ("On · 14 %"); a signal so it follows the language.
     #[prop(optional, into)]
-    state_line: Option<String>,
+    state_line: Option<Signal<String>>,
     /// A background tint, as the class `card--<tint>` (`sage`, `cool`).
     #[prop(optional)]
     tint: Option<&'static str>,
@@ -66,7 +66,9 @@ pub fn CardFrame(
     /// Puts the room and name beside the tile instead of under it.
     #[prop(optional)]
     row_header: bool,
-    children: Children,
+    /// The body; a card whose state line says everything has none.
+    #[prop(optional)]
+    children: Option<Children>,
 ) -> impl IntoView {
     let icon = entity_icon(&entity);
     let availability = entity.state.availability;
@@ -133,8 +135,8 @@ pub fn CardFrame(
                 </button>
                 {trailing.map(|t| view! { <div class="card__trailing">{t}</div> })}
             </div>
-            {state_line.map(|s| view! { <p class="card__state">{s}</p> })}
-            <div class="card__body">{children()}</div>
+            {state_line.map(|s| view! { <p class="card__state">{move || s.get()}</p> })}
+            {children.map(|c| view! { <div class="card__body">{c()}</div> })}
         </article>
     }
 }

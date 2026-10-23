@@ -7,7 +7,8 @@ use leptos::task::tick;
 use leptos_router::components::Router;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::model::{
-    Capabilities, EntityCategory, EntityState, Kind, StateValue, UNASSIGNED_AREA, UiOverride,
+    Capabilities, EntityCategory, EntityState, Kind, LightState, StateValue, UNASSIGNED_AREA,
+    UiOverride,
 };
 use oikos_web::commands::Pending;
 use oikos_web::components::card_frame::CardFrame;
@@ -146,6 +147,50 @@ async fn trailing_sits_outside_the_header() {
     );
     assert!(
         host.query_selector(".card__trailing [role=switch]")
+            .unwrap()
+            .is_some()
+    );
+    let state = host.query_selector(".card__state").unwrap().unwrap();
+    assert_eq!(state.text_content().unwrap(), "Off");
+}
+
+fn light(level: u8) -> EntityView {
+    let mut e = switch("salon");
+    e.id = "light.bed".into();
+    e.name = "Bed".into();
+    e.kind = Kind::Light;
+    e.component = Kind::Light.component().to_string();
+    e.protocol_kind = Kind::Light;
+    e.capabilities.brightness = true;
+    e.state.value = StateValue::Light(LightState {
+        on: true,
+        brightness: Some(level),
+        ..Default::default()
+    });
+    e
+}
+
+#[wasm_bindgen_test]
+async fn light_card_shows_state_line_and_percent() {
+    let host = mount(None, || card_for(light(36)));
+    tick().await;
+    let state = host.query_selector(".card__state").unwrap().unwrap();
+    assert_eq!(state.text_content().unwrap(), "On · 14 %");
+    let level = host.query_selector(".level__value").unwrap().unwrap();
+    assert_eq!(level.text_content().unwrap(), "14 %");
+    assert!(
+        host.query_selector(".card__trailing [role=switch][aria-checked=true]")
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn switch_toggle_is_trailing() {
+    let host = mount(None, || card_for(switch("salon")));
+    tick().await;
+    assert!(
+        host.query_selector(".card__trailing [role=switch][aria-checked=false]")
             .unwrap()
             .is_some()
     );

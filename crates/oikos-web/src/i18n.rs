@@ -124,6 +124,11 @@ pub enum Key {
     Navigation,
     Breadcrumb,
     RoomGone,
+    LightOn,
+    LightOff,
+    SwitchOn,
+    SwitchOff,
+    Brightness,
 }
 
 impl Key {
@@ -158,6 +163,11 @@ impl Key {
         Key::Navigation,
         Key::Breadcrumb,
         Key::RoomGone,
+        Key::LightOn,
+        Key::LightOff,
+        Key::SwitchOn,
+        Key::SwitchOff,
+        Key::Brightness,
     ];
 }
 
@@ -194,6 +204,11 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Navigation => ("Main", "Navigation principale"),
         Key::Breadcrumb => ("Breadcrumb", "Fil d'Ariane"),
         Key::RoomGone => ("This room is gone.", "Cette pièce n'existe plus."),
+        Key::LightOn => ("On", "Allumé"),
+        Key::LightOff => ("Off", "Éteint"),
+        Key::SwitchOn => ("On", "Activé"),
+        Key::SwitchOff => ("Off", "Désactivé"),
+        Key::Brightness => ("Brightness", "Luminosité"),
     };
     match lang {
         Lang::En => en,
@@ -210,6 +225,12 @@ pub fn unseen_alerts(lang: Lang, badge: &str) -> String {
         (Lang::Fr, true) => format!("{badge} alerte non lue"),
         (Lang::Fr, false) => format!("{badge} alertes non lues"),
     }
+}
+
+/// The language in context, read reactively; English when there is none.
+pub fn use_lang() -> impl Fn() -> Lang + Copy + 'static {
+    let lang = use_context::<RwSignal<Lang>>();
+    move || lang.map_or(Lang::En, |l| l.get())
 }
 
 /// A translator bound to the language signal in context (reactive), or English when there is none.
@@ -294,7 +315,12 @@ mod tests {
             | Key::ChangeLanguage
             | Key::Navigation
             | Key::Breadcrumb
-            | Key::RoomGone => Key::ALL.contains(&k),
+            | Key::RoomGone
+            | Key::LightOn
+            | Key::LightOff
+            | Key::SwitchOn
+            | Key::SwitchOff
+            | Key::Brightness => Key::ALL.contains(&k),
         }
     }
     #[test]
@@ -302,6 +328,6 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 30);
+        assert_eq!(Key::ALL.len(), 35);
     }
 }
