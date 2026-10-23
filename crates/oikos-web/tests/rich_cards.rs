@@ -100,3 +100,42 @@ async fn water_heater_sheet_has_full_controls() {
     assert!(has(&host, ".stepper"));
     assert!(has(&host, "select"));
 }
+
+fn temperature(last_update: Option<u64>) -> EntityView {
+    let mut e = entity("sensor.salon_t", Kind::Sensor, StateValue::Number(20.66));
+    e.device_class = Some("temperature".into());
+    e.unit = Some("°C".into());
+    e.state.last_update = last_update;
+    e
+}
+
+fn now_s() -> u64 {
+    (js_sys::Date::now() / 1000.0) as u64
+}
+
+#[wasm_bindgen_test]
+async fn temperature_card_without_history_has_no_curve() {
+    let host = mount(temperature(None), None);
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    tick().await;
+    assert!(!has(&host, "svg.spark"));
+    let value = host.query_selector(".temp__value").unwrap().unwrap();
+    assert_eq!(value.text_content().unwrap(), "20.7 °C");
+    assert!(has(&host, ".card--cool"));
+}
+
+#[wasm_bindgen_test]
+async fn temperature_badge_from_last_update() {
+    let host = mount(temperature(Some(now_s() - 60)), None);
+    tick().await;
+    let badge = host
+        .query_selector(".card__trailing .badge")
+        .unwrap()
+        .unwrap();
+    assert_eq!(badge.text_content().unwrap(), "Live");
+
+    let host = mount(temperature(None), None);
+    tick().await;
+    assert!(!has(&host, ".badge"));
+}

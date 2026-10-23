@@ -8,5 +8,6 @@ pub mod history_chart;
 pub mod hs_wheel;
 pub mod now;
 pub mod room_title;
+pub mod sparkline;
 pub mod status_pill;
 pub mod toast;

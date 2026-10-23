@@ -50,9 +50,65 @@ pub fn switch_state_line(lang: Lang, on: Option<bool>) -> String {
     }
 }
 
+/// After this long without a state message a sensor's badge stops saying "Live".
+pub const QUIET_AFTER_S: u64 = 3 * 3600;
+
+/// How fresh a sensor's reading is, from the unix time of its last state message: "Live" while
+/// recent, then "3 h ago", then "2 d ago"; `None` when the hub never said.
+pub fn freshness(lang: Lang, now: u64, last_update: Option<u64>) -> Option<String> {
+    let age = now.saturating_sub(last_update?);
+    let (key, n) = if age < QUIET_AFTER_S {
+        return Some(text(lang, Key::Live).to_owned());
+    } else if age < 86_400 {
+        (Key::AgoHours, age / 3600)
+    } else {
+        (Key::AgoDays, age / 86_400)
+    };
+    Some(text(lang, key).replace("{n}", &n.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn freshness_cases() {
+        let now = 1_000_000;
+        assert_eq!(freshness(Lang::En, now, None), None);
+        assert_eq!(freshness(Lang::En, now, Some(now)).as_deref(), Some("Live"));
+        assert_eq!(
+            freshness(Lang::En, now, Some(now - 10_799)).as_deref(),
+            Some("Live")
+        );
+        assert_eq!(
+            freshness(Lang::En, now, Some(now - 10_800)).as_deref(),
+            Some("3 h ago")
+        );
+        assert_eq!(
+            freshness(Lang::En, now, Some(now - 86_399)).as_deref(),
+            Some("23 h ago")
+        );
+        assert_eq!(
+            freshness(Lang::En, now, Some(now - 86_400)).as_deref(),
+            Some("1 d ago")
+        );
+        assert_eq!(
+            freshness(Lang::En, now, Some(now + 60)).as_deref(),
+            Some("Live")
+        );
+        assert_eq!(
+            freshness(Lang::Fr, now, Some(now - 10_800)).as_deref(),
+            Some("Il y a 3 h")
+        );
+        assert_eq!(
+            freshness(Lang::Fr, now, Some(now - 2 * 86_400)).as_deref(),
+            Some("Il y a 2 j")
+        );
+        assert_eq!(
+            freshness(Lang::Fr, now, Some(now)).as_deref(),
+            Some("En direct")
+        );
+    }
 
     #[test]
     fn decimal_follows_language() {
