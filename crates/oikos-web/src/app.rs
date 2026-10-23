@@ -147,7 +147,11 @@ pub fn App() -> impl IntoView {
     #[cfg(target_arch = "wasm32")]
     crate::ws::connect("/ws", house);
     #[cfg(target_arch = "wasm32")]
-    house.refresh_flows_config();
+    {
+        house.refresh_flows_config();
+        house.refresh_weather();
+        house.refresh_home_settings();
+    }
     view! {
         <Router>
             <TrackBackStack />

@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use leptos::prelude::*;
 use oikos_api::{
     AlertView, AreaView, BridgeView, ConnectionStatus, Dashboard, DashboardView, DeviceView,
-    EntityView, FlowView, FlowsConfigView, GroupView, IgnoredView, WsEvent,
+    EntityView, FlowView, FlowsConfigView, GroupView, HomeSettings, IgnoredView, WeatherView,
+    WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -22,6 +23,10 @@ pub struct House {
     pub flows: RwSignal<Vec<FlowView>>,
     /// The hub's `[flows]` settings; `None` until the first fetch answers.
     pub flows_config: RwSignal<Option<FlowsConfigView>>,
+    /// The current weather; `None` while the hub has none or a fetch failed.
+    pub weather: RwSignal<Option<WeatherView>>,
+    /// The home settings; the default document until the first fetch answers.
+    pub home_settings: RwSignal<HomeSettings>,
     /// The hand-made groups by id (without the `group_` prefix), for the member counts on Home.
     pub groups: RwSignal<BTreeMap<String, GroupView>>,
     /// The dashboards, fetched once at start-up: the hub does not push their structure.
@@ -47,6 +52,8 @@ impl House {
             alerts: RwSignal::new(Vec::new()),
             flows: RwSignal::new(Vec::new()),
             flows_config: RwSignal::new(None),
+            weather: RwSignal::new(None),
+            home_settings: RwSignal::new(HomeSettings::default()),
             groups: RwSignal::new(BTreeMap::new()),
             dashboards: RwSignal::new(Vec::new()),
             command_failed: RwSignal::new(None),
@@ -73,6 +80,25 @@ impl House {
         leptos::task::spawn_local(async move {
             if let Ok(cfg) = crate::api::get_flows_config().await {
                 flows_config.set(Some(cfg));
+            }
+        });
+    }
+
+    /// Fetches the weather into [`House::weather`]; no weather, or a failure, clears it so the
+    /// header hides the card.
+    pub fn refresh_weather(&self) {
+        let weather = self.weather;
+        leptos::task::spawn_local(async move {
+            weather.set(crate::api::home::get_weather().await.ok().flatten());
+        });
+    }
+
+    /// Fetches the home settings into [`House::home_settings`]; a failure leaves the last value.
+    pub fn refresh_home_settings(&self) {
+        let home_settings = self.home_settings;
+        leptos::task::spawn_local(async move {
+            if let Ok(settings) = crate::api::home::get_home_settings().await {
+                home_settings.set(settings);
             }
         });
     }
@@ -154,8 +180,8 @@ impl House {
             WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
             // The Climate screen reads its own view: tell it to refetch.
             WsEvent::ClimateChanged { .. } => self.climate_rev.update(|r| *r += 1),
-            // The home header (a later project) will use these.
-            WsEvent::WeatherChanged | WsEvent::HomeSettingsChanged { .. } => {}
+            WsEvent::WeatherChanged => self.refresh_weather(),
+            WsEvent::HomeSettingsChanged { settings } => self.home_settings.set(settings),
         }
     }
 }
@@ -186,6 +212,18 @@ mod tests {
             order: 1,
             widgets: (0..widgets).map(widget).collect(),
         }
+    }
+
+    #[test]
+    fn home_settings_event_updates_signal() {
+        let house = House::new();
+        house.apply(WsEvent::HomeSettingsChanged {
+            settings: HomeSettings {
+                eco_setpoint: Some(16.0),
+                ..HomeSettings::default()
+            },
+        });
+        assert_eq!(house.home_settings.get_untracked().eco_setpoint, Some(16.0));
     }
 
     #[test]
