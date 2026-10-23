@@ -15,6 +15,7 @@ The table lists every topic the hub reads or writes, with its default prefix. "I
 | `<ha_status_topic>`, default `homeassistant/status` | out | no | `online`, once per connect | `[mqtt] send_ha_birth`, `[mqtt] ha_status_topic` |
 | `oikos/ui/<entity id>` | in, out | yes | The entity's [override](entity-types.md#overrides) JSON; empty clears it | `[topics] ui_prefix` |
 | `oikos/ui/_areas` | in, out | yes | The declared rooms (`{"areas": […]}`) | `[topics] ui_prefix` |
+| `oikos/ui/_home` | in, out | yes | The home settings (`{"eco_setpoint", "mode_entity", "indoor_entity"}`); an empty payload means defaults | `[topics] ui_prefix` |
 | `oikos/ui/_types` | out | yes | The whole [type table](entity-types.md#the-type-table) | `[topics] ui_prefix` |
 | `oikos/ui/dashboards/<id>` | in, out | yes | A dashboard definition; empty removes it | `[topics] ui_prefix` |
 | `oikos/automation/<flow id>` | in, out | yes | A [flow](flow-nodes.md) document; empty removes it | `[topics] automation_prefix` |

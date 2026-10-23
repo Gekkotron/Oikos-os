@@ -1,10 +1,10 @@
 ---
 title: MCP tools
 sidebar_position: 3
-description: The 35 tools and the one resource of the hub's MCP server, with their arguments.
+description: The 37 tools and the one resource of the hub's MCP server, with their arguments.
 ---
 
-The MCP server is at `http://<host>:8081/mcp` (streamable HTTP, stateful sessions) and offers **thirty-five tools** and **one resource**. It has the same trust model as the REST API on the same port: LAN-only, no authentication in v1. The tools are defined in [`crates/oikos-os/src/mcp`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/mcp). For setup in Claude Code, Codex and Claude Desktop, see [Talking to the house (MCP)](../users/assistants-mcp.md).
+The MCP server is at `http://<host>:8081/mcp` (streamable HTTP, stateful sessions) and offers **thirty-seven tools** and **one resource**. It has the same trust model as the REST API on the same port: LAN-only, no authentication in v1. The tools are defined in [`crates/oikos-os/src/mcp`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/mcp). For setup in Claude Code, Codex and Claude Desktop, see [Talking to the house (MCP)](../users/assistants-mcp.md).
 
 A failed tool call answers in-band (`isError: true` with the reason as text) so the assistant can retry with better arguments. A refused publish (broker link down) is the same in-band error.
 
@@ -97,6 +97,13 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 | --- | --- |
 | `get_weather` | The outdoor weather from Open-Meteo: now, today, rain in the next hour, tonight's low and the next five days, in metric units, with `stale` set when the data is old. The same document as `GET /api/v1/weather`. Answers `weather unavailable` while `[weather] enabled` is `false` or before the first fetch. See [Weather](../users/weather.md). |
 
+## Home settings
+
+| Tool | What it does |
+| --- | --- |
+| `get_home_settings` | The home settings: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a temperature sensor); a field that is not set is `null`. |
+| `set_home_settings` | Replaces the home settings (retained on `oikos/ui/_home`) and returns them. Read them with `get_home_settings` first and send the whole document back. Args: `settings`. `eco_setpoint` must be from 5 to 30; an entity of the wrong kind is refused with the reason. |
+
 ## Climate
 
 The climate engine is in beta. These nine tools answer `climate disabled` while `[climate] enabled` is `false`. See [Climate](../users/climate.md).
@@ -115,4 +122,4 @@ The climate engine is in beta. These nine tools answer `climate disabled` while 
 
 ## Count
 
-Twenty tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather), six in `flow_tools.rs` and nine in `climate_tools.rs`: 20 + 6 + 9 = 35.
+Twenty-two tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, home settings), six in `flow_tools.rs` and nine in `climate_tools.rs`: 22 + 6 + 9 = 37.

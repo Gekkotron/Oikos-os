@@ -38,6 +38,13 @@ Ids in paths are the entity, flow, group or dashboard ids the API returns. Bodie
 | `PUT /api/v1/areas` | Replaces the declared rooms (`oikos/ui/_areas`) and returns the resulting list. |
 | `PATCH /api/v1/areas/{id}` | Renames a room: body `{"name": "…"}`; the room's other fields are kept. Returns the area list. `422` for a blank name or for `Unassigned`, `404` for an unknown area, `503` while the broker link is down. |
 
+## Home settings
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/home/settings` | The home settings document `{eco_setpoint, mode_entity, indoor_entity}` (all three `null` until saved). |
+| `PUT /api/v1/home/settings` | Replaces the document and returns it as stored (retained on `oikos/ui/_home`). `eco_setpoint` is a number from 5 to 30 (°C), `mode_entity` the id of a `select` entity, `indoor_entity` the id of a temperature sensor; `null` clears a field. `422` for a value that does not validate (the error names the field), `503` while the broker link is down. |
+
 ## Groups
 
 Groups need `[groups] enabled = true`; while it is `false` every route here answers `503` with `groups disabled`. See [Groups and virtual entities](../users/groups-and-virtual-entities.md).
@@ -184,6 +191,7 @@ Units are metric: °C, km/h, mm, hPa and %. `fetched_at` is unix seconds. Any nu
 | `button_pressed` | `{id}`: a virtual or discovered button was pressed. An event, not a state. |
 | `signal_received` | `{id, signal}`: a remote, event entity or tag sent a signal. An event, not a state. |
 | `weather_changed` | No payload: the weather was refreshed with new data, refetch `GET /api/v1/weather`. |
+| `home_settings_changed` | `{settings}`: the home settings document changed. |
 | `climate_changed` | `{zone}`: one zone's document changed, or the house settings when `zone` is `null`. |
 
 ## Errors

@@ -56,7 +56,7 @@ Open-Meteo data is CC BY 4.0. The docs page credits it (§8).
 [weather]
 enabled = false          # opt-in; nothing leaves the LAN while false
 city = "Paris"           # required when enabled
-country = "FR"           # optional ISO 3166-1 alpha-2 filter, avoids Paris, Texas
+country = "FR"           # optional ISO 3166-1 alpha-2 filter (sent uppercased), avoids Paris, Texas
 refresh_minutes = 15     # optional, default 15, minimum 10
 ```
 
@@ -67,7 +67,7 @@ refresh_minutes = 15     # optional, default 15, minimum 10
 - No result: one `error` log naming the city, and weather stays unavailable for this run (entities offline, `GET /api/v1/weather` → 503). The hub runs on.
 - Network or HTTP error: retry with exponential backoff (30 s doubling up to 15 min). Entities stay offline meanwhile.
 
-**Polling.** The first fetch happens right after the city is resolved, then every `refresh_minutes`, with a small random jitter (±10 %) so many hubs do not hit the API in step. Each fetch is a single forecast request. A failed fetch is logged at `warn`, once per outage rather than once per try, and the last good value is kept. The HTTP client uses short timeouts (connect 5 s, total 15 s) and an identifying `User-Agent` (`oikos-os/<version>`).
+**Polling.** The first fetch happens right after the city is resolved, then every `refresh_minutes`, with a small random jitter (±10 %) so many hubs do not hit the API in step. Each fetch is a single forecast request. A failed fetch is logged at `warn`, once per outage rather than once per try, and the last good value is kept. The HTTP client (`open_meteo::client()` returns a `Result`, so a failed build is reported, not a panic) uses short timeouts (connect 5 s, total 15 s) and an identifying `User-Agent` (`oikos-os/<version>`).
 
 **Freshness** (my call, from the research draft):
 - `stale` becomes `true` once the last success is older than **2 × refresh_minutes**.
@@ -81,7 +81,7 @@ refresh_minutes = 15     # optional, default 15, minimum 10
 One device, **Weather** (`identifiers: ["oikos_weather"]`), published by the hub under the first discovery prefix `P`, following the virtual-entity pattern (`crates/oikos-os/src/virtual_entities.rs`):
 
 - Configs: `P/<component>/weather/<key>/config`, retained.
-- One retained JSON state document, `P/weather/state`. Every entity reads its field with a `value_template`, as Zigbee2MQTT entities do.
+- One retained topic per key, `P/weather/<key>`, with a plain payload (a number, an enum name, or `ON`/`OFF`). A value that disappears from the source is published as `None`, which the registry reads as unknown, and every key is republished once after each hub start so a restart never leaves a stale retained value.
 - Availability: `P/weather/availability`, retained `online`/`offline`. The hub publishes `offline` on start until the first successful fetch.
 - `weather` is added to the reserved sub-trees (`RegistryConfig::default_reserved`, and the mqtt-topics doc), so the state topic is never read as discovery.
 
@@ -126,7 +126,7 @@ Returns `200` with a `WeatherView` (in `oikos-api`, JSON Schema derived like the
 ```json
 {
   "place": { "name": "Paris", "admin": "Île-de-France", "country": "FR" },
-  "fetched_at": "2026-10-23T09:15:02Z",
+  "fetched_at": 1792746902,
   "stale": false,
   "current": {
     "temperature": 13.4, "apparent_temperature": 11.9, "humidity": 81,
@@ -146,9 +146,10 @@ Returns `200` with a `WeatherView` (in `oikos-api`, JSON Schema derived like the
 }
 ```
 
+- `fetched_at` is Unix seconds, like `Snapshot.generated_at`. Every number under `current`, `today`, `rain_next_hour`, `tonight_min` and in `days` is nullable, because Open-Meteo can return `null`.
 - `days` holds the next 5 days, starting tomorrow. Today is in `today`.
 - No coordinates in the response. `place` is enough for display.
-- `503 weather_unavailable` when `[weather]` is disabled, the city did not resolve, or no fetch has succeeded yet. The error code style follows `history_unavailable`.
+- `503` (`weather unavailable`, as climate answers `climate disabled`) when `[weather]` is disabled, the city did not resolve, or no fetch has succeeded yet. The error code style follows `history_unavailable`.
 - **WS:** a new bump event `WeatherChanged` (no payload, like `ClimateChanged`) after every successful fetch that changed the view. The web refetches the endpoint on it. This is my call. In the conversation I said the entity changes would be enough, but the forecast days are not entities, so the header needs a signal to refresh them.
 - **MCP:** a read-only `get_weather` tool returns the same view. My call, for parity with REST, since assistants are a first-class client here.
 
@@ -158,12 +159,12 @@ Returns `200` with a `WeatherView` (in `oikos-api`, JSON Schema derived like the
 
 A small per-house document, retained on the broker like dashboards and climate settings, so the broker holds the truth and it survives restarts:
 
-- Topic: `P/home/settings`, retained JSON. `home` is added to the reserved sub-trees.
+- Topic: `<ui_prefix>/_home` (default `oikos/ui/_home`), retained JSON, next to `_areas` and `_types`. The hub intercepts it before the registry, so it never becomes an override and no new reserved sub-tree is needed. An empty payload means defaults; an undecodable one is logged and the previous document is kept.
 - Fields, all optional, `null` meaning unset:
   - `eco_setpoint`: number, °C, finite, 5 to 30. The header shows "heating in eco" when every heating thermostat is off or set at or below this value (§7).
   - `mode_entity`: entity id of a `select` entity, usually a `virtual_<id>` select. The header shows its current option as the house mode pill, and changes it when the pill is tapped.
   - `indoor_entity`: entity id of a temperature sensor (`sensor` with `device_class: temperature`). When set, the header shows it as the indoor temperature.
-- Field naming follows the hub's existing JSON conventions for documents of this kind. The builder checks the dashboards and climate house documents and matches them.
+- Field names are snake_case, like `HouseSettings` and `Dashboard`.
 
 ### 6.2 API
 
@@ -172,9 +173,9 @@ A small per-house document, retained on the broker like dashboards and climate s
   - `eco_setpoint` within 5–30 and finite;
   - `mode_entity` must currently exist and be a `select`;
   - `indoor_entity` must currently exist and be a temperature `sensor`.
-  - A rejected value is `400` with a message naming the field. An entity that vanishes later is not an error. The web treats it as unset.
-- WS: `HomeSettingsChanged { settings }` on every change. The snapshot also carries the current document so the web has it at connect. The builder picks whichever of the two existing patterns fits best (a snapshot field, or a fetch at boot like `flows_config`), as long as a change from another client reaches every open UI.
-- MCP: `get_home_settings` and `set_home_settings` (partial update: the fields given are replaced, `null` clears one).
+  - A rejected value is `422` with a message naming the field (`Rejected`), and `503` while the broker link is down. An entity that vanishes later is not an error. The web treats it as unset.
+- WS: `HomeSettingsChanged { settings }` on every change. The snapshot does not carry the document (a new field would break a web test literal): the web fetches `GET /api/v1/home/settings` at boot and listens for `HomeSettingsChanged`, so a change from another client reaches every open UI.
+- MCP: `get_home_settings` and `set_home_settings` (the whole document, like `set_climate_settings`: read, change, send back).
 
 ### 6.3 `select` virtual entities (decided with the user)
 
@@ -202,7 +203,7 @@ These need no hub code beyond §3–§6. They are the user's answers to the open
 
 - `docs/reference/configuration.md`: a new `[weather]` section.
 - `docs/reference/http-api.md`: `GET /api/v1/weather`, `GET`/`PUT /api/v1/home/settings`, and the `select` fields of `PUT /api/v1/virtual/{id}`, plus the new WS events.
-- `docs/reference/mqtt-topics.md`: the weather and home topics, the `select` virtual config topic, and the reserved sub-trees `weather` and `home`.
+- `docs/reference/mqtt-topics.md`: the weather and home topics, the `select` virtual config topic, and the reserved sub-tree `weather`.
 - `docs/reference/mcp-tools.md`: `get_weather`, `get_home_settings`, `set_home_settings`, the `set_virtual` select spec, and the tool count.
 - `docs/users/weather.md` (new): enabling, the city and country, what each entity means, freshness and offline behaviour, flow examples (gust threshold, rain within the hour, frost tonight), privacy (the city and the coordinates of the resolved place go to Open-Meteo, and only when enabled), and the Open-Meteo CC BY 4.0 credit.
 - `docs/users/groups-and-virtual-entities.md`: the `select` kind and the house-mode example.
@@ -222,5 +223,4 @@ The README is not touched.
 - The module layout inside `oikos-os` (`weather/` with `client`, `poller`, `entities`, for example) and where the WMO mapping lives.
 - The exact Open-Meteo variable list, as long as it yields §4 and §5. Whether `uv_index` comes from `current` or the nearest hourly slot.
 - How the poller is wired into the hub's task set and shutdown, following the existing pollers and tasks.
-- Whether the home settings and weather state live in the snapshot or are fetched at boot, as long as §6.2's propagation rule holds.
 - The exact log wording.
