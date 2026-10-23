@@ -21,7 +21,7 @@ refresh_minutes = 15
 ```
 
 - `city` is required. `country` is optional: two letters (`FR`), it keeps the lookup to one country, so `Paris` is not Paris, Texas.
-- `refresh_minutes` is 15 by default and cannot be lower than 10.
+- `refresh_minutes` is 15 by default and must be between 10 and 1440.
 - A mistake (an empty city, a three-letter country, a refresh below 10) stops the hub at start with a message naming the key.
 
 At start the hub looks the city up once and logs the place it chose (name, region, country and coordinates). If it finds nothing, it logs an error naming the city and the weather stays unavailable until you fix the name and restart. If the lookup fails because of the network, the hub retries after 30 seconds, then waits twice as long each time, up to 15 minutes between tries. The rest of the house keeps running either way.

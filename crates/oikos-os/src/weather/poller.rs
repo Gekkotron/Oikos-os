@@ -10,7 +10,6 @@ use tokio::task::JoinHandle;
 use super::is_expired;
 use super::open_meteo::{self, Endpoints, FetchError, Place};
 use crate::clock;
-use crate::flows::engine::random_roll;
 use crate::hub::Hub;
 
 /// First wait after a failed geocoding; it doubles up to [`GEOCODE_BACKOFF_MAX`].
@@ -83,7 +82,11 @@ pub async fn run(hub: Arc<Hub>, endpoints: Endpoints) {
                 }
             }
         }
-        tokio::time::sleep(refresh_delay(hub.weather_refresh_minutes(), random_roll())).await;
+        tokio::time::sleep(refresh_delay(
+            hub.weather_refresh_minutes(),
+            clock::random_roll(),
+        ))
+        .await;
     }
 }
 

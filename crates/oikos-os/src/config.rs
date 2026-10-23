@@ -448,6 +448,12 @@ impl WeatherConfig {
                 self.refresh_minutes
             ));
         }
+        if self.refresh_minutes > 1440 {
+            return Err(format!(
+                "[weather] refresh_minutes is {}: it must be at most 1440 (one day)",
+                self.refresh_minutes
+            ));
+        }
         Ok(())
     }
 }

@@ -164,6 +164,9 @@ fn validate_options(options: &[String]) -> Result<(), String> {
                 "an option is 1 to {MAX_OPTION_LEN} characters, not {option:?}"
             ));
         }
+        if option.trim().eq_ignore_ascii_case("none") {
+            return Err(format!("{option:?} is reserved: it means an unknown state"));
+        }
         if options[..i].iter().any(|seen| seen.trim() == option.trim()) {
             return Err(format!("duplicate option {option:?}"));
         }
@@ -357,6 +360,8 @@ mod tests {
             Some(vec!["a".into(), "a".into()]),
             Some(vec!["a".into(), "a ".into()]),
             Some(vec!["  ".into()]),
+            Some(vec!["None".into()]),
+            Some(vec!["a".into(), " none ".into()]),
             Some(vec!["x".repeat(65)]),
             Some((0..33).map(|i| i.to_string()).collect()),
         ] {

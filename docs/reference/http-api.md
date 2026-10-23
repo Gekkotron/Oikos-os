@@ -59,7 +59,7 @@ Groups need `[groups] enabled = true`; while it is `false` every route here answ
 
 | Route | What it does |
 | --- | --- |
-| `PUT /api/v1/virtual/{id}` | Creates or replaces a virtual switch, number, button or select (`{"kind", "name", …}`) and returns the entity `virtual_<id>`; the initial state is published only when it is new. `422` for a bad id or spec, `503` while the broker link is down. |
+| `PUT /api/v1/virtual/{id}` | Creates or replaces a virtual switch, number, button or select (`{"kind", "name", …}`) and returns the entity `virtual_<id>`; the initial state is published only when it is new, except that redefining a select whose current state is no longer among its options resets it to the first option. `422` for a bad id or spec, `503` while the broker link is down. |
 | `DELETE /api/v1/virtual/{id}` | Removes a virtual entity and clears its retained topics (`204`), or `404`. |
 
 The body takes `kind` (`switch`, `number`, `button` or `select`) and `name`; for a number also `min` (0), `max` (100), `step` (1) and `unit`; for a select `options` (1 to 32 distinct strings of up to 64 characters, required); `initial` is the state published when the entity is first created. The id is 1 to 48 characters of `a-z`, `0-9` and `_`.

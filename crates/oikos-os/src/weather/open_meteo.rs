@@ -291,14 +291,15 @@ fn uv_index(forecast: &Forecast, now: NaiveDateTime) -> Option<f64> {
     at(&forecast.hourly.uv_index, slot)
 }
 
-/// The mm expected over the first four quarter-hour slots from `now` on.
+/// The mm expected over the first four quarter-hour slots after `now`. Open-Meteo labels a
+/// slot with its end ("Preceding 15 minutes sum"), so the slot at `now` is already past.
 fn rain_next_hour(forecast: &Forecast, now: NaiveDateTime) -> Option<f64> {
     let slots = &forecast.minutely_15;
     let values: Vec<f64> = slots
         .time
         .iter()
         .enumerate()
-        .filter(|(_, t)| parse_time(t).is_some_and(|t| t >= now))
+        .filter(|(_, t)| parse_time(t).is_some_and(|t| t > now))
         .take(4)
         .filter_map(|(i, _)| at(&slots.precipitation, i))
         .collect();

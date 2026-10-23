@@ -203,10 +203,11 @@ fn build_view_maps_current_today_and_days() {
 }
 
 #[test]
-fn rain_next_hour_sums_four_slots_from_now() {
-    // 14:15 .. 15:00 are 0.1 + 0.2 + 0.3 + 0.4; later slots are dry.
+fn rain_next_hour_sums_four_slots_after_now() {
+    // `current.time` is 14:15 and a slot holds the precipitation of the 15 minutes before its
+    // label, so the 14:15 slot (0.1) is past. 14:30 .. 15:15 are 0.2 + 0.3 + 0.4 + 0.0.
     let v = build_view(&parse(FORECAST), &paris(), 0);
-    assert!(close(v.rain_next_hour, 1.0), "{:?}", v.rain_next_hour);
+    assert!(close(v.rain_next_hour, 0.9), "{:?}", v.rain_next_hour);
 }
 
 #[test]

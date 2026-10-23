@@ -254,9 +254,9 @@ Outdoor weather from [Open-Meteo](https://open-meteo.com), a free service with n
 | `enabled` | `false` | Turn the weather on. While `false`, `GET /api/v1/weather` answers 503 and `get_weather` answers `weather unavailable`. |
 | `city` | `""` | The city to look up. Required (not empty or blank) when enabled. |
 | `country` | none | Optional ISO 3166-1 alpha-2 filter for the lookup, such as `FR`, so `Paris` is not Paris, Texas. Exactly two letters. |
-| `refresh_minutes` | `15` | Minutes between two fetches, with about 10 % random jitter. At least 10 when enabled. |
+| `refresh_minutes` | `15` | Minutes between two fetches, with about 10 % random jitter. Between 10 and 1440 when enabled. |
 
-When enabled, an empty `city`, a `country` that is not two letters or a `refresh_minutes` below 10 stops the hub at start with `invalid config: [weather] …`. `OIKOS_WEATHER__ENABLED`, `OIKOS_WEATHER__CITY`, `OIKOS_WEATHER__COUNTRY` and `OIKOS_WEATHER__REFRESH_MINUTES` work like the other sections; the city and country stay text even when they look like numbers.
+When enabled, an empty `city`, a `country` that is not two letters or a `refresh_minutes` below 10 or above 1440 stops the hub at start with `invalid config: [weather] …`. `OIKOS_WEATHER__ENABLED`, `OIKOS_WEATHER__CITY`, `OIKOS_WEATHER__COUNTRY` and `OIKOS_WEATHER__REFRESH_MINUTES` work like the other sections; the city and country stay text even when they look like numbers.
 
 ```toml
 [weather]

@@ -159,12 +159,9 @@ fn weather_publish_failure_is_retried_next_time() {
     hub.set_connection(ConnectionStatus::Online);
     hub.apply_weather(sample_view());
     let out = drain(&mut rx);
-    assert_eq!(
-        out.iter()
-            .filter(|p| p.topic != "oikos/weather/availability")
-            .count(),
-        19
-    );
+    // The configs lost while offline go out again with the states.
+    assert_eq!(state_count(&out), 19);
+    assert_eq!(config_count(&out), 19);
 }
 
 #[test]
@@ -289,4 +286,56 @@ fn restart_publishes_unknown_for_values_a_previous_run_left_retained() {
     assert!(uv[0].retain);
     // 18 values, the unknown uv_index and the availability: each goes out once.
     assert_eq!(out.len(), 20);
+}
+
+fn config_count(out: &[Publish]) -> usize {
+    out.iter().filter(|p| p.topic.ends_with("/config")).count()
+}
+
+fn state_count(out: &[Publish]) -> usize {
+    out.iter()
+        .filter(|p| !p.topic.ends_with("/config") && p.topic != "oikos/weather/availability")
+        .count()
+}
+
+#[test]
+fn configs_lost_while_offline_are_republished_by_the_next_apply() {
+    let (hub, mut rx) = hub();
+    hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".into(),
+    });
+    hub.publish_weather_configs();
+    assert!(drain(&mut rx).is_empty());
+    assert!(hub.entity_view("weather_temperature").is_none());
+
+    hub.set_connection(ConnectionStatus::Online);
+    hub.apply_weather(sample_view());
+    let out = drain(&mut rx);
+    assert_eq!(config_count(&out), 19);
+    assert_eq!(state_count(&out), 19);
+    assert!(hub.entity_view("weather_temperature").is_some());
+
+    // Healthy now: nothing is republished.
+    hub.apply_weather(sample_view());
+    assert!(drain(&mut rx).is_empty());
+}
+
+#[test]
+fn removed_entity_makes_the_next_apply_republish_the_configs() {
+    let (hub, mut rx) = hub();
+    hub.publish_weather_configs();
+    hub.apply_weather(sample_view());
+    drain(&mut rx);
+    assert!(hub.entity_view("weather_temperature").is_some());
+
+    hub.ingest_message("oikos/sensor/weather/temperature/config", b"", true);
+    assert!(hub.entity_view("weather_temperature").is_none());
+    // No reaction to the empty retained message itself.
+    assert!(drain(&mut rx).is_empty());
+
+    hub.apply_weather(sample_view());
+    let out = drain(&mut rx);
+    assert_eq!(config_count(&out), 19);
+    assert_eq!(state_count(&out), 19);
+    assert!(hub.entity_view("weather_temperature").is_some());
 }

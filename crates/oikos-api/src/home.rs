@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct HomeSettings {
-    /// The setpoint in °C the house falls back to when nobody is home.
+    /// The threshold in °C (5 to 30) at or below which a thermostat, or an off one, counts as eco.
     pub eco_setpoint: Option<f64>,
     /// The entity id of the select that holds the house mode.
     pub mode_entity: Option<String>,

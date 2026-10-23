@@ -24,6 +24,8 @@ pub(crate) struct WeatherSlot {
     /// The availability last published (`publish_weather_configs` sets `Some(false)`); `None`
     /// until the first success.
     online: Option<bool>,
+    /// Whether the last `publish_weather_configs` got every config and the availability out.
+    configs_ok: bool,
 }
 
 impl Hub {
@@ -90,6 +92,12 @@ impl Hub {
     /// did. A payload the broker refused is sent again by the next call.
     pub fn apply_weather(&self, mut view: WeatherView) {
         view.stale = false;
+        // Self-healing: configs that never went out, or that something removed from the
+        // registry, are published again (which also re-seeds every state for republishing).
+        // An empty retained config is deliberately not reacted to: two hubs would ping-pong.
+        if !self.weather_slot().configs_ok || self.entity_view("weather_temperature").is_none() {
+            self.publish_weather_configs();
+        }
         let (changed, data_changed) = {
             let mut slot = self.weather_slot();
             let data_changed = slot.view.as_ref().is_none_or(|old| {
@@ -148,12 +156,24 @@ impl Hub {
             .iter()
             .map(|key| (*key, String::new()))
             .collect();
+        let mut failed = 0;
         for (topic, config) in entities::configs(&self.discovery_prefix) {
-            self.publish_weather(topic, config.to_string());
+            if !self.publish_weather(topic, config.to_string()) {
+                failed += 1;
+            }
         }
-        if self.publish_availability(false) {
+        let availability_ok = self.publish_availability(false);
+        if availability_ok {
             self.weather_slot().online = Some(false);
         }
+        if failed > 0 || !availability_ok {
+            tracing::warn!(
+                failed,
+                availability_ok,
+                "weather: some entity configs were not published; retrying on the next update"
+            );
+        }
+        self.weather_slot().configs_ok = failed == 0 && availability_ok;
     }
 
     /// While `[weather]` is off, clears what an earlier run left retained: the states under

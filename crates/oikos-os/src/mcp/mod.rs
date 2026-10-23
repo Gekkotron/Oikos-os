@@ -165,7 +165,9 @@ fn instructions() -> String {
          `approve_climate_proposal` (or the push button). Safety (frost, overheat, stale \
          readings) always acts. A temperature set by hand holds until the zone's next scheduled \
          change, at most `manual_hold_max_min`. `get_weather` returns the outdoor weather when \
-         `[weather] enabled`.",
+         `[weather] enabled`. `get_home_settings` and `set_home_settings` read and replace the whole \
+home settings document: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a \
+temperature sensor).",
         fields = UiOverride::FIELDS.join(", ")
     )
 }

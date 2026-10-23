@@ -461,6 +461,15 @@ fn weather_refresh_has_a_floor() {
 }
 
 #[test]
+fn weather_refresh_has_a_ceiling() {
+    let mut cfg = enabled_weather("Paris");
+    cfg.refresh_minutes = 1441;
+    assert!(cfg.validate().unwrap_err().starts_with("[weather]"));
+    cfg.refresh_minutes = 1440;
+    assert_eq!(cfg.validate(), Ok(()));
+}
+
+#[test]
 fn weather_from_toml_and_env() {
     Jail::expect_with(|jail| {
         jail.create_file(
