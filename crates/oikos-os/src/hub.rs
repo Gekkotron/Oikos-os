@@ -212,8 +212,7 @@ pub struct Hub {
     /// The retained ambiance definitions, under `<ui_prefix>/ambiances/<id>`.
     ambiance_store: Mutex<AmbianceStore>,
     /// Ids of the ambiances being applied right now.
-    #[allow(dead_code)]
-    ambiances_running: Mutex<BTreeSet<String>>,
+    pub(crate) ambiances_running: Mutex<BTreeSet<String>>,
     /// The home settings document, retained on `<ui_prefix>/_home`.
     pub(crate) home_settings: Mutex<oikos_api::HomeSettings>,
     /// The topic prefix flows are retained under, one topic per flow id.

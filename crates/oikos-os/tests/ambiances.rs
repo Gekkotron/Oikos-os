@@ -1,12 +1,12 @@
 //! The ambiance store and CRUD on a hub driven without a broker.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use oikos_api::{
-    Ambiance, AmbianceAction, Category, CategoryAction, ClimateAction, ConnectionStatus,
-    DeviceAction, FlowAction, FlowDo, Target, WsEvent,
+    Ambiance, AmbianceAction, ApplyReport, Category, CategoryAction, ClimateAction,
+    ConnectionStatus, DeviceAction, FlowAction, FlowDo, Outcome, Target, WsEvent,
 };
 use oikos_core::command::Publish;
 use oikos_core::model::{Area, AreasDocument, Command};
@@ -239,4 +239,339 @@ async fn ingest_broadcasts_ambiances_changed() {
     // An identical echo changes nothing, so nothing is broadcast.
     hub.ingest("oikos/ui/ambiances/a", VALID.as_bytes());
     assert!(events.try_recv().is_err());
+}
+
+// Applying an ambiance.
+
+const LED_FIXTURE: &str = "discovery/light__0x60a423fffe94d1c6__light.json";
+const LED_TOPIC: &str = "oikos/light/0x60a423fffe94d1c6/light/config";
+const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
+const LED_STATE_TOPIC: &str = "zigbee2mqtt/rooms/living/led_ceiling";
+const LED_COMMAND_TOPIC: &str = "zigbee2mqtt/rooms/living/led_ceiling/set";
+const TV_FIXTURE: &str = "discovery/light__0x9035eafffec07012__light.json";
+const TV_TOPIC: &str = "oikos/light/0x9035eafffec07012/light/config";
+const TV_ID: &str = "0x9035eafffec07012_light_zigbee2mqtt";
+const TV_STATE_TOPIC: &str = "zigbee2mqtt/rooms/living/led_tv";
+
+fn hub_with_timeout(ms: u64) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let mut cfg = config();
+    cfg.commands.confirm_timeout_ms = ms;
+    let (tx, rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    (hub, rx)
+}
+
+/// A hub that knows the ceiling LED, currently `on`.
+fn led_hub(ms: u64, on: bool) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let (hub, rx) = hub_with_timeout(ms);
+    hub.ingest(LED_TOPIC, &fixture(LED_FIXTURE));
+    set_led(&hub, on);
+    (hub, rx)
+}
+
+fn set_led(hub: &Hub, on: bool) {
+    let state: &[u8] = if on {
+        br#"{"state":"ON","brightness":100}"#
+    } else {
+        br#"{"state":"OFF","brightness":100}"#
+    };
+    hub.ingest(LED_STATE_TOPIC, state);
+}
+
+/// Plays the broker: records the topic of every publish and echoes the LED's new state, and
+/// the switch's too when `echo_switch`. Anything else gets no echo.
+fn echo(
+    mut publisher: mpsc::Receiver<Publish>,
+    hub: Arc<Hub>,
+    echo_switch: bool,
+) -> Arc<Mutex<Vec<String>>> {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&log);
+    tokio::spawn(async move {
+        while let Some(publish) = publisher.recv().await {
+            sink.lock().expect("log").push(publish.topic.clone());
+            if publish.topic == LED_COMMAND_TOPIC {
+                let on = serde_json::from_str::<serde_json::Value>(&publish.payload)
+                    .is_ok_and(|v| v["state"] == "ON");
+                set_led(&hub, on);
+            } else if echo_switch && publish.topic.ends_with("/stair/light/set") {
+                hub.ingest(
+                    "zigbee2mqtt/rooms/stair/light",
+                    format!(r#"{{"state":"{}"}}"#, publish.payload).as_bytes(),
+                );
+            }
+        }
+    });
+    log
+}
+
+fn published(log: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+    log.lock().expect("log").clone()
+}
+
+/// Stores the ambiance as a retained payload, skipping the writer's checks.
+fn save(hub: &Hub, a: &Ambiance) {
+    let payload = serde_json::to_vec(a).expect("serialize");
+    hub.ingest(&format!("oikos/ui/ambiances/{}", a.id), &payload);
+}
+
+fn lights(to: Target) -> AmbianceAction {
+    AmbianceAction::Category(CategoryAction {
+        what: Category::Lights,
+        to,
+        brightness: None,
+        area: None,
+        except: vec![],
+    })
+}
+
+fn device(entity: &str, command: Command) -> AmbianceAction {
+    AmbianceAction::Device(DeviceAction {
+        entity: entity.to_owned(),
+        command,
+    })
+}
+
+fn turn_on() -> Command {
+    Command::TurnOn {
+        brightness: None,
+        color: None,
+        effect: None,
+    }
+}
+
+fn outcomes(report: &ApplyReport) -> Vec<Outcome> {
+    report.actions.iter().map(|a| a.outcome).collect()
+}
+
+#[tokio::test]
+async fn already_off_light_is_not_commanded() {
+    let (hub, rx) = led_hub(50, false);
+    let log = echo(rx, Arc::clone(&hub), false);
+    save(&hub, &ambiance("night", vec![lights(Target::Off)]));
+
+    let report = hub.apply_ambiance("night").await.expect("apply");
+
+    assert_eq!(report.ambiance, "night");
+    assert_eq!(outcomes(&report), [Outcome::Ok]);
+    assert_eq!(report.actions[0].total, 1);
+    assert!(report.actions[0].failed.is_empty() && report.actions[0].skipped.is_empty());
+    tokio::task::yield_now().await;
+    assert!(published(&log).is_empty(), "{:?}", published(&log));
+}
+
+#[tokio::test]
+async fn on_light_is_turned_off_and_reported_ok() {
+    let (hub, rx) = led_hub(50, true);
+    let log = echo(rx, Arc::clone(&hub), false);
+    save(&hub, &ambiance("night", vec![lights(Target::Off)]));
+
+    let report = hub.apply_ambiance("night").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Ok]);
+    assert_eq!(report.actions[0].total, 1);
+    assert_eq!(published(&log), [LED_COMMAND_TOPIC]);
+}
+
+#[tokio::test]
+async fn silent_device_is_failed_and_next_action_still_runs() {
+    let (hub, rx) = led_hub(50, true);
+    hub.ingest(SWITCH_TOPIC, &fixture(SWITCH_FIXTURE));
+    let _log = echo(rx, Arc::clone(&hub), false);
+    save(
+        &hub,
+        &ambiance(
+            "mix",
+            vec![device(SWITCH_ID, turn_on()), lights(Target::Off)],
+        ),
+    );
+
+    let report = hub.apply_ambiance("mix").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Failed, Outcome::Ok]);
+    let failed = &report.actions[0].failed;
+    assert_eq!(failed.len(), 1);
+    assert_eq!(failed[0].id, SWITCH_ID);
+    assert!(failed[0].reason.contains("no state change"), "{failed:?}");
+}
+
+#[tokio::test]
+async fn offline_member_is_skipped_rest_ok() {
+    let (hub, rx) = led_hub(50, true);
+    // The TV light reports its availability on a topic of its own.
+    let mut config: serde_json::Value = serde_json::from_slice(&fixture(TV_FIXTURE)).expect("json");
+    config["availability"][0]["topic"] = "test/tv_availability".into();
+    hub.ingest(TV_TOPIC, config.to_string().as_bytes());
+    hub.ingest(TV_STATE_TOPIC, br#"{"state":"ON","brightness":100}"#);
+    hub.ingest("test/tv_availability", br#"{"state":"offline"}"#);
+    let log = echo(rx, Arc::clone(&hub), false);
+    save(&hub, &ambiance("night", vec![lights(Target::Off)]));
+
+    let report = hub.apply_ambiance("night").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Ok]);
+    let action = &report.actions[0];
+    assert_eq!(action.total, 2);
+    assert_eq!(action.skipped.len(), 1);
+    assert_eq!(action.skipped[0].id, TV_ID);
+    assert_eq!(action.skipped[0].reason, "offline");
+    assert!(action.failed.is_empty());
+    assert_eq!(published(&log), [LED_COMMAND_TOPIC]);
+}
+
+#[tokio::test]
+async fn vanished_entity_is_skipped_not_fatal() {
+    let (hub, rx) = led_hub(50, true);
+    hub.ingest(SWITCH_TOPIC, &fixture(SWITCH_FIXTURE));
+    let _log = echo(rx, Arc::clone(&hub), false);
+    save(
+        &hub,
+        &ambiance(
+            "mix",
+            vec![device(SWITCH_ID, turn_on()), lights(Target::Off)],
+        ),
+    );
+    hub.ingest(SWITCH_TOPIC, b"");
+
+    let report = hub.apply_ambiance("mix").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Skipped, Outcome::Ok]);
+    assert_eq!(
+        report.actions[0].reason.as_deref(),
+        Some("no longer exists")
+    );
+}
+
+#[tokio::test]
+async fn flow_enable_action_enables_flow() {
+    let (hub, rx) = led_hub(50, true);
+    hub.ingest(
+        "oikos/binary_sensor/0x00158d008b5a2d65/occupancy/config",
+        &fixture("discovery/binary_sensor__0x00158d008b5a2d65__occupancy.json"),
+    );
+    let _log = echo(rx, Arc::clone(&hub), false);
+    let flow = serde_json::json!({
+        "id": "living", "name": "Living", "enabled": false,
+        "nodes": [
+            { "id": "motion", "type": "trigger.state",
+              "params": { "entity": "0x00158d008b5a2d65_occupancy_zigbee2mqtt" } },
+            { "id": "on", "type": "command",
+              "params": { "entity": LED_ID, "command": { "type": "turn_on" } } }
+        ],
+        "edges": [{ "from": "motion", "to": "on" }]
+    });
+    hub.ingest("oikos/automation/living", flow.to_string().as_bytes());
+    assert!(!hub.flow("living").expect("flow").definition.enabled);
+    let action = AmbianceAction::Flow(FlowAction {
+        flow: "living".to_owned(),
+        action: FlowDo::Enable,
+    });
+    save(&hub, &ambiance("a", vec![action]));
+
+    let report = hub.apply_ambiance("a").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Ok]);
+    assert!(hub.flow("living").expect("flow").definition.enabled);
+}
+
+#[tokio::test]
+async fn climate_action_skipped_when_engine_off() {
+    let (hub, _rx) = hub_with_timeout(50);
+    // Saving would be refused while the engine is off, so the payload is written directly.
+    let climate = AmbianceAction::Climate(ClimateAction {
+        clear: true,
+        ..ClimateAction::default()
+    });
+    save(&hub, &ambiance("a", vec![climate]));
+
+    let report = hub.apply_ambiance("a").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Skipped]);
+    assert_eq!(
+        report.actions[0].reason.as_deref(),
+        Some("the climate engine is off")
+    );
+}
+
+#[tokio::test]
+async fn second_apply_while_running_is_refused() {
+    let (hub, rx) = led_hub(500, true);
+    let _log = echo(rx, Arc::clone(&hub), false);
+    // The switch never echoes, so the first run waits out the whole timeout.
+    hub.ingest(SWITCH_TOPIC, &fixture(SWITCH_FIXTURE));
+    save(&hub, &ambiance("slow", vec![device(SWITCH_ID, turn_on())]));
+
+    let first = {
+        let hub = Arc::clone(&hub);
+        tokio::spawn(async move { hub.apply_ambiance("slow").await })
+    };
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert_eq!(
+        hub.apply_ambiance("slow").await,
+        Err(HubError::Rejected("already running".to_owned()))
+    );
+    let report = first.await.expect("task").expect("first apply");
+    assert_eq!(outcomes(&report), [Outcome::Failed]);
+}
+
+#[tokio::test]
+async fn lock_released_after_failed_run() {
+    let (hub, rx) = led_hub(50, true);
+    hub.ingest(SWITCH_TOPIC, &fixture(SWITCH_FIXTURE));
+    let _log = echo(rx, Arc::clone(&hub), false);
+    save(&hub, &ambiance("a", vec![device(SWITCH_ID, turn_on())]));
+
+    let first = hub.apply_ambiance("a").await.expect("first");
+    assert_eq!(outcomes(&first), [Outcome::Failed]);
+    let second = hub.apply_ambiance("a").await.expect("second runs again");
+    assert_eq!(outcomes(&second), [Outcome::Failed]);
+}
+
+#[tokio::test]
+async fn apply_broadcasts_report() {
+    let (hub, rx) = led_hub(50, true);
+    let _log = echo(rx, Arc::clone(&hub), false);
+    save(&hub, &ambiance("night", vec![lights(Target::Off)]));
+    let mut events = hub.subscribe();
+
+    let report = hub.apply_ambiance("night").await.expect("apply");
+
+    let mut seen = None;
+    while let Ok(event) = events.try_recv() {
+        if let WsEvent::AmbianceApplied { report } = event {
+            seen = Some(report);
+        }
+    }
+    assert_eq!(seen, Some(report));
+}
+
+#[tokio::test]
+async fn apply_refused_while_broker_offline() {
+    let (hub, mut rx) = led_hub(50, true);
+    save(&hub, &ambiance("night", vec![lights(Target::Off)]));
+    hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+
+    assert_eq!(
+        hub.apply_ambiance("night").await,
+        Err(HubError::Publish("broker offline".to_owned()))
+    );
+    assert!(rx.try_recv().is_err(), "nothing may be published");
+}
+
+#[tokio::test]
+async fn apply_unknown_or_invalid_ambiance_is_refused() {
+    let (hub, _rx) = hub_with_timeout(50);
+    assert_eq!(
+        hub.apply_ambiance("ghost").await,
+        Err(HubError::UnknownAmbiance("ghost".to_owned()))
+    );
+    hub.ingest("oikos/ui/ambiances/bad", br#"{"id":"bad","name":""}"#);
+    assert!(matches!(
+        hub.apply_ambiance("bad").await,
+        Err(HubError::Rejected(_))
+    ));
 }
