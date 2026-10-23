@@ -30,7 +30,7 @@ Security (`/security`): the alarm panel as a hero card (arm modes, Disarm, inlin
 
 ## Climate
 
-Climate (`/climate`, beta): one card per zone with its reading, target, state, overrides, learning and recent decisions, a quick hold of a setpoint for a while, the house settings sheet and the engine's banners. The room thermometer picker lists the temperature sensors grouped by room. See [Climate](climate.md).
+Climate (`/climate`, beta): one card per zone with its reading, target, state, overrides, learning and recent decisions, a quick hold of a setpoint for a while, the house settings sheet and the engine's banners. The room thermometer picker lists the temperature sensors grouped by room. Rules and proposals show on a week timeline; while editing, tapping an empty spot on a day adds a two-hour block there (base + 2 °C), and a block's popover has day chips to add it to, or remove it from, other days. See [Climate](climate.md).
 
 ## History
 

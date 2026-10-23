@@ -150,16 +150,88 @@ pub fn delete_block(rules: &ModeRules, block: usize) -> ModeRules {
     out
 }
 
-/// The minute under the pointer along the day track the handle sits in.
-fn minute_at(ev: &web_sys::PointerEvent) -> Option<u16> {
-    let handle = ev.target()?.dyn_into::<web_sys::Element>().ok()?;
-    let track = handle.closest(".climate-timeline__track").ok()??;
+/// Whether `rules.blocks[block]` can also cover `day`: no other block on that day overlaps its
+/// times. A day it already covers fits.
+pub fn day_fits(rules: &ModeRules, block: usize, day: Day) -> bool {
+    let Some(b) = rules.blocks.get(block) else {
+        return false;
+    };
+    b.days.contains(&day)
+        || !rules
+            .blocks
+            .iter()
+            .enumerate()
+            .any(|(i, o)| i != block && o.days.contains(&day) && b.from < o.to && o.from < b.to)
+}
+
+/// Adds `day` to `rules.blocks[block]` when it fits, or removes it when the block has other
+/// days. Anything else returns the rules unchanged.
+pub fn toggle_day(rules: &ModeRules, block: usize, day: Day) -> ModeRules {
+    let mut out = rules.clone();
+    let Some(b) = out.blocks.get_mut(block) else {
+        return out;
+    };
+    if b.days.contains(&day) {
+        if b.days.len() == 1 {
+            return out;
+        }
+        b.days.retain(|d| *d != day);
+    } else if day_fits(rules, block, day) {
+        b.days.push(day);
+        b.days.sort();
+    } else {
+        return out;
+    }
+    b.evidence = None;
+    out
+}
+
+/// A new block on `day` from the 15-minute step at `minute`, two hours long or up to the next
+/// block that day, at the base + 2 °C (19 °C when the base is off). Returns the rules and the
+/// new block's index, or `None` when a block on that day already holds `minute`.
+pub fn add_block(rules: &ModeRules, day: Day, minute: u16) -> Option<(ModeRules, usize)> {
+    const LENGTH: u16 = 120;
+    const OFF_BASE_TEMP: f64 = 19.0;
+    let from = (minute.min(DAY_END - 1) / STEP) * STEP;
+    let same_day = || rules.blocks.iter().filter(|o| o.days.contains(&day));
+    if same_day().any(|o| o.from.0 <= from && from < o.to.0) {
+        return None;
+    }
+    let to = same_day()
+        .map(|o| o.from.0)
+        .filter(|&f| f > from)
+        .fold((from + LENGTH).min(DAY_END), u16::min);
+    let setpoint = match rules.base {
+        Setpoint::Temp(t) => Setpoint::Temp((t + 2.0).clamp(MIN_TEMP, MAX_TEMP)),
+        Setpoint::Off => Setpoint::Temp(OFF_BASE_TEMP),
+    };
+    let mut out = rules.clone();
+    out.blocks.push(oikos_climate::doc::Block {
+        days: vec![day],
+        from: HhMm(from),
+        to: HhMm(to),
+        setpoint,
+        evidence: None,
+    });
+    let index = out.blocks.len() - 1;
+    Some((out, index))
+}
+
+/// The minute at `client_x` along a day track.
+fn minute_on(track: &web_sys::Element, client_x: i32) -> Option<u16> {
     let rect = track.get_bounding_client_rect();
     if rect.width() <= 0.0 {
         return None;
     }
-    let fraction = ((f64::from(ev.client_x()) - rect.left()) / rect.width()).clamp(0.0, 1.0);
+    let fraction = ((f64::from(client_x) - rect.left()) / rect.width()).clamp(0.0, 1.0);
     Some((fraction * f64::from(DAY_END)).round() as u16)
+}
+
+/// The minute under the pointer along the day track the handle sits in.
+fn minute_at(ev: &web_sys::PointerEvent) -> Option<u16> {
+    let handle = ev.target()?.dyn_into::<web_sys::Element>().ok()?;
+    let track = handle.closest(".climate-timeline__track").ok()??;
+    minute_on(&track, ev.client_x())
 }
 
 fn capture(ev: &web_sys::PointerEvent) {
@@ -358,8 +430,44 @@ fn BlockEditor(
         Some(Setpoint::Temp(t)) => t.to_string(),
         _ => String::new(),
     };
+    let day_chips = Day::ALL
+        .into_iter()
+        .map(|day| {
+            let on =
+                move || rules.with(|r| r.blocks.get(block).is_some_and(|b| b.days.contains(&day)));
+            // The last day stays (Delete block removes it); a day another block holds cannot join.
+            let locked = move || {
+                rules.with(|r| match r.blocks.get(block) {
+                    Some(b) if b.days.contains(&day) => b.days.len() == 1,
+                    Some(_) => !day_fits(r, block, day),
+                    None => true,
+                })
+            };
+            view! {
+                <button
+                    type="button"
+                    class="chip"
+                    class:chip--selected=on
+                    aria-pressed=move || on().to_string()
+                    disabled=locked
+                    on:click=move |_| {
+                        let current = rules.get_untracked();
+                        let next = toggle_day(&current, block, day);
+                        if next != current {
+                            on_change.run(next);
+                        }
+                    }
+                >
+                    {day.short()}
+                </button>
+            }
+        })
+        .collect_view();
     view! {
         <div class="climate-timeline__editor card">
+            <div class="climate-timeline__days" role="group" aria-label="Days">
+                {day_chips}
+            </div>
             <label class="climate-field">
                 <span class="climate-field__label">"From"</span>
                 // A block can start up to one step before its end.
@@ -445,7 +553,29 @@ pub fn WeekTimeline(
             view! {
                 <div class="climate-timeline__row">
                     <span class="climate-timeline__day">{day.short()}</span>
-                    <div class="climate-timeline__track">
+                    <div
+                        class="climate-timeline__track"
+                        class:climate-timeline__track--editable=editable
+                        on:click=move |ev: web_sys::MouseEvent| {
+                            // Only the empty track: a click on a bar opens that bar.
+                            if !editable || ev.target() != ev.current_target() {
+                                return;
+                            }
+                            let Some(track) = ev
+                                .current_target()
+                                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                            else {
+                                return;
+                            };
+                            let Some(minute) = minute_on(&track, ev.client_x()) else {
+                                return;
+                            };
+                            if let Some((next, index)) = add_block(&rules.get_untracked(), day, minute) {
+                                on_change.run(next);
+                                selected.set(Some(index));
+                            }
+                        }
+                    >
                         <For each=move || 0..count() key=|block| *block let:block>
                             <Bar
                                 day=day
@@ -475,6 +605,12 @@ pub fn WeekTimeline(
                 <div class="climate-timeline__hours">{hours}</div>
             </div>
             {rows}
+            {editable
+                .then(|| {
+                    view! {
+                        <p class="climate-timeline__hint">"Tap an empty spot to add a block"</p>
+                    }
+                })}
             {move || {
                 selected
                     .get()
@@ -673,5 +809,107 @@ mod tests {
         assert_eq!(out.base, m.base);
         assert_eq!(delete_block(&m, 9), m);
         valid(&out);
+    }
+
+    #[test]
+    fn toggle_day_adds_a_free_day_and_removes_one() {
+        let mut m = mode(vec![
+            block(&[Day::Mon, Day::Tue, Day::Wed], "00:00", "07:30", 18.0),
+            block(&[Day::Sat], "00:00", "07:30", 18.0),
+        ]);
+        m.blocks[1].evidence = Some(oikos_climate::doc::Evidence { agree: 1, of: 1 });
+        let sunday = toggle_day(&m, 1, Day::Sun);
+        assert_eq!(sunday.blocks[1].days, vec![Day::Sat, Day::Sun]);
+        assert_eq!(sunday.blocks[1].evidence, None);
+        let monday = toggle_day(&m, 1, Day::Mon);
+        assert_eq!(monday, m, "Monday already has an overlapping block");
+        let tue_off = toggle_day(&m, 0, Day::Tue);
+        assert_eq!(tue_off.blocks[0].days, vec![Day::Mon, Day::Wed]);
+        // Days stay in week order.
+        let fri = toggle_day(&m, 0, Day::Fri);
+        assert_eq!(
+            fri.blocks[0].days,
+            vec![Day::Mon, Day::Tue, Day::Wed, Day::Fri]
+        );
+        for r in [sunday, tue_off, fri] {
+            valid(&r);
+        }
+    }
+
+    #[test]
+    fn toggle_day_keeps_the_last_day() {
+        let m = mode(vec![block(&[Day::Sat], "00:00", "07:30", 18.0)]);
+        assert_eq!(toggle_day(&m, 0, Day::Sat), m);
+        assert_eq!(toggle_day(&m, 4, Day::Sun), m);
+    }
+
+    #[test]
+    fn day_fits_only_where_no_block_overlaps() {
+        let m = mode(vec![
+            block(&[Day::Mon], "06:00", "08:00", 19.0),
+            block(&[Day::Tue], "07:00", "09:00", 21.0),
+            block(&[Day::Wed], "08:00", "10:00", 21.0),
+        ]);
+        // Block 1 (07:00-09:00) overlaps Monday's 06:00-08:00 and Wednesday's 08:00-10:00.
+        assert!(!day_fits(&m, 1, Day::Mon));
+        assert!(!day_fits(&m, 1, Day::Wed));
+        assert!(day_fits(&m, 1, Day::Thu));
+        // Its own day always fits.
+        assert!(day_fits(&m, 1, Day::Tue));
+        let touching = mode(vec![
+            block(&[Day::Mon], "06:00", "07:00", 19.0),
+            block(&[Day::Tue], "07:00", "09:00", 21.0),
+        ]);
+        assert!(day_fits(&touching, 1, Day::Mon));
+    }
+
+    #[test]
+    fn add_block_starts_on_the_tapped_quarter_for_two_hours() {
+        let m = mode(vec![block(&[Day::Sat], "00:00", "07:30", 18.0)]);
+        let (out, i) = add_block(&m, Day::Sun, 18 * 60 + 7).expect("free spot");
+        assert_eq!(i, 1);
+        assert_eq!(out.blocks[0], m.blocks[0]);
+        let b = &out.blocks[1];
+        assert_eq!(b.days, vec![Day::Sun]);
+        assert_eq!((b.from, b.to), (at("18:00"), at("20:00")));
+        // Base 17 °C + 2.
+        assert_eq!(b.setpoint, Setpoint::Temp(19.0));
+        assert_eq!(b.evidence, None);
+        valid(&out);
+    }
+
+    #[test]
+    fn add_block_stops_at_the_next_block_and_the_day_end() {
+        let m = mode(vec![block(&[Day::Mon, Day::Tue], "09:00", "11:00", 21.0)]);
+        let (short, _) = add_block(&m, Day::Mon, 8 * 60 + 20).unwrap();
+        assert_eq!(
+            (short.blocks[1].from, short.blocks[1].to),
+            (at("08:15"), at("09:00"))
+        );
+        let (late, _) = add_block(&m, Day::Mon, 23 * 60).unwrap();
+        assert_eq!(late.blocks[1].to, at("24:00"));
+        let (end, _) = add_block(&m, Day::Mon, 1440).unwrap();
+        assert_eq!(
+            (end.blocks[1].from, end.blocks[1].to),
+            (at("23:45"), at("24:00"))
+        );
+        // Inside a block on that day: nothing to add.
+        assert_eq!(add_block(&m, Day::Tue, 10 * 60), None);
+        // The same time on a day the block does not cover is free.
+        assert!(add_block(&m, Day::Wed, 10 * 60).is_some());
+        for r in [short, late, end] {
+            valid(&r);
+        }
+    }
+
+    #[test]
+    fn add_block_temperature_follows_the_base() {
+        let mut m = mode(Vec::new());
+        m.base = Setpoint::Temp(39.0);
+        let (hot, _) = add_block(&m, Day::Mon, 0).unwrap();
+        assert_eq!(hot.blocks[0].setpoint, Setpoint::Temp(40.0));
+        m.base = Setpoint::Off;
+        let (off, _) = add_block(&m, Day::Mon, 0).unwrap();
+        assert_eq!(off.blocks[0].setpoint, Setpoint::Temp(19.0));
     }
 }
