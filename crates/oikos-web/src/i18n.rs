@@ -95,6 +95,7 @@ pub fn install_lang() -> RwSignal<Lang> {
 pub enum Key {
     MyHome,
     Overview,
+    House,
     Automations,
     Groups,
     MyRooms,
@@ -129,6 +130,7 @@ impl Key {
     pub const ALL: &'static [Key] = &[
         Key::MyHome,
         Key::Overview,
+        Key::House,
         Key::Automations,
         Key::Groups,
         Key::MyRooms,
@@ -164,6 +166,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
     let (en, fr) = match key {
         Key::MyHome => ("My home", "Ma maison"),
         Key::Overview => ("Overview", "Vue d'ensemble"),
+        Key::House => ("House", "Maison"),
         Key::Automations => ("Automations", "Automatisations"),
         Key::Groups => ("Groups", "Groupes"),
         Key::MyRooms => ("My rooms", "Mes pièces"),
@@ -264,6 +267,7 @@ mod tests {
         match k {
             Key::MyHome
             | Key::Overview
+            | Key::House
             | Key::Automations
             | Key::Groups
             | Key::MyRooms
@@ -298,6 +302,6 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 29);
+        assert_eq!(Key::ALL.len(), 30);
     }
 }

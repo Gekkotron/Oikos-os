@@ -5,17 +5,22 @@ use leptos_router::hooks::use_location;
 
 use super::route::{Lookup, crumbs};
 use crate::house::House;
-use crate::i18n::{Key, Lang, use_text};
+use crate::i18n::{Key, Lang, text, use_text};
 use crate::icons::{HOUSE, MOON, SUN, SUN_MOON};
 use crate::theme::Theme;
 
-/// The name the user gave the item a crumb points at, from what the house already holds.
-fn name_of(house: House, lookup: Lookup) -> Option<String> {
+/// The name the user gave the item a crumb points at, from what the house already holds. The
+/// built-in house, while the user has not renamed it, reads in the shell's language.
+fn name_of(house: House, lang: Lang, lookup: Lookup) -> Option<String> {
     match lookup {
         Lookup::Dashboard(id) => house.dashboards.with(|list| {
-            list.iter()
-                .find(|d| d.dashboard.id == id)
-                .map(|d| d.dashboard.name.clone())
+            list.iter().find(|d| d.dashboard.id == id).map(|d| {
+                if d.synthesized && d.dashboard.id == oikos_api::HOUSE_ID {
+                    text(lang, Key::House).to_owned()
+                } else {
+                    d.dashboard.name.clone()
+                }
+            })
         }),
         Lookup::Room(id) => house
             .areas
@@ -47,7 +52,8 @@ pub fn ContentHeader(drawer_open: RwSignal<bool>) -> impl IntoView {
 
     let trail = Memo::new(move |_| {
         let path = location.pathname.get();
-        crumbs(&path, lang.get(), |lookup| name_of(house, lookup))
+        let lang = lang.get();
+        crumbs(&path, lang, |lookup| name_of(house, lang, lookup))
     });
     let theme_icon = move || match theme.get() {
         Theme::Auto => SUN_MOON,

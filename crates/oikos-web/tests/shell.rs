@@ -206,6 +206,58 @@ async fn dashboards_unfold_from_two() {
 }
 
 #[wasm_bindgen_test]
+async fn overview_targets_the_open_dashboard() {
+    let m = mount(Lang::En, None).await;
+    m.house.dashboards.set(vec![
+        dashboard(oikos_api::HOUSE_ID, "House", 0),
+        dashboard("d1", "Wall tablet", 1),
+        dashboard("d2", "Kitchen screen", 2),
+    ]);
+    let overview = || {
+        m.host
+            .query_selector(".sidebar__link")
+            .unwrap()
+            .expect("the Overview link")
+            .get_attribute("href")
+    };
+    go("/dashboards/d2").await;
+    assert_eq!(overview().as_deref(), Some("/dashboards/d2"));
+    go("/dashboards/house").await;
+    assert_eq!(overview().as_deref(), Some("/dashboards/house"));
+    // Away from the dashboards, or on one that does not exist, it goes where "/" lands.
+    go("/flows").await;
+    assert_eq!(overview().as_deref(), Some("/dashboards/d1"));
+    go("/dashboards/gone").await;
+    assert_eq!(overview().as_deref(), Some("/dashboards/d1"));
+    go("/").await;
+}
+
+#[wasm_bindgen_test]
+async fn the_built_in_house_is_named_in_the_shell_language() {
+    let m = mount(Lang::Fr, None).await;
+    let mut house = dashboard(oikos_api::HOUSE_ID, "House", 0);
+    house.synthesized = true;
+    m.house
+        .dashboards
+        .set(vec![house, dashboard("d1", "Wall tablet", 1)]);
+    go("/dashboards/house").await;
+    assert_eq!(
+        text_of(&m.host, ".sidebar__sublink[href=\"/dashboards/house\"]"),
+        "Maison"
+    );
+    assert_eq!(
+        text_of(&m.host, ".breadcrumb [aria-current=\"page\"]"),
+        "Maison"
+    );
+    // A dashboard the user named keeps its name.
+    assert_eq!(
+        text_of(&m.host, ".sidebar__sublink[href=\"/dashboards/d1\"]"),
+        "Wall tablet"
+    );
+    go("/").await;
+}
+
+#[wasm_bindgen_test]
 async fn french_shell() {
     let m = mount(Lang::Fr, Some("2")).await;
     let sidebar = text_of(&m.host, ".sidebar");

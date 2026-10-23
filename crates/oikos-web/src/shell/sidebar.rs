@@ -53,10 +53,16 @@ pub fn Sidebar(
             .strip_prefix("/dashboards/")
             .map(|rest| rest.split('/').next().unwrap_or("").to_owned())
     });
+    // The open dashboard, or the one "/" lands on when no known dashboard is open.
     let overview_href = move || {
         house
             .dashboards
-            .with(|list| landing_dashboard(list))
+            .with(|list| {
+                open_dashboard
+                    .get()
+                    .filter(|id| list.iter().any(|d| &d.dashboard.id == id))
+                    .or_else(|| landing_dashboard(list))
+            })
             .map_or_else(|| "/".to_owned(), |id| format!("/dashboards/{id}"))
     };
     // When the open dashboard is listed underneath, it is the page and Overview only its section.
@@ -157,6 +163,13 @@ pub fn Sidebar(
                                     children=move |dv| {
                                         let id = dv.dashboard.id;
                                         let href = format!("/dashboards/{id}");
+                                        let name = dv.dashboard.name;
+                                        let builtin = dv.synthesized && id == oikos_api::HOUSE_ID;
+                                        // The hub names the built-in house in English; until the
+                                        // user renames it, it reads in the shell's language.
+                                        let label = move || {
+                                            if builtin { t(Key::House).to_owned() } else { name.clone() }
+                                        };
                                         let is_open = move || {
                                             open_dashboard
                                                 .with(|open| open.as_deref() == Some(id.as_str()))
@@ -165,7 +178,7 @@ pub fn Sidebar(
                                         view! {
                                             <li>
                                                 <a class="sidebar__sublink" href=href aria-current=is_open>
-                                                    {dv.dashboard.name}
+                                                    {label}
                                                 </a>
                                             </li>
                                         }
