@@ -91,7 +91,7 @@ See [Flow nodes](flow-nodes.md) for the document format.
 | --- | --- |
 | `GET /api/v1/alerts` | The push alerts the hub keeps in its retained history (`oikos/push/history`), newest first. |
 | `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on `oikos/push/responses`); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
-| `GET /api/v1/push` | Push status: `{"state","installs","queued"}`. `state` is `off` (no usable `[push] credentials`), `syncing` (rebuilding the token map after a connect) or `ready`; `installs` counts the registered app installs, `queued` the alerts waiting in the retry queue. |
+| `GET /api/v1/push` | Push status: `{"state","installs","queued"}`. `state` is `off` (no usable Firebase key: neither `[push] credentials` nor `secrets/firebase.json`), `syncing` (rebuilding the token map after a connect) or `ready`; `installs` counts the registered app installs, `queued` the alerts waiting in the retry queue. |
 
 ## Media
 
