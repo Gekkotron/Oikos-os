@@ -1,10 +1,10 @@
 ---
 title: MCP tools
 sidebar_position: 3
-description: The 34 tools and the one resource of the hub's MCP server, with their arguments.
+description: The 35 tools and the one resource of the hub's MCP server, with their arguments.
 ---
 
-The MCP server is at `http://<host>:8081/mcp` (streamable HTTP, stateful sessions) and offers **thirty-four tools** and **one resource**. It has the same trust model as the REST API on the same port: LAN-only, no authentication in v1. The tools are defined in [`crates/oikos-os/src/mcp`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/mcp). For setup in Claude Code, Codex and Claude Desktop, see [Talking to the house (MCP)](../users/assistants-mcp.md).
+The MCP server is at `http://<host>:8081/mcp` (streamable HTTP, stateful sessions) and offers **thirty-five tools** and **one resource**. It has the same trust model as the REST API on the same port: LAN-only, no authentication in v1. The tools are defined in [`crates/oikos-os/src/mcp`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/mcp). For setup in Claude Code, Codex and Claude Desktop, see [Talking to the house (MCP)](../users/assistants-mcp.md).
 
 A failed tool call answers in-band (`isError: true` with the reason as text) so the assistant can retry with better arguments. A refused publish (broker link down) is the same in-band error.
 
@@ -91,6 +91,12 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 | --- | --- |
 | `get_history` | One slice of an entity's history, available only when `[history] url` is set. Args: `entity`, `what`, and by `what`: `series` needs `range` (`24h`, `7d`, `30d`, `1y`); `daily` needs `days` (7, 30 or 365) and `kind` (`counter` or `power`); `today` needs `kind`; `last_change` needs nothing more. The reply is a one-field object named after `what`. Errors read `history_unavailable: …` or `not_recorded: …`. |
 
+## Weather
+
+| Tool | What it does |
+| --- | --- |
+| `get_weather` | The outdoor weather from Open-Meteo: now, today, rain in the next hour, tonight's low and the next five days, in metric units, with `stale` set when the data is old. The same document as `GET /api/v1/weather`. Answers `weather unavailable` while `[weather] enabled` is `false` or before the first fetch. See [Weather](../users/weather.md). |
+
 ## Climate
 
 The climate engine is in beta. These nine tools answer `climate disabled` while `[climate] enabled` is `false`. See [Climate](../users/climate.md).
@@ -109,4 +115,4 @@ The climate engine is in beta. These nine tools answer `climate disabled` while 
 
 ## Count
 
-Nineteen tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications), six in `flow_tools.rs` and nine in `climate_tools.rs`: 19 + 6 + 9 = 34.
+Twenty tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather), six in `flow_tools.rs` and nine in `climate_tools.rs`: 20 + 6 + 9 = 35.

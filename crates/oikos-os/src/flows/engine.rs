@@ -728,7 +728,7 @@ fn step(node: &str, outcome: StepOutcome, detail: String) -> StepView {
 
 /// A random number for a random delay. std's `RandomState` is seeded from the OS and hashing
 /// the clock into it gives a fresh value per call; good enough for picking a wait, no crate.
-fn random_roll() -> u64 {
+pub(crate) fn random_roll() -> u64 {
     use std::hash::{BuildHasher, Hasher};
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
     hasher.write_u128(

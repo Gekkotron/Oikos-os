@@ -164,7 +164,8 @@ fn instructions() -> String {
          The engine learns rules from history and proposes them; nothing applies until \
          `approve_climate_proposal` (or the push button). Safety (frost, overheat, stale \
          readings) always acts. A temperature set by hand holds until the zone's next scheduled \
-         change, at most `manual_hold_max_min`.",
+         change, at most `manual_hold_max_min`. `get_weather` returns the outdoor weather when \
+         `[weather] enabled`.",
         fields = UiOverride::FIELDS.join(", ")
     )
 }

@@ -425,6 +425,33 @@ impl Default for WeatherConfig {
     }
 }
 
+impl WeatherConfig {
+    /// While enabled: a city, a two-letter country when given, and at least 10 minutes between
+    /// fetches (Open-Meteo's free tier is for light use).
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.city.trim().is_empty() {
+            return Err("[weather] city is required when weather is enabled".to_owned());
+        }
+        if let Some(country) = &self.country
+            && !(country.len() == 2 && country.chars().all(|c| c.is_ascii_alphabetic()))
+        {
+            return Err(format!(
+                "[weather] country `{country}` must be two letters, such as `FR`"
+            ));
+        }
+        if self.refresh_minutes < 10 {
+            return Err(format!(
+                "[weather] refresh_minutes is {}: it must be at least 10",
+                self.refresh_minutes
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Flow scheduling.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
@@ -594,6 +621,8 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "watchdog.acl.log_file",
     "history.url",
     "climate.prefix",
+    "weather.city",
+    "weather.country",
 ];
 
 /// The push key `load` falls back to, relative to the config file's folder (git-ignored).

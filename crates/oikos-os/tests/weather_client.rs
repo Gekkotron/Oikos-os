@@ -81,7 +81,7 @@ fn close(a: Option<f64>, b: f64) -> bool {
 #[tokio::test]
 async fn geocode_picks_the_first_result_and_sends_country() {
     let (ep, seen) = stub(200, GEOCODING).await;
-    let place = geocode(&client(), &ep, "Paris", Some("FR"))
+    let place = geocode(&client().unwrap(), &ep, "Paris", Some("FR"))
         .await
         .unwrap()
         .unwrap();
@@ -100,7 +100,9 @@ async fn geocode_picks_the_first_result_and_sends_country() {
 async fn geocode_without_results_is_none() {
     let (ep, _) = stub(200, r#"{"generationtime_ms":0.1}"#).await;
     assert_eq!(
-        geocode(&client(), &ep, "Nowhereville", None).await.unwrap(),
+        geocode(&client().unwrap(), &ep, "Nowhereville", None)
+            .await
+            .unwrap(),
         None
     );
 }
@@ -108,7 +110,7 @@ async fn geocode_without_results_is_none() {
 #[tokio::test]
 async fn geocode_sends_the_city_url_encoded() {
     let (ep, seen) = stub(200, GEOCODING).await;
-    geocode(&client(), &ep, "Saint-Étienne", None)
+    geocode(&client().unwrap(), &ep, "Saint-Étienne", None)
         .await
         .unwrap();
     let q = &seen.lock().unwrap()[0];
@@ -119,23 +121,29 @@ async fn geocode_sends_the_city_url_encoded() {
 #[tokio::test]
 async fn http_error_is_fetch_error() {
     let (ep, _) = stub(500, "{}").await;
-    let err = geocode(&client(), &ep, "Paris", None).await.unwrap_err();
+    let err = geocode(&client().unwrap(), &ep, "Paris", None)
+        .await
+        .unwrap_err();
     assert!(matches!(err, FetchError::Http(_)), "{err:?}");
-    let err = forecast(&client(), &ep, &paris()).await.unwrap_err();
+    let err = forecast(&client().unwrap(), &ep, &paris())
+        .await
+        .unwrap_err();
     assert!(matches!(err, FetchError::Http(_)), "{err:?}");
 }
 
 #[tokio::test]
 async fn undecodable_body_is_a_decode_error() {
     let (ep, _) = stub(200, "not json").await;
-    let err = forecast(&client(), &ep, &paris()).await.unwrap_err();
+    let err = forecast(&client().unwrap(), &ep, &paris())
+        .await
+        .unwrap_err();
     assert!(matches!(err, FetchError::Decode(_)), "{err:?}");
 }
 
 #[tokio::test]
 async fn forecast_requests_the_needed_variables() {
     let (ep, seen) = stub(200, FORECAST).await;
-    let f = forecast(&client(), &ep, &paris()).await.unwrap();
+    let f = forecast(&client().unwrap(), &ep, &paris()).await.unwrap();
     assert_eq!(f.daily.time.len(), 6);
     let q = &seen.lock().unwrap()[0];
     assert_eq!(q["latitude"], "48.85341");

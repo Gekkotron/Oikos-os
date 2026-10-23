@@ -15,7 +15,7 @@ use oikos_api::{
     AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, Dashboard, DashboardReorder,
     DashboardView, EnergyKind, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec,
     GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, IgnoredView, LastChange,
-    OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec,
+    OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec, WeatherView,
 };
 use oikos_climate::doc::{HouseSettings, Rules, ZoneSettings};
 use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus, OverrideRequest};
@@ -60,6 +60,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/flows/{id}/run", post(run_flow))
         .route("/groups", get(list_groups))
         .route("/groups/{id}", put(put_group).delete(delete_group))
+        .route("/weather", get(weather))
         .route("/climate", get(climate))
         .route("/climate/house", put(put_climate_house))
         .route("/climate/zones/{id}", put(put_climate_zone))
@@ -642,6 +643,11 @@ async fn delete_group(
 ) -> Result<StatusCode, HttpError> {
     hub.delete_group(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The outdoor weather (`200`); `503` while `[weather]` is off or before the first fetch.
+async fn weather(State(hub): HubState) -> Result<Json<WeatherView>, HttpError> {
+    Ok(Json(hub.weather_view()?))
 }
 
 /// The climate engine as one document (`200`); `503` while `[climate] enabled` is false.

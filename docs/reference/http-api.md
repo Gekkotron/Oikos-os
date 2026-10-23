@@ -130,6 +130,39 @@ Available when `[climate] enabled = true`; otherwise these routes answer `503`. 
 | `POST /api/v1/climate/zones/{id}/learn` | Learns the zone now; `200` with the learner state. |
 | `GET /api/v1/climate/zones/{id}/decisions?limit=` | `{recent, older}`: the latest decisions from memory, then older rows from history when it is on (`limit` 50 by default, 500 at most; `400` for a `limit` that is not a number). |
 
+## Weather
+
+Available when `[weather] enabled = true`. See [Weather](../users/weather.md).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/weather` | The outdoor weather as one document (below). `503` while `[weather]` is off, the city was not found, or no fetch has succeeded yet. |
+
+```json
+{
+  "place": { "name": "Paris", "admin": "Île-de-France", "country": "FR" },
+  "fetched_at": 1792746902,
+  "stale": false,
+  "current": {
+    "temperature": 13.4, "apparent_temperature": 11.9, "humidity": 81,
+    "condition": "cloudy", "daylight": true, "cloud_cover": 92,
+    "precipitation": 0.0, "wind_speed": 14.0, "wind_gusts": 31.0,
+    "wind_direction": 230, "pressure": 1012.3, "uv_index": 1.2
+  },
+  "today": {
+    "min": 9.1, "max": 15.0, "precipitation": 2.4,
+    "precipitation_probability": 70, "wind_gusts_max": 45.0
+  },
+  "rain_next_hour": 0.3,
+  "tonight_min": 7.8,
+  "days": [
+    { "date": "2026-10-24", "condition": "rain", "min": 8.0, "max": 13.5, "precipitation_probability": 85 }
+  ]
+}
+```
+
+Units are metric: °C, km/h, mm, hPa and %. `fetched_at` is unix seconds. Any number may be `null` when Open-Meteo has no value. `days` holds the next five days, starting tomorrow. There are no coordinates in the response. `stale` is `true` once the last fetch is older than twice `refresh_minutes`.
+
 ## WebSocket
 
 `GET /ws` upgrades to a WebSocket. The hub sends a `snapshot` frame first, then every hub event as a JSON text frame tagged by `type`. It subscribes before it takes the snapshot, so no event falls between the two. A client that falls behind gets a fresh `snapshot` instead of being dropped. Incoming frames are ignored.
@@ -150,6 +183,7 @@ Available when `[climate] enabled = true`; otherwise these routes answer `503`. 
 | `command_failed` | `{id, reason}`. |
 | `button_pressed` | `{id}`: a virtual or discovered button was pressed. An event, not a state. |
 | `signal_received` | `{id, signal}`: a remote, event entity or tag sent a signal. An event, not a state. |
+| `weather_changed` | No payload: the weather was refreshed with new data, refetch `GET /api/v1/weather`. |
 | `climate_changed` | `{zone}`: one zone's document changed, or the house settings when `zone` is `null`. |
 
 ## Errors

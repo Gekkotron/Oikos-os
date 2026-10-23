@@ -410,3 +410,72 @@ fn watchdog_rejects_an_unknown_source() {
         Ok(())
     });
 }
+
+fn enabled_weather(city: &str) -> oikos_os::config::WeatherConfig {
+    oikos_os::config::WeatherConfig {
+        enabled: true,
+        city: city.to_owned(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn weather_disabled_by_default_and_valid() {
+    let cfg = Config::default();
+    assert!(!cfg.weather.enabled);
+    assert_eq!(cfg.weather.refresh_minutes, 15);
+    assert_eq!(cfg.weather.validate(), Ok(()));
+}
+
+#[test]
+fn weather_enabled_needs_a_city() {
+    assert!(enabled_weather("").validate().unwrap_err().contains("city"));
+    let blank = enabled_weather("  ").validate().unwrap_err();
+    assert!(blank.starts_with("[weather]"), "{blank}");
+    assert_eq!(enabled_weather("Paris").validate(), Ok(()));
+    // Disabled never complains.
+    let off = oikos_os::config::WeatherConfig {
+        refresh_minutes: 1,
+        country: Some("FRA".into()),
+        ..Default::default()
+    };
+    assert_eq!(off.validate(), Ok(()));
+}
+
+#[test]
+fn weather_country_is_two_letters() {
+    for (code, ok) in [("FR", true), ("fr", true), ("FRA", false), ("F1", false)] {
+        let mut cfg = enabled_weather("Paris");
+        cfg.country = Some(code.to_owned());
+        assert_eq!(cfg.validate().is_ok(), ok, "{code}");
+    }
+}
+
+#[test]
+fn weather_refresh_has_a_floor() {
+    let mut cfg = enabled_weather("Paris");
+    cfg.refresh_minutes = 9;
+    assert!(cfg.validate().unwrap_err().starts_with("[weather]"));
+    cfg.refresh_minutes = 10;
+    assert_eq!(cfg.validate(), Ok(()));
+}
+
+#[test]
+fn weather_from_toml_and_env() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "oikos.toml",
+            "[weather]\nenabled = true\ncity = \"Lyon\"\ncountry = \"FR\"\n",
+        )?;
+        let cfg = Config::load(None)?;
+        assert!(cfg.weather.enabled);
+        assert_eq!(cfg.weather.city, "Lyon");
+        assert_eq!(cfg.weather.country.as_deref(), Some("FR"));
+        jail.set_env("OIKOS_WEATHER__CITY", "1234");
+        jail.set_env("OIKOS_WEATHER__COUNTRY", "42");
+        let cfg = Config::load(None)?;
+        assert_eq!(cfg.weather.city, "1234");
+        assert_eq!(cfg.weather.country.as_deref(), Some("42"));
+        Ok(())
+    });
+}

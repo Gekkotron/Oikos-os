@@ -53,6 +53,9 @@ async fn main() -> anyhow::Result<ExitCode> {
             cfg.climate
                 .validate()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
+            cfg.weather
+                .validate()
+                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
             logging::init(&cfg.log);
             tracing::info!(host = %cfg.mqtt.host, port = cfg.mqtt.port, "starting oikos-os");
 
@@ -77,6 +80,7 @@ async fn main() -> anyhow::Result<ExitCode> {
                 Arc::clone(&hub),
                 publish_rx,
             );
+            let weather = hub.start_weather();
             tokio::spawn(oikos_os::groups::migrate::spawn(Arc::clone(&hub)));
             let http_task = http::serve(&cfg.http, http::router(Arc::clone(&hub))).await?;
 
@@ -95,6 +99,9 @@ async fn main() -> anyhow::Result<ExitCode> {
             }
             engine.abort();
             if let Some(task) = &climate {
+                task.abort();
+            }
+            if let Some(task) = &weather {
                 task.abort();
             }
             push_retry.abort();

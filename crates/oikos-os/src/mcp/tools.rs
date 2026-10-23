@@ -1,11 +1,11 @@
-//! The fourteen tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
+//! The twenty tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
 //! await); write tools log their arguments and go through the hub's writers.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use oikos_api::{CommandResponse, DeviceView, EntityView, GroupView};
+use oikos_api::{CommandResponse, DeviceView, EntityView, GroupView, WeatherView};
 use oikos_core::flow::{notify_channel_error, notify_severity_error};
 use oikos_core::model::{AreasDocument, SwitchType};
 use rmcp::handler::server::wrapper::{Json, Parameters};
@@ -28,6 +28,14 @@ pub(super) type ToolResult<T> = Result<Json<T>, ToolError>;
 
 #[tool_router(vis = "pub(super)")]
 impl OikosMcp {
+    /// The outdoor weather from Open-Meteo: now, today, rain in the next hour, tonight's low and
+    /// the next five days (metric units; `stale` is true when the data is old). Answers
+    /// `weather unavailable` while `[weather]` is off or before the first fetch.
+    #[tool(name = "get_weather", annotations(read_only_hint = true))]
+    async fn get_weather(&self) -> ToolResult<WeatherView> {
+        Ok(Json(self.hub.weather_view()?))
+    }
+
     /// The Zigbee2MQTT bridge (version, coordinator, permit join, online or not) and the
     /// state of the link to the MQTT broker.
     #[tool(name = "bridge_info", annotations(read_only_hint = true))]

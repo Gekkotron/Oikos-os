@@ -66,13 +66,13 @@ pub enum FetchError {
 }
 
 /// An HTTP client for Open-Meteo: 5 s to connect, 15 s in all.
-pub fn client() -> reqwest::Client {
+pub fn client() -> Result<reqwest::Client, FetchError> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(15))
         .user_agent(concat!("oikos-os/", env!("CARGO_PKG_VERSION")))
         .build()
-        .expect("static client configuration is valid")
+        .map_err(|e| FetchError::Http(e.without_url().to_string()))
 }
 
 #[derive(Deserialize)]

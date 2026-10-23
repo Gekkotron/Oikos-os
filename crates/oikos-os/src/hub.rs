@@ -201,6 +201,8 @@ pub struct Hub {
     /// `[weather] enabled` and `refresh_minutes`.
     pub(crate) weather_enabled: bool,
     pub(crate) weather_refresh_minutes: u64,
+    pub(crate) weather_city: String,
+    pub(crate) weather_country: Option<String>,
     pub(crate) weather: Mutex<crate::weather::hub::WeatherSlot>,
     /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
     dashboard_store: Mutex<DashboardStore>,
@@ -321,6 +323,8 @@ impl Hub {
                 .then(|| ClimateHub::new(&cfg.climate.prefix)),
             weather_enabled: cfg.weather.enabled,
             weather_refresh_minutes: cfg.weather.refresh_minutes,
+            weather_city: cfg.weather.city.trim().to_owned(),
+            weather_country: cfg.weather.country.clone(),
             weather: Mutex::default(),
             dashboard_store: Mutex::new(DashboardStore::new()),
             automation_prefix: cfg.topics.automation_prefix.clone(),

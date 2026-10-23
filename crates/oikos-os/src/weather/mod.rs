@@ -3,6 +3,7 @@
 pub mod entities;
 pub mod hub;
 pub mod open_meteo;
+pub mod poller;
 
 /// Whether the last success is older than twice the refresh period.
 pub fn is_stale(fetched_at: u64, now: u64, refresh_minutes: u64) -> bool {
