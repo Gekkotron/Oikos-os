@@ -1,7 +1,6 @@
 //! The Alerts page: channel chips on top, the alerts grouped by day below.
 
 use leptos::prelude::*;
-use leptos_router::components::A;
 use oikos_api::AlertChannel;
 
 use crate::alerts::{DayLabel, filtered, group_by_day};
@@ -9,6 +8,7 @@ use crate::components::alert_row::AlertRow;
 use crate::components::now::Now;
 use crate::house::House;
 use crate::icons::channel_icon;
+use crate::nav::BackLink;
 
 /// The heading of a day group: "Today", "Yesterday" or the date in the browser's locale.
 pub fn day_title(label: &DayLabel) -> String {
@@ -87,10 +87,7 @@ pub fn AlertsScreen() -> impl IntoView {
     view! {
         <div class="alerts">
             <header class="sheet__header">
-                <A href="/" attr:class="sheet__back">
-                    "←"
-                    <span class="sheet__back-label">"Back"</span>
-                </A>
+                <BackLink />
                 <div class="sheet__titles">
                     <h1 class="sheet__title">"Alerts"</h1>
                 </div>

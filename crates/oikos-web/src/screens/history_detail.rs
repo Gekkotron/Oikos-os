@@ -2,7 +2,6 @@
 
 use leptos::prelude::*;
 use leptos_router::NavigateOptions;
-use leptos_router::components::A;
 use leptos_router::hooks::{use_navigate, use_params_map, use_query_map};
 use oikos_api::{EntityView, HistoryRange};
 use oikos_core::energy::{EnergyMeters, EnergyUnits};
@@ -11,7 +10,7 @@ use crate::components::history_chart::{Flavor, HistoryChart};
 use crate::energy::{energy_entities, energy_entity};
 use crate::format::{title_suffix, type_word, wrap_id};
 use crate::house::House;
-use crate::nav::ReturnPath;
+use crate::nav::BackLink;
 use crate::screens::entity_sheet::{availability_class, availability_word};
 
 /// Classify a unit as the counter flavour (energy totals: Wh/kWh/MWh) or the series flavour.
@@ -49,7 +48,6 @@ const RANGES: [HistoryRange; 4] = [
 #[component]
 pub fn HistoryDetailScreen() -> impl IntoView {
     let house = expect_context::<House>();
-    let return_path = expect_context::<ReturnPath>();
     let params = use_params_map();
     let query = use_query_map();
     let navigate = use_navigate();
@@ -140,10 +138,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
     view! {
         <div class="sheet history-detail">
             <header class="sheet__header">
-                <A href=move || return_path.0.get() attr:class="sheet__back">
-                    "←"
-                    <span class="sheet__back-label">"Back"</span>
-                </A>
+                <BackLink />
                 {header}
             </header>
             {move || {

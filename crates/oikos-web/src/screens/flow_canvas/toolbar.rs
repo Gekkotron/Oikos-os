@@ -23,6 +23,7 @@ use crate::flow_list::clear_stale_area;
 use crate::flow_viewport::visible_world;
 use crate::house::House;
 use crate::icons::{CHECK, PENCIL, PLAY, X_MARK};
+use crate::nav::use_back;
 use crate::screens::flow_schedule::SaveBlocked;
 
 #[component]
@@ -287,9 +288,10 @@ pub fn Toolbar(
         })
     };
     let original = Signal::derive(move || view.with(|v| v.definition.clone()));
+    let back = use_back();
     view! {
         <div class="flow-toolbar flow-toolbar--title">
-            <A href="/flows" attr:class="flow-toolbar__back" attr:aria-label="Back to flows">
+            <A href=move || back.get() attr:class="flow-toolbar__back" attr:aria-label="Back">
                 "←"
             </A>
             <Show
