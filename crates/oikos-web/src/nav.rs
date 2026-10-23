@@ -89,6 +89,8 @@ fn parent_of(path: &str) -> String {
         "/flows".to_owned()
     } else if child("/groups/").is_some() {
         "/groups".to_owned()
+    } else if child("/settings/").is_some() {
+        "/settings".to_owned()
     } else {
         "/".to_owned()
     }
@@ -214,6 +216,7 @@ mod tests {
         assert_eq!(back_target(&walk(&["/alerts/a1"])), "/alerts");
         assert_eq!(back_target(&walk(&["/flows/porch"])), "/flows");
         assert_eq!(back_target(&walk(&["/groups/salon/edit"])), "/groups");
+        assert_eq!(back_target(&walk(&["/settings/zigbee2mqtt"])), "/settings");
         assert_eq!(back_target(&walk(&["/group/salon"])), "/");
         assert_eq!(back_target(&walk(&["/entity/lamp"])), "/");
         assert_eq!(back_target(&[]), "/");

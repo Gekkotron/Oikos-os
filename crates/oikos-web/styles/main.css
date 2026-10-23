@@ -2517,6 +2517,78 @@ p.override__hint {
   gap: 8px;
 }
 
+/* The Settings list: one card, one full-width row per sub-page, its status on the right. */
+.settings__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.settings__list li + li {
+  border-top: 1px solid var(--card-border);
+}
+
+.settings__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 16px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.settings__item:hover {
+  background: var(--raised);
+}
+
+.settings__item:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: -2px;
+}
+
+.settings__item-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings__item-title {
+  font: var(--type-body);
+  font-weight: 600;
+}
+
+.settings__item-hint,
+.settings__item-status {
+  font: var(--type-label);
+  color: var(--muted);
+}
+
+.settings__item-status {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings__item-chevron {
+  flex: none;
+  font-size: 20px;
+  color: var(--muted);
+}
+
+.settings__all {
+  align-self: flex-start;
+}
+
 .segmented {
   display: flex;
   gap: 8px;
