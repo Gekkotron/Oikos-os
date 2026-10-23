@@ -6345,3 +6345,20 @@ html:has(.flow-canvas-screen) {
     overflow-x: auto;
   }
 }
+
+/* Settings, Home panel: fields stack; a validation message sits under its field. */
+.home-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.home-settings__error {
+  margin: 0;
+  color: var(--offline);
+  font: var(--type-label);
+}
+
+.home-settings__save {
+  align-self: flex-start;
+}

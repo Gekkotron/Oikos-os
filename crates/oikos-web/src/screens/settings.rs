@@ -8,6 +8,7 @@ use oikos_api::{ConnectionStatus, DeviceView, UpdateView};
 
 use crate::house::House;
 use crate::screens::entity_sheet::{availability_class, availability_word};
+use crate::screens::home_settings_panel::HomeSettingsPanel;
 use crate::theme::Theme;
 
 const DASH: &str = "—";
@@ -270,6 +271,7 @@ pub fn SettingsScreen() -> impl IntoView {
                     "Open Z2M devices"
                 </A>
             </Panel>
+            <HomeSettingsPanel />
             <Panel title="Theme">
                 <ThemeSwitch />
             </Panel>

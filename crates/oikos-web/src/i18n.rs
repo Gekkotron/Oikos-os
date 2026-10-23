@@ -520,6 +520,51 @@ pub fn uv_word(lang: Lang, level: UvLevel) -> &'static str {
     }
 }
 
+/// The fixed words of the Home panel in Settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HomeText {
+    Title,
+    Hint,
+    EcoSetpoint,
+    ModeSelector,
+    IndoorSensor,
+    ColdBelow,
+    HotAbove,
+    NoneChoice,
+    AutoMean,
+    Save,
+    Saved,
+    NotANumber,
+    CouldNotSave,
+}
+
+/// A fixed word of the Home panel.
+pub fn home_text(lang: Lang, k: HomeText) -> &'static str {
+    use HomeText::*;
+    let (en, fr) = match k {
+        Title => ("Home", "Maison"),
+        Hint => (
+            "What the home header says and when it calls it cold or hot.",
+            "Ce que dit l'en-tête de la maison et quand il parle de froid ou de chaud.",
+        ),
+        EcoSetpoint => ("Eco setpoint (°C)", "Consigne éco (°C)"),
+        ModeSelector => ("Mode selector", "Sélecteur de mode"),
+        IndoorSensor => ("Indoor sensor", "Capteur intérieur"),
+        ColdBelow => ("Cold below (°C)", "Froid en dessous de (°C)"),
+        HotAbove => ("Hot above (°C)", "Chaud au-dessus de (°C)"),
+        NoneChoice => ("None", "Aucun"),
+        AutoMean => (
+            "Automatic (mean of rooms)",
+            "Automatique (moyenne des pièces)",
+        ),
+        Save => ("Save", "Enregistrer"),
+        Saved => ("Saved", "Enregistré"),
+        NotANumber => ("Enter a number", "Saisissez un nombre"),
+        CouldNotSave => ("Could not save", "Enregistrement impossible"),
+    };
+    if lang == Lang::Fr { fr } else { en }
+}
+
 /// The fixed words of the weather page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WeatherText {
@@ -682,6 +727,28 @@ mod tests {
         for lang in [Lang::En, Lang::Fr] {
             assert!(!weather_text(lang, WeatherText::Credit).is_empty());
         }
+    }
+    #[test]
+    fn home_panel_copy_has_both_languages() {
+        use HomeText::*;
+        for k in [
+            Title,
+            Hint,
+            EcoSetpoint,
+            ModeSelector,
+            IndoorSensor,
+            ColdBelow,
+            HotAbove,
+            NoneChoice,
+            AutoMean,
+            Save,
+            Saved,
+            NotANumber,
+            CouldNotSave,
+        ] {
+            assert!(!home_text(Lang::En, k).is_empty() && !home_text(Lang::Fr, k).is_empty());
+        }
+        assert_eq!(home_text(Lang::Fr, Title), "Maison");
     }
     #[test]
     fn toggles() {

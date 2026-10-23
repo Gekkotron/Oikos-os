@@ -1,0 +1,325 @@
+//! The Home panel in Settings: the five home-header settings behind one Save.
+
+use leptos::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use leptos::task::spawn_local;
+
+use oikos_api::HomeSettings;
+use oikos_core::model::Kind;
+
+use crate::climate::entity_field::ThermometerField;
+use crate::components::toast::Toasts;
+use crate::format::list_label;
+use crate::home_header::mood::{COLD_DEFAULT, HOT_DEFAULT};
+use crate::house::House;
+use crate::i18n::{HomeText, Lang, home_text};
+
+/// A setting the panel edits, for pointing an error at its field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Field {
+    Eco,
+    Mode,
+    Indoor,
+    Cold,
+    Hot,
+}
+
+/// The five fields as typed: numbers as text, entity pickers as ids.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Draft {
+    pub eco: String,
+    pub mode: Option<String>,
+    pub indoor: Option<String>,
+    pub cold: String,
+    pub hot: String,
+}
+
+fn number_text(v: Option<f64>) -> String {
+    v.map(|v| v.to_string()).unwrap_or_default()
+}
+
+impl From<&HomeSettings> for Draft {
+    fn from(s: &HomeSettings) -> Self {
+        Draft {
+            eco: number_text(s.eco_setpoint),
+            mode: s.mode_entity.clone(),
+            indoor: s.indoor_entity.clone(),
+            cold: number_text(s.cold_below),
+            hot: number_text(s.hot_above),
+        }
+    }
+}
+
+/// `,` or `.` as the decimal mark; empty is `None`.
+fn parse_number(text: &str, field: Field) -> Result<Option<f64>, (Field, &'static str)> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    text.replace(',', ".")
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite())
+        .map(Some)
+        .ok_or((field, "not a number"))
+}
+
+/// The settings document the draft stands for, or the first number that does not parse.
+pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, (Field, &'static str)> {
+    Ok(HomeSettings {
+        eco_setpoint: parse_number(&draft.eco, Field::Eco)?,
+        mode_entity: draft.mode.clone(),
+        indoor_entity: draft.indoor.clone(),
+        cold_below: parse_number(&draft.cold, Field::Cold)?,
+        hot_above: parse_number(&draft.hot, Field::Hot)?,
+    })
+}
+
+/// The field a hub validation message names; `None` when it names none of them.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // only the wasm save path calls it
+fn field_of_message(message: &str) -> Option<Field> {
+    [
+        ("eco_setpoint", Field::Eco),
+        ("mode_entity", Field::Mode),
+        ("indoor_entity", Field::Indoor),
+        ("cold_below", Field::Cold),
+        ("hot_above", Field::Hot),
+    ]
+    .into_iter()
+    .find(|(name, _)| message.contains(name))
+    .map(|(_, field)| field)
+}
+
+/// The `select` entities as `(id, label)`: the hub's virtual ones first, then by label.
+fn mode_options(house: House) -> Vec<(String, String)> {
+    let mut list: Vec<(String, String)> = house.entities.with(|m| {
+        m.values()
+            .filter(|e| e.kind == Kind::Select)
+            .map(|e| (e.id.clone(), list_label(e)))
+            .collect()
+    });
+    list.sort_by_key(|(id, label)| (!id.starts_with("virtual_"), label.to_lowercase()));
+    list
+}
+
+#[component]
+pub fn HomeSettingsPanel() -> impl IntoView {
+    let house = expect_context::<House>();
+    let lang = use_context::<RwSignal<Lang>>();
+    let t = move |k: HomeText| home_text(lang.map_or(Lang::En, |l| l.get()), k);
+
+    let draft = RwSignal::new(house.home_settings.with_untracked(|s| Draft::from(s)));
+    let error = RwSignal::new(None::<(Field, String)>);
+    let saving = RwSignal::new(false);
+
+    // A change from elsewhere (another tab, the MCP, our own save) refills the form, unless
+    // there are edits in progress.
+    Effect::new(move |prev: Option<Draft>| {
+        let fresh = house.home_settings.with(|s| Draft::from(s));
+        if let Some(prev) = &prev
+            && draft.get_untracked() == *prev
+        {
+            draft.set(fresh.clone());
+        }
+        fresh
+    });
+
+    let save = move |_| {
+        let settings = match draft_to_settings(&draft.get_untracked()) {
+            Ok(s) => s,
+            Err((field, _)) => {
+                error.set(Some((field, t(HomeText::NotANumber).to_owned())));
+                return;
+            }
+        };
+        error.set(None);
+        saving.set(true);
+        #[cfg(target_arch = "wasm32")]
+        {
+            let toasts = use_context::<Toasts>();
+            spawn_local(async move {
+                match crate::api::home::put_home_settings(&settings).await {
+                    Ok(stored) => {
+                        house.home_settings.set(stored);
+                        if let Some(toasts) = toasts {
+                            toasts.push(t(HomeText::Saved));
+                        }
+                    }
+                    Err(e) => match field_of_message(&e.error) {
+                        Some(field) => {
+                            error.try_set(Some((field, e.error)));
+                        }
+                        None => {
+                            if let Some(toasts) = toasts {
+                                toasts.push(format!("{}: {}", t(HomeText::CouldNotSave), e.error));
+                            }
+                        }
+                    },
+                }
+                saving.try_set(false);
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = (settings, use_context::<Toasts>());
+    };
+
+    let error_for = move |field: Field| {
+        move || {
+            error.with(|e| {
+                e.as_ref()
+                    .filter(|(f, _)| *f == field)
+                    .map(|(_, text)| view! { <p class="home-settings__error">{text.clone()}</p> })
+            })
+        }
+    };
+
+    let number = move |field: Field,
+                       label: HomeText,
+                       placeholder: String,
+                       get: fn(&Draft) -> String,
+                       set: fn(&mut Draft, String)| {
+        view! {
+            <div class="climate-field">
+                <label class="climate-field__label" for=format!("home-{field:?}")>
+                    {move || t(label)}
+                </label>
+                <input
+                    id=format!("home-{field:?}")
+                    class="field"
+                    type="text"
+                    inputmode="decimal"
+                    placeholder=placeholder
+                    prop:value=move || draft.with(get)
+                    on:input=move |ev| draft.update(|d| set(d, event_target_value(&ev)))
+                />
+                {error_for(field)}
+            </div>
+        }
+    };
+
+    let mode_value = Signal::derive(move || draft.with(|d| d.mode.clone()));
+
+    view! {
+        <section class="sheet__panel home-settings">
+            <h2 class="sheet__heading">{move || t(HomeText::Title)}</h2>
+            <p class="settings__hint">{move || t(HomeText::Hint)}</p>
+            {number(
+                Field::Eco,
+                HomeText::EcoSetpoint,
+                String::new(),
+                |d| d.eco.clone(),
+                |d, v| d.eco = v,
+            )}
+            <div class="climate-field">
+                <label class="climate-field__label" for="home-Mode">
+                    {move || t(HomeText::ModeSelector)}
+                </label>
+                <select
+                    id="home-Mode"
+                    class="field"
+                    on:change=move |ev| {
+                        let v = event_target_value(&ev);
+                        draft.update(|d| d.mode = (!v.is_empty()).then_some(v));
+                    }
+                >
+                    <option value="" selected=move || mode_value.get().is_none()>
+                        {move || t(HomeText::NoneChoice)}
+                    </option>
+                    {move || {
+                        let current = mode_value.get();
+                        let mut list = mode_options(house);
+                        if let Some(id) = current.as_ref()
+                            && !list.iter().any(|(i, _)| i == id)
+                        {
+                            list.insert(0, (id.clone(), id.clone()));
+                        }
+                        list.into_iter()
+                            .map(|(id, text)| {
+                                let selected = current.as_deref() == Some(id.as_str());
+                                view! { <option value=id selected=selected>{text}</option> }
+                            })
+                            .collect_view()
+                    }}
+                </select>
+                {error_for(Field::Mode)}
+            </div>
+            <div class="home-settings__field">
+                <ThermometerField
+                    value=Signal::derive(move || draft.with(|d| d.indoor.clone()))
+                    auto=Signal::derive(|| None)
+                    on_change=Callback::new(move |v| draft.update(|d| d.indoor = v))
+                    label=Signal::derive(move || t(HomeText::IndoorSensor).to_owned())
+                    auto_text=Signal::derive(move || t(HomeText::AutoMean).to_owned())
+                />
+                {error_for(Field::Indoor)}
+            </div>
+            {number(
+                Field::Cold,
+                HomeText::ColdBelow,
+                COLD_DEFAULT.to_string(),
+                |d| d.cold.clone(),
+                |d, v| d.cold = v,
+            )}
+            {number(
+                Field::Hot,
+                HomeText::HotAbove,
+                HOT_DEFAULT.to_string(),
+                |d| d.hot.clone(),
+                |d, v| d.hot = v,
+            )}
+            <button
+                type="button"
+                class="chip home-settings__save"
+                prop:disabled=move || saving.get()
+                on:click=save
+            >
+                {move || t(HomeText::Save)}
+            </button>
+        </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn draft(eco: &str, cold: &str, hot: &str) -> Draft {
+        Draft {
+            eco: eco.into(),
+            mode: None,
+            indoor: None,
+            cold: cold.into(),
+            hot: hot.into(),
+        }
+    }
+
+    #[test]
+    fn draft_parses_numbers() {
+        let s = draft_to_settings(&draft("15,5", "", "27.5")).unwrap();
+        assert_eq!(s.eco_setpoint, Some(15.5));
+        assert_eq!(s.cold_below, None);
+        assert_eq!(s.hot_above, Some(27.5));
+        let (field, _) = draft_to_settings(&draft("abc", "", "")).unwrap_err();
+        assert_eq!(field, Field::Eco);
+        let (field, _) = draft_to_settings(&draft("", "", "x")).unwrap_err();
+        assert_eq!(field, Field::Hot);
+    }
+
+    #[test]
+    fn hub_messages_name_their_field() {
+        assert_eq!(
+            field_of_message("cold_below must be below hot_above"),
+            Some(Field::Cold)
+        );
+        assert_eq!(
+            field_of_message("eco_setpoint must be between 5 and 30"),
+            Some(Field::Eco)
+        );
+        assert_eq!(field_of_message("mode_entity: unknown"), Some(Field::Mode));
+        assert_eq!(
+            field_of_message("indoor_entity: unknown"),
+            Some(Field::Indoor)
+        );
+        assert_eq!(field_of_message("boom"), None);
+    }
+}
