@@ -1,0 +1,189 @@
+<style>
+  .rc-wrap { display: grid; gap: 28px; }
+  .rc-theme { border-radius: 18px; padding: 22px; }
+  .rc-theme h3 { margin: 0 0 14px; font: 600 14px/18px Inter, system-ui, sans-serif; }
+  .ivoire {
+    --bg:#f3f0e8; --ink:#1f2420; --muted:#5f665c; --card-bg:#fffdf8; --card-border:#ebe6da;
+    --on-bg:#fbf0d4; --on-ink:#8f6613; --tile:#f3efe6; --tile-on:#f1d896; --cool:#eaf0f5;
+    --sage:#e3eadf; --sage-ink:#4f6b4a; --track:#e6e0d3; --btn-dark:#232a26; --btn-dark-ink:#fffdf8;
+    --toggle-on:#b98a2c; --spark:#38738f; --tank:#cfdde6;
+  }
+  .night {
+    --bg:#0b1020; --ink:#e8ecff; --muted:rgb(232 236 255 / 65%); --card-bg:rgb(255 255 255 / 6%);
+    --card-border:rgb(255 255 255 / 9%); --on-bg:linear-gradient(145deg, rgb(255 196 87 / 28%), rgb(255 196 87 / 6%));
+    --on-ink:#ffc457; --tile:rgb(255 255 255 / 8%); --tile-on:rgb(255 196 87 / 30%); --cool:rgb(88 225 255 / 10%);
+    --sage:rgb(111 240 191 / 10%); --sage-ink:#6ff0bf; --track:rgb(255 255 255 / 12%); --btn-dark:#e8ecff;
+    --btn-dark-ink:#0b1020; --toggle-on:#ffc457; --spark:#58e1ff; --tank:rgb(88 225 255 / 35%);
+    background: radial-gradient(120% 90% at 50% 0%, #1d2b55 0%, #0b1020 100%) !important;
+  }
+  .rc-theme { background: var(--bg); color: var(--ink); font-family: Inter, system-ui, sans-serif; }
+  .rc-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  @media (max-width: 900px) { .rc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .c { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 22px; padding: 16px;
+       min-height: 230px; display: flex; flex-direction: column; position: relative; }
+  .c.on { background: var(--on-bg); }
+  .c.cool { background: var(--cool); }
+  .c.sage { background: var(--sage); }
+  .c.wide { grid-column: span 2; flex-direction: row; gap: 16px; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .tile { width: 40px; height: 40px; border-radius: 12px; background: var(--tile); display: grid; place-items: center; font-size: 18px; }
+  .c.on .tile { background: var(--tile-on); }
+  .room { font-size: 11px; color: var(--muted); margin-top: 18px; }
+  .name { font-size: 15px; font-weight: 600; margin-top: 2px; }
+  .state { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .c.on .state { color: var(--on-ink); }
+  .grow { flex: 1; }
+  .tog { width: 40px; height: 22px; border-radius: 11px; background: var(--track); position: relative; }
+  .tog::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+  .tog.on { background: var(--toggle-on); } .tog.on::after { left: 21px; }
+  .slabel { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .c.on .slabel { color: var(--on-ink); }
+  .slider { height: 4px; border-radius: 2px; background: var(--track); position: relative; }
+  .slider i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--toggle-on); }
+  .slider b { position: absolute; top: -6px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 25%); }
+  .badge { font-size: 10px; border: 1px solid var(--card-border); border-radius: 8px; padding: 3px 7px; color: var(--muted); }
+  .hdr { display: flex; gap: 10px; align-items: center; }
+  .hdr .room { margin: 0; }
+  .hdr .name { margin: 0; }
+  .dial { display: grid; place-items: center; flex: 1; }
+  .dial svg { width: 150px; height: 150px; touch-action: none; cursor: grab; }
+  .dial-foot { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+  .round { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--card-border); display: grid; place-items: center; background: transparent; color: var(--ink); cursor: pointer; }
+  .big { font-size: 36px; font-weight: 500; letter-spacing: -0.02em; margin-top: 14px; }
+  .big small { font-size: 15px; color: var(--muted); }
+  .spark-row { display: flex; justify-content: space-between; align-items: flex-end; font-size: 12px; color: var(--muted); }
+  .sentence { font-size: 26px; font-weight: 500; letter-spacing: -0.02em; margin-top: 8px; }
+  .btns { display: flex; gap: 8px; margin-top: auto; }
+  .btn-dark { background: var(--btn-dark); color: var(--btn-dark-ink); border-radius: 10px; padding: 9px 14px; font-size: 13px; }
+  .btn-ghost { border: 1px solid var(--card-border); border-radius: 10px; padding: 9px 11px; font-size: 13px; }
+  .robot { width: 190px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 10.5px; color: var(--muted); }
+  .foot { font-size: 11px; color: var(--muted); margin-top: auto; }
+  .tank-row { display: flex; gap: 12px; align-items: flex-end; margin-top: auto; }
+  .tank { width: 22px; height: 70px; border-radius: 11px; background: var(--track); position: relative; overflow: hidden; }
+  .tank i { position: absolute; left: 0; right: 0; bottom: 0; height: 22%; background: var(--tank); }
+  .q { outline: 2px dashed #c9973d; outline-offset: 3px; border-radius: 6px; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 8px; }
+</style>
+
+<h2>Rich cards: one look, two themes</h2>
+<p class="subtitle">My reading of the mockup, with the defaults so far. The climate ring is draggable, so try it. Dashed outlines mark parts that are still open.</p>
+
+<div class="rc-wrap">
+  <section class="rc-theme ivoire"><h3>Ivoire</h3><div class="rc-grid" data-cards></div></section>
+  <section class="rc-theme night"><h3>Night Glass</h3><div class="rc-grid" data-cards></div></section>
+</div>
+
+<p class="note">The vacuum card spans two columns on Home (full row on a phone) and is 2×1 on dashboards. Labels come in FR and EN. The robot drawing is generic, with no brand on it.</p>
+
+<template id="cards">
+  <article class="c">
+    <div class="top"><div class="tile">💡</div><div class="tog"></div></div>
+    <div class="room">Salon</div><div class="name">Ruban LED</div><div class="state">Éteint</div>
+    <div class="grow"></div>
+    <div class="slabel"><span>Luminosité</span><span>0 %</span></div>
+    <div class="slider"><i style="width:0"></i><b style="left:0"></b></div>
+  </article>
+
+  <article class="c on">
+    <div class="top"><div class="tile">💡</div><div class="tog on"></div></div>
+    <div class="room">Chambre</div><div class="name">LED du lit</div><div class="state">Allumée · 14 %</div>
+    <div class="grow"></div>
+    <div class="slabel"><span>Luminosité</span><span>14 %</span></div>
+    <div class="slider"><i style="width:14%"></i><b style="left:calc(14% - 8px)"></b></div>
+  </article>
+
+  <article class="c sage">
+    <div class="top">
+      <div class="hdr"><div class="tile">🌡️</div><div><div class="room">Chambre</div><div class="name">Climatisation</div></div></div>
+      <span class="badge">Éco</span>
+    </div>
+    <div class="dial">
+      <svg viewBox="0 0 160 160" data-dial>
+        <path d="M 30.5 129.5 A 70 70 0 1 1 129.5 129.5" fill="none" stroke="var(--track)" stroke-width="8" stroke-linecap="round"/>
+        <path data-arc fill="none" stroke="var(--sage-ink)" stroke-width="8" stroke-linecap="round"/>
+        <circle data-knob r="8" fill="#fff" stroke="var(--sage-ink)" stroke-width="2"/>
+        <text data-val x="80" y="84" text-anchor="middle" font-size="30" font-weight="500" fill="var(--ink)">15,5°</text>
+        <text x="80" y="102" text-anchor="middle" font-size="9" fill="var(--muted)">Température souhaitée</text>
+      </svg>
+    </div>
+    <div class="dial-foot"><button class="round" data-minus>−</button><span>Il fait <b>22°</b></span><button class="round" data-plus>+</button></div>
+  </article>
+
+  <article class="c cool">
+    <div class="top"><div class="tile">🌡️</div><span class="badge q">En direct</span></div>
+    <div class="room">Salon</div><div class="name">Température</div>
+    <div class="big">20,7 <small>°C</small></div>
+    <div class="grow"></div>
+    <div class="spark-row"><span>💧 57 %</span>
+      <svg width="100" height="28" viewBox="0 0 100 28"><polyline fill="none" stroke="var(--spark)" stroke-width="1.6" points="0,24 10,22 18,23 26,17 34,19 42,14 50,16 58,11 66,13 74,8 82,10 90,6 100,8"/></svg>
+    </div>
+  </article>
+
+  <article class="c wide">
+    <div style="display:flex;flex-direction:column;flex:1">
+      <div class="hdr"><div class="tile">🤖</div><span style="font-size:12px;color:var(--muted)">🔋 100 %</span></div>
+      <div class="room">Salon</div><div class="name">Aspirateur</div>
+      <div class="sentence">À la maison.</div>
+      <div class="btns"><span class="btn-dark">▶ Démarrer</span><span class="btn-ghost">⌂</span></div>
+    </div>
+    <div class="robot">
+      <svg width="150" height="150" viewBox="0 0 150 150">
+        <circle cx="75" cy="75" r="72" fill="none" stroke="var(--card-border)"/>
+        <circle cx="75" cy="75" r="60" fill="none" stroke="var(--card-border)"/>
+        <circle cx="75" cy="75" r="48" fill="var(--tile)" stroke="var(--card-border)" stroke-width="2"/>
+        <circle cx="75" cy="64" r="15" fill="var(--card-bg)" stroke="var(--card-border)" stroke-width="2"/>
+        <rect x="71" y="35" width="8" height="2" rx="1" fill="var(--muted)"/>
+      </svg>
+      <span>Sur sa base · Prêt à nettoyer</span>
+    </div>
+  </article>
+
+  <article class="c">
+    <div class="top"><div class="tile">♨️</div><div class="tog"></div></div>
+    <div class="room">Local technique</div><div class="name">Marche forcée</div><div class="state">Désactivée</div>
+    <div class="grow"></div>
+    <div class="foot q">🍃 Le programme prend le relais</div>
+  </article>
+
+  <article class="c">
+    <div class="top"><div class="tile">💧</div><span style="color:var(--muted)">⋯</span></div>
+    <div class="room">Local technique</div><div class="name">Chauffe-eau</div>
+    <div class="tank-row"><div class="tank"><i></i></div>
+      <div><div class="big" style="margin:0">15 <small>°C</small></div><div class="foot">Au repos · Entrée à 16,3 °C</div></div>
+    </div>
+  </article>
+</template>
+
+<script>
+  (function () {
+    const tpl = document.getElementById('cards');
+    document.querySelectorAll('[data-cards]').forEach(g => g.appendChild(tpl.content.cloneNode(true)));
+    const MIN = 7, MAX = 30, START = 135, SWEEP = 270, R = 70, C = 80;
+    const pt = a => { const r = a * Math.PI / 180; return [C + R * Math.cos(r), C + R * Math.sin(r)]; };
+    document.querySelectorAll('[data-dial]').forEach(svg => {
+      let v = 15.5;
+      const arc = svg.querySelector('[data-arc]'), knob = svg.querySelector('[data-knob]'), txt = svg.querySelector('[data-val]');
+      const card = svg.closest('.c');
+      function draw() {
+        const a = START + (v - MIN) / (MAX - MIN) * SWEEP;
+        const [sx, sy] = pt(START), [ex, ey] = pt(a);
+        arc.setAttribute('d', `M ${sx} ${sy} A ${R} ${R} 0 ${a - START > 180 ? 1 : 0} 1 ${ex} ${ey}`);
+        knob.setAttribute('cx', ex); knob.setAttribute('cy', ey);
+        txt.textContent = v.toFixed(1).replace('.', ',') + '°';
+      }
+      function fromEvent(e) {
+        const b = svg.getBoundingClientRect();
+        let a = Math.atan2(e.clientY - (b.top + b.height / 2), e.clientX - (b.left + b.width / 2)) * 180 / Math.PI;
+        if (a < 0) a += 360;
+        let rel = a - START; if (rel < 0) rel += 360;
+        if (rel > SWEEP) rel = rel > SWEEP + (360 - SWEEP) / 2 ? 0 : SWEEP;
+        v = Math.round((MIN + rel / SWEEP * (MAX - MIN)) * 2) / 2; draw();
+      }
+      svg.addEventListener('pointerdown', e => { svg.setPointerCapture(e.pointerId); fromEvent(e); });
+      svg.addEventListener('pointermove', e => { if (e.buttons) fromEvent(e); });
+      card.querySelector('[data-minus]').onclick = () => { v = Math.max(MIN, v - 0.5); draw(); };
+      card.querySelector('[data-plus]').onclick = () => { v = Math.min(MAX, v + 0.5); draw(); };
+      draw();
+    });
+  })();
+</script>
