@@ -10,6 +10,11 @@ use crate::flow_text::{Ctx, Role, role};
 use crate::house::House;
 use crate::icons::node_icon;
 
+/// The card a library row is being dragged to the canvas as, while a drag is on. Provided by
+/// the canvas, which adds it where the row is dropped.
+#[derive(Clone, Copy)]
+pub struct Dragging(pub StoredValue<Option<NodeKind>>);
+
 /// The id of the card just added from the library, which glows for a moment so it can be
 /// found on the canvas. Provided by the canvas.
 #[derive(Clone, Copy)]
@@ -45,11 +50,12 @@ fn role_suffix(role: Role) -> &'static str {
 }
 
 /// The library. Clicking a row, or Enter on the highlighted one while the search box has the
-/// focus, calls `on_add`; the library stays as it is so several cards can go in a row. Esc in
-/// the search box clears it.
+/// focus, calls `on_add`; the library stays as it is so several cards can go in a row. A row
+/// can also be dragged onto the canvas (see [`Dragging`]). Esc in the search box clears it.
 #[component]
 pub fn Library(on_add: Callback<NodeKind>) -> impl IntoView {
     let house = expect_context::<House>();
+    let Dragging(dragging) = expect_context::<Dragging>();
     let query = RwSignal::new(String::new());
     let highlight = RwSignal::new(0_usize);
 
@@ -125,13 +131,25 @@ pub fn Library(on_add: Callback<NodeKind>) -> impl IntoView {
                 let icon = node_icon(&entry.kind);
                 let label = entry.label.clone();
                 let sub = entry.sub.clone();
+                let drag = entry.clone();
+                let start_drag = move |ev: ev::DragEvent| {
+                    dragging.set_value(Some(drag.kind.clone()));
+                    if let Some(data) = ev.data_transfer() {
+                        // Some browsers start no drag without data.
+                        let _ = data.set_data("text/plain", &drag.label);
+                        data.set_effect_allowed("copy");
+                    }
+                };
                 view! {
                     {head}
                     <li
                         class=class
                         class:flow-library__item--on=move || highlight.get() == i
                         role="option"
+                        draggable="true"
                         aria-selected=move || (highlight.get() == i).to_string()
+                        on:dragstart=start_drag
+                        on:dragend=move |_| dragging.set_value(None)
                         on:pointermove=move |_| highlight.set(i)
                         on:click=move |_| add(entry.clone())
                     >

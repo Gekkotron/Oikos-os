@@ -780,6 +780,75 @@ async fn drag_is_one_undo_step() {
     );
 }
 
+/// A bubbling `kind` drag event at client point `at` on `target`.
+fn drag_at(target: &web_sys::Element, kind: &str, at: (i32, i32)) {
+    let init = web_sys::DragEventInit::new();
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    init.set_client_x(at.0);
+    init.set_client_y(at.1);
+    target
+        .dispatch_event(&web_sys::DragEvent::new_with_event_init_dict(kind, &init).unwrap())
+        .unwrap();
+}
+
+/// `(x, y, zoom)` of a `transform:translate(Xpx,Ypx) scale(Z)` style.
+fn transform(style: &str) -> (f64, f64, f64) {
+    let nums: Vec<f64> = style
+        .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+        .filter_map(|t| t.parse().ok())
+        .collect();
+    (nums[0], nums[1], nums[2])
+}
+
+/// `(left, top)` of a `left:Xpx;top:Ypx` style.
+fn corner(style: &str) -> (f64, f64) {
+    let px = |key: &str| {
+        let rest = &style[style.find(key).unwrap() + key.len()..];
+        rest[..rest.find("px").unwrap()].parse().unwrap()
+    };
+    (px("left:"), px("top:"))
+}
+
+#[wasm_bindgen_test]
+async fn drop_adds_under_the_pointer() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    click(&host, ".flow-controls__btn[aria-label=\"Zoom in\"]");
+    tick().await;
+    let row = (0..count(&host, ".flow-library__item"))
+        .filter_map(|i| {
+            host.query_selector_all(".flow-library__item")
+                .unwrap()
+                .item(i)
+        })
+        .filter_map(|n| n.dyn_into::<web_sys::Element>().ok())
+        .find(|el| el.text_content().unwrap_or_default().contains("Wait"))
+        .unwrap();
+    let canvas = element(&host, ".flow-canvas");
+    let rect = canvas.get_bounding_client_rect();
+    let at = (rect.left() as i32 + 200, rect.top() as i32 + 200);
+    drag_at(&row, "dragstart", (0, 0));
+    drag_at(&canvas, "dragover", at);
+    drag_at(&canvas, "drop", at);
+    drag_at(&row, "dragend", (0, 0));
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=delay_1]"), 1, "{html}");
+    // The card's stored corner, through the camera (`screen = world * zoom + pan`), puts its
+    // centre on the drop point. The test page has no stylesheet, so rects can't tell.
+    let (tx, ty, zoom) = transform(&style(&host, ".flow-world"));
+    let (left, top) = corner(&style(&host, "[data-node=delay_1]"));
+    let cx = left * zoom + tx + 232.0 * zoom / 2.0;
+    let cy = top * zoom + ty + 52.0 * zoom / 2.0;
+    // The drop point within the canvas (the canvas' corner is fractional, the event's not).
+    let (dx, dy) = (f64::from(at.0) - rect.left(), f64::from(at.1) - rect.top());
+    assert!(
+        (cx - dx).abs() < 0.01 && (cy - dy).abs() < 0.01,
+        "card centred at ({cx}, {cy}) in the canvas, dropped at ({dx}, {dy})"
+    );
+    assert_eq!(count(&host, ".flow-library"), 1, "{html}");
+}
+
 #[wasm_bindgen_test]
 async fn ws_update_keeps_draft() {
     let (host, _mounted, house) = editing(reference_view(None, vec![done_run()])).await;

@@ -28,13 +28,13 @@ pub use graph::{Graph, Mode, Selection};
 pub use viewport::{Camera, CanvasControls, Minimap, Viewport};
 
 use crate::flow_edit::{History, add_node, duplicate_node, remove_edge, remove_node};
-use crate::flow_layout::{bounds, free_spot, positions};
+use crate::flow_layout::{NODE_H, NODE_W, Pt, bounds, free_spot, positions};
 use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot};
 use crate::flows::{highlight, parked_deadline, parked_node, step_offset};
 use crate::house::House;
 use crate::screens::flow_schedule::SaveBlocked;
-pub use library::Fresh;
 use library::Library;
+pub use library::{Dragging, Fresh};
 use settings::NodeEditor;
 use toolbar::Toolbar;
 
@@ -178,6 +178,41 @@ fn FlowBody(
         });
         flash(fresh, id);
     });
+    let dragging = StoredValue::new(None::<NodeKind>);
+    provide_context(Dragging(dragging));
+    // A library row dropped on the canvas becomes a card centred under the pointer.
+    let over_canvas = move |ev: &ev::DragEvent| -> Option<web_sys::Element> {
+        let target = ev.target()?.dyn_into::<web_sys::Element>().ok()?;
+        if target.closest(".flow-drawer").ok().flatten().is_some() {
+            return None;
+        }
+        target.closest(".flow-canvas").ok().flatten()
+    };
+    let on_dragover = move |ev: ev::DragEvent| {
+        if dragging.with_value(Option::is_some) && over_canvas(&ev).is_some() {
+            ev.prevent_default();
+        }
+    };
+    let on_drop = move |ev: ev::DragEvent| {
+        let Some(canvas) = over_canvas(&ev) else {
+            return;
+        };
+        let Some(kind) = dragging.try_update_value(Option::take).flatten() else {
+            return;
+        };
+        ev.prevent_default();
+        let rect = canvas.get_bounding_client_rect();
+        let pointer = camera.view.get_untracked().to_world(Pt {
+            x: f64::from(ev.client_x()) - rect.left(),
+            y: f64::from(ev.client_y()) - rect.top(),
+        });
+        let at = Pt {
+            x: pointer.x - NODE_W / 2.0,
+            y: pointer.y - NODE_H / 2.0,
+        };
+        let id = editor.edit(|f| add_node(f, kind, at));
+        flash(fresh, id);
+    };
     // A selection the draft no longer has (undone, deleted) is dropped.
     Effect::new(move |_| {
         let stale = draft.with(|f| match selection.get_untracked() {
@@ -316,7 +351,12 @@ fn FlowBody(
         .into_any(),
     };
     view! {
-        <div class="flow-stage" class:flow-stage--drawer=move || side.get() != Panel::Closed>
+        <div
+            class="flow-stage"
+            class:flow-stage--drawer=move || side.get() != Panel::Closed
+            on:dragover=on_dragover
+            on:drop=on_drop
+        >
             {canvas}
             <Toolbar view=view editing=editing editor=editor saving=saving runs_open=runs_open selection=selection />
             <Drawer
