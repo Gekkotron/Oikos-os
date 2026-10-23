@@ -4,13 +4,28 @@ sidebar_position: 8
 description: How the hub sends alerts to the Android app through Firebase Cloud Messaging, the topics it uses, its configuration and how to switch over from OikosPush.
 ---
 
-The hub sends the house's push notifications to the Android app through Firebase Cloud Messaging. The service-account key comes from `credentials` (or `OIKOS_PUSH__CREDENTIALS`); when neither is set, the hub uses `secrets/firebase.json` next to its config file if that file exists, which is where the Docker install expects it. Without a key it keeps the alert history and sends nothing, with one warning at start; a key file that is unreadable is the same, and the warning names its path. The hub starts either way.
+The hub sends the house's push notifications to the Android app through Firebase Cloud Messaging. Without a Firebase key it keeps the alert history and sends nothing, with one warning at start. The hub starts either way.
+
+## Turn it on
+
+Copy the Firebase service-account key to `secrets/firebase.json` in the clone and restart the hub:
+
+```bash
+cp ~/firebase-service-account.json secrets/firebase.json
+docker compose restart hub
+```
+
+Nothing tracked needs editing: `compose.yml` always mounts `secrets/` read-only at `/etc/oikos/secrets`, and git and the Docker build ignore everything in it. The hub looks for `secrets/firebase.json` next to its config file, so the same folder works when it runs straight from the repo. Remove the file and restart to turn push off.
+
+To keep the key elsewhere, point `[push] credentials` (or `OIKOS_PUSH__CREDENTIALS`, for example in the git-ignored `.env`) at it; an explicit path wins over `secrets/`. A key file that is unreadable turns push off the same way, and the warning names its path. Only the path is ever logged.
+
+## Configuration
 
 ```toml
 [push]
 prefix = "oikos/push"            # <prefix>/notification/<source>, /tokens/<installId>, /responses, /history
 legacy_prefix = "oikos-push"     # OikosPush's topics, still read during the switch-over; "" turns them off
-credentials = "/path/to/firebase-service-account.json"  # never logged; leave out to use secrets/firebase.json if present
+# credentials = "/path/to/firebase-service-account.json"  # leave out to use secrets/firebase.json
 ```
 
 `retry_interval` (60 s), `max_retries` (10), `history_size` (100 alerts) and `history_days` (7) keep OikosPush's values. The old `history_topic` and `responses_topic` keys are refused at start: the error names the keys `[push]` takes.
@@ -39,9 +54,9 @@ While `legacy_prefix` is set the hub also reads `oikos-push/notification/+`, `oi
    - [ ] read on `<frigate prefix>/events` and `encryption-gateway/health/+`.
 
    Mosquitto denies silently, but the Python ACL watchdog keeps running throughout, so a missing grant shows up on the phone as a system alert. The ACL file lives on the broker host, outside this repo.
-1. Ship the hub with push on but **no `[push] credentials`**, and the Frigate bridge and the gateway watchdog **off**: it builds its history from the producers' notifications and shows alerts, and sends nothing. OikosPush is still the sender. Check that the hub's history matches OikosPush's: for alerts received while both run, the same ids in the same order with the same `cancel` state. A mismatch is a bug to fix before step 2.
+1. Ship the hub with push on but **no key** (no `secrets/firebase.json`, no `[push] credentials`), and the Frigate bridge and the gateway watchdog **off**: it builds its history from the producers' notifications and shows alerts, and sends nothing. OikosPush is still the sender. Check that the hub's history matches OikosPush's: for alerts received while both run, the same ids in the same order with the same `cancel` state. A mismatch is a bug to fix before step 2.
 2. Stop the OikosPush core, the Frigate bridge container and the gateway watchdog container (`docker compose down` on the broker host). Leave the ACL watchdog container running: it stays the Python container until the hub runs next to Mosquitto (or can read its log or `$SYS` topic), and `[watchdog.acl]` is left off until then.
-3. Set `[push] credentials` (copy the service-account key from the OikosPush deploy directory, git-ignored, never printed), turn `[frigate] bridge` and `[watchdog.gateway]` on (`[watchdog.acl]` stays off, see above), and restart the hub.
+3. Copy the service-account key from the OikosPush deploy directory to `secrets/firebase.json` (git-ignored, never printed), turn `[frigate] bridge` and `[watchdog.gateway]` on (`[watchdog.acl]` stays off, see above), and restart the hub.
 4. Send a test notification over MCP and check that it arrives once. Trigger a camera event and check the snapshot, then the clip.
 
 Until step 3 both the hub and OikosPush publish a retained history, on different topics (`oikos/push/history` and `oikos-push/history`); the current app reads the old one, so nothing changes for the phone.
