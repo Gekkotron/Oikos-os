@@ -5,6 +5,7 @@ use leptos::task::spawn_local;
 use oikos_core::dashboard::{Dashboard, Widget, allowed_spans};
 
 use crate::api;
+use crate::house::House;
 use crate::icons::{CHECK, GEAR, PENCIL, X_MARK};
 
 /// Reactive state for the edit mode: active flag, the editable draft, and the saved baseline
@@ -104,6 +105,7 @@ pub fn add_widget_handler(state: EditState) -> Callback<Widget> {
 /// Save book-end the row with Save as the primary action.
 #[component]
 pub fn EditToolbar(state: EditState) -> impl IntoView {
+    let house = expect_context::<House>();
     let dirty = state.dirty();
     view! {
         <div class="dashboard-edit-toolbar">
@@ -152,7 +154,8 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                                 // The hub may normalize widget order, invalidating the selection.
                                 state.selected_widget.set(None);
                                 state.original.set(saved.clone());
-                                state.draft.set(saved);
+                                state.draft.set(saved.clone());
+                                house.store_dashboard(saved);
                             }
                         });
                     }

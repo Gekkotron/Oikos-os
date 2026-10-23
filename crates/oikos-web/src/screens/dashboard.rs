@@ -21,15 +21,23 @@ pub fn DashboardScreen() -> impl IntoView {
     // A Memo so a nav change updates the id without remounting the component.
     let query = use_query_map();
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
+    // Whether the list holds this dashboard. The fallback tracks this instead of the whole
+    // list so Save writing its result back does not rebuild the editor mid-edit.
+    let known = Memo::new(move |_| {
+        let current = id.get();
+        house
+            .dashboards
+            .with(|v| v.iter().any(|d| d.dashboard.id == current))
+    });
 
     view! {
         <Show
             when=move || id.get() == HOUSE_ID
             fallback=move || {
-                // Re-reading `house.dashboards` here keeps the fallback reactive to the
-                // retained-topic fetch landing after first paint.
+                // Tracking `known` keeps the fallback reactive to the fetch landing after
+                // first paint.
                 let current_id = id.get();
-                house.dashboards.track();
+                known.track();
                 match house.dashboard(&current_id) {
                     Some(view) => {
                         // The picker's "New dashboard" lands here with ?edit=1.

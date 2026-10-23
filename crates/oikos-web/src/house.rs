@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use leptos::prelude::*;
 use oikos_api::{
-    AlertView, AreaView, BridgeView, ConnectionStatus, DashboardView, DeviceView, EntityView,
-    FlowView, FlowsConfigView, GroupView, IgnoredView, WsEvent,
+    AlertView, AreaView, BridgeView, ConnectionStatus, Dashboard, DashboardView, DeviceView,
+    EntityView, FlowView, FlowsConfigView, GroupView, IgnoredView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -93,6 +93,21 @@ impl House {
             .with_untracked(|v| v.iter().find(|d| d.dashboard.id == id).cloned())
     }
 
+    /// Writes a dashboard the hub just saved into the list, replacing the copy with the same
+    /// id or appending it. The hub does not push dashboard structure, so without this the
+    /// screen would rebuild from the copy fetched at start-up.
+    pub fn store_dashboard(&self, saved: Dashboard) {
+        self.dashboards.update(
+            |v| match v.iter_mut().find(|d| d.dashboard.id == saved.id) {
+                Some(view) => view.dashboard = saved,
+                None => v.push(DashboardView {
+                    dashboard: saved,
+                    synthesized: false,
+                }),
+            },
+        );
+    }
+
     /// Fans `event` out to the signals the way `HouseState::apply` patches its fields.
     pub fn apply(&self, event: WsEvent) {
         match event {
@@ -146,5 +161,49 @@ impl House {
 impl Default for House {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dashboard(id: &str, widgets: usize) -> Dashboard {
+        let widget = |i: usize| oikos_api::Widget {
+            id: format!("w{i}"),
+            kind: oikos_api::WidgetKind::Light,
+            span: oikos_api::Span::X1x1,
+            config: oikos_api::WidgetConfig::Entity {
+                entity_id: "light.a".into(),
+                title: None,
+            },
+        };
+        Dashboard {
+            id: id.into(),
+            name: id.into(),
+            order: 1,
+            widgets: (0..widgets).map(widget).collect(),
+        }
+    }
+
+    #[test]
+    fn store_dashboard_replaces_the_cached_copy() {
+        let house = House::new();
+        house.dashboards.set(vec![DashboardView {
+            dashboard: dashboard("d", 0),
+            synthesized: false,
+        }]);
+        house.store_dashboard(dashboard("d", 2));
+        assert_eq!(house.dashboard("d").unwrap().dashboard.widgets.len(), 2);
+        assert_eq!(house.dashboards.get_untracked().len(), 1);
+    }
+
+    #[test]
+    fn store_dashboard_appends_an_unknown_one() {
+        let house = House::new();
+        house.store_dashboard(dashboard("d", 1));
+        let stored = house.dashboard("d").unwrap();
+        assert!(!stored.synthesized);
+        assert_eq!(stored.dashboard.widgets.len(), 1);
     }
 }
