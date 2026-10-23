@@ -66,6 +66,12 @@ fn attribute(theme: Theme) -> Option<&'static str> {
     }
 }
 
+/// The `<meta name="theme-color">` of an applied theme: its page colour (`--bg` in tokens.css).
+#[cfg(any(target_arch = "wasm32", test))]
+fn theme_color(light: bool) -> &'static str {
+    if light { "#f3f0e8" } else { "#0b1020" }
+}
+
 /// `localStorage`, or `None` when it is missing, blocked or throws.
 #[cfg(target_arch = "wasm32")]
 fn storage() -> Option<web_sys::Storage> {
@@ -81,7 +87,8 @@ fn system_light_query() -> Option<web_sys::MediaQueryList> {
         .flatten()
 }
 
-/// Sets `data-theme` on `<html>`; Auto resolves to the system's `light` or `dark`.
+/// Sets `data-theme` on `<html>` and the browser's theme colour; Auto resolves to the system's
+/// `light` or `dark`.
 #[cfg(target_arch = "wasm32")]
 fn apply(theme: Theme) {
     let value = attribute(theme).unwrap_or_else(|| {
@@ -91,11 +98,18 @@ fn apply(theme: Theme) {
             "dark"
         }
     });
-    if let Some(root) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.document_element())
-    {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Some(root) = document.document_element() {
         let _ = root.set_attribute("data-theme", value);
+    }
+    if let Some(meta) = document
+        .query_selector("meta[name=\"theme-color\"]")
+        .ok()
+        .flatten()
+    {
+        let _ = meta.set_attribute("content", theme_color(value == "light"));
     }
 }
 
@@ -274,6 +288,30 @@ mod tests {
             assert!(night.contains(t), "{t}");
         }
         assert!(!css.contains("Fraunces"));
+    }
+
+    /// The browser chrome takes each theme's page colour, in Rust and in the pre-boot script.
+    #[test]
+    fn theme_color_is_the_page_background() {
+        let css = include_str!("../styles/tokens.css");
+        let bg = |body| {
+            declarations(body)
+                .into_iter()
+                .find(|(name, _)| name == "--bg")
+                .map(|(_, value)| value)
+                .expect("--bg")
+        };
+        assert_eq!(super::theme_color(false), bg(block(css, ":root")));
+        assert_eq!(
+            super::theme_color(true),
+            bg(block(css, "[data-theme=\"light\"]"))
+        );
+        let html = include_str!("../index.html");
+        assert!(html.contains(&format!(
+            "light ? \"{}\" : \"{}\"",
+            super::theme_color(true),
+            super::theme_color(false)
+        )));
     }
 
     #[test]
