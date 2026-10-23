@@ -53,6 +53,10 @@ const EXPECTED_TOOLS: &[&str] = &[
     "list_groups",
     "set_group",
     "delete_group",
+    "list_ambiances",
+    "set_ambiance",
+    "delete_ambiance",
+    "apply_ambiance",
     "get_history",
     "send_notification",
     "list_alerts",
@@ -957,6 +961,54 @@ async fn start_with_groups() -> Server {
 
 fn switch_group_spec() -> Value {
     json!({ "kind": "switch", "name": "Stair", "members": [SWITCH_ID], "hideMembers": true })
+}
+
+#[tokio::test]
+async fn mcp_set_then_list_ambiance() {
+    let server = start_with_groups().await;
+    let client = server.client().await;
+
+    let view = json_of(
+        "set_ambiance",
+        &call(
+            &client,
+            "set_ambiance",
+            json!({ "ambiance": {
+                "id": "night",
+                "name": "Night",
+                "actions": [{ "type": "category", "what": "lights", "to": "off" }]
+            } }),
+        )
+        .await,
+    );
+    assert_eq!(view["id"], "night");
+
+    let list = json_of(
+        "list_ambiances",
+        &call(&client, "list_ambiances", json!({})).await,
+    );
+    assert_eq!(list["ambiances"].as_array().map(Vec::len), Some(1));
+    assert_eq!(list["ambiances"][0]["ambiance"]["name"], "Night");
+
+    let deleted = json_of(
+        "delete_ambiance",
+        &call(&client, "delete_ambiance", json!({ "id": "night" })).await,
+    );
+    assert_eq!(deleted, json!({ "id": "night" }));
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn mcp_apply_unknown_ambiance_errors() {
+    let server = start_with_groups().await;
+    let client = server.client().await;
+
+    let result = call(&client, "apply_ambiance", json!({ "id": "nope" })).await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(text_of(&result).contains("unknown"), "{}", text_of(&result));
+
+    client.cancel().await.expect("close");
 }
 
 #[tokio::test]
