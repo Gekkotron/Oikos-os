@@ -18,6 +18,8 @@ pub struct EditState {
     /// Index of the widget whose config sheet is open.
     pub selected_widget: RwSignal<Option<usize>>,
     pub settings_open: RwSignal<bool>,
+    /// The id of the widget just added from the library, which glows for a moment.
+    pub fresh: RwSignal<Option<String>>,
 }
 
 impl EditState {
@@ -28,6 +30,7 @@ impl EditState {
             original: RwSignal::new(initial),
             selected_widget: RwSignal::new(None),
             settings_open: RwSignal::new(false),
+            fresh: RwSignal::new(None),
         }
     }
 
@@ -67,10 +70,32 @@ impl EditState {
     }
 }
 
-/// Appends a picked widget to the draft; the hub validates it on Save.
+/// How long a widget added from the library glows.
+#[cfg(target_arch = "wasm32")]
+const FRESH_MS: u32 = 1200;
+
+/// Marks widget `id` as just added, and unmarks it after [`FRESH_MS`] unless another widget
+/// took the mark meanwhile.
+#[cfg(target_arch = "wasm32")]
+fn flash(fresh: RwSignal<Option<String>>, id: String) {
+    fresh.set(Some(id.clone()));
+    gloo_timers::callback::Timeout::new(FRESH_MS, move || {
+        if fresh.try_get_untracked().flatten().as_deref() == Some(id.as_str()) {
+            fresh.try_set(None);
+        }
+    })
+    .forget();
+}
+
+/// Appends a picked widget to the draft and marks it fresh; the hub validates it on Save.
 pub fn add_widget_handler(state: EditState) -> Callback<Widget> {
     Callback::new(move |widget: Widget| {
+        let id = widget.id.clone();
         state.draft.update(|d| d.widgets.push(widget));
+        #[cfg(target_arch = "wasm32")]
+        flash(state.fresh, id);
+        #[cfg(not(target_arch = "wasm32"))]
+        state.fresh.set(Some(id));
     })
 }
 

@@ -32,6 +32,7 @@ use crate::flow_layout::{NODE_H, NODE_W, Pt, bounds, free_spot, positions};
 use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot, free_area};
 use crate::flows::{highlight, parked_deadline, parked_node, step_offset};
 use crate::house::House;
+use crate::layout::top_offset;
 use crate::screens::flow_schedule::SaveBlocked;
 use library::Library;
 pub use library::{Dragging, Fresh};
@@ -412,15 +413,6 @@ fn flash(fresh: RwSignal<Option<String>>, id: String) {
 
 /// How long a card added from the library glows.
 const FRESH_MS: u32 = 1200;
-
-/// Measures where the canvas starts: just under the sticky top bar.
-fn top_offset() -> f64 {
-    document()
-        .query_selector(".topbar")
-        .ok()
-        .flatten()
-        .map_or(0.0, |bar| bar.get_bounding_client_rect().bottom() + 8.0)
-}
 
 #[component]
 pub fn FlowCanvasScreen() -> impl IntoView {

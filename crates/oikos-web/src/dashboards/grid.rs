@@ -1,8 +1,7 @@
 use leptos::prelude::*;
 use oikos_core::dashboard::Widget;
 
-use super::add_picker::AddWidgetPicker;
-use super::edit::{EditState, add_widget_handler};
+use super::edit::EditState;
 use super::widget::WidgetView;
 
 /// Column grid that places widgets by their declared span. Column counts per breakpoint
@@ -18,6 +17,23 @@ pub fn Grid(
     #[prop(optional)] edit: Option<EditState>,
 ) -> impl IntoView {
     let active = move || edit.is_some_and(|e| e.active.get());
+    // The tile of a widget just added is brought into view once it has rendered.
+    #[cfg(target_arch = "wasm32")]
+    if let Some(state) = edit {
+        Effect::new(move |_| {
+            if let Some(id) = state.fresh.get() {
+                request_animation_frame(move || {
+                    let selector = format!("[data-widget-id=\"{id}\"]");
+                    if let Ok(Some(tile)) = document().query_selector(&selector) {
+                        let options = web_sys::ScrollIntoViewOptions::new();
+                        options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                        options.set_behavior(web_sys::ScrollBehavior::Smooth);
+                        tile.scroll_into_view_with_scroll_into_view_options(&options);
+                    }
+                });
+            }
+        });
+    }
     view! {
         <div class="dashboard-grid">
             <For
@@ -42,6 +58,10 @@ pub fn Grid(
                                 .unwrap_or(w.span);
                             format!("widget widget-span-{}", span.as_str())
                         }
+                    };
+                    let is_fresh = {
+                        let id = id.clone();
+                        move || edit.is_some_and(|e| e.fresh.with(|f| f.as_deref() == Some(id.as_str())))
                     };
                     let tools = edit.map(|state| {
                         view! {
@@ -92,7 +112,7 @@ pub fn Grid(
                         }
                     });
                     view! {
-                        <div class=class>
+                        <div class=class class:widget--fresh=is_fresh data-widget-id=id>
                             <WidgetView widget=w />
                             // An overlay (not a tile click handler) so the inner card's own
                             // controls, e.g. a light toggle, cannot fire while editing. It sits
@@ -114,13 +134,6 @@ pub fn Grid(
                     }
                 }
             />
-            {edit.map(|state| view! {
-                <Show when=active>
-                    <div class="widget widget-span-1x1 widget-add">
-                        <AddWidgetPicker on_add=add_widget_handler(state) />
-                    </div>
-                </Show>
-            })}
         </div>
     }
 }

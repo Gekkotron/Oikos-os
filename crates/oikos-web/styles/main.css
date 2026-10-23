@@ -5128,25 +5128,114 @@ html:has(.flow-canvas-screen) {
 }
 .widget__tools button { min-height: 32px; min-width: 32px; }
 
-.widget-add { display: flex; align-items: center; justify-content: center; position: relative; min-height: 4rem; }
-.dashboard-add-picker { position: relative; }
-.dashboard-add-picker__trigger {
-  padding: 0.6rem 1rem; border-radius: 0.75rem; cursor: pointer;
-  border: 1px dashed currentColor; background: transparent; color: inherit;
+/* Widget library: an always-open panel beside the grid while editing a dashboard. It reuses
+   the flow library's rows; each section sets its own accent. */
+.dashboard-library-panel {
+  box-sizing: border-box;
+  padding: 12px;
+  overflow-y: auto;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
 }
-.dashboard-add-picker__panel {
-  position: fixed; z-index: 60;
-  width: min(20rem, 85vw); max-height: 60vh; overflow-y: auto;
-  padding: 0.75rem; border-radius: 0.75rem;
-  background: var(--card-bg, #1e1e1e); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+
+.dashboard-library {
+  --node-accent: var(--accent-amber);
 }
-.dashboard-add-picker__group h4 { margin: 0.5rem 0 0.25rem; font-size: 0.8rem; opacity: 0.7; }
-.dashboard-add-picker__group ul { list-style: none; margin: 0; padding: 0; }
-.dashboard-add-picker__group li button {
-  width: 100%; text-align: left; padding: 0.4rem 0.5rem;
-  background: transparent; border: 0; color: inherit; cursor: pointer; border-radius: 0.4rem;
+
+.dashboard-library .flow-library__item {
+  cursor: pointer;
 }
-.dashboard-add-picker__group li button:hover { background: rgba(255, 255, 255, 0.08); }
+
+.dashboard-library__header--lights,
+.dashboard-library__item--lights,
+.dashboard-library__header--flows,
+.dashboard-library__item--flows {
+  --node-accent: var(--accent-amber);
+}
+
+.dashboard-library__header--covers,
+.dashboard-library__item--covers,
+.dashboard-library__header--rooms,
+.dashboard-library__item--rooms {
+  --node-accent: var(--accent-cyan);
+}
+
+.dashboard-library__header--climates,
+.dashboard-library__item--climates,
+.dashboard-library__header--water-heaters,
+.dashboard-library__item--water-heaters {
+  --node-accent: var(--accent-rose);
+}
+
+.dashboard-library__header--sensors,
+.dashboard-library__item--sensors,
+.dashboard-library__header--history,
+.dashboard-library__item--history {
+  --node-accent: var(--accent-violet);
+}
+
+.dashboard-library__header--energy,
+.dashboard-library__item--energy {
+  --node-accent: var(--accent-mint);
+}
+
+@media (min-width: 601px) {
+  .dashboard-edit-layout {
+    display: flex;
+    align-items: flex-start;
+  }
+
+  .dashboard-edit-layout .dashboard-grid {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .dashboard-library-panel {
+    position: sticky;
+    top: var(--dashboard-top, 80px);
+    flex: none;
+    width: 360px;
+    max-height: calc(100vh - var(--dashboard-top, 80px) - 12px);
+    margin: 12px 12px 12px 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .dashboard-library-panel {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    z-index: 40;
+    max-height: 45vh;
+  }
+
+  .dashboard-edit-layout .dashboard-grid {
+    padding-bottom: calc(45vh + 16px);
+  }
+}
+
+/* A widget just added from the library glows for a moment. */
+.widget--fresh {
+  border-radius: var(--radius-card);
+  animation: widget-fresh 1.2s var(--ease);
+}
+
+@keyframes widget-fresh {
+  from {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-amber) 45%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .widget--fresh {
+    animation: none;
+  }
+}
 
 /* Edit-mode side sheets: right-anchored over the grid. */
 .widget-config-sheet,

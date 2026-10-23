@@ -22,6 +22,7 @@ pub mod groups;
 pub mod house;
 pub mod house_state;
 pub mod icons;
+pub mod layout;
 pub mod nav;
 pub mod override_editor;
 pub mod schedule;
