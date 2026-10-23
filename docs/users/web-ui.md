@@ -68,7 +68,7 @@ The rules behind the table:
 - "Dark" means between dusk and dawn at the location set in `[flows]`, as the flow canvas computes it.
 - A light counts when it is on and not hidden. A light inside a group counts on its own; the group entity does not count, so no light is counted twice.
 - The indoor temperature is the sensor you pick in [Settings](#settings), or else the median of the rooms: each room counts as the mean of its temperature sensors, offline sensors are left out, and so is any sensor that does not read in °C. One outdoor sensor cannot skew it. Outdoor weather sensors are never used. Offline lights, doors, windows and thermostats are ignored everywhere in the header. The sentence and the indoor chip show the same value.
-- The cold and hot thresholds come from the Home panel in Settings. They default to 15 °C and 26 °C.
+- The cold and hot thresholds come from Settings › Home. They default to 15 °C and 26 °C.
 - The same house state always gives the same sentence. It changes only when something in the house changes.
 
 ### Detail line
@@ -88,9 +88,9 @@ Chips sit in a row under the detail line. Each one hides when its input is missi
 - **Heating**: taken from the climate units that can heat. A unit counts as heating when its mode is heat, auto or heat_cool. A cooling-only unit is ignored.
   - « Clim en marche » / "Air conditioning on" when a unit is in cool mode. This case wins over the others.
   - « Chauffage éteint » / "Heating off" when no unit is heating.
-  - « Chauffage en éco » / "Heating in eco" when every heating unit has a target at or below the eco setpoint. This case needs an eco setpoint in the Home panel; without one, the chip hides.
+  - « Chauffage en éco » / "Heating in eco" when every heating unit has a target at or below the eco setpoint. This case needs an eco setpoint in Settings › Home; without one, the chip hides.
   - Hidden in every other case, for example when a heating unit targets above the eco setpoint.
-- **House mode**: the current option of the mode selector, shown as a pill with ▾. Tap it to open the list of the selector's options and pick one. Hidden when no mode selector is set in the Home panel.
+- **House mode**: the current option of the mode selector, shown as a pill with ▾. Tap it to open the list of the selector's options and pick one. Hidden when no mode selector is set in Settings › Home.
 
 ### Weather card
 
@@ -163,9 +163,16 @@ Devices: the administration view of the Zigbee devices. Each row shows the devic
 
 ## Settings
 
-Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night Glass, Ivoire). The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
+Settings (`/settings`): a short list, one row per page, with a status on the right. A row opens its page at `/settings/<page>`, which has a Back link and its own breadcrumb (Settings › page):
 
-The **Home** panel (**Maison** in French) holds the settings of the home header, with one Save button for the whole panel. Its five fields:
+- **Home** (**Maison**, `/settings/home`): the home header settings, described below.
+- **Appearance** (`/settings/appearance`), status the current theme: the theme switch (Auto, Night Glass, Ivoire), the same choice as the header's theme button.
+- **Zigbee2MQTT** (`/settings/zigbee2mqtt`), status the number of firmware updates waiting, or the bridge state when there are none: the bridge (version, coordinator, permit join, state), the updates waiting, the counts (devices, entities, primary entities, areas, ignored topics) and the way to the [devices](#devices) list.
+- **Broker** (`/settings/broker`), status Online, Connecting… or Offline: the MQTT connection, with the reason when it is down.
+- **AI assistants (MCP)** (`/settings/mcp`): the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop, built from the page's origin, so they always carry the hub's real address. The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
+- **About** (`/settings/about`), status the version: the product, its version and the hub's address.
+
+The **Home** page (**Maison** in French, `/settings/home`) holds the settings of the home header, with one Save button for the whole panel. Its five fields:
 
 - **Eco setpoint (°C)**: from 5 to 30. Leave it empty to turn off the "Heating in eco" case.
 - **Cold below (°C)** and **Hot above (°C)**: the thresholds of the sentence, from 5 to 35. Each one shows its default (15 and 26) as a placeholder when empty. The cold threshold must stay below the hot one; an invalid value shows its error next to the field.

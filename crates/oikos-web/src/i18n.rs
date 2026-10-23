@@ -115,6 +115,11 @@ pub enum Key {
     Alerts,
     Settings,
     Devices,
+    Appearance,
+    Zigbee2mqtt,
+    Broker,
+    AiAssistants,
+    About,
     NewDashboard,
     NewFlow,
     NewGroup,
@@ -151,6 +156,11 @@ impl Key {
         Key::Alerts,
         Key::Settings,
         Key::Devices,
+        Key::Appearance,
+        Key::Zigbee2mqtt,
+        Key::Broker,
+        Key::AiAssistants,
+        Key::About,
         Key::NewDashboard,
         Key::NewFlow,
         Key::NewGroup,
@@ -188,6 +198,11 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Alerts => ("Alerts", "Alertes"),
         Key::Settings => ("Settings", "Réglages"),
         Key::Devices => ("Devices", "Appareils"),
+        Key::Appearance => ("Appearance", "Apparence"),
+        Key::Zigbee2mqtt => ("Zigbee2MQTT", "Zigbee2MQTT"),
+        Key::Broker => ("Broker", "Broker MQTT"),
+        Key::AiAssistants => ("AI assistants (MCP)", "Assistants IA (MCP)"),
+        Key::About => ("About", "À propos"),
         Key::NewDashboard => ("New dashboard", "Nouveau tableau"),
         Key::NewFlow => ("New flow", "Nouvelle automatisation"),
         Key::NewGroup => ("New group", "Nouveau groupe"),
@@ -792,6 +807,11 @@ mod tests {
             | Key::Alerts
             | Key::Settings
             | Key::Devices
+            | Key::Appearance
+            | Key::Zigbee2mqtt
+            | Key::Broker
+            | Key::AiAssistants
+            | Key::About
             | Key::NewDashboard
             | Key::NewFlow
             | Key::NewGroup
@@ -815,7 +835,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 31);
+        assert_eq!(Key::ALL.len(), 36);
     }
     fn window(room: Option<&str>) -> Activity {
         Activity::Open(Opening {

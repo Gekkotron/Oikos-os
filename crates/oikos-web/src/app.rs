@@ -29,7 +29,7 @@ use crate::screens::groups::GroupsScreen;
 use crate::screens::history_detail::HistoryDetailScreen;
 use crate::screens::room::RoomScreen;
 use crate::screens::security::SecurityScreen;
-use crate::screens::settings::SettingsScreen;
+use crate::screens::settings::{SettingsPageScreen, SettingsScreen};
 use crate::screens::weather::WeatherScreen;
 use crate::shell::Shell;
 use crate::theme::install_theme;
@@ -179,6 +179,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/groups/:id/edit") view=GroupWizardScreen />
                     <Route path=path!("/devices") view=DevicesScreen />
                     <Route path=path!("/settings") view=SettingsScreen />
+                    <Route path=path!("/settings/:page") view=SettingsPageScreen />
                 </Routes>
             </Shell>
             <ToastQueue />
