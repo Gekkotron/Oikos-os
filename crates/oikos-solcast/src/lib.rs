@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod forecast;
 pub mod period;
 
 pub use period::{ParseError, Period, parse_forecasts};
