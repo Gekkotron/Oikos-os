@@ -3140,7 +3140,7 @@ p.override__hint {
   --flow-glass: color-mix(in srgb, var(--bg) 80%, transparent);
   --drawer-w: 360px;
   position: fixed;
-  inset: var(--flow-top, 0px) 0 0;
+  inset: var(--flow-top, 0px) 0 0 var(--flow-left, 0px);
   overflow: hidden;
 }
 
@@ -5284,10 +5284,10 @@ html:has(.flow-canvas-screen) {
 
   .dashboard-library-panel {
     position: sticky;
-    top: var(--dashboard-top, 80px);
+    top: 12px;
     flex: none;
     width: 360px;
-    max-height: calc(100vh - var(--dashboard-top, 80px) - 12px);
+    max-height: calc(100dvh - 24px);
     margin: 12px 12px 12px 0;
   }
 }

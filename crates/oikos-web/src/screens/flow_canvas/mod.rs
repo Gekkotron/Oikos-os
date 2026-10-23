@@ -34,7 +34,7 @@ use crate::flow_layout::{
 use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot, free_area};
 use crate::flows::{highlight, parked_deadline, parked_node, step_offset};
 use crate::house::House;
-use crate::layout::top_offset;
+use crate::layout::canvas_inset_style;
 use crate::screens::flow_schedule::SaveBlocked;
 use library::Library;
 pub use library::{Dragging, Fresh};
@@ -452,12 +452,9 @@ pub fn FlowCanvasScreen() -> impl IntoView {
         house.flows.with(|f| !f.is_empty())
             || matches!(house.connection.get(), oikos_api::ConnectionStatus::Online)
     });
-    let top = RwSignal::new(0.0_f64);
-    Effect::new(move |_| top.set(top_offset()));
-    let resize = window_event_listener(ev::resize, move |_| top.set(top_offset()));
-    on_cleanup(move || resize.remove());
+    let inset = canvas_inset_style();
     view! {
-        <div class="flow-canvas-screen" style=move || format!("--flow-top:{}px", top.get())>
+        <div class="flow-canvas-screen" style=inset>
             {move || {
                 // A new id mounts a fresh body (and fits its flow); live updates of the same
                 // flow flow through `view` without remounting.
@@ -502,12 +499,9 @@ pub fn NewFlowScreen() -> impl IntoView {
         active_run: None,
         runs: Vec::new(),
     };
-    let top = RwSignal::new(0.0_f64);
-    Effect::new(move |_| top.set(top_offset()));
-    let resize = window_event_listener(ev::resize, move |_| top.set(top_offset()));
-    on_cleanup(move || resize.remove());
+    let inset = canvas_inset_style();
     view! {
-        <div class="flow-canvas-screen" style=move || format!("--flow-top:{}px", top.get())>
+        <div class="flow-canvas-screen" style=inset>
             <FlowBody view=Signal::stored(blank) start_editing=true />
         </div>
     }
