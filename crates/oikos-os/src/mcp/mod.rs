@@ -132,7 +132,7 @@ fn instructions() -> String {
          `set_flow` creates or replaces one (validated against the house, saved retained on \
          `oikos/automation/<id>`, the prefix being configurable), `set_flow_enabled` \
          switches it and `delete_flow` removes it; `run_flow` starts a manual run. A flow's optional `area` (an area id; a room name is resolved) is the room the UI lists it under; it does not change what the flow does. `set_virtual` and `delete_virtual` manage virtual \
-         entities (a `switch`, `number` or `button` the hub owns, as `virtual_<id>`) for flows \
+         entities (a `switch`, `number`, `button` or `select` the hub owns, as `virtual_<id>`) for flows \
          to read and write. `list_groups`, `set_group` and `delete_group` manage flexible \
          groups (hub-published entities as `group_<id>` whose definition — kind, members, \
          hideMembers — is retained at `oikos/group/<id>/definition`); the hub fans group \

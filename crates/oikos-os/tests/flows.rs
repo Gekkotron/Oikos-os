@@ -1265,6 +1265,7 @@ async fn hub_with_button() -> (
         max: None,
         step: None,
         unit: None,
+        options: None,
         initial: None,
     };
     hub.set_virtual("boost", spec).await.expect("button");

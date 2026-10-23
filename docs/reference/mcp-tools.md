@@ -75,7 +75,7 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 
 | Tool | What it does |
 | --- | --- |
-| `set_virtual` | Creates or replaces a virtual `switch`, `number` or `button` the hub owns, as `virtual_<id>`. Args: `id` (1 to 48 characters of `a-z`, `0-9`, `_`), `spec` (`kind`, `name`; for a number `min`, `max`, `step`, `unit`; `initial`). |
+| `set_virtual` | Creates or replaces a virtual `switch`, `number`, `button` or `select` the hub owns, as `virtual_<id>`. Args: `id` (1 to 48 characters of `a-z`, `0-9`, `_`), `spec` (`kind`, `name`; for a number `min`, `max`, `step`, `unit`; for a select `options`; `initial`). |
 | `delete_virtual` | Removes a virtual entity. Args: `id` (without the `virtual_` prefix). |
 
 ## Notifications

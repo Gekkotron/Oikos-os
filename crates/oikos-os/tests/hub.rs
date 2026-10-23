@@ -838,6 +838,7 @@ fn virtual_switch() -> VirtualSpec {
         max: None,
         step: None,
         unit: None,
+        options: None,
         initial: None,
     }
 }
@@ -905,6 +906,7 @@ async fn number_defaults_and_initial_override() {
         max: Some(30.0),
         step: Some(0.5),
         unit: Some("°C".to_owned()),
+        options: None,
         initial: None,
     };
     let view = hub
@@ -972,6 +974,98 @@ async fn virtual_switch_command_is_accepted_and_retained() {
     assert_confirmed_on(&response);
 }
 
+fn house_mode(options: &[&str]) -> VirtualSpec {
+    VirtualSpec {
+        kind: VirtualKind::Select,
+        name: "House mode".to_owned(),
+        min: None,
+        max: None,
+        step: None,
+        unit: None,
+        options: Some(options.iter().map(|o| (*o).to_owned()).collect()),
+        initial: None,
+    }
+}
+
+const MODE_STATE: &str = "oikos/virtual/house_mode";
+const MODE_CONFIG: &str = "oikos/select/virtual/house_mode/config";
+
+#[tokio::test]
+async fn select_virtual_is_created_and_commanded() {
+    let (hub, mut publisher) = hub_with_timeout(500);
+    let view = hub
+        .set_virtual("house_mode", house_mode(&["home", "away", "night"]))
+        .await
+        .expect("created");
+    assert_eq!(view.kind, Kind::Select);
+    assert_eq!(view.state.value, StateValue::Text("home".to_owned()));
+    let published = drain(&mut publisher);
+    assert_eq!(published.len(), 2, "{published:?}");
+    assert_eq!(published[0].topic, MODE_CONFIG);
+    assert!(published[0].retain);
+    assert_eq!(published[1].topic, MODE_STATE);
+    assert_eq!(published[1].payload, "home");
+    assert!(published[1].retain);
+
+    let echo_hub = Arc::clone(&hub);
+    let echo = tokio::spawn(async move {
+        let published = publisher.recv().await.expect("the command publish");
+        assert_eq!(published.topic, MODE_STATE);
+        assert_eq!(published.payload, "away");
+        echo_hub.ingest(MODE_STATE, b"away");
+        publisher
+    });
+    hub.send_command(
+        "virtual_house_mode",
+        Command::SelectOption {
+            option: "away".to_owned(),
+        },
+    )
+    .await
+    .expect("published");
+    let mut publisher = echo.await.expect("echo task");
+
+    let result = hub
+        .send_command(
+            "virtual_house_mode",
+            Command::SelectOption {
+                option: "party".to_owned(),
+            },
+        )
+        .await;
+    assert!(matches!(result, Err(HubError::Command(_))), "{result:?}");
+    assert!(drain(&mut publisher).is_empty());
+}
+
+#[tokio::test]
+async fn select_options_change_resets_a_missing_state() {
+    let (hub, mut publisher) = hub();
+    hub.set_virtual("house_mode", house_mode(&["home", "away"]))
+        .await
+        .expect("created");
+    hub.ingest(MODE_STATE, b"away");
+    drain(&mut publisher);
+
+    let view = hub
+        .set_virtual("house_mode", house_mode(&["home", "night"]))
+        .await
+        .expect("redefined");
+    assert_eq!(view.state.value, StateValue::Text("home".to_owned()));
+    let published = drain(&mut publisher);
+    assert_eq!(published.len(), 2, "{published:?}");
+    assert_eq!(published[0].topic, MODE_CONFIG);
+    assert_eq!(published[1].topic, MODE_STATE);
+    assert_eq!(published[1].payload, "home");
+    assert!(published[1].retain);
+
+    hub.set_virtual("house_mode", house_mode(&["home", "night"]))
+        .await
+        .expect("redefined again");
+    let published = drain(&mut publisher);
+    assert_eq!(published.len(), 1, "{published:?}");
+    assert_eq!(published[0].topic, MODE_CONFIG);
+}
+
 #[tokio::test]
 async fn virtual_topics_are_not_ignored_discovery() {
     let (hub, _publisher) = hub();
@@ -1017,6 +1111,7 @@ async fn virtual_button_has_no_state_and_no_retain() {
         max: None,
         step: None,
         unit: None,
+        options: None,
         initial: None,
     };
     let view = hub.set_virtual("boost", spec).await.expect("button");

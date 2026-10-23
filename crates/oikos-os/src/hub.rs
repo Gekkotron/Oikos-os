@@ -19,7 +19,7 @@ use crate::pictures::{MAX_PICTURE_BYTES, Picture, Pictures};
 use crate::virtual_entities as virtuals;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, GroupMemberView, GroupSpec,
-    GroupView, IgnoredView, OverridePatch, Snapshot, VirtualSpec, WsEvent, area_views,
+    GroupView, IgnoredView, OverridePatch, Snapshot, VirtualKind, VirtualSpec, WsEvent, area_views,
     device_views, entity_views, mask_secret, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
@@ -1313,7 +1313,7 @@ impl Hub {
     /// Creates or replaces virtual entity `id`: publishes its discovery config retained and
     /// applies it locally. The initial state (`OFF`, the number's `min`, or `initial`) is
     /// published retained only when the entity did not exist, so redefining one keeps its
-    /// state; a button has none. A changed kind clears the old config topic.
+    /// state (a select whose state left its options is reset); a button has none. A changed kind clears the old config topic.
     pub async fn set_virtual(&self, id: &str, spec: VirtualSpec) -> Result<EntityView, HubError> {
         virtuals::validate_id(id).map_err(HubError::Rejected)?;
         let initial = virtuals::initial_state(&spec).map_err(HubError::Rejected)?;
@@ -1341,7 +1341,17 @@ impl Hub {
         }
         self.ingest(&config_topic, config.as_bytes());
 
-        if let (None, Some(state)) = (previous, initial) {
+        // A new entity gets its initial state; a redefined select whose current value fell
+        // outside the new options goes back to the initial one (the first option).
+        let reset = match (&previous, &spec.options) {
+            (None, _) => true,
+            (Some(_), Some(options)) if spec.kind == VirtualKind::Select => !matches!(
+                self.entity_view(&unique_id).map(|view| view.state.value),
+                Some(StateValue::Text(current)) if options.contains(&current)
+            ),
+            _ => false,
+        };
+        if let (true, Some(state)) = (reset, initial) {
             let topic = virtuals::state_topic(&self.discovery_prefix, id);
             self.publish(Publish {
                 topic: topic.clone(),

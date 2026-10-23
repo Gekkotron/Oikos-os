@@ -246,10 +246,10 @@ impl OikosMcp {
         Json(SearchResult { devices, entities })
     }
 
-    /// Creates or replaces a virtual entity the hub owns: a `switch`, a `number` or a
-    /// `button`, for flows to read and write (a flag, a setpoint, a manual trigger). It is
-    /// saved retained and returned as an entity with the id `virtual_<id>`; a switch or number
-    /// is commanded with `send_command` like any other, and moved to a room with
+    /// Creates or replaces a virtual entity the hub owns: a `switch`, a `number`, a `button`
+    /// or a `select` (give its `options`), for flows to read and write (a flag, a setpoint, a
+    /// manual trigger, a mode). It is saved retained and returned as an entity with the id
+    /// `virtual_<id>`; a switch, number or select is commanded with `send_command` like any other, and moved to a room with
     /// `set_override`. Redefining one keeps its state.
     #[tool(name = "set_virtual", annotations(idempotent_hint = true))]
     async fn set_virtual(

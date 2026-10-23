@@ -18,8 +18,8 @@ The table lists every topic the hub reads or writes, with its default prefix. "I
 | `oikos/ui/_types` | out | yes | The whole [type table](entity-types.md#the-type-table) | `[topics] ui_prefix` |
 | `oikos/ui/dashboards/<id>` | in, out | yes | A dashboard definition; empty removes it | `[topics] ui_prefix` |
 | `oikos/automation/<flow id>` | in, out | yes | A [flow](flow-nodes.md) document; empty removes it | `[topics] automation_prefix` |
-| `<first discovery prefix>/<switch\|number\|button>/virtual/<id>/config` | out | yes | Discovery of a virtual entity | `[topics] discovery_prefixes` (first entry) |
-| `<first discovery prefix>/virtual/<id>` | in, out | yes for a switch or number; no for a button | `ON` / `OFF`, a number, or `PRESS`; the state and the command topic | `[topics] discovery_prefixes` (first entry) |
+| `<first discovery prefix>/<switch\|number\|button\|select>/virtual/<id>/config` | out | yes | Discovery of a virtual entity | `[topics] discovery_prefixes` (first entry) |
+| `<first discovery prefix>/virtual/<id>` | in, out | yes for a switch, number or select; no for a button | `ON` / `OFF`, a number, an option name, or `PRESS`; the state and the command topic | `[topics] discovery_prefixes` (first entry) |
 | `<first discovery prefix>/<component>/group/<id>/config` | out | yes | Discovery of a group entity | `[groups] enabled`, `[topics] discovery_prefixes` |
 | `<first discovery prefix>/group/<id>` | in, out | yes (state) | The combined state; commands arrive here as JSON | `[groups] enabled` |
 | `<first discovery prefix>/group/<id>/definition` | in, out | yes | `{kind, name, members, hideMembers}` | `[groups] enabled` |
