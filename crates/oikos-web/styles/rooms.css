@@ -1,0 +1,30 @@
+/* Rooms: the overview stacks one section per room, and each room has a page of its own. */
+
+.room + .room {
+  margin-top: 32px;
+}
+
+.room__gone {
+  margin: 24px 0;
+  color: var(--muted);
+  font: var(--type-body);
+}
+
+/* A room in the sidebar: its name, then how many cards Home shows there. */
+.sidebar__room-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__count {
+  margin-left: auto;
+  color: var(--muted);
+  font: var(--type-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar__room[aria-current] .sidebar__count {
+  color: inherit;
+}

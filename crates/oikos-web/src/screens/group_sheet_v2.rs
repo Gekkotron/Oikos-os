@@ -17,7 +17,7 @@ use crate::components::toast::Toasts;
 use crate::format::{display_value, is_on};
 use crate::house::House;
 use crate::icons::{PENCIL, TRASH, kind_icon};
-use crate::nav::{BackLink, HomeRoom, home_room_for, use_back};
+use crate::nav::{BackLink, use_back};
 use crate::screens::group_wizard::kind_word;
 use crate::screens::home::card_for;
 
@@ -113,7 +113,6 @@ pub fn GroupSheetV2Screen() -> impl IntoView {
 #[component]
 fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
     let house = expect_context::<House>();
-    let home_room = expect_context::<HomeRoom>();
     let current = move || {
         group
             .get()
@@ -144,10 +143,6 @@ fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
                 .map_or_else(|| area.clone(), |a| a.name.clone())
         })
     });
-    // Back returns to the page the sheet was opened from; on the House dashboard, in the group's room.
-    home_room
-        .0
-        .set(home_room_for(&entity.with_untracked(|e| e.area.clone())));
 
     let rows = move || {
         let members = current().members;

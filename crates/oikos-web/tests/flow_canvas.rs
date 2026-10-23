@@ -1473,3 +1473,98 @@ async fn signal_trigger_editor_lists_signals() {
     assert_eq!(count(&host, ".signal-chips .chip"), 4);
     assert_eq!(count(&host, ".signal-chips .chip--selected"), 1);
 }
+
+/// Stands in for the shell chrome the canvas sits beside.
+fn fake_chrome(sidebar_position: &str) -> web_sys::Element {
+    let document = web_sys::window().unwrap().document().unwrap();
+    while let Some(stale) = document.query_selector(".sidebar").unwrap() {
+        stale.parent_element().unwrap().remove();
+    }
+    let chrome = document.create_element("div").unwrap();
+    chrome.set_inner_html(&format!(
+        r#"<aside class="sidebar" style="position:{sidebar_position};left:0;top:0;width:210px;height:300px"></aside>
+           <header class="content-header" style="position:fixed;left:210px;top:0;height:46px;width:300px"></header>"#
+    ));
+    document.body().unwrap().append_child(&chrome).unwrap();
+    chrome
+}
+
+fn flow_style(host: &web_sys::Element) -> String {
+    host.query_selector(".flow-canvas-screen")
+        .unwrap()
+        .unwrap()
+        .get_attribute("style")
+        .unwrap_or_default()
+}
+
+#[wasm_bindgen_test]
+async fn canvas_inset_clears_the_sidebar() {
+    let chrome = fake_chrome("sticky");
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    let style = flow_style(&host);
+    assert!(style.contains("--flow-top:46px"), "{style}");
+    let right = chrome
+        .query_selector(".sidebar")
+        .unwrap()
+        .unwrap()
+        .get_bounding_client_rect()
+        .right();
+    assert!(right >= 210.0);
+    assert!(style.contains(&format!("--flow-left:{right}px")), "{style}");
+    chrome.remove();
+}
+
+#[wasm_bindgen_test]
+async fn canvas_ignores_an_off_canvas_sidebar() {
+    let chrome = fake_chrome("fixed");
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    let style = flow_style(&host);
+    assert!(style.contains("--flow-left:0px"), "{style}");
+    chrome.remove();
+}
+
+#[wasm_bindgen_test]
+async fn canvas_resets_the_scroll_before_measuring() {
+    let chrome = fake_chrome("sticky");
+    // The header scrolls with the page, as the real one does.
+    chrome
+        .query_selector(".content-header")
+        .unwrap()
+        .unwrap()
+        .set_attribute(
+            "style",
+            "position:absolute;left:210px;top:0;height:46px;width:300px",
+        )
+        .unwrap();
+    let document = web_sys::window().unwrap().document().unwrap();
+    let spacer = document.create_element("div").unwrap();
+    spacer.set_attribute("style", "height:5000px").unwrap();
+    document.body().unwrap().append_child(&spacer).unwrap();
+    let window = web_sys::window().unwrap();
+    window.scroll_to_with_x_and_y(0.0, 1200.0);
+    assert!(window.scroll_y().unwrap() > 0.0);
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    assert_eq!(window.scroll_y().unwrap(), 0.0);
+    let style = flow_style(&host);
+    assert!(style.contains("--flow-top:46px"), "{style}");
+    spacer.remove();
+    chrome.remove();
+}

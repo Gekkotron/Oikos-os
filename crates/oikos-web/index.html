@@ -3,14 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1020">
+<script>
+// Mirrors theme.rs (parse + attribute + Auto + theme-color); keep in sync. Avoids a flash of the
+// wrong theme before wasm boots. Blocked storage still follows the system; nothing ever throws.
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("oikos.theme"); } catch (e) {}
+  var light = t === "ivoire" || t === "warm";
+  if (t !== "night" && !light) {
+    try { light = matchMedia("(prefers-color-scheme: light)").matches; } catch (e) {}
+  }
+  try {
+    document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+    document.querySelector('meta[name="theme-color"]').setAttribute("content", light ? "#f3f0e8" : "#0b1020");
+  } catch (e) {}
+})();
+</script>
 <title>Oikos-os</title>
 <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
 <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-<meta name="theme-color" content="#0b1020">
 <link data-trunk rel="rust" data-wasm-opt="s"/>
 <link data-trunk rel="css" href="styles/tokens.css"/>
 <link data-trunk rel="css" href="styles/fonts.css"/>
 <link data-trunk rel="css" href="styles/main.css"/>
+<link data-trunk rel="css" href="styles/rooms.css"/>
 <link data-trunk rel="copy-dir" href="assets"/>
 </head>
 <body></body>

@@ -1,12 +1,14 @@
-//! The connection pill in the top bar.
+//! The connection pill at the foot of the sidebar.
 
 use leptos::prelude::*;
 use oikos_api::ConnectionStatus;
 
 use crate::house::House;
+use crate::i18n::{Key, use_text};
 
 #[component]
 pub fn StatusPill() -> impl IntoView {
+    let t = use_text();
     let house = expect_context::<House>();
     let connection = house.connection;
     let class = move || match connection.get() {
@@ -15,9 +17,9 @@ pub fn StatusPill() -> impl IntoView {
         ConnectionStatus::Offline { .. } => "pill pill--offline",
     };
     let text = move || match connection.get() {
-        ConnectionStatus::Connecting => "Reconnecting…",
-        ConnectionStatus::Online => "Online",
-        ConnectionStatus::Offline { .. } => "Offline",
+        ConnectionStatus::Connecting => t(Key::Reconnecting),
+        ConnectionStatus::Online => t(Key::Online),
+        ConnectionStatus::Offline { .. } => t(Key::Offline),
     };
     let title = move || match connection.get() {
         ConnectionStatus::Offline { reason } => reason,

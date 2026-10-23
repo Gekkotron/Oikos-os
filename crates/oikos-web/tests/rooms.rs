@@ -1,0 +1,241 @@
+#![cfg(target_arch = "wasm32")]
+
+use leptos::prelude::*;
+use leptos::task::tick;
+use leptos_router::components::{Route, Router, Routes};
+use leptos_router::path;
+use oikos_api::{AreaView, EntityView};
+use oikos_core::model::{
+    Capabilities, EntityCategory, EntityState, Kind, UNASSIGNED_AREA, UiOverride,
+};
+use oikos_web::house::House;
+use oikos_web::i18n::Lang;
+use oikos_web::screens::home::HomeScreen;
+use oikos_web::screens::room::RoomScreen;
+use oikos_web::shell::Shell;
+use oikos_web::theme::Theme;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_test::*;
+wasm_bindgen_test_configure!(run_in_browser);
+
+fn entity(id: &str, name: &str, kind: Kind, area: &str) -> EntityView {
+    EntityView {
+        id: id.into(),
+        device_id: None,
+        name: name.into(),
+        device_name: None,
+        label: None,
+        kind,
+        component: kind.component().to_string(),
+        protocol_kind: kind,
+        device_class: None,
+        unit: None,
+        icon: None,
+        category: EntityCategory::Primary,
+        enabled_by_default: true,
+        area: area.into(),
+        part_of: None,
+        capabilities: Capabilities::default(),
+        ui: UiOverride::default(),
+        state: EntityState::default(),
+    }
+}
+
+fn area(id: &str, count: usize) -> AreaView {
+    AreaView {
+        id: id.into(),
+        name: format!("Room {id}"),
+        icon: None,
+        order: None,
+        entity_count: count,
+        primary_count: count,
+        group_names: Default::default(),
+        group_favorites: Default::default(),
+    }
+}
+
+fn add_entities(house: House) {
+    house.entities.set(
+        [
+            entity("light.a", "Lamp a", Kind::Light, "a"),
+            entity("light.b", "Lamp b", Kind::Light, "b"),
+            entity("switch.p", "Plug", Kind::Switch, UNASSIGNED_AREA),
+        ]
+        .into_iter()
+        .map(|e| (e.id.clone(), e))
+        .collect(),
+    );
+}
+
+struct Mounted {
+    _app: Box<dyn std::any::Any>,
+    host: web_sys::Element,
+}
+
+/// A house with rooms a and b (one light each) and an unassigned switch, opened at `path`.
+async fn mount(path: &str) -> Mounted {
+    mount_with(path, true).await.0
+}
+
+/// As [`mount`]; without `with_entities` the areas are there but no entity has arrived yet.
+async fn mount_with(path: &str, with_entities: bool) -> (Mounted, House) {
+    let window = web_sys::window().unwrap();
+    window
+        .history()
+        .unwrap()
+        .push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(path))
+        .unwrap();
+    let document = window.document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let house = House::new();
+    house.areas.set(vec![
+        area("a", 1),
+        area("b", 1),
+        area("c", 0),
+        area(UNASSIGNED_AREA, 1),
+    ]);
+    if with_entities {
+        add_entities(house);
+    }
+    let app = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(RwSignal::new(Theme::Auto));
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(oikos_web::components::toast::Toasts::new());
+        provide_context(oikos_web::commands::Pending::new());
+        provide_context(oikos_web::components::confirm::Confirming::new());
+        oikos_web::nav::install_nav();
+        let badge: Signal<Option<String>> = Signal::stored(None);
+        view! {
+            <Router>
+                <oikos_web::nav::TrackBackStack />
+                <Shell
+                    climate_on=Signal::from(false)
+                    alarm_armed=Signal::from(false)
+                    solar_active=Signal::from(false)
+                    alerts_badge=badge
+                >
+                    <Routes fallback=|| ()>
+                        <Route path=path!("/dashboards/:id") view=HomeScreen />
+                        <Route path=path!("/rooms/:id") view=RoomScreen />
+                    </Routes>
+                </Shell>
+            </Router>
+        }
+    });
+    tick().await;
+    tick().await;
+    (
+        Mounted {
+            _app: Box::new(app),
+            host,
+        },
+        house,
+    )
+}
+
+fn texts(host: &web_sys::Element, selector: &str) -> Vec<String> {
+    let list = host.query_selector_all(selector).unwrap();
+    (0..list.length())
+        .map(|i| list.item(i).unwrap().text_content().unwrap_or_default())
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn overview_shows_every_room() {
+    let m = mount("/dashboards/house").await;
+    assert_eq!(
+        texts(&m.host, ".room .room__title"),
+        ["Room a", "Room b", "Room Unassigned"]
+    );
+    assert!(m.host.query_selector("nav.chips").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn room_route_shows_one_room() {
+    let m = mount("/rooms/a").await;
+    assert_eq!(texts(&m.host, ".room .room__title"), ["Room a"]);
+    assert_eq!(
+        m.host.query_selector_all(".room .card").unwrap().length(),
+        1
+    );
+    let link = m
+        .host
+        .query_selector(".sidebar__rooms a[href=\"/rooms/a\"]")
+        .unwrap()
+        .expect("sidebar link");
+    assert_eq!(link.get_attribute("aria-current").as_deref(), Some("page"));
+}
+
+#[wasm_bindgen_test]
+async fn room_route_unknown_room() {
+    let m = mount("/rooms/zz").await;
+    assert_eq!(texts(&m.host, ".room__gone"), ["This room is gone."]);
+    assert!(m.host.query_selector(".room").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn sidebar_lists_rooms_with_counts() {
+    let m = mount("/dashboards/house").await;
+    let rooms = m.host.query_selector(".sidebar__rooms").unwrap().unwrap();
+    for id in ["a", "b"] {
+        let link = rooms
+            .query_selector(&format!("a[href=\"/rooms/{id}\"]"))
+            .unwrap()
+            .unwrap_or_else(|| panic!("no link for {id}"));
+        assert!(link.text_content().unwrap().contains(&format!("Room {id}")));
+        let count = link.query_selector(".sidebar__count").unwrap().unwrap();
+        assert_eq!(count.text_content().as_deref(), Some("1"));
+    }
+    assert_eq!(rooms.query_selector_all("a").unwrap().length(), 2);
+}
+
+#[wasm_bindgen_test]
+async fn room_page_waits_for_its_cards_without_calling_the_room_gone() {
+    // The areas are in, the entities are not: the room exists and is empty for now.
+    let (m, house) = mount_with("/rooms/a", false).await;
+    assert!(m.host.query_selector(".room__gone").unwrap().is_none());
+    assert_eq!(texts(&m.host, ".room .room__empty"), ["Nothing here yet."]);
+    add_entities(house);
+    tick().await;
+    assert!(m.host.query_selector(".room__gone").unwrap().is_none());
+    assert_eq!(
+        m.host.query_selector_all(".room .card").unwrap().length(),
+        1
+    );
+}
+
+#[wasm_bindgen_test]
+async fn room_with_nothing_on_home_is_empty_not_gone() {
+    // The hub knows the room c, where nothing shows on Home.
+    let (m, _house) = mount_with("/rooms/c", true).await;
+    assert!(m.host.query_selector(".room__gone").unwrap().is_none());
+    assert_eq!(texts(&m.host, ".room .room__empty"), ["Nothing here yet."]);
+}
+
+#[wasm_bindgen_test]
+async fn room_with_an_accented_or_spaced_id_is_highlighted() {
+    // Area ids are room names; the address bar and the links carry them percent-encoded.
+    for (id, encoded) in [
+        ("Séjour", "S%C3%A9jour"),
+        ("Salle de bain", "Salle%20de%20bain"),
+    ] {
+        let (m, house) = mount_with(&format!("/rooms/{encoded}"), true).await;
+        house.areas.update(|list| list.push(area(id, 1)));
+        house.entities.update(|map| {
+            let lamp = entity("light.named", "Named lamp", Kind::Light, id);
+            map.insert(lamp.id.clone(), lamp);
+        });
+        tick().await;
+        assert_eq!(texts(&m.host, ".room .room__title"), [format!("Room {id}")]);
+        let link = m
+            .host
+            .query_selector(&format!(".sidebar__rooms a[href=\"/rooms/{encoded}\"]"))
+            .unwrap()
+            .unwrap_or_else(|| panic!("no sidebar link to /rooms/{encoded}"));
+        assert_eq!(link.get_attribute("aria-current").as_deref(), Some("page"));
+        let crumb = texts(&m.host, ".breadcrumb [aria-current=\"page\"]");
+        assert_eq!(crumb, [format!("Room {id}")]);
+    }
+}

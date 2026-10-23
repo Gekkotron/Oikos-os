@@ -21,14 +21,17 @@ pub mod format;
 pub mod groups;
 pub mod house;
 pub mod house_state;
+pub mod i18n;
 pub mod icons;
 pub mod layout;
 pub mod nav;
 pub mod override_editor;
+pub mod rooms;
 pub mod schedule;
 pub mod screens;
 pub mod security;
 pub mod settings_rules;
+pub mod shell;
 pub mod theme;
 #[cfg(target_arch = "wasm32")]
 pub mod ws;

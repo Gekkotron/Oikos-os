@@ -1,7 +1,6 @@
 //! The dashboard screen: for id "house" render the existing rooms-overview `HomeScreen`
 //! verbatim; for any other id render the generic widget grid.
 
-use leptos::ev;
 use leptos::prelude::*;
 use leptos_router::hooks::{use_params_map, use_query_map};
 use oikos_api::HOUSE_ID;
@@ -11,7 +10,6 @@ use crate::dashboards::edit::{EditState, EditToolbar, add_widget_handler};
 use crate::dashboards::grid::Grid;
 use crate::dashboards::library::WidgetLibrary;
 use crate::house::House;
-use crate::layout::top_offset;
 use crate::screens::home::HomeScreen;
 
 #[component]
@@ -40,22 +38,15 @@ pub fn DashboardScreen() -> impl IntoView {
                 known.track();
                 match house.dashboard(&current_id) {
                     Some(view) => {
-                        // The picker's "New dashboard" lands here with ?edit=1.
+                        // The sidebar's "New dashboard" lands here with ?edit=1.
                         let initial_edit = query.read_untracked().get("edit").as_deref() == Some("1");
                         let edit = EditState::new(view.dashboard.clone(), initial_edit);
                         let widgets = Signal::derive(move || edit.draft.get().widgets);
-                        let top = RwSignal::new(0.0_f64);
-                        Effect::new(move |_| top.set(top_offset()));
-                        let resize = window_event_listener(ev::resize, move |_| top.set(top_offset()));
-                        on_cleanup(move || resize.remove());
                         view! {
                             <EditToolbar state=edit />
                             // The library sits beside the grid while editing; the layout wraps
                             // both only then so the plain grid keeps its full width.
-                            <div
-                                class:dashboard-edit-layout=move || edit.active.get()
-                                style=move || format!("--dashboard-top:{}px", top.get())
-                            >
+                            <div class:dashboard-edit-layout=move || edit.active.get()>
                                 <Grid widgets=widgets edit=edit />
                                 <Show when=move || edit.active.get()>
                                     <aside class="dashboard-library-panel" aria-label="Widget library">

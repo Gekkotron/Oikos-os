@@ -120,7 +120,7 @@ fn Snippet(title: &'static str, text: String) -> impl IntoView {
 #[component]
 fn ThemeSwitch() -> impl IntoView {
     let theme = expect_context::<RwSignal<Theme>>();
-    let segment = move |value: Theme, label: &'static str| {
+    let segment = move |value: Theme| {
         view! {
             <button
                 type="button"
@@ -129,14 +129,13 @@ fn ThemeSwitch() -> impl IntoView {
                 aria-pressed=move || (theme.get() == value).to_string()
                 on:click=move |_| theme.set(value)
             >
-                {label}
+                {value.label()}
             </button>
         }
     };
     view! {
         <div class="segmented" role="group" aria-label="Theme">
-            {segment(Theme::Auto, "Auto")} {segment(Theme::Night, "Night")}
-            {segment(Theme::Warm, "Warm")}
+            {segment(Theme::Auto)} {segment(Theme::Night)} {segment(Theme::Ivoire)}
         </div>
     }
 }

@@ -210,41 +210,50 @@ body {
   }
 }
 
-/* App shell */
-.topbar {
+/* App shell: the sidebar beside the content column (header, then the screen). */
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.shell__content {
+  min-width: 0;
+}
+
+/* Full height with its own scroll when it overflows. No backdrop-filter: that would make the
+   sidebar the containing block of fixed descendants. */
+.sidebar {
   position: sticky;
-  top: 8px;
-  z-index: 10;
+  top: 0;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
+  flex-direction: column;
+  gap: 12px;
   box-sizing: border-box;
-  margin: 8px;
-  padding: 8px 12px;
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-nav);
-  background: var(--card-bg);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  height: 100vh;
+  height: 100dvh;
+  padding: 20px 12px 16px;
+  overflow-y: auto;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
 }
 
-.topbar__brand {
+.sidebar__brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-right: auto;
+  gap: 10px;
+  padding: 0 12px 8px;
 }
 
-.topbar__logo {
+.sidebar__logo {
   display: block;
   border-radius: 8px;
   user-select: none;
 }
 
 /* The doorbell Easter egg: the house shakes while it rings. */
-.topbar__logo--ringing {
+.sidebar__logo--ringing {
   animation: doorbell 0.55s ease-in-out 2;
 }
 
@@ -272,93 +281,275 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .topbar__logo--ringing {
+  .sidebar__logo--ringing {
     animation: none;
   }
 }
 
-.topbar__name {
+.sidebar__wordmark {
   font: var(--type-display);
   letter-spacing: var(--type-display-spacing);
 }
 
-/* Icon rail. Each entry is a 44x44 glyph by default; the active page expands into a pill
-   with its label in the amber-soft "lit room" wash. The Energy and Security glyphs still
-   recolour themselves when the house is producing or armed. */
-.topbar__nav {
+.sidebar__nav {
   display: flex;
-  flex: 1 0 100%;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+
+.sidebar__list,
+.sidebar__rooms,
+.sidebar__dashboards {
+  display: flex;
+  flex-direction: column;
   gap: 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.topbar__nav::-webkit-scrollbar {
-  display: none;
-}
-
-.topbar__nav a,
-.topbar__nav .dashboards-picker__trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  min-height: var(--touch-min);
-  min-width: var(--touch-min);
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-nav);
-  background: transparent;
-  color: color-mix(in srgb, var(--ink) 70%, transparent);
+.sidebar__heading {
+  margin: 20px 12px 6px;
+  color: var(--muted);
   font: var(--type-label);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Settings sits at the bottom, just above the connection status. */
+.sidebar__footer {
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.sidebar__link,
+.sidebar__sublink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  font: var(--type-body);
+  font-weight: 500;
+  text-align: left;
   text-decoration: none;
-  white-space: nowrap;
   cursor: pointer;
   transition:
     background var(--motion-short) var(--ease),
-    color var(--motion-short) var(--ease),
-    border-color var(--motion-short) var(--ease);
+    color var(--motion-short) var(--ease);
 }
 
-.topbar__nav a:hover,
-.topbar__nav .dashboards-picker__trigger:hover {
+.sidebar__link:hover,
+.sidebar__sublink:hover {
   color: var(--ink);
   background: var(--raised);
 }
 
-.topbar__nav a:focus-visible,
-.topbar__nav .dashboards-picker__trigger:focus-visible {
+.sidebar__link:focus-visible,
+.sidebar__sublink:focus-visible {
   outline: 2px solid var(--select);
   outline-offset: 2px;
 }
 
-.topbar__nav a .nav__label {
-  display: none;
-}
-
-/* The picker trigger always shows its label (dashboard name or "Dashboards") because it is a
-   dropdown opener, not a nav target. Regular nav items only show the label when active. */
-.topbar__nav .dashboards-picker__trigger .nav__label {
-  display: inline;
-}
-
-.topbar__nav a[aria-current="page"],
-.topbar__nav .dashboards-picker__trigger--active {
-  padding: 0 16px 0 12px;
-  color: var(--accent-amber);
-  background: var(--accent-soft);
-  border-color: var(--accent-ring);
-}
-
-.topbar__nav a[aria-current="page"] .nav__label,
-.topbar__nav .dashboards-picker__trigger--active .nav__label {
-  display: inline;
+/* "page" is the open screen; "true" is Overview while one of its dashboards below is the page. */
+.sidebar__link[aria-current] {
+  color: var(--nav-active-ink);
+  background: var(--nav-active-bg);
   font-weight: 600;
 }
 
-/* The nav rail glyph is a 20px line icon that inherits the link's text colour.
-   The Energy and Security entries override that when the house is lit. */
+/* The unfolded dashboards: indented under Overview's label, the open one in the active ink. */
+.sidebar__dashboards {
+  margin: 2px 0 4px;
+}
+
+.sidebar__sublink {
+  min-height: 34px;
+  padding-left: 42px;
+}
+
+.sidebar__sublink[aria-current="page"] {
+  color: var(--nav-active-ink);
+  font-weight: 600;
+}
+
+.sidebar__new {
+  gap: 6px;
+  padding-left: 38px;
+}
+
+.sidebar__new:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* Read by assistive tech, not shown: badge counts, the language button's target. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sidebar__new-glyph {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+.sidebar__new-glyph svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Counts and the Beta pill sit at the right end of the entry. */
+.sidebar__link .nav__badge {
+  margin-left: auto;
+}
+
+.sidebar__status {
+  padding: 4px 4px 0;
+}
+
+/* The content header: breadcrumb on the left, theme and language on the right. Not sticky. */
+.content-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px 8px 8px;
+}
+
+.breadcrumb {
+  min-width: 0;
+}
+
+.breadcrumb__list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font: var(--type-body);
+  font-weight: 500;
+}
+
+.breadcrumb__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.breadcrumb__item + .breadcrumb__item::before {
+  content: "/";
+  color: var(--muted);
+}
+
+.breadcrumb__item a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.breadcrumb__item a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.breadcrumb__item [aria-current="page"] {
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb__home {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+}
+
+.breadcrumb__home svg {
+  width: 100%;
+  height: 100%;
+}
+
+.content-header__tools {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.content-header__menu,
+.shell__scrim {
+  display: none;
+}
+
+.content-header__theme,
+.content-header__lang {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--card-bg);
+  color: var(--ink);
+  font: var(--type-label);
+  cursor: pointer;
+}
+
+.content-header__theme svg {
+  width: 20px;
+  height: 20px;
+}
+
+.content-header__lang {
+  padding: 0 14px;
+  color: var(--muted);
+}
+
+.content-header__lang--on {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.content-header__theme:hover,
+.content-header__lang:hover {
+  background: var(--raised);
+}
+
+.content-header__theme:focus-visible,
+.content-header__lang:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 2px;
+}
+
+/* A sidebar entry's 20px line icon; it inherits the link's text colour. The Energy and Security
+   entries override that while the house produces or is armed. */
 .nav__glyph {
   display: inline-flex;
   width: 20px;
@@ -380,13 +571,7 @@ body {
   color: var(--warning);
 }
 
-.topbar__nav a[aria-current="page"] .nav__glyph,
-.topbar__nav .dashboards-picker__trigger--active .nav__glyph {
-  color: var(--accent-amber);
-}
-
-/* Unread-count pill on a nav entry (currently only the Alerts tab). Sits inline next to the
-   glyph, so it stays visible when the label is hidden on inactive tabs. */
+/* Unread-count pill on a sidebar entry (currently only Alerts). */
 .nav__badge {
   display: inline-flex;
   align-items: center;
@@ -401,7 +586,7 @@ body {
   pointer-events: none;
 }
 
-/* A feature still being tested (the Climate tab). Quieter than an unread count. */
+/* A feature still being tested (the Climate entry). Quieter than an unread count. */
 .nav__badge--beta {
   background: var(--warning-bg);
   color: var(--warning);
@@ -448,16 +633,6 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 8px;
-}
-
-@media (min-width: 720px) {
-  .topbar__nav {
-    flex: 0 1 auto;
-  }
-
-  .topbar__nav a {
-    flex: none;
-  }
 }
 
 /* Home */
@@ -752,7 +927,8 @@ a.chip {
   }
 }
 
-/* Toasts */
+/* Toasts. The top of the fixed stack: phone widget library 40, edit sheets 45, drawer scrim 46,
+   drawer 47, toasts 50. */
 .toasts {
   position: fixed;
   right: 0;
@@ -2988,7 +3164,7 @@ p.override__hint {
   --flow-glass: color-mix(in srgb, var(--bg) 80%, transparent);
   --drawer-w: 360px;
   position: fixed;
-  inset: var(--flow-top, 0px) 0 0;
+  inset: var(--flow-top, 0px) 0 0 var(--flow-left, 0px);
   overflow: hidden;
 }
 
@@ -5038,70 +5214,6 @@ html:has(.flow-canvas-screen) {
 }
 .widget-unavailable-label { overflow-wrap: anywhere; }
 
-/* The dashboards picker replaces the Home tab. The menu is position: fixed with its coordinates
-   set from the trigger's bounding rect in Rust, which escapes .topbar__nav's overflow-x
-   clipping — an absolute-positioned dropdown would get hidden on viewports narrow enough that
-   the nav scrolls horizontally. */
-.dashboards-picker {
-  display: flex;
-  flex: 0 0 auto;
-}
-
-.dashboards-picker__trigger {
-  /* Inherits the icon-rail chrome from .topbar__nav .dashboards-picker__trigger so the picker
-     reads as part of the nav. --active lights it when the user is on a dashboard page. */
-}
-
-.dashboards-picker__chevron {
-  display: inline-flex;
-  width: 14px;
-  height: 14px;
-  margin-left: 2px;
-  opacity: 0.6;
-}
-
-.dashboards-picker__chevron svg {
-  width: 100%;
-  height: 100%;
-}
-
-.dashboards-picker__menu {
-  position: fixed;
-  z-index: 20;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
-  min-width: 220px;
-  background: var(--menu-bg);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius-nav);
-  box-shadow: var(--menu-shadow);
-}
-
-.dashboards-picker__menu li {
-  display: flex;
-}
-
-.dashboards-picker__menu a,
-.dashboards-picker__new button {
-  flex: 1;
-  justify-content: flex-start;
-  text-align: left;
-  padding: 0 12px;
-  min-height: var(--touch-min);
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: var(--type-label);
-  cursor: pointer;
-}
-
-.dashboards-picker__new {
-  border-top: 1px solid var(--card-border, currentColor);
-  margin-top: 4px;
-  padding-top: 4px;
-}
-
 /* Edit mode: toolbar sits above the grid, right-aligned, as a cluster of .btn controls. The
    pencil is a round icon toggle that lights amber (.btn--active) when edit mode is on; the gear
    opens the dashboard settings sheet; Discard and Save share the .btn--with-icon shape with
@@ -5196,10 +5308,10 @@ html:has(.flow-canvas-screen) {
 
   .dashboard-library-panel {
     position: sticky;
-    top: var(--dashboard-top, 80px);
+    top: 12px;
     flex: none;
     width: 360px;
-    max-height: calc(100vh - var(--dashboard-top, 80px) - 12px);
+    max-height: calc(100dvh - 24px);
     margin: 12px 12px 12px 0;
   }
 }
@@ -5210,6 +5322,7 @@ html:has(.flow-canvas-screen) {
     left: 8px;
     right: 8px;
     bottom: 8px;
+    /* Under the edit sheets (45), the phone drawer (46/47) and the toasts (50). */
     z-index: 40;
     max-height: 45vh;
   }
@@ -5254,7 +5367,9 @@ html:has(.flow-canvas-screen) {
   background: var(--surface, #fff);
   color: inherit;
   box-shadow: -4px 0 16px rgba(0, 0, 0, 0.2);
-  z-index: 50;
+  /* Above the phone widget library (40), under the phone drawer (46/47) and the toasts (50).
+     Menus opened inside a sheet sit in its stacking context, so they stay above it. */
+  z-index: 45;
 }
 .widget-config-sheet label,
 .dashboard-settings-sheet label { display: flex; flex-direction: column; gap: 4px; }
@@ -5705,4 +5820,83 @@ html:has(.flow-canvas-screen) {
 /* Handles never cover more than a quarter of a bar each, so its middle stays clickable. */
 .climate-timeline__handle {
   width: min(14px, 25%);
+}
+
+/* Phones: the sidebar is a drawer that slides in over the page, behind the header's menu button.
+   Fixed, so the flow canvas (layout.rs) spans the whole width. The drawer (47) and its scrim (46)
+   cover the phone widget library (40) and the edit sheets (45); only toasts (50) stay above. */
+@media (max-width: 899px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 47;
+    width: min(85vw, 320px);
+    /* Opaque: Night Glass's sidebar tint is translucent, and the page shows through a drawer. */
+    background: linear-gradient(var(--sidebar-bg), var(--sidebar-bg)), var(--menu-bg);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform var(--motion-medium) var(--ease),
+      visibility 0s linear var(--motion-medium);
+  }
+
+  .sidebar--open {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform var(--motion-medium) var(--ease),
+      visibility 0s;
+  }
+
+  .shell__scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 46;
+    background: var(--scrim);
+  }
+
+  .sidebar__link,
+  .sidebar__sublink {
+    min-height: var(--touch-min);
+  }
+
+  .content-header__menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    box-sizing: border-box;
+    min-width: var(--touch-min);
+    height: var(--touch-min);
+    padding: 0;
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    background: var(--card-bg);
+    color: var(--ink);
+    font-size: 20px;
+    cursor: pointer;
+  }
+
+  .content-header__theme,
+  .content-header__lang {
+    min-width: var(--touch-min);
+    height: var(--touch-min);
+  }
+
+  .content-header__menu:focus-visible {
+    outline: 2px solid var(--select);
+    outline-offset: 2px;
+  }
+}
+
+@media (max-width: 899px) and (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar--open {
+    transition: none;
+  }
 }
