@@ -1583,6 +1583,109 @@ async fn http_put_and_delete_group() {
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 }
 
+fn lights_off_ambiance(id: &str) -> Value {
+    json!({
+        "id": id,
+        "name": "Night",
+        "actions": [{ "type": "category", "what": "lights", "to": "off" }]
+    })
+}
+
+#[tokio::test]
+async fn ambiances_crud_round_trip() {
+    let server = Server::start().await;
+    server.online();
+    let url = server.url("/api/v1/ambiances/night");
+
+    let listed: Value = server
+        .get("/api/v1/ambiances")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(listed, json!([]));
+
+    // The id is omitted: the path supplies it.
+    let res = server
+        .client
+        .put(&url)
+        .json(&json!({ "name": "Night", "actions": [] }))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::OK);
+    let view: Value = res.json().await.expect("json");
+    assert_eq!(view["id"], "night");
+    assert_eq!(view["ambiance"]["id"], "night");
+
+    let listed: Value = server
+        .get("/api/v1/ambiances")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(listed.as_array().map(Vec::len), Some(1));
+
+    let deleted = server.client.delete(&url).send().await.expect("DELETE");
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    let again = server.client.delete(&url).send().await.expect("DELETE");
+    assert_eq!(again.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn put_ambiance_path_body_mismatch_is_422() {
+    let server = Server::start().await;
+    server.online();
+    let res = server
+        .client
+        .put(server.url("/api/v1/ambiances/night"))
+        .json(&lights_off_ambiance("day"))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn apply_unknown_ambiance_is_404() {
+    let server = Server::start().await;
+    server.online();
+    let res = server
+        .client
+        .post(server.url("/api/v1/ambiances/ghost/apply"))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn apply_returns_report_json() {
+    let server = Server::start().await;
+    server.online();
+    let put = server
+        .client
+        .put(server.url("/api/v1/ambiances/night"))
+        .json(&lights_off_ambiance("night"))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(put.status(), StatusCode::OK);
+
+    let res = server
+        .client
+        .post(server.url("/api/v1/ambiances/night/apply"))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(res.status(), StatusCode::OK);
+    let report: Value = res.json().await.expect("json");
+    assert_eq!(report["ambiance"], "night");
+    assert!(report["started_at"].is_u64(), "{report}");
+    // The fixture house has no light: nothing was attempted.
+    assert_eq!(report["actions"][0]["outcome"], "skipped");
+}
+
 const DAIKIN_TOPIC: &str = "oikos/climate/daikin_192_168_1_150/climate/config";
 const DAIKIN_FIXTURE: &str = "discovery/climate__daikin_192_168_1_150__climate.json";
 
