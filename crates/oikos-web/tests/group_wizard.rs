@@ -20,6 +20,7 @@ fn entity(id: &str, kind: Kind, protocol_kind: Kind, area: &str) -> EntityView {
         device_name: None,
         label: None,
         kind,
+        component: kind.component().to_string(),
         protocol_kind,
         device_class: None,
         unit: None,

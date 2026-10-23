@@ -53,13 +53,15 @@ fn save_prefs(prefs: &FlowListPrefs) {
     let _ = encode_prefs;
 }
 
-/// The ⋯ menu of a row: open the flow, or move it to a room.
+/// The ⋯ menu of a row: open the flow, move it to a room, or delete it.
 fn menu_for(row: &ListRow) -> AnyView {
     let id = row.view.definition.id.clone();
+    let name = row.view.definition.name.clone();
     let href = format!("/flows/{}", crate::api::encode_id(&id));
     view! {
         <RoomMenu
             id=id
+            name=name
             href=href
             current=row.room.clone()
             invalid=row.view.invalid.is_some()

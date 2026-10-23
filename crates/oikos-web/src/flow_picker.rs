@@ -11,11 +11,11 @@ use oikos_core::types::{Shape, type_def};
 use serde_json::{Value, json};
 
 use crate::flow_edit::fold_accents;
-use crate::flow_text::{Ctx, sentence};
+use crate::flow_text::{Ctx, sentence, subline};
 use crate::format::entity_title;
 use crate::screens::flow_canvas::sun::sun_params_from_preset;
 
-/// Most entities a query lists, so the popover stays short.
+/// Most entities a query lists, so the list stays short.
 const MAX_ENTITIES: usize = 8;
 
 /// The section of the picker an entry sits in, in display order.
@@ -34,6 +34,8 @@ pub struct Entry {
     pub group: Group,
     /// The sentence the card will read.
     pub label: String,
+    /// The row's second line: what a generic card does, or an entity card's room and device.
+    pub sub: Option<String>,
     pub kind: NodeKind,
 }
 
@@ -48,6 +50,7 @@ fn entry(group: Group, kind: NodeKind, ctx: &Ctx) -> Entry {
     Entry {
         group,
         label: sentence(&node, ctx),
+        sub: subline(&node, ctx),
         kind: node.kind,
     }
 }
@@ -142,11 +145,13 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 ..Default::default()
             }),
             Some("Schedule"),
+            "At a set time, or on a repeat",
         ),
         (
             Group::When,
             NodeKind::TriggerSun(sun_params_from_preset(SunWhich::Sunset, None)),
             Some("Sun event"),
+            "Sunrise, sunset, dusk or dawn",
         ),
         (
             Group::And,
@@ -158,6 +163,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 extra: Default::default(),
             }),
             Some("When it's dark"),
+            "Between dusk and dawn",
         ),
         (
             Group::Wait,
@@ -166,6 +172,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 ..Default::default()
             }),
             Some("Wait"),
+            "A fixed or random delay",
         ),
         (
             Group::Then,
@@ -174,6 +181,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 ..Default::default()
             }),
             Some("Notify"),
+            "A push to your phone",
         ),
         (
             Group::Flow,
@@ -183,6 +191,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 ..Default::default()
             }),
             None,
+            "Stops it from running again",
         ),
         (
             Group::Flow,
@@ -192,12 +201,14 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 ..Default::default()
             }),
             Some("Enable a flow"),
+            "Switches another flow on or off",
         ),
     ];
     let mut out: Vec<Entry> = generic
         .into_iter()
-        .map(|(group, kind, label)| {
+        .map(|(group, kind, label, sub)| {
             let mut e = entry(group, kind, ctx);
+            e.sub = Some(sub.to_owned());
             // The sentence of a card with no target reads poorly; the picker names it.
             if let Some(label) = label {
                 e.label = label.to_owned();
@@ -343,12 +354,51 @@ mod tests {
                 (Group::Flow, "Enable a flow"),
             ]
         );
+        let subs: Vec<_> = got.iter().map(|e| e.sub.as_deref()).collect();
+        assert_eq!(
+            subs,
+            [
+                Some("At a set time, or on a repeat"),
+                Some("Sunrise, sunset, dusk or dawn"),
+                Some("Between dusk and dawn"),
+                Some("A push to your phone"),
+                Some("A fixed or random delay"),
+                Some("Stops it from running again"),
+                Some("Switches another flow on or off"),
+            ]
+        );
         assert!(matches!(
             &got[0].kind,
             NodeKind::TriggerSchedule(p) if p.cron == "0 * * * *"
         ));
         assert!(matches!(&got[3].kind, NodeKind::Notify(p) if p.title == "Notification"));
         assert!(matches!(&got[4].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+    }
+
+    #[test]
+    fn entity_entries_carry_the_subline() {
+        let entities = house(vec![ent("l1", "Lumière table", Kind::Light)]);
+        let areas = vec![AreaView {
+            id: "salon".into(),
+            name: "Salon".into(),
+            icon: None,
+            order: None,
+            entity_count: 1,
+            primary_count: 1,
+            group_names: Default::default(),
+            group_favorites: Default::default(),
+        }];
+        let ctx = Ctx {
+            entities: &entities,
+            areas: &areas,
+            flows: &[],
+        };
+        let got = entries("table", &ctx);
+        let entity: Vec<_> = got.iter().filter(|e| e.label.contains("Lumière")).collect();
+        assert!(!entity.is_empty());
+        for e in entity {
+            assert_eq!(e.sub.as_deref(), Some("Salon"), "{}", e.label);
+        }
     }
 
     #[test]

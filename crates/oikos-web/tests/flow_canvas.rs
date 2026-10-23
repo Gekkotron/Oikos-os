@@ -574,7 +574,8 @@ async fn click_card_opens_settings() {
     tick().await;
     let html = host.inner_html();
     assert_eq!(count(&host, ".flow-node--selected"), 0, "{html}");
-    assert_eq!(count(&host, ".flow-drawer .field"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-drawer .node-editor"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-library"), 1, "{html}");
 }
 
 #[wasm_bindgen_test]
@@ -692,7 +693,9 @@ async fn connect_by_drag() {
         0,
         "{html}"
     );
-    pointer_at(&pin, "pointerup", start);
+    // Released over no card (the test page has no stylesheet, so the pin's own spot on screen
+    // is not where the graph thinks it is).
+    pointer_at(&pin, "pointerup", (1, 1));
     tick().await;
 
     drag_wire(&host, "on", "off").await;
@@ -779,6 +782,75 @@ async fn drag_is_one_undo_step() {
     );
 }
 
+/// A bubbling `kind` drag event at client point `at` on `target`.
+fn drag_at(target: &web_sys::Element, kind: &str, at: (i32, i32)) {
+    let init = web_sys::DragEventInit::new();
+    init.set_bubbles(true);
+    init.set_cancelable(true);
+    init.set_client_x(at.0);
+    init.set_client_y(at.1);
+    target
+        .dispatch_event(&web_sys::DragEvent::new_with_event_init_dict(kind, &init).unwrap())
+        .unwrap();
+}
+
+/// `(x, y, zoom)` of a `transform:translate(Xpx,Ypx) scale(Z)` style.
+fn transform(style: &str) -> (f64, f64, f64) {
+    let nums: Vec<f64> = style
+        .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+        .filter_map(|t| t.parse().ok())
+        .collect();
+    (nums[0], nums[1], nums[2])
+}
+
+/// `(left, top)` of a `left:Xpx;top:Ypx` style.
+fn corner(style: &str) -> (f64, f64) {
+    let px = |key: &str| {
+        let rest = &style[style.find(key).unwrap() + key.len()..];
+        rest[..rest.find("px").unwrap()].parse().unwrap()
+    };
+    (px("left:"), px("top:"))
+}
+
+#[wasm_bindgen_test]
+async fn drop_adds_under_the_pointer() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    click(&host, ".flow-controls__btn[aria-label=\"Zoom in\"]");
+    tick().await;
+    let row = (0..count(&host, ".flow-library__item"))
+        .filter_map(|i| {
+            host.query_selector_all(".flow-library__item")
+                .unwrap()
+                .item(i)
+        })
+        .filter_map(|n| n.dyn_into::<web_sys::Element>().ok())
+        .find(|el| el.text_content().unwrap_or_default().contains("Wait"))
+        .unwrap();
+    let canvas = element(&host, ".flow-canvas");
+    let rect = canvas.get_bounding_client_rect();
+    let at = (rect.left() as i32 + 200, rect.top() as i32 + 200);
+    drag_at(&row, "dragstart", (0, 0));
+    drag_at(&canvas, "dragover", at);
+    drag_at(&canvas, "drop", at);
+    drag_at(&row, "dragend", (0, 0));
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=delay_1]"), 1, "{html}");
+    // The card's stored corner, through the camera (`screen = world * zoom + pan`), puts its
+    // centre on the drop point. The test page has no stylesheet, so rects can't tell.
+    let (tx, ty, zoom) = transform(&style(&host, ".flow-world"));
+    let (left, top) = corner(&style(&host, "[data-node=delay_1]"));
+    let cx = left * zoom + tx + 232.0 * zoom / 2.0;
+    let cy = top * zoom + ty + 52.0 * zoom / 2.0;
+    // The drop point within the canvas (the canvas' corner is fractional, the event's not).
+    let (dx, dy) = (f64::from(at.0) - rect.left(), f64::from(at.1) - rect.top());
+    assert!(
+        (cx - dx).abs() < 0.01 && (cy - dy).abs() < 0.01,
+        "card centred at ({cx}, {cy}) in the canvas, dropped at ({dx}, {dy})"
+    );
+    assert_eq!(count(&host, ".flow-library"), 1, "{html}");
+}
+
 #[wasm_bindgen_test]
 async fn ws_update_keeps_draft() {
     let (host, _mounted, house) = editing(reference_view(None, vec![done_run()])).await;
@@ -786,6 +858,8 @@ async fn ws_update_keeps_draft() {
     press(&body(), "Backspace", false, false);
     tick().await;
     assert_eq!(count(&host, "[data-node=on]"), 0);
+    click(&host, ".flow-toolbar__runs");
+    tick().await;
     assert_eq!(count(&host, ".flow-drawer--open"), 1);
     assert_eq!(count(&host, ".run-list > li"), 1);
     let mut newer = done_run();
@@ -885,10 +959,26 @@ async fn field_edit_is_one_undo_step() {
 
 /// Opens the picker and types `query` into its search box.
 async fn search(host: &web_sys::Element, query: &str) {
-    click(host, ".flow-picker-wrap > button");
-    tick().await;
-    let input: web_sys::HtmlInputElement = element(host, ".flow-picker__search").unchecked_into();
+    let input: web_sys::HtmlInputElement = element(host, ".flow-library__search").unchecked_into();
     type_into(&input, query, "input");
+    tick().await;
+}
+
+/// Clicks the library row titled `title`.
+async fn add_row(host: &web_sys::Element, title: &str) {
+    let rows = host.query_selector_all(".flow-library__item").unwrap();
+    let row = (0..rows.length())
+        .filter_map(|i| rows.item(i))
+        .filter_map(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+        .find(|el| {
+            el.query_selector(".flow-library__title")
+                .unwrap()
+                .and_then(|t| t.text_content())
+                .as_deref()
+                == Some(title)
+        })
+        .unwrap_or_else(|| panic!("no library row {title}: {}", host.inner_html()));
+    row.click();
     tick().await;
 }
 
@@ -922,34 +1012,148 @@ fn table_lamp() -> oikos_api::EntityView {
 }
 
 #[wasm_bindgen_test]
-async fn add_picker_adds_selected_card() {
+async fn library_open_in_edit_mode() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    tick().await;
+    assert_eq!(count(&host, ".flow-drawer--open"), 0);
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-library"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-library__item"), 7, "{html}");
+    assert_eq!(count(&host, ".flow-picker-wrap"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn library_click_adds_and_stays_open() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    add_row(&host, "Wait").await;
+    add_row(&host, "Wait").await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=delay_1]"), 1, "{html}");
+    assert_eq!(count(&host, "[data-node=delay_2]"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-node--selected"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-library"), 1, "{html}");
+    assert_ne!(
+        style(&host, "[data-node=delay_1]"),
+        style(&host, "[data-node=delay_2]"),
+        "the second card does not sit on the first"
+    );
+    // Each add is one undo step.
+    press(&body(), "z", true, false);
+    tick().await;
+    assert_eq!(count(&host, "[data-node=delay_2]"), 0);
+    assert_eq!(count(&host, "[data-node=delay_1]"), 1);
+}
+
+#[wasm_bindgen_test]
+async fn library_enter_adds_highlighted() {
     let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
     search(&host, "Wait").await;
-    let focused = web_sys::window()
-        .unwrap()
-        .document()
-        .unwrap()
-        .active_element();
-    assert_eq!(
-        focused.map(|e| e.class_name()),
-        Some("field flow-picker__search".into()),
-        "the search box takes focus"
-    );
     press(
-        &element(&host, ".flow-picker__search"),
+        &element(&host, ".flow-library__search"),
         "Enter",
         false,
         false,
     );
     tick().await;
     let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=delay_1]"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-library"), 1, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn selecting_a_card_swaps_to_settings_and_back() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    select_card(&host, "moving").await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-drawer .node-editor"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-library"), 0, "{html}");
+    click(&host, ".node-editor__header .btn");
+    tick().await;
+    assert_eq!(count(&host, ".flow-library"), 1, "{}", host.inner_html());
+}
+
+#[wasm_bindgen_test]
+async fn edit_mode_refits_beside_the_library() {
+    let host = host();
+    let _mounted = mount(
+        &host,
+        vec![reference_view(None, vec![])],
+        "/flows/living_led_motion",
+    );
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let before = style(&host, ".flow-world");
+    click(&host, ".flow-toolbar__edit");
+    // The panel opens, then the camera refits: two effects.
+    gloo_timers::future::TimeoutFuture::new(20).await;
+    let after = style(&host, ".flow-world");
+    assert_ne!(
+        before, after,
+        "the untouched view refits for the open panel"
+    );
+    // Fit frames the graph in what the panel leaves free.
+    click(&host, ".flow-controls__btn[aria-label=\"Fit view\"]");
+    tick().await;
+    assert_eq!(style(&host, ".flow-world"), after);
+}
+
+#[wasm_bindgen_test]
+async fn runs_button_shows_runs_over_settings() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![done_run()])).await;
+    click(&host, ".flow-toolbar__runs");
+    tick().await;
+    select_card(&host, "moving").await;
+    assert_eq!(count(&host, ".flow-drawer .node-editor"), 1);
     assert_eq!(
-        count(&host, "[data-node=delay_1].flow-node--selected"),
-        1,
+        element(&host, ".flow-toolbar__runs").get_attribute("aria-expanded"),
+        Some("false".into()),
+        "the button follows what the panel shows"
+    );
+    // One click brings the runs back.
+    click(&host, ".flow-toolbar__runs");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-drawer .run-list"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-drawer .node-editor"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn backspace_in_library_search_keeps_selection() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    // A selected wire leaves the library showing; ⌫ in its search edits the text only.
+    click_any(&host, ".flow-wire-hit");
+    tick().await;
+    assert_eq!(count(&host, ".flow-wire--selected"), 1);
+    let input: web_sys::HtmlElement = element(&host, ".flow-library__search").unchecked_into();
+    input.focus().unwrap();
+    press(&input, "Backspace", false, false);
+    tick().await;
+    assert_eq!(count(&host, ".flow-wire"), 4, "{}", host.inner_html());
+}
+
+#[wasm_bindgen_test]
+async fn runs_from_edit_mode_returns_to_library() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    click(&host, ".flow-toolbar__runs");
+    tick().await;
+    let html = host.inner_html();
+    assert!(
+        count(
+            &host,
+            ".flow-drawer .run-list, .flow-drawer .flow-drawer__empty"
+        ) >= 1,
         "{html}"
     );
-    assert_eq!(count(&host, ".flow-picker"), 0, "{html}");
-    assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-library"), 0, "{html}");
+    click(&host, ".flow-drawer__close");
+    tick().await;
+    assert_eq!(count(&host, ".flow-library"), 1, "{}", host.inner_html());
 }
 
 #[wasm_bindgen_test]
@@ -959,9 +1163,9 @@ async fn picker_groups_entity_results() {
         .entities
         .update(|e| drop(e.insert("light.table".into(), table_lamp())));
     search(&host, "table").await;
-    let headers: Vec<String> = (0..count(&host, ".flow-picker__header"))
+    let headers: Vec<String> = (0..count(&host, ".flow-library__header"))
         .map(|i| {
-            host.query_selector_all(".flow-picker__header")
+            host.query_selector_all(".flow-library__header")
                 .unwrap()
                 .item(i)
                 .unwrap()
@@ -975,21 +1179,6 @@ async fn picker_groups_entity_results() {
         "{}",
         host.inner_html()
     );
-}
-
-#[wasm_bindgen_test]
-async fn escape_closes_picker() {
-    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
-    search(&host, "").await;
-    assert_eq!(count(&host, ".flow-picker"), 1);
-    press(
-        &element(&host, ".flow-picker__search"),
-        "Escape",
-        false,
-        false,
-    );
-    tick().await;
-    assert_eq!(count(&host, ".flow-picker"), 0);
 }
 
 // ---- New flow and renaming ------------------------------------------------------------------

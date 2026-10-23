@@ -15,6 +15,8 @@ pub const COL_GAP: f64 = 96.0;
 pub const ROW_GAP: f64 = 28.0;
 /// Margin the auto layout leaves above and left of the graph.
 pub const PAD: f64 = 40.0;
+/// Vertical space between cards added one after another from the library.
+pub const STACK_GAP: f64 = 16.0;
 
 /// A point in canvas (world) coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,6 +56,38 @@ const RAMP: f64 = COL_GAP * 0.75;
 /// Horizontal distance from a wire's pin to the centre of its "yes"/"no" label. The label sits
 /// at the pin's own height, so the two labels of an `if` stay as far apart as its two pins.
 const LABEL_DX: f64 = 24.0;
+
+/// Where a new card goes so it overlaps none of the cards in `taken` (their top-left corners)
+/// and stays inside `area` (what is on screen): down the column from `start` in steps of one
+/// card and [`STACK_GAP`], then from the top of that column, then in the columns beside it,
+/// nearest first. `start` itself when nothing in `area` is free.
+pub fn free_spot(taken: &BTreeMap<String, Pt>, start: Pt, area: Rect) -> Pt {
+    let free = |at: Pt| {
+        !taken.values().any(|p| {
+            at.x < p.x + NODE_W && p.x < at.x + NODE_W && at.y < p.y + NODE_H && p.y < at.y + NODE_H
+        })
+    };
+    let (right, bottom) = (area.x + area.w, area.y + area.h);
+    let (step_x, step_y) = (NODE_W + COL_GAP, NODE_H + STACK_GAP);
+    let column = |x: f64| {
+        let below = std::iter::successors(Some(start.y), move |y| Some(y + step_y))
+            .take_while(move |y| y + NODE_H <= bottom);
+        let above = std::iter::successors(Some(area.y), move |y| Some(y + step_y))
+            .take_while(move |y| *y < start.y);
+        below
+            .chain(above)
+            .map(move |y| Pt { x, y })
+            .find(|&at| free(at))
+    };
+    // Column offsets 0, +1, -1, +2, -2, … far enough to cover the area from `start`.
+    let reach = ((area.w + (start.x - area.x).abs()) / step_x).ceil() as u32 + 1;
+    std::iter::once(0.0)
+        .chain((1..=reach).map(f64::from).flat_map(|k| [k, -k]))
+        .map(|k| start.x + k * step_x)
+        .filter(|x| *x >= area.x && x + NODE_W <= right)
+        .find_map(column)
+        .unwrap_or(start)
+}
 
 /// Where each card goes: the stored positions when every node has one (a flow arranged by hand
 /// keeps its look), else [`auto_layout`].
@@ -475,6 +509,106 @@ pub fn routes(flow: &Flow, pos: &BTreeMap<String, Pt>) -> Vec<(Key, Route)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_spot_keeps_a_free_start() {
+        let taken = BTreeMap::from([("a".to_owned(), Pt { x: 500.0, y: 500.0 })]);
+        assert_eq!(
+            free_spot(&taken, Pt { x: 0.0, y: 0.0 }, WIDE),
+            Pt { x: 0.0, y: 0.0 }
+        );
+    }
+
+    #[test]
+    fn free_spot_steps_below_overlapping_cards() {
+        let taken = BTreeMap::from([
+            ("a".to_owned(), Pt { x: 0.0, y: 0.0 }),
+            (
+                "b".to_owned(),
+                Pt {
+                    x: 10.0,
+                    y: NODE_H + STACK_GAP,
+                },
+            ),
+        ]);
+        // Two cards in the way: it lands two steps down.
+        assert_eq!(
+            free_spot(&taken, Pt { x: 0.0, y: 0.0 }, WIDE),
+            Pt {
+                x: 0.0,
+                y: 2.0 * (NODE_H + STACK_GAP)
+            }
+        );
+    }
+
+    /// An area much larger than any test graph.
+    const WIDE: Rect = Rect {
+        x: -5000.0,
+        y: -5000.0,
+        w: 10000.0,
+        h: 10000.0,
+    };
+
+    fn overlaps_any(taken: &BTreeMap<String, Pt>, at: Pt) -> bool {
+        taken.values().any(|p| {
+            intersects(
+                Rect {
+                    x: at.x,
+                    y: at.y,
+                    w: NODE_W,
+                    h: NODE_H,
+                },
+                Rect {
+                    x: p.x,
+                    y: p.y,
+                    w: NODE_W,
+                    h: NODE_H,
+                },
+            )
+        })
+    }
+
+    #[test]
+    fn free_spot_stays_inside_the_area() {
+        // A full column from the start point down past the bottom of the visible area.
+        let area = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 1000.0,
+            h: 400.0,
+        };
+        let taken: BTreeMap<String, Pt> = (0..10)
+            .map(|i| {
+                (
+                    format!("n{i}"),
+                    Pt {
+                        x: 300.0,
+                        y: 150.0 + f64::from(i) * 40.0,
+                    },
+                )
+            })
+            .collect();
+        let at = free_spot(&taken, Pt { x: 300.0, y: 150.0 }, area);
+        assert!(!overlaps_any(&taken, at), "{at:?}");
+        assert!(at.x >= area.x && at.x + NODE_W <= area.x + area.w, "{at:?}");
+        assert!(at.y >= area.y && at.y + NODE_H <= area.y + area.h, "{at:?}");
+    }
+
+    #[test]
+    fn free_spot_falls_back_to_the_start_when_full() {
+        let area = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 300.0,
+            h: 100.0,
+        };
+        let taken = BTreeMap::from([
+            ("a".to_owned(), Pt { x: 0.0, y: 0.0 }),
+            ("b".to_owned(), Pt { x: 0.0, y: 50.0 }),
+        ]);
+        let start = Pt { x: 20.0, y: 20.0 };
+        assert_eq!(free_spot(&taken, start, area), start);
+    }
 
     fn led() -> Flow {
         Flow::decode(include_str!("../tests/fixtures/living_led_motion.json").as_bytes()).unwrap()

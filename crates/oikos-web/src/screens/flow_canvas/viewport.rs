@@ -11,7 +11,7 @@ use wasm_bindgen::JsCast;
 use crate::flow_layout::{NODE_H, NODE_W, Pt, Rect, bounds, positions};
 use crate::flow_text::{Role, role};
 use crate::flow_viewport::{
-    Mini, View, ZOOM_STEP, centre_on, fit, mini_to_world, minimap, visible_world,
+    Mini, View, ZOOM_STEP, centre_on, fit_beside, mini_to_world, minimap, visible_world,
 };
 
 /// Minimap size in CSS pixels.
@@ -25,11 +25,13 @@ const WHEEL_LINE: f64 = 16.0;
 const TAP_SLOP: f64 = 3.0;
 
 /// The canvas camera, shared by the viewport, its controls, the minimap and the graph: the pan
-/// and zoom, and the surface's measured size in CSS pixels (0×0 until it has been laid out).
+/// and zoom, the surface's measured size in CSS pixels (0×0 until it has been laid out) and how
+/// much of its right side the open side panel covers (0 when closed); fitting leaves that free.
 #[derive(Clone, Copy)]
 pub struct Camera {
     pub view: RwSignal<View>,
     pub size: RwSignal<(f64, f64)>,
+    pub inset: RwSignal<f64>,
 }
 
 impl Camera {
@@ -42,6 +44,7 @@ impl Camera {
                 zoom: 1.0,
             }),
             size: RwSignal::new((0.0, 0.0)),
+            inset: RwSignal::new(0.0),
         };
         provide_context(camera);
         camera
@@ -114,8 +117,10 @@ pub fn Viewport(
     let resize = window_event_listener(ev::resize, move |_| request_animation_frame(measure));
     on_cleanup(move || resize.remove());
 
+    // Fits again when the size or the side panel changes, until the user moves the view.
     Effect::new(move |_| {
         let (w, h) = size.get();
+        let inset = camera.inset.get();
         if w <= 0.0 || h <= 0.0 {
             return;
         }
@@ -123,7 +128,7 @@ pub fn Viewport(
             .get_value()
             .is_none_or(|fitted| fitted == view.get_untracked());
         if untouched {
-            let fitted = fit(content.get_untracked(), w, h);
+            let fitted = fit_beside(content.get_untracked(), w, h, inset);
             last_fit.set_value(Some(fitted));
             view.set(fitted);
         }
@@ -258,7 +263,12 @@ pub fn CanvasControls(view: RwSignal<View>, content: Signal<Rect>) -> impl IntoV
     };
     let fit_view = move |_| {
         if let Some((w, h)) = camera.measured() {
-            view.set(fit(content.get_untracked(), w, h));
+            view.set(fit_beside(
+                content.get_untracked(),
+                w,
+                h,
+                camera.inset.get_untracked(),
+            ));
         }
     };
     view! {

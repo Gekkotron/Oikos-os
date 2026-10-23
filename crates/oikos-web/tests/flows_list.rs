@@ -119,3 +119,107 @@ async fn list_has_new_flow_button() {
         .unwrap();
     assert!(link.is_some(), "{}", host.inner_html());
 }
+
+fn reference() -> FlowView {
+    FlowView {
+        definition: Flow::decode(REFERENCE.as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    }
+}
+
+fn broken() -> FlowView {
+    FlowView {
+        definition: Flow {
+            id: "broken".into(),
+            name: "Broken one".into(),
+            ..Default::default()
+        },
+        invalid: Some("missing port".into()),
+        active_run: None,
+        runs: vec![],
+    }
+}
+
+fn count(host: &web_sys::Element, selector: &str) -> u32 {
+    host.query_selector_all(selector).unwrap().length()
+}
+
+fn click(host: &web_sys::Element, selector: &str) {
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}: {}", host.inner_html()))
+        .unchecked_into::<web_sys::HtmlElement>()
+        .click();
+}
+
+/// Clicks the button inside `selector` whose text is `label`.
+fn click_text(host: &web_sys::Element, selector: &str, label: &str) {
+    let all = host.query_selector_all(selector).unwrap();
+    (0..all.length())
+        .filter_map(|i| all.item(i))
+        .filter_map(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+        .find(|el| el.text_content().unwrap_or_default().trim() == label)
+        .unwrap_or_else(|| panic!("no {label} in {selector}: {}", host.inner_html()))
+        .click();
+}
+
+#[wasm_bindgen_test]
+async fn menu_offers_delete_with_confirmation() {
+    let host = host();
+    let _mounted = mount(&host, vec![reference()]);
+    tick().await;
+    click(&host, ".room-menu__button");
+    tick().await;
+    let delete = host
+        .query_selector(".room-menu__item--danger")
+        .unwrap()
+        .expect("a delete item");
+    assert_eq!(delete.text_content().unwrap(), "Delete flow…");
+    click(&host, ".room-menu__item--danger");
+    tick().await;
+    let confirm = host
+        .query_selector(".room-menu__pop [role=alertdialog]")
+        .unwrap()
+        .expect("a confirmation");
+    let text = confirm.text_content().unwrap();
+    assert!(text.contains("Delete “Living LED on motion”?"), "{text}");
+    assert!(text.contains("This can't be undone."), "{text}");
+    assert_eq!(count(&host, ".room-menu__head"), 0);
+    click_text(&host, ".room-menu__confirm button", "Cancel");
+    tick().await;
+    assert_eq!(count(&host, ".room-menu__confirm"), 0);
+    assert_eq!(count(&host, ".room-menu__head"), 1, "{}", host.inner_html());
+}
+
+#[wasm_bindgen_test]
+async fn failed_delete_keeps_the_row() {
+    let host = host();
+    let _mounted = mount(&host, vec![reference(), broken()]);
+    tick().await;
+    let rows = count(&host, ".room-menu__button");
+    click(&host, ".room-menu__button");
+    tick().await;
+    click(&host, ".room-menu__item--danger");
+    tick().await;
+    // No hub answers in the test, so the delete fails.
+    click_text(&host, ".room-menu__confirm button", "Delete");
+    gloo_timers::future::TimeoutFuture::new(100).await;
+    assert_eq!(count(&host, ".room-menu__pop"), 0);
+    assert_eq!(count(&host, ".room-menu__button"), rows);
+}
+
+#[wasm_bindgen_test]
+async fn invalid_flow_can_still_be_deleted() {
+    let host = host();
+    let _mounted = mount(&host, vec![broken()]);
+    tick().await;
+    click(&host, ".room-menu__button");
+    tick().await;
+    let delete = host
+        .query_selector(".room-menu__item--danger")
+        .unwrap()
+        .expect("a delete item");
+    assert!(!delete.has_attribute("disabled"));
+}

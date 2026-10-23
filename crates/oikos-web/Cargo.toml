@@ -43,6 +43,8 @@ web-sys = { workspace = true, features = [
     "Document",
     "DomRect",
     "Clipboard",
+    "DataTransfer",
+    "DragEvent",
     "Element",
     "GainNode",
     "HtmlElement",
@@ -59,5 +61,5 @@ web-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
-web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventInit", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "KeyboardEventInit", "History", "Node", "NodeList", "PointerEvent", "PointerEventInit"] }
+web-sys = { workspace = true, features = ["Document", "Element", "Event", "EventInit", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "KeyboardEventInit", "History", "Node", "NodeList", "PointerEvent", "PointerEventInit", "DragEvent", "DragEventInit"] }
 wasm-bindgen-test.workspace = true
