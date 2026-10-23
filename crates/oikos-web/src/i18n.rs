@@ -3,7 +3,11 @@
 use chrono::{Datelike, NaiveDate, NaiveTime, Timelike, Weekday};
 use leptos::prelude::*;
 
+use oikos_api::WeatherCondition;
+
 use crate::home_header::mood::{Activity, Detail, Greeting, TempBand};
+use crate::home_header::summary::HeatingChip;
+use crate::home_header::weather_fmt::UvLevel;
 
 /// Storage key for the persisted choice.
 #[cfg(target_arch = "wasm32")]
@@ -367,6 +371,149 @@ pub fn detail_text(lang: Lang, d: &Detail) -> String {
             "Coucher du soleil : position de la maison non réglée".to_owned()
         }
         (Lang::En, Detail::SunsetFallback) => "Sunset: house location not set".to_owned(),
+    }
+}
+
+/// The lights chip: "3 lights on" / "3 lumières allumées"; `short` drops the "on" part.
+pub fn lights_chip(lang: Lang, n: usize, short: bool) -> String {
+    match (lang, n == 1, short) {
+        (Lang::Fr, true, true) => format!("{n} lumière"),
+        (Lang::Fr, false, true) => format!("{n} lumières"),
+        (Lang::Fr, true, false) => format!("{n} lumière allumée"),
+        (Lang::Fr, false, false) => format!("{n} lumières allumées"),
+        (Lang::En, true, true) => format!("{n} light"),
+        (Lang::En, false, true) => format!("{n} lights"),
+        (Lang::En, true, false) => format!("{n} light on"),
+        (Lang::En, false, false) => format!("{n} lights on"),
+    }
+}
+
+/// The indoor chip: "19.6 °C inside" / "19,6 °C à l'intérieur"; `short` is the temperature alone.
+pub fn indoor_chip(lang: Lang, t: f64, short: bool) -> String {
+    let value = format!("{} °C", home_number(lang, t, 1));
+    match (lang, short) {
+        (_, true) => value,
+        (Lang::Fr, false) => format!("{value} à l'intérieur"),
+        (Lang::En, false) => format!("{value} inside"),
+    }
+}
+
+/// The heating chip; `short` is one word.
+pub fn heating_chip_text(lang: Lang, h: HeatingChip, short: bool) -> &'static str {
+    match (lang, h, short) {
+        (Lang::Fr, HeatingChip::Off, false) => "Chauffage éteint",
+        (Lang::Fr, HeatingChip::Off, true) => "Éteint",
+        (Lang::Fr, HeatingChip::Eco, false) => "Chauffage en éco",
+        (Lang::Fr, HeatingChip::Eco, true) => "Éco",
+        (Lang::Fr, HeatingChip::Cooling, false) => "Clim en marche",
+        (Lang::Fr, HeatingChip::Cooling, true) => "Clim",
+        (Lang::En, HeatingChip::Off, false) => "Heating off",
+        (Lang::En, HeatingChip::Off, true) => "Off",
+        (Lang::En, HeatingChip::Eco, false) => "Heating in eco",
+        (Lang::En, HeatingChip::Eco, true) => "Eco",
+        (Lang::En, HeatingChip::Cooling, false) => "Air conditioning on",
+        (Lang::En, HeatingChip::Cooling, true) => "A/C",
+    }
+}
+
+/// The accessible name of the house mode menu.
+pub fn house_mode_label(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Fr => "Mode de la maison",
+        Lang::En => "House mode",
+    }
+}
+
+/// The weather card's accessible name.
+pub fn weather_link_label(lang: Lang) -> &'static str {
+    match lang {
+        Lang::Fr => "Voir la météo",
+        Lang::En => "Open the weather",
+    }
+}
+
+/// "feels like 5°" after the condition, on the wide card.
+pub fn feels_like(lang: Lang, deg: &str) -> String {
+    match lang {
+        Lang::Fr => format!("ressenti {deg}"),
+        Lang::En => format!("feels like {deg}"),
+    }
+}
+
+/// Today's low and high on the wide card: "Today 9° / 14°".
+pub fn today_range(lang: Lang, range: &str) -> String {
+    match lang {
+        Lang::Fr => format!("Aujourd'hui {range}"),
+        Lang::En => format!("Today {range}"),
+    }
+}
+
+/// The sunset line of the card; `short` is "Sunset 6:42 pm" / "Coucher 18 h 42".
+pub fn card_sunset(lang: Lang, at: NaiveTime, short: bool) -> String {
+    let time = home_time(lang, at);
+    match (lang, short) {
+        (Lang::Fr, false) => format!("Coucher du soleil {time}"),
+        (Lang::Fr, true) => format!("Coucher {time}"),
+        (Lang::En, _) => format!("Sunset {time}"),
+    }
+}
+
+/// The muted line of a card whose data is late.
+pub fn data_from(lang: Lang, at: NaiveTime) -> String {
+    match lang {
+        Lang::Fr => format!("Données de {}", home_time(lang, at)),
+        Lang::En => format!("Data from {}", home_time(lang, at)),
+    }
+}
+
+/// The label of a weather condition.
+pub fn condition_label(lang: Lang, c: WeatherCondition) -> &'static str {
+    use WeatherCondition::*;
+    match (lang, c) {
+        (Lang::Fr, Clear) => "Dégagé",
+        (Lang::Fr, PartlyCloudy) => "Éclaircies",
+        (Lang::Fr, Cloudy) => "Nuageux",
+        (Lang::Fr, Fog) => "Brouillard",
+        (Lang::Fr, Drizzle) => "Bruine",
+        (Lang::Fr, Rain) => "Pluie",
+        (Lang::Fr, FreezingRain) => "Pluie verglaçante",
+        (Lang::Fr, Snow) => "Neige",
+        (Lang::Fr, Showers) => "Averses",
+        (Lang::Fr, Thunderstorm) => "Orage",
+        (Lang::En, Clear) => "Clear",
+        (Lang::En, PartlyCloudy) => "Partly cloudy",
+        (Lang::En, Cloudy) => "Cloudy",
+        (Lang::En, Fog) => "Fog",
+        (Lang::En, Drizzle) => "Drizzle",
+        (Lang::En, Rain) => "Rain",
+        (Lang::En, FreezingRain) => "Freezing rain",
+        (Lang::En, Snow) => "Snow",
+        (Lang::En, Showers) => "Showers",
+        (Lang::En, Thunderstorm) => "Thunderstorm",
+    }
+}
+
+/// The compass point for an index from `compass_index` (0 = N, clockwise).
+pub fn compass_word(lang: Lang, index: usize) -> &'static str {
+    const EN: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    const FR: [&str; 8] = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"];
+    let table = if lang == Lang::Fr { FR } else { EN };
+    table[index % 8]
+}
+
+/// The word for a UV band.
+pub fn uv_word(lang: Lang, level: UvLevel) -> &'static str {
+    match (lang, level) {
+        (Lang::Fr, UvLevel::Low) => "Faible",
+        (Lang::Fr, UvLevel::Moderate) => "Modéré",
+        (Lang::Fr, UvLevel::High) => "Élevé",
+        (Lang::Fr, UvLevel::VeryHigh) => "Très élevé",
+        (Lang::Fr, UvLevel::Extreme) => "Extrême",
+        (Lang::En, UvLevel::Low) => "Low",
+        (Lang::En, UvLevel::Moderate) => "Moderate",
+        (Lang::En, UvLevel::High) => "High",
+        (Lang::En, UvLevel::VeryHigh) => "Very high",
+        (Lang::En, UvLevel::Extreme) => "Extreme",
     }
 }
 

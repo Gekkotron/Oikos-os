@@ -28,6 +28,7 @@ use crate::cards::vacuum::VacuumCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::alert_row::RecentAlerts;
 use crate::components::card_frame::GROUP_PREFIX;
+use crate::home_header::view::HomeHeader;
 use crate::rooms::{generic_placement, use_group_refresh, use_loaded, use_room_chips};
 use crate::screens::room::{RoomSection, RoomsSkeleton};
 
@@ -113,6 +114,7 @@ pub fn HomeScreen() -> impl IntoView {
 
     view! {
         <Show when=move || loaded.get() fallback=|| view! { <RoomsSkeleton /> }>
+            <HomeHeader />
             <For
                 each=move || chips.get()
                 key=|c| c.id.clone()

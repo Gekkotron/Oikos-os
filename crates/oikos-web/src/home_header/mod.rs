@@ -2,3 +2,5 @@
 
 pub mod mood;
 pub mod summary;
+pub mod view;
+pub mod weather_fmt;
