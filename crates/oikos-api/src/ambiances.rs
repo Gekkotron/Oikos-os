@@ -1,7 +1,8 @@
 //! Ambiance wire types: one-tap house states made of actions. Shape validation lives here
 //! (no house needed); checks against the house belong to the hub.
 
-use oikos_core::model::Command;
+use crate::views::EntityView;
+use oikos_core::model::{Availability, Command, EntityCategory, Kind, StateValue, SwitchType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -266,9 +267,136 @@ fn validate_climate(c: &ClimateAction) -> Result<(), String> {
     }
 }
 
+/// The entities a category action targets, offline ones included (the UI counts them).
+/// A hidden entity still belongs: hiding only removes a card.
+pub fn category_members<'a>(
+    action: &CategoryAction,
+    entities: &'a [EntityView],
+) -> Vec<&'a EntityView> {
+    entities
+        .iter()
+        .filter(|e| {
+            e.category == EntityCategory::Primary
+                && e.enabled_by_default
+                && e.part_of.is_none()
+                && !e.id.starts_with("group_")
+                && !action.except.contains(&e.id)
+                && action.area.as_ref().is_none_or(|a| &e.area == a)
+                && in_category(action.what, e)
+        })
+        .collect()
+}
+
+fn in_category(what: Category, e: &EntityView) -> bool {
+    match what {
+        Category::Lights => e.kind == Kind::Light,
+        Category::Plugs => matches!(
+            SwitchType::of(e.protocol_kind, &e.ui),
+            Some(SwitchType::Switch | SwitchType::Plug)
+        ),
+        Category::Covers => e.kind == Kind::Cover,
+    }
+}
+
+/// What applying a category action does: commands to send, entities already in the
+/// wanted state, and entities that cannot be reached.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CategoryPlan {
+    pub send: Vec<(String, Command)>,
+    pub already: Vec<String>,
+    pub offline: Vec<String>,
+}
+
+pub fn plan_category(action: &CategoryAction, entities: &[EntityView]) -> CategoryPlan {
+    let mut plan = CategoryPlan::default();
+    for e in category_members(action, entities) {
+        let Some(cmd) = member_command(action, e) else {
+            continue;
+        };
+        if e.state.availability == Availability::Offline {
+            plan.offline.push(e.id.clone());
+        } else if already_there(e, &cmd) {
+            plan.already.push(e.id.clone());
+        } else {
+            plan.send.push((e.id.clone(), cmd));
+        }
+    }
+    plan
+}
+
+/// The command for one member; `None` when the target does not fit the category.
+fn member_command(action: &CategoryAction, e: &EntityView) -> Option<Command> {
+    let plain_on = Command::TurnOn {
+        brightness: None,
+        color: None,
+        effect: None,
+    };
+    match (action.what, action.to) {
+        (Category::Lights | Category::Plugs, Target::Off) => Some(Command::TurnOff),
+        (Category::Lights, Target::On) => {
+            let brightness = action
+                .brightness
+                .filter(|_| e.capabilities.brightness)
+                .map(|pct| (f64::from(pct) * 255.0 / 100.0).round().min(255.0) as u8);
+            Some(Command::TurnOn {
+                brightness,
+                color: None,
+                effect: None,
+            })
+        }
+        (Category::Plugs, Target::On) => Some(plain_on),
+        (Category::Covers, Target::Open) => Some(Command::Open),
+        (Category::Covers, Target::Close) => Some(Command::Close),
+        _ => None,
+    }
+}
+
+/// True when the entity's known state already matches what `cmd` would set.
+pub fn already_there(view: &EntityView, cmd: &Command) -> bool {
+    let value = &view.state.value;
+    let is_on = match value {
+        StateValue::OnOff(on) => Some(*on),
+        StateValue::Light(l) => Some(l.on),
+        _ => None,
+    };
+    match cmd {
+        Command::TurnOff => is_on == Some(false),
+        Command::TurnOn {
+            brightness: None, ..
+        } => is_on == Some(true),
+        Command::TurnOn {
+            brightness: Some(b),
+            ..
+        } => match value {
+            StateValue::Light(l) => l.on && l.brightness.is_some_and(|cur| cur.abs_diff(*b) <= 5),
+            _ => false,
+        },
+        Command::Close => match value {
+            StateValue::Cover(c) => c.position == Some(0) || c.state.as_deref() == Some("closed"),
+            _ => false,
+        },
+        Command::Open => match value {
+            StateValue::Cover(c) => c.position == Some(100) || c.state.as_deref() == Some("open"),
+            _ => false,
+        },
+        Command::SetPosition { position } => {
+            matches!(value, StateValue::Cover(c) if c.position == Some(*position))
+        }
+        Command::SelectOption { option } => matches!(value, StateValue::Text(t) if t == option),
+        Command::SetTemperature { temperature } => {
+            matches!(value, StateValue::Climate(c) if c.target.is_some_and(|t| (t - temperature).abs() < 0.05))
+        }
+        Command::SetHvacMode { mode } => {
+            matches!(value, StateValue::Climate(c) if c.mode.as_deref() == Some(mode.as_str()))
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oikos_core::model::{ClimateState, CoverState, EntityState, LightState};
     use serde_json::json;
 
     /// Spec Appendix A.2, without the comment. The command is the real `select_option`
@@ -432,5 +560,240 @@ mod tests {
             validate_ambiance(&a),
             Err("action 1: covers take open or close".to_string())
         );
+    }
+
+    fn entity(id: &str, kind: Kind) -> EntityView {
+        EntityView {
+            id: id.into(),
+            device_id: None,
+            name: id.into(),
+            device_name: None,
+            label: None,
+            kind,
+            component: kind.component().to_string(),
+            protocol_kind: kind,
+            device_class: None,
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "living".into(),
+            part_of: None,
+            capabilities: Default::default(),
+            ui: Default::default(),
+            state: Default::default(),
+        }
+    }
+
+    fn switch_as(id: &str, show_as: Option<&str>) -> EntityView {
+        let mut e = entity(id, Kind::Switch);
+        e.ui.show_as = show_as.map(Into::into);
+        e
+    }
+
+    fn act(what: Category, to: Target) -> CategoryAction {
+        CategoryAction {
+            what,
+            to,
+            brightness: None,
+            area: None,
+            except: vec![],
+        }
+    }
+
+    fn ids(v: Vec<&EntityView>) -> Vec<&str> {
+        v.into_iter().map(|e| e.id.as_str()).collect()
+    }
+
+    fn light_state(on: bool, brightness: Option<u8>) -> EntityState {
+        EntityState {
+            value: StateValue::Light(LightState {
+                on,
+                brightness,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn with_state(mut e: EntityView, value: StateValue) -> EntityView {
+        e.state.value = value;
+        e
+    }
+
+    #[test]
+    fn plugs_never_include_door_siren_chime() {
+        let all = [
+            switch_as("door", Some("door")),
+            switch_as("siren", Some("siren")),
+            switch_as("chime", Some("chime")),
+            switch_as("plain", None),
+            switch_as("plug", Some("plug")),
+        ];
+        let a = act(Category::Plugs, Target::Off);
+        assert_eq!(ids(category_members(&a, &all)), ["plain", "plug"]);
+    }
+
+    #[test]
+    fn switch_shown_as_light_is_a_light_not_a_plug() {
+        let mut lamp = switch_as("lamp", Some("light"));
+        lamp.kind = Kind::Light;
+        let all = [lamp];
+        assert!(category_members(&act(Category::Plugs, Target::Off), &all).is_empty());
+        assert_eq!(
+            ids(category_members(&act(Category::Lights, Target::Off), &all)),
+            ["lamp"]
+        );
+    }
+
+    #[test]
+    fn groups_are_not_category_members() {
+        let all = [entity("group_x", Kind::Light), entity("lamp", Kind::Light)];
+        let a = act(Category::Lights, Target::Off);
+        assert_eq!(ids(category_members(&a, &all)), ["lamp"]);
+    }
+
+    #[test]
+    fn non_primary_and_folded_are_excluded_hidden_is_kept() {
+        let mut diag = entity("diag", Kind::Light);
+        diag.category = EntityCategory::Diagnostic;
+        let mut off_by_default = entity("dis", Kind::Light);
+        off_by_default.enabled_by_default = false;
+        let mut folded = entity("folded", Kind::Light);
+        folded.part_of = Some("other".into());
+        let mut hidden = entity("hidden", Kind::Light);
+        hidden.ui.hidden = true;
+        let all = [diag, off_by_default, folded, hidden];
+        let a = act(Category::Lights, Target::Off);
+        assert_eq!(ids(category_members(&a, &all)), ["hidden"]);
+    }
+
+    #[test]
+    fn area_and_except_filter() {
+        let mut kitchen = entity("k", Kind::Light);
+        kitchen.area = "kitchen".into();
+        let all = [entity("a", Kind::Light), entity("b", Kind::Light), kitchen];
+        let mut a = act(Category::Lights, Target::Off);
+        a.area = Some("living".into());
+        a.except = vec!["b".into()];
+        assert_eq!(ids(category_members(&a, &all)), ["a"]);
+    }
+
+    #[test]
+    fn brightness_pct_maps_to_255_scale_only_when_dimmable() {
+        let mut dimmable = entity("dim", Kind::Light);
+        dimmable.capabilities.brightness = true;
+        let plain = entity("plain", Kind::Light);
+        let mut a = act(Category::Lights, Target::On);
+        a.brightness = Some(30);
+        let plan = plan_category(&a, &[dimmable, plain]);
+        let on = |brightness| Command::TurnOn {
+            brightness,
+            color: None,
+            effect: None,
+        };
+        assert_eq!(
+            plan.send,
+            [("dim".into(), on(Some(77))), ("plain".into(), on(None))]
+        );
+    }
+
+    #[test]
+    fn plan_splits_offline_already_and_send() {
+        let mut off = entity("off", Kind::Light);
+        off.state = light_state(false, None);
+        let mut on = entity("on", Kind::Light);
+        on.state = light_state(true, Some(200));
+        let mut gone = entity("gone", Kind::Light);
+        gone.state = light_state(true, None);
+        gone.state.availability = Availability::Offline;
+        let plan = plan_category(&act(Category::Lights, Target::Off), &[off, on, gone]);
+        assert_eq!(plan.send, [("on".to_string(), Command::TurnOff)]);
+        assert_eq!(plan.already, ["off"]);
+        assert_eq!(plan.offline, ["gone"]);
+    }
+
+    #[test]
+    fn already_there_cases() {
+        let on = |brightness| Command::TurnOn {
+            brightness,
+            color: None,
+            effect: None,
+        };
+        let light = |on, b| {
+            let mut e = entity("l", Kind::Light);
+            e.state = light_state(on, b);
+            e
+        };
+        let plug = |v| with_state(entity("p", Kind::Switch), StateValue::OnOff(v));
+        let cover = |state: Option<&str>, position| {
+            with_state(
+                entity("c", Kind::Cover),
+                StateValue::Cover(CoverState {
+                    state: state.map(Into::into),
+                    position,
+                }),
+            )
+        };
+        let climate = with_state(
+            entity("t", Kind::Climate),
+            StateValue::Climate(ClimateState {
+                target: Some(20.0),
+                mode: Some("heat".into()),
+                ..Default::default()
+            }),
+        );
+
+        assert!(already_there(&plug(false), &Command::TurnOff));
+        assert!(!already_there(&plug(true), &Command::TurnOff));
+        assert!(already_there(&light(false, None), &Command::TurnOff));
+        assert!(already_there(&plug(true), &on(None)));
+        assert!(already_there(&light(true, Some(10)), &on(None)));
+        assert!(!already_there(&light(false, None), &on(None)));
+        assert!(already_there(&light(true, Some(250)), &on(Some(255))));
+        assert!(!already_there(&light(true, Some(240)), &on(Some(255))));
+        assert!(!already_there(&light(false, Some(255)), &on(Some(255))));
+        assert!(already_there(&cover(None, Some(0)), &Command::Close));
+        assert!(already_there(&cover(Some("closed"), None), &Command::Close));
+        assert!(!already_there(&cover(None, Some(50)), &Command::Close));
+        assert!(already_there(&cover(None, Some(100)), &Command::Open));
+        assert!(already_there(&cover(Some("open"), None), &Command::Open));
+        assert!(already_there(
+            &cover(None, Some(40)),
+            &Command::SetPosition { position: 40 }
+        ));
+        assert!(!already_there(
+            &cover(None, Some(41)),
+            &Command::SetPosition { position: 40 }
+        ));
+        let sel = with_state(entity("s", Kind::Select), StateValue::Text("night".into()));
+        assert!(already_there(
+            &sel,
+            &Command::SelectOption {
+                option: "night".into()
+            }
+        ));
+        assert!(already_there(
+            &climate,
+            &Command::SetTemperature { temperature: 20.04 }
+        ));
+        assert!(!already_there(
+            &climate,
+            &Command::SetTemperature { temperature: 20.1 }
+        ));
+        assert!(already_there(
+            &climate,
+            &Command::SetHvacMode {
+                mode: "heat".into()
+            }
+        ));
+        assert!(!already_there(
+            &climate,
+            &Command::SetHvacMode {
+                mode: "cool".into()
+            }
+        ));
+        assert!(!already_there(&entity("u", Kind::Light), &Command::TurnOff));
+        assert!(!already_there(&plug(true), &Command::Toggle));
     }
 }

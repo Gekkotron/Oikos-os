@@ -18,8 +18,9 @@ mod weather;
 pub use alerts::{AlertAction, AlertChannel, AlertSeverity, AlertView, parse_history};
 pub use ambiances::{
     AMBIANCE_ICONS, ActionReport, Ambiance, AmbianceAction, AmbianceView, ApplyReport, Category,
-    CategoryAction, ClimateAction, DeviceAction, FlowAction, FlowDo, Outcome, Problem, Target,
-    is_valid_ambiance_id, validate_ambiance,
+    CategoryAction, CategoryPlan, ClimateAction, DeviceAction, FlowAction, FlowDo, Outcome,
+    Problem, Target, already_there, category_members, is_valid_ambiance_id, plan_category,
+    validate_ambiance,
 };
 pub use dashboards::{
     Dashboard, DashboardReorder, DashboardView, HOUSE_ID, HOUSE_NAME, Span, Widget, WidgetConfig,
