@@ -5,6 +5,8 @@
   /* Surface and ink */
   --bg: #0b1020;
   --bg-gradient: radial-gradient(120% 90% at 50% 0%, #1d2b55 0%, #0b1020 100%);
+  /* Dims the page behind the phone drawer. */
+  --scrim: rgb(0 0 0 / 45%);
   --ink: #e8ecff;
   --card-bg: rgb(255 255 255 / 6%);
   --card-border: rgb(255 255 255 / 9%);
@@ -77,6 +79,7 @@
   color-scheme: light;
   --bg: #f3f0e8;
   --bg-gradient: linear-gradient(180deg, #f3f0e8 0%, #f3f0e8 100%);
+  --scrim: rgb(31 36 32 / 35%);
   --ink: #1f2420;
   --muted: #5f665c;
   --card-bg: #fffdf8;
