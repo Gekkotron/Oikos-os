@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
-use oikos_api::{FlowView, RunStatus, RunView, StepOutcome, StepView};
+use oikos_api::{FlowView, FlowWriteOutcome, RunStatus, RunView, StepOutcome, StepView};
 use oikos_core::flow::{Flow, Position};
 use oikos_web::components::now::install_now;
 use oikos_web::components::toast::Toasts;
@@ -434,6 +434,24 @@ impl FakeFetch {
     }
 }
 
+/// The hub's answer to a flow PUT that stored `flow` with no warning.
+fn write_outcome(flow: &FlowView) -> String {
+    serde_json::to_string(&FlowWriteOutcome {
+        flow: flow.clone(),
+        warning: None,
+    })
+    .unwrap()
+}
+
+/// The PUTs `fetch` saw; a save also refetches `/api/v1/config/flows` for the fallback badge.
+fn puts(fetch: &FakeFetch) -> Vec<(String, String, String)> {
+    fetch
+        .requests()
+        .into_iter()
+        .filter(|(method, _, _)| method == "PUT")
+        .collect()
+}
+
 impl Drop for FakeFetch {
     fn drop(&mut self) {
         js_sys::Reflect::set(&js_sys::global(), &"fetch".into(), &self.0).unwrap();
@@ -449,7 +467,7 @@ async fn save_leaves_edit_mode() {
     click(&host, ".flow-toolbar__edit");
     tick().await;
     assert_eq!(count(&host, ".flow-graph--editing"), 1);
-    let _fetch = FakeFetch::answer(&serde_json::to_string(&saved).unwrap());
+    let _fetch = FakeFetch::answer(&write_outcome(&saved));
     click(&host, ".flow-toolbar button[aria-label=Save]");
     gloo_timers::future::TimeoutFuture::new(50).await;
     let html = host.inner_html();
@@ -1214,10 +1232,10 @@ async fn rename_updates_draft_name() {
     tick().await;
     assert_eq!(name.value(), "Hall light");
     // Saving sends the new name under the original id.
-    let fetch = FakeFetch::answer(&serde_json::to_string(&reference_view(None, vec![])).unwrap());
+    let fetch = FakeFetch::answer(&write_outcome(&reference_view(None, vec![])));
     click(&host, ".flow-toolbar button[aria-label=Save]");
     gloo_timers::future::TimeoutFuture::new(50).await;
-    let requests = fetch.requests();
+    let requests = puts(&fetch);
     assert_eq!(requests.len(), 1, "{requests:?}");
     assert_eq!(requests[0].1, "/api/v1/flows/living_led_motion");
     let sent: serde_json::Value = serde_json::from_str(&requests[0].2).unwrap();
@@ -1253,12 +1271,12 @@ async fn save_new_flow(
     let name: web_sys::HtmlInputElement =
         element(&host, ".flow-toolbar input[aria-label=\"Flow name\"]").unchecked_into();
     type_into(&name, "Nouveau flow", "input");
-    let fetch = FakeFetch::answer(&serde_json::to_string(&saved).unwrap());
+    let fetch = FakeFetch::answer(&write_outcome(&saved));
     click(&host, ".flow-toolbar button[aria-label=Save]");
     gloo_timers::future::TimeoutFuture::new(100).await;
     let path = web_sys::window().unwrap().location().pathname().unwrap();
     assert_eq!(count(&host, ".flow-graph--editing"), 0);
-    (fetch.requests(), path, host.inner_html())
+    (puts(&fetch), path, host.inner_html())
 }
 
 #[wasm_bindgen_test]

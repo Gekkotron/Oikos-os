@@ -2,7 +2,8 @@
 
 use leptos::prelude::*;
 use leptos::task::tick;
-use leptos_router::components::Router;
+use leptos_router::components::{Route, Router, Routes};
+use leptos_router::path;
 use oikos_api::{AreaView, EntityView, WsEvent};
 use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
 use oikos_web::components::toast::Toasts;
@@ -52,6 +53,12 @@ fn mount() -> web_sys::Element {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
+    web_sys::window()
+        .unwrap()
+        .history()
+        .unwrap()
+        .replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/groups/new"))
+        .unwrap();
     let house = House::new();
     for e in [
         entity("lamp", Kind::Light, Kind::Light, "salon"),
@@ -66,9 +73,12 @@ fn mount() -> web_sys::Element {
     let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         provide_context(house);
         provide_context(Toasts::new());
+        oikos_web::nav::install_nav();
         view! {
             <Router>
-                <GroupWizardScreen />
+                <Routes fallback=|| "fallback">
+                    <Route path=path!("/groups/new") view=GroupWizardScreen />
+                </Routes>
             </Router>
         }
     });
@@ -137,10 +147,18 @@ async fn step_three_hides_members_by_default() {
     click(&host, "button.btn", "Next").await;
     click(&host, "button.card", "lamp").await;
     click(&host, "button.btn", "Next").await;
-    let toggle: web_sys::HtmlInputElement = host
-        .query_selector("input[aria-label='Hide members on Home']")
-        .unwrap()
-        .unwrap()
-        .unchecked_into();
-    assert!(toggle.checked());
+    let switches = host.query_selector_all("[role=switch]").unwrap();
+    let toggle = (0..switches.length())
+        .map(|i| {
+            switches
+                .item(i)
+                .unwrap()
+                .unchecked_into::<web_sys::Element>()
+        })
+        .find(|el| el.text_content().unwrap().contains("Hide members on Home"))
+        .unwrap_or_else(|| panic!("no Hide members switch in {}", host.inner_html()));
+    assert_eq!(
+        toggle.get_attribute("aria-checked").as_deref(),
+        Some("true")
+    );
 }

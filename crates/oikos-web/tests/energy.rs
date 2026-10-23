@@ -6,7 +6,7 @@ use leptos_router::components::Router;
 use oikos_api::{EntityView, WsEvent};
 use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride};
 use oikos_web::house::House;
-use oikos_web::screens::energy::EnergyScreen;
+use oikos_web::screens::energy::{EnergyScreen, KwhToday};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 use web_sys::{Element, Event, HtmlElement};
@@ -57,6 +57,8 @@ fn mount(entities: Vec<EntityView>) -> Element {
         host.clone().unchecked_into(),
         move || {
             provide_context(house);
+            // App installs this through install_history_refresh, which also fetches.
+            provide_context(KwhToday(RwSignal::new(Default::default())));
             view! {
                 <Router>
                     <EnergyScreen />

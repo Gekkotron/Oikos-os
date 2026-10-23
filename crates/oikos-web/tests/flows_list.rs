@@ -84,7 +84,7 @@ async fn lists_valid_and_invalid_flows() {
     tick().await;
     let html = host.inner_html();
     assert!(html.contains("Living LED on motion"), "{html}");
-    assert!(html.contains("flow-card"), "{html}");
+    assert!(html.contains("flow-row"), "{html}");
     assert!(
         html.contains("0x00158d00044c4d4c_occupancy_zigbee2mqtt"),
         "{html}"
