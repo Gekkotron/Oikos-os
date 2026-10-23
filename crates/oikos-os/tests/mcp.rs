@@ -30,6 +30,8 @@ const LINKQUALITY_TOPIC: &str = "oikos/sensor/0x847127fffe24e322/linkquality/con
 
 const EXPECTED_TOOLS: &[&str] = &[
     "bridge_info",
+    "get_home_settings",
+    "set_home_settings",
     "list_areas",
     "set_areas",
     "list_devices",

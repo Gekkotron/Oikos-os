@@ -9,6 +9,7 @@ pub mod dashboards;
 pub mod flows;
 pub mod groups;
 pub mod history;
+pub mod home;
 pub mod http;
 pub mod hub;
 pub mod logging;

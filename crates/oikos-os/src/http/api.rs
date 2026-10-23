@@ -14,8 +14,8 @@ use axum::routing::{get, patch, post, put};
 use oikos_api::{
     AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, Dashboard, DashboardReorder,
     DashboardView, EnergyKind, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec,
-    GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, IgnoredView, LastChange,
-    OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec, WeatherView,
+    GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, HomeSettings, IgnoredView,
+    LastChange, OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec, WeatherView,
 };
 use oikos_climate::doc::{HouseSettings, Rules, ZoneSettings};
 use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus, OverrideRequest};
@@ -61,6 +61,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/groups", get(list_groups))
         .route("/groups/{id}", put(put_group).delete(delete_group))
         .route("/weather", get(weather))
+        .route("/home/settings", get(home_settings).put(put_home_settings))
         .route("/climate", get(climate))
         .route("/climate/house", put(put_climate_house))
         .route("/climate/zones/{id}", put(put_climate_zone))
@@ -648,6 +649,21 @@ async fn delete_group(
 /// The outdoor weather (`200`); `503` while `[weather]` is off or before the first fetch.
 async fn weather(State(hub): HubState) -> Result<Json<WeatherView>, HttpError> {
     Ok(Json(hub.weather_view()?))
+}
+
+/// The home settings document (`200`), defaults until one is saved.
+async fn home_settings(State(hub): HubState) -> Json<HomeSettings> {
+    Json(hub.home_settings())
+}
+
+/// Replaces the home settings (`200` with the stored document); `422` when they do not
+/// validate, `503` while the broker link is down.
+async fn put_home_settings(
+    State(hub): HubState,
+    body: Body<HomeSettings>,
+) -> Result<Json<HomeSettings>, HttpError> {
+    let Json(settings) = body?;
+    Ok(Json(hub.set_home_settings(settings)?))
 }
 
 /// The climate engine as one document (`200`); `503` while `[climate] enabled` is false.

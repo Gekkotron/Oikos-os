@@ -1,11 +1,11 @@
-//! The twenty tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
+//! The twenty-two tools of the house (the six flow tools are in `flow_tools.rs`). Read tools work on one snapshot (one read lock, released before any
 //! await); write tools log their arguments and go through the hub's writers.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use oikos_api::{CommandResponse, DeviceView, EntityView, GroupView, WeatherView};
+use oikos_api::{CommandResponse, DeviceView, EntityView, GroupView, HomeSettings, WeatherView};
 use oikos_core::flow::{notify_channel_error, notify_severity_error};
 use oikos_core::model::{AreasDocument, SwitchType};
 use rmcp::handler::server::wrapper::{Json, Parameters};
@@ -19,7 +19,7 @@ use super::params::{
     EntityDetailView, EntityPage, GetEntityParams, GetHistoryParams, GroupList, HistoryAnswer,
     HistoryWhat, IgnoredList, Include, ListAlertsParams, ListDevicesParams, ListEntitiesParams,
     MAX_LIMIT, SearchParams, SearchResult, SendCommandParams, SendNotificationParams, Sent,
-    SetAreasParams, SetGroupParams, SetOverrideParams, SetVirtualParams,
+    SetAreasParams, SetGroupParams, SetHomeSettingsParams, SetOverrideParams, SetVirtualParams,
 };
 use super::{OikosMcp, ToolError};
 use crate::history::query as history_query;
@@ -34,6 +34,25 @@ impl OikosMcp {
     #[tool(name = "get_weather", annotations(read_only_hint = true))]
     async fn get_weather(&self) -> ToolResult<WeatherView> {
         Ok(Json(self.hub.weather_view()?))
+    }
+
+    /// The home settings: the eco setpoint (°C), the house mode select and the indoor
+    /// temperature sensor the home header uses. Empty fields are unset.
+    #[tool(name = "get_home_settings", annotations(read_only_hint = true))]
+    async fn get_home_settings(&self) -> Json<HomeSettings> {
+        Json(self.hub.home_settings())
+    }
+
+    /// Replaces the home settings (`eco_setpoint` 5 to 30 °C, `mode_entity` a select entity,
+    /// `indoor_entity` a temperature sensor). Read them with `get_home_settings` first and send
+    /// the whole document back. The reason of a refusal is returned so you can fix it.
+    #[tool(name = "set_home_settings", annotations(idempotent_hint = true))]
+    async fn set_home_settings(
+        &self,
+        Parameters(params): Parameters<SetHomeSettingsParams>,
+    ) -> ToolResult<HomeSettings> {
+        log_write("set_home_settings", &params);
+        Ok(Json(self.hub.set_home_settings(params.settings)?))
     }
 
     /// The Zigbee2MQTT bridge (version, coordinator, permit join, online or not) and the

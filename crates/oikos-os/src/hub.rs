@@ -178,7 +178,7 @@ pub struct Hub {
     link_epoch: AtomicU64,
     connection: watch::Sender<ConnectionStatus>,
     publisher: mpsc::Sender<Publish>,
-    ui_prefix: String,
+    pub(crate) ui_prefix: String,
     /// The first discovery prefix: virtual entities are published under it.
     pub(crate) discovery_prefix: String,
     /// Push notifications: the service owns `<prefix>/history`; the alert store decodes the
@@ -206,6 +206,8 @@ pub struct Hub {
     pub(crate) weather: Mutex<crate::weather::hub::WeatherSlot>,
     /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
     dashboard_store: Mutex<DashboardStore>,
+    /// The home settings document, retained on `<ui_prefix>/_home`.
+    pub(crate) home_settings: Mutex<oikos_api::HomeSettings>,
     /// The topic prefix flows are retained under, one topic per flow id.
     automation_prefix: String,
     /// The time zone schedules and their preview run in.
@@ -327,6 +329,7 @@ impl Hub {
             weather_country: cfg.weather.country.clone(),
             weather: Mutex::default(),
             dashboard_store: Mutex::new(DashboardStore::new()),
+            home_settings: Mutex::new(oikos_api::HomeSettings::default()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
             house_point: cfg.flows.house_point(),
@@ -359,6 +362,10 @@ impl Hub {
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
         if topic == self.push.history_topic() {
             self.ingest_history(topic, payload);
+            return Vec::new();
+        }
+        if topic == crate::home::topic(&self.ui_prefix) {
+            self.ingest_home(payload);
             return Vec::new();
         }
         if let Some(id) = self.dashboard_id_of(topic) {
