@@ -15,6 +15,10 @@ pub const COL_GAP: f64 = 96.0;
 pub const ROW_GAP: f64 = 28.0;
 /// Margin the auto layout leaves above and left of the graph.
 pub const PAD: f64 = 40.0;
+/// Vertical space between cards added one after another from the library.
+pub const STACK_GAP: f64 = 16.0;
+/// Most steps [`free_spot`] takes before it settles for where it is.
+const FREE_SPOT_STEPS: usize = 200;
 
 /// A point in canvas (world) coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,6 +58,24 @@ const RAMP: f64 = COL_GAP * 0.75;
 /// Horizontal distance from a wire's pin to the centre of its "yes"/"no" label. The label sits
 /// at the pin's own height, so the two labels of an `if` stay as far apart as its two pins.
 const LABEL_DX: f64 = 24.0;
+
+/// The first spot at or below `start` where a new card overlaps none of the cards in `taken`
+/// (their top-left corners), stepping down by one card and [`STACK_GAP`] at a time.
+pub fn free_spot(taken: &BTreeMap<String, Pt>, start: Pt) -> Pt {
+    let overlaps = |at: Pt| {
+        taken.values().any(|p| {
+            at.x < p.x + NODE_W && p.x < at.x + NODE_W && at.y < p.y + NODE_H && p.y < at.y + NODE_H
+        })
+    };
+    let mut at = start;
+    for _ in 0..FREE_SPOT_STEPS {
+        if !overlaps(at) {
+            break;
+        }
+        at.y += NODE_H + STACK_GAP;
+    }
+    at
+}
 
 /// Where each card goes: the stored positions when every node has one (a flow arranged by hand
 /// keeps its look), else [`auto_layout`].
@@ -475,6 +497,37 @@ pub fn routes(flow: &Flow, pos: &BTreeMap<String, Pt>) -> Vec<(Key, Route)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_spot_keeps_a_free_start() {
+        let taken = BTreeMap::from([("a".to_owned(), Pt { x: 500.0, y: 500.0 })]);
+        assert_eq!(
+            free_spot(&taken, Pt { x: 0.0, y: 0.0 }),
+            Pt { x: 0.0, y: 0.0 }
+        );
+    }
+
+    #[test]
+    fn free_spot_steps_below_overlapping_cards() {
+        let taken = BTreeMap::from([
+            ("a".to_owned(), Pt { x: 0.0, y: 0.0 }),
+            (
+                "b".to_owned(),
+                Pt {
+                    x: 10.0,
+                    y: NODE_H + STACK_GAP,
+                },
+            ),
+        ]);
+        // Two cards in the way: it lands two steps down.
+        assert_eq!(
+            free_spot(&taken, Pt { x: 0.0, y: 0.0 }),
+            Pt {
+                x: 0.0,
+                y: 2.0 * (NODE_H + STACK_GAP)
+            }
+        );
+    }
 
     fn led() -> Flow {
         Flow::decode(include_str!("../tests/fixtures/living_led_motion.json").as_bytes()).unwrap()

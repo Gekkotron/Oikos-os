@@ -1,6 +1,6 @@
 //! Pan, zoom, fit and minimap maths for the flow canvas. Pure functions, no DOM.
 
-use crate::flow_layout::{PAD, Pt, Rect};
+use crate::flow_layout::{NODE_H, NODE_W, PAD, Pt, Rect};
 
 /// Lowest zoom reachable by wheel, pinch or the buttons.
 pub const ZOOM_MIN: f64 = 0.25;
@@ -12,6 +12,9 @@ pub const FIT_MIN: f64 = 0.3;
 pub const FIT_MAX: f64 = 1.0;
 /// Multiplicative step of the +/− buttons.
 pub const ZOOM_STEP: f64 = 1.2;
+/// Screen width the side panel covers on the right of the canvas: `--drawer-w` (360px) plus
+/// its 24px of margin in `main.css`; keep the two in step.
+pub const PANEL_RESERVE_PX: f64 = 384.0;
 
 /// Pan and zoom of the canvas: `screen = world * zoom + (x, y)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,6 +94,22 @@ pub fn visible_world(view: &View, screen_w: f64, screen_h: f64) -> Rect {
     }
 }
 
+/// Where a card added from the library lands: centred in the part of the screen the side panel
+/// leaves free (`panel_px` on the right), or in the whole screen when that part is narrower
+/// than a card.
+pub fn add_spot(view: &View, screen_w: f64, screen_h: f64, panel_px: f64) -> Pt {
+    let (card_w, card_h) = (NODE_W * view.zoom, NODE_H * view.zoom);
+    let free_w = if screen_w - panel_px >= card_w {
+        screen_w - panel_px
+    } else {
+        screen_w
+    };
+    view.to_world(Pt {
+        x: (free_w - card_w) / 2.0,
+        y: (screen_h - card_h) / 2.0,
+    })
+}
+
 /// World to minimap transform: `m = (world - o) * scale`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Mini {
@@ -137,6 +156,51 @@ pub fn centre_on(view: &View, world: Pt, screen_w: f64, screen_h: f64) -> View {
 mod tests {
     use super::*;
     use crate::flow_layout::{NODE_H, NODE_W};
+
+    #[test]
+    fn add_spot_centres_left_of_the_panel() {
+        let view = View {
+            x: 0.0,
+            y: 0.0,
+            zoom: 1.0,
+        };
+        // 1000×600 screen, 384 px panel: the free area is 616 wide.
+        let p = add_spot(&view, 1000.0, 600.0, 384.0);
+        assert_eq!(
+            p,
+            Pt {
+                x: (616.0 - NODE_W) / 2.0,
+                y: (600.0 - NODE_H) / 2.0
+            }
+        );
+    }
+
+    #[test]
+    fn add_spot_follows_pan_and_zoom() {
+        let view = View {
+            x: -100.0,
+            y: -50.0,
+            zoom: 2.0,
+        };
+        let screen = Pt {
+            x: (616.0 - NODE_W * 2.0) / 2.0,
+            y: (600.0 - NODE_H * 2.0) / 2.0,
+        };
+        assert_eq!(add_spot(&view, 1000.0, 600.0, 384.0), view.to_world(screen));
+    }
+
+    #[test]
+    fn add_spot_ignores_the_panel_when_too_narrow() {
+        let view = View {
+            x: 0.0,
+            y: 0.0,
+            zoom: 1.0,
+        };
+        assert_eq!(
+            add_spot(&view, 500.0, 400.0, 384.0).x,
+            (500.0 - NODE_W) / 2.0
+        );
+    }
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 0.01
