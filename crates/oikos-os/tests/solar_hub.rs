@@ -280,3 +280,13 @@ async fn expired_forecast_goes_offline_on_refresh() {
         "offline"
     );
 }
+
+#[tokio::test]
+async fn view_with_history_is_empty_without_history() {
+    let (hub, _rx) = hub_with(true);
+    hub.apply_solar_forecast(common::solar::forecast_today());
+    let plain = hub.solar_view().unwrap();
+    let with = hub.solar_view_with_history().await.unwrap();
+    assert!(with.history.forecasts.is_empty());
+    assert_eq!(with, plain);
+}

@@ -5,13 +5,14 @@ use std::collections::BTreeMap;
 use std::sync::MutexGuard;
 
 use chrono::{DateTime, Utc};
-use oikos_api::{SolarView, WsEvent};
+use oikos_api::{SolarForecastDay, SolarView, WsEvent};
 use oikos_core::command::Publish;
 use oikos_solcast::{Forecast, Ledger};
 use serde::{Deserialize, Serialize};
 
 use super::{entities, is_expired, is_stale, view::build_view};
 use crate::clock;
+use crate::history::solar::SolarForecastRow;
 use crate::hub::{Hub, HubError};
 
 /// The payload that makes a sensor's state unknown (the registry reads `None` as unknown; an
@@ -111,9 +112,74 @@ impl Hub {
         ))
     }
 
-    /// [`Self::solar_view`] with the history of past days (filled in by a later task).
+    /// [`Self::solar_view`] with the morning forecasts of the 7 local days before today. Empty
+    /// when history is off or the database cannot be read.
     pub async fn solar_view_with_history(&self) -> Result<SolarView, HubError> {
-        self.solar_view()
+        let mut view = self.solar_view()?;
+        let Some(history) = self.history() else {
+            return Ok(view);
+        };
+        let today = now_utc().with_timezone(&self.zone()).date_naive();
+        let from = today - chrono::Duration::days(7);
+        let rows = match history.db() {
+            Ok(db) => db.solar_forecast_days(from, today).await,
+            Err(e) => {
+                tracing::debug!("solar forecast history unavailable: {e}");
+                return Ok(view);
+            }
+        };
+        match rows {
+            Ok(rows) => {
+                view.history.forecasts = rows
+                    .into_iter()
+                    .map(|r| SolarForecastDay {
+                        date: r.date.format("%Y-%m-%d").to_string(),
+                        estimate: r.estimate,
+                        low: r.low,
+                        high: r.high,
+                        made_at: u64::try_from(r.made_at.timestamp()).unwrap_or(0),
+                    })
+                    .collect();
+            }
+            Err(e) => tracing::debug!("solar forecast history read failed: {e}"),
+        }
+        Ok(view)
+    }
+
+    /// Keeps today's totals as the day's morning forecast; the first one of a local day wins in
+    /// the database. Skipped without history or outside a Tokio runtime.
+    fn record_solar_morning_forecast(&self, forecast: &Forecast) {
+        let Some(history) = self.history().cloned() else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let now = now_utc();
+        let zone = self.zone();
+        let today = now.with_timezone(&zone).date_naive();
+        let Some(total) = oikos_solcast::day_totals(&forecast.periods, zone)
+            .into_iter()
+            .find(|d| d.date == today)
+        else {
+            return;
+        };
+        let row = SolarForecastRow {
+            date: today,
+            estimate: total.estimate,
+            low: total.low,
+            high: total.high,
+            made_at: now,
+        };
+        runtime.spawn(async move {
+            let result = match history.db() {
+                Ok(db) => db.insert_solar_forecast_day(&row).await.map(|_| ()),
+                Err(_) => return,
+            };
+            if let Err(e) = result {
+                tracing::warn!("storing the morning solar forecast failed: {e}");
+            }
+        });
     }
 
     /// Publishes `payload` retained and echoes it into the registry. Whether the broker took it.
@@ -224,6 +290,7 @@ impl Hub {
     /// web when the data did. A payload the broker refused is sent again by the next call.
     pub fn apply_solar_forecast(&self, forecast: Forecast) {
         self.heal_solar_configs();
+        self.record_solar_morning_forecast(&forecast);
         let data_changed = {
             let mut slot = self.solar_slot();
             let changed = slot.forecast.as_ref().is_none_or(|old| {

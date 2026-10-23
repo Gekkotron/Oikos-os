@@ -6,6 +6,7 @@ pub mod climate;
 pub mod db;
 pub mod query;
 pub mod rollup;
+pub mod solar;
 pub mod writer;
 
 use std::sync::Arc;
