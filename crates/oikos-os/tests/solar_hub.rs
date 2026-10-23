@@ -127,7 +127,7 @@ async fn cache_restores_forecast_and_ledger_once() {
     assert_eq!(hub.solar_ledger(), source.solar_ledger());
     assert_eq!(hub.solar_ledger().calls, 1);
 
-    // A second cache with other data is ignored.
+    // A second cache keeps the held forecast; its higher call count is merged in.
     let (other, mut other_rx) = hub_with(true);
     other.publish_solar_configs();
     other.record_solar_attempt();
@@ -138,12 +138,66 @@ async fn cache_restores_forecast_and_ledger_once() {
         .payload
         .clone();
     hub.ingest_message("oikos/solar/cache", second.as_bytes(), true);
-    assert_eq!(hub.solar_ledger().calls, 1);
+    assert_eq!(hub.solar_ledger().calls, 2);
 
     // Malformed is swallowed.
     let (fresh, _rx) = hub_with(true);
     fresh.ingest_message("oikos/solar/cache", b"{nope", true);
     assert!(!fresh.solar_has_forecast());
+}
+
+fn cache_payload(rx: &mut mpsc::Receiver<Publish>) -> String {
+    last(&drain(rx), "oikos/solar/cache")
+        .unwrap()
+        .payload
+        .clone()
+}
+
+#[tokio::test]
+async fn forecast_cache_never_lowers_calls_recorded_this_run() {
+    let (source, mut rx) = hub_with(true);
+    source.publish_solar_configs();
+    source.record_solar_attempt();
+    source.apply_solar_forecast(common::solar::forecast_today());
+    let cache = cache_payload(&mut rx);
+
+    let (hub, _rx) = hub_with(true);
+    hub.record_solar_attempt();
+    hub.record_solar_attempt();
+    hub.record_solar_attempt();
+    hub.ingest_message("oikos/solar/cache", cache.as_bytes(), true);
+    assert_eq!(hub.solar_ledger().calls, 3);
+    assert!(hub.solar_has_forecast());
+}
+
+#[tokio::test]
+async fn ledger_only_cache_is_restored_into_a_fresh_hub() {
+    let (source, mut rx) = hub_with(true);
+    source.publish_solar_configs();
+    source.record_solar_attempt();
+    source.record_solar_attempt();
+    let cache = cache_payload(&mut rx);
+    assert!(!cache.contains("\"forecast\":{"));
+
+    let (hub, _rx) = hub_with(true);
+    hub.ingest_message("oikos/solar/cache", cache.as_bytes(), true);
+    assert_eq!(hub.solar_ledger(), source.solar_ledger());
+    assert_eq!(hub.solar_ledger().calls, 2);
+    assert!(!hub.solar_has_forecast());
+}
+
+#[tokio::test]
+async fn ledger_only_cache_with_fewer_calls_does_not_lower_calls() {
+    let (source, mut rx) = hub_with(true);
+    source.publish_solar_configs();
+    source.record_solar_attempt();
+    let cache = cache_payload(&mut rx);
+
+    let (hub, _rx) = hub_with(true);
+    hub.record_solar_attempt();
+    hub.record_solar_attempt();
+    hub.ingest_message("oikos/solar/cache", cache.as_bytes(), true);
+    assert_eq!(hub.solar_ledger().calls, 2);
 }
 
 #[tokio::test]

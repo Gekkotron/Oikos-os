@@ -146,8 +146,12 @@ impl Hub {
                 ledger: slot.ledger.clone(),
             }
         };
-        let Ok(payload) = serde_json::to_string(&cache) else {
-            return;
+        let payload = match serde_json::to_string(&cache) {
+            Ok(payload) => payload,
+            Err(error) => {
+                tracing::warn!(%error, "solar: could not serialise the retained cache");
+                return;
+            }
         };
         let _ = self.publish(Publish {
             topic: entities::cache_topic(&self.discovery_prefix),
@@ -231,7 +235,8 @@ impl Hub {
             slot.failing_since = None;
             changed
         };
-        if self.solar_slot().online != Some(true) && self.publish_solar_availability(true) {
+        let online = self.solar_slot().online;
+        if online != Some(true) && self.publish_solar_availability(true) {
             self.solar_slot().online = Some(true);
         }
         if let Some(view) = self.solar_state_view(now_utc()) {
@@ -258,7 +263,8 @@ impl Hub {
             return;
         }
         self.heal_solar_configs();
-        if self.solar_slot().online != Some(true) && self.publish_solar_availability(true) {
+        let online = self.solar_slot().online;
+        if online != Some(true) && self.publish_solar_availability(true) {
             self.solar_slot().online = Some(true);
         }
         let Some(view) = self.solar_state_view(now_utc()) else {
@@ -302,7 +308,8 @@ impl Hub {
 
     /// Marks the entities unavailable, once per transition.
     pub fn set_solar_offline(&self) {
-        if self.solar_slot().online != Some(false) && self.publish_solar_availability(false) {
+        let online = self.solar_slot().online;
+        if online != Some(false) && self.publish_solar_availability(false) {
             self.solar_slot().online = Some(false);
         }
     }
@@ -337,8 +344,7 @@ impl Hub {
     }
 
     /// Loads the retained cache on the cache topic while `[solcast]` is on and no forecast is
-    /// held yet: the hub's own later echoes never overwrite newer data. A ledger-only cache is
-    /// taken only before this run recorded a call. Whether `topic` is the cache topic.
+    /// held yet; its ledger is always merged in (never lowering recorded calls). Whether `topic` is the cache topic.
     pub(crate) fn ingest_solar_cache(&self, topic: &str, payload: &[u8]) -> bool {
         if topic != entities::cache_topic(&self.discovery_prefix) {
             return false;
@@ -354,13 +360,12 @@ impl Hub {
             }
         };
         let mut slot = self.solar_slot();
-        if slot.forecast.is_some() {
-            return true;
+        // The ledger is merged so a late or stale cache never lowers a call this run recorded;
+        // the forecast is taken only while none is held.
+        slot.ledger = slot.ledger.merge(&cache.ledger);
+        if slot.forecast.is_none() {
+            slot.forecast = cache.forecast;
         }
-        if cache.forecast.is_some() || slot.ledger == Ledger::default() {
-            slot.ledger = cache.ledger;
-        }
-        slot.forecast = cache.forecast;
         true
     }
 

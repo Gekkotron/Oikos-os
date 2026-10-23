@@ -22,6 +22,22 @@ pub struct Ledger {
 }
 
 impl Ledger {
+    /// Combines two ledgers without ever losing a recorded call: the later UTC day wins (the
+    /// larger count when both are the same day), and the later attempt and block are kept.
+    pub fn merge(&self, other: &Ledger) -> Ledger {
+        let (utc_day, calls) = match self.utc_day.cmp(&other.utc_day) {
+            std::cmp::Ordering::Equal => (self.utc_day, self.calls.max(other.calls)),
+            std::cmp::Ordering::Greater => (self.utc_day, self.calls),
+            std::cmp::Ordering::Less => (other.utc_day, other.calls),
+        };
+        Ledger {
+            utc_day,
+            calls,
+            last_attempt: self.last_attempt.max(other.last_attempt),
+            blocked_until: self.blocked_until.max(other.blocked_until),
+        }
+    }
+
     /// Calls counted on the UTC day of `now` (zero when the ledger is about another day).
     pub fn calls_on(&self, now: DateTime<Utc>) -> u32 {
         if self.utc_day == Some(now.date_naive()) {
@@ -162,6 +178,40 @@ mod tests {
 
     fn day(s: &str) -> NaiveDate {
         s.parse().unwrap()
+    }
+
+    fn ledger(d: Option<&str>, calls: u32, last: Option<i64>, block: Option<i64>) -> Ledger {
+        Ledger {
+            utc_day: d.map(day),
+            calls,
+            last_attempt: last,
+            blocked_until: block,
+        }
+    }
+
+    #[test]
+    fn merge_same_day_keeps_max_calls_and_later_times() {
+        let a = ledger(Some("2026-10-24"), 3, Some(100), None);
+        let b = ledger(Some("2026-10-24"), 5, Some(50), Some(900));
+        let expected = ledger(Some("2026-10-24"), 5, Some(100), Some(900));
+        assert_eq!(a.merge(&b), expected);
+        assert_eq!(b.merge(&a), expected);
+    }
+
+    #[test]
+    fn merge_different_days_keeps_the_later_day_with_its_calls() {
+        let old = ledger(Some("2026-10-23"), 9, Some(10), Some(5));
+        let new = ledger(Some("2026-10-24"), 1, Some(20), None);
+        let expected = ledger(Some("2026-10-24"), 1, Some(20), Some(5));
+        assert_eq!(old.merge(&new), expected);
+        assert_eq!(new.merge(&old), expected);
+    }
+
+    #[test]
+    fn merge_with_default_takes_the_other() {
+        let a = ledger(Some("2026-10-24"), 2, Some(7), Some(8));
+        assert_eq!(Ledger::default().merge(&a), a);
+        assert_eq!(a.merge(&Ledger::default()), a);
     }
 
     #[test]
