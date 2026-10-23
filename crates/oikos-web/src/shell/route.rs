@@ -1,6 +1,7 @@
 //! Which sidebar entry is active for a path, and the breadcrumb trail of a page.
 
 use crate::i18n::{Key, Lang, text};
+use crate::screens::settings::SettingsPage;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Section {
@@ -150,7 +151,13 @@ pub fn crumbs(path: &str, lang: Lang, name_of: impl Fn(Lookup) -> Option<String>
                 String::new(),
             );
         }
-        ["settings", ..] => push(t(Key::Settings), String::new()),
+        ["settings"] => push(t(Key::Settings), String::new()),
+        ["settings", slug, ..] => {
+            push(t(Key::Settings), "/settings".into());
+            if let Some(page) = SettingsPage::from_slug(slug) {
+                push(t(page.key()), String::new());
+            }
+        }
         ["devices", ..] => push(t(Key::Devices), String::new()),
         ["entity", id, ..] => push(named(Lookup::Entity(id), id), String::new()),
         ["history", id, ..] => {
@@ -245,6 +252,26 @@ mod tests {
         let c = crumbs("/groups/g1/edit", Lang::En, names);
         assert_eq!(labels(&c), ["My home", "Groups", "g1", "Edit group"]);
         assert_eq!(c[2].href.as_deref(), Some("/group/g1"));
+    }
+
+    #[test]
+    fn settings_crumbs() {
+        assert_eq!(
+            labels(&crumbs("/settings", Lang::En, names)),
+            ["My home", "Settings"]
+        );
+        let c = crumbs("/settings/zigbee2mqtt", Lang::Fr, names);
+        assert_eq!(labels(&c), ["Ma maison", "Réglages", "Zigbee2MQTT"]);
+        assert_eq!(c[1].href.as_deref(), Some("/settings"));
+        assert_eq!(
+            labels(&crumbs("/settings/about", Lang::Fr, names)),
+            ["Ma maison", "Réglages", "À propos"]
+        );
+        assert_eq!(
+            labels(&crumbs("/settings/nope", Lang::En, names)),
+            ["My home", "Settings"]
+        );
+        assert_eq!(section_for("/settings/mcp", &[]), Section::Settings);
     }
 
     /// Room ids are room names; the address bar keeps them percent-encoded.
