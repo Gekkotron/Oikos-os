@@ -1,10 +1,10 @@
 ---
 title: Groups and virtual entities
 sidebar_position: 6
-description: Control several devices as one with a group, and create switches, numbers and buttons the hub owns for your flows.
+description: Control several devices as one with a group, and create switches, numbers, buttons and selects the hub owns for your flows.
 ---
 
-Two kinds of entity belong to the hub itself, with no device behind them. A **group** controls several devices as one. A **virtual entity** is a switch, a number or a button that exists only in the hub, so a flow has something to read and write.
+Two kinds of entity belong to the hub itself, with no device behind them. A **group** controls several devices as one. A **virtual entity** is a switch, a number, a button or a select that exists only in the hub, so a flow has something to read and write.
 
 ## Groups
 
@@ -71,13 +71,14 @@ Earlier versions folded the covers and the lights of a room into one derived car
 
 ## Virtual entities
 
-A virtual entity has no device behind it: a "force heating" flag, a setpoint, a manual trigger for a flow. Three kinds exist:
+A virtual entity has no device behind it: a "force heating" flag, a setpoint, a manual trigger for a flow. Four kinds exist:
 
 | Kind | What it is |
 | --- | --- |
 | `switch` | An on/off value flows can read and write. Starts off. |
 | `number` | A number between `min` and `max` (0 and 100 by default), with a `step` (1) and an optional `unit`. Starts at `min`. |
 | `button` | A press with no state: an event, not a value. A flow can trigger on it. |
+| `select` | One value out of a fixed list of `options` (1 to 32 distinct names of up to 64 characters). Starts at `initial`, or the first option. |
 
 The entity is `virtual_<id>`, on a device named `Virtual`. The id is 1 to 48 characters of `a-z`, `0-9` and `_`.
 
@@ -87,13 +88,21 @@ Create one with MCP `set_virtual` or `PUT /api/v1/virtual/{id}`, with a body suc
 { "kind": "number", "name": "Target temperature", "min": 15, "max": 25, "step": 0.5, "unit": "°C", "initial": 19 }
 ```
 
+A select lists its options. A house mode that your flows set and read:
+
+```json
+{ "kind": "select", "name": "House mode", "options": ["home", "away", "night"], "initial": "home" }
+```
+
+Its id `house_mode` gives the entity `virtual_house_mode`. A command naming an option outside the list is refused, and a flow can compare its state or send it a `select_option` command.
+
 Remove it with `delete_virtual` or `DELETE /api/v1/virtual/{id}`.
 
 ### Behaviour
 
-- A switch and a number echo on their own topic and are retained, so a command is its own state and survives a restart.
-- The hub publishes the initial state, retained, only the first time the entity is created: `OFF` for a switch, `min` for a number, or `initial`. A flow's trigger needs a known previous value to see a change, so a first tap would otherwise go unnoticed.
-- Calling `set_virtual` again on an existing entity republishes its config (a rename, other bounds) and keeps its state. Changing the kind clears the old config.
+- A switch, a number and a select echo on their own topic and are retained, so a command is its own state and survives a restart.
+- The hub publishes the initial state, retained, only the first time the entity is created: `OFF` for a switch, `min` for a number, the first option for a select, or `initial`. A flow's trigger needs a known previous value to see a change, so a first tap would otherwise go unnoticed.
+- Calling `set_virtual` again on an existing entity republishes its config (a rename, other bounds) and keeps its state, except that a select whose state is no longer among the new options goes back to the first option. Changing the kind clears the old config.
 - A button is not retained: a press is an event. A flow `trigger.state` on a button fires with the value `PRESS`.
 - A virtual entity is an ordinary entity otherwise. Commands go through `send_command`, and it moves to a room with the usual override.
 

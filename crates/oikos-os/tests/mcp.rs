@@ -30,6 +30,8 @@ const LINKQUALITY_TOPIC: &str = "oikos/sensor/0x847127fffe24e322/linkquality/con
 
 const EXPECTED_TOOLS: &[&str] = &[
     "bridge_info",
+    "get_home_settings",
+    "set_home_settings",
     "list_areas",
     "set_areas",
     "list_devices",
@@ -63,6 +65,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "set_climate_override",
     "clear_climate_override",
     "learn_climate_zone",
+    "get_weather",
 ];
 
 const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";

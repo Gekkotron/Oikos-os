@@ -1,0 +1,18 @@
+{
+  "results": [
+    {
+      "id": 2988507,
+      "name": "Paris",
+      "latitude": 48.85341,
+      "longitude": 2.3488,
+      "elevation": 42.0,
+      "feature_code": "PPLC",
+      "country_code": "FR",
+      "timezone": "Europe/Paris",
+      "population": 2138551,
+      "country": "France",
+      "admin1": "Île-de-France"
+    }
+  ],
+  "generationtime_ms": 0.6
+}

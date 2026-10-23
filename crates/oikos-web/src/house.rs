@@ -154,6 +154,8 @@ impl House {
             WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
             // The Climate screen reads its own view: tell it to refetch.
             WsEvent::ClimateChanged { .. } => self.climate_rev.update(|r| *r += 1),
+            // The home header (a later project) will use these.
+            WsEvent::WeatherChanged | WsEvent::HomeSettingsChanged { .. } => {}
         }
     }
 }

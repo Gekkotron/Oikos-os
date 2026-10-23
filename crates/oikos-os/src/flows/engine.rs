@@ -726,20 +726,6 @@ fn step(node: &str, outcome: StepOutcome, detail: String) -> StepView {
     }
 }
 
-/// A random number for a random delay. std's `RandomState` is seeded from the OS and hashing
-/// the clock into it gives a fresh value per call; good enough for picking a wait, no crate.
-fn random_roll() -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
-    hasher.write_u128(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos(),
-    );
-    hasher.finish()
-}
-
 /// Runs one node: its outcome, the detail to record and the output port to follow.
 async fn run_node(
     hub: &Hub,
@@ -865,7 +851,7 @@ async fn run_node(
                 (StepOutcome::Ok, format!("waited {}", params.for_), None)
             }
             Ok((low, Some(high))) => {
-                let duration = pick_duration(low, Some(high), random_roll());
+                let duration = pick_duration(low, Some(high), clock::random_roll());
                 tokio::time::sleep(duration).await;
                 let detail = format!(
                     "waited {} ({} to {})",

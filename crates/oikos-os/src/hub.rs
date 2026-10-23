@@ -19,7 +19,7 @@ use crate::pictures::{MAX_PICTURE_BYTES, Picture, Pictures};
 use crate::virtual_entities as virtuals;
 use oikos_api::{
     AlertView, AreaView, CommandResponse, ConnectionStatus, EntityView, GroupMemberView, GroupSpec,
-    GroupView, IgnoredView, OverridePatch, Snapshot, VirtualSpec, WsEvent, area_views,
+    GroupView, IgnoredView, OverridePatch, Snapshot, VirtualKind, VirtualSpec, WsEvent, area_views,
     device_views, entity_views, mask_secret, snapshot,
 };
 use oikos_core::command::{CommandError, Publish, map_command};
@@ -178,9 +178,9 @@ pub struct Hub {
     link_epoch: AtomicU64,
     connection: watch::Sender<ConnectionStatus>,
     publisher: mpsc::Sender<Publish>,
-    ui_prefix: String,
+    pub(crate) ui_prefix: String,
     /// The first discovery prefix: virtual entities are published under it.
-    discovery_prefix: String,
+    pub(crate) discovery_prefix: String,
     /// Push notifications: the service owns `<prefix>/history`; the alert store decodes the
     /// broker's echo of it for the web and the API.
     push: Arc<PushService>,
@@ -198,8 +198,16 @@ pub struct Hub {
     groups_enabled: bool,
     /// The climate engine's documents, present only while `[climate] enabled`.
     pub(crate) climate: Option<ClimateHub>,
+    /// `[weather] enabled` and `refresh_minutes`.
+    pub(crate) weather_enabled: bool,
+    pub(crate) weather_refresh_minutes: u64,
+    pub(crate) weather_city: String,
+    pub(crate) weather_country: Option<String>,
+    pub(crate) weather: Mutex<crate::weather::hub::WeatherSlot>,
     /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
     dashboard_store: Mutex<DashboardStore>,
+    /// The home settings document, retained on `<ui_prefix>/_home`.
+    pub(crate) home_settings: Mutex<oikos_api::HomeSettings>,
     /// The topic prefix flows are retained under, one topic per flow id.
     automation_prefix: String,
     /// The time zone schedules and their preview run in.
@@ -315,7 +323,13 @@ impl Hub {
                 .climate
                 .enabled
                 .then(|| ClimateHub::new(&cfg.climate.prefix)),
+            weather_enabled: cfg.weather.enabled,
+            weather_refresh_minutes: cfg.weather.refresh_minutes,
+            weather_city: cfg.weather.city.trim().to_owned(),
+            weather_country: cfg.weather.country.clone(),
+            weather: Mutex::default(),
             dashboard_store: Mutex::new(DashboardStore::new()),
+            home_settings: Mutex::new(oikos_api::HomeSettings::default()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
             house_point: cfg.flows.house_point(),
@@ -348,6 +362,10 @@ impl Hub {
     pub fn ingest(&self, topic: &str, payload: &[u8]) -> Vec<Change> {
         if topic == self.push.history_topic() {
             self.ingest_history(topic, payload);
+            return Vec::new();
+        }
+        if topic == crate::home::topic(&self.ui_prefix) {
+            self.ingest_home(payload);
             return Vec::new();
         }
         if let Some(id) = self.dashboard_id_of(topic) {
@@ -478,6 +496,10 @@ impl Hub {
     /// event: a non-retained message on the command topic of a button some flow watches
     /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.
     pub fn ingest_message(&self, topic: &str, payload: &[u8], retain: bool) -> Vec<Change> {
+        // A weather device left on the broker by an earlier run is cleared, not applied.
+        if self.clear_disabled_weather(topic, payload, retain) {
+            return Vec::new();
+        }
         // Climate documents are the engine's own data, never devices.
         if self.ingest_climate(topic, payload) {
             return Vec::new();
@@ -1313,7 +1335,8 @@ impl Hub {
     /// Creates or replaces virtual entity `id`: publishes its discovery config retained and
     /// applies it locally. The initial state (`OFF`, the number's `min`, or `initial`) is
     /// published retained only when the entity did not exist, so redefining one keeps its
-    /// state; a button has none. A changed kind clears the old config topic.
+    /// state (a select whose state left its options goes back to its first option); a button
+    /// has none. A changed kind clears the old config topic.
     pub async fn set_virtual(&self, id: &str, spec: VirtualSpec) -> Result<EntityView, HubError> {
         virtuals::validate_id(id).map_err(HubError::Rejected)?;
         let initial = virtuals::initial_state(&spec).map_err(HubError::Rejected)?;
@@ -1341,7 +1364,23 @@ impl Hub {
         }
         self.ingest(&config_topic, config.as_bytes());
 
-        if let (None, Some(state)) = (previous, initial) {
+        // A new entity gets its initial state; a redefined select whose current value fell
+        // outside the new options goes back to the first option.
+        let reset = match (&previous, &spec.options) {
+            (None, _) => true,
+            (Some(_), Some(options)) if spec.kind == VirtualKind::Select => !matches!(
+                self.entity_view(&unique_id).map(|view| view.state.value),
+                Some(StateValue::Text(current)) if options.contains(&current)
+            ),
+            _ => false,
+        };
+        let state = match (&previous, &spec.options) {
+            (Some(_), Some(options)) if spec.kind == VirtualKind::Select => {
+                options.first().cloned()
+            }
+            _ => initial,
+        };
+        if let (true, Some(state)) = (reset, state) {
             let topic = virtuals::state_topic(&self.discovery_prefix, id);
             self.publish(Publish {
                 topic: topic.clone(),

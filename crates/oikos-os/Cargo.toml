@@ -28,7 +28,7 @@ rust-embed.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["query"] }
 base64 = "0.22"
 bytes = "1"
 sqlx.workspace = true

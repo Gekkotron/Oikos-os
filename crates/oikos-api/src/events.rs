@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::alerts::AlertView;
 use crate::flows::{FlowView, RunView};
+use crate::home::HomeSettings;
 use crate::snapshot::Snapshot;
 use crate::views::{AreaView, BridgeView, DeviceView, EntityView};
 
@@ -75,6 +76,12 @@ pub enum WsEvent {
     ClimateChanged {
         zone: Option<String>,
     },
+    /// The outdoor weather was refreshed: refetch `GET /api/v1/weather`.
+    WeatherChanged,
+    /// The home settings document changed.
+    HomeSettingsChanged {
+        settings: HomeSettings,
+    },
 }
 
 /// A partial override: the keys to set (`null` clears one).
@@ -125,5 +132,19 @@ mod tests {
             let back: WsEvent = serde_json::from_value(value).expect("round-trips");
             assert_eq!(back, event);
         }
+    }
+
+    #[test]
+    fn new_events_serialize() {
+        assert_eq!(
+            serde_json::to_value(WsEvent::WeatherChanged).unwrap(),
+            json!({"type": "weather_changed"})
+        );
+        let e = WsEvent::HomeSettingsChanged {
+            settings: HomeSettings::default(),
+        };
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["type"], "home_settings_changed");
+        assert_eq!(serde_json::from_value::<WsEvent>(v).unwrap(), e);
     }
 }

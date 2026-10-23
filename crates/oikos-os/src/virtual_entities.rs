@@ -1,4 +1,4 @@
-//! Virtual entities: switches, numbers and buttons the hub owns. Pure helpers that build
+//! Virtual entities: switches, numbers, buttons and selects the hub owns. Pure helpers that build
 //! their retained discovery configs and initial state; the hub publishes them.
 //!
 //! Topics, for the first discovery prefix `P`: the config is `P/<component>/virtual/<id>/config`
@@ -11,6 +11,10 @@ use serde_json::{Value, json};
 
 /// The longest id.
 const MAX_ID_LEN: usize = 48;
+/// The most options a select takes.
+const MAX_OPTIONS: usize = 32;
+/// The longest option, in characters after trimming.
+const MAX_OPTION_LEN: usize = 64;
 const DEFAULT_MIN: f64 = 0.0;
 const DEFAULT_MAX: f64 = 100.0;
 const DEFAULT_STEP: f64 = 1.0;
@@ -40,6 +44,7 @@ fn component(kind: VirtualKind) -> &'static str {
         VirtualKind::Switch => "switch",
         VirtualKind::Number => "number",
         VirtualKind::Button => "button",
+        VirtualKind::Select => "select",
     }
 }
 
@@ -59,6 +64,7 @@ pub fn is_config_topic(prefix: &str, id: &str, topic: &str) -> bool {
         VirtualKind::Switch,
         VirtualKind::Number,
         VirtualKind::Button,
+        VirtualKind::Select,
     ]
     .into_iter()
     .any(|kind| config_topic(prefix, kind, id) == topic)
@@ -123,24 +129,77 @@ pub fn button_config(prefix: &str, id: &str, spec: &VirtualSpec) -> Value {
     })
 }
 
+/// A select echoing on its own topic.
+pub fn select_config(prefix: &str, id: &str, spec: &VirtualSpec) -> Value {
+    let topic = state_topic(prefix, id);
+    json!({
+        "name": spec.name,
+        "unique_id": unique_id(id),
+        "command_topic": topic,
+        "state_topic": topic,
+        "options": spec.options.clone().unwrap_or_default(),
+        "retain": true,
+        "device": device(),
+    })
+}
+
 /// The discovery config for `spec`.
 pub fn build_config(prefix: &str, id: &str, spec: &VirtualSpec) -> Value {
     match spec.kind {
         VirtualKind::Switch => switch_config(prefix, id, spec),
         VirtualKind::Number => number_config(prefix, id, spec),
         VirtualKind::Button => button_config(prefix, id, spec),
+        VirtualKind::Select => select_config(prefix, id, spec),
     }
 }
 
+/// 1 to 32 distinct options of 1 to 64 characters after trimming.
+fn validate_options(options: &[String]) -> Result<(), String> {
+    if !(1..=MAX_OPTIONS).contains(&options.len()) {
+        return Err(format!("a select has 1 to {MAX_OPTIONS} options"));
+    }
+    for (i, option) in options.iter().enumerate() {
+        if !(1..=MAX_OPTION_LEN).contains(&option.trim().chars().count()) {
+            return Err(format!(
+                "an option is 1 to {MAX_OPTION_LEN} characters, not {option:?}"
+            ));
+        }
+        if option.trim().eq_ignore_ascii_case("none") {
+            return Err(format!("{option:?} is reserved: it means an unknown state"));
+        }
+        if options[..i].iter().any(|seen| seen.trim() == option.trim()) {
+            return Err(format!("duplicate option {option:?}"));
+        }
+    }
+    Ok(())
+}
+
 /// Checks the spec and returns the state to publish when the entity is first created:
-/// `OFF` or `initial` for a switch, the lower bound or `initial` for a number, none for a
-/// button. A number's `initial` must lie within the bounds (0 and 100 unless given).
+/// `OFF` or `initial` for a switch, the lower bound or `initial` for a number, the first
+/// option or `initial` for a select, none for a button. A number's `initial` must lie within the bounds (0 and 100 unless given).
 pub fn initial_state(spec: &VirtualSpec) -> Result<Option<String>, String> {
     if spec.name.trim().is_empty() {
         return Err("a virtual entity needs a name".to_owned());
     }
+    if spec.kind != VirtualKind::Select && spec.options.is_some() {
+        return Err("`options` only applies to a select".to_owned());
+    }
     match spec.kind {
         VirtualKind::Button => Ok(None),
+        VirtualKind::Select => {
+            let options = spec
+                .options
+                .as_deref()
+                .ok_or_else(|| "a select needs `options`".to_owned())?;
+            validate_options(options)?;
+            match &spec.initial {
+                None | Some(Value::Null) => Ok(Some(options[0].clone())),
+                Some(Value::String(text)) if options.contains(text) => Ok(Some(text.clone())),
+                Some(other) => Err(format!(
+                    "a select's `initial` is one of its options, not {other}"
+                )),
+            }
+        }
         VirtualKind::Switch => {
             let on = match &spec.initial {
                 None | Some(Value::Null) => false,
@@ -192,6 +251,7 @@ mod tests {
             max: None,
             step: None,
             unit: None,
+            options: None,
             initial: None,
         }
     }
@@ -258,6 +318,59 @@ mod tests {
             "t",
             "oikos/button/other/t/config"
         ));
+    }
+
+    #[test]
+    fn select_config_lists_options_and_echoes() {
+        let mut s = spec(VirtualKind::Select);
+        s.options = Some(vec!["home".into(), "away".into(), "night".into()]);
+        let c = select_config("oikos", "house_mode", &s);
+        assert_eq!(c["command_topic"], "oikos/virtual/house_mode");
+        assert_eq!(c["state_topic"], c["command_topic"]);
+        assert_eq!(c["options"], json!(["home", "away", "night"]));
+        assert_eq!(c["retain"], true);
+        assert_eq!(
+            config_topic("oikos", VirtualKind::Select, "house_mode"),
+            "oikos/select/virtual/house_mode/config"
+        );
+        assert!(is_config_topic(
+            "oikos",
+            "house_mode",
+            "oikos/select/virtual/house_mode/config"
+        ));
+    }
+
+    #[test]
+    fn select_initial_state_rules() {
+        let mut s = spec(VirtualKind::Select);
+        s.options = Some(vec!["home".into(), "away".into()]);
+        assert_eq!(initial_state(&s), Ok(Some("home".to_owned())));
+        s.initial = Some(json!("away"));
+        assert_eq!(initial_state(&s), Ok(Some("away".to_owned())));
+        s.initial = Some(json!("party"));
+        assert!(initial_state(&s).is_err());
+    }
+
+    #[test]
+    fn select_options_are_validated() {
+        let mut s = spec(VirtualKind::Select);
+        for bad in [
+            None,
+            Some(vec![]),
+            Some(vec!["a".into(), "a".into()]),
+            Some(vec!["a".into(), "a ".into()]),
+            Some(vec!["  ".into()]),
+            Some(vec!["None".into()]),
+            Some(vec!["a".into(), " none ".into()]),
+            Some(vec!["x".repeat(65)]),
+            Some((0..33).map(|i| i.to_string()).collect()),
+        ] {
+            s.options = bad.clone();
+            assert!(initial_state(&s).is_err(), "{bad:?}");
+        }
+        let mut sw = spec(VirtualKind::Switch);
+        sw.options = Some(vec!["a".into()]);
+        assert!(initial_state(&sw).is_err(), "options refused on a switch");
     }
 
     #[test]

@@ -22,7 +22,7 @@ String keys keep the raw text of the variable, so `OIKOS_MQTT__PASSWORD=007` sta
 
 Logging has one more rule: if `RUST_LOG` is set and valid, it wins over `[log] level`. If it is unset or invalid, `[log] level` applies; if that is invalid too, the level is `info`.
 
-At start the hub also checks `[flows]` (coordinates), `[watchdog]` and `[climate]`. A bad value stops it with `invalid config: <reason>`.
+At start the hub also checks `[flows]` (coordinates), `[watchdog]`, `[climate]` and `[weather]`. A bad value stops it with `invalid config: <reason>`.
 
 Secrets (`[mqtt] password`, `[frigate] password`, the password inside `[history] url`) are masked when the config is logged. Keep `oikos.toml` out of git; it is git-ignored in this repo.
 
@@ -243,4 +243,25 @@ The climate engine (beta, still being tested). Everything except these two keys 
 [climate]
 enabled = true
 prefix = "oikos/climate"
+```
+
+## `[weather]`
+
+Outdoor weather from [Open-Meteo](https://open-meteo.com), a free service with no API key. Off by default: while `enabled` is `false` the hub makes no request at all. See [Weather](../users/weather.md).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Turn the weather on. While `false`, `GET /api/v1/weather` answers 503 and `get_weather` answers `weather unavailable`. |
+| `city` | `""` | The city to look up. Required (not empty or blank) when enabled. |
+| `country` | none | Optional ISO 3166-1 alpha-2 filter for the lookup, such as `FR`, so `Paris` is not Paris, Texas. Exactly two letters. |
+| `refresh_minutes` | `15` | Minutes between two fetches, with about 10 % random jitter. Between 10 and 1440 when enabled. |
+
+When enabled, an empty `city`, a `country` that is not two letters or a `refresh_minutes` below 10 or above 1440 stops the hub at start with `invalid config: [weather] …`. `OIKOS_WEATHER__ENABLED`, `OIKOS_WEATHER__CITY`, `OIKOS_WEATHER__COUNTRY` and `OIKOS_WEATHER__REFRESH_MINUTES` work like the other sections; the city and country stay text even when they look like numbers.
+
+```toml
+[weather]
+enabled = true
+city = "Lyon"
+country = "FR"
+refresh_minutes = 15
 ```
