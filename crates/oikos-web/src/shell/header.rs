@@ -82,23 +82,25 @@ pub fn ContentHeader() -> impl IntoView {
                 <button
                     type="button"
                     class="content-header__theme"
-                    aria-label=move || t(Key::ChangeTheme)
+                    aria-label=move || format!("{} ({})", t(Key::ChangeTheme), theme.get().label())
                     title=move || theme.get().label()
                     inner_html=theme_icon
                     on:click=move |_| theme.update(|th| *th = th.next())
                 ></button>
-                // The label names the language the button switches to, in that language.
+                // The name keeps the visible "FR EN" and adds, hidden, the language the button
+                // switches to, written in that language.
                 <button
                     type="button"
                     class="content-header__lang"
-                    aria-label=move || t(Key::ChangeLanguage)
                     title=move || t(Key::ChangeLanguage)
-                    lang=move || lang.get().next().as_str()
                     on:click=move |_| lang.update(|l| *l = l.next())
                 >
                     <span class:content-header__lang--on=move || lang.get() == Lang::Fr>"FR"</span>
                     <span aria-hidden="true">"·"</span>
                     <span class:content-header__lang--on=move || lang.get() == Lang::En>"EN"</span>
+                    <span class="visually-hidden" lang=move || lang.get().next().as_str()>
+                        {move || t(Key::ChangeLanguage)}
+                    </span>
                 </button>
             </div>
         </header>

@@ -39,7 +39,8 @@ pub fn Sidebar(
     let chips = use_room_chips();
     let rooms = Memo::new(move |_| chips.with(|list| sidebar_rooms(list)));
 
-    // With two or more dashboards (the house counts) they unfold under Overview.
+    // With two or more dashboards (the house counts) they unfold under Overview; "New dashboard"
+    // is there at any count.
     let unfolded = Memo::new(move |_| house.dashboards.with(|list| list.len() >= 2));
     // The id in a `/dashboards/:id` path.
     let open_dashboard = Memo::new(move |_| {
@@ -75,10 +76,18 @@ pub fn Sidebar(
         list.sort_by_key(|d| d.dashboard.id != oikos_api::HOUSE_ID);
         list
     };
+    // True while a create call is in flight, so a double click makes one dashboard, not two.
+    let creating = RwSignal::new(false);
     let new_dashboard = move |_| {
+        if creating.get_untracked() {
+            return;
+        }
+        creating.set(true);
         let navigate = navigate.clone();
         spawn_local(async move {
-            if let Some(id) = create_dashboard(house).await {
+            let created = create_dashboard(house).await;
+            creating.try_set(false);
+            if let Some(id) = created {
                 navigate(&format!("/dashboards/{id}?edit=1"), Default::default());
             }
         });
@@ -139,18 +148,19 @@ pub fn Sidebar(
                                         }
                                     }
                                 />
-                                <li>
-                                    <button
-                                        type="button"
-                                        class="sidebar__sublink sidebar__new"
-                                        on:click=new_dashboard.clone()
-                                    >
-                                        <span class="sidebar__new-glyph" inner_html=PLUS></span>
-                                        {move || t(Key::NewDashboard)}
-                                    </button>
-                                </li>
                             </ul>
                         </Show>
+                        // Always offered: a house with only the built-in dashboard makes its first one here.
+                        <button
+                            type="button"
+                            class="sidebar__sublink sidebar__new"
+                            disabled=move || creating.get()
+                            aria-busy=move || creating.get().then_some("true")
+                            on:click=new_dashboard
+                        >
+                            <span class="sidebar__new-glyph" inner_html=PLUS></span>
+                            {move || t(Key::NewDashboard)}
+                        </button>
                     </li>
                     <li>
                         <a class="sidebar__link" href="/flows" aria-current=current(Section::Automations)>
@@ -224,10 +234,12 @@ pub fn Sidebar(
                             <span class="nav__label">{move || t(Key::Alerts)}</span>
                             {move || alerts_badge.get().map(|text| {
                                 let label = unseen_alerts(lang.map_or(Lang::En, |l| l.get()), &text);
+                                // The count is read out from the hidden text; the pill is for the eye.
                                 view! {
-                                    <span class="nav__badge" aria-label=label>
+                                    <span class="nav__badge" aria-hidden="true">
                                         {text}
                                     </span>
+                                    <span class="visually-hidden">{label}</span>
                                 }
                             })}
                         </a>

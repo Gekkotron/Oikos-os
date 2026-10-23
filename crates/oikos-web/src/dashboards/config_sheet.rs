@@ -161,7 +161,7 @@ fn move_dashboard(house: House, id: String, delta: isize) {
     });
 }
 
-/// Per-dashboard sheet: name, delete and move up/down in the picker.
+/// Per-dashboard sheet: name, delete and move up/down in the sidebar list.
 #[component]
 pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl IntoView {
     let house = expect_context::<House>();

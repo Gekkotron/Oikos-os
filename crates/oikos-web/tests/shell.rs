@@ -110,11 +110,19 @@ async fn sidebar_lists_the_main_entries() {
             .unwrap()
             .is_some()
     );
-    assert!(
+    // The count is spoken from hidden text inside the link; the pill itself is hidden from AT.
+    assert_eq!(
+        text_of(&m.host, ".sidebar a[href=\"/alerts\"] .visually-hidden"),
+        "3 unseen alerts"
+    );
+    assert_eq!(
         m.host
-            .query_selector(".nav__badge[aria-label=\"3 unseen alerts\"]")
+            .query_selector(".sidebar a[href=\"/alerts\"] .nav__badge")
             .unwrap()
-            .is_some()
+            .expect("a badge")
+            .get_attribute("aria-hidden")
+            .as_deref(),
+        Some("true")
     );
     // The page itself sits in the content column, under the header.
     assert!(
@@ -160,6 +168,8 @@ async fn dashboards_unfold_from_two() {
             .unwrap()
             .is_none()
     );
+    // The first authored dashboard is made from here, so the action is there with one dashboard.
+    assert!(text_of(&m.host, "button.sidebar__new").contains("New dashboard"));
     // Overview goes to the house when it is the only dashboard.
     assert!(
         m.host
@@ -179,7 +189,13 @@ async fn dashboards_unfold_from_two() {
     let first = links.item(0).unwrap().text_content().unwrap();
     let second = links.item(1).unwrap().text_content().unwrap();
     assert_eq!((first.as_str(), second.as_str()), ("House", "Wall tablet"));
-    assert!(text_of(&m.host, ".sidebar__dashboards").contains("New dashboard"));
+    assert_eq!(
+        m.host
+            .query_selector_all("button.sidebar__new")
+            .unwrap()
+            .length(),
+        1
+    );
     // Overview now lands on the first authored dashboard, as `/` does.
     assert!(
         m.host
@@ -206,11 +222,9 @@ async fn french_shell() {
             .trim_start()
             .starts_with("Ma maison")
     );
-    assert!(
-        m.host
-            .query_selector(".nav__badge[aria-label=\"2 alertes non lues\"]")
-            .unwrap()
-            .is_some()
+    assert_eq!(
+        text_of(&m.host, ".sidebar a[href=\"/alerts\"] .visually-hidden"),
+        "2 alertes non lues"
     );
 }
 
@@ -225,16 +239,21 @@ async fn theme_button_cycles() {
         .unchecked_into();
     assert_eq!(
         button.get_attribute("aria-label").as_deref(),
-        Some("Change theme")
+        Some("Change theme (Auto)")
     );
     let mut seen = Vec::new();
     for _ in 0..3 {
         button.click();
         tick().await;
-        seen.push(m.theme.get_untracked());
+        let theme = m.theme.get_untracked();
+        seen.push(theme);
         assert_eq!(
             button.get_attribute("title").as_deref(),
-            Some(m.theme.get_untracked().label())
+            Some(theme.label())
+        );
+        assert_eq!(
+            button.get_attribute("aria-label"),
+            Some(format!("Change theme ({})", theme.label()))
         );
     }
     assert_eq!(seen, [Theme::Night, Theme::Ivoire, Theme::Auto]);
@@ -249,17 +268,23 @@ async fn language_button_switches() {
         .unwrap()
         .expect("a language button")
         .unchecked_into();
-    assert_eq!(
-        button.get_attribute("aria-label").as_deref(),
-        Some("Français")
-    );
+    // No aria-label: the name is the visible "FR", "EN" plus the hidden target language.
+    assert_eq!(button.get_attribute("aria-label"), None);
+    let hidden = |lang: &str| {
+        let span = button
+            .query_selector(".visually-hidden")
+            .unwrap()
+            .expect("the hidden target language");
+        assert_eq!(span.get_attribute("lang").as_deref(), Some(lang));
+        span.text_content().unwrap()
+    };
+    let text = button.text_content().unwrap();
+    assert!(text.contains("FR") && text.contains("EN"), "{text}");
+    assert_eq!(hidden("fr"), "Français");
     button.click();
     tick().await;
     assert!(text_of(&m.host, ".sidebar").contains("Vue d'ensemble"));
-    assert_eq!(
-        button.get_attribute("aria-label").as_deref(),
-        Some("English")
-    );
+    assert_eq!(hidden("en"), "English");
 }
 
 /// Moves the page to `path` the way Back/Forward does; every mounted router follows popstate.
@@ -298,6 +323,29 @@ async fn active_entry_follows_the_route() {
     assert!(
         trail.contains("Automations") && trail.contains("f1"),
         "{trail}"
+    );
+
+    // An open dashboard listed under Overview is the page; Overview is only its section.
+    m.house.dashboards.set(vec![
+        dashboard(oikos_api::HOUSE_ID, "House", 0),
+        dashboard("d1", "Wall tablet", 1),
+    ]);
+    go("/dashboards/d1").await;
+    let mark = |selector: &str| {
+        m.host
+            .query_selector(selector)
+            .unwrap()
+            .unwrap_or_else(|| panic!("no {selector}"))
+            .get_attribute("aria-current")
+    };
+    assert_eq!(
+        mark(".sidebar__sublink[href=\"/dashboards/d1\"]").as_deref(),
+        Some("page")
+    );
+    assert_eq!(mark(".sidebar__sublink[href=\"/dashboards/house\"]"), None);
+    assert_eq!(
+        mark(".sidebar__link[href=\"/dashboards/d1\"]").as_deref(),
+        Some("true")
     );
 
     go("/devices").await;
