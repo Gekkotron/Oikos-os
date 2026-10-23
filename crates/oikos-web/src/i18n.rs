@@ -198,11 +198,14 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
     }
 }
 
-/// The accessible label of the Alerts badge: "3 unseen alerts" / "3 alertes non lues".
+/// The accessible label of the Alerts badge: "3 unseen alerts" / "3 alertes non lues", singular
+/// for a badge of "1" ("99+" stays plural).
 pub fn unseen_alerts(lang: Lang, badge: &str) -> String {
-    match lang {
-        Lang::En => format!("{badge} unseen alerts"),
-        Lang::Fr => format!("{badge} alertes non lues"),
+    match (lang, badge == "1") {
+        (Lang::En, true) => format!("{badge} unseen alert"),
+        (Lang::En, false) => format!("{badge} unseen alerts"),
+        (Lang::Fr, true) => format!("{badge} alerte non lue"),
+        (Lang::Fr, false) => format!("{badge} alertes non lues"),
     }
 }
 
@@ -245,6 +248,10 @@ mod tests {
         assert_eq!(text(Lang::Fr, Key::Online), "La maison est connectée");
         assert_eq!(unseen_alerts(Lang::Fr, "3"), "3 alertes non lues");
         assert_eq!(unseen_alerts(Lang::En, "3"), "3 unseen alerts");
+        assert_eq!(unseen_alerts(Lang::En, "1"), "1 unseen alert");
+        assert_eq!(unseen_alerts(Lang::Fr, "1"), "1 alerte non lue");
+        assert_eq!(unseen_alerts(Lang::En, "99+"), "99+ unseen alerts");
+        assert_eq!(unseen_alerts(Lang::Fr, "99+"), "99+ alertes non lues");
     }
     #[test]
     fn toggles() {
