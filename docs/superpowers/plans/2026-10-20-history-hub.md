@@ -460,8 +460,8 @@ Behaviour:
 
 **Files:** none (deploy only). The README is updated if a step differs.
 
-- [ ] **Step 1:** Ask the user for SSH access to the Geekom, and check that nothing is already on port 5432 (`ss -ltnp | grep 5432`).
-- [ ] **Step 2:** Copy `deploy/timescaledb/` to the Geekom, create `.env` with a real password, and run `docker compose up -d`. Then `docker exec oikos-timescaledb psql -U oikos -d oikos -c 'select 1'` should print `1`.
+- [ ] **Step 1:** Ask the user for SSH access to the home server, and check that nothing is already on port 5432 (`ss -ltnp | grep 5432`).
+- [ ] **Step 2:** Copy `deploy/timescaledb/` to the home server, create `.env` with a real password, and run `docker compose up -d`. Then `docker exec oikos-timescaledb psql -U oikos -d oikos -c 'select 1'` should print `1`.
 - [ ] **Step 3:** Set `[history] url = "postgres://oikos:<password>@192.168.1.91:5432/oikos"` in the hub's `oikos.toml` and restart with `tools/restart.sh`. The log should show the migrations applied and no history errors.
 - [ ] **Step 4:** After 10 minutes, `select count(*), count(distinct entity_id) from entity_state` is non-zero. One real sensor's `/api/v1/history/series?range=24h` returns points.
 - [ ] **Step 5:** Record the live state in project memory, and in the README if the deploy steps changed. No commit is needed unless docs changed.

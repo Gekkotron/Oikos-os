@@ -180,7 +180,7 @@ mod tests {
     fn msg(status: &str, ts: i64) -> Vec<u8> {
         json!({"component": "gateway", "status": status,
                "exit_code": if status == "ok" { 0 } else { 1 },
-               "restart_attempted": false, "timestamp": ts, "host": "GEEKOMA5"})
+               "restart_attempted": false, "timestamp": ts, "host": "hub-host"})
         .to_string()
         .into_bytes()
     }
@@ -202,7 +202,7 @@ mod tests {
         assert_eq!((r.component.as_str(), r.status), ("gateway", Status::Fail));
         assert_eq!(
             (r.host.as_deref(), r.exit_code),
-            (Some("GEEKOMA5"), Some(1))
+            (Some("hub-host"), Some(1))
         );
     }
 
@@ -245,7 +245,7 @@ mod tests {
         assert_eq!(alert["ttl"], 86400);
         assert_eq!(alert["silent"], false);
         assert_eq!(alert["title"], "gateway down");
-        assert_eq!(alert["body"], "gateway: health check failed on GEEKOMA5");
+        assert_eq!(alert["body"], "gateway: health check failed on hub-host");
         assert_eq!(alert["loc"]["key"], "gateway.health_down");
         assert_eq!(alert["loc"]["args"]["component"], "gateway");
         assert_eq!(alert["loc"]["args"]["exit_code"], "1");
@@ -287,7 +287,7 @@ mod tests {
         let alert = feed(&mut wd, "gateway", "ok", 2).expect("recovered");
         assert_eq!(alert["severity"], "info");
         assert_eq!(alert["title"], "gateway recovered");
-        assert_eq!(alert["body"], "gateway: back to ok on GEEKOMA5");
+        assert_eq!(alert["body"], "gateway: back to ok on hub-host");
         assert_eq!(alert["loc"]["key"], "gateway.health_recovered");
         assert_eq!(alert["loc"]["args"]["previous"], "fail");
     }

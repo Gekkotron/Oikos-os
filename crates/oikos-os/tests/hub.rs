@@ -1831,8 +1831,8 @@ fn history_ids(published: &[Publish]) -> Vec<String> {
         .collect()
 }
 
-const GW_FAIL: &str = r#"{"status":"fail","exit_code":1,"timestamp":1700000000,"host":"GEEKOMA5"}"#;
-const GW_OK: &str = r#"{"status":"ok","exit_code":0,"timestamp":1700000060,"host":"GEEKOMA5"}"#;
+const GW_FAIL: &str = r#"{"status":"fail","exit_code":1,"timestamp":1700000000,"host":"hub-host"}"#;
+const GW_OK: &str = r#"{"status":"ok","exit_code":0,"timestamp":1700000060,"host":"hub-host"}"#;
 const DENIED: &str =
     "1791743566: Denied PUBLISH from Athena (d0, q0, r1, m0, 'athena/heartbeat', ... (207 bytes))";
 

@@ -6,15 +6,15 @@ Status: approved in conversation, awaiting plan
 
 ## Why
 
-The house keeps no memory of its own. Sensor history lives in InfluxDB 2.7 on the Geekom (org `geckostudio`, bucket `athena`), written by Athena-Core from raw MQTT and read by OikosHistory, a Python service on `:8090` that the Android app calls for charts, "kWh today" and "since X". The hub stores nothing: state is in memory, rebuilt from retained MQTT on each connect. The web Energy and Security tabs have features on hold waiting for history (`docs/superpowers/plans/2026-10-19-web-energy-security-deferred.md`).
+The house keeps no memory of its own. Sensor history lives in InfluxDB 2.7 on the home server (org `geckostudio`, bucket `athena`), written by Athena-Core from raw MQTT and read by OikosHistory, a Python service on `:8090` that the Android app calls for charts, "kWh today" and "since X". The hub stores nothing: state is in memory, rebuilt from retained MQTT on each connect. The web Energy and Security tabs have features on hold waiting for history (`docs/superpowers/plans/2026-10-19-web-energy-security-deferred.md`).
 
 The user wants the hub to own history in **TimescaleDB**, record **everything**, and keep it **for years**. OikosHistory goes away. The original hub design planned "InfluxDB reader first, then SQLite writer" for this phase (`2026-10-18-oikos-os-design.md` §roadmap 3). This design replaces that plan: no Influx reader and no SQLite.
 
-Success: TimescaleDB runs in Docker on the Geekom; the hub writes every entity state change to it; the web UI shows 24 h / 7 d / 30 d / 1 y charts, "kWh today" on Energy and "since X" on Security, all served by the hub; the house keeps running normally when the database is down.
+Success: TimescaleDB runs in Docker on the home server; the hub writes every entity state change to it; the web UI shows 24 h / 7 d / 30 d / 1 y charts, "kWh today" on Energy and "since X" on Security, all served by the hub; the house keeps running normally when the database is down.
 
 ## Decisions taken in conversation (the user's)
 
-- TimescaleDB, in a Docker container on the Geekom.
+- TimescaleDB, in a Docker container on the home server.
 - Record everything the hub knows, kept for years.
 - Start fresh: no import of the existing InfluxDB data. History begins when the hub's recorder goes live. The Influx data stays untouched.
 - No Jeedom data (Jeedom is being retired). The hub only knows entities announced by discovery (Zigbee2MQTT, hand-published discovery such as the water heater) and its own virtual entities, so Jeedom stays out with no filtering.
@@ -42,7 +42,7 @@ Success: TimescaleDB runs in Docker on the Geekom; the hub writes every entity s
 
 - **History must never break the house.** A slow, full or unreachable database must not delay MQTT handling, commands or flows. No `await` on the database in the ingest path.
 - Rows for nothing: Zigbee2MQTT repeats a device's full state on every command echo and link-quality report, and the hub replays retained states on every connect. Writing those repeats would multiply the data and fake "last changed" times.
-- A database schema the hub cannot evolve: schema changes are versioned migrations applied at startup, never manual SQL on the Geekom.
+- A database schema the hub cannot evolve: schema changes are versioned migrations applied at startup, never manual SQL on the home server.
 - Losing years of data silently because the container volume was anonymous or inside the container.
 
 ## How it works
