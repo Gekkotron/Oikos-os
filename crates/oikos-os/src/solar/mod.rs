@@ -2,6 +2,7 @@
 
 pub mod entities;
 pub mod hub;
+pub mod poller;
 pub mod view;
 
 use oikos_solcast::Forecast;

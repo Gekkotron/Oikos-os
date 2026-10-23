@@ -84,6 +84,7 @@ async fn main() -> anyhow::Result<ExitCode> {
                 publish_rx,
             );
             let weather = hub.start_weather();
+            let solar = hub.start_solar();
             tokio::spawn(oikos_os::groups::migrate::spawn(Arc::clone(&hub)));
             let http_task = http::serve(&cfg.http, http::router(Arc::clone(&hub))).await?;
 
@@ -105,6 +106,9 @@ async fn main() -> anyhow::Result<ExitCode> {
                 task.abort();
             }
             if let Some(task) = &weather {
+                task.abort();
+            }
+            if let Some(task) = &solar {
                 task.abort();
             }
             push_retry.abort();
