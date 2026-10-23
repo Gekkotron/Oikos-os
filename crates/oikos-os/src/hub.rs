@@ -1313,7 +1313,8 @@ impl Hub {
     /// Creates or replaces virtual entity `id`: publishes its discovery config retained and
     /// applies it locally. The initial state (`OFF`, the number's `min`, or `initial`) is
     /// published retained only when the entity did not exist, so redefining one keeps its
-    /// state (a select whose state left its options is reset); a button has none. A changed kind clears the old config topic.
+    /// state (a select whose state left its options goes back to its first option); a button
+    /// has none. A changed kind clears the old config topic.
     pub async fn set_virtual(&self, id: &str, spec: VirtualSpec) -> Result<EntityView, HubError> {
         virtuals::validate_id(id).map_err(HubError::Rejected)?;
         let initial = virtuals::initial_state(&spec).map_err(HubError::Rejected)?;
@@ -1342,7 +1343,7 @@ impl Hub {
         self.ingest(&config_topic, config.as_bytes());
 
         // A new entity gets its initial state; a redefined select whose current value fell
-        // outside the new options goes back to the initial one (the first option).
+        // outside the new options goes back to the first option.
         let reset = match (&previous, &spec.options) {
             (None, _) => true,
             (Some(_), Some(options)) if spec.kind == VirtualKind::Select => !matches!(
@@ -1351,7 +1352,13 @@ impl Hub {
             ),
             _ => false,
         };
-        if let (true, Some(state)) = (reset, initial) {
+        let state = match (&previous, &spec.options) {
+            (Some(_), Some(options)) if spec.kind == VirtualKind::Select => {
+                options.first().cloned()
+            }
+            _ => initial,
+        };
+        if let (true, Some(state)) = (reset, state) {
             let topic = virtuals::state_topic(&self.discovery_prefix, id);
             self.publish(Publish {
                 topic: topic.clone(),

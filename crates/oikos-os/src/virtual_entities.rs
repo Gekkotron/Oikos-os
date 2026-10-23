@@ -11,7 +11,9 @@ use serde_json::{Value, json};
 
 /// The longest id.
 const MAX_ID_LEN: usize = 48;
+/// The most options a select takes.
 const MAX_OPTIONS: usize = 32;
+/// The longest option, in characters after trimming.
 const MAX_OPTION_LEN: usize = 64;
 const DEFAULT_MIN: f64 = 0.0;
 const DEFAULT_MAX: f64 = 100.0;
@@ -162,7 +164,7 @@ fn validate_options(options: &[String]) -> Result<(), String> {
                 "an option is 1 to {MAX_OPTION_LEN} characters, not {option:?}"
             ));
         }
-        if options[..i].contains(option) {
+        if options[..i].iter().any(|seen| seen.trim() == option.trim()) {
             return Err(format!("duplicate option {option:?}"));
         }
     }
@@ -170,8 +172,8 @@ fn validate_options(options: &[String]) -> Result<(), String> {
 }
 
 /// Checks the spec and returns the state to publish when the entity is first created:
-/// `OFF` or `initial` for a switch, the lower bound or `initial` for a number, the first option or `initial` for a
-/// select, none for a button. A number's `initial` must lie within the bounds (0 and 100 unless given).
+/// `OFF` or `initial` for a switch, the lower bound or `initial` for a number, the first
+/// option or `initial` for a select, none for a button. A number's `initial` must lie within the bounds (0 and 100 unless given).
 pub fn initial_state(spec: &VirtualSpec) -> Result<Option<String>, String> {
     if spec.name.trim().is_empty() {
         return Err("a virtual entity needs a name".to_owned());
@@ -353,6 +355,7 @@ mod tests {
             None,
             Some(vec![]),
             Some(vec!["a".into(), "a".into()]),
+            Some(vec!["a".into(), "a ".into()]),
             Some(vec!["  ".into()]),
             Some(vec!["x".repeat(65)]),
             Some((0..33).map(|i| i.to_string()).collect()),

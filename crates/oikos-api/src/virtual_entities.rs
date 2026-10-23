@@ -39,8 +39,8 @@ pub struct VirtualSpec {
     #[serde(default)]
     pub options: Option<Vec<String>>,
     /// The state published when the entity is first created: `true`/`false` or `"ON"`/`"OFF"`
-    /// for a switch (default off), a number within the bounds for a number (default `min`), one of the options for a select
-    /// (default the first).
+    /// for a switch (default off), a number within the bounds for a number (default `min`),
+    /// one of the options for a select (default the first).
     /// Ignored when the entity already exists.
     #[serde(default)]
     pub initial: Option<serde_json::Value>,

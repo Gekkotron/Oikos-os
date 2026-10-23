@@ -1067,6 +1067,28 @@ async fn select_options_change_resets_a_missing_state() {
 }
 
 #[tokio::test]
+async fn select_reset_goes_to_the_first_option_not_initial() {
+    let (hub, mut publisher) = hub();
+    hub.set_virtual("house_mode", house_mode(&["home", "away"]))
+        .await
+        .expect("created");
+    hub.ingest(MODE_STATE, b"away");
+    drain(&mut publisher);
+
+    let mut spec = house_mode(&["home", "night"]);
+    spec.initial = Some(serde_json::json!("night"));
+    let view = hub
+        .set_virtual("house_mode", spec)
+        .await
+        .expect("redefined");
+    assert_eq!(view.state.value, StateValue::Text("home".to_owned()));
+    let published = drain(&mut publisher);
+    assert_eq!(published.len(), 2, "{published:?}");
+    assert_eq!(published[1].topic, MODE_STATE);
+    assert_eq!(published[1].payload, "home");
+}
+
+#[tokio::test]
 async fn virtual_topics_are_not_ignored_discovery() {
     let (hub, _publisher) = hub();
     hub.ingest("oikos/virtual/x", b"ON");
