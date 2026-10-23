@@ -256,7 +256,11 @@ async fn no_call_before_the_suback() {
     // The entities are published, yet nothing is asked while the cache may still be coming.
     let published = Arc::clone(&app.published);
     until("the configs", || {
-        published.lock().unwrap().iter().any(|(t, _)| t.ends_with("/config"))
+        published
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(t, _)| t.ends_with("/config"))
     })
     .await;
     tokio::time::sleep(Duration::from_secs(1)).await;

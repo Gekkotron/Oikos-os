@@ -21,6 +21,15 @@ pub struct Forecast {
 
 /// Sum the sites period by period (matched on `end`; a site missing a period counts as 0 there).
 pub fn merge(sites: Vec<Vec<Period>>, fetched_at: i64) -> Forecast {
+    Forecast {
+        fetched_at,
+        periods: sum_sites(&sites),
+        sites,
+    }
+}
+
+/// The sites summed period by period, sorted by `end`.
+fn sum_sites(sites: &[Vec<Period>]) -> Vec<Period> {
     let mut sum: BTreeMap<DateTime<Utc>, Period> = BTreeMap::new();
     for p in sites.iter().flatten() {
         sum.entry(p.end)
@@ -31,11 +40,7 @@ pub fn merge(sites: Vec<Vec<Period>>, fetched_at: i64) -> Forecast {
             })
             .or_insert_with(|| p.clone());
     }
-    Forecast {
-        fetched_at,
-        periods: sum.into_values().collect(),
-        sites,
-    }
+    sum.into_values().collect()
 }
 
 impl Forecast {
@@ -52,12 +57,13 @@ impl Forecast {
     /// Prepend the periods of `previous` that a fresh fetch no longer returns: every period
     /// with `start() >= from` that ends at or before the first period of `self`. Done on the
     /// merged series and per site (a site missing from `previous` keeps nothing; a site with
-    /// no period now keeps nothing). The series stay sorted by `end` without duplicates.
+    /// no period now keeps nothing). The merged series is then rebuilt from the sites, so it
+    /// always equals their sum; every series stays sorted by `end` without duplicates.
     pub fn keep_past(&mut self, previous: &Forecast, from: DateTime<Utc>) {
-        prepend_past(&mut self.periods, &previous.periods, from);
         for (site, before) in self.sites.iter_mut().zip(&previous.sites) {
             prepend_past(site, before, from);
         }
+        self.periods = sum_sites(&self.sites);
     }
 }
 
@@ -439,9 +445,13 @@ mod tests {
         assert_eq!(new.sites[1].len(), 26 + 2);
         assert_eq!(new.sites[1][25].estimate, 3.0);
         assert_eq!(new.sites[1][26].estimate, 6.0);
-        // The merged series starts at the earliest site start.
+        // The merged series is the sum of the sites, kept past included: it starts at the
+        // earliest site start and covers site B's 26 kept periods.
+        assert_eq!(new.periods, merge(new.sites.clone(), 2).periods);
         assert_eq!(new.periods.len(), 24 + 4);
         assert!(new.periods.windows(2).all(|w| w[0].end < w[1].end));
+        // Site B's kept past (3.0) adds to site A's fresh periods where they overlap.
+        assert!(new.periods.iter().any(|p| (p.estimate - 5.0).abs() < 1e-9));
     }
 
     #[test]

@@ -206,7 +206,9 @@ async fn fetch_round(hub: &Hub, client: &Client, sites: &[String], warned: &mut 
         match client.site_forecast(site).await {
             Ok(periods) if periods.is_empty() => {
                 if !*warned {
-                    tracing::warn!("solar: a site answered without any period; keeping the last forecast");
+                    tracing::warn!(
+                        "solar: a site answered without any period; keeping the last forecast"
+                    );
                     *warned = true;
                 }
                 hub.record_solar_failure();
@@ -304,7 +306,10 @@ mod tests {
         let date: NaiveDate = "2026-09-06".parse().unwrap();
         let midnight = local_midnight(date, zone);
         assert_eq!(midnight.with_timezone(&zone).date_naive(), date);
-        assert_eq!(midnight.with_timezone(&zone).format("%H:%M").to_string(), "01:00");
+        assert_eq!(
+            midnight.with_timezone(&zone).format("%H:%M").to_string(),
+            "01:00"
+        );
     }
 
     #[test]

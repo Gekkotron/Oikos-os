@@ -6,7 +6,7 @@
 //! `P/solar/availability` and the retained forecast cache `P/solar/cache`. The `solar` sub-tree
 //! is reserved, so these topics are never read as discovery.
 
-use chrono::{DateTime, SecondsFormat};
+use chrono::{DateTime, NaiveDate, SecondsFormat};
 use oikos_api::SolarView;
 use serde_json::{Value, json};
 
@@ -98,7 +98,15 @@ pub fn configs(prefix: &str) -> Vec<(String, Value)> {
 
 /// One (key, payload) per key that has a value.
 pub fn states(view: &SolarView) -> Vec<(&'static str, String)> {
-    let tomorrow = view.days.first();
+    // Tomorrow is the day after today's date, not merely the first listed day.
+    let tomorrow = view
+        .today
+        .date
+        .parse::<NaiveDate>()
+        .ok()
+        .and_then(|today| today.succ_opt())
+        .map(|date| date.format("%Y-%m-%d").to_string())
+        .and_then(|date| view.days.iter().find(|d| d.date == date));
     let numbers = |v: Option<f64>| v.map(|v| v.to_string());
     let peak_time = view.today.peak.as_ref().and_then(|p| {
         let at = DateTime::from_timestamp(i64::try_from(p.at).ok()?, 0)?;
@@ -229,6 +237,28 @@ mod tests {
         assert!(!keys.contains(&"forecast_today"));
         assert!(!keys.contains(&"forecast_peak_today"));
         assert!(!keys.contains(&"forecast_peak_time_today"));
+    }
+
+    #[test]
+    fn tomorrow_entities_use_the_day_after_today() {
+        let day = |date: &str, estimate: f64| oikos_api::SolarDay {
+            date: date.to_owned(),
+            estimate,
+            low: estimate - 1.0,
+            high: estimate + 1.0,
+        };
+        let mut view = fixture_view();
+        assert_eq!(view.today.date, "2026-10-23");
+        // The first listed day is two days out: no tomorrow figures.
+        view.days = vec![day("2026-10-25", 9.0)];
+        let keys: Vec<&str> = states(&view).iter().map(|(k, _)| *k).collect();
+        assert!(!keys.contains(&"forecast_tomorrow"));
+        // Tomorrow is found wherever it sits in the list.
+        view.days = vec![day("2026-10-25", 9.0), day("2026-10-24", 7.5)];
+        let full = states(&view);
+        assert!(full.contains(&("forecast_tomorrow", "7.5".to_owned())));
+        assert!(full.contains(&("forecast_tomorrow_low", "6.5".to_owned())));
+        assert!(full.contains(&("forecast_tomorrow_high", "8.5".to_owned())));
     }
 
     #[test]

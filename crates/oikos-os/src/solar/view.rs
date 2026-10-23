@@ -1,12 +1,16 @@
 //! The solar forecast view the hub serves, built from a merged forecast.
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use chrono_tz::Tz;
 use oikos_api::{
     SolarDay, SolarHistory, SolarNow, SolarPeak, SolarPeriod, SolarSite, SolarSpan, SolarToday,
     SolarView,
 };
-use oikos_solcast::{Forecast, Ledger, best_hours, day_totals, peak, power_at, remaining};
+use oikos_solcast::{
+    Forecast, Ledger, best_hours, day_totals, local_midnight, peak, power_at, remaining,
+};
 
 /// Number of days after today the view lists.
 const DAYS_AHEAD: usize = 7;
@@ -43,9 +47,24 @@ pub fn build_view(
     let totals = day_totals(&forecast.periods, zone);
     let today_total = totals.iter().find(|d| d.date == today);
 
+    // Where each day's periods stop: a day that ends before its local end is only partly
+    // forecast and is not offered as a day figure.
+    let mut last_end: BTreeMap<NaiveDate, DateTime<Utc>> = BTreeMap::new();
+    for p in &forecast.periods {
+        let end = last_end.entry(local_date(p.start(), zone)).or_insert(p.end);
+        *end = (*end).max(p.end);
+    }
+    let complete = |date: NaiveDate| {
+        let next = date.succ_opt().map(|next| local_midnight(next, zone));
+        match (last_end.get(&date), next) {
+            (Some(end), Some(next)) => *end >= next,
+            _ => false,
+        }
+    };
+
     let days = totals
         .iter()
-        .filter(|d| d.date > today)
+        .filter(|d| d.date > today && complete(d.date))
         .take(DAYS_AHEAD)
         .map(|d| SolarDay {
             date: date_string(d.date),
@@ -178,6 +197,17 @@ mod tests {
         assert_eq!(v.days.len(), 7);
         assert_eq!(v.days[0].date, "2026-10-24");
         assert_eq!(v.days[6].date, "2026-10-30");
+    }
+
+    #[test]
+    fn view_days_leave_out_a_partial_last_day() {
+        // week(5) stops at 2026-10-28T00:00Z, an hour into the local 28th.
+        let v = view_at(&week(5), noon());
+        let dates: Vec<_> = v.days.iter().map(|d| d.date.as_str()).collect();
+        assert_eq!(
+            dates,
+            ["2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"]
+        );
     }
 
     #[test]
