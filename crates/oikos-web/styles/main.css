@@ -499,6 +499,10 @@ body {
   margin-left: auto;
 }
 
+.content-header__menu {
+  display: none;
+}
+
 .content-header__theme,
 .content-header__lang {
   display: inline-flex;
@@ -5811,4 +5815,73 @@ html:has(.flow-canvas-screen) {
 /* Handles never cover more than a quarter of a bar each, so its middle stays clickable. */
 .climate-timeline__handle {
   width: min(14px, 25%);
+}
+
+/* Phones: the sidebar is a drawer that slides in over the page, behind the header's menu button.
+   Fixed, so the flow canvas (layout.rs) spans the whole width. Toasts (z-index 50) stay above. */
+@media (max-width: 899px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 30;
+    width: min(85vw, 320px);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition:
+      transform var(--motion-medium) var(--ease),
+      visibility 0s linear var(--motion-medium);
+  }
+
+  .sidebar--open {
+    transform: none;
+    visibility: visible;
+    transition:
+      transform var(--motion-medium) var(--ease),
+      visibility 0s;
+  }
+
+  .shell__scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 29;
+    background: rgb(0 0 0 / 45%);
+  }
+
+  .sidebar__link,
+  .sidebar__sublink {
+    min-height: var(--touch-min);
+  }
+
+  .content-header__menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    box-sizing: border-box;
+    min-width: var(--touch-min);
+    height: var(--touch-min);
+    padding: 0;
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    background: var(--card-bg);
+    color: var(--ink);
+    font-size: 20px;
+    cursor: pointer;
+  }
+
+  .content-header__menu:focus-visible {
+    outline: 2px solid var(--select);
+    outline-offset: 2px;
+  }
+}
+
+@media (max-width: 899px) and (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar--open {
+    transition: none;
+  }
 }

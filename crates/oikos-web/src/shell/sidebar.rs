@@ -4,6 +4,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::{use_location, use_navigate};
+use wasm_bindgen::JsCast;
 
 use super::route::{Section, section_for};
 use crate::app::landing_dashboard;
@@ -21,6 +22,7 @@ pub fn Sidebar(
     alarm_armed: Signal<bool>,
     solar_active: Signal<bool>,
     alerts_badge: Signal<Option<String>>,
+    drawer_open: RwSignal<bool>,
 ) -> impl IntoView {
     let t = use_text();
     let lang = use_context::<RwSignal<Lang>>();
@@ -104,8 +106,25 @@ pub fn Sidebar(
         .forget();
     };
 
+    // Following any link of the drawer closes it; the route change would too, but a link to the
+    // page already open changes no route.
+    let close_on_link = move |event: web_sys::MouseEvent| {
+        let on_link = event
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+            .is_some_and(|el| el.closest("a").ok().flatten().is_some());
+        if on_link {
+            drawer_open.set(false);
+        }
+    };
+
     view! {
-        <aside class="sidebar" id="sidebar">
+        <aside
+            class="sidebar"
+            class:sidebar--open=move || drawer_open.get()
+            id="sidebar"
+            on:click=close_on_link
+        >
             <div class="sidebar__brand">
                 <img
                     class="sidebar__logo"

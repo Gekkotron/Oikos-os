@@ -357,3 +357,80 @@ async fn active_entry_follows_the_route() {
     );
     go("/").await;
 }
+
+/// What the drawer shows: whether it is out, whether the scrim is up, and the menu button's state.
+fn drawer_state(m: &Mounted) -> (bool, bool, Option<String>) {
+    let menu = m
+        .host
+        .query_selector(".content-header__menu")
+        .unwrap()
+        .expect("a menu button");
+    (
+        m.host.query_selector(".sidebar--open").unwrap().is_some(),
+        m.host.query_selector(".shell__scrim").unwrap().is_some(),
+        menu.get_attribute("aria-expanded"),
+    )
+}
+
+#[wasm_bindgen_test]
+async fn drawer_closes_on_navigation_and_escape() {
+    let m = mount(Lang::En, None).await;
+    let closed = (false, false, Some("false".to_owned()));
+    let menu: web_sys::HtmlElement = m
+        .host
+        .query_selector(".content-header__menu")
+        .unwrap()
+        .expect("a menu button")
+        .unchecked_into();
+    assert_eq!(
+        menu.get_attribute("aria-controls").as_deref(),
+        Some("sidebar")
+    );
+    assert_eq!(drawer_state(&m), closed);
+
+    menu.click();
+    tick().await;
+    assert_eq!(drawer_state(&m), (true, true, Some("true".to_owned())));
+
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key("Escape");
+    let escape =
+        web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    web_sys::window().unwrap().dispatch_event(&escape).unwrap();
+    tick().await;
+    assert_eq!(drawer_state(&m), closed);
+
+    // Following a sidebar link closes it.
+    menu.click();
+    tick().await;
+    assert!(drawer_state(&m).0);
+    let flows: web_sys::HtmlElement = m
+        .host
+        .query_selector(".sidebar a[href=\"/flows\"]")
+        .unwrap()
+        .expect("the Automations link")
+        .unchecked_into();
+    flows.click();
+    tick().await;
+    assert_eq!(drawer_state(&m), closed);
+
+    // A route change closes it too (Back/Forward, a link inside the page).
+    menu.click();
+    tick().await;
+    assert!(drawer_state(&m).0);
+    go("/devices").await;
+    assert_eq!(drawer_state(&m), closed);
+
+    menu.click();
+    tick().await;
+    let scrim: web_sys::HtmlElement = m
+        .host
+        .query_selector(".shell__scrim")
+        .unwrap()
+        .expect("a scrim")
+        .unchecked_into();
+    scrim.click();
+    tick().await;
+    assert_eq!(drawer_state(&m), closed);
+    go("/").await;
+}

@@ -38,7 +38,7 @@ fn name_of(house: House, lookup: Lookup) -> Option<String> {
 }
 
 #[component]
-pub fn ContentHeader() -> impl IntoView {
+pub fn ContentHeader(drawer_open: RwSignal<bool>) -> impl IntoView {
     let t = use_text();
     let house = expect_context::<House>();
     let theme = expect_context::<RwSignal<Theme>>();
@@ -57,6 +57,17 @@ pub fn ContentHeader() -> impl IntoView {
 
     view! {
         <header class="content-header">
+            // Only shown below 900px, where the sidebar is a drawer.
+            <button
+                type="button"
+                class="content-header__menu"
+                aria-controls="sidebar"
+                aria-expanded=move || drawer_open.get().to_string()
+                aria-label=move || if drawer_open.get() { t(Key::CloseMenu) } else { t(Key::OpenMenu) }
+                on:click=move |_| drawer_open.update(|open| *open = !*open)
+            >
+                <span class="content-header__menu-bars" aria-hidden="true">"☰"</span>
+            </button>
             <nav class="breadcrumb" aria-label=move || t(Key::Breadcrumb)>
                 <ol class="breadcrumb__list">
                     {move || {

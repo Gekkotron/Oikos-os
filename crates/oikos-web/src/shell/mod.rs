@@ -4,7 +4,10 @@ pub mod header;
 pub mod route;
 pub mod sidebar;
 
+use leptos::ev;
 use leptos::prelude::*;
+use leptos_router::hooks::use_location;
+use wasm_bindgen::JsCast;
 
 use header::ContentHeader;
 use sidebar::Sidebar;
@@ -19,11 +22,44 @@ pub fn Shell(
     #[prop(into)] alerts_badge: Signal<Option<String>>,
     children: Children,
 ) -> impl IntoView {
+    // Below 900px the sidebar is a drawer; this says whether it is out.
+    let drawer_open = RwSignal::new(false);
+    let location = use_location();
+    Effect::new(move |_| {
+        location.pathname.track();
+        drawer_open.set(false);
+    });
+    let _escape = window_event_listener(ev::keydown, move |event| {
+        // `try_`: the listener can outlive an unmounted shell for a moment.
+        if event.key() == "Escape" && drawer_open.try_get_untracked() == Some(true) {
+            drawer_open.try_set(false);
+        }
+    });
+    // Focus follows the drawer: into it when it opens, back to the menu button when it closes.
+    Effect::new(move |was_open: Option<bool>| {
+        let open = drawer_open.get();
+        let selector = match (was_open, open) {
+            (_, true) => Some(".sidebar a"),
+            (Some(true), false) => Some(".content-header__menu"),
+            _ => None,
+        };
+        let target = selector
+            .and_then(|s| document().query_selector(s).ok().flatten())
+            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+        if let Some(el) = target {
+            let _ = el.focus();
+        }
+        open
+    });
+
     view! {
         <div class="shell">
-            <Sidebar climate_on alarm_armed solar_active alerts_badge />
+            <Sidebar climate_on alarm_armed solar_active alerts_badge drawer_open />
+            <Show when=move || drawer_open.get()>
+                <div class="shell__scrim" on:click=move |_| drawer_open.set(false)></div>
+            </Show>
             <div class="shell__content">
-                <ContentHeader />
+                <ContentHeader drawer_open />
                 <main class="screen">{children()}</main>
             </div>
         </div>
