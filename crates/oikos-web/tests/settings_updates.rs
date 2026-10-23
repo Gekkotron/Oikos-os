@@ -6,7 +6,7 @@ use leptos_router::components::Router;
 use oikos_api::{DeviceView, UpdateView};
 use oikos_core::model::Availability;
 use oikos_web::house::House;
-use oikos_web::screens::settings::SettingsScreen;
+use oikos_web::screens::settings::{SettingsScreen, ZigbeePage};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 wasm_bindgen_test_configure!(run_in_browser);
@@ -30,7 +30,10 @@ fn device(name: &str, update: Option<UpdateView>) -> DeviceView {
     }
 }
 
-async fn mount(devices: Vec<DeviceView>) -> web_sys::Element {
+async fn mount<V: IntoView + 'static>(
+    devices: Vec<DeviceView>,
+    screen: fn() -> V,
+) -> web_sys::Element {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -41,7 +44,7 @@ async fn mount(devices: Vec<DeviceView>) -> web_sys::Element {
             house.devices.set(devices.clone());
             provide_context(house);
             provide_context(RwSignal::new(oikos_web::theme::Theme::Auto));
-            view! { <Router><SettingsScreen /></Router> }
+            view! { <Router>{screen()}</Router> }
         },
     ));
     tick().await;
@@ -55,10 +58,10 @@ async fn settings_lists_devices_with_updates() {
         latest: Some("1.1".into()),
         available: true,
     };
-    let host = mount(vec![
-        device("Hall lamp", Some(up)),
-        device("Quiet plug", None),
-    ])
+    let host = mount(
+        vec![device("Hall lamp", Some(up)), device("Quiet plug", None)],
+        ZigbeePage,
+    )
     .await;
     let text = host.text_content().unwrap();
     assert!(text.contains("Updates available"));
@@ -69,10 +72,29 @@ async fn settings_lists_devices_with_updates() {
 
 #[wasm_bindgen_test]
 async fn settings_shows_up_to_date_when_none() {
-    let host = mount(vec![device("Quiet plug", None)]).await;
+    let host = mount(vec![device("Quiet plug", None)], ZigbeePage).await;
     assert!(
         host.text_content()
             .unwrap()
             .contains("All devices are up to date")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn settings_list_shows_the_waiting_updates_on_the_zigbee_row() {
+    let up = UpdateView {
+        installed: Some("1.0".into()),
+        latest: Some("1.1".into()),
+        available: true,
+    };
+    let host = mount(vec![device("Hall lamp", Some(up))], SettingsScreen).await;
+    let text = host.text_content().unwrap();
+    assert!(text.contains("Zigbee2MQTT"));
+    assert!(text.contains("1 update"));
+    assert!(!text.contains("Hall lamp"));
+    assert!(
+        host.query_selector("a[href='/settings/zigbee2mqtt']")
+            .unwrap()
+            .is_some()
     );
 }

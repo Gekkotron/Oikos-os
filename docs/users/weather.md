@@ -28,6 +28,12 @@ At start the hub looks the city up once and logs the place it chose (name, regio
 
 See [Configuration](../reference/configuration.md#weather) for every key and environment variable.
 
+## In the web UI
+
+With weather on, the house overview has a weather card in its header, next to the greeting: the condition, the temperature, the feels-like temperature, today's low and high, and the sunset time. The card hides when there is no data or the last good data is more than six hours old. The header's detail line also mentions rain expected within the hour and frost tonight.
+
+Tap the card to open the weather page (`/weather`). It shows the wind, humidity, pressure, cloud cover, today's rain, the UV index, the sun and the next five days, from the same data as the document above. The header rules and the page layout are in [The web UI](web-ui.md#home-header).
+
 ## The entities
 
 All units are metric. Entity ids are `weather_<key>`, for instance `weather_wind_gusts`.

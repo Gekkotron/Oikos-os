@@ -2,7 +2,8 @@
 
 use leptos::prelude::*;
 use leptos::task::tick;
-use leptos_router::components::Router;
+use leptos_router::components::{Route, Router, Routes};
+use leptos_router::path;
 use oikos_api::{EntityView, WsEvent};
 use oikos_core::model::{
     Capabilities, EntityCategory, EntityState, GenericState, GenericValue, Kind, StateValue,
@@ -12,7 +13,7 @@ use oikos_core::types::GenericCaps;
 use oikos_web::commands::Pending;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
-use oikos_web::screens::entity_sheet::SheetBody;
+use oikos_web::screens::entity_sheet::{EntitySheetScreen, SheetBody};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 use web_sys::{Event, EventInit, HtmlInputElement};
@@ -50,6 +51,66 @@ fn type_into(input: &HtmlInputElement, text: &str) {
     init.set_bubbles(true);
     let event = Event::new_with_event_init_dict("input", &init).unwrap();
     input.dispatch_event(&event).unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn moving_from_one_sheet_to_another_shows_the_new_entity() {
+    let window = web_sys::window().unwrap();
+    window
+        .history()
+        .unwrap()
+        .push_state_with_url(
+            &wasm_bindgen::JsValue::NULL,
+            "",
+            Some("/entity/sensor.hall"),
+        )
+        .unwrap();
+    let document = window.document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+
+    let house = House::new();
+    house.apply(WsEvent::EntityUpserted(sensor(1.0)));
+    let mut kitchen = sensor(2.0);
+    kitchen.id = "sensor.kitchen".into();
+    kitchen.name = "Kitchen".into();
+    house.apply(WsEvent::EntityUpserted(kitchen));
+    let _mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        oikos_web::nav::install_nav();
+        provide_context(Toasts::new());
+        provide_context(Pending::new());
+        view! {
+            <Router>
+                <Routes fallback=|| ()>
+                    <Route path=path!("/entity/:id") view=EntitySheetScreen />
+                </Routes>
+            </Router>
+        }
+    });
+    tick().await;
+    let title = |host: &web_sys::Element| {
+        host.query_selector(".sheet__title")
+            .unwrap()
+            .and_then(|t| t.text_content())
+    };
+    assert_eq!(title(&host).as_deref(), Some("Hall"));
+
+    // Both entities are known: the sheet must follow the id, not only the known/unknown flag.
+    window
+        .history()
+        .unwrap()
+        .push_state_with_url(
+            &wasm_bindgen::JsValue::NULL,
+            "",
+            Some("/entity/sensor.kitchen"),
+        )
+        .unwrap();
+    window
+        .dispatch_event(&Event::new("popstate").unwrap())
+        .unwrap();
+    tick().await;
+    assert_eq!(title(&host).as_deref(), Some("Kitchen"));
 }
 
 #[wasm_bindgen_test]

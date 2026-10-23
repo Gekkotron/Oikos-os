@@ -19,6 +19,7 @@ pub mod flow_viewport;
 pub mod flows;
 pub mod format;
 pub mod groups;
+pub mod home_header;
 pub mod house;
 pub mod house_state;
 pub mod i18n;

@@ -30,10 +30,17 @@ pub fn connect(path: &str, house: House) {
                             Ok(Message::Text(text)) => match serde_json::from_str::<WsEvent>(&text)
                             {
                                 Ok(event) => {
-                                    if matches!(event, WsEvent::Snapshot(_)) {
+                                    let connected = matches!(event, WsEvent::Snapshot(_));
+                                    if connected {
                                         backoff = FIRST_BACKOFF_MS;
                                     }
                                     house.apply(event);
+                                    // Weather and home settings are not in the snapshot: refetch
+                                    // them on every (re)connect.
+                                    if connected {
+                                        house.refresh_weather();
+                                        house.refresh_home_settings();
+                                    }
                                 }
                                 Err(e) => {
                                     web_sys::console::warn_1(&format!("bad ws event: {e}").into())

@@ -22,6 +22,99 @@ The themes are **Night Glass** (dark), **Ivoire** (a light, warm ivory with sage
 
 On a phone or a narrow window (below 900 px) the sidebar becomes a drawer. The ☰ button at the left of the header opens it over the page; tapping the dimmed page, choosing an entry or widening the window closes it.
 
+## Home header
+
+The house overview (**House**, first under Overview) opens with a header above its cards: the date, a greeting, one sentence about the house, a detail line, a row of chips and, when weather is on, a weather card. Only the overview has it; your own dashboards do not.
+
+On a wide window the text sits on the left and the weather card on the right. On a phone everything stacks, and the weather card becomes one compact row under the chips. Without a weather card, the sentence takes the full width and the sunset moves to the detail line.
+
+The header is computed in the browser from what the screen already has: entities, rooms, alerts, the sun from `[flows]`, the weather and the home settings. Nothing is stored for it. When a part has no data, that part hides.
+
+### Greeting
+
+The date is written in the UI language, for example "Vendredi 23 octobre" or "Friday 23 October", using the house's local time. The greeting follows the hour:
+
+| Hours | French | English |
+| --- | --- | --- |
+| 05:00 to 11:59 | Bonjour | Good morning |
+| 12:00 to 17:59 | Bon après-midi | Good afternoon |
+| 18:00 to 04:59 | Bonsoir | Good evening |
+
+### The sentence
+
+The sentence has two halves joined by a comma: the **activity** first, then the **temperature**. The first activity row that matches wins. The temperature half is left out when there is no indoor temperature.
+
+| Half | When | French | English |
+| --- | --- | --- | --- |
+| Activity | An alert you have not seen yet (same count as the Alerts badge) | Quelque chose demande ton attention | Something needs your attention |
+| Activity | One door or window open | Ouverture : Fenêtre (Cuisine) | Open: Window (Kitchen) |
+| Activity | Several doors or windows open | 2 ouvertures | 2 doors or windows open |
+| Activity | Dark outside, between 22:00 and 05:59, and no light on | La maison dort | The house is asleep |
+| Activity | No light on | La maison est calme | The house is quiet |
+| Activity | Anything else | La maison est éveillée | The house is awake |
+| Temperature | Indoor temperature below the cold threshold | il fait froid | it's cold |
+| Temperature | Indoor temperature above the hot threshold | il fait chaud | it's warm |
+| Temperature | Anything else | il fait bon | it's comfortable |
+
+Examples:
+
+- « La maison est calme, il fait bon. » / "The house is quiet, it's comfortable."
+- « La maison dort, il fait froid. » / "The house is asleep, it's cold."
+- « Ouverture : Fenêtre (Cuisine), il fait froid. » / "Open: Window (Kitchen), it's cold."
+
+The rules behind the table:
+
+- The door or window line uses the entity's name. The room is added in brackets when the entity has one.
+- "Dark" means between dusk and dawn at the location set in `[flows]`, as the flow canvas computes it.
+- A light counts when it is on and not hidden. A light inside a group counts on its own; the group entity does not count, so no light is counted twice.
+- The indoor temperature is the sensor you pick in [Settings](#settings), or else the median of the rooms: each room counts as the mean of its temperature sensors, offline sensors are left out, and so is any sensor that does not read in °C. One outdoor sensor cannot skew it. Outdoor weather sensors are never used. Offline lights, doors, windows and thermostats are ignored everywhere in the header. The sentence and the indoor chip show the same value.
+- The cold and hot thresholds come from Settings › Home. They default to 15 °C and 26 °C.
+- The same house state always gives the same sentence. It changes only when something in the house changes.
+
+### Detail line
+
+Under the sentence, in a muted style, the detail line holds up to two fragments joined by " · ". Each one appears only when it applies, in this order:
+
+1. Rain expected within the hour (more than 0.1 mm): « Pluie attendue dans l'heure » / "Rain expected within the hour".
+2. Frost tonight, shown from 15:00: « Gel cette nuit » / "Frost tonight".
+3. The sunset time, shown from two hours before sunset until sunset, or at all times when the weather card is hidden: « Coucher du soleil à 18 h 42 » / "Sunset at 6:42 pm". When the house location is not set in `[flows]`, this fragment reads « Coucher du soleil : position de la maison non réglée » / "Sunset: house location not set" instead of a time.
+
+### Chips
+
+Chips sit in a row under the detail line. Each one hides when its input is missing.
+
+- **Lights**: the number of lights on, for example « 3 lumières allumées » / "3 lights on". Shown in amber when at least one light is on, and hidden when none is.
+- **Indoor**: the indoor temperature to one decimal, for example « 19,6 °C à l'intérieur » / "19.6 °C inside". Hidden without an indoor temperature.
+- **Heating**: taken from the climate units that can heat. A unit counts as heating when its mode is heat, auto or heat_cool. A cooling-only unit is ignored.
+  - « Clim en marche » / "Air conditioning on" when a unit is in cool mode. This case wins over the others.
+  - « Chauffage éteint » / "Heating off" when no unit is heating.
+  - « Chauffage en éco » / "Heating in eco" when every heating unit has a target at or below the eco setpoint. This case needs an eco setpoint in Settings › Home; without one, the chip hides.
+  - Hidden in every other case, for example when a heating unit targets above the eco setpoint.
+- **House mode**: the current option of the mode selector, shown as a pill with ▾. Tap it to open the list of the selector's options and pick one. Hidden when no mode selector is set in Settings › Home.
+
+### Weather card
+
+When weather is on, the card sits on the right of the header (or under the chips on a phone). It shows the condition icon, the current temperature, the condition, the "feels like" temperature, today's low and high, and the sunset time. Tap the card to open the [weather page](#weather-page).
+
+The card hides when:
+
+- weather is off, or the hub has not fetched it yet;
+- the last fetch failed;
+- the last good data is more than six hours old.
+
+When the data is late but less than six hours old, the card stays and adds a muted "Data from 9:02 pm" line.
+
+### Weather page
+
+The weather page is at `/weather`, opened from the weather card. The Back button returns to the screen you came from. It is not in the sidebar.
+
+- **Top**: the condition icon, the current temperature to one decimal, the condition, the feels-like temperature, today's low and high, tonight's minimum and the rain expected in the next hour.
+- **Now**: eight tiles, four across on a wide window and two on a phone. Wind (speed, an arrow for the direction the wind comes from, a compass word and gusts), humidity, pressure, cloud cover, today's rain (amount and chance), the strongest gust today, the UV index with a word (Low, Moderate, High, Very high, Extreme), and the sun (sunrise and sunset).
+- **Next 5 days**: one card per day with the weekday and date, the condition icon, the high, the low and the chance of rain.
+- **Footer**: the place, the time of the last update, a stale notice when the data is late, and the Open-Meteo credit.
+
+When weather is off or not fetched yet, the page says that the weather is unavailable and tells you to enable `[weather]` in `oikos.toml`.
+
 ## Dashboards
 
 ![The House dashboard: room chips and the Favorites cards](/img/screens/house.webp)
@@ -81,7 +174,21 @@ Devices: the administration view of the Zigbee devices. Each row shows the devic
 
 ## Settings
 
-Settings: the hub status, an MCP panel with the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop (built from the page's origin, so they always carry the hub's real address), and the theme switch (Auto, Night Glass, Ivoire). The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
+Settings (`/settings`): a short list, one row per page, with a status on the right. A row opens its page at `/settings/<page>`, which has a Back link and its own breadcrumb (Settings › page):
+
+- **Home** (**Maison**, `/settings/home`): the home header settings, described below.
+- **Appearance** (`/settings/appearance`), status the current theme: the theme switch (Auto, Night Glass, Ivoire), the same choice as the header's theme button.
+- **Zigbee2MQTT** (`/settings/zigbee2mqtt`), status the number of firmware updates waiting, or the bridge state when there are none: the bridge (version, coordinator, permit join, state), the updates waiting, the counts (devices, entities, primary entities, areas, ignored topics) and the way to the [devices](#devices) list.
+- **Broker** (`/settings/broker`), status Online, Connecting… or Offline: the MQTT connection, with the reason when it is down.
+- **AI assistants (MCP)** (`/settings/mcp`): the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop, built from the page's origin, so they always carry the hub's real address. The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
+- **About** (`/settings/about`), status the version: the product, its version and the hub's address.
+
+The **Home** page (**Maison** in French, `/settings/home`) holds the settings of the home header, with one Save button for the whole panel. Its five fields:
+
+- **Eco setpoint (°C)**: from 5 to 30. Leave it empty to turn off the "Heating in eco" case.
+- **Cold below (°C)** and **Hot above (°C)**: the thresholds of the sentence, from 5 to 35. Each one shows its default (15 and 26) as a placeholder when empty. The cold threshold must stay below the hot one; an invalid value shows its error next to the field.
+- **Mode selector**: the select entity behind the house mode pill. Choose "None" to hide the pill.
+- **Indoor sensor**: the temperature sensor for the indoor value, picked from a list grouped by room. "Automatic (median of rooms)" uses the median of the room values.
 
 ## Alerts
 
