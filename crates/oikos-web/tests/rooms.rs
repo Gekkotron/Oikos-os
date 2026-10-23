@@ -168,6 +168,35 @@ async fn room_route_shows_one_room() {
     assert_eq!(link.get_attribute("aria-current").as_deref(), Some("page"));
 }
 
+/// Moves the page to `path` the way Back/Forward does; the mounted router follows popstate.
+async fn go(path: &str) {
+    let window = web_sys::window().unwrap();
+    window
+        .history()
+        .unwrap()
+        .push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(path))
+        .unwrap();
+    window
+        .dispatch_event(&web_sys::Event::new("popstate").unwrap())
+        .unwrap();
+    tick().await;
+}
+
+#[wasm_bindgen_test]
+async fn moving_from_one_room_to_another_shows_the_new_room() {
+    // Both rooms are known: the page must follow the id, not only the known/gone flag.
+    let m = mount("/rooms/a").await;
+    go("/rooms/b").await;
+    assert_eq!(
+        texts(&m.host, ".breadcrumb [aria-current=\"page\"]"),
+        ["Room b"]
+    );
+    assert_eq!(texts(&m.host, ".room .room__title"), ["Room b"]);
+    let cards = texts(&m.host, ".room .card");
+    assert_eq!(cards.len(), 1);
+    assert!(cards[0].contains("Lamp b"), "{cards:?}");
+}
+
 #[wasm_bindgen_test]
 async fn room_route_unknown_room() {
     let m = mount("/rooms/zz").await;
