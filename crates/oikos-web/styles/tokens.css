@@ -49,6 +49,18 @@
   --btn-dark-ink: var(--bg);
   --cool-bg: rgb(88 225 255 / 10%);
 
+  /* Rich cards */
+  --tile-bg: rgb(255 255 255 / 8%);
+  --tile-on-bg: rgb(255 196 87 / 30%);
+  --card-sage-bg: rgb(111 240 191 / 10%);
+  --card-cool-bg: rgb(88 225 255 / 10%);
+  --ring-track: rgb(255 255 255 / 12%);
+  --ring-heat: #ffc457;
+  --ring-cool: #58e1ff;
+  --ring-other: #6ff0bf;
+  --badge-border: rgb(255 255 255 / 14%);
+  --toggle-on: #ffc457;
+
   /* Shape */
   --radius-card: 20px;
   --radius-nav: 24px;
@@ -118,6 +130,16 @@
   --btn-dark-bg: #232a26;
   --btn-dark-ink: #fffdf8;
   --cool-bg: #eaf0f5;
+  --tile-bg: #f3efe6;
+  --tile-on-bg: #f1d896;
+  --card-sage-bg: #e3eadf;
+  --card-cool-bg: #eaf0f5;
+  --ring-track: #e6e0d3;
+  --ring-heat: #c9973d;
+  --ring-cool: #38738f;
+  --ring-other: #4f6b4a;
+  --badge-border: #ebe6da;
+  --toggle-on: #b98a2c;
   --radius-card: 24px;
   --font-display: "Manrope", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --type-display: 700 28px/32px var(--font-display);
