@@ -27,6 +27,7 @@ use crate::screens::group_sheet_v2::GroupSheetV2Screen;
 use crate::screens::group_wizard::GroupWizardScreen;
 use crate::screens::groups::GroupsScreen;
 use crate::screens::history_detail::HistoryDetailScreen;
+use crate::screens::room::RoomScreen;
 use crate::screens::security::SecurityScreen;
 use crate::screens::settings::SettingsScreen;
 use crate::shell::Shell;
@@ -155,6 +156,7 @@ pub fn App() -> impl IntoView {
                 <Routes fallback=HouseRedirect>
                     <Route path=path!("/") view=HouseRedirect />
                     <Route path=path!("/dashboards/:id") view=DashboardScreen />
+                    <Route path=path!("/rooms/:id") view=RoomScreen />
                     <Route path=path!("/entity/:id") view=EntitySheetScreen />
                     <Route path=path!("/history/:id") view=HistoryDetailScreen />
                     <Route path=path!("/group/:id") view=GroupSheetV2Screen />

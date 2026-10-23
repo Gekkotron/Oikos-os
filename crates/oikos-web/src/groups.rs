@@ -7,7 +7,8 @@ use oikos_core::model::{Availability, Command, CoverState, StateValue};
 
 use crate::cards::cover::is_moving;
 use crate::format::is_on;
-use crate::screens::home::{FAVORITES, shows_on_home, without_paired_humidity};
+use crate::rooms::FAVORITES;
+use crate::screens::home::{shows_on_home, without_paired_humidity};
 
 /// One card on Home: a single entity (a hand-made group is an entity too).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -267,7 +268,7 @@ pub fn mean_brightness(members: &[EntityView]) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::screens::home::FAVORITES;
+    use crate::rooms::FAVORITES;
     use oikos_core::model::{
         Availability, Capabilities, CoverState, EntityCategory, EntityState, Kind, LightState,
         StateValue, UiOverride,

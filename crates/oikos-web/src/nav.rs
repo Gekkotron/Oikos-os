@@ -1,13 +1,8 @@
-//! Navigation state that outlives a screen: the Home room and the stack every Back link reads.
+//! Navigation state that outlives a screen: the stack every Back link reads.
 
 use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_location;
-
-/// The Home chip the user picked. Provided above the router, so opening a sheet and coming back
-/// lands on the same room instead of the first one.
-#[derive(Clone, Copy)]
-pub struct HomeRoom(pub RwSignal<Option<String>>);
 
 /// The pages visited so far, path and query, oldest first; the last one is the current page.
 /// Back goes to the one before it, so every sheet returns to the page it was opened from, and a
@@ -18,9 +13,8 @@ pub struct BackStack(pub RwSignal<Vec<String>>);
 /// How many pages the stack keeps; older ones fall off the bottom.
 const DEPTH: usize = 32;
 
-/// Provides [`HomeRoom`] and [`BackStack`]. Call it once, above the router.
+/// Provides [`BackStack`]. Call it once, above the router.
 pub fn install_nav() {
-    provide_context(HomeRoom(RwSignal::new(None)));
     provide_context(BackStack(RwSignal::new(Vec::new())));
 }
 
@@ -91,11 +85,6 @@ pub fn use_back() -> Signal<String> {
     Signal::derive(move || stack.with(|s| back_target(s)))
 }
 
-/// The Home room to select when a group sheet in `area` goes Back; `None` for a group with no room.
-pub fn home_room_for(area: &str) -> Option<String> {
-    (!area.is_empty()).then(|| area.to_owned())
-}
-
 /// Keeps [`BackStack`] on the current page. Render it inside the router.
 #[component]
 pub fn TrackBackStack() -> impl IntoView {
@@ -121,7 +110,7 @@ pub fn BackLink() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEPTH, back_target, home_room_for, parent_of, visit};
+    use super::{DEPTH, back_target, parent_of, visit};
 
     fn walk(pages: &[&str]) -> Vec<String> {
         let mut stack = Vec::new();
@@ -130,12 +119,6 @@ mod tests {
             visit(&mut stack, path, search);
         }
         stack
-    }
-
-    #[test]
-    fn group_back_selects_its_room() {
-        assert_eq!(home_room_for("living").as_deref(), Some("living"));
-        assert_eq!(home_room_for(""), None);
     }
 
     #[test]

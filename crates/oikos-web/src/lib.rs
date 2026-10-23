@@ -26,6 +26,7 @@ pub mod icons;
 pub mod layout;
 pub mod nav;
 pub mod override_editor;
+pub mod rooms;
 pub mod schedule;
 pub mod screens;
 pub mod security;

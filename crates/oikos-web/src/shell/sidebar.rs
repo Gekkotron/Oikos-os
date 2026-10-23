@@ -13,6 +13,7 @@ use crate::house::House;
 use crate::i18n::{Key, Lang, unseen_alerts, use_text};
 use crate::icons::{BELL, BOLT, FLOW_NODES, GEAR, HOUSE, LAYERS, PLUS, SHIELD, THERMOMETER};
 use crate::nav::BackStack;
+use crate::rooms::{sidebar_rooms, use_room_chips};
 
 #[component]
 pub fn Sidebar(
@@ -33,6 +34,10 @@ pub fn Sidebar(
         back.with(|stack| section_for(&path, stack))
     });
     let current = move |entry: Section| move || (section.get() == entry).then_some("page");
+
+    // The rooms that have something on Home; Favorites and Unassigned are not rooms of their own.
+    let chips = use_room_chips();
+    let rooms = Memo::new(move |_| chips.with(|list| sidebar_rooms(list)));
 
     // With two or more dashboards (the house counts) they unfold under Overview.
     let unfolded = Memo::new(move |_| house.dashboards.with(|list| list.len() >= 2));
@@ -161,7 +166,27 @@ pub fn Sidebar(
                     </li>
                 </ul>
                 <h2 class="sidebar__heading">{move || t(Key::MyRooms)}</h2>
-                <ul class="sidebar__rooms"></ul>
+                <ul class="sidebar__rooms">
+                    <For
+                        each=move || rooms.get()
+                        key=|r| (r.id.clone(), r.name.clone(), r.primary_count)
+                        children=move |room| {
+                            let entry = Section::Room(room.id.clone());
+                            view! {
+                                <li>
+                                    <a
+                                        class="sidebar__link sidebar__room"
+                                        href=format!("/rooms/{}", room.id)
+                                        aria-current=current(entry)
+                                    >
+                                        <span class="sidebar__room-name">{room.name}</span>
+                                        <span class="sidebar__count">{room.primary_count}</span>
+                                    </a>
+                                </li>
+                            }
+                        }
+                    />
+                </ul>
                 <h2 class="sidebar__heading">{move || t(Key::HomeSection)}</h2>
                 <ul class="sidebar__list">
                     <li>
