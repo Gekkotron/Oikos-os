@@ -21,6 +21,7 @@ pub mod format;
 pub mod groups;
 pub mod house;
 pub mod house_state;
+pub mod i18n;
 pub mod icons;
 pub mod layout;
 pub mod nav;
