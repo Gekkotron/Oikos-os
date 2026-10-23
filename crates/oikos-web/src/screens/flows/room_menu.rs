@@ -195,7 +195,7 @@ pub fn RoomMenu(
                                 >
                                     "Cancel"
                                 </button>
-                                <button type="button" class="btn btn--danger" on:click=delete.clone()>
+                                <button type="button" class="btn btn--danger" on:click=delete>
                                     "Delete"
                                 </button>
                             </div>
