@@ -16,7 +16,7 @@ use crate::components::hs_wheel::HsWheel;
 use crate::format::{format_timestamp, list_label, title_suffix, type_word, wrap_id};
 use crate::house::House;
 use crate::icons::entity_icon;
-use crate::nav::ReturnPath;
+use crate::nav::BackLink;
 use crate::override_editor::OverrideEditor;
 use crate::screens::generic_panel::GenericPanel;
 use crate::screens::home::card_for;
@@ -227,7 +227,6 @@ fn state_panel(entity: &EntityView) -> impl IntoView + use<> {
 #[component]
 pub fn SheetBody(id: String) -> impl IntoView {
     let house = expect_context::<House>();
-    let return_path = expect_context::<ReturnPath>();
     // What the override editor starts from. It follows outside changes on its own; handing it
     // the live entity would rebuild it (and drop unsaved typing) on every WebSocket echo.
     let initial = house.entities.with_untracked(|m| m.get(&id).cloned());
@@ -268,10 +267,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
     let id_for_groups = id.clone();
     view! {
         <header class="sheet__header">
-            <A href=move || return_path.0.get() attr:class="sheet__back">
-                "←"
-                <span class="sheet__back-label">"Back"</span>
-            </A>
+            <BackLink />
             {header}
         </header>
         <Panel title="Controls">
@@ -318,7 +314,6 @@ pub fn SheetBody(id: String) -> impl IntoView {
 #[component]
 pub fn EntitySheetScreen() -> impl IntoView {
     let house = expect_context::<House>();
-    let return_path = expect_context::<ReturnPath>();
     let params = use_params_map();
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
     let known = Memo::new(move |_| house.entities.with(|m| m.contains_key(&id.get())));
@@ -335,10 +330,7 @@ pub fn EntitySheetScreen() -> impl IntoView {
                 } else if loaded.get() {
                     view! {
                         <header class="sheet__header">
-                            <A href=move || return_path.0.get() attr:class="sheet__back">
-                                "←"
-                                <span class="sheet__back-label">"Back"</span>
-                            </A>
+                            <BackLink />
                             <div class="sheet__titles">
                                 <h1 class="sheet__title">"Unknown entity"</h1>
                                 <p class="sheet__subtitle">{move || wrap_id(&id.get())}</p>

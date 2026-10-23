@@ -3,6 +3,7 @@
 //! entity.
 
 use leptos::prelude::*;
+use leptos_router::NavigateOptions;
 use leptos_router::components::A;
 use leptos_router::hooks::{use_navigate, use_params_map};
 use oikos_api::{GroupMemberView, GroupSpec, GroupView};
@@ -16,7 +17,7 @@ use crate::components::toast::Toasts;
 use crate::format::{display_value, is_on};
 use crate::house::House;
 use crate::icons::{PENCIL, TRASH, kind_icon};
-use crate::nav::{HomeRoom, home_room_for};
+use crate::nav::{BackLink, HomeRoom, home_room_for, use_back};
 use crate::screens::group_wizard::kind_word;
 use crate::screens::home::card_for;
 
@@ -110,16 +111,6 @@ pub fn GroupSheetV2Screen() -> impl IntoView {
 }
 
 #[component]
-fn BackLink() -> impl IntoView {
-    view! {
-        <A href="/" attr:class="sheet__back">
-            "←"
-            <span class="sheet__back-label">"Back"</span>
-        </A>
-    }
-}
-
-#[component]
 fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
     let house = expect_context::<House>();
     let home_room = expect_context::<HomeRoom>();
@@ -153,7 +144,7 @@ fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
                 .map_or_else(|| area.clone(), |a| a.name.clone())
         })
     });
-    // Back lands on Home in the group's room.
+    // Back returns to the page the sheet was opened from; on the House dashboard, in the group's room.
     home_room
         .0
         .set(home_room_for(&entity.with_untracked(|e| e.area.clone())));
@@ -255,6 +246,7 @@ fn Settings(
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
     let navigate = use_navigate();
+    let back = use_back();
     let confirming = RwSignal::new(false);
     let deleting = RwSignal::new(false);
     let current = move || group.get().flatten().expect("found group");
@@ -298,7 +290,14 @@ fn Settings(
             deleting.set(true);
             leptos::task::spawn_local(async move {
                 match delete_group(&id).await {
-                    Ok(()) => navigate("/", Default::default()),
+                    // The group is gone: leave its sheet out of the browser history too.
+                    Ok(()) => navigate(
+                        &back.get_untracked(),
+                        NavigateOptions {
+                            replace: true,
+                            ..Default::default()
+                        },
+                    ),
                     Err(_) => {
                         toasts.push(DELETE_FAILED);
                         deleting.set(false);

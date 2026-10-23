@@ -44,6 +44,8 @@ Groups (`/groups`): the hand-made groups, with a wizard to create one (`/groups/
 
 Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor.
 
+Back, on every sheet and detail page, returns to the page it was opened from, one step at a time: dashboard → group → member → history unwinds in that order. A form you saved (new or edited group, new flow) is skipped. A page opened directly, from a link or after a reload, goes back to its parent: Alerts for an alert, Flows for a flow, Groups for the group wizard, the entity for its history, the first dashboard for the rest.
+
 ## Devices
 
 Devices: the administration view of the Zigbee devices. Each row shows the device's room (the rooms of its entities, or "No room"), its model and vendor, and badges for firmware updates, battery, link quality and entity count. The search matches the name, room, model, vendor and IEEE address.

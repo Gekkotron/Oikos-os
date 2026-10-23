@@ -11,6 +11,7 @@ use crate::api::send_alert_action;
 use crate::components::toast::Toasts;
 use crate::house::House;
 use crate::icons::channel_icon;
+use crate::nav::BackLink;
 
 /// The most action buttons shown.
 const MAX_ACTIONS: usize = 3;
@@ -137,10 +138,7 @@ fn ActionButton(alert_id: String, action: AlertAction) -> impl IntoView {
 fn back_header(title: Option<String>) -> impl IntoView {
     view! {
         <header class="sheet__header">
-            <A href="/alerts" attr:class="sheet__back">
-                "←"
-                <span class="sheet__back-label">"Back"</span>
-            </A>
+            <BackLink />
             {title.map(|t| view! { <div class="sheet__titles"><h1 class="sheet__title">{t}</h1></div> })}
         </header>
     }

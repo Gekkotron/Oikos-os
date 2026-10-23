@@ -4,7 +4,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use leptos::prelude::*;
-use leptos_router::components::A;
 use leptos_router::hooks::{use_navigate, use_params_map};
 use oikos_api::{AreaView, EntityView, GroupSpec};
 use oikos_core::model::Kind;
@@ -16,6 +15,7 @@ use crate::flow_edit::fold_accents;
 use crate::format::list_label;
 use crate::house::House;
 use crate::icons::{CHECK, MAGNIFIER};
+use crate::nav::{BackLink, use_back};
 
 /// The kinds a group can be made of: every controllable kind.
 pub const GROUP_KINDS: &[Kind] = &[
@@ -110,6 +110,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
     let navigate = use_navigate();
+    let back = use_back();
     let params = use_params_map();
     let edit_id: Option<String> = params.read_untracked().get("id").filter(|s| !s.is_empty());
     let editing = edit_id.is_some();
@@ -139,7 +140,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                     }
                     None => {
                         toasts.push("Group not found");
-                        navigate("/devices", Default::default());
+                        navigate(&back.get_untracked(), Default::default());
                     }
                 },
                 Err(e) => toasts.push(e.error),
@@ -226,9 +227,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
 
     view! {
         <div class="devices">
-            <A href="/devices" attr:class="sheet__back">
-                "Devices"
-            </A>
+            <BackLink />
             <h1 class="devices__title">
                 {if editing { "Edit group" } else { "New group" }}
             </h1>

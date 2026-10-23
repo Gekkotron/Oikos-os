@@ -13,7 +13,7 @@ use crate::components::status_pill::StatusPill;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
 use crate::icons::{BELL, BOLT, FLOW_NODES, GEAR, LAYERS, SHIELD, THERMOMETER};
-use crate::nav::{TrackReturnPath, install_nav};
+use crate::nav::{TrackBackStack, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
 use crate::screens::alerts::AlertsScreen;
 use crate::screens::climate::ClimateScreen;
@@ -156,7 +156,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Router>
-            <TrackReturnPath />
+            <TrackBackStack />
             <crate::alerts::TrackAlertsSeen />
             <header class="topbar">
                 <span class="topbar__brand">
