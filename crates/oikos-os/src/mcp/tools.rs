@@ -45,7 +45,11 @@ impl OikosMcp {
 
     /// Replaces the home settings (`eco_setpoint` 5 to 30 °C, `mode_entity` a select entity,
     /// `indoor_entity` a temperature sensor, `cold_below` and `hot_above` 5 to 35 °C with
-    /// `cold_below` lower; the web reads cold below 15 and warm above 26 when unset). Read them with `get_home_settings` first and send
+    /// `cold_below` lower; the web reads cold below 15 and warm above 26 when unset; `off_peak`
+    /// a list of `{"start": "HH:MM", "end": "HH:MM"}` local off-peak windows, `end` before
+    /// `start` crossing midnight, none overlapping, empty for a single tariff; a change applies
+    /// from the start of today and past days keep their windows in `off_peak_history`, which the
+    /// hub keeps and ignores when sent). Read them with `get_home_settings` first and send
     /// the whole document back. The reason of a refusal is returned so you can fix it.
     #[tool(name = "set_home_settings", annotations(idempotent_hint = true))]
     async fn set_home_settings(

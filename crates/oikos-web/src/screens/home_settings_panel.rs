@@ -136,6 +136,7 @@ pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, (Field, &'static
         indoor_entity: draft.indoor.clone(),
         cold_below: parse_number(&draft.cold, Field::Cold)?,
         hot_above: parse_number(&draft.hot, Field::Hot)?,
+        ..HomeSettings::default()
     })
 }
 

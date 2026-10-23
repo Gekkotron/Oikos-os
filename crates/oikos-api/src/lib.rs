@@ -4,6 +4,7 @@
 
 mod alerts;
 mod dashboards;
+mod energy;
 mod events;
 mod flows;
 mod groups;
@@ -19,6 +20,7 @@ pub use dashboards::{
     Dashboard, DashboardReorder, DashboardView, HOUSE_ID, HOUSE_NAME, Span, Widget, WidgetConfig,
     WidgetKind, allowed_spans, decode_dashboard,
 };
+pub use energy::{energy_entities, energy_entity};
 pub use events::{ApiError, CommandResponse, ConnectionStatus, OverridePatch, WsEvent};
 pub use flows::{
     FlowView, FlowWriteOutcome, FlowsConfigView, RunStatus, RunView, SchedulePreview, StepOutcome,
@@ -26,9 +28,10 @@ pub use flows::{
 };
 pub use groups::{GroupMemberView, GroupSpec, GroupView};
 pub use history::{
-    EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange, LastChangeItem,
+    EnergyKind, GridDay, GridSlot, GridTotals, HistoryDaily, HistoryRange, HistorySeries,
+    HistoryToday, LastChange, LastChangeItem,
 };
-pub use home::HomeSettings;
+pub use home::{HomeSettings, OffPeakEntry, OffPeakWindow};
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use views::{
     AreaView, BridgeView, DeviceView, EntityView, IgnoredView, UpdateView, mask_secret,

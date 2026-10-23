@@ -3,8 +3,10 @@
 //! `<ui_prefix>/_home`, next to `_areas` and `_types`, and intercepted by the hub before the
 //! registry so it never becomes an override.
 
+use chrono::NaiveDate;
 use oikos_api::{HomeSettings, WsEvent};
 use oikos_core::command::Publish;
+use oikos_core::energy::{record_change, validate_windows};
 use oikos_core::model::Kind;
 use oikos_core::registry::Registry;
 use std::sync::MutexGuard;
@@ -25,10 +27,25 @@ pub fn topic(ui_prefix: &str) -> String {
     format!("{ui_prefix}/_home")
 }
 
+/// The document to store for `incoming`: the client's `off_peak_history` is replaced by the
+/// hub's, with an entry for `today` when the windows in force change.
+pub fn next_document(
+    current: &HomeSettings,
+    incoming: HomeSettings,
+    today: NaiveDate,
+) -> HomeSettings {
+    let off_peak_history = record_change(&current.off_peak_history, &incoming.off_peak, today);
+    HomeSettings {
+        off_peak_history,
+        ..incoming
+    }
+}
+
 /// Checks the document against the house: the setpoint is a sane temperature, the mode is a
 /// select, the indoor entity is a temperature sensor and the cold threshold is below the hot one.
 /// The message names the field.
 pub fn validate(settings: &HomeSettings, reg: &Registry) -> Result<(), String> {
+    validate_windows(&settings.off_peak)?;
     if let Some(eco) = settings.eco_setpoint
         && !(eco.is_finite() && (ECO_MIN..=ECO_MAX).contains(&eco))
     {
@@ -87,6 +104,12 @@ impl Hub {
     /// Validates, publishes the document retained and applies it. Returns the stored document.
     pub fn set_home_settings(&self, settings: HomeSettings) -> Result<HomeSettings, HubError> {
         validate(&settings, &self.read()).map_err(HubError::Rejected)?;
+        let today =
+            chrono::DateTime::<chrono::Utc>::from_timestamp_micros(crate::clock::now_micros())
+                .unwrap_or_default()
+                .with_timezone(&self.zone())
+                .date_naive();
+        let settings = next_document(&self.home_settings(), settings, today);
         let payload = serde_json::to_string(&settings)
             .map_err(|err| HubError::Rejected(format!("home settings: {err}")))?;
         self.publish(Publish {
@@ -126,6 +149,8 @@ impl Hub {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::NaiveDate;
+    use oikos_core::energy::{OffPeakEntry, OffPeakWindow};
     use oikos_core::registry::RegistryConfig;
 
     const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../oikos-core/tests/fixtures/");
@@ -248,6 +273,75 @@ mod tests {
             let err = validate(&with(&bad), &reg).expect_err("not a temperature sensor");
             assert!(err.contains("indoor_entity"), "{err}");
         }
+    }
+
+    fn win(start: &str, end: &str) -> OffPeakWindow {
+        OffPeakWindow {
+            start: start.to_owned(),
+            end: end.to_owned(),
+        }
+    }
+
+    fn day(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn validate_refuses_overlapping_windows() {
+        let reg = registry();
+        let doc = HomeSettings {
+            off_peak: vec![win("22:00", "06:00"), win("05:00", "07:00")],
+            ..HomeSettings::default()
+        };
+        let err = validate(&doc, &reg).expect_err("overlap");
+        assert!(err.starts_with("off_peak windows 1 and 2 overlap"), "{err}");
+    }
+
+    #[test]
+    fn set_records_window_change() {
+        let incoming = HomeSettings {
+            off_peak: vec![win("01:00", "07:00")],
+            ..HomeSettings::default()
+        };
+        let next = next_document(&HomeSettings::default(), incoming, day("2026-10-24"));
+        assert_eq!(next.off_peak_history.len(), 1);
+        assert_eq!(next.off_peak_history[0].since, "2026-10-24");
+        assert_eq!(
+            next.off_peak_history[0].windows,
+            vec![win("01:00", "07:00")]
+        );
+    }
+
+    #[test]
+    fn unchanged_windows_keep_history() {
+        let first = next_document(
+            &HomeSettings::default(),
+            HomeSettings {
+                off_peak: vec![win("01:00", "07:00")],
+                ..HomeSettings::default()
+            },
+            day("2026-10-20"),
+        );
+        let again = HomeSettings {
+            eco_setpoint: Some(16.0),
+            ..first.clone()
+        };
+        let next = next_document(&first, again, day("2026-10-24"));
+        assert_eq!(next.off_peak_history, first.off_peak_history);
+        assert_eq!(next.eco_setpoint, Some(16.0));
+    }
+
+    #[test]
+    fn client_history_is_ignored() {
+        let forged = HomeSettings {
+            off_peak_history: vec![OffPeakEntry {
+                since: "2020-01-01".to_owned(),
+                windows: vec![win("00:00", "12:00")],
+            }],
+            ..HomeSettings::default()
+        };
+        let next = next_document(&HomeSettings::default(), forged, day("2026-10-24"));
+        assert!(next.off_peak_history.is_empty());
     }
 
     #[test]

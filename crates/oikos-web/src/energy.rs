@@ -6,10 +6,10 @@ use std::collections::BTreeMap;
 
 use oikos_api::EntityView;
 use oikos_core::energy::{
-    ARC_SLOTS, ConsumerIcon, EnergyEntity, EnergyNode, EnergyRole, EnergyUi, Flow, IDLE_W,
-    NodeKind, NodeStatus, PowerUnits,
+    ARC_SLOTS, EnergyEntity, EnergyNode, EnergyRole, EnergyUi, Flow, IDLE_W, NodeKind, NodeStatus,
+    PowerUnits,
 };
-use oikos_core::model::{Availability, StateValue};
+use oikos_core::model::StateValue;
 
 /// The diagram's viewBox, in px.
 pub const VIEW_W: f64 = 260.0;
@@ -33,33 +33,10 @@ fn arc_slots(n: usize) -> &'static [(f64, f64)] {
     }
 }
 
-/// The slice of an entity the energy maths need.
-pub fn energy_entity(e: &EntityView) -> EnergyEntity {
-    EnergyEntity {
-        id: e.id.clone(),
-        device_id: e.device_id.clone(),
-        name: e.name.clone(),
-        label: e.label.clone(),
-        unit: e.unit.clone(),
-        value: match e.state.value {
-            StateValue::Number(n) => Some(n),
-            _ => None,
-        },
-        available: e.state.availability != Availability::Offline,
-        role: e.ui.energy_role.as_deref().and_then(EnergyRole::parse),
-        invert: e.ui.energy_invert,
-        order: e.ui.order,
-        icon: e.ui.energy_icon.as_deref().and_then(ConsumerIcon::parse),
-        meter: e.ui.energy_meter.clone(),
-    }
-}
+pub use oikos_api::energy_entity;
 
 pub fn energy_entities(entities: &BTreeMap<String, EntityView>) -> Vec<EnergyEntity> {
-    entities
-        .values()
-        .filter(|e| !e.id.starts_with("group_"))
-        .map(energy_entity)
-        .collect()
+    oikos_api::energy_entities(entities.values())
 }
 
 /// True when the solar roles together produce at least 10 W, so the Energy tab glyph lights up.

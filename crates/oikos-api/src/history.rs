@@ -86,6 +86,47 @@ pub struct LastChange {
     pub items: Vec<LastChangeItem>,
 }
 
+/// One half hour of `GET /history/grid_day`: kWh bought off-peak and peak, kWh sold.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GridSlot {
+    /// Slot start, unix seconds.
+    pub start: i64,
+    /// Slot start as house-local `HH:MM`.
+    pub local: String,
+    pub off_peak: f64,
+    pub peak: f64,
+    pub export: f64,
+}
+
+/// The day's sums of [`GridSlot`]s.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GridTotals {
+    pub off_peak: f64,
+    pub peak: f64,
+    pub export: f64,
+}
+
+/// What crossed the grid meter on one house-local day.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GridDay {
+    /// The day shown, `YYYY-MM-DD`.
+    pub date: String,
+    /// The house's current date.
+    pub today: String,
+    /// The first day with a bought reading, if any.
+    pub first_date: Option<String>,
+    /// Half hours in the full day (46, 48 or 50), also when `slots` stops at now.
+    pub day_slots: usize,
+    pub slots: Vec<GridSlot>,
+    /// Off-peak periods of the day, `[from, to)` unix seconds.
+    pub bands: Vec<(i64, i64)>,
+    pub totals: GridTotals,
+    /// An export counter exists.
+    pub has_export: bool,
+    /// Off-peak windows are set for that day.
+    pub tariffs: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

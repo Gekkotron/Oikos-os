@@ -3,6 +3,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub use oikos_core::energy::{OffPeakEntry, OffPeakWindow};
+
 /// What the home header needs from the user. Every field is optional.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
@@ -17,6 +19,11 @@ pub struct HomeSettings {
     pub cold_below: Option<f64>,
     /// °C, above this it reads warm; unset = 26.
     pub hot_above: Option<f64>,
+    /// Off-peak windows in force from today, `HH:MM` local wall clock; `end < start` crosses
+    /// midnight. Empty means a single tariff.
+    pub off_peak: Vec<OffPeakWindow>,
+    /// The dated windows of past days, kept by the hub: a client's value is ignored.
+    pub off_peak_history: Vec<OffPeakEntry>,
 }
 
 #[cfg(test)]
@@ -35,6 +42,7 @@ mod tests {
             }
         );
         assert_eq!((s.cold_below, s.hot_above), (None, None));
+        assert!(s.off_peak.is_empty() && s.off_peak_history.is_empty());
         assert_eq!(
             serde_json::to_value(HomeSettings::default()).unwrap(),
             json!({
@@ -42,7 +50,9 @@ mod tests {
                 "mode_entity": null,
                 "indoor_entity": null,
                 "cold_below": null,
-                "hot_above": null
+                "hot_above": null,
+                "off_peak": [],
+                "off_peak_history": []
             })
         );
     }
