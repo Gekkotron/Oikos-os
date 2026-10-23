@@ -38,7 +38,7 @@ pub fn DashboardScreen() -> impl IntoView {
                 known.track();
                 match house.dashboard(&current_id) {
                     Some(view) => {
-                        // The picker's "New dashboard" lands here with ?edit=1.
+                        // The sidebar's "New dashboard" lands here with ?edit=1.
                         let initial_edit = query.read_untracked().get("edit").as_deref() == Some("1");
                         let edit = EditState::new(view.dashboard.clone(), initial_edit);
                         let widgets = Signal::derive(move || edit.draft.get().widgets);
