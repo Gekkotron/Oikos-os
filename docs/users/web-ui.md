@@ -67,7 +67,7 @@ The rules behind the table:
 - The door or window line uses the entity's name. The room is added in brackets when the entity has one.
 - "Dark" means between dusk and dawn at the location set in `[flows]`, as the flow canvas computes it.
 - A light counts when it is on and not hidden. A light inside a group counts on its own; the group entity does not count, so no light is counted twice.
-- The indoor temperature is the sensor you pick in [Settings](#settings), or else the mean of the temperature sensors in rooms that are not offline. Outdoor weather sensors are never used. The sentence and the indoor chip show the same value.
+- The indoor temperature is the sensor you pick in [Settings](#settings), or else the median of the rooms: each room counts as the mean of its temperature sensors, offline sensors are left out, and so is any sensor that does not read in °C. One outdoor sensor cannot skew it. Outdoor weather sensors are never used. Offline lights, doors, windows and thermostats are ignored everywhere in the header. The sentence and the indoor chip show the same value.
 - The cold and hot thresholds come from the Home panel in Settings. They default to 15 °C and 26 °C.
 - The same house state always gives the same sentence. It changes only when something in the house changes.
 
@@ -113,7 +113,7 @@ The weather page is at `/weather`, opened from the weather card. The Back button
 - **Next 5 days**: one card per day with the weekday and date, the condition icon, the high, the low and the chance of rain.
 - **Footer**: the place, the time of the last update, a stale notice when the data is late, and the Open-Meteo credit.
 
-When weather is off or not fetched yet, the page says that the weather is unavailable and points to [Weather](weather.md), where the `[weather]` section is explained.
+When weather is off or not fetched yet, the page says that the weather is unavailable and tells you to enable `[weather]` in `oikos.toml`.
 
 ## Dashboards
 
@@ -170,7 +170,7 @@ The **Home** panel (**Maison** in French) holds the settings of the home header,
 - **Eco setpoint (°C)**: from 5 to 30. Leave it empty to turn off the "Heating in eco" case.
 - **Cold below (°C)** and **Hot above (°C)**: the thresholds of the sentence, from 5 to 35. Each one shows its default (15 and 26) as a placeholder when empty. The cold threshold must stay below the hot one; an invalid value shows its error next to the field.
 - **Mode selector**: the select entity behind the house mode pill. Choose "None" to hide the pill.
-- **Indoor sensor**: the temperature sensor for the indoor value, picked from a list grouped by room. "Automatic (mean of rooms)" uses the mean of the room sensors.
+- **Indoor sensor**: the temperature sensor for the indoor value, picked from a list grouped by room. "Automatic (median of rooms)" uses the median of the room values.
 
 ## Alerts
 

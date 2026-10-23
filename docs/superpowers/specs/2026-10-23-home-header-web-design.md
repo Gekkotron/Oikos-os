@@ -88,7 +88,8 @@ Temperature (indoor temperature T, see below; thresholds from §7, defaults cold
 
 - Examples: « La maison est calme, il fait bon. » « La maison dort, il fait froid. » « Ouverture : Fenêtre (Cuisine), il fait froid. »
 - No indoor temperature → the sentence stops after the activity half.
-- **Indoor temperature T** (hub spec §7): the `indoor_entity` value when set and numeric; else the mean of the primary temperature sensors (`device_class == "temperature"`, `°C`) that have an area other than Unassigned and are not offline (`state.availability != Offline`, so `Unknown` counts, with a numeric value; no staleness check on `last_update`, my call). The weather entities (`weather_*`) are excluded: they are in Unassigned, and the builder also excludes the hub's weather device explicitly. Rounded to 0.1 °C for display; the comparison uses the unrounded value.
+- **Indoor temperature T** (hub spec §7): the `indoor_entity` value when set and numeric; else the median of the room values, a room value being the mean of that room's primary temperature sensors (`device_class == "temperature"`, `°C` or no unit), grouped by area (even count: the mean of the two middle values; one outdoor sensor in a room of its own cannot drag the result). Only sensors that have an area other than Unassigned and are not offline (`state.availability != Offline`, so `Unknown` counts, with a numeric value; no staleness check on `last_update`, my call). The weather entities (`weather_*`) are excluded: they are in Unassigned, and the builder also excludes the hub's weather device explicitly. Rounded to 0.1 °C for display; the comparison uses the unrounded value.
+- Offline lights, openings and thermostats (`state.availability == Offline`) are ignored by the light count, the opening list and the heating chip; `Unknown` still counts.
 - "Light on": an entity whose `kind` is `Kind::Light` (the hub already sends the effective kind, so a switch with `showAs` light is included, see `SwitchType::effective_kind`), not a group (`group_*` id), not hidden by the user (`ui.hidden`), not a diagnostic or config entity, and on. A light folded into a group with `hideMembers` still counts; the group entity itself does not (my call, so a light is never counted twice nor missed).
 - "Door or window open": a primary, non-hidden `binary_sensor` with `device_class` `door`, `window`, `garage_door` or `opening`, state on.
 - Wording of the sentences in FR is the user's; the EN column and the table rows 1, 2, 2b, 5 are my proposals that the user accepted ("ok c'est top").
@@ -108,7 +109,7 @@ Chips, left to right; each one is hidden when its input is missing:
 
 - **Lights**: count of lights on (§4.2 rule). Amber "lit" style when > 0; hidden when 0 (my call: the sentence already says "calme"). Click → nothing in v1 (my call).
 - **Indoor**: T with one decimal and « à l'intérieur » / "inside". Hidden without T.
-- **Heating** (cases approved with the user; the mapping onto the state is my call). Over primary, non-hidden climate entities whose `capabilities.hvac_modes` contains `heat` (a cool-only unit is ignored). `ClimateState.mode` decides (`oikos-core/src/model/state.rs`), not `action`:
+- **Heating** (cases approved with the user; the mapping onto the state is my call). Over primary, non-hidden, non-offline climate entities (an offline thermostat is ignored, as in §4.2) whose `capabilities.hvac_modes` contains `heat` (a cool-only unit is ignored). `ClimateState.mode` decides (`oikos-core/src/model/state.rs`), not `action`:
   - a unit is **heating-on** when `mode` is `heat`, `auto` or `heat_cool`; **off** when `mode` is `off`, `dry` or `fan_only` (those do not heat);
   - any unit with `mode == cool` → « Clim en marche » / "Air conditioning on" (takes precedence);
   - else no unit heating-on → « Chauffage éteint » / "Heating off";
@@ -141,7 +142,7 @@ Opened from the weather card; the header's Back follows `nav.rs` `BackStack` lik
 - Eco setpoint: number field, °C, 5–30, empty = unset.
 - Cold below / Hot above: two number fields with the defaults shown as placeholders.
 - House mode entity: a picker of `select` entities (virtual selects, ids `virtual_…`, first), with "None".
-- Indoor sensor: the existing room-grouped thermometer picker (`climate/entity_field.rs`), with "Automatic (mean of rooms)" as the empty choice.
+- Indoor sensor: the existing room-grouped thermometer picker (`climate/entity_field.rs`), with "Automatic (median of rooms)" as the empty choice.
 - One Save button sends the whole document (`PUT` replaces it), built from the latest copy (kept fresh by `HomeSettingsChanged`); errors from `422` show next to the named field. The panel reloads on `HomeSettingsChanged`.
 
 ## 8. Data plumbing

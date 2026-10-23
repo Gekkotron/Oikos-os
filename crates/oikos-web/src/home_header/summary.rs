@@ -52,8 +52,9 @@ fn live_number(entity: &EntityView) -> Option<f64> {
     }
 }
 
-/// The indoor temperature: the chosen sensor when it reads a number, else the mean of the
-/// primary room temperature sensors (weather and unassigned ones left out).
+/// The indoor temperature: the chosen sensor when it reads a number, else the median of the room
+/// values, each room being the mean of its primary temperature sensors in °C (weather and
+/// unassigned ones left out).
 pub fn indoor_temperature(
     entities: &BTreeMap<String, EntityView>,
     settings: &HomeSettings,
@@ -66,18 +67,30 @@ pub fn indoor_temperature(
     {
         return Some(n);
     }
-    let rooms: Vec<f64> = entities
+    let mut by_room: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+    for e in entities.values().filter(|e| {
+        e.kind == Kind::Sensor
+            && e.is_primary()
+            && e.device_class.as_deref() == Some("temperature")
+            && e.unit.as_deref().is_none_or(|u| u == "°C")
+            && e.area != UNASSIGNED_AREA
+            && e.device_id.as_deref() != Some(WEATHER_DEVICE)
+    }) {
+        if let Some(n) = live_number(e) {
+            by_room.entry(e.area.as_str()).or_default().push(n);
+        }
+    }
+    let mut rooms: Vec<f64> = by_room
         .values()
-        .filter(|e| {
-            e.kind == Kind::Sensor
-                && e.is_primary()
-                && e.device_class.as_deref() == Some("temperature")
-                && e.area != UNASSIGNED_AREA
-                && e.device_id.as_deref() != Some(WEATHER_DEVICE)
-        })
-        .filter_map(live_number)
+        .map(|v| v.iter().sum::<f64>() / v.len() as f64)
         .collect();
-    (!rooms.is_empty()).then(|| rooms.iter().sum::<f64>() / rooms.len() as f64)
+    rooms.sort_by(f64::total_cmp);
+    let mid = rooms.len() / 2;
+    match rooms.len() {
+        0 => None,
+        n if n % 2 == 1 => Some(rooms[mid]),
+        _ => Some((rooms[mid - 1] + rooms[mid]) / 2.0),
+    }
 }
 
 /// How many lights are on: groups, hidden, diagnostic and config entities are not counted.
@@ -89,6 +102,7 @@ pub fn lights_on(entities: &BTreeMap<String, EntityView>) -> usize {
                 && !e.id.starts_with("group_")
                 && !e.ui.hidden
                 && e.category == EntityCategory::Primary
+                && e.state.availability != Availability::Offline
                 && is_on(&e.state)
         })
         .count()
@@ -105,6 +119,7 @@ pub fn openings(entities: &BTreeMap<String, EntityView>, areas: &[AreaView]) -> 
                     Some("door" | "window" | "garage_door" | "opening")
                 )
                 && e.is_primary()
+                && e.state.availability != Availability::Offline
                 && matches!(e.state.value, StateValue::OnOff(true))
         })
         .map(|e| Opening {
@@ -127,6 +142,7 @@ pub fn heating_chip(
     for e in entities.values() {
         if e.kind != Kind::Climate
             || !e.is_primary()
+            || e.state.availability == Availability::Offline
             || !e.capabilities.hvac_modes.iter().any(|m| m == "heat")
         {
             continue;
@@ -292,6 +308,60 @@ mod tests {
         assert_eq!(indoor_temperature(&h, &settings_with(None)), Some(20.0));
     }
 
+    fn rooms(values: &[f64]) -> BTreeMap<String, EntityView> {
+        house(
+            values
+                .iter()
+                .enumerate()
+                .map(|(i, v)| temp(&format!("t{i}"), *v, &format!("room {i}")))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn indoor_median_of_one_to_four_rooms() {
+        let s = settings_with(None);
+        assert_eq!(indoor_temperature(&rooms(&[18.0]), &s), Some(18.0));
+        assert_eq!(indoor_temperature(&rooms(&[18.0, 20.0]), &s), Some(19.0));
+        assert_eq!(
+            indoor_temperature(&rooms(&[22.0, 18.0, 19.0]), &s),
+            Some(19.0)
+        );
+        assert_eq!(
+            indoor_temperature(&rooms(&[18.0, 24.0, 19.0, 21.0]), &s),
+            Some(20.0)
+        );
+    }
+
+    #[test]
+    fn indoor_median_ignores_an_outdoor_outlier() {
+        let got = indoor_temperature(
+            &rooms(&[19.0, 18.5, 19.5, 20.0, 18.0, 57.0]),
+            &settings_with(None),
+        )
+        .unwrap();
+        assert!((got - 19.25).abs() < 1.0, "got {got}");
+    }
+
+    #[test]
+    fn indoor_room_with_three_sensors_counts_once() {
+        let h = house(vec![
+            temp("a1", 10.0, "room a"),
+            temp("a2", 10.0, "room a"),
+            temp("a3", 10.0, "room a"),
+            temp("b", 20.0, "room b"),
+        ]);
+        assert_eq!(indoor_temperature(&h, &settings_with(None)), Some(15.0));
+    }
+
+    #[test]
+    fn indoor_ignores_fahrenheit_sensors() {
+        let mut f = temp("f", 70.0, "room b");
+        f.unit = Some("°F".into());
+        let h = house(vec![temp("a", 20.0, "room a"), f]);
+        assert_eq!(indoor_temperature(&h, &settings_with(None)), Some(20.0));
+    }
+
     #[test]
     fn indoor_none_without_sensors() {
         let h = house(vec![ent("x", Kind::Switch)]);
@@ -322,6 +392,23 @@ mod tests {
             shown_switch,
         ]);
         assert_eq!(lights_on(&h), 2);
+    }
+
+    #[test]
+    fn lights_count_skips_offline() {
+        let mut gone = light("gone", true);
+        gone.state.availability = Availability::Offline;
+        let mut unknown = light("unknown", true);
+        unknown.state.availability = Availability::Unknown;
+        assert_eq!(lights_on(&house(vec![gone, unknown])), 1);
+    }
+
+    #[test]
+    fn openings_skip_offline() {
+        let mut gone = opening("gone", "door", true, Kind::BinarySensor);
+        gone.state.availability = Availability::Offline;
+        let live = opening("live", "door", true, Kind::BinarySensor);
+        assert_eq!(openings(&house(vec![gone, live]), &[]).len(), 1);
     }
 
     fn opening(id: &str, class: &str, open: bool, kind: Kind) -> EntityView {
@@ -434,6 +521,15 @@ mod tests {
     fn cool_only_unit_ignored() {
         let got = heating(vec![unit("a", &["off", "cool"], "off", None)], Some(15.0));
         assert_eq!(got, None);
+    }
+
+    #[test]
+    fn heating_ignores_offline_units() {
+        let mut gone = unit("gone", HEAT, "cool", None);
+        gone.state.availability = Availability::Offline;
+        assert_eq!(heating(vec![gone.clone()], None), None);
+        let off = unit("o", HEAT, "off", None);
+        assert_eq!(heating(vec![gone, off], None), Some(HeatingChip::Off));
     }
 
     #[test]
