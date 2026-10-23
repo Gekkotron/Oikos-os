@@ -9,7 +9,9 @@ use oikos_core::model::{Command, EntityState, StateValue, WaterHeaterState};
 use super::climate::stepped;
 use super::{ModeSelect, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, open_entity};
+use crate::components::card_place::{CardPlace, use_card_place};
 use crate::format::{degrees, display_value, word};
+use crate::i18n::{Key, use_text};
 
 fn with_water_heater(
     state: &EntityState,
@@ -127,14 +129,30 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
             </span>
         }
     });
-    let stepper = target.is_some().then(|| {
+    // The tile keeps the reading; the target and mode are one tap away, in the sheet.
+    let in_sheet = use_card_place() == CardPlace::Sheet;
+    let stepper = (in_sheet && target.is_some()).then(|| {
         view! { <Stepper label=target_text caption="Target" can_step=true on_step=on_step /> }
     });
+    let mode_select = mode_select.filter(|_| in_sheet);
 
+    let t = use_text();
+    let open = open_entity(&entity.id);
+    let trailing = view! {
+        <button
+            type="button"
+            class="btn btn--icon card__more"
+            aria-label=move || t(Key::More)
+            on:click=move |_| open.run(())
+        >
+            "⋯"
+        </button>
+    }
+    .into_any();
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
-        <CardFrame entity=entity on_click=on_click pending=pending>
+        <CardFrame entity=entity on_click=on_click pending=pending trailing=trailing>
             <div class="heater">
                 <div class="heater__main">
                     <span

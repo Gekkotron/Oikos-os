@@ -168,3 +168,12 @@
 .light__level .slider {
   width: 100%;
 }
+
+/* The ⋯ button that opens a card's sheet. */
+.card__more {
+  min-width: 40px;
+  min-height: 40px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--muted);
+}

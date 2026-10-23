@@ -129,6 +129,7 @@ pub enum Key {
     SwitchOn,
     SwitchOff,
     Brightness,
+    More,
 }
 
 impl Key {
@@ -168,6 +169,7 @@ impl Key {
         Key::SwitchOn,
         Key::SwitchOff,
         Key::Brightness,
+        Key::More,
     ];
 }
 
@@ -209,6 +211,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::SwitchOn => ("On", "Activé"),
         Key::SwitchOff => ("Off", "Désactivé"),
         Key::Brightness => ("Brightness", "Luminosité"),
+        Key::More => ("More options", "Plus d'options"),
     };
     match lang {
         Lang::En => en,
@@ -320,7 +323,8 @@ mod tests {
             | Key::LightOff
             | Key::SwitchOn
             | Key::SwitchOff
-            | Key::Brightness => Key::ALL.contains(&k),
+            | Key::Brightness
+            | Key::More => Key::ALL.contains(&k),
         }
     }
     #[test]
@@ -328,6 +332,6 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 35);
+        assert_eq!(Key::ALL.len(), 36);
     }
 }
