@@ -348,6 +348,7 @@ mod tests {
             started_at: 1,
             ended_at: None,
             trigger: None,
+            manual: false,
             steps: vec![],
         }
     }

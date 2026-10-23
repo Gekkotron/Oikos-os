@@ -57,8 +57,12 @@ pub struct RunView {
     pub started_at: u64,
     /// Unix seconds; `None` while the run is in progress.
     pub ended_at: Option<u64>,
-    /// What fired the run; `None` for a manual run.
+    /// The entity change, press or signal that fired the run; `None` for a manual, schedule or
+    /// sun run.
     pub trigger: Option<TriggerInfo>,
+    /// Started by hand (the flow's Run button or `run_flow`) rather than by a trigger.
+    #[serde(default)]
+    pub manual: bool,
     pub steps: Vec<StepView>,
 }
 
@@ -125,6 +129,7 @@ mod tests {
                 value: json!(true),
                 previous: json!(false),
             }),
+            manual: false,
             steps: vec![StepView {
                 node: "n1".into(),
                 at: 11,

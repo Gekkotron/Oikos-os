@@ -141,6 +141,7 @@ async fn sun_trigger_fires_at_dusk_and_rearms() {
     let run = next_done_run(&mut events).await;
     assert_eq!(run.steps[0].node, "sun");
     assert_eq!(run.steps[0].detail, "sun dusk +0m");
+    assert!(!run.manual, "a sun run is not manual");
 
     // Re-armed: another dusk follows within a day and a half.
     tokio::time::advance(Duration::from_secs(36 * 3600)).await;

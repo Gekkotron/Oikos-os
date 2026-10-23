@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use oikos_api::{EntityView, RunStatus, RunView, StepOutcome, TriggerInfo};
+use oikos_api::{EntityView, RunStatus, RunView, StepOutcome};
 use oikos_core::command::command_name;
 use oikos_core::flow::{Flow, Node, NodeKind, parse_duration};
 
@@ -102,20 +102,26 @@ pub fn value_text(value: &serde_json::Value) -> String {
     }
 }
 
-/// What the trigger step shows: `"{entity title} = {value}"` from the run's trigger, or
-/// `manual` for a run started by hand. Computed here instead of printing the engine's detail,
-/// which carries the raw entity id.
-pub fn trigger_line(
-    trigger: Option<&TriggerInfo>,
-    entities: &BTreeMap<String, EntityView>,
-) -> String {
-    match trigger {
-        Some(t) => format!(
+/// What fired a run, for its header: `manual` for a run started by hand, `"{entity title} =
+/// {value}"` for an entity change, press or signal, and `schedule` or `sun` for a timed run
+/// (read from its first step, the trigger node). Computed here instead of printing the
+/// engine's detail, which carries the raw entity id.
+pub fn trigger_line(run: &RunView, flow: &Flow, entities: &BTreeMap<String, EntityView>) -> String {
+    if run.manual {
+        return "manual".to_owned();
+    }
+    if let Some(t) = &run.trigger {
+        return format!(
             "{} = {}",
             entity_label(&t.entity, entities),
             value_text(&t.value)
-        ),
-        None => "manual".to_owned(),
+        );
+    }
+    let first = run.steps.first().and_then(|s| flow.node(&s.node));
+    match first.map(|n| &n.kind) {
+        Some(NodeKind::TriggerSchedule(_)) => "schedule".to_owned(),
+        Some(NodeKind::TriggerSun(_)) => "sun".to_owned(),
+        _ => String::new(),
     }
 }
 
@@ -253,7 +259,7 @@ pub fn status_class(status: RunStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oikos_api::StepView;
+    use oikos_api::{StepView, TriggerInfo};
 
     fn reference() -> Flow {
         Flow::decode(
@@ -303,6 +309,7 @@ mod tests {
             started_at: 1,
             ended_at: None,
             trigger: None,
+            manual: false,
             steps: vec![
                 step("motion", StepOutcome::Ok, ""),
                 step("moving", StepOutcome::Ok, "false"),
@@ -333,6 +340,7 @@ mod tests {
             started_at: 1,
             ended_at: None,
             trigger: None,
+            manual: false,
             steps,
         }
     }
@@ -391,14 +399,32 @@ mod tests {
     }
 
     #[test]
-    fn trigger_line_uses_the_title_and_value() {
-        let t = TriggerInfo {
+    fn trigger_line_names_what_fired_the_run() {
+        let none = BTreeMap::new();
+        let mut run = running(vec![step("motion", StepOutcome::Ok, "")]);
+        run.trigger = Some(TriggerInfo {
             entity: "m".into(),
             value: serde_json::json!(true),
             previous: serde_json::json!(false),
-        };
-        assert_eq!(trigger_line(Some(&t), &BTreeMap::new()), "m = true");
-        assert_eq!(trigger_line(None, &BTreeMap::new()), "manual");
+        });
+        assert_eq!(trigger_line(&run, &reference(), &none), "m = true");
+        // Only a run started by hand is manual, whatever its trigger node.
+        run.trigger = None;
+        run.manual = true;
+        assert_eq!(trigger_line(&run, &reference(), &none), "manual");
+        // A timed run carries no trigger; its first step names the trigger node.
+        let mut timed = reference();
+        let motion = timed.nodes.iter_mut().find(|n| n.id == "motion").unwrap();
+        motion.kind = NodeKind::TriggerSchedule(
+            serde_json::from_value(serde_json::json!({"cron": "0 7 * * *"})).unwrap(),
+        );
+        run.manual = false;
+        assert_eq!(trigger_line(&run, &timed, &none), "schedule");
+        let motion = timed.nodes.iter_mut().find(|n| n.id == "motion").unwrap();
+        motion.kind = NodeKind::TriggerSun(
+            serde_json::from_value(serde_json::json!({"which": "sunset"})).unwrap(),
+        );
+        assert_eq!(trigger_line(&run, &timed, &none), "sun");
     }
 
     #[test]

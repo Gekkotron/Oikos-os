@@ -219,6 +219,21 @@ impl FlowStore {
         trigger: Option<TriggerInfo>,
         at: u64,
     ) -> Option<RunView> {
+        self.start_run(flow_id, trigger, false, at)
+    }
+
+    /// [`Self::begin_run`] for a run started by hand, marked `manual`.
+    pub fn begin_manual_run(&mut self, flow_id: &str, at: u64) -> Option<RunView> {
+        self.start_run(flow_id, None, true, at)
+    }
+
+    fn start_run(
+        &mut self,
+        flow_id: &str,
+        trigger: Option<TriggerInfo>,
+        manual: bool,
+        at: u64,
+    ) -> Option<RunView> {
         if !self.is_valid(flow_id) {
             return None;
         }
@@ -229,6 +244,7 @@ impl FlowStore {
             started_at: at,
             ended_at: None,
             trigger,
+            manual,
             steps: Vec::new(),
         };
         self.active.insert(flow_id.to_owned(), run.id.clone());
@@ -268,6 +284,7 @@ impl FlowStore {
             started_at: at,
             ended_at: Some(at),
             trigger,
+            manual: false,
             steps: vec![StepView {
                 node: trigger_node.to_owned(),
                 at,

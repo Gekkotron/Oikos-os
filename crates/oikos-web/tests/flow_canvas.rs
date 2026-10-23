@@ -105,6 +105,7 @@ fn done_run() -> RunView {
         started_at: 1_700_000_000,
         ended_at: Some(1_700_000_300),
         trigger: None,
+        manual: false,
         steps: vec![
             step("motion", "occupancy = true"),
             step("moving", "false"),
@@ -330,6 +331,7 @@ async fn parked_delay_counts_down() {
         started_at: now,
         ended_at: None,
         trigger: None,
+        manual: false,
         steps: vec![step("motion", "occupancy = false"), moving],
     };
     let flow = FlowView {

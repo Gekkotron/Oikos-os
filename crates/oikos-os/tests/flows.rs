@@ -914,6 +914,7 @@ async fn run_flow_executes_without_trigger_data() {
 
     hub.run_flow("living").expect("run");
     let run = next_run_event(&mut events, RunStatus::Failed).await;
+    assert!(run.manual);
     assert_eq!(run.steps[0].detail, "manual");
     assert_eq!(run.steps[1].detail, "no triggering entity");
 
@@ -1035,6 +1036,7 @@ async fn schedule_fires_each_tick_while_enabled() {
     let run = next_run_event(&mut events, RunStatus::Done).await;
     assert_eq!(step_nodes(&run), ["clock", "on"]);
     assert_eq!(run.steps[0].detail, "schedule */10 * * * *");
+    assert!(!run.manual, "a scheduled run is not manual");
     assert!(run.trigger.is_none());
     assert_eq!(published(&log).len(), 1);
 

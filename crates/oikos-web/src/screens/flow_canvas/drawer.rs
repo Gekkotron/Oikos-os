@@ -18,9 +18,7 @@ use crate::icons::X_MARK;
 fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl IntoView {
     let house = expect_context::<House>();
     let now = expect_context::<Now>();
-    let trigger = house
-        .entities
-        .with(|e| trigger_line(run.trigger.as_ref(), e));
+    let trigger = house.entities.with(|e| trigger_line(&run, &flow, e));
     let started = run.started_at;
     let duration = run_duration(run.started_at, run.ended_at);
     let names: Vec<(String, String)> = house.flows.with_untracked(|flows| {

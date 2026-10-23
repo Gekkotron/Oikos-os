@@ -194,7 +194,7 @@ impl Hub {
                 return Err(HubError::Rejected("a run is active".to_owned()));
             }
             store
-                .begin_run(id, None, clock::now())
+                .begin_manual_run(id, clock::now())
                 .ok_or_else(|| HubError::UnknownFlow(id.to_owned()))?
         };
         self.broadcast_run(id, &run);
