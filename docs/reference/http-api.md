@@ -170,6 +170,37 @@ Available when `[weather] enabled = true`. See [Weather](../users/weather.md).
 
 Units are metric: °C, km/h, mm, hPa and %. `fetched_at` is unix seconds. Any number may be `null` when Open-Meteo has no value. `days` holds the next five days, starting tomorrow. There are no coordinates in the response. `stale` is `true` once the last fetch is older than twice `refresh_minutes`.
 
+## Solar
+
+Available when `[solcast] enabled = true`. See [Solar forecast](../users/solar-forecast.md).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/solar` | The solar forecast as one document (below). `503` with `solar unavailable` while `[solcast]` is off or before the first fetch. |
+
+```json
+{
+  "fetched_at": 1792746902, "stale": false, "next_refresh_at": 1792754100,
+  "calls_today": 6, "daily_limit": 8,
+  "now": { "power": 1.6, "remaining_today": 5.2 },
+  "today": {
+    "date": "2026-10-23", "estimate": 12.4, "low": 9.8, "high": 14.1,
+    "peak": { "power": 2.4, "at": 1792758600 },
+    "best_hours": { "from": 1792749600, "to": 1792764000 }
+  },
+  "days": [ { "date": "2026-10-24", "estimate": 8.1, "low": 5.0, "high": 11.0 } ],
+  "sites": [ { "index": 0, "today": 5.1 }, { "index": 1, "today": 7.3 } ],
+  "periods": [ { "end": 1792746000, "minutes": 30, "estimate": 0.0, "low": 0.0, "high": 0.0 } ],
+  "history": {
+    "forecasts": [
+      { "date": "2026-10-22", "estimate": 11.6, "low": 8.9, "high": 13.0, "made_at": 1792680000 }
+    ]
+  }
+}
+```
+
+Energies are kWh, powers kW, times Unix seconds and dates `YYYY-MM-DD` in the house's time zone. Any number may be `null`. `next_refresh_at` is `null` when no call is planned (budget spent, key refused). `days` holds the next seven days, starting tomorrow. `periods` are the 30-minute forecast periods from local midnight today to the end of tomorrow, each with its energy in kWh and its `minutes` length. `sites` never carries the resource id; `index` is its position in `[solcast] sites`. `best_hours` is the longest run today where the estimate is at least 60 % of the peak, or `null` on a day with no production. `history.forecasts` lists the morning forecast of each of the 7 local days before today, oldest first, and is empty when history is off. `stale` is `true` when a planned refresh has failed for over an hour or the last success is older than 18 hours.
+
 ## WebSocket
 
 `GET /ws` upgrades to a WebSocket. The hub sends a `snapshot` frame first, then every hub event as a JSON text frame tagged by `type`. It subscribes before it takes the snapshot, so no event falls between the two. A client that falls behind gets a fresh `snapshot` instead of being dropped. Incoming frames are ignored.
@@ -191,6 +222,7 @@ Units are metric: °C, km/h, mm, hPa and %. `fetched_at` is unix seconds. Any nu
 | `button_pressed` | `{id}`: a virtual or discovered button was pressed. An event, not a state. |
 | `signal_received` | `{id, signal}`: a remote, event entity or tag sent a signal. An event, not a state. |
 | `weather_changed` | No payload: the weather was refreshed with new data, refetch `GET /api/v1/weather`. |
+| `solar_changed` | No payload: the solar forecast was refreshed or its current figures moved, refetch `GET /api/v1/solar`. |
 | `home_settings_changed` | `{settings}`: the home settings document changed. |
 | `climate_changed` | `{zone}`: one zone's document changed, or the house settings when `zone` is `null`. |
 

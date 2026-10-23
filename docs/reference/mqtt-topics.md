@@ -24,6 +24,10 @@ The table lists every topic the hub reads or writes, with its default prefix. "I
 | `<first discovery prefix>/<sensor\|binary_sensor>/weather/<key>/config` | out | yes | Discovery of a weather entity (19 keys, one device) | `[topics] discovery_prefixes` (first entry), `[weather]` |
 | `<first discovery prefix>/weather/<key>` | out | yes | A weather value: a number, an enum name or `ON` / `OFF`; `None` (unknown) once the source stops reporting a value that was published | `[topics] discovery_prefixes` (first entry), `[weather]` |
 | `<first discovery prefix>/weather/availability` | out | yes | `online` once weather was fetched, `offline` before the first fetch and after an hour without one | `[topics] discovery_prefixes` (first entry), `[weather]` |
+| `<first discovery prefix>/sensor/solar/<key>/config` | out | yes | Discovery of a solar forecast entity (10 keys, one device) | `[topics] discovery_prefixes` (first entry), `[solcast]` |
+| `<first discovery prefix>/solar/<key>` | out | yes | A solar forecast value: a number in kWh or kW, or an RFC 3339 UTC time for the peak time | `[topics] discovery_prefixes` (first entry), `[solcast]` |
+| `<first discovery prefix>/solar/availability` | out | yes | `online` once a forecast covers now, `offline` otherwise (see [Solar forecast](../users/solar-forecast.md#freshness-and-offline)) | `[topics] discovery_prefixes` (first entry), `[solcast]` |
+| `<first discovery prefix>/solar/cache` | out, in | yes | The retained forecast and call count, so a restart does not spend calls; never the API key | `[topics] discovery_prefixes` (first entry), `[solcast]` |
 | `<first discovery prefix>/<component>/group/<id>/config` | out | yes | Discovery of a group entity | `[groups] enabled`, `[topics] discovery_prefixes` |
 | `<first discovery prefix>/group/<id>` | in, out | yes (state) | The combined state; commands arrive here as JSON | `[groups] enabled` |
 | `<first discovery prefix>/group/<id>/definition` | in, out | yes | `{kind, name, members, hideMembers}` | `[groups] enabled` |
@@ -42,7 +46,7 @@ The table lists every topic the hub reads or writes, with its default prefix. "I
 
 ## Notes
 
-- **Reserved sub-trees.** Under a discovery prefix, the segments `ui`, `automation`, `virtual`, `push` and `weather` are reserved: never publish discovery there. A topic in them is never read as discovery and never shows under `GET /api/v1/ignored`.
+- **Reserved sub-trees.** Under a discovery prefix, the segments `ui`, `automation`, `virtual`, `push`, `weather` and `solar` are reserved: never publish discovery there. A topic in them is never read as discovery and never shows under `GET /api/v1/ignored`.
 - **Climate documents never end in `/config`.** They cannot be read as discovery. The hub subscribes to `<prefix>/house` and `<prefix>/zone/+/+`, never `<prefix>/#`. `oikos/push/responses` is subscribed only while the climate engine is on, so a tapped proposal button reaches it.
 - **Overlapping subscriptions.** The hub subscribes to `<discovery prefix>/#`, `<z2m_base>/bridge/#`, `<ui_prefix>/#` and `<automation_prefix>/#`. A push filter that falls inside one of those wildcards (the default `oikos/push/…` under `oikos/#`) is left out, so the broker does not deliver a notification twice.
 - **Alerts raised inside the hub** (the Frigate bridge, watchdogs, flows, MCP) go to the push service in process, without the broker.

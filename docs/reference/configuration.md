@@ -22,7 +22,7 @@ String keys keep the raw text of the variable, so `OIKOS_MQTT__PASSWORD=007` sta
 
 Logging has one more rule: if `RUST_LOG` is set and valid, it wins over `[log] level`. If it is unset or invalid, `[log] level` applies; if that is invalid too, the level is `info`.
 
-At start the hub also checks `[flows]` (coordinates), `[watchdog]`, `[climate]` and `[weather]`. A bad value stops it with `invalid config: <reason>`.
+At start the hub also checks `[flows]` (coordinates), `[watchdog]`, `[climate]`, `[weather]` and `[solcast]`. A bad value stops it with `invalid config: <reason>`.
 
 Secrets (`[mqtt] password`, `[frigate] password`, the password inside `[history] url`) are masked when the config is logged. Keep `oikos.toml` out of git; it is git-ignored in this repo.
 
@@ -264,4 +264,26 @@ enabled = true
 city = "Lyon"
 country = "FR"
 refresh_minutes = 15
+```
+
+## `[solcast]`
+
+The Solcast rooftop solar forecast. Off by default: while `enabled` is `false` the hub makes no request at all. See [Solar forecast](../users/solar-forecast.md).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Turn the solar forecast on. While `false`, `GET /api/v1/solar` answers 503 and `get_solar` answers `solar unavailable`. |
+| `sites` | `[]` | Rooftop resource ids from the Solcast Toolkit, one or more. Each id may hold only letters, digits, `-` and `_`. One request per site per refresh. |
+| `daily_limit` | `10` | This hub's share of the account's requests per UTC day. The hobbyist limit is 10. Refreshes per day are `(daily_limit - 2) / number of sites`, at least 1; 2 calls are kept in reserve. Must be at least the number of sites. |
+| `api_key_file` | `secrets/solcast.key` next to `oikos.toml` | The file holding the API key, on one line. Only the path is logged. |
+
+When enabled, no site, an empty or invalid id, a `daily_limit` below the number of sites, or an unreadable or empty key file stops the hub at start with `invalid config: [solcast] …`. `OIKOS_SOLCAST__ENABLED`, `OIKOS_SOLCAST__SITES`, `OIKOS_SOLCAST__DAILY_LIMIT` and `OIKOS_SOLCAST__API_KEY_FILE` work like the other sections; the sites are a list, so use array syntax: `OIKOS_SOLCAST__SITES='["<resource id>"]'`.
+
+The API key is never written to `oikos.toml`, a log line, an API response or MQTT.
+
+```toml
+[solcast]
+enabled = true
+sites = ["<rooftop resource id>"]
+daily_limit = 10
 ```
