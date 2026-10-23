@@ -29,6 +29,8 @@ use tokio::sync::mpsc;
 #[derive(Clone, Copy)]
 enum Answer {
     Ok,
+    /// 200 with no period at all.
+    Empty,
     Status(u16),
 }
 
@@ -106,6 +108,11 @@ async fn site_forecasts(State(s): State<Arc<Stub>>, Path(site): Path<String>) ->
         .unwrap_or(Answer::Ok);
     match answer {
         Answer::Ok => ([("content-type", "application/json")], s.body.clone()).into_response(),
+        Answer::Empty => (
+            [("content-type", "application/json")],
+            json!({ "forecasts": [] }).to_string(),
+        )
+            .into_response(),
         Answer::Status(code) => StatusCode::from_u16(code).unwrap().into_response(),
     }
 }
@@ -140,6 +147,14 @@ fn key_file() -> std::path::PathBuf {
 }
 
 async fn app(enabled: bool, sites: &[&str], limit: u32) -> App {
+    let app = app_unsubscribed(enabled, sites, limit).await;
+    // The broker acknowledged the subscription.
+    app.hub.on_suback();
+    app
+}
+
+/// Like [`app`], but the broker has not acknowledged the subscription yet.
+async fn app_unsubscribed(enabled: bool, sites: &[&str], limit: u32) -> App {
     let mut cfg = Config::default();
     cfg.topics.discovery_prefixes = vec!["oikos".to_owned()];
     cfg.flows.timezone = Some("Europe/Paris".into());
@@ -232,6 +247,27 @@ async fn first_start_fetches_once_per_site_and_serves_view() {
 }
 
 #[tokio::test]
+async fn no_call_before_the_suback() {
+    let app = app_unsubscribed(true, &["a"], 10).await;
+    let stub = Stub::new(&[], 1.0);
+    let base = serve_stub(Arc::clone(&stub)).await;
+    let task = spawn_with(&app.hub, base, Duration::ZERO);
+
+    // The entities are published, yet nothing is asked while the cache may still be coming.
+    let published = Arc::clone(&app.published);
+    until("the configs", || {
+        published.lock().unwrap().iter().any(|(t, _)| t.ends_with("/config"))
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(stub.total(), 0, "called before the SubAck");
+
+    app.hub.on_suback();
+    until("the call after the SubAck", || stub.total() >= 1).await;
+    task.abort();
+}
+
+#[tokio::test]
 async fn first_site_server_error_skips_second_site() {
     let app = app(true, &["a", "b"], 10).await;
     let stub = Stub::new(&[("a", Answer::Status(500))], 1.0);
@@ -305,6 +341,28 @@ async fn one_failing_site_keeps_previous_forecast() {
     let ledger = app.hub.solar_ledger();
     assert_eq!(ledger.calls_on(Utc::now()), 2);
     // Nothing from site A's answer (twice the fixture) reached the view.
+    let view = app.hub.solar_view().unwrap();
+    let today = view.today.estimate.unwrap();
+    assert!((today - hub_estimate()).abs() < 0.01, "{today}");
+    assert_eq!(view.fetched_at, u64::try_from(before.fetched_at).unwrap());
+    task.abort();
+}
+
+#[tokio::test]
+async fn empty_site_answer_keeps_previous_forecast() {
+    let app = app(true, &["a", "b"], 10).await;
+    let stub = Stub::new(&[("b", Answer::Empty)], 2.0);
+    let base = serve_stub(Arc::clone(&stub)).await;
+    let before = common::solar::forecast_today();
+    feed_cache(&app.hub, Some(&before), &oikos_solcast::Ledger::default());
+    let task = spawn_with(&app.hub, base, Duration::ZERO);
+
+    until("both sites asked", || stub.calls("b") >= 1).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(stub.calls("a"), 1);
+    assert_eq!(stub.calls("b"), 1);
+    assert_eq!(app.hub.solar_ledger().calls_on(Utc::now()), 2);
+    // Site A's doubled answer was not applied.
     let view = app.hub.solar_view().unwrap();
     let today = view.today.estimate.unwrap();
     assert!((today - hub_estimate()).abs() < 0.01, "{today}");

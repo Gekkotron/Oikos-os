@@ -56,9 +56,13 @@ Each refresh keeps the periods of the day that have already passed, so "forecast
 
 If Solcast refuses the key (401 or 403), the hub logs one error and stops calling until it restarts. Fix the key file, then restart.
 
+:::warning
+Enable `[solcast]` on one hub only per Solcast account and broker. A second hub with it off clears the first one's retained cache, and two enabled hubs share the daily budget badly.
+:::
+
 ## The entities
 
-Entity ids are `solar_forecast_<key>`, for instance `solar_forecast_today`. The device has no room; move an entity to one with the usual override if you want it there.
+Entity ids are `solar_<key>` for the keys below, for instance `solar_forecast_today`. The device has no room; move an entity to one with the usual override if you want it there.
 
 | Key | Unit | Meaning |
 | --- | --- | --- |

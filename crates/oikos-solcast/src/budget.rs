@@ -91,7 +91,8 @@ fn local_hour(date: NaiveDate, zone: Tz, hour: u32) -> DateTime<Utc> {
 }
 
 /// Refresh instants of one local day: the first 30 min before sunrise, the rest spread evenly
-/// up to 60 min before sunset. Missing sun times fall back to 07:00 / 19:00 local.
+/// up to 60 min before sunset. Missing sun times, or a sunset not after the sunrise, fall back
+/// to 07:00 / 19:00 local.
 pub fn slots(
     sunrise: Option<DateTime<Utc>>,
     sunset: Option<DateTime<Utc>>,
@@ -99,8 +100,13 @@ pub fn slots(
     zone: Tz,
     refreshes: u32,
 ) -> Vec<DateTime<Utc>> {
-    let rise = sunrise.unwrap_or_else(|| local_hour(date, zone, 7));
-    let set = sunset.unwrap_or_else(|| local_hour(date, zone, 19));
+    let mut rise = sunrise.unwrap_or_else(|| local_hour(date, zone, 7));
+    let mut set = sunset.unwrap_or_else(|| local_hour(date, zone, 19));
+    if set <= rise {
+        // Inconsistent sun times (a sunset that belongs to another day): use the fallback.
+        rise = local_hour(date, zone, 7);
+        set = local_hour(date, zone, 19);
+    }
     let first = rise - Duration::minutes(30);
     if refreshes <= 1 {
         return vec![first];
@@ -254,6 +260,21 @@ mod tests {
     fn slots_polar_fallback_uses_7_and_19_local() {
         let s = slots(None, None, day("2026-12-21"), chrono_tz::Europe::Paris, 2);
         // 07:00 CET = 06:00Z, first = 05:30Z; last = 19:00 CET - 1 h = 17:00Z.
+        assert_eq!(
+            s,
+            vec![utc("2026-12-21T05:30:00Z"), utc("2026-12-21T17:00:00Z")]
+        );
+    }
+
+    #[test]
+    fn slots_sunset_before_sunrise_falls_back() {
+        let s = slots(
+            Some(utc("2026-12-21T17:00:00Z")),
+            Some(utc("2026-12-21T06:00:00Z")),
+            day("2026-12-21"),
+            chrono_tz::Europe::Paris,
+            2,
+        );
         assert_eq!(
             s,
             vec![utc("2026-12-21T05:30:00Z"), utc("2026-12-21T17:00:00Z")]

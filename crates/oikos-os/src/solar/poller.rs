@@ -5,22 +5,26 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDate, Utc};
+use chrono_tz::Tz;
 use oikos_api::ConnectionStatus;
 use oikos_core::flow::sun::sun_events;
 use oikos_solcast::{
-    ApiKey, BASE_URL, Client, Decision, Ledger, SolcastError, decide, merge, refreshes_per_day,
-    slots,
+    ApiKey, BASE_URL, Client, Decision, Ledger, SolcastError, decide, local_midnight, merge,
+    refreshes_per_day, slots,
 };
 use tokio::task::JoinHandle;
 
 use crate::config::read_key_file;
 use crate::hub::Hub;
 
-/// How long the poller waits after the entities are published, so the broker can replay the
-/// retained cache before the first decision. Without the cache a restart would look like a
-/// first start.
-pub const CACHE_GRACE: Duration = Duration::from_secs(3);
+/// How long the poller waits after the subscription is acknowledged, so the broker can replay
+/// the retained cache before the first decision. Without the cache a restart would look like
+/// a first start.
+pub const CACHE_GRACE: Duration = Duration::from_secs(10);
+
+/// The longest the poller waits for the broker's SubAck before going on anyway.
+pub const SUBACK_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The shortest sleep between two decisions.
 const MIN_SLEEP: Duration = Duration::from_secs(1);
@@ -40,8 +44,8 @@ impl Hub {
     }
 }
 
-/// Spawns [`run`] against `base_url` (tests point it at a stub), waiting `cache_grace` after
-/// the broker is online before the first decision.
+/// Spawns [`run`] against `base_url` (tests point it at a stub), waiting for the SubAck, then `cache_grace`,
+/// after the broker is online before the first decision.
 pub fn spawn_with(hub: &Arc<Hub>, base_url: String, cache_grace: Duration) -> JoinHandle<()> {
     tokio::spawn(run(Arc::clone(hub), base_url, cache_grace))
 }
@@ -90,6 +94,14 @@ pub async fn run(hub: Arc<Hub>, base_url: String, cache_grace: Duration) {
     }
     // Once, from this task only, so it never interleaves with `apply_solar_forecast`.
     hub.publish_solar_configs();
+    let mut subscribed = hub.solar_subscribed();
+    match tokio::time::timeout(SUBACK_TIMEOUT, subscribed.wait_for(|done| *done)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(_)) => return,
+        Err(_) => tracing::warn!(
+            "solar: the broker did not acknowledge the subscription in time; going on without the cache guarantee"
+        ),
+    }
     tokio::time::sleep(cache_grace).await;
 
     let sites = hub.solar_sites();
@@ -159,10 +171,30 @@ fn planned_slots(hub: &Hub, now: DateTime<Utc>, limit: u32, sites: u32) -> Vec<D
     let mut out = Vec::new();
     for offset in -1..=1 {
         let date: NaiveDate = today + ChronoDuration::days(offset);
-        let sun = sun_events(lat, lon, date);
-        out.extend(slots(sun.sunrise, sun.sunset, date, zone, refreshes));
+        let (sunrise, sunset) = local_sun(lat, lon, date, zone);
+        out.extend(slots(sunrise, sunset, date, zone, refreshes));
     }
     out
+}
+
+/// Sunrise and sunset that fall on the local `date` in `zone`. `sun_events` searches one UTC
+/// day, so the local day's events can sit in the UTC day before or after: the three UTC days
+/// around `date` are searched and the events are filtered on their local date.
+fn local_sun(
+    lat: f64,
+    lon: f64,
+    date: NaiveDate,
+    zone: Tz,
+) -> (Option<DateTime<Utc>>, Option<DateTime<Utc>>) {
+    let on_date = |t: &DateTime<Utc>| t.with_timezone(&zone).date_naive() == date;
+    let mut sunrise = None;
+    let mut sunset = None;
+    for offset in -1..=1 {
+        let events = sun_events(lat, lon, date + ChronoDuration::days(offset));
+        sunrise = sunrise.or(events.sunrise.filter(on_date));
+        sunset = sunset.or(events.sunset.filter(on_date));
+    }
+    (sunrise, sunset)
 }
 
 /// Fetches every site in order. All must succeed for the forecast to be replaced: one failure
@@ -172,6 +204,14 @@ async fn fetch_round(hub: &Hub, client: &Client, sites: &[String], warned: &mut 
     for site in sites {
         hub.record_solar_attempt();
         match client.site_forecast(site).await {
+            Ok(periods) if periods.is_empty() => {
+                if !*warned {
+                    tracing::warn!("solar: a site answered without any period; keeping the last forecast");
+                    *warned = true;
+                }
+                hub.record_solar_failure();
+                return Round::Failed;
+            }
             Ok(periods) => results.push(periods),
             Err(SolcastError::Unauthorized) => {
                 tracing::error!(
@@ -201,15 +241,7 @@ async fn fetch_round(hub: &Hub, client: &Client, sites: &[String], warned: &mut 
     let now = Utc::now();
     let mut forecast = merge(results, now.timestamp());
     let zone = hub.zone();
-    let midnight = zone
-        .from_local_datetime(
-            &now.with_timezone(&zone)
-                .date_naive()
-                .and_hms_opt(0, 0, 0)
-                .expect("midnight is valid"),
-        )
-        .earliest()
-        .map_or(now, |t| t.with_timezone(&Utc));
+    let midnight = local_midnight(now.with_timezone(&zone).date_naive(), zone);
     if let Some(previous) = hub.solar_forecast() {
         // Solcast only returns the periods from now on: keep what today already had.
         forecast.keep_past(&previous, midnight);
@@ -238,6 +270,41 @@ mod tests {
 
     fn at(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()
+    }
+
+    /// (zone, latitude, longitude): places where the sun is up at 00:00Z in summer or the local
+    /// day straddles a UTC day.
+    const PLACES: [(&str, f64, f64); 3] = [
+        ("America/Los_Angeles", 34.05, -118.24),
+        ("Australia/Sydney", -33.87, 151.21),
+        ("Europe/Paris", 48.86, 2.35),
+    ];
+
+    #[test]
+    fn local_sun_is_on_the_local_date_with_rise_before_set() {
+        for (name, lat, lon) in PLACES {
+            let zone: Tz = name.parse().unwrap();
+            for date in ["2026-06-21", "2026-12-21", "2026-03-29", "2026-10-25"] {
+                let date: NaiveDate = date.parse().unwrap();
+                let (rise, set) = local_sun(lat, lon, date, zone);
+                let (rise, set) = (rise.unwrap(), set.unwrap());
+                assert!(rise < set, "{name} {date}: {rise} {set}");
+                assert_eq!(rise.with_timezone(&zone).date_naive(), date, "{name}");
+                assert_eq!(set.with_timezone(&zone).date_naive(), date, "{name}");
+                let refreshes = slots(Some(rise), Some(set), date, zone, 8);
+                assert_eq!(refreshes.len(), 8, "{name} {date}: {refreshes:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn local_midnight_after_a_midnight_dst_change() {
+        // Chile springs forward at 00:00 on 2026-09-06: midnight does not exist.
+        let zone: Tz = "America/Santiago".parse().unwrap();
+        let date: NaiveDate = "2026-09-06".parse().unwrap();
+        let midnight = local_midnight(date, zone);
+        assert_eq!(midnight.with_timezone(&zone).date_naive(), date);
+        assert_eq!(midnight.with_timezone(&zone).format("%H:%M").to_string(), "01:00");
     }
 
     #[test]

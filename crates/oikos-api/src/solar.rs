@@ -19,7 +19,7 @@ pub struct SolarView {
     pub daily_limit: u32,
     pub now: SolarNow,
     pub today: SolarToday,
-    /// The coming days, today first.
+    /// The next days, starting tomorrow (today is in `today`).
     pub days: Vec<SolarDay>,
     /// Today's share per configured site.
     pub sites: Vec<SolarSite>,
@@ -88,7 +88,7 @@ pub struct SolarSite {
     pub today: Option<f64>,
 }
 
-/// One forecast period, kWh.
+/// One forecast period; the values are mean kW over the period.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SolarPeriod {
     /// When the period ends, Unix seconds.

@@ -120,7 +120,7 @@ pub fn day_totals(periods: &[Period], zone: Tz) -> Vec<DayTotal> {
 }
 
 /// First instant of a local date (the first valid hour if midnight does not exist).
-fn local_midnight(date: NaiveDate, zone: Tz) -> DateTime<Utc> {
+pub fn local_midnight(date: NaiveDate, zone: Tz) -> DateTime<Utc> {
     (0..4)
         .find_map(|h| {
             let naive = date.and_hms_opt(h, 0, 0)?;

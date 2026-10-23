@@ -210,6 +210,9 @@ pub struct Hub {
     pub(crate) solar_daily_limit: u32,
     pub(crate) solar_key_file: Option<std::path::PathBuf>,
     pub(crate) solar: Mutex<crate::solar::hub::SolarSlot>,
+    /// Set once the broker acknowledged the on-connect subscription: the retained solar cache
+    /// has been requested, and the poller may read the ledger.
+    pub(crate) solar_subscribed: tokio::sync::watch::Sender<bool>,
     /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
     dashboard_store: Mutex<DashboardStore>,
     /// The home settings document, retained on `<ui_prefix>/_home`.
@@ -339,6 +342,7 @@ impl Hub {
             solar_daily_limit: cfg.solcast.daily_limit,
             solar_key_file: cfg.solcast.api_key_file.clone(),
             solar: Mutex::default(),
+            solar_subscribed: tokio::sync::watch::channel(false).0,
             dashboard_store: Mutex::new(DashboardStore::new()),
             home_settings: Mutex::new(oikos_api::HomeSettings::default()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
@@ -754,6 +758,13 @@ impl Hub {
     /// retained tokens are on their way, the push service starts its settle delay.
     pub fn on_suback(&self) {
         self.push.on_subscribed();
+        self.solar_subscribed.send_replace(true);
+    }
+
+    /// Turns `true` once the broker acknowledged the on-connect subscription (the solar poller
+    /// waits for it before reading the retained cache).
+    pub fn solar_subscribed(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.solar_subscribed.subscribe()
     }
 
     /// The bridge's lock is released before the alert goes to the push service.
