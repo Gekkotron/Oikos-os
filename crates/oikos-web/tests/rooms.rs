@@ -213,3 +213,29 @@ async fn room_with_nothing_on_home_is_empty_not_gone() {
     assert!(m.host.query_selector(".room__gone").unwrap().is_none());
     assert_eq!(texts(&m.host, ".room .room__empty"), ["Nothing here yet."]);
 }
+
+#[wasm_bindgen_test]
+async fn room_with_an_accented_or_spaced_id_is_highlighted() {
+    // Area ids are room names; the address bar and the links carry them percent-encoded.
+    for (id, encoded) in [
+        ("Séjour", "S%C3%A9jour"),
+        ("Salle de bain", "Salle%20de%20bain"),
+    ] {
+        let (m, house) = mount_with(&format!("/rooms/{encoded}"), true).await;
+        house.areas.update(|list| list.push(area(id, 1)));
+        house.entities.update(|map| {
+            let lamp = entity("light.named", "Named lamp", Kind::Light, id);
+            map.insert(lamp.id.clone(), lamp);
+        });
+        tick().await;
+        assert_eq!(texts(&m.host, ".room .room__title"), [format!("Room {id}")]);
+        let link = m
+            .host
+            .query_selector(&format!(".sidebar__rooms a[href=\"/rooms/{encoded}\"]"))
+            .unwrap()
+            .unwrap_or_else(|| panic!("no sidebar link to /rooms/{encoded}"));
+        assert_eq!(link.get_attribute("aria-current").as_deref(), Some("page"));
+        let crumb = texts(&m.host, ".breadcrumb [aria-current=\"page\"]");
+        assert_eq!(crumb, [format!("Room {id}")]);
+    }
+}

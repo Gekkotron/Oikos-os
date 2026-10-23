@@ -32,20 +32,55 @@ pub struct Crumb {
     pub href: Option<String>,
 }
 
-/// The path's segments, ignoring any query, fragment and empty segments.
-fn segments(path: &str) -> Vec<&str> {
+/// The path's segments, percent-decoded, ignoring any query, fragment and empty segments. Ids
+/// are names ("Salle de bain"), and the address bar keeps them encoded.
+fn segments(path: &str) -> Vec<String> {
     let path = path.split(['?', '#']).next().unwrap_or("");
-    path.split('/').filter(|s| !s.is_empty()).collect()
+    path.split('/')
+        .filter(|s| !s.is_empty())
+        .map(percent_decode)
+        .collect()
+}
+
+/// `%XX` escapes back to their bytes; a segment that does not decode to UTF-8 stays as it is,
+/// and so does a "%" that starts no escape.
+fn percent_decode(segment: &str) -> String {
+    let raw = segment.as_bytes();
+    let hex = |b: u8| char::from(b).to_digit(16);
+    let mut bytes = Vec::with_capacity(raw.len());
+    let mut i = 0;
+    while i < raw.len() {
+        let escape = match raw.get(i..i + 3) {
+            Some([b'%', hi, lo]) => hex(*hi).zip(hex(*lo)).map(|(hi, lo)| hi * 16 + lo),
+            _ => None,
+        };
+        match escape {
+            Some(byte) => {
+                // Two hex digits: at most 255.
+                bytes.push(u8::try_from(byte).unwrap_or(b'%'));
+                i += 3;
+            }
+            None => {
+                bytes.push(raw[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8(bytes).unwrap_or_else(|_| segment.to_owned())
 }
 
 fn is_detail_page(path: &str) -> bool {
-    matches!(segments(path).first(), Some(&"entity") | Some(&"history"))
+    matches!(
+        segments(path).first().map(String::as_str),
+        Some("entity" | "history")
+    )
 }
 
 /// The sidebar entry to highlight. Entity and history pages inherit the section of the page the
 /// user came from (the latest non-entity/history entry of `back`).
 pub fn section_for(path: &str, back: &[String]) -> Section {
-    let seg = segments(path);
+    let owned = segments(path);
+    let seg: Vec<&str> = owned.iter().map(String::as_str).collect();
     match seg.as_slice() {
         [] | ["dashboards", ..] => Section::Overview,
         ["rooms", id, ..] => Section::Room((*id).to_string()),
@@ -74,7 +109,8 @@ pub fn crumbs(path: &str, lang: Lang, name_of: impl Fn(Lookup) -> Option<String>
         href: Some(href.to_string()),
     };
     let mut out = vec![link(t(Key::MyHome), "/")];
-    let seg = segments(path);
+    let owned = segments(path);
+    let seg: Vec<&str> = owned.iter().map(String::as_str).collect();
     let mut push = |label: String, href: String| out.push(link(label, &href));
     match seg.as_slice() {
         ["dashboards", "new"] => push(t(Key::NewDashboard), String::new()),
@@ -139,6 +175,8 @@ mod tests {
             Lookup::Room("r1") => Some("Kitchen".into()),
             Lookup::Flow("f1") => Some("Night lights".into()),
             Lookup::Entity("light.a") => Some("Lamp".into()),
+            Lookup::Room("Séjour") => Some("Séjour".into()),
+            Lookup::Room("Salle de bain") => Some("Salle de bain".into()),
             _ => None,
         }
     }
@@ -207,5 +245,33 @@ mod tests {
         let c = crumbs("/groups/g1/edit", Lang::En, names);
         assert_eq!(labels(&c), ["My home", "Groups", "g1", "Edit group"]);
         assert_eq!(c[2].href.as_deref(), Some("/group/g1"));
+    }
+
+    /// Room ids are room names; the address bar keeps them percent-encoded.
+    #[test]
+    fn encoded_room_ids() {
+        assert_eq!(
+            section_for("/rooms/S%C3%A9jour", &[]),
+            Section::Room("Séjour".into())
+        );
+        assert_eq!(
+            section_for("/rooms/Salle%20de%20bain", &[]),
+            Section::Room("Salle de bain".into())
+        );
+        let back = vec!["/rooms/S%C3%A9jour".to_string()];
+        assert_eq!(
+            section_for("/entity/light.a", &back),
+            Section::Room("Séjour".into())
+        );
+        assert_eq!(
+            labels(&crumbs("/rooms/S%C3%A9jour", Lang::Fr, names)),
+            ["Ma maison", "Séjour"]
+        );
+        assert_eq!(
+            labels(&crumbs("/rooms/Salle%20de%20bain", Lang::En, names)),
+            ["My home", "Salle de bain"]
+        );
+        // A stray "%" that is no escape stays as typed.
+        assert_eq!(section_for("/rooms/50%", &[]), Section::Room("50%".into()));
     }
 }

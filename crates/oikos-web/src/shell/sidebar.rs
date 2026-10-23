@@ -7,6 +7,7 @@ use leptos_router::hooks::{use_location, use_navigate};
 use wasm_bindgen::JsCast;
 
 use super::route::{Section, section_for};
+use crate::api::encode_id;
 use crate::app::landing_dashboard;
 use crate::components::status_pill::StatusPill;
 use crate::dashboards::create_dashboard;
@@ -208,7 +209,7 @@ pub fn Sidebar(
                                 <li>
                                     <a
                                         class="sidebar__link sidebar__room"
-                                        href=format!("/rooms/{}", room.id)
+                                        href=format!("/rooms/{}", encode_id(&room.id))
                                         aria-current=current(entry)
                                     >
                                         <span class="sidebar__room-name">{room.name}</span>
