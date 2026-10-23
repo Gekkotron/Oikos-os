@@ -12,9 +12,9 @@ A sidebar on the left replaces the old top bar. From top to bottom it holds:
 
 - **Overview**, with House first and your own dashboards under it, plus **＋ New dashboard**.
 - **Automations** (flows) and **Groups**.
-- **My rooms**: one entry per room, with the number of cards Home shows there. A room opens at `/rooms/<id>`; the old room chips on House are gone, and the rooms list lives here instead.
-- **Home**: Energy, Security, Climate (beta), Alerts (with an unseen-count pill) and Settings.
-- A connection badge at the bottom.
+- **My rooms**: one entry per room, with the number of primary entities the hub counts in it (the same count as the room's area). A room opens at `/rooms/<id>`; the old room chips on House are gone, and the rooms list lives here instead.
+- **Home**: Energy, Security, Climate (beta) and Alerts (with an unseen-count pill).
+- **Settings** at the bottom, above the connection badge.
 
 The header above the screen carries a breadcrumb, the theme button and the **FR · EN** button. The theme button cycles Auto, Night Glass and Ivoire, and the choice is remembered in the browser. FR · EN switches the shell (sidebar, header and breadcrumb) between French and English; the screens themselves are still in English for now, and the choice is remembered too.
 
@@ -24,7 +24,9 @@ On a phone or a narrow window (below 900 px) the sidebar becomes a drawer. The �
 
 ## Dashboards
 
-![The House dashboard: the Favorites cards and the rooms](/img/screens/house.webp)
+![The House dashboard: room chips and the Favorites cards](/img/screens/house.webp)
+
+*This screenshot predates the sidebar: the rooms are now listed in the sidebar instead of as chips.*
 
 Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview. House is always the first entry: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
 
