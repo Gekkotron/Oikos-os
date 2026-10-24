@@ -1066,3 +1066,48 @@ async fn unresponsive_siren_delays_neither_alert_nor_disarm() {
     assert!(disarm.await.unwrap().unwrap().accepted);
     assert_eq!(rig.state(), "disarmed");
 }
+
+/// A rig whose watched door is a *delayed* opening in away mode; `silent` is a second delayed
+/// door that has never published a state.
+async fn delayed_rig() -> (Rig, String) {
+    let mut silent = String::new();
+    let rig = Rig::with(|hub, settings| {
+        silent = entity_id(hub, "back_door");
+        settings.sensors[0].entry = Entry::Delayed;
+        settings.sensors.push(SensorRule {
+            entity: silent.clone(),
+            kind: SensorKind::Opening,
+            modes: BTreeSet::from([ArmMode::Away]),
+            entry: Entry::Delayed,
+        });
+    })
+    .await;
+    (rig, silent)
+}
+
+#[tokio::test(start_paused = true)]
+async fn delayed_door_with_known_state_goes_pending() {
+    use oikos_core::model::AlarmMode;
+    let (mut rig, _) = delayed_rig().await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+    rig.hub.ingest_message("fx/front_door", b"open", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "pending");
+}
+
+#[tokio::test(start_paused = true)]
+#[ignore = "reproduces: the first-ever value of a watched sensor with no registry state is swallowed as a seed"]
+async fn first_ever_open_of_a_stateless_sensor_goes_pending() {
+    use oikos_core::model::AlarmMode;
+    let (mut rig, silent) = delayed_rig().await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+    assert!(rig.hub.entity_view(&silent).is_some());
+    // Live (non-retained) first publication of `open` on a sensor never seen before.
+    rig.hub.ingest_message("fx/back_door", b"open", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "pending", "first value was taken for a seed");
+}
