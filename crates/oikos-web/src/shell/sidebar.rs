@@ -8,7 +8,7 @@ use wasm_bindgen::JsCast;
 
 use super::route::{Section, section_for};
 use crate::api::encode_id;
-use crate::app::landing_dashboard;
+use crate::app::landing_path;
 use crate::components::status_pill::StatusPill;
 use crate::dashboards::create_dashboard;
 use crate::house::House;
@@ -53,7 +53,7 @@ pub fn Sidebar(
             .strip_prefix("/dashboards/")
             .map(|rest| rest.split('/').next().unwrap_or("").to_owned())
     });
-    // The open dashboard, or the one "/" lands on when no known dashboard is open.
+    // The open dashboard, or where "/" lands (the house) when no known dashboard is open.
     let overview_href = move || {
         house
             .dashboards
@@ -61,9 +61,8 @@ pub fn Sidebar(
                 open_dashboard
                     .get()
                     .filter(|id| list.iter().any(|d| &d.dashboard.id == id))
-                    .or_else(|| landing_dashboard(list))
             })
-            .map_or_else(|| "/".to_owned(), |id| format!("/dashboards/{id}"))
+            .map_or_else(landing_path, |id| format!("/dashboards/{id}"))
     };
     // When the open dashboard is listed underneath, it is the page and Overview only its section.
     let overview_current = move || {
