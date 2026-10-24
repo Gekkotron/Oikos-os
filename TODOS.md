@@ -90,7 +90,7 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 The Home solar card and the `/solar` page read as messy (`solar/card.rs`, `solar/curve.rs`, `screens/solar.rs`, strings in `i18n.rs`):
 
 - [ ] Headline "4,0 / 3,8 kWh" has no labels — say which figure is measured and which is the forecast (e.g. "4,0 kWh produits · prévu 3,8").
-- [ ] "reste ≈ 1,6" has no unit; add kWh.
+- [ ] **"reste ≈ 1,6" reads as nonsense once production beats the forecast.** It is `now.remaining_today` = the forecast summed from now to midnight (`oikos-solcast` `remaining()`), so "4,0 / 3,8 · reste ≈ 1,6" seems to say 1,6 kWh are still missing although 4,0 > 3,8 is already done. Replace it with an end-of-day projection when the measured figure is known: "fin de journée ≈ 5,6 kWh" = measured + forecast still to come (EN "≈ 5.6 kWh by tonight"); fall back to "encore ≈ 1,6 kWh prévus" without a measurement. Always print the kWh unit. Applies to the card and `/solar` (`i18n::solar_bottom`).
 - [ ] The card caption wraps mid-group ("Demain 1,9 kWh (1–" / "3)"); keep "(1–3)" with its value (non-breaking space or a shorter line), or drop the range on the card.
 - [ ] The measured fill is opaque and drawn over the forecast: before "now" it hides the forecast band and the dashed median, so measured vs forecast can't be compared. Draw measured as a line (or a translucent fill) above the band, and keep the median visible across the whole day.
 - [ ] The measured series ends with a steep straight drop to a vertical edge just before the now line (linear join of the last hourly point to the current reading). Smooth or step it, and end it exactly at now.
