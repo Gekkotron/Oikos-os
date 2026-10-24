@@ -134,7 +134,7 @@ pub fn SolarCard() -> impl IntoView {
         let l = lang.get();
         let line = match d.stale_at {
             Some(at) => i18n::data_from(l, at),
-            None => i18n::solar_bottom(l, d.remaining, d.tomorrow),
+            None => i18n::solar_bottom(l, d.remaining, d.measured, d.tomorrow),
         };
         (!line.is_empty()).then_some(line)
     };

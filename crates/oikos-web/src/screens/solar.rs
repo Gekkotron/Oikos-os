@@ -441,7 +441,7 @@ fn content(
                 <div>
                     {from_data(|d, l| i18n::solar_power_line(l, d.measured_kw, d.forecast_kw))}
                 </div>
-                <div>{from_data(|d, l| i18n::solar_bottom(l, d.remaining, d.tomorrow))}</div>
+                <div>{from_data(|d, l| i18n::solar_bottom(l, d.remaining, d.measured, d.tomorrow))}</div>
             </div>
         </div>
 
