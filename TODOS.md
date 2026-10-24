@@ -7,9 +7,6 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 ### P1 — correctness / forward-compat
 
 - **New widget cards — browser check 2026-10-24 (all four render with live data, desktop and phone).** Polish found:
-  - HistoryChart widget nests the chart's own framed card inside the widget card (double border); drop one frame.
-  - Chart caption leaks the internal fill mode "held-until-next-row" (`components/history_chart/view.rs:280`, also on the history page) and wraps in two cramped columns in a 2x1 widget.
-  - Time axis labels collide at the right edge ("12:00now").
   - New widget strings are English only on the FR UI: metric labels, "Run", "Last 24 hours", and the group summaries "All on/off/open/closed" (`groups.rs`). Route them through `i18n.rs`.
   - EnergyStat label "Today (kWh)" repeats the unit shown in the value ("12.4 kWh").
   - RoomGroup at 1x1: the cover summary ("All closed") wraps beside the three buttons; stack them or hide the text at 1x1.

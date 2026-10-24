@@ -81,6 +81,13 @@
   min-width: 0;
 }
 
+/* The widget is the card: the chart drops its own frame inside it. */
+.widget-history .history-chart {
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
 .widget-history__title {
   color: var(--muted);
 }

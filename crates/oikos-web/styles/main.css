@@ -5296,8 +5296,15 @@ html:has(.flow-canvas-screen) {
   white-space: nowrap;
 }
 
+/* "now" sits at the right edge; anchor it there instead of overflowing the chart. */
+.history-chart__axis-x > span:last-child {
+  transform: translateX(-100%);
+}
+
 .history-chart__legend {
   display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
   justify-content: space-between;
   margin-top: 10px;
   font: 400 11px/14px var(--font-body);

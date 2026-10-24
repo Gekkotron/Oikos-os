@@ -277,7 +277,7 @@ fn range_name(r: HistoryRange) -> &'static str {
 }
 
 fn legend_left_series(r: HistoryRange) -> String {
-    format!("{} · held-until-next-row", range_name(r))
+    range_name(r).to_owned()
 }
 
 fn legend_left_counter(r: HistoryRange) -> String {
