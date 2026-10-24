@@ -65,6 +65,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "clear_climate_override",
     "learn_climate_zone",
     "get_weather",
+    "get_solar",
 ];
 
 fn fixtures() -> PathBuf {

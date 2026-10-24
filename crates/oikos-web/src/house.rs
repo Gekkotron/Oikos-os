@@ -215,6 +215,8 @@ impl House {
             WsEvent::AmbianceApplied { report } => self
                 .ambiance_reports
                 .update(|m| _ = m.insert(report.ambiance.clone(), report)),
+            // The web solar views (a later plan) will use this.
+            WsEvent::SolarChanged => {}
         }
     }
 }
@@ -244,6 +246,7 @@ mod tests {
             name: id.into(),
             order: 1,
             widgets: (0..widgets).map(widget).collect(),
+            show_header: false,
         }
     }
 

@@ -79,6 +79,8 @@ pub enum WsEvent {
     },
     /// The outdoor weather was refreshed: refetch `GET /api/v1/weather`.
     WeatherChanged,
+    /// The solar forecast was refreshed: refetch `GET /api/v1/solar`.
+    SolarChanged,
     /// The home settings document changed.
     HomeSettingsChanged {
         settings: HomeSettings,
@@ -149,6 +151,18 @@ mod tests {
             serde_json::to_value(WsEvent::WeatherChanged).unwrap(),
             json!({"type": "weather_changed"})
         );
+    }
+
+    #[test]
+    fn solar_changed_serializes() {
+        assert_eq!(
+            serde_json::to_value(WsEvent::SolarChanged).unwrap(),
+            json!({"type": "solar_changed"})
+        );
+    }
+
+    #[test]
+    fn home_settings_changed_serializes() {
         let e = WsEvent::HomeSettingsChanged {
             settings: HomeSettings::default(),
         };

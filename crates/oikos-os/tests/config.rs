@@ -488,3 +488,97 @@ fn weather_from_toml_and_env() {
         Ok(())
     });
 }
+
+mod solcast {
+    #![allow(clippy::result_large_err)]
+    use super::*;
+    use oikos_os::config::SolcastConfig;
+
+    fn enabled(sites: &[&str], daily_limit: u32, key: Option<&str>) -> SolcastConfig {
+        SolcastConfig {
+            enabled: true,
+            sites: sites.iter().map(|s| (*s).to_owned()).collect(),
+            daily_limit,
+            api_key_file: key.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn solcast_defaults() {
+        Jail::expect_with(|jail| {
+            let cfg = Config::load(None)?;
+            assert!(!cfg.solcast.enabled);
+            assert!(cfg.solcast.sites.is_empty());
+            assert_eq!(cfg.solcast.daily_limit, 10);
+            assert_eq!(
+                cfg.solcast.api_key_file.as_deref(),
+                Some(std::path::Path::new("secrets/solcast.key"))
+            );
+            jail.create_dir("etc")?;
+            jail.create_file("etc/hub.toml", "")?;
+            let cfg = Config::load(Some(std::path::Path::new("etc/hub.toml")))?;
+            assert!(
+                cfg.solcast
+                    .api_key_file
+                    .unwrap()
+                    .ends_with("etc/secrets/solcast.key")
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn solcast_validate_messages() {
+        Jail::expect_with(|jail| {
+            let err = |c: SolcastConfig| c.validate().unwrap_err();
+            assert_eq!(
+                err(enabled(&[], 10, None)),
+                "[solcast] sites needs at least one rooftop resource id"
+            );
+            assert_eq!(
+                err(enabled(&["a", " "], 10, None)),
+                "[solcast] sites has an empty id"
+            );
+            assert_eq!(
+                err(enabled(&["a b"], 10, None)),
+                "[solcast] sites has an id with characters other than letters, digits, - and _"
+            );
+            assert_eq!(
+                err(enabled(&["a/../b"], 10, None)),
+                "[solcast] sites has an id with characters other than letters, digits, - and _"
+            );
+            assert_eq!(
+                err(enabled(&["a", "b", "c"], 2, None)),
+                "[solcast] daily_limit is 2: it must be at least the number of sites (3)"
+            );
+            assert_eq!(
+                err(enabled(&["a"], 10, Some("missing.key"))),
+                format!(
+                    "[solcast] cannot read the API key file missing.key: {}",
+                    std::fs::read_to_string("missing.key").unwrap_err()
+                )
+            );
+            jail.create_file("empty.key", " \n")?;
+            assert_eq!(
+                err(enabled(&["a"], 10, Some("empty.key"))),
+                "[solcast] the API key file empty.key is empty"
+            );
+            jail.create_file("ok.key", "  k \n")?;
+            let ok = enabled(&["abcd-1234_x"], 10, Some("ok.key"));
+            assert_eq!(ok.validate(), Ok(()));
+            assert_eq!(ok.read_key().unwrap(), "k");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn solcast_disabled_is_always_valid() {
+        let cfg = SolcastConfig {
+            enabled: false,
+            sites: vec![String::new(), "a b".to_owned()],
+            daily_limit: 0,
+            api_key_file: Some("nope.key".into()),
+        };
+        assert_eq!(cfg.validate(), Ok(()));
+    }
+}

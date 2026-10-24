@@ -1,10 +1,10 @@
 ---
 title: MCP tools
 sidebar_position: 3
-description: The 41 tools and the one resource of the hub's MCP server, with their arguments.
+description: The 42 tools and the one resource of the hub's MCP server, with their arguments.
 ---
 
-The MCP server is at `http://<host>:8081/mcp` (streamable HTTP, stateful sessions) and offers **forty-one tools** and **one resource**. It has the same trust model as the REST API on the same port: LAN-only, no authentication in v1. The tools are defined in [`crates/oikos-os/src/mcp`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/mcp). For setup in Claude Code, Codex and Claude Desktop, see [Talking to the house (MCP)](../users/assistants-mcp.md).
+The MCP server is at `http://<host>:8081/mcp` (streamable HTTP, stateful sessions) and offers **forty-two tools** and **one resource**. It has the same trust model as the REST API on the same port: LAN-only, no authentication in v1. The tools are defined in [`crates/oikos-os/src/mcp`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/mcp). For setup in Claude Code, Codex and Claude Desktop, see [Talking to the house (MCP)](../users/assistants-mcp.md).
 
 A failed tool call answers in-band (`isError: true` with the reason as text) so the assistant can retry with better arguments. A refused publish (broker link down) is the same in-band error.
 
@@ -97,6 +97,12 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 | --- | --- |
 | `get_weather` | The outdoor weather from Open-Meteo: now, today, rain in the next hour, tonight's low and the next five days, in metric units, with `stale` set when the data is old. The same document as `GET /api/v1/weather`. Answers `weather unavailable` while `[weather] enabled` is `false` or before the first fetch. See [Weather](../users/weather.md). |
 
+## Solar
+
+| Tool | What it does |
+| --- | --- |
+| `get_solar` | The Solcast solar forecast: today, tomorrow, the next seven days, the 30-minute periods and the request budget, with `stale` set when the data is old. The same document as `GET /api/v1/solar`. Answers `solar unavailable` while `[solcast] enabled` is `false` or before the first fetch. See [Solar forecast](../users/solar-forecast.md). |
+
 ## Home settings
 
 | Tool | What it does |
@@ -133,4 +139,4 @@ See [Ambiances](../users/ambiances.md) for the action types, the category rules 
 
 ## Count
 
-Twenty-two tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, home settings), six in `flow_tools.rs`, nine in `climate_tools.rs` and four in `ambiance_tools.rs`: 22 + 6 + 9 + 4 = 41.
+Twenty-three tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs`, nine in `climate_tools.rs` and four in `ambiance_tools.rs`: 23 + 6 + 9 + 4 = 42.

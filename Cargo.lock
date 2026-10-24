@@ -2292,6 +2292,7 @@ dependencies = [
  "oikos-core",
  "oikos-frigate",
  "oikos-push",
+ "oikos-solcast",
  "oikos-watchdog",
  "reqwest",
  "rmcp",
@@ -2327,6 +2328,20 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "oikos-solcast"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "chrono-tz",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

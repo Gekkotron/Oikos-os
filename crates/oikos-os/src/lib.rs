@@ -18,5 +18,6 @@ pub mod mcp;
 pub mod media;
 pub mod mqtt;
 pub mod pictures;
+pub mod solar;
 pub mod virtual_entities;
 pub mod weather;

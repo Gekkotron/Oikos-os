@@ -10,6 +10,9 @@ pub struct Dashboard {
     pub name: String,
     pub order: u32,
     pub widgets: Vec<Widget>,
+    /// Shows the house overview header (greeting, chips, weather) above the widgets.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub show_header: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -209,9 +212,28 @@ mod tests {
                     },
                 },
             ],
+            show_header: true,
         };
         let json = serde_json::to_string(&d).unwrap();
         assert_eq!(serde_json::from_str::<Dashboard>(&json).unwrap(), d);
+    }
+
+    #[test]
+    fn show_header_defaults_off_and_is_omitted_when_off() {
+        let d: Dashboard =
+            serde_json::from_str(r#"{ "id": "d", "name": "D", "order": 1, "widgets": [] }"#)
+                .unwrap();
+        assert!(!d.show_header);
+        assert!(!serde_json::to_string(&d).unwrap().contains("show_header"));
+        let on = Dashboard {
+            show_header: true,
+            ..d
+        };
+        assert!(
+            serde_json::to_string(&on)
+                .unwrap()
+                .contains(r#""show_header":true"#)
+        );
     }
 
     #[test]

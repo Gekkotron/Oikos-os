@@ -9,6 +9,7 @@ use crate::dashboards::config_sheet::{DashboardSettingsSheet, WidgetConfigSheet}
 use crate::dashboards::edit::{EditState, EditToolbar, add_widget_handler};
 use crate::dashboards::grid::Grid;
 use crate::dashboards::library::WidgetLibrary;
+use crate::home_header::view::HomeHeader;
 use crate::house::House;
 use crate::screens::home::HomeScreen;
 
@@ -32,17 +33,22 @@ pub fn DashboardScreen() -> impl IntoView {
         <Show
             when=move || id.get() == HOUSE_ID
             fallback=move || {
-                // Tracking `known` keeps the fallback reactive to the fetch landing after
-                // first paint.
+                // Reading `known` keeps the fallback reactive to the fetch landing after first
+                // paint. It must be read, not tracked: a memo runs (and subscribes to the list)
+                // only when read.
                 let current_id = id.get();
-                known.track();
-                match house.dashboard(&current_id) {
+                let found = known.get().then(|| house.dashboard(&current_id)).flatten();
+                match found {
                     Some(view) => {
                         // The sidebar's "New dashboard" lands here with ?edit=1.
                         let initial_edit = query.read_untracked().get("edit").as_deref() == Some("1");
                         let edit = EditState::new(view.dashboard.clone(), initial_edit);
                         let widgets = Signal::derive(move || edit.draft.get().widgets);
+                        let show_header = move || edit.draft.with(|d| d.show_header);
                         view! {
+                            <Show when=show_header>
+                                <HomeHeader />
+                            </Show>
                             <EditToolbar state=edit />
                             // The library sits beside the grid while editing; the layout wraps
                             // both only then so the plain grid keeps its full width.

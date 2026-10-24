@@ -70,6 +70,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "clear_climate_override",
     "learn_climate_zone",
     "get_weather",
+    "get_solar",
 ];
 
 const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
