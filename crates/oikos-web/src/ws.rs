@@ -35,10 +35,11 @@ pub fn connect(path: &str, house: House) {
                                         backoff = FIRST_BACKOFF_MS;
                                     }
                                     house.apply(event);
-                                    // Weather and home settings are not in the snapshot: refetch
-                                    // them on every (re)connect.
+                                    // Weather, home settings and the solar forecast are not in
+                                    // the snapshot: refetch them on every (re)connect.
                                     if connected {
                                         house.refresh_weather();
+                                        house.refresh_solar();
                                         house.refresh_home_settings();
                                     }
                                 }

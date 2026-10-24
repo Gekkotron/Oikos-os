@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Duration, NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -17,7 +17,7 @@ use crate::house::House;
 use crate::i18n::{self, Lang, SolarText as T, WeatherText, solar_text, weather_text};
 use crate::nav::BackLink;
 use crate::screens::flow_canvas::sun::house_place;
-use crate::solar::card::{curve_points, today_total};
+use crate::solar::card::{curve_points, today_is_current, today_total};
 use crate::solar::curve::{Curve, day_curve, producing_span};
 use crate::solar::measured::{Generation, SolarMeasured};
 use crate::solar::model::{
@@ -28,8 +28,11 @@ use crate::solar::model::{
 
 const W: f64 = 600.0;
 const H: f64 = 180.0;
-/// Days of history read for yesterday, the accuracy and the month.
-const HISTORY_DAYS: u16 = 30;
+/// Days of history read for yesterday, the accuracy and the month: the hub's daily window is
+/// today−(n−1)…today and accepts only 7, 30 or 365, so on the 31st the 1st needs the long one.
+fn history_days(today: NaiveDate) -> u16 {
+    if today.day() > 30 { 365 } else { 30 }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
@@ -105,6 +108,7 @@ fn page_data(
         let day = periods_in(&s.periods, from, to);
         let today_kwh = measured.and_then(|m| m.today_kwh.get());
         let so_far = forecast_so_far(&day, now);
+        let current = today_is_current(s, today);
         // Only the days before today count as measured history; today comes from `today_kwh`.
         let past: BTreeMap<NaiveDate, f64> = daily
             .map(|d| d.range(..today).map(|(k, v)| (*k, *v)).collect())
@@ -124,8 +128,8 @@ fn page_data(
         Some(PageData {
             measured: today_kwh,
             so_far,
-            total: today_total(s, &day),
-            range: s.today.low.zip(s.today.high),
+            total: today_total(s, &day, today),
+            range: current.then(|| s.today.low.zip(s.today.high)).flatten(),
             remaining: s.now.remaining_today,
             tomorrow: tomorrow(s, today).map(|d| (d.estimate, d.low, d.high)),
             measured_kw,
@@ -134,14 +138,20 @@ fn page_data(
                 .today
                 .peak
                 .as_ref()
+                .filter(|_| current)
                 .and_then(|p| Some((p.power, local_time(zone, p.at)?))),
-            best: s.today.best_hours.as_ref().and_then(|b| {
-                Some((
-                    local_time(zone, b.from)?,
-                    local_time(zone, b.to)?,
-                    s.today.peak.as_ref().map(|p| best_hours_floor(p.power)),
-                ))
-            }),
+            best: s
+                .today
+                .best_hours
+                .as_ref()
+                .filter(|_| current)
+                .and_then(|b| {
+                    Some((
+                        local_time(zone, b.from)?,
+                        local_time(zone, b.to)?,
+                        s.today.peak.as_ref().map(|p| best_hours_floor(p.power)),
+                    ))
+                }),
             gap: gap_percent(today_kwh, so_far),
             sun: (!fallback).then_some(sunrise.zip(sunset)).flatten(),
             yesterday: yesterday_row.map(|y| (y, late)),
@@ -201,20 +211,16 @@ fn page_curve(
 
 /// kWh per house-local date over the last 30 days, summed over the solar sources: the counters
 /// when there are any, else the power sensors. `None` when a source fails or none has data.
-async fn load_daily(zone: Tz, src: SolarSources) -> Option<BTreeMap<NaiveDate, f64>> {
+async fn load_daily(zone: Tz, days: u16, src: SolarSources) -> Option<BTreeMap<NaiveDate, f64>> {
     let mut maps = Vec::new();
     if src.counters.is_empty() {
         for p in &src.powers {
-            let d = fetch_daily(&p.id, HISTORY_DAYS, EnergyKind::Power)
-                .await
-                .ok()?;
+            let d = fetch_daily(&p.id, days, EnergyKind::Power).await.ok()?;
             maps.push(daily_by_date(zone, &d.days, p.sign));
         }
     } else {
         for id in &src.counters {
-            let d = fetch_daily(id, HISTORY_DAYS, EnergyKind::Counter)
-                .await
-                .ok()?;
+            let d = fetch_daily(id, days, EnergyKind::Counter).await.ok()?;
             maps.push(daily_by_date(zone, &d.days, 1.0));
         }
     }
@@ -500,8 +506,9 @@ pub fn SolarScreen() -> impl IntoView {
             .with_untracked(|c| house_place(c.as_ref()).1);
         let g = generation.next();
         let generation = generation.clone();
+        let days = history_days(local_date(zone, unix_now()));
         spawn_local(async move {
-            let loaded = load_daily(zone, src).await;
+            let loaded = load_daily(zone, days, src).await;
             if generation.is_current(g) {
                 daily.set(loaded);
             }
@@ -533,5 +540,21 @@ pub fn SolarScreen() -> impl IntoView {
                 }
             }}
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn date(d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 10, d).unwrap()
+    }
+
+    #[test]
+    fn history_window_covers_the_first_of_the_month() {
+        assert_eq!(history_days(date(1)), 30);
+        assert_eq!(history_days(date(30)), 30);
+        assert_eq!(history_days(date(31)), 365);
     }
 }

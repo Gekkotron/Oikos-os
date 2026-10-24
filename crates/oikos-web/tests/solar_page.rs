@@ -1,6 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
-use chrono::Duration;
+use chrono::{Duration, NaiveDate, TimeZone};
 use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::Router;
@@ -17,28 +17,47 @@ fn now_s() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
 }
 
+/// The instant of a house-local wall-clock time on `date` (DST-safe: no `from + n * 3600`).
+fn at(date: NaiveDate, h: u32, m: u32) -> u64 {
+    chrono_tz::Europe::Paris
+        .from_local_datetime(&date.and_hms_opt(h, m, 0).unwrap())
+        .earliest()
+        .expect("local time exists")
+        .timestamp() as u64
+}
+
+/// Local noon today, inside the producing periods.
+fn noon() -> u64 {
+    at(local_date(chrono_tz::Europe::Paris, now_s()), 12, 0)
+}
+
 /// Today's and tomorrow's 48 half-hour periods (a bell from 08:00 to 18:00 local), 7 days, and
 /// `sites` roofs.
 fn solar(sites: usize) -> SolarView {
     let zone = chrono_tz::Europe::Paris;
     let today = local_date(zone, now_s());
-    let bell = |from: u64| {
+    let bell = |date: NaiveDate| {
+        let end_of_day = day_bounds(zone, date).1;
         (1..=48u64)
             .map(|i| {
+                let end = if i == 48 {
+                    end_of_day
+                } else {
+                    at(date, (i / 2) as u32, (i % 2 * 30) as u32)
+                };
                 let hour = (i as f64 - 0.5) / 2.0;
                 let kw = if (8.0..18.0).contains(&hour) {
                     (3.0 - (hour - 13.0).abs() * 0.5).max(0.2)
                 } else {
                     0.0
                 };
-                serde_json::json!({"end": from + i * 1800, "minutes": 30, "estimate": kw,
+                serde_json::json!({"end": end, "minutes": 30, "estimate": kw,
                                    "low": kw * 0.6, "high": kw * 1.3})
             })
             .collect::<Vec<_>>()
     };
-    let (from, to) = day_bounds(zone, today);
-    let mut periods = bell(from);
-    periods.extend(bell(to));
+    let mut periods = bell(today);
+    periods.extend(bell(today + Duration::days(1)));
     let days: Vec<_> = (1..=7)
         .map(|n| {
             let d = (today + Duration::days(n)).format("%Y-%m-%d").to_string();
@@ -54,8 +73,8 @@ fn solar(sites: usize) -> SolarView {
         "now": {"power": 0.7, "remaining_today": 5.2},
         "today": {"date": today.format("%Y-%m-%d").to_string(), "estimate": 12.4,
                   "low": 9.8, "high": 14.1,
-                  "peak": {"power": 3.0, "at": from + 13 * 3600},
-                  "best_hours": {"from": from + 10 * 3600, "to": from + 14 * 3600}},
+                  "peak": {"power": 3.0, "at": at(today, 13, 0)},
+                  "best_hours": {"from": at(today, 10, 0), "to": at(today, 14, 0)}},
         "days": days, "sites": sites, "periods": periods,
         "history": {"forecasts": []}
     }))
@@ -174,7 +193,7 @@ async fn nothing_before_first_fetch() {
 
 #[wasm_bindgen_test]
 async fn clock_tick_keeps_the_page_nodes() {
-    let clock = RwSignal::new(now_s());
+    let clock = RwSignal::new(noon());
     let host = mount_with(Some(solar(2)), true, clock).await;
     let button = host
         .query_selector(".solar-tabs button")
@@ -184,8 +203,10 @@ async fn clock_tick_keeps_the_page_nodes() {
         .query_selector(".solar-page__curve")
         .unwrap()
         .expect("curve card");
+    let before = host.inner_html();
     clock.update(|t| *t += 60);
     tick().await;
+    assert_ne!(before, host.inner_html(), "the tick changed nothing");
     assert!(button.is_connected() && curve.is_connected());
     let again = host.query_selector(".solar-tabs button").unwrap().unwrap();
     assert!(button.is_same_node(Some(&again)));

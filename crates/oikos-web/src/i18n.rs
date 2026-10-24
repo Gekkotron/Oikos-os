@@ -893,7 +893,7 @@ pub fn solar_text(lang: Lang, k: SolarText) -> &'static str {
         Roofs => ("Roofs", "Toits"),
         Roof => ("Roof", "Toit"),
         Month => ("This month", "Ce mois-ci"),
-        NextDays => ("Next 7 days", "7 prochains jours"),
+        NextDays => ("Next days", "Prochains jours"),
         Unavailable => (
             "The solar forecast is unavailable.",
             "Les prévisions solaires sont indisponibles.",

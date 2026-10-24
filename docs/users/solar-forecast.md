@@ -96,7 +96,7 @@ Entity ids are `solar_<key>` for the keys below, for instance `solar_forecast_to
 
 Click the card to open the solar page. The card is hidden when the hub has no forecast or the forecast is more than 24 hours old. When the forecast is stale but less than 24 hours old, the bottom line says "Data from HH:MM". On a phone the two cards stack, and the curve becomes a thin strip.
 
-**Measured or forecast.** The amber area is measured production. It comes from the entities whose energy role is **Solar**, set in the entity's settings as for the Energy tab. Several are added together, and **Invert** is honoured. When their kWh counters exist, the card's "today" figures are the same as on the Energy page.
+**Measured or forecast.** The amber area is measured production. It comes from the entities whose energy role is **Solar**, set in the entity's settings as for the Energy tab. Several are added together, and **Invert** is honoured. When nothing is measured, the area shows the forecast so far in a lighter shade and the title starts with "≈". When their kWh counters exist, the card's "today" figures are the same as on the Energy page.
 
 When there is no solar entity, or history is off, the card fills the curve with the forecast up to now, and the title starts with "≈". That figure is the forecast so far, not a measurement.
 
@@ -113,7 +113,7 @@ When there is no solar entity, or history is off, the card fills the curve with 
   - **7-day accuracy**: needs at least 3 days with a morning forecast above 0.5 kWh.
   - **Roofs**: only with two or more rooftop sites.
   - **This month**.
-- the next 7 days as bars;
+- the next days as bars;
 - a footer with the update time, the next refresh and the Solcast calls used today.
 
 Each tile hides when its data is missing. **Yesterday**, **7-day accuracy** and **This month** need history.

@@ -1,7 +1,7 @@
 //! The solar card of the home header: today's kWh, the day curve and tomorrow, one link to the
 //! solar page.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use leptos::prelude::*;
 use leptos_router::components::A;
 use oikos_api::{SolarPeriod, SolarView};
@@ -55,9 +55,19 @@ pub(crate) fn curve_points(
     }
 }
 
-/// Today's forecast total, kWh: the hub's figure, else the sum of the day's periods.
-pub(crate) fn today_total(s: &SolarView, day: &[SolarPeriod]) -> Option<f64> {
-    s.today.estimate.or_else(|| {
+/// Whether the hub's `today` block is about the house-local `today`. Just after midnight it can
+/// still describe yesterday.
+pub(crate) fn today_is_current(s: &SolarView, today: NaiveDate) -> bool {
+    s.today.date == today.format("%Y-%m-%d").to_string()
+}
+
+/// Today's forecast total, kWh: the hub's figure when its `today` block is current, else the
+/// sum of the day's periods.
+pub(crate) fn today_total(s: &SolarView, day: &[SolarPeriod], today: NaiveDate) -> Option<f64> {
+    let hub = today_is_current(s, today)
+        .then_some(s.today.estimate)
+        .flatten();
+    hub.or_else(|| {
         (!day.is_empty()).then(|| {
             day.iter()
                 .map(|p| p.estimate * f64::from(p.minutes) / 60.0)
@@ -77,7 +87,7 @@ fn card_data(house: House, now: u64, measured: Option<SolarMeasured>) -> Option<
         let real: Vec<(u64, f64)> = measured.map(|m| m.periods.get()).unwrap_or_default();
         let (points, is_forecast) = curve_points(real, &day, now);
         let so_far = forecast_so_far(&day, now);
-        let total = today_total(s, &day);
+        let total = today_total(s, &day, today);
         let mut data = CardData {
             measured: today_kwh,
             so_far,
@@ -158,5 +168,43 @@ pub fn SolarCard() -> impl IntoView {
             </svg>
             {move || bottom().map(|b| view! { <span class="solar-card__line">{b}</span> })}
         </A>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view(today_date: &str) -> SolarView {
+        serde_json::from_value(serde_json::json!({
+            "fetched_at": 0, "stale": false, "next_refresh_at": null,
+            "calls_today": 1, "daily_limit": 10,
+            "now": {"power": null, "remaining_today": null},
+            "today": {"date": today_date, "estimate": 12.4, "low": 8.0, "high": 15.0,
+                      "peak": null, "best_hours": null},
+            "days": [], "sites": [], "periods": [],
+            "history": {"forecasts": []}
+        }))
+        .expect("fixture")
+    }
+
+    fn period(end: u64, estimate: f64) -> SolarPeriod {
+        serde_json::from_value(serde_json::json!({
+            "end": end, "minutes": 30, "estimate": estimate, "low": estimate, "high": estimate
+        }))
+        .expect("period")
+    }
+
+    #[test]
+    fn stale_today_block_falls_back_to_the_period_sum() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 25).unwrap();
+        let day = [period(1800, 2.0), period(3600, 4.0)];
+        let current = view("2026-10-25");
+        assert!(today_is_current(&current, today));
+        assert_eq!(today_total(&current, &day, today), Some(12.4));
+        let yesterday = view("2026-10-24");
+        assert!(!today_is_current(&yesterday, today));
+        assert_eq!(today_total(&yesterday, &day, today), Some(3.0));
+        assert_eq!(today_total(&yesterday, &[], today), None);
     }
 }

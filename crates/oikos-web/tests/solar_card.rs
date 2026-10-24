@@ -1,6 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
-use chrono::Duration;
+use chrono::{Duration, NaiveDate, TimeZone};
 use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::Router;
@@ -30,14 +30,27 @@ fn weather(fetched_at: u64) -> WeatherView {
     .expect("weather fixture")
 }
 
+/// The instant of a house-local wall-clock time on `date` (DST-safe).
+fn at(date: NaiveDate, h: u32, m: u32) -> u64 {
+    chrono_tz::Europe::Paris
+        .from_local_datetime(&date.and_hms_opt(h, m, 0).unwrap())
+        .earliest()
+        .expect("local time exists")
+        .timestamp() as u64
+}
+
 /// Today's 48 half-hour periods (a bell from 08:00 to 18:00 local) and a tomorrow.
 fn solar(fetched_at: u64, stale: bool) -> SolarView {
     let zone = chrono_tz::Europe::Paris;
     let today = local_date(zone, now_s());
-    let (from, _) = day_bounds(zone, today);
+    let (_, end_of_day) = day_bounds(zone, today);
     let periods: Vec<_> = (1..=48u64)
         .map(|i| {
-            let end = from + i * 1800;
+            let end = if i == 48 {
+                end_of_day
+            } else {
+                at(today, (i / 2) as u32, (i % 2 * 30) as u32)
+            };
             let hour = (i as f64 - 0.5) / 2.0;
             let kw = if (8.0..18.0).contains(&hour) {
                 (3.0 - (hour - 13.0).abs() * 0.5).max(0.2)
@@ -63,8 +76,10 @@ fn solar(fetched_at: u64, stale: bool) -> SolarView {
 
 fn measured_points() -> Vec<(u64, f64)> {
     let zone = chrono_tz::Europe::Paris;
-    let (from, _) = day_bounds(zone, local_date(zone, now_s()));
-    (20..=24u64).map(|i| (from + i * 1800, 1.5)).collect()
+    let today = local_date(zone, now_s());
+    (20..=24u64)
+        .map(|i| (at(today, (i / 2) as u32, (i % 2 * 30) as u32), 1.5))
+        .collect()
 }
 
 async fn mount(
@@ -220,7 +235,8 @@ async fn clock_tick_keeps_the_card_node() {
     document.body().unwrap().append_child(&host).unwrap();
     let house = House::new();
     house.solar.set(Some(solar(now_s(), false)));
-    let clock = RwSignal::new(now_s());
+    let zone = chrono_tz::Europe::Paris;
+    let clock = RwSignal::new(at(local_date(zone, now_s()), 12, 0));
     std::mem::forget(leptos::mount::mount_to(
         host.clone().unchecked_into(),
         move || {
@@ -233,8 +249,10 @@ async fn clock_tick_keeps_the_card_node() {
     ));
     tick().await;
     let before = host.query_selector(".solar-card").unwrap().expect("card");
+    let html = host.inner_html();
     clock.update(|t| *t += 60);
     tick().await;
+    assert_ne!(html, host.inner_html(), "the tick changed nothing");
     let after = host.query_selector(".solar-card").unwrap().expect("card");
     assert!(before.is_same_node(Some(&after)));
     assert!(before.is_connected());
