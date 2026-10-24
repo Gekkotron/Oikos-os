@@ -13,6 +13,7 @@ use oikos_core::types::GenericCaps;
 use oikos_web::commands::Pending;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
+use oikos_web::i18n::Lang;
 use oikos_web::screens::entity_sheet::{EntitySheetScreen, SheetBody};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -294,4 +295,115 @@ async fn update_sheet_shows_available_version() {
     let text = host.text_content().unwrap();
     assert!(text.contains("Firmware 1.0 → 1.1"), "{text}");
     assert!(text.contains("Update available"), "{text}");
+}
+
+fn plug() -> EntityView {
+    let mut e = sensor(1.0);
+    e.id = "switch.pump".into();
+    e.name = "Pump".into();
+    e.kind = Kind::Switch;
+    e.protocol_kind = Kind::Switch;
+    e.component = Kind::Switch.component().to_string();
+    e.ui.show_as = Some("plug".into());
+    e.state.value = StateValue::OnOff(true);
+    e
+}
+
+#[wasm_bindgen_test]
+async fn the_sheet_follows_the_language_without_a_remount() {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+
+    let house = House::new();
+    house.apply(WsEvent::EntityUpserted(plug()));
+    let lang = RwSignal::new(Lang::Fr);
+    let _mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(lang);
+        oikos_web::nav::install_nav();
+        provide_context(Toasts::new());
+        provide_context(Pending::new());
+        view! {
+            <Router>
+                <SheetBody id="switch.pump".to_owned() />
+            </Router>
+        }
+    });
+    tick().await;
+    let text = || host.text_content().unwrap_or_default();
+    for fr in [
+        "Afficher comme",
+        "Prise",
+        "Commandes",
+        "Réglages",
+        "Général",
+        "Enregistrer",
+    ] {
+        assert!(text().contains(fr), "{fr} missing: {}", text());
+    }
+    for en in ["Show as", "Plug", "Controls", "Settings", "General", "Save"] {
+        assert!(!text().contains(en), "{en} present: {}", text());
+    }
+    let html = || host.inner_html();
+    assert!(html().contains("Voir l'historique"), "{}", html());
+
+    lang.set(Lang::En);
+    tick().await;
+    for en in ["Show as", "Plug", "Controls", "Settings", "General", "Save"] {
+        assert!(text().contains(en), "{en} missing: {}", text());
+    }
+    for fr in [
+        "Afficher comme",
+        "Prise",
+        "Commandes",
+        "Réglages",
+        "Général",
+        "Enregistrer",
+    ] {
+        assert!(!text().contains(fr), "{fr} present: {}", text());
+    }
+
+    lang.set(Lang::Fr);
+    tick().await;
+    assert!(text().contains("Afficher comme"), "{}", text());
+}
+
+#[wasm_bindgen_test]
+async fn an_unknown_entity_is_named_in_the_language() {
+    let window = web_sys::window().unwrap();
+    window
+        .history()
+        .unwrap()
+        .push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/entity/ghost"))
+        .unwrap();
+    let document = window.document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+
+    let house = House::new();
+    house.apply(WsEvent::EntityUpserted(sensor(1.0)));
+    let lang = RwSignal::new(Lang::Fr);
+    let _mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(lang);
+        oikos_web::nav::install_nav();
+        provide_context(Toasts::new());
+        provide_context(Pending::new());
+        view! {
+            <Router>
+                <Routes fallback=|| ()>
+                    <Route path=path!("/entity/:id") view=EntitySheetScreen />
+                </Routes>
+            </Router>
+        }
+    });
+    tick().await;
+    let text = || host.text_content().unwrap_or_default();
+    assert!(text().contains("Entité inconnue"), "{}", text());
+    assert!(!text().contains("Unknown entity"), "{}", text());
+    lang.set(Lang::En);
+    tick().await;
+    assert!(text().contains("Unknown entity"), "{}", text());
+    assert!(!text().contains("Entité inconnue"), "{}", text());
 }

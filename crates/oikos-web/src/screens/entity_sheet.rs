@@ -16,7 +16,11 @@ use crate::components::hs_wheel::HsWheel;
 use crate::components::card_place::InSheet;
 use crate::format::{list_label, title_suffix, type_word, wrap_id};
 use crate::house::House;
+use crate::i18n::devices::{
+    DeviceText, availability_text, key_signal, text_signal, use_device_text,
+};
 use crate::i18n::format::{date_time, local_date_time};
+use crate::i18n::{Key, Lang, use_lang};
 use crate::icons::entity_icon;
 use crate::nav::BackLink;
 use crate::override_editor::OverrideEditor;
@@ -31,12 +35,9 @@ pub(crate) fn availability_class(availability: Availability) -> &'static str {
     }
 }
 
+/// The availability in English, for the screens that are not translated yet (Settings, history).
 pub(crate) fn availability_word(availability: Availability) -> &'static str {
-    match availability {
-        Availability::Online => "Online",
-        Availability::Offline => "Offline",
-        Availability::Unknown => "Unknown",
-    }
+    availability_text(Lang::En, availability)
 }
 
 fn pretty<T: serde::Serialize>(value: &T) -> String {
@@ -45,10 +46,10 @@ fn pretty<T: serde::Serialize>(value: &T) -> String {
 
 /// A glass panel with a heading.
 #[component]
-fn Panel(title: &'static str, children: Children) -> impl IntoView {
+fn Panel(#[prop(into)] title: Signal<String>, children: Children) -> impl IntoView {
     view! {
         <section class="sheet__panel">
-            <h2 class="sheet__heading">{title}</h2>
+            <h2 class="sheet__heading">{move || title.get()}</h2>
             {children()}
         </section>
     }
@@ -90,6 +91,7 @@ fn is_white(hs: Option<Hs>) -> bool {
 #[component]
 fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
     let sender = Sender::from_context();
+    let t = use_device_text();
     let shows_colour = Memo::new(move |_| {
         entity.with(|e| {
             e.as_ref()
@@ -124,7 +126,7 @@ fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
     });
     view! {
         <Show when=move || shows_colour.get()>
-            <Panel title="Colour">
+            <Panel title=text_signal(DeviceText::Colour)>
                 <HsWheel value=value on_pick=on_pick />
                 <div class="colour__presets">
                     <button
@@ -135,7 +137,7 @@ fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
                         on:click=move |_| on_pick.run(WHITE)
                     >
                         <span class="colour__swatch colour__swatch--white"></span>
-                        "White"
+                        {move || t(DeviceText::White)}
                     </button>
                 </div>
             </Panel>
@@ -144,11 +146,11 @@ fn ColourPanel(id: String, entity: Memo<Option<EntityView>>) -> impl IntoView {
 }
 
 #[component]
-fn Row(label: &'static str, #[prop(into)] value: String) -> impl IntoView {
+fn Row(#[prop(into)] label: Signal<String>, #[prop(into)] value: Signal<String>) -> impl IntoView {
     view! {
         <div class="sheet__row">
-            <dt>{label}</dt>
-            <dd>{wrap_id(&value)}</dd>
+            <dt>{move || label.get()}</dt>
+            <dd>{move || wrap_id(&value.get())}</dd>
         </div>
     }
 }
@@ -158,47 +160,51 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
     let device: DeviceView = house
         .devices
         .with(|d| d.iter().find(|d| d.id == device_id).cloned())?;
-    let siblings: Vec<(String, String)> = house.entities.with(|m| {
+    let siblings: Vec<EntityView> = house.entities.with(|m| {
         device
             .entity_ids
             .iter()
             .filter(|id| **id != entity.id)
-            .filter_map(|id| {
-                m.get(id)
-                    .map(|e| (e.id.clone(), list_label(crate::i18n::Lang::En, e)))
-            })
+            .filter_map(|id| m.get(id).cloned())
             .collect()
     });
+    let lang = use_lang();
+    let t = use_device_text();
+    let availability = device.availability;
     let dash = || "—".to_owned();
     Some(
         view! {
-            <h3 class="sheet__subheading">"Device"</h3>
+            <h3 class="sheet__subheading">{move || t(DeviceText::Device)}</h3>
             <dl class="sheet__rows">
-                    <Row label="Name" value=device.friendly_name.clone() />
-                    <Row label="Model" value=device.model.clone().unwrap_or_else(dash) />
-                    <Row label="Vendor" value=device.vendor.clone().unwrap_or_else(dash) />
-                    <Row label="IEEE address" value=device.ieee.clone() />
-                    <Row label="Availability" value=availability_word(device.availability) />
+                    <Row label=text_signal(DeviceText::Name) value=device.friendly_name.clone() />
+                    <Row label=text_signal(DeviceText::Model) value=device.model.clone().unwrap_or_else(dash) />
+                    <Row label=text_signal(DeviceText::Vendor) value=device.vendor.clone().unwrap_or_else(dash) />
+                    <Row label=text_signal(DeviceText::IeeeAddress) value=device.ieee.clone() />
                     <Row
-                        label="Battery"
+                        label=text_signal(DeviceText::Availability)
+                        value=Signal::derive(move || availability_text(lang(), availability).to_owned())
+                    />
+                    <Row
+                        label=key_signal(Key::Battery)
                         value=device.battery.map_or_else(dash, |b| format!("{b} %"))
                     />
                     <Row
-                        label="Link quality"
+                        label=text_signal(DeviceText::LinkQuality)
                         value=device.linkquality.map_or_else(dash, |q| q.to_string())
                     />
                 </dl>
                 {(!siblings.is_empty())
                     .then(|| {
                         view! {
-                            <h3 class="sheet__subheading">"Other entities"</h3>
+                            <h3 class="sheet__subheading">{move || t(DeviceText::OtherEntities)}</h3>
                             <ul class="sheet__links">
                                 {siblings
                                     .into_iter()
-                                    .map(|(id, name)| {
+                                    .map(|e| {
+                                        let href = format!("/entity/{}", crate::api::encode_id(&e.id));
                                         view! {
                                             <li>
-                                                <A href=format!("/entity/{}", crate::api::encode_id(&id))>{wrap_id(&name)}</A>
+                                                <A href=href>{move || wrap_id(&list_label(lang(), &e))}</A>
                                             </li>
                                         }
                                     })
@@ -214,7 +220,8 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
 fn state_panel(entity: &EntityView) -> impl IntoView + use<> {
     let value = pretty(&entity.state.value);
     let attributes = pretty(&entity.state.attributes);
-    let lang = crate::i18n::use_lang();
+    let lang = use_lang();
+    let t = use_device_text();
     let last_update = entity.state.last_update;
     let updated = move || {
         last_update.map_or_else(
@@ -223,11 +230,11 @@ fn state_panel(entity: &EntityView) -> impl IntoView + use<> {
         )
     };
     view! {
-        <h3 class="sheet__subheading">"Value"</h3>
+        <h3 class="sheet__subheading">{move || t(DeviceText::Value)}</h3>
         <pre class="sheet__json">{value}</pre>
-        <h3 class="sheet__subheading">"Attributes"</h3>
+        <h3 class="sheet__subheading">{move || t(DeviceText::Attributes)}</h3>
         <pre class="sheet__json">{attributes}</pre>
-        <p class="sheet__updated">"Last update: " {updated}</p>
+        <p class="sheet__updated">{move || t(DeviceText::LastUpdate)} " " {updated}</p>
     }
 }
 
@@ -236,6 +243,8 @@ fn state_panel(entity: &EntityView) -> impl IntoView + use<> {
 #[component]
 pub fn SheetBody(id: String) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
+    let t = use_device_text();
     // What the override editor starts from. It follows outside changes on its own; handing it
     // the live entity would rebuild it (and drop unsaved typing) on every WebSocket echo.
     let initial = house.entities.with_untracked(|m| m.get(&id).cloned());
@@ -253,7 +262,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
                     .map_or_else(|| e.area.clone(), |a| a.name.clone())
             });
             let availability = e.state.availability;
-            let title = match title_suffix(crate::i18n::Lang::En, &e) {
+            let title = match title_suffix(lang(), &e) {
                 Some(suffix) => format!("{} · {suffix}", e.name),
                 None => e.name.clone(),
             };
@@ -262,10 +271,10 @@ pub fn SheetBody(id: String) -> impl IntoView {
                 <div class="sheet__titles">
                     <h1 class="sheet__title">{wrap_id(&title)}</h1>
                     <p class="sheet__subtitle">
-                        {area} " · " {type_word(crate::i18n::Lang::En, &e)} " · "
+                        {area} " · " {type_word(lang(), &e)} " · "
                         <span class=availability_class(availability)></span>
                         " "
-                        {availability_word(availability)}
+                        {availability_text(lang(), availability)}
                     </p>
                 </div>
             }
@@ -279,17 +288,17 @@ pub fn SheetBody(id: String) -> impl IntoView {
             <BackLink />
             {header}
         </header>
-        <Panel title="Controls">
+        <Panel title=text_signal(DeviceText::Controls)>
             <div class="sheet__controls">
                 <InSheet>{move || entity.get().map(card_for)}</InSheet>
             </div>
             <A href=history_href attr:class="chip sheet__history">
-                "View history →"
+                {move || t(DeviceText::ViewHistory)}
             </A>
         </Panel>
         <ColourPanel id=id.clone() entity=entity />
         <GenericPanel entity=entity />
-        <Panel title="Settings">
+        <Panel title=key_signal(Key::Settings)>
             {initial.map(|e| view! { <OverrideEditor entity=e /> })}
         </Panel>
         {move || {
@@ -297,7 +306,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
             (!list.is_empty())
                 .then(|| {
                     view! {
-                        <Panel title="In groups">
+                        <Panel title=text_signal(DeviceText::InGroups)>
                             <ul class="sheet__links">
                                 {list
                                     .into_iter()
@@ -315,7 +324,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
                 })
         }}
         <details class="sheet__panel sheet__details">
-            <summary class="sheet__heading sheet__summary">"Device & diagnostics"</summary>
+            <summary class="sheet__heading sheet__summary">{move || t(DeviceText::DeviceDiagnostics)}</summary>
             {move || entity.get().and_then(|e| device_panel(house, &e))}
             {move || entity.get().map(|e| state_panel(&e))}
         </details>
@@ -325,6 +334,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
 #[component]
 pub fn EntitySheetScreen() -> impl IntoView {
     let house = expect_context::<House>();
+    let t = use_device_text();
     let params = use_params_map();
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
     // `Some(id)` while the house has the entity. One memo carrying the id, so a sheet-to-sheet
@@ -349,7 +359,7 @@ pub fn EntitySheetScreen() -> impl IntoView {
                         <header class="sheet__header">
                             <BackLink />
                             <div class="sheet__titles">
-                                <h1 class="sheet__title">"Unknown entity"</h1>
+                                <h1 class="sheet__title">{move || t(DeviceText::UnknownEntity)}</h1>
                                 <p class="sheet__subtitle">{move || wrap_id(&id.get())}</p>
                             </div>
                         </header>

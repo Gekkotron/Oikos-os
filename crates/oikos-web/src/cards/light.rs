@@ -8,6 +8,7 @@ use super::text::{brightness_percent, light_state_line};
 use super::{Sender, ToggleSwitch};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::format::entity_title;
+use crate::i18n::devices::{DeviceText, use_device_text};
 use crate::i18n::{Key, use_lang, use_text};
 
 /// Whether the entity is on: from `OnOff` (a native switch, or a switch shown as a light) or
@@ -63,6 +64,7 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let lang = use_lang();
     let t = use_text();
+    let td = use_device_text();
     let known = read_on(&entity.state);
     let on = known.unwrap_or(false);
     let light = match &entity.state.value {
@@ -141,8 +143,8 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
             <button
                 type="button"
                 class="swatch"
-                title="Colour"
-                aria-label="Colour: open to change it"
+                title=move || td(DeviceText::Colour)
+                aria-label=move || td(DeviceText::ColourOpen)
                 style:background=color
                 on:click=move |_| open.run(())
             ></button>

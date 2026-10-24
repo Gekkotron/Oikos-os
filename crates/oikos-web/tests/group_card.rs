@@ -1,5 +1,6 @@
-use oikos_web::cards::group::{PRESS_ALL, range_of, switch_text, thermostat_text};
+use oikos_web::cards::group::{range_of, switch_text, thermostat_text};
 use oikos_web::i18n::Lang;
+use oikos_web::i18n::devices::{DeviceText, device_text};
 use serde_json::{Map, Value, json};
 
 #[test]
@@ -34,13 +35,16 @@ fn climate_group_with_targets_19_and_21_shows_the_range() {
         .clone();
     let range = range_of(&attributes);
     assert_eq!(range, Some([19.0, 21.0]));
-    assert_eq!(thermostat_text(range, Some("heat"), None), "19–21 °C");
+    assert_eq!(
+        thermostat_text(Lang::En, range, Some("heat"), None),
+        "19–21\u{a0}°C"
+    );
 }
 
 #[test]
 fn climate_group_without_range_shows_the_mode_or_mixed() {
-    assert_eq!(thermostat_text(None, Some("heat"), None), "Heat");
-    assert_eq!(thermostat_text(None, None, None), "Mixed");
+    assert_eq!(thermostat_text(Lang::En, None, Some("heat"), None), "Heat");
+    assert_eq!(thermostat_text(Lang::En, None, None, None), "Mixed");
 }
 
 #[test]
@@ -51,7 +55,12 @@ fn malformed_range_is_ignored() {
 
 #[test]
 fn button_group_label_is_press_all() {
-    assert_eq!(PRESS_ALL, "Press all");
+    assert_eq!(device_text(Lang::En, DeviceText::PressAll), "Press all");
+    assert_eq!(
+        device_text(Lang::Fr, DeviceText::PressAll),
+        "Tout déclencher"
+    );
+    assert_eq!(thermostat_text(Lang::Fr, None, None, None), "Mixte");
 }
 
 mod summaries {

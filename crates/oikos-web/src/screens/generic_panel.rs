@@ -10,18 +10,9 @@ use crate::cards::Sender;
 use crate::cards::generic::{control_label, control_view};
 use crate::components::now::{Now, unix_now};
 use crate::format::word;
-
-/// "just now", "5 minutes ago", "3 hours ago", "2 days ago".
-pub(crate) fn relative_time(now: u64, then: u64) -> String {
-    let secs = now.saturating_sub(then);
-    let plural = |n: u64, unit: &str| format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" });
-    match secs {
-        0..=59 => "just now".into(),
-        60..=3599 => plural(secs / 60, "minute"),
-        3600..=86_399 => plural(secs / 3600, "hour"),
-        _ => plural(secs / 86_400, "day"),
-    }
-}
+use crate::i18n::devices::{DeviceText, firmware_versions, last_signal, use_device_text};
+use crate::i18n::format::ago;
+use crate::i18n::use_lang;
 
 fn generic_state(entity: &EntityView) -> GenericState {
     match &entity.state.value {
@@ -72,6 +63,7 @@ fn text_field(
 }
 
 fn signal_line(entity: &EntityView, def: &TypeDef, now: u64) -> Option<AnyView> {
+    let lang = use_lang();
     let g = generic_state(entity);
     let last = match g.fields.get(def.primary.as_deref().unwrap_or("last"))? {
         GenericValue::Text(s) => word(s),
@@ -81,14 +73,18 @@ fn signal_line(entity: &EntityView, def: &TypeDef, now: u64) -> Option<AnyView> 
         Some(GenericValue::Number(ms)) if *ms >= 0.0 => Some((*ms / 1000.0) as u64),
         _ => entity.state.last_update,
     };
-    let text = match at {
-        Some(t) => format!("Last: {last}, {}", relative_time(now, t)),
-        None => format!("Last: {last}"),
+    let text = move || {
+        last_signal(
+            lang(),
+            &last,
+            at.map(|t| ago(lang(), now.saturating_sub(t))).as_deref(),
+        )
     };
     Some(view! { <p class="sheet__generic__last">{text}</p> }.into_any())
 }
 
 fn update_line(entity: &EntityView) -> Option<AnyView> {
+    let t = use_device_text();
     let g = generic_state(entity);
     let text = |k: &str| match g.fields.get(k) {
         Some(GenericValue::Text(s)) if !s.is_empty() => Some(s.clone()),
@@ -100,8 +96,8 @@ fn update_line(entity: &EntityView) -> Option<AnyView> {
     Some(
         view! {
             <div class="sheet__generic__row">
-                <span>{format!("Firmware {installed} → {latest}")}</span>
-                {available.then(|| view! { <span class="chip chip--selected">"Update available"</span> })}
+                <span>{firmware_versions(&installed, &latest)}</span>
+                {available.then(|| view! { <span class="chip chip--selected">{move || t(DeviceText::UpdateAvailable)}</span> })}
             </div>
         }
         .into_any(),
@@ -119,6 +115,7 @@ fn picture_primary(def: &TypeDef) -> bool {
 pub fn GenericPanel(entity: Memo<Option<EntityView>>) -> impl IntoView {
     let sender = Sender::from_context();
     let now = use_context::<Now>();
+    let t = use_device_text();
     let applies = Memo::new(move |_| {
         entity.with(|e| {
             e.as_ref()
@@ -174,26 +171,12 @@ pub fn GenericPanel(entity: Memo<Option<EntityView>>) -> impl IntoView {
                     .then(|| {
                         view! {
                             <section class="sheet__panel sheet__generic">
-                                <h2 class="sheet__heading">"Details"</h2>
+                                <h2 class="sheet__heading">{move || t(DeviceText::Details)}</h2>
                                 {sections}
                             </section>
                         }
                     })
             }}
         </Show>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::relative_time;
-
-    #[test]
-    fn relative_time_ladder() {
-        assert_eq!(relative_time(100, 70), "just now");
-        assert_eq!(relative_time(1000, 1000 - 300), "5 minutes ago");
-        assert_eq!(relative_time(10_000, 10_000 - 7200), "2 hours ago");
-        assert_eq!(relative_time(1_000_000, 1_000_000 - 86_400), "1 day ago");
-        assert_eq!(relative_time(5, 10), "just now");
     }
 }

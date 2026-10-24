@@ -6,6 +6,8 @@ use leptos::task::spawn_local;
 use crate::api::rename_area;
 use crate::components::toast::Toasts;
 use crate::house::House;
+use crate::i18n::current_lang;
+use crate::i18n::devices::{DeviceText, device_text, use_device_text};
 use crate::icons;
 
 /// The room heading. `id` is `None` for a chip that is not a room (Favorites, Unassigned), which
@@ -17,6 +19,7 @@ pub fn RoomTitle(
 ) -> impl IntoView {
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
+    let t = use_device_text();
     let editing = RwSignal::new(false);
     let busy = RwSignal::new(false);
     let draft = RwSignal::new(String::new());
@@ -46,7 +49,7 @@ pub fn RoomTitle(
         };
         let next = draft.get_untracked().trim().to_owned();
         if next.is_empty() {
-            toasts.push("A room needs a name");
+            toasts.push(device_text(current_lang(), DeviceText::RoomNeedsName));
             return;
         }
         if next == name.get_untracked() {
@@ -77,8 +80,8 @@ pub fn RoomTitle(
                             <button
                                 type="button"
                                 class="btn btn--round btn--icon room__rename"
-                                aria-label="Rename room"
-                                title="Rename room"
+                                aria-label=move || t(DeviceText::RenameRoom)
+                                title=move || t(DeviceText::RenameRoom)
                                 on:click=start
                                 inner_html=icons::PENCIL
                             ></button>
@@ -98,7 +101,7 @@ pub fn RoomTitle(
                     node_ref=input
                     class="field room__field"
                     type="text"
-                    aria-label="Room name"
+                    aria-label=move || t(DeviceText::RoomName)
                     prop:value=move || draft.get()
                     prop:disabled=move || busy.get()
                     on:input=move |ev| draft.set(event_target_value(&ev))
@@ -109,10 +112,10 @@ pub fn RoomTitle(
                     }
                 />
                 <button type="submit" class="btn room__action" disabled=move || busy.get()>
-                    "Save"
+                    {move || t(DeviceText::Save)}
                 </button>
                 <button type="button" class="btn room__action" on:click=move |_| editing.set(false)>
-                    "Cancel"
+                    {move || t(DeviceText::Cancel)}
                 </button>
             </form>
         </Show>

@@ -9,6 +9,7 @@ use super::{ModeSelect, PowerToggle, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::format::{generic_value, value_class, word};
 use crate::i18n::states::on_off;
+use crate::i18n::{Key, use_text};
 
 /// A control name as button text: `activate` becomes "Activate".
 pub fn control_label(name: &str) -> String {
@@ -83,6 +84,7 @@ pub(crate) fn control_view(
         _ => GenericState::default(),
     };
     let lang = crate::i18n::use_lang();
+    let t = use_text();
     let id = entity.id.clone();
     let control = name.to_owned();
     let send = move |value: Option<serde_json::Value>| {
@@ -168,7 +170,7 @@ pub(crate) fn control_view(
             let open = open_entity(&entity.id);
             view! {
                 <button type="button" class="btn" on:click=move |_| open.run(())>
-                    "Edit"
+                    {move || t(Key::Edit)}
                 </button>
             }
             .into_any()

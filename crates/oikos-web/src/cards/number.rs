@@ -7,10 +7,12 @@ use oikos_core::model::{Command, EntityState, StateValue};
 use super::Sender;
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::format::value_class;
+use crate::i18n::devices::{DeviceText, use_device_text};
 
 #[component]
 pub fn NumberCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let t = use_device_text();
     let label = super::live_value(&entity);
     let caps = &entity.capabilities;
     let (min, max, step) = (
@@ -50,7 +52,7 @@ pub fn NumberCard(entity: EntityView) -> impl IntoView {
                     min=min.to_string()
                     max=max.to_string()
                     step=step.to_string()
-                    aria-label="Value"
+                    aria-label=move || t(DeviceText::Value)
                     prop:value=value.to_string()
                     on:change=on_change
                 />

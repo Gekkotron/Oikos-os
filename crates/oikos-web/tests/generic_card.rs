@@ -13,6 +13,8 @@ use oikos_web::cards::generic::GenericCard;
 use oikos_web::commands::Pending;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
+use oikos_web::i18n::Lang;
+use oikos_web::screens::generic_panel::GenericPanel;
 use oikos_web::screens::home::card_for;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -128,4 +130,33 @@ async fn remote_has_no_home_card() {
     let host = mount(generic("device_automation", &[], "press"), true);
     tick().await;
     assert!(host.query_selector(".card").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn the_generic_panel_follows_the_language_without_a_remount() {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let entity = generic("lock", &["locked"], "locked");
+    let lang = RwSignal::new(Lang::Fr);
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(House::new());
+            provide_context(Toasts::new());
+            provide_context(Pending::new());
+            provide_context(lang);
+            let entity = entity.clone();
+            let memo = Memo::new(move |_| Some(entity.clone()));
+            view! { <GenericPanel entity=memo /> }
+        },
+    ));
+    tick().await;
+    let text = || host.text_content().unwrap_or_default();
+    assert!(text().contains("Détails"), "{}", text());
+    assert!(!text().contains("Details"), "{}", text());
+    lang.set(Lang::En);
+    tick().await;
+    assert!(text().contains("Details"), "{}", text());
+    assert!(!text().contains("Détails"), "{}", text());
 }

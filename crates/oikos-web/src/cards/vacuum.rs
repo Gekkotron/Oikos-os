@@ -11,14 +11,19 @@ use crate::components::card_frame::{CardFrame, open_entity};
 use crate::components::card_place::{CardPlace, use_card_place};
 use crate::components::robot::Robot;
 use crate::format::word;
+use crate::i18n::devices::{DeviceText, device_text};
 use crate::i18n::{Key, Lang, text, use_lang, use_text};
 use crate::icons::vacuum_action_icon;
 
 /// The short button label for a vacuum action.
-fn action_label(action: &str) -> String {
+fn action_label(lang: Lang, action: &str) -> String {
     match action {
-        "return_to_base" => "Dock".into(),
-        "clean_spot" => "Spot".into(),
+        "return_to_base" => device_text(lang, DeviceText::Dock).into(),
+        "clean_spot" => device_text(lang, DeviceText::Spot).into(),
+        "locate" => device_text(lang, DeviceText::Locate).into(),
+        "stop" => device_text(lang, DeviceText::Stop).into(),
+        "start" => text(lang, Key::Start).into(),
+        "pause" => text(lang, Key::Pause).into(),
         other => word(other),
     }
 }
@@ -45,6 +50,7 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let lang = use_lang();
     let t = use_text();
+    let td = crate::i18n::devices::use_device_text();
     let in_sheet = use_card_place() == CardPlace::Sheet;
     let label = super::live_value(&entity);
     let (activity, battery, fan) = match &entity.state.value {
@@ -57,7 +63,7 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
     let battery_view = battery.map(|level| {
         let fill = format!("width: {}%", level.min(100));
         view! {
-            <span class="vacuum__battery" class:vacuum__battery--low=level < 20 title="Battery">
+            <span class="vacuum__battery" class:vacuum__battery--low=level < 20 title=move || t(Key::Battery)>
                 <span class="vacuum__battery-glyph" aria-hidden="true">
                     <span class="vacuum__battery-fill" style=fill></span>
                 </span>
@@ -113,7 +119,8 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
             .cloned()
             .map(|action| {
                 let id = entity.id.clone();
-                let text = action_label(&action);
+                let name = action.clone();
+                let text = move || action_label(lang(), &name);
                 let icon = vacuum_action_icon(&action);
                 view! {
                     <button
@@ -148,7 +155,7 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
         });
         let options = entity.capabilities.fan_speeds.clone();
         view! {
-            <ModeSelect label="Fan speed" options=options selected=fan on_select=on_select captioned=true />
+            <ModeSelect label=Signal::derive(move || td(DeviceText::FanSpeed).to_owned()) options=options selected=fan on_select=on_select captioned=true />
         }
     });
 
@@ -202,13 +209,17 @@ mod tests {
 
     #[test]
     fn short_action_labels() {
-        assert_eq!(action_label("return_to_base"), "Dock");
-        assert_eq!(action_label("clean_spot"), "Spot");
-        assert_eq!(action_label("locate"), "Locate");
-        assert_eq!(action_label("start"), "Start");
-        assert_eq!(action_label("pause"), "Pause");
-        assert_eq!(action_label("stop"), "Stop");
-        assert_eq!(action_label("custom_thing"), "Custom thing");
+        let en = Lang::En;
+        assert_eq!(action_label(en, "return_to_base"), "Dock");
+        assert_eq!(action_label(en, "clean_spot"), "Spot");
+        assert_eq!(action_label(en, "locate"), "Locate");
+        assert_eq!(action_label(en, "start"), "Start");
+        assert_eq!(action_label(en, "pause"), "Pause");
+        assert_eq!(action_label(en, "stop"), "Stop");
+        assert_eq!(action_label(en, "custom_thing"), "Custom thing");
+        assert_eq!(action_label(Lang::Fr, "return_to_base"), "Retour base");
+        assert_eq!(action_label(Lang::Fr, "locate"), "Localiser");
+        assert_eq!(action_label(Lang::Fr, "start"), "Démarrer");
     }
 
     #[test]

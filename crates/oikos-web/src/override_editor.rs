@@ -1,8 +1,6 @@
 //! The settings form of the device sheet: only the controls that apply to the entity (see
 //! [`crate::settings_rules`]), saved as a partial patch of the hub's `UiOverride`.
 
-use std::borrow::Cow;
-
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oikos_api::{EntityView, OverridePatch};
@@ -15,6 +13,11 @@ use crate::components::toast::Toasts;
 use crate::energy::energy_entities;
 use crate::format::word;
 use crate::house::House;
+use crate::i18n::devices::{
+    DeviceText, clear_setting, device_text, key_signal, key_value, text_signal, use_device_text,
+};
+use crate::i18n::states::switch_type_word;
+use crate::i18n::{Key, Lang, current_lang, text, use_lang, use_text};
 use crate::icons::consumer_icon;
 use crate::settings_rules::{Shown, clear_field, order_valid, other_saved, set_type, shown};
 
@@ -67,15 +70,15 @@ fn non_blank(s: String) -> Text {
 
 #[component]
 fn TextField(
-    label: &'static str,
+    #[prop(into)] label: Signal<String>,
     draft: Draft,
     get: fn(&UiOverride) -> Text,
     set: fn(&mut UiOverride, Text),
-    #[prop(optional)] hint: Option<&'static str>,
+    #[prop(optional, into)] hint: Option<Signal<String>>,
 ) -> impl IntoView {
     view! {
         <label class="override__field">
-            <span class="override__label">{label}</span>
+            <span class="override__label">{move || label.get()}</span>
             <input
                 class="field"
                 type="text"
@@ -85,7 +88,7 @@ fn TextField(
                     draft.update(|d| set(d, value));
                 }
             />
-            {hint.map(|h| view! { <span class="override__hint">{h}</span> })}
+            {hint.map(|h| view! { <span class="override__hint">{move || h.get()}</span> })}
         </label>
     }
 }
@@ -94,6 +97,7 @@ fn TextField(
 /// dropped. `valid` is false while the text is not empty or a whole number from 0 to 9999.
 #[component]
 fn PositionField(draft: Draft, valid: RwSignal<bool>) -> impl IntoView {
+    let t = use_device_text();
     let text =
         RwSignal::new(draft.with_untracked(|d| d.order.map(|n| n.to_string()).unwrap_or_default()));
     // Follow an outside change (the draft taking over a newer stored override).
@@ -106,7 +110,7 @@ fn PositionField(draft: Draft, valid: RwSignal<bool>) -> impl IntoView {
     });
     view! {
         <label class="override__field">
-            <span class="override__label">"Position"</span>
+            <span class="override__label">{move || t(DeviceText::Position)}</span>
             <input
                 class="field"
                 type="text"
@@ -126,9 +130,9 @@ fn PositionField(draft: Draft, valid: RwSignal<bool>) -> impl IntoView {
             <span class="override__hint" class:override__hint--error=move || !valid.get()>
                 {move || {
                     if valid.get() {
-                        "Lower numbers come first. Leave empty for automatic."
+                        t(DeviceText::PositionHint)
                     } else {
-                        "Enter a whole number from 0 to 9999."
+                        t(DeviceText::PositionError)
                     }
                 }}
             </span>
@@ -138,7 +142,7 @@ fn PositionField(draft: Draft, valid: RwSignal<bool>) -> impl IntoView {
 
 #[component]
 fn FlagField(
-    label: &'static str,
+    #[prop(into)] label: Signal<String>,
     draft: Draft,
     get: fn(&UiOverride) -> bool,
     set: fn(&mut UiOverride, bool),
@@ -146,7 +150,7 @@ fn FlagField(
     let on = move || draft.with(get);
     view! {
         <label class="override__flag">
-            <span class="override__label">{label}</span>
+            <span class="override__label">{move || label.get()}</span>
             <button
                 type="button"
                 role="switch"
@@ -164,22 +168,41 @@ fn FlagField(
     }
 }
 
+/// The text of a chip, resolved in the language when it is drawn.
+#[derive(Clone)]
+enum ChipLabel {
+    Text(DeviceText),
+    Key(Key),
+    /// What a switch is shown as.
+    Type(SwitchType),
+    /// A control the device announced: its name in words, "Lock" for `locked`.
+    Control(String),
+}
+
+impl ChipLabel {
+    fn resolve(&self, lang: Lang) -> String {
+        match self {
+            ChipLabel::Text(k) => device_text(lang, *k).to_owned(),
+            ChipLabel::Key(k) => text(lang, *k).to_owned(),
+            ChipLabel::Type(t) => switch_type_word(lang, *t).to_owned(),
+            ChipLabel::Control(c) => control_label(lang, c),
+        }
+    }
+}
+
 /// One chip of a [`ChipField`]: its text, the value it stands for (`None`: the field's default)
 /// and an optional glyph shown before the text.
 #[derive(Clone)]
 struct ChipOption {
-    label: Cow<'static, str>,
-    value: Option<Cow<'static, str>>,
+    label: ChipLabel,
+    value: Option<String>,
     glyph: Option<&'static str>,
 }
 
-const fn chip(label: &'static str, value: Option<&'static str>) -> ChipOption {
+fn chip(label: ChipLabel, value: Option<&str>) -> ChipOption {
     ChipOption {
-        label: Cow::Borrowed(label),
-        value: match value {
-            Some(v) => Some(Cow::Borrowed(v)),
-            None => None,
-        },
+        label,
+        value: value.map(str::to_owned),
         glyph: None,
     }
 }
@@ -188,30 +211,29 @@ const fn chip(label: &'static str, value: Option<&'static str>) -> ChipOption {
 /// hand) shows as one more selected chip with its raw text, so it is never silently replaced.
 #[component]
 fn ChipField(
-    label: &'static str,
+    #[prop(into)] label: Signal<String>,
     draft: Draft,
     options: Vec<ChipOption>,
     get: fn(&UiOverride) -> Text,
     on_pick: fn(&mut UiOverride, Option<&str>),
 ) -> impl IntoView {
-    let known: Vec<Option<String>> = options
-        .iter()
-        .map(|o| o.value.as_ref().map(|v| v.to_string()))
-        .collect();
+    let known: Vec<Option<String>> = options.iter().map(|o| o.value.clone()).collect();
     let unknown = move || {
         draft
             .with(get)
             .filter(|v| !known.contains(&Some(v.clone())))
     };
+    let lang = use_lang();
     view! {
-        <div class="override__field" role="group" aria-label=label>
-            <span class="override__label">{label}</span>
+        <div class="override__field" role="group" aria-label=move || label.get()>
+            <span class="override__label">{move || label.get()}</span>
             <div class="override__chips">
                 {options
                     .into_iter()
                     .map(|o| {
                         let value = o.value.clone();
                         let pick = o.value.clone();
+                        let option_label = o.label.clone();
                         let selected =
                             Signal::derive(move || draft.with(get).as_deref() == value.as_deref());
                         view! {
@@ -223,7 +245,7 @@ fn ChipField(
                                 on:click=move |_| draft.update(|d| on_pick(d, pick.as_deref()))
                             >
                                 {o.glyph.map(|g| view! { <span class="chip__glyph" inner_html=g></span> })}
-                                {o.label}
+                                {move || option_label.resolve(lang())}
                             </button>
                         }
                     })
@@ -247,6 +269,7 @@ fn ChipField(
 #[component]
 fn AreaField(draft: Draft) -> impl IntoView {
     let house = expect_context::<House>();
+    let t = use_device_text();
     let known = move |value: &str| house.areas.with(|a| a.iter().any(|a| a.id == value));
     // Free text mode starts on when the stored area is not one of the hub's.
     let other =
@@ -261,7 +284,7 @@ fn AreaField(draft: Draft) -> impl IntoView {
     const OTHER: &str = "__other__";
     view! {
         <div class="override__field">
-            <label class="override__label" for="override-area">"Room"</label>
+            <label class="override__label" for="override-area">{move || t(DeviceText::Room)}</label>
             <select
                 id="override-area"
                 class="select"
@@ -276,7 +299,7 @@ fn AreaField(draft: Draft) -> impl IntoView {
                     }
                 }
             >
-                <option value="" prop:selected=move || selected().is_empty()>"Default"</option>
+                <option value="" prop:selected=move || selected().is_empty()>{move || t(DeviceText::Default)}</option>
                 <For
                     each=move || house.areas.get()
                     key=|a| (a.id.clone(), a.name.clone())
@@ -289,13 +312,13 @@ fn AreaField(draft: Draft) -> impl IntoView {
                         }
                     }
                 />
-                <option value=OTHER prop:selected=move || other.get()>"Other…"</option>
+                <option value=OTHER prop:selected=move || other.get()>{move || t(DeviceText::Other)}</option>
             </select>
             <Show when=move || other.get()>
                 <input
                     class="field"
                     type="text"
-                    aria-label="Room name"
+                    aria-label=move || t(DeviceText::RoomName)
                     prop:value=move || draft.with(|d| d.area.clone().unwrap_or_default())
                     on:input=move |ev| {
                         let area = non_blank(event_target_value(&ev));
@@ -312,6 +335,7 @@ fn AreaField(draft: Draft) -> impl IntoView {
 #[component]
 fn CounterField(draft: Draft) -> impl IntoView {
     let house = expect_context::<House>();
+    let t = use_device_text();
     let counters = Memo::new(move |_| {
         let all = house.entities.with(energy_entities);
         let mut list: Vec<(String, String)> = EnergyMeters::counters(&all)
@@ -326,7 +350,7 @@ fn CounterField(draft: Draft) -> impl IntoView {
         move || current().filter(|id| counters.with(|c| !c.iter().any(|(known, _)| known == id)));
     view! {
         <label class="override__field">
-            <span class="override__label">"Energy counter"</span>
+            <span class="override__label">{move || t(DeviceText::EnergyCounter)}</span>
             <select
                 class="select"
                 on:change=move |ev| {
@@ -334,7 +358,7 @@ fn CounterField(draft: Draft) -> impl IntoView {
                     draft.update(|d| d.energy_meter = value);
                 }
             >
-                <option value="" prop:selected=move || current().is_none()>"Automatic"</option>
+                <option value="" prop:selected=move || current().is_none()>{move || t(DeviceText::Automatic)}</option>
                 <For
                     each=move || counters.get()
                     key=|(id, name)| (id.clone(), name.clone())
@@ -359,16 +383,18 @@ fn CounterField(draft: Draft) -> impl IntoView {
 /// The light-on brightness slider (1..=255, the hub rejects 0) with a reset to "Default".
 #[component]
 fn BrightnessField(draft: Draft) -> impl IntoView {
+    let t = use_device_text();
+    let tk = use_text();
     view! {
         <div class="override__field">
-            <span class="override__label">"Brightness"</span>
+            <span class="override__label">{move || tk(Key::Brightness)}</span>
             <div class="override__slider">
                 <input
                     class="slider"
                     type="range"
                     min="1"
                     max="255"
-                    aria-label="Brightness when turned on"
+                    aria-label=move || t(DeviceText::BrightnessOnTurnOn)
                     prop:value=move || {
                         draft.with(|d| d.light_on_brightness.unwrap_or(255)).to_string()
                     }
@@ -382,7 +408,7 @@ fn BrightnessField(draft: Draft) -> impl IntoView {
                     {move || {
                         draft
                             .with(|d| d.light_on_brightness)
-                            .map_or_else(|| "Default".to_owned(), |n| n.to_string())
+                            .map_or_else(|| t(DeviceText::Default).to_owned(), |n| n.to_string())
                     }}
                 </span>
                 <button
@@ -391,7 +417,7 @@ fn BrightnessField(draft: Draft) -> impl IntoView {
                     disabled=move || draft.with(|d| d.light_on_brightness.is_none())
                     on:click=move |_| draft.update(|d| d.light_on_brightness = None)
                 >
-                    "Reset"
+                    {move || t(DeviceText::Reset)}
                 </button>
             </div>
         </div>
@@ -401,14 +427,14 @@ fn BrightnessField(draft: Draft) -> impl IntoView {
 /// A titled block of the form, left out entirely while it has nothing to show.
 #[component]
 fn Section(
-    title: &'static str,
+    #[prop(into)] title: Signal<String>,
     #[prop(into)] when: Signal<bool>,
     children: ChildrenFn,
 ) -> impl IntoView {
     view! {
         <Show when=move || when.get()>
             <fieldset class="override__group">
-                <legend class="override__legend">{title}</legend>
+                <legend class="override__legend">{move || title.get()}</legend>
                 {children()}
             </fieldset>
         </Show>
@@ -418,11 +444,13 @@ fn Section(
 /// Values set for controls the form does not show, each with a button that clears it.
 #[component]
 fn OtherSaved(draft: Draft, shown: Memo<Shown>) -> impl IntoView {
+    let t = use_device_text();
+    let lang = use_lang();
     let entries = Memo::new(move |_| draft.with(|d| shown.with(|s| other_saved(d, s))));
     view! {
         <Show when=move || entries.with(|e| !e.is_empty())>
             <div class="override__field">
-                <span class="override__label">"Other saved settings"</span>
+                <span class="override__label">{move || t(DeviceText::OtherSaved)}</span>
                 <ul class="override__saved">
                     <For
                         each=move || entries.get()
@@ -430,11 +458,14 @@ fn OtherSaved(draft: Draft, shown: Memo<Shown>) -> impl IntoView {
                         children=move |(key, value)| {
                             view! {
                                 <li class="override__saved-row">
-                                    <span>{format!("{key}: {value}")}</span>
+                                    <span>{{
+                                        let value = value.clone();
+                                        move || key_value(lang(), key, &value)
+                                    }}</span>
                                     <button
                                         type="button"
                                         class="btn btn--compact"
-                                        aria-label=format!("Clear {key}")
+                                        aria-label=move || clear_setting(lang(), key)
                                         on:click=move |_| draft.update(|d| clear_field(d, key))
                                     >
                                         "×"
@@ -449,45 +480,45 @@ fn OtherSaved(draft: Draft, shown: Memo<Shown>) -> impl IntoView {
     }
 }
 
-fn energy_role_label(role: &str) -> &'static str {
+fn energy_role_label(role: &str) -> ChipLabel {
     match role {
-        "solar" => "Solar",
-        "grid" => "Grid",
-        "grid_export" => "Grid export",
-        "battery" => "Battery",
-        "house" => "House",
-        "consumer" => "Consumer",
-        "water" => "Water",
-        _ => "Unknown",
+        "solar" => ChipLabel::Text(DeviceText::Solar),
+        "grid" => ChipLabel::Text(DeviceText::Grid),
+        "grid_export" => ChipLabel::Text(DeviceText::GridExport),
+        "battery" => ChipLabel::Key(Key::Battery),
+        "house" => ChipLabel::Key(Key::House),
+        "consumer" => ChipLabel::Text(DeviceText::Consumer),
+        "water" => ChipLabel::Text(DeviceText::Water),
+        _ => ChipLabel::Text(DeviceText::Unknown),
     }
 }
 
-fn light_on_label(preset: &str) -> &'static str {
+fn light_on_label(preset: &str) -> DeviceText {
     match preset {
-        "white" => "White",
-        "warm" => "Warm",
-        "red" => "Red",
-        "green" => "Green",
-        "blue" => "Blue",
-        _ => "Unknown",
+        "white" => DeviceText::White,
+        "warm" => DeviceText::Warm,
+        "red" => DeviceText::Red,
+        "green" => DeviceText::Green,
+        "blue" => DeviceText::Blue,
+        _ => DeviceText::Unknown,
     }
 }
 
 /// The consumer icons, in the app's order, with their labels.
-const CONSUMER_ICONS: [(&str, &str); 7] = [
-    ("water_heater", "Water heater"),
-    ("heat_pump", "Heat pump"),
-    ("oven", "Oven"),
-    ("fridge", "Fridge"),
-    ("washer", "Washer"),
-    ("dryer", "Dryer"),
-    ("dishwasher", "Dishwasher"),
+const CONSUMER_ICONS: [(&str, DeviceText); 7] = [
+    ("water_heater", DeviceText::WaterHeater),
+    ("heat_pump", DeviceText::HeatPump),
+    ("oven", DeviceText::Oven),
+    ("fridge", DeviceText::Fridge),
+    ("washer", DeviceText::Washer),
+    ("dryer", DeviceText::Dryer),
+    ("dishwasher", DeviceText::Dishwasher),
 ];
 
 fn type_options() -> Vec<ChipOption> {
     SwitchType::ALL
         .into_iter()
-        .map(|t| chip(t.label(), t.key()))
+        .map(|t| chip(ChipLabel::Type(t), t.key()))
         .collect()
 }
 
@@ -502,34 +533,37 @@ fn main_control_options(entity: &EntityView) -> Vec<ChipOption> {
     controls
         .iter()
         .map(|c| ChipOption {
-            label: control_label(c).into(),
-            value: Some(c.clone().into()),
+            label: ChipLabel::Control(c.clone()),
+            value: Some(c.clone()),
             glyph: None,
         })
-        .chain(std::iter::once(chip("None", Some("none"))))
+        .chain(std::iter::once(chip(
+            ChipLabel::Text(DeviceText::NoneChoice),
+            Some("none"),
+        )))
         .collect()
 }
 
-/// `locked` reads "Lock"; the rest is the snake_case name in sentence case.
-fn control_label(control: &str) -> String {
+/// `locked` reads "Lock" / "Verrou"; the rest is the snake_case name in sentence case.
+fn control_label(lang: Lang, control: &str) -> String {
     match control {
-        "locked" => "Lock".into(),
+        "locked" => device_text(lang, DeviceText::LockControl).into(),
         other => word(other),
     }
 }
 
 fn light_on_options() -> Vec<ChipOption> {
-    std::iter::once(chip("Last state", None))
+    std::iter::once(chip(ChipLabel::Text(DeviceText::LastState), None))
         .chain(
             LIGHT_ON_PRESETS
                 .iter()
-                .map(|p| chip(light_on_label(p), Some(*p))),
+                .map(|p| chip(ChipLabel::Text(light_on_label(p)), Some(*p))),
         )
         .collect()
 }
 
 fn energy_role_options() -> Vec<ChipOption> {
-    std::iter::once(chip("None", None))
+    std::iter::once(chip(ChipLabel::Text(DeviceText::NoneChoice), None))
         .chain(
             ENERGY_ROLES
                 .iter()
@@ -540,13 +574,13 @@ fn energy_role_options() -> Vec<ChipOption> {
 
 fn icon_options() -> Vec<ChipOption> {
     std::iter::once(ChipOption {
-        label: "Plug".into(),
+        label: ChipLabel::Text(DeviceText::Plug),
         value: None,
         glyph: Some(consumer_icon(None)),
     })
     .chain(CONSUMER_ICONS.iter().map(|(key, label)| ChipOption {
-        label: (*label).into(),
-        value: Some((*key).into()),
+        label: ChipLabel::Text(*label),
+        value: Some((*key).to_owned()),
         glyph: Some(consumer_icon(ConsumerIcon::parse(key))),
     }))
     .collect()
@@ -603,7 +637,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                         house.entities.update(|m| {
                             m.insert(view.id.clone(), view);
                         });
-                        toasts.push("Saved");
+                        toasts.push(device_text(current_lang(), DeviceText::Saved));
                     }
                     Err(e) => error.set(Some(e.error)),
                 }
@@ -630,7 +664,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                                 e.ui = UiOverride::default();
                             }
                         });
-                        toasts.push("Override cleared");
+                        toasts.push(device_text(current_lang(), DeviceText::OverrideCleared));
                     }
                     Err(e) => error.set(Some(e.error)),
                 }
@@ -643,33 +677,35 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
     let rules_entity = entity.clone();
     let shown = Memo::new(move |_| draft.with(|d| shown(&rules_entity, d)));
     let order_ok = RwSignal::new(true);
-    let group_label = if entity.protocol_kind == Kind::Cover {
-        "Group with the other shutters in this room"
+    let group_label = text_signal(if entity.protocol_kind == Kind::Cover {
+        DeviceText::GroupShutters
     } else {
-        "Group with the other lights in this room"
-    };
+        DeviceText::GroupLights
+    });
+    let tt = text_signal;
+    let t = use_device_text();
     let on = move |pick: fn(&Shown) -> bool| Signal::derive(move || shown.with(pick));
 
     view! {
         <form class="override" on:submit=|ev| ev.prevent_default()>
             <fieldset class="override__group">
-                <legend class="override__legend">"General"</legend>
+                <legend class="override__legend">{move || t(DeviceText::General)}</legend>
                 <TextField
-                    label="Name"
+                    label=tt(DeviceText::Name)
                     draft=draft
                     get=|d| d.name.clone()
                     set=|d, v| d.name = v
-                    hint="Leave empty to use the device's own name."
+                    hint=tt(DeviceText::NameHint)
                 />
                 <AreaField draft=draft />
-                <FlagField label="Favorite" draft=draft get=|d| d.favorite set=|d, v| d.favorite = v />
+                <FlagField label=tt(DeviceText::Favorite) draft=draft get=|d| d.favorite set=|d, v| d.favorite = v />
                 <PositionField draft=draft valid=order_ok />
                 <Show
                     when=move || shown.with(|s| s.show_on_home)
                     fallback=move || {
                         view! {
                             <FlagField
-                                label="Hide from Home"
+                                label=tt(DeviceText::HideFromHome)
                                 draft=draft
                                 get=|d| d.hidden
                                 set=|d, v| d.hidden = v
@@ -678,7 +714,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     }
                 >
                     <FlagField
-                        label="Show on Home"
+                        label=tt(DeviceText::ShowOnHome)
                         draft=draft
                         get=|d| d.home_pinned && !d.hidden
                         set=|d, v| {
@@ -690,9 +726,9 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     />
                 </Show>
             </fieldset>
-            <Section title="Type" when=on(|s| s.show_as)>
+            <Section title=tt(DeviceText::Type) when=on(|s| s.show_as)>
                 <ChipField
-                    label="Show as"
+                    label=tt(DeviceText::ShowAs)
                     draft=draft
                     options=type_options()
                     get=|d| d.show_as.clone()
@@ -705,16 +741,16 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     }
                 />
             </Section>
-            <Section title="Main control" when=on(|s| s.main_control)>
+            <Section title=tt(DeviceText::MainControl) when=on(|s| s.main_control)>
                 <ChipField
-                    label="Main control"
+                    label=tt(DeviceText::MainControl)
                     draft=draft
                     options=main_control_options(&options_entity)
                     get=|d| d.main_control.clone()
                     on_pick=|d, v| d.main_control = v.map(str::to_owned)
                 />
             </Section>
-            <Section title="Light" when=on(|s| s.group_with_room || s.light_on)>
+            <Section title=tt(DeviceText::Light) when=on(|s| s.group_with_room || s.light_on)>
                 <Show when=move || shown.with(|s| s.group_with_room)>
                     <FlagField
                         label=group_label
@@ -725,7 +761,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 </Show>
                 <Show when=move || shown.with(|s| s.light_on)>
                     <ChipField
-                        label="Turn on in"
+                        label=tt(DeviceText::TurnOnIn)
                         draft=draft
                         options=light_on_options()
                         get=|d| d.light_on_preset.clone()
@@ -741,10 +777,10 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     <BrightnessField draft=draft />
                 </Show>
             </Section>
-            <Section title="Security" when=on(|s| s.security_shown || s.security_action)>
+            <Section title=key_signal(Key::Security) when=on(|s| s.security_shown || s.security_action)>
                 <Show when=move || shown.with(|s| s.security_shown)>
                     <FlagField
-                        label="Show on Security"
+                        label=tt(DeviceText::ShowOnSecurity)
                         draft=draft
                         get=|d| !d.security_hidden
                         set=|d, v| d.security_hidden = !v
@@ -752,7 +788,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 </Show>
                 <Show when=move || shown.with(|s| s.security_action)>
                     <FlagField
-                        label="Show on Security"
+                        label=tt(DeviceText::ShowOnSecurity)
                         draft=draft
                         get=|d| d.security_action
                         set=|d, v| d.security_action = v
@@ -760,26 +796,29 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 </Show>
                 <Show when=move || shown.with(|s| s.security_ask)>
                     <FlagField
-                        label="Ask before acting"
+                        label=tt(DeviceText::AskBeforeActing)
                         draft=draft
                         get=|d| d.security_ask
                         set=|d, v| d.security_ask = v
                     />
                 </Show>
             </Section>
-            <Section title="Display and energy" when=on(|s| s.card_style || s.energy_role)>
+            <Section title=tt(DeviceText::DisplayAndEnergy) when=on(|s| s.card_style || s.energy_role)>
                 <Show when=move || shown.with(|s| s.card_style)>
                     <ChipField
-                        label="Card style"
+                        label=tt(DeviceText::CardStyle)
                         draft=draft
-                        options=vec![chip("Standard", None), chip("Header temperature", Some("hero_weather"))]
+                        options=vec![
+                            chip(ChipLabel::Text(DeviceText::Standard), None),
+                            chip(ChipLabel::Text(DeviceText::HeaderTemperature), Some("hero_weather")),
+                        ]
                         get=|d| d.card_style.clone()
                         on_pick=|d, v| d.card_style = v.map(str::to_owned)
                     />
                 </Show>
                 <Show when=move || shown.with(|s| s.energy_role)>
                     <ChipField
-                        label="Energy role"
+                        label=tt(DeviceText::EnergyRole)
                         draft=draft
                         options=energy_role_options()
                         get=|d| d.energy_role.clone()
@@ -787,11 +826,11 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     />
                 </Show>
                 <Show when=move || shown.with(|s| s.unit_warning)>
-                    <p class="override__hint override__hint--error">"Needs a power unit (W, kW)"</p>
+                    <p class="override__hint override__hint--error">{move || t(DeviceText::NeedsPowerUnit)}</p>
                 </Show>
                 <Show when=move || shown.with(|s| s.energy_invert)>
                     <FlagField
-                        label="Invert sign"
+                        label=tt(DeviceText::InvertSign)
                         draft=draft
                         get=|d| d.energy_invert
                         set=|d, v| d.energy_invert = v
@@ -799,7 +838,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 </Show>
                 <Show when=move || shown.with(|s| s.energy_icon)>
                     <ChipField
-                        label="Icon"
+                        label=tt(DeviceText::Icon)
                         draft=draft
                         options=icon_options()
                         get=|d| d.energy_icon.clone()
@@ -810,13 +849,13 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     <CounterField draft=draft />
                 </Show>
             </Section>
-            <Section title="Climate" when=on(|s| s.climate_presets)>
+            <Section title=key_signal(Key::Climate) when=on(|s| s.climate_presets)>
                 <TextField
-                    label="Target presets (°C)"
+                    label=tt(DeviceText::TargetPresets)
                     draft=draft
                     get=|d| d.climate_presets.clone()
                     set=|d, v| d.climate_presets = v
-                    hint="Comma-separated, e.g. 19, 21, 23. Up to 6 chips."
+                    hint=tt(DeviceText::PresetsHint)
                 />
             </Section>
             <OtherSaved draft=draft shown=shown />
@@ -830,7 +869,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     disabled=move || !dirty.get() || busy.get() || !order_ok.get()
                     on:click=save
                 >
-                    "Save"
+                    {move || t(DeviceText::Save)}
                 </button>
                 <button
                     type="button"
@@ -838,7 +877,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                     disabled=move || busy.get()
                     on:click=clear
                 >
-                    "Reset to defaults"
+                    {move || t(DeviceText::ResetToDefaults)}
                 </button>
             </div>
         </form>
