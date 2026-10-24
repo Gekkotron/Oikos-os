@@ -6599,3 +6599,23 @@ html:has(.flow-canvas-screen) {
 .home-settings__save {
   align-self: flex-start;
 }
+
+.home-settings__window {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-settings__window .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-settings__window .btn {
+  flex: none;
+  width: auto;
+}
+
+.home-settings__add {
+  align-self: flex-start;
+}
