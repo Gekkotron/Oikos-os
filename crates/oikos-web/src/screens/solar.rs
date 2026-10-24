@@ -232,8 +232,8 @@ fn tile(label: String, value: String, sub: String) -> impl IntoView {
     }
 }
 
-fn day_column(lang: Lang, d: &(NaiveDate, f64, f64, f64), max: f64) -> impl IntoView {
-    let (date, estimate, low, high) = *d;
+fn day_column(lang: Lang, d: (NaiveDate, f64, f64, f64), max: f64) -> impl IntoView {
+    let (date, estimate, low, high) = d;
     let pct = if max > 0.0 {
         estimate / max * 100.0
     } else {
@@ -277,7 +277,11 @@ fn tiles(d: &PageData, lang: Lang) -> Vec<AnyView> {
     if let Some((from, to, floor)) = d.best {
         add(
             solar_text(lang, T::BestHours),
-            format!("{}–{}", from.format("%H:%M"), to.format("%H:%M")),
+            format!(
+                "{}–{}",
+                i18n::home_time(lang, from),
+                i18n::home_time(lang, to)
+            ),
             floor
                 .map(|f| i18n::solar_above(lang, f))
                 .unwrap_or_default(),
@@ -404,51 +408,65 @@ fn CurveCard(
     }
 }
 
-/// The page body for one forecast; the curve card reads the clock itself.
+/// The page body. The curve card is built once; every figure reads `data` in its own closure, so
+/// a clock tick or a sensor report updates text in place and never rebuilds a node holding focus.
 fn content(
-    d: &PageData,
-    lang: Lang,
-    lang_signal: RwSignal<Lang>,
+    data: Memo<Option<PageData>>,
+    lang: RwSignal<Lang>,
     curve: Memo<Option<(Curve, bool)>>,
     tab: RwSignal<Tab>,
 ) -> impl IntoView {
-    let max = d.days.iter().map(|d| d.1).fold(0.0_f64, f64::max);
-    let days = d
-        .days
-        .iter()
-        .map(|day| day_column(lang, day, max))
-        .collect_view();
-    let power = i18n::solar_power_line(lang, d.measured_kw, d.forecast_kw);
-    let bottom = i18n::solar_bottom(lang, d.remaining, d.tomorrow);
-    let footer = i18n::solar_footer(lang, d.updated, d.next, d.calls, d.limit);
-    let stale = d.stale_at.map(|at| i18n::data_from(lang, at));
+    let from_data = move |f: fn(&PageData, Lang) -> String| {
+        move || data.get().map(|d| f(&d, lang.get())).unwrap_or_default()
+    };
     view! {
         <div class="solar-page__top">
             <div>
                 <div class="solar-page__title">
-                    {i18n::solar_title(lang, d.measured, d.so_far, d.total)}
+                    {from_data(|d, l| i18n::solar_title(l, d.measured, d.so_far, d.total))}
                 </div>
                 <div class="solar-page__range">
-                    {d.range.map(|(lo, hi)| i18n::solar_range(lang, lo, hi))}
+                    {from_data(|d, l| {
+                        d.range.map(|(lo, hi)| i18n::solar_range(l, lo, hi)).unwrap_or_default()
+                    })}
                 </div>
             </div>
             <div class="solar-page__side">
-                <div>{power}</div>
-                <div>{bottom}</div>
+                <div>
+                    {from_data(|d, l| i18n::solar_power_line(l, d.measured_kw, d.forecast_kw))}
+                </div>
+                <div>{from_data(|d, l| i18n::solar_bottom(l, d.remaining, d.tomorrow))}</div>
             </div>
         </div>
 
-        <CurveCard lang=lang_signal curve tab />
+        <CurveCard lang curve tab />
 
-        <div class="solar-tiles">{tiles(d, lang)}</div>
+        <div class="solar-tiles">
+            {move || data.get().map(|d| tiles(&d, lang.get()))}
+        </div>
 
-        <h3 class="solar-page__label">{solar_text(lang, T::NextDays)}</h3>
-        <div class="solar-days">{days}</div>
+        <h3 class="solar-page__label">{move || solar_text(lang.get(), T::NextDays)}</h3>
+        <div class="solar-days">
+            {move || {
+                data.get()
+                    .map(|d| {
+                        let l = lang.get();
+                        let max = d.days.iter().map(|d| d.1).fold(0.0_f64, f64::max);
+                        d.days.into_iter().map(|day| day_column(l, day, max)).collect_view()
+                    })
+            }}
+        </div>
 
         <footer class="solar-page__foot">
-            <p>{footer}</p>
-            {stale.map(|s| view! { <p>{s}</p> })}
-            <p>{solar_text(lang, T::Credit)}</p>
+            <p>
+                {from_data(|d, l| i18n::solar_footer(l, d.updated, d.next, d.calls, d.limit))}
+            </p>
+            {move || {
+                data.get()
+                    .and_then(|d| d.stale_at)
+                    .map(|at| view! { <p>{i18n::data_from(lang.get(), at)}</p> })
+            }}
+            <p>{move || solar_text(lang.get(), T::Credit)}</p>
         </footer>
     }
 }
@@ -463,11 +481,17 @@ pub fn SolarScreen() -> impl IntoView {
     let tab = RwSignal::new(Tab::Today);
     let daily: RwSignal<Option<BTreeMap<NaiveDate, f64>>> = RwSignal::new(None);
 
-    // The last 30 days, read once the solar entities are known (and again if they change).
+    // The house-local date: a new day makes yesterday a different day, so the history is re-read.
+    let date = Memo::new(move |_| {
+        let zone = house.flows_config.with(|c| house_place(c.as_ref()).1);
+        local_date(zone, now.get())
+    });
+    // The last 30 days, read once the solar entities are known and again on a new local date.
     let sources = Memo::new(move |_| house.entities.with(|m| solar_sources(&energy_entities(m))));
     let generation = Generation::default();
     Effect::new(move |_| {
         let src = sources.get();
+        date.track();
         if src.counters.is_empty() && src.powers.is_empty() {
             return;
         }
@@ -487,24 +511,25 @@ pub fn SolarScreen() -> impl IntoView {
     let data =
         Memo::new(move |_| daily.with(|d| page_data(house, now.get(), measured, d.as_ref())));
     let curve = Memo::new(move |_| page_curve(house, now.get(), measured, tab.get()));
+    let has_solar = Memo::new(move |_| house.solar.with(Option::is_some));
     view! {
         <section class="solar-page">
             <BackLink />
             {move || {
-                let l = lang.get();
-                match data.get() {
-                    Some(d) => content(&d, l, lang, curve, tab).into_any(),
+                if has_solar.get() {
+                    content(data, lang, curve, tab).into_any()
+                } else if !house.solar_loaded.get() {
                     // Nothing until the first fetch has answered, then the hint.
-                    None if !house.solar_loaded.get() => ().into_any(),
-                    None => {
-                        view! {
-                            <div class="solar-page__empty">
-                                <p>{solar_text(l, T::Unavailable)}</p>
-                                <p class="solar-page__hint">{solar_text(l, T::EnableHint)}</p>
-                            </div>
-                        }
-                            .into_any()
+                    ().into_any()
+                } else {
+                    let l = lang.get();
+                    view! {
+                        <div class="solar-page__empty">
+                            <p>{solar_text(l, T::Unavailable)}</p>
+                            <p class="solar-page__hint">{solar_text(l, T::EnableHint)}</p>
+                        </div>
                     }
+                        .into_any()
                 }
             }}
         </section>

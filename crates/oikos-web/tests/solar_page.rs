@@ -63,6 +63,14 @@ fn solar(sites: usize) -> SolarView {
 }
 
 async fn mount(solar: Option<SolarView>, loaded: bool) -> web_sys::Element {
+    mount_with(solar, loaded, RwSignal::new(now_s())).await
+}
+
+async fn mount_with(
+    solar: Option<SolarView>,
+    loaded: bool,
+    clock: RwSignal<u64>,
+) -> web_sys::Element {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -74,6 +82,7 @@ async fn mount(solar: Option<SolarView>, loaded: bool) -> web_sys::Element {
         move || {
             oikos_web::nav::install_nav();
             provide_context(house);
+            provide_context(oikos_web::components::now::Now(clock));
             provide_context(SolarMeasured {
                 today_kwh: RwSignal::new(Some(6.4)),
                 periods: RwSignal::new(Vec::new()),
@@ -107,7 +116,7 @@ async fn solar_page_shows_top_curve_tiles_days_footer() {
     assert!(text.contains("Range 9.8–14.1 kWh"), "{text}");
     assert!(text.contains("Forecast peak"), "{text}");
     assert!(text.contains("Best hours"), "{text}");
-    assert!(text.contains("10:00–14:00"), "{text}");
+    assert!(text.contains("10:00 am–2:00 pm"), "{text}");
     assert!(text.contains("Solcast calls 3 / 10 today"), "{text}");
 }
 
@@ -161,4 +170,23 @@ async fn nothing_before_first_fetch() {
     let text = host.text_content().unwrap_or_default();
     assert!(!text.contains("secrets/solcast.key"), "{text}");
     assert!(host.query_selector(".sheet__back").unwrap().is_some());
+}
+
+#[wasm_bindgen_test]
+async fn clock_tick_keeps_the_page_nodes() {
+    let clock = RwSignal::new(now_s());
+    let host = mount_with(Some(solar(2)), true, clock).await;
+    let button = host
+        .query_selector(".solar-tabs button")
+        .unwrap()
+        .expect("today button");
+    let curve = host
+        .query_selector(".solar-page__curve")
+        .unwrap()
+        .expect("curve card");
+    clock.update(|t| *t += 60);
+    tick().await;
+    assert!(button.is_connected() && curve.is_connected());
+    let again = host.query_selector(".solar-tabs button").unwrap().unwrap();
+    assert!(button.is_same_node(Some(&again)));
 }
