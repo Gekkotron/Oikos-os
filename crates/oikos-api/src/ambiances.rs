@@ -302,7 +302,8 @@ fn in_category(what: Category, e: &EntityView) -> bool {
         Category::Lights => e.kind == Kind::Light,
         Category::Plugs => {
             e.protocol_kind == Kind::Switch
-                && matches!(e.ui.show_as.as_deref(), None | Some("plug"))
+                // An untyped switch is a plain switch, which could drive anything.
+                && e.ui.show_as.as_deref() == Some("plug")
         }
         Category::Covers => {
             e.kind == Kind::Cover
@@ -650,7 +651,14 @@ mod tests {
             switch_as("plug", Some("plug")),
         ];
         let a = act(Category::Plugs, Target::Off);
-        assert_eq!(ids(category_members(&a, &all)), ["plain", "plug"]);
+        assert_eq!(ids(category_members(&a, &all)), ["plug"]);
+    }
+
+    #[test]
+    fn untyped_switch_is_a_switch_not_a_plug() {
+        let all = [switch_as("relay", None), switch_as("plug", Some("plug"))];
+        let a = act(Category::Plugs, Target::Off);
+        assert_eq!(ids(category_members(&a, &all)), ["plug"]);
     }
 
     #[test]
@@ -674,15 +682,18 @@ mod tests {
 
     #[test]
     fn virtual_entities_and_the_z2m_bridge_are_never_plugs() {
-        let mut permit_join = switch_as("bridge_0x00124b0022983b3e_permit_join_zigbee2mqtt", None);
+        let mut permit_join = switch_as(
+            "bridge_0x00124b0022983b3e_permit_join_zigbee2mqtt",
+            Some("plug"),
+        );
         permit_join.device_id = Some("zigbee2mqtt_bridge_0x00124b0022983b3e".into());
         let all = [
-            switch_as("virtual_guest_mode", None),
+            switch_as("virtual_guest_mode", Some("plug")),
             permit_join,
-            switch_as("plain", None),
+            switch_as("plug", Some("plug")),
         ];
         let a = act(Category::Plugs, Target::Off);
-        assert_eq!(ids(category_members(&a, &all)), ["plain"]);
+        assert_eq!(ids(category_members(&a, &all)), ["plug"]);
     }
 
     #[test]

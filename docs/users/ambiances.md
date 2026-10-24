@@ -40,7 +40,7 @@ An ambiance belongs to the house, not to a room. A room only appears inside an a
 `what` is one of:
 
 - **`lights`**: every light, including switches you show as a light. `to` is `on` or `off`. With `on` you can set `brightness` (1 to 100 %); a light that cannot dim just turns on.
-- **`plugs`**: every switch shown as a plain switch (no `showAs`) or as a plug (`showAs: "plug"`). `to` is `on` or `off`. Any other `showAs`, such as door, siren, chime or a value the hub does not know, is never a plug, so a house-wide "plugs off" never touches it. A relay you do not want switched off goes in `except`.
+- **`plugs`**: every switch typed as a plug (`showAs: "plug"`, **Show as → Plug** in the device settings). `to` is `on` or `off`. A switch with no type is a plain switch, not a plug: it could drive a siren or a pump, so it is left out until you type it. Any other `showAs`, such as door, siren, chime or a value the hub does not know, is never a plug either. A plug you do not want switched off goes in `except`.
 - **`covers`**: every window covering: a cover with no device class, or with the class `shutter`, `blind`, `curtain`, `shade`, `awning` or `window`. Garage doors, gates, doors, dampers and any other class are never part of the category, so "close every cover" never moves a garage door. `to` is `open` or `close`.
 
 A category is not a fixed list. The devices are picked **when the ambiance is applied**, from the live house, so a light or plug you add next month is included without editing the ambiance. The rules behind the selection:

@@ -52,7 +52,7 @@ Four action types. All of them were played back to the user ("yes"). Their exact
 
 - **What:**
   - `lights`: every light, including switches shown as a light (`showAs: light`);
-  - `plugs`: every switch whose type (`SwitchType::of`) is `Switch` or `Plug`. This is an allow-list: door, siren and chime switches are never included, and any type added later stays out until it is added here on purpose. A switch with no `showAs` reads as `Switch` (existing rule) and is included. A relay the user does not want switched off goes in `except` or gets the door type;
+  - `plugs`: every switch whose type (`SwitchType::of`) is `Switch` or `Plug`. This is an allow-list: door, siren and chime switches are never included, and any type added later stays out until it is added here on purpose. Revised 2026-10-24 (user decision): only `showAs: plug` is included. A switch with no `showAs` is a plain switch and is left out, since it could drive a siren or a pump; the user types it as a plug to include it. A plug the user does not want switched off goes in `except`;
   - `covers`: every cover.
 - **Where:** the whole house, or one area.
 - **To:**

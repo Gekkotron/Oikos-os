@@ -690,6 +690,11 @@ async fn bridge_switch_and_z2m_group_are_not_category_members() {
         "oikos/light/1221051039810110150109113116116_1/light/config",
         &fixture("discovery/light__1221051039810110150109113116116_1__light.json"),
     );
+    // Typed as a plug, so only the bridge rule keeps it out.
+    hub.ingest(
+        "oikos/ui/bridge_0x00124b0022983b3e_permit_join_zigbee2mqtt",
+        br#"{"showAs":"plug"}"#,
+    );
     let log = echo(rx, Arc::clone(&hub), false);
     let plugs = AmbianceAction::Category(CategoryAction {
         what: Category::Plugs,
