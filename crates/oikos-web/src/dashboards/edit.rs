@@ -193,6 +193,7 @@ mod tests {
                 name: "D".into(),
                 order: 0,
                 widgets,
+                show_header: false,
             },
             true,
         )

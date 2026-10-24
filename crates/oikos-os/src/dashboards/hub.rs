@@ -164,6 +164,7 @@ mod tests {
             name: id.to_owned(),
             order,
             widgets: Vec::new(),
+            show_header: false,
         }
     }
 

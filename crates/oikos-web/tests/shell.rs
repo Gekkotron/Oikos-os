@@ -20,6 +20,7 @@ fn dashboard(id: &str, name: &str, order: u32) -> DashboardView {
             name: name.into(),
             order,
             widgets: Vec::new(),
+            show_header: false,
         },
         synthesized: false,
     }
