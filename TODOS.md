@@ -6,36 +6,25 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ### P1 — correctness / forward-compat
 
-- **Rich widget renderers for the library's 4 extra kinds.** The widget library offers `HistoryChart`, `RoomGroup`, `FlowButton` and `EnergyStat`, but `crates/oikos-web/src/dashboards/widget.rs` renders them as the `Unavailable` placeholder, so a user can add a widget that only shows ⚠:
-  - `RoomGroup` → `cards::group::{CoverGroupCard,LightGroupCard}`
-  - `FlowButton` → trigger via `api::run_flow`
-  - `EnergyStat` → `cards::sensor::SensorCard` or a new metric card
-  - `HistoryChart` → new chart card
-  - `Camera` / `Lock` are not offered by the library yet; add them with their cards.
-- **Hub reorder is "all-or-nothing at validation", not at MQTT publish.** A mid-loop publish failure in `dashboards/hub.rs::reorder_dashboards` leaves broker + local store half-reordered (but mutually consistent). Rare on a healthy local broker; add a WHY comment or publish all N before applying any locally.
+- **Check the four new widget renderers in a browser** (`dashboards/{room_group,flow_button,energy_stat,history_widget}.rs`, `styles/widgets.css`): only unit-tested so far.
+- **HistoryChart widget ranges.** The chart only knows Day/Week/Month, so the widget's 1h, 6h and 24h ranges all show a day. Either add short ranges to the chart or limit the widget's range choice to what it can draw.
+- **EnergyStat kWh never refreshes.** Today/week/month are fetched once (when the counter set changes); a dashboard left open overnight keeps yesterday's "Today". Refetch on a timer or at midnight.
+- `Camera` / `Lock` widgets: not offered by the library yet; add them with their cards.
 
 ### P2 — polish / test coverage
 
-- Save button has no in-flight guard; a double click sends two PUTs. Disable while the request is in flight.
-- Save-success `selected_widget.set(None)` runs post-await — a widget selected mid-flight is cleared. Clear it only when the index no longer holds the same widget.
-- Toggling pencil off while dirty keeps the unsaved draft on the grid with no indicator.
-- Dashboard delete has no confirmation dialog. Route the `DashboardSettingsSheet` delete button through `components::confirm::Confirming`.
-- `DashboardSettingsSheet` delete/reorder swallow API errors with `is_ok()` and no feedback. Toast on failure.
-- Grid comment (`dashboards/grid.rs`) claims spans wider than the column count "are clamped there" — check the CSS and either add the clamp or say why none is needed.
 - `Grid` keys tiles by widget id alone and `WidgetView` takes the widget once, so a title change from the config sheet only shows after a remount.
 - Dashboards fetched once at startup; no retry/refresh on WS reconnect. Trigger a re-fetch on the WS reconnect event.
+- Overlay z-index 1 vs tools z-index 2 depends on no inner card element exceeding z-index 1 — audit the new widget cards (`widgets.css`).
+- Edits made to the draft while a Save is in flight are overwritten by the hub's reply.
 - Deep-linking an authored dashboard id shows "Unknown dashboard" briefly before the fetch lands. Add a loaded flag and a loading state in `screens/dashboard.rs`.
 - `WidgetConfigSheet` has no entity/target picker — swap-target requires delete + re-add.
 - HistoryChart entry filter in the widget library uses Sensor entities only; spec says "any entity with history".
-- Energy metric list is hard-coded in `dashboards/library.rs`; could drift from the hub source.
-- Overlay z-index 1 vs tools z-index 2 depends on no inner card element exceeding z-index 1 — audit each `WidgetView` variant once the rich renderers land.
-- Tests: add a tie-break-by-id test for `DashboardStore::list()`; `order_route_shadows_id_route` asserts `is_success()` only (tighten to `NO_CONTENT`); `widget_config_tagged_by_kind_shape` name does not match what it checks; store tests read `store.entries` instead of `invalid_reason()`.
 
 ### P3 — cosmetic / backlog
 
 - Two concurrent PUTs can pick the same `next_free_order` (lock released between read and publish). Fine single-user; add a guard if the hub grows multi-writer.
 - `path/body id mismatch` returns 422 while flows PUT returns 400 — normalize across PUT routes.
-- Three dashboard HTTP handlers have no doc comments (only `put_dashboard` does).
 
 ## Climate engine v1 (landed on sc-critical-meissner-823c, 2026-10-22)
 
