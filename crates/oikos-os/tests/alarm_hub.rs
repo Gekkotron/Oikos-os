@@ -315,11 +315,17 @@ struct Rig {
 
 impl Rig {
     async fn new() -> Rig {
+        Rig::with(|_, _| {}).await
+    }
+
+    async fn with(edit: impl FnOnce(&Hub, &mut AlarmSettings)) -> Rig {
         let (hub, rx) = hub();
         house(&hub);
         let door = entity_id(&hub, "front_door");
         hub.ingest("fx/front_door", b"closed");
-        hub.set_alarm_settings(enabled_with(&door)).await.unwrap();
+        let mut settings = enabled_with(&door);
+        edit(&hub, &mut settings);
+        hub.set_alarm_settings(settings).await.unwrap();
         let task = hub.start_alarm();
         let mut rig = Rig {
             hub,
@@ -491,4 +497,87 @@ async fn runtime_persisted_retained() {
     assert!(last.retain);
     let rt: Runtime = serde_json::from_str(&last.payload).unwrap();
     assert!(matches!(rt.phase, Phase::Arming { .. }));
+}
+
+#[tokio::test(start_paused = true)]
+async fn remote_arm_after_idle_gets_a_fresh_exit_delay() {
+    let mut rig = Rig::with(|hub, settings| {
+        settings.remotes = vec![Remote {
+            entity: entity_id(hub, "keyfob"),
+            signals: [("arm".to_owned(), RemoteAction::Away)].into(),
+        }];
+    })
+    .await;
+    rig.advance(1000).await;
+    rig.hub.ingest_message("fx/keyfob/action", b"arm", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "arming");
+}
+
+#[tokio::test(start_paused = true)]
+async fn boot_settle_backlog_is_not_replayed_against_the_seed() {
+    use oikos_alarm::machine::{Phase, Runtime};
+    let (hub, mut rx) = hub();
+    house(&hub);
+    let door = entity_id(&hub, "front_door");
+    hub.ingest("fx/front_door", b"closed");
+    hub.ingest_message(
+        "oikos/alarm/settings",
+        serde_json::to_string(&enabled_with(&door))
+            .unwrap()
+            .as_bytes(),
+        true,
+    );
+    let armed = Runtime {
+        phase: Phase::Armed {
+            mode: ArmMode::Away,
+        },
+        ..Runtime::default()
+    };
+    hub.ingest_message(
+        "oikos/alarm/state",
+        serde_json::to_string(&armed).unwrap().as_bytes(),
+        true,
+    );
+    let task = hub.start_alarm();
+    // Within the settle: a stale replay says open, then the live state says closed.
+    hub.ingest_message("fx/front_door", b"open", true);
+    hub.ingest_message("fx/front_door", b"closed", false);
+    for _ in 0..3 {
+        tokio::time::advance(std::time::Duration::from_secs(3)).await;
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+            drain(&mut rx);
+        }
+    }
+    assert_eq!(hub.alarm_view().state, "armed_away");
+    task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn alarm_changed_during_an_outage_does_not_reseed() {
+    use oikos_core::model::AlarmMode;
+    let mut rig = Rig::new().await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+
+    rig.hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+    rig.pump().await;
+    eprintln!("offline: {}", rig.state());
+    // A settings document arriving while the link is down announces AlarmChanged.
+    let mut settings = rig.hub.alarm_settings();
+    settings.siren_s = 60;
+    let doc = serde_json::to_string(&settings).unwrap();
+    rig.hub
+        .ingest_message("oikos/alarm/settings", doc.as_bytes(), true);
+    rig.pump().await;
+    rig.hub.set_connection(ConnectionStatus::Online);
+    rig.pump().await;
+    eprintln!("before replay: {}", rig.state());
+    rig.hub.ingest_message("fx/front_door", b"open", true);
+    rig.pump().await;
+    assert_eq!(rig.state(), "armed_away");
 }

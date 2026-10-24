@@ -73,11 +73,11 @@ impl Hub {
         };
         self.run_alarm_effects(effects).await;
         // The runtime goes out before the panel state, so a restart never reads an older one.
-        if let Err(err) = self
-            .persist_alarm_runtime(&rt)
-            .and_then(|()| self.publish_alarm_panel(&rt))
-        {
-            tracing::warn!(%err, "alarm state could not be published");
+        if let Err(err) = self.persist_alarm_runtime(&rt) {
+            tracing::warn!(%err, "alarm runtime could not be persisted");
+        }
+        if let Err(err) = self.publish_alarm_panel(&rt) {
+            tracing::warn!(%err, "alarm panel state could not be published");
         }
         if before != (rt.state_name(), rt.deadline()) {
             self.broadcast(WsEvent::AlarmChanged);
@@ -169,16 +169,30 @@ impl Hub {
         mut seen: broadcast::Receiver<StateSeen>,
     ) {
         let mut link = self.connection();
-        while !matches!(*link.borrow_and_update(), ConnectionStatus::Online) {
-            if link.changed().await.is_err() {
-                return;
+        let mut known = Known::default();
+        let mut resumed_epoch;
+        loop {
+            while !matches!(*link.borrow_and_update(), ConnectionStatus::Online) {
+                if link.changed().await.is_err() {
+                    return;
+                }
+            }
+            resumed_epoch = self.link_epoch();
+            tokio::time::sleep(ALARM_BOOT_SETTLE).await;
+            // What queued up during the settle is dropped: the seed below reflects the final
+            // registry, and a queued replay read against it would look like a change.
+            drain(&mut events, &mut seen);
+            if self.link_epoch() == resumed_epoch
+                && matches!(*link.borrow_and_update(), ConnectionStatus::Online)
+            {
+                break;
             }
         }
-        tokio::time::sleep(ALARM_BOOT_SETTLE).await;
-        let mut known = Known::default();
-        let mut resumed_epoch = self.link_epoch();
-        self.alarm_resume().await;
         self.alarm_seed_all(&mut known);
+        self.alarm_resume().await;
+        // Seeding is allowed only while the link is up and settled: during an outage the
+        // registry holds the values from before the drop.
+        let mut synced = true;
         let mut resume_at: Option<tokio::time::Instant> = None;
         loop {
             let now = self.alarm_now();
@@ -192,7 +206,8 @@ impl Hub {
                     Ok(WsEvent::SignalReceived { id, signal }) => {
                         let remote = self.alarm_settings().remotes.iter().any(|r| r.entity == id);
                         if remote {
-                            self.alarm_event(Event::Signal { entity: id, signal }, now).await;
+                            let ev = Event::Signal { entity: id, signal };
+                            self.alarm_event(ev, self.alarm_now()).await;
                         }
                     }
                     // The broker is about to replay retained states: forget what we knew, so a
@@ -200,6 +215,7 @@ impl Hub {
                     Ok(WsEvent::ConnectionChanged(status)) if status != ConnectionStatus::Online => {
                         known = Known::default();
                         resume_at = None;
+                        synced = false;
                     }
                     Ok(WsEvent::ConnectionChanged(_)) if self.link_epoch() != resumed_epoch => {
                         resumed_epoch = self.link_epoch();
@@ -208,7 +224,7 @@ impl Hub {
                     // A newly watched entity has no known value yet: its first change would be
                     // taken for a first sighting. (Not while a reconnect is settling: the
                     // registry still holds the value from before the drop.)
-                    Ok(WsEvent::AlarmChanged) if resume_at.is_none() => self.alarm_seed_all(&mut known),
+                    Ok(WsEvent::AlarmChanged) if synced => self.alarm_seed_all(&mut known),
                     // The deadline is recomputed at the top of every pass.
                     Ok(_) | Err(RecvError::Lagged(_)) => {}
                     Err(RecvError::Closed) => break,
@@ -216,7 +232,8 @@ impl Hub {
                 // After the events, so a change is stored by `StateChanged` first. This only
                 // re-seeds an entity whose replay was identical (the registry stays silent).
                 report = seen.recv() => match report {
-                    Ok(report) => self.alarm_seed(&mut known, &report),
+                    Ok(report) if synced => self.alarm_seed(&mut known, &report),
+                    Ok(_) => {}
                     Err(RecvError::Lagged(_)) => {}
                     Err(RecvError::Closed) => break,
                 },
@@ -227,8 +244,9 @@ impl Hub {
                     }
                 } => {
                     resume_at = None;
-                    self.alarm_resume().await;
                     self.alarm_seed_all(&mut known);
+                    self.alarm_resume().await;
+                    synced = true;
                 }
                 () = async {
                     match deadline {
@@ -325,6 +343,18 @@ impl Hub {
                 .or_insert_with(|| tracker_presence(&state.value));
         }
     }
+}
+
+/// Throws away everything queued on the two receivers.
+fn drain(events: &mut broadcast::Receiver<WsEvent>, seen: &mut broadcast::Receiver<StateSeen>) {
+    while !matches!(
+        events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed)
+    ) {}
+    while !matches!(
+        seen.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed)
+    ) {}
 }
 
 /// Whether a binary sensor reads on; `None` while its state is unknown.
