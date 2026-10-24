@@ -71,6 +71,23 @@ impl EditState {
     }
 }
 
+/// The selection after a save: kept only while its index still points at the same widget id
+/// in the saved dashboard, since the hub may have normalized the widget order.
+fn kept_selection(selected: Option<usize>, before: &Dashboard, after: &Dashboard) -> Option<usize> {
+    let index = selected?;
+    let id = &before.widgets.get(index)?.id;
+    (after.widgets.get(index).map(|w| &w.id) == Some(id)).then_some(index)
+}
+
+/// The pencil's accessible name; it says so when switching edit mode off left an unsaved draft.
+fn pencil_label(active: bool, dirty: bool) -> &'static str {
+    if dirty && !active {
+        "Toggle edit mode (unsaved changes)"
+    } else {
+        "Toggle edit mode"
+    }
+}
+
 /// How long a widget added from the library glows.
 #[cfg(target_arch = "wasm32")]
 const FRESH_MS: u32 = 1200;
@@ -107,13 +124,18 @@ pub fn add_widget_handler(state: EditState) -> Callback<Widget> {
 pub fn EditToolbar(state: EditState) -> impl IntoView {
     let house = expect_context::<House>();
     let dirty = state.dirty();
+    // True while a Save request is in flight; blocks a second PUT and a Discard mid-save.
+    let saving = RwSignal::new(false);
     view! {
         <div class="dashboard-edit-toolbar">
             <button
                 type="button"
                 class="btn btn--round dashboard-edit-toolbar__pencil"
                 class:btn--active=move || state.active.get()
-                aria-label="Toggle edit mode"
+                class:dashboard-edit-toolbar__pencil--dirty=move || {
+                    !state.active.get() && dirty.get()
+                }
+                aria-label=move || pencil_label(state.active.get(), dirty.get())
                 aria-pressed=move || state.active.get().to_string()
                 on:click=move |_| {
                     let now_active = !state.active.get_untracked();
@@ -139,7 +161,7 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                     type="button"
                     class="btn btn--with-icon dashboard-edit-toolbar__discard"
                     on:click=move |_| state.discard()
-                    disabled=move || !dirty.get()
+                    disabled=move || !dirty.get() || saving.get()
                 >
                     <span class="btn__glyph" inner_html=X_MARK></span>
                     "Discard"
@@ -148,18 +170,29 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                     type="button"
                     class="btn btn--with-icon btn--primary dashboard-edit-toolbar__save"
                     on:click=move |_| {
+                        if saving.get_untracked() {
+                            return;
+                        }
+                        saving.set(true);
                         let d = state.draft.get_untracked();
                         spawn_local(async move {
                             if let Ok(saved) = api::put_dashboard(&d).await {
                                 // The hub may normalize widget order, invalidating the selection.
-                                state.selected_widget.set(None);
+                                let current = state.draft.get_untracked();
+                                let kept = kept_selection(
+                                    state.selected_widget.get_untracked(),
+                                    &current,
+                                    &saved,
+                                );
+                                state.selected_widget.set(kept);
                                 state.original.set(saved.clone());
                                 state.draft.set(saved.clone());
                                 house.store_dashboard(saved);
                             }
+                            saving.set(false);
                         });
                     }
-                    disabled=move || !dirty.get()
+                    disabled=move || !dirty.get() || saving.get()
                 >
                     <span class="btn__glyph" inner_html=CHECK></span>
                     "Save"
@@ -210,6 +243,39 @@ mod tests {
         s.reorder(0, 1);
         assert!(dirty.get());
         assert_eq!(s.draft.get().widgets[0].id, "b");
+    }
+
+    #[test]
+    fn selection_kept_only_when_widget_id_unchanged() {
+        let dash = |ids: &[&str]| Dashboard {
+            id: "d".into(),
+            name: "D".into(),
+            order: 0,
+            widgets: ids
+                .iter()
+                .map(|id| widget(id, WidgetKind::Light, Span::X1x1))
+                .collect(),
+            show_header: false,
+        };
+        let before = dash(&["a", "b"]);
+        assert_eq!(
+            kept_selection(Some(1), &before, &dash(&["a", "b"])),
+            Some(1)
+        );
+        assert_eq!(kept_selection(Some(1), &before, &dash(&["b", "a"])), None);
+        assert_eq!(kept_selection(Some(1), &before, &dash(&["a"])), None);
+        assert_eq!(kept_selection(Some(5), &before, &before), None);
+        assert_eq!(kept_selection(None, &before, &before), None);
+    }
+
+    #[test]
+    fn pencil_label_flags_unsaved_changes_only_when_inactive() {
+        assert_eq!(
+            pencil_label(false, true),
+            "Toggle edit mode (unsaved changes)"
+        );
+        assert_eq!(pencil_label(true, true), "Toggle edit mode");
+        assert_eq!(pencil_label(false, false), "Toggle edit mode");
     }
 
     #[test]

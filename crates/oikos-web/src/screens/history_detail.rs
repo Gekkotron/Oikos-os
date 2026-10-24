@@ -1,5 +1,7 @@
 //! The full-screen `/history/:id?range=…` page: chrome row, range chips, and a `HistoryChart`.
 
+use std::collections::BTreeMap;
+
 use leptos::prelude::*;
 use leptos_router::NavigateOptions;
 use leptos_router::hooks::{use_navigate, use_params_map, use_query_map};
@@ -20,6 +22,14 @@ pub fn flavor_for_unit(unit: Option<&str>) -> Flavor {
     } else {
         Flavor::Series
     }
+}
+
+/// The power sensor paired with the energy counter `id`, from the live entity map.
+pub fn power_pair_of(entities: &BTreeMap<String, EntityView>, id: &str) -> Option<String> {
+    let all = energy_entities(entities);
+    let me = entities.get(id)?;
+    let ee = energy_entity(me);
+    EnergyMeters::counter_power(&ee, &all).map(|p| p.id.clone())
 }
 
 /// Parse the `range` query parameter (`24h`, `7d`, `30d`, `1y`); default `24h`.
@@ -73,12 +83,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
             return None;
         }
         let id = id.get();
-        house.entities.with(|m| {
-            let all = energy_entities(m);
-            let me = m.get(&id)?;
-            let ee = energy_entity(me);
-            EnergyMeters::counter_power(&ee, &all).map(|p| p.id.clone())
-        })
+        house.entities.with(|m| power_pair_of(m, &id))
     });
 
     let header = move || {

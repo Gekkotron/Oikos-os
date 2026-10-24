@@ -495,10 +495,12 @@ async fn delete_flow(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Every valid dashboard, House first.
 async fn list_dashboards(State(hub): HubState) -> Json<Vec<DashboardView>> {
     Json(hub.dashboards())
 }
 
+/// One dashboard by id; `404` for an unknown or invalid one.
 async fn get_dashboard(
     State(hub): HubState,
     Path(id): Path<String>,
@@ -526,6 +528,7 @@ async fn put_dashboard(
     Ok(Json(hub.set_dashboard(dashboard).await?))
 }
 
+/// `204` once the dashboard is cleared (an invalid one too); `403` for the reserved `house` id.
 async fn delete_dashboard(
     State(hub): HubState,
     Path(id): Path<String>,
@@ -535,6 +538,7 @@ async fn delete_dashboard(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `204` after reassigning orders; `422` when the list does not match the current dashboards.
 async fn reorder_dashboards(
     State(hub): HubState,
     body: Body<DashboardReorder>,

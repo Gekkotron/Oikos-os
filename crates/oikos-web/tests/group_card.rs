@@ -1,21 +1,29 @@
 use oikos_web::cards::group::{PRESS_ALL, range_of, switch_text, thermostat_text};
+use oikos_web::i18n::Lang;
 use serde_json::{Map, Value, json};
 
 #[test]
 fn switch_group_off_says_all_off() {
-    assert_eq!(switch_text(false, None), "All off");
+    assert_eq!(switch_text(Lang::En, false, None), "All off");
 }
 
 #[test]
 fn switch_group_on_says_all_on() {
-    assert_eq!(switch_text(true, None), "All on");
+    assert_eq!(switch_text(Lang::En, true, None), "All on");
 }
 
 #[test]
 fn switch_group_counts_decide_when_members_differ() {
-    assert_eq!(switch_text(true, Some((2, 3))), "2 of 3 on");
-    assert_eq!(switch_text(true, Some((3, 3))), "All on");
-    assert_eq!(switch_text(false, Some((0, 3))), "All off");
+    assert_eq!(switch_text(Lang::En, true, Some((2, 3))), "2 of 3 on");
+    assert_eq!(switch_text(Lang::En, true, Some((3, 3))), "All on");
+    assert_eq!(switch_text(Lang::En, false, Some((0, 3))), "All off");
+}
+
+#[test]
+fn switch_group_speaks_french() {
+    assert_eq!(switch_text(Lang::Fr, true, Some((2, 3))), "2 sur 3 allumés");
+    assert_eq!(switch_text(Lang::Fr, true, Some((1, 3))), "1 sur 3 allumé");
+    assert_eq!(switch_text(Lang::Fr, false, None), "Tout éteint");
 }
 
 #[test]
@@ -55,6 +63,7 @@ mod summaries {
         UiOverride,
     };
     use oikos_web::groups::{cover_text, light_text};
+    use oikos_web::i18n::Lang;
 
     fn entity(id: &str, kind: Kind, value: StateValue) -> EntityView {
         EntityView {
@@ -135,7 +144,7 @@ mod summaries {
         let s =
             oikos_web::cards::group::group_summary("g", &group(Kind::Cover, &all), &by_id(&all))
                 .unwrap();
-        assert_eq!(cover_text(&s), "All open");
+        assert_eq!(cover_text(Lang::En, &s), "All open");
         let mixed = [cover("a", "open"), cover("b", "closed")];
         let s = oikos_web::cards::group::group_summary(
             "g",
@@ -143,7 +152,7 @@ mod summaries {
             &by_id(&mixed),
         )
         .unwrap();
-        assert_eq!(cover_text(&s), "1 open · 1 closed");
+        assert_eq!(cover_text(Lang::En, &s), "1 open · 1 closed");
     }
 
     #[test]
@@ -152,7 +161,7 @@ mod summaries {
         let s =
             oikos_web::cards::group::group_summary("g", &group(Kind::Light, &all), &by_id(&all))
                 .unwrap();
-        assert_eq!(light_text(&s), "All on");
+        assert_eq!(light_text(Lang::En, &s), "All on");
         let mixed = [light("a", true), light("b", false)];
         let s = oikos_web::cards::group::group_summary(
             "g",
@@ -160,6 +169,6 @@ mod summaries {
             &by_id(&mixed),
         )
         .unwrap();
-        assert_eq!(light_text(&s), "1 of 2 on");
+        assert_eq!(light_text(Lang::En, &s), "1 of 2 on");
     }
 }
