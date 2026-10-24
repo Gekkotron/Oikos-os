@@ -121,7 +121,7 @@ When weather is off or not fetched yet, the page says that the weather is unavai
 
 *This screenshot predates the sidebar: the rooms are now listed in the sidebar instead of as chips.*
 
-Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview. House is always the first entry: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
+Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview. House is always the first entry, and the page the web UI opens on: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
 
 On a user-authored dashboard the header's pencil enters edit mode: click a widget to open its config sheet (title, size, delete), use move left/right to reorder, cycle the span with the resize button, Save or Discard. In edit mode a panel on the right (at the bottom on a phone) lists what can be added, grouped by kind, each row with its room and device; search narrows it, and clicking a row adds the widget at the end of the grid. The gear opens the dashboard settings sheet (name, a Show header switch that puts the House greeting, chips and weather card above the widgets, move up/down in the sidebar, delete), and `＋ New dashboard` in the sidebar creates a new one at `max(order) + 1`.
 
@@ -170,7 +170,7 @@ Every device card has the same frame: an icon tile, the room (left out under a r
 
 Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor. The controls are the device's card with all its controls (see [Cards](#cards)).
 
-Back, on every sheet and detail page, returns to the page it was opened from, one step at a time: dashboard → group → member → history unwinds in that order. A form you saved (new or edited group, new flow) is skipped. A page opened directly, from a link or after a reload, goes back to its parent: Alerts for an alert, Flows for a flow, Groups for the group wizard, the entity for its history, the first dashboard for the rest.
+Back, on every sheet and detail page, returns to the page it was opened from, one step at a time: dashboard → group → member → history unwinds in that order. A form you saved (new or edited group, new flow) is skipped. A page opened directly, from a link or after a reload, goes back to its parent: Alerts for an alert, Flows for a flow, Groups for the group wizard, the entity for its history, the House dashboard for the rest.
 
 ## Devices
 
