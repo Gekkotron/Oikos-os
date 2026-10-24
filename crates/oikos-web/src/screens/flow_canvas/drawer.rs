@@ -7,65 +7,99 @@ use oikos_api::{RunView, StepOutcome};
 use oikos_core::flow::Flow;
 use wasm_bindgen::JsCast;
 
-use crate::alerts::relative_time;
 use crate::components::now::Now;
 use crate::flow_text::{Ctx, title};
 use crate::flows::{run_duration, status_class, status_word, step_offset, trigger_line};
-use crate::format::format_timestamp;
 use crate::house::House;
+use crate::i18n::flows::{FlowText, flow_text};
+use crate::i18n::format::{ago, date_time, local_date_time};
+use crate::i18n::{Lang, use_lang};
 use crate::icons::X_MARK;
+
+/// The exact time of a run or step, as a tooltip.
+fn time_title(lang: Lang, secs: u64) -> String {
+    date_time(lang, local_date_time(secs))
+}
+
+/// The word on a step's outcome badge.
+fn outcome_word(lang: Lang, outcome: StepOutcome) -> &'static str {
+    flow_text(
+        lang,
+        match outcome {
+            StepOutcome::Ok => FlowText::StepOk,
+            StepOutcome::Failed => FlowText::StepFailed,
+            _ => FlowText::StepSkipped,
+        },
+    )
+}
 
 #[component]
 fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl IntoView {
     let house = expect_context::<House>();
     let now = expect_context::<Now>();
-    let trigger = house.entities.with(|e| trigger_line(&run, &flow, e));
+    let lang = use_lang();
+    let trigger = {
+        let (run, flow) = (run.clone(), flow.clone());
+        move || {
+            // Only the language is tracked: a state message must not rebuild every run.
+            let lang = lang();
+            house
+                .entities
+                .with_untracked(|e| trigger_line(lang, &run, &flow, e))
+        }
+    };
     let started = run.started_at;
     let duration = run_duration(run.started_at, run.ended_at);
-    let names: Vec<(String, String)> = house.flows.with_untracked(|flows| {
-        flows
-            .iter()
-            .map(|f| (f.definition.id.clone(), f.definition.name.clone()))
-            .collect()
-    });
-    let steps = house.entities.with(|entities| {
-        house.areas.with(|areas| {
-            let ctx = Ctx {
-                entities,
-                areas,
-                flows: &names,
-                lang: crate::i18n::current_lang(),
-            };
-            run.steps
-                .iter()
-                .map(|s| {
-                    let node = flow
-                        .node(&s.node)
-                        .map_or_else(|| s.node.clone(), |n| title(n, &ctx));
-                    let outcome = match s.outcome {
-                        StepOutcome::Ok => "ok",
-                        StepOutcome::Failed => "failed",
-                        _ => "skipped",
+    let steps = {
+        let (run, flow) = (run.clone(), flow.clone());
+        move || {
+            let lang = lang();
+            let names: Vec<(String, String)> = house.flows.with_untracked(|flows| {
+                flows
+                    .iter()
+                    .map(|f| (f.definition.id.clone(), f.definition.name.clone()))
+                    .collect()
+            });
+            house.entities.with_untracked(|entities| {
+                house.areas.with_untracked(|areas| {
+                    let ctx = Ctx {
+                        entities,
+                        areas,
+                        flows: &names,
+                        lang,
                     };
-                    let outcome_class = match s.outcome {
-                        StepOutcome::Ok => "step__outcome--ok",
-                        StepOutcome::Failed => "step__outcome--failed",
-                        StepOutcome::Skipped => "step__outcome--skipped",
-                    };
-                    let offset = step_offset(s.at, started);
-                    let detail = (!s.detail.is_empty()).then(|| s.detail.clone());
-                    view! {
-                        <li class="step">
-                            <span class="step__at" title=format_timestamp(s.at)>{offset}</span>
-                            <span class="step__node">{node}</span>
-                            <span class=format!("step__outcome {outcome_class}")>{outcome}</span>
-                            {detail.map(|d| view! { <span class="step__detail">{d}</span> })}
-                        </li>
-                    }
+                    run.steps
+                        .iter()
+                        .map(|s| {
+                            let node = flow
+                                .node(&s.node)
+                                .map_or_else(|| s.node.clone(), |n| title(n, &ctx));
+                            let outcome = outcome_word(lang, s.outcome);
+                            let outcome_class = match s.outcome {
+                                StepOutcome::Ok => "step__outcome--ok",
+                                StepOutcome::Failed => "step__outcome--failed",
+                                StepOutcome::Skipped => "step__outcome--skipped",
+                            };
+                            let offset = step_offset(s.at, started);
+                            let detail = (!s.detail.is_empty()).then(|| s.detail.clone());
+                            view! {
+                                <li class="step">
+                                    <span class="step__at" title=time_title(lang, s.at)>
+                                        {offset}
+                                    </span>
+                                    <span class="step__node">{node}</span>
+                                    <span class=format!(
+                                        "step__outcome {outcome_class}",
+                                    )>{outcome}</span>
+                                    {detail.map(|d| view! { <span class="step__detail">{d}</span> })}
+                                </li>
+                            }
+                        })
+                        .collect_view()
                 })
-                .collect_view()
-        })
-    });
+            })
+        }
+    };
     let id = run.id.clone();
     let replayed = {
         let id = id.clone();
@@ -96,12 +130,17 @@ fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl I
         >
             <details>
                 <summary>
-                    <span class="run__status">{status_word(run.status)}</span>
-                    <span class="run__time" title=format_timestamp(started)>
-                        {move || relative_time(started, now.0.get())}
+                    <span class="run__status">{move || status_word(lang(), run.status)}</span>
+                    <span class="run__time" title=move || time_title(lang(), started)>
+                        {move || ago(lang(), now.0.get().saturating_sub(started))}
                     </span>
                     {duration.map(|d| view! {
-                        <span class="run__duration" title="Duration">{format!("· {d}")}</span>
+                        <span
+                            class="run__duration"
+                            title=move || flow_text(lang(), FlowText::Duration)
+                        >
+                            {format!("· {d}")}
+                        </span>
                     })}
                     <span class="run__trigger">{trigger}</span>
                 </summary>
@@ -158,10 +197,16 @@ pub fn Drawer(
     replay: RwSignal<Option<String>>,
     children: ChildrenFn,
 ) -> impl IntoView {
+    let lang = use_lang();
     let list = move || {
         let runs = runs.get();
         if runs.is_empty() {
-            return view! { <p class="flow-drawer__empty">"No runs yet."</p> }.into_any();
+            return view! {
+                <p class="flow-drawer__empty">
+                    {move || flow_text(lang(), FlowText::NoRunsYet)}
+                </p>
+            }
+            .into_any();
         }
         let flow = flow.get();
         view! {
@@ -178,22 +223,29 @@ pub fn Drawer(
         <aside
             class="flow-drawer"
             class:flow-drawer--open=move || panel.get() != Panel::Closed
-            aria-label=move || match held.get() {
-                Panel::Library => "Card library",
-                Panel::Settings => "Card settings",
-                Panel::Runs | Panel::Closed => "Recent runs",
+            aria-label=move || {
+                flow_text(
+                    lang(),
+                    match held.get() {
+                        Panel::Library => FlowText::PanelLibrary,
+                        Panel::Settings => FlowText::PanelSettings,
+                        Panel::Runs | Panel::Closed => FlowText::PanelRuns,
+                    },
+                )
             }
             inert=move || panel.get() == Panel::Closed
         >
             {children()}
             <Show when=move || held.get() == Panel::Runs>
                 <header class="flow-drawer__header">
-                    <h2 class="flow-drawer__title">"Recent runs"</h2>
+                    <h2 class="flow-drawer__title">
+                        {move || flow_text(lang(), FlowText::PanelRuns)}
+                    </h2>
                     <button
                         type="button"
                         class="btn btn--ghost btn--icon flow-drawer__close"
-                        aria-label="Close runs"
-                        title="Close"
+                        aria-label=move || flow_text(lang(), FlowText::CloseRuns)
+                        title=move || flow_text(lang(), FlowText::Close)
                         on:click=move |_| runs_open.set(false)
                         inner_html=X_MARK
                     ></button>

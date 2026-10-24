@@ -10,7 +10,21 @@ use super::graph::Selection;
 use super::sun::{FallbackBadge, sun_sheet};
 use crate::flow_edit::remove_node;
 use crate::house::House;
+use crate::i18n::flows::{FlowText, flow_text, invalid_json, use_flow_text};
+use crate::i18n::format::parse_decimal;
+use crate::i18n::{Lang, use_lang};
 use crate::screens::flow_schedule::ScheduleField;
+
+/// A fixed word as a signal that follows the language, for a field's label or placeholder.
+fn word(k: FlowText) -> Signal<String> {
+    let lang = use_lang();
+    Signal::derive(move || flow_text(lang(), k).to_owned())
+}
+
+/// A text that is an id or an example, the same in both languages.
+fn plain(s: &str) -> Signal<String> {
+    Signal::stored(s.to_owned())
+}
 
 /// How the form writes into the draft. The first write after the user starts a change (focus
 /// on a field, a click, a committed `change`) records an undo step; the keystrokes that follow
@@ -63,6 +77,19 @@ fn op_str(op: Op) -> &'static str {
     }
 }
 
+/// What a comparison reads as in the Compare list: a sign, or words for `is_dark`.
+fn op_label(lang: Lang, op: &str) -> &'static str {
+    match op {
+        "eq" => "=",
+        "ne" => "≠",
+        "gt" => ">",
+        "lt" => "<",
+        "gte" => "≥",
+        "lte" => "≤",
+        _ => flow_text(lang, FlowText::OpIsDark),
+    }
+}
+
 fn op_from(s: &str) -> Option<Op> {
     match s {
         "eq" => Some(Op::Eq),
@@ -86,15 +113,34 @@ fn json_text(initial: &serde_json::Value) -> String {
     }
 }
 
+/// What is wrong with a JSON field: empty while required (our text) or the parser's message
+/// (shown as received).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum JsonProblem {
+    Required,
+    Parse(String),
+}
+
+/// What a JSON field's text means: JSON, or a number typed with a decimal comma ("21,5"). The
+/// parser's message comes back as the error.
+fn parse_json_input(text: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str::<serde_json::Value>(text).or_else(|e| {
+        parse_decimal(text)
+            .map(serde_json::Value::from)
+            .ok_or_else(|| e.to_string())
+    })
+}
+
 #[component]
 fn JsonField(
-    label: String,
+    label: Signal<String>,
     initial: serde_json::Value,
     optional: bool,
     write: Callback<Option<serde_json::Value>>,
 ) -> impl IntoView {
+    let lang = use_lang();
     let raw = RwSignal::new(json_text(&initial));
-    let error = RwSignal::new(None::<String>);
+    let error = RwSignal::new(None::<JsonProblem>);
     let on_input = move |ev: web_sys::Event| {
         let text = event_target_value(&ev);
         raw.set(text.clone());
@@ -104,21 +150,21 @@ fn JsonField(
                 error.set(None);
                 write.run(None);
             } else {
-                error.set(Some("required".into()));
+                error.set(Some(JsonProblem::Required));
             }
             return;
         }
-        match serde_json::from_str::<serde_json::Value>(trimmed) {
+        match parse_json_input(trimmed) {
             Ok(value) => {
                 error.set(None);
                 write.run(Some(value));
             }
-            Err(e) => error.set(Some(e.to_string())),
+            Err(e) => error.set(Some(JsonProblem::Parse(e))),
         }
     };
     view! {
         <label class="node-editor__field">
-            <span class="node-editor__label">{label}</span>
+            <span class="node-editor__label">{move || label.get()}</span>
             <input
                 type="text"
                 class="field"
@@ -129,7 +175,12 @@ fn JsonField(
                 aria-invalid=move || error.with(|e| e.is_some()).then_some("true")
             />
             {move || error.get().map(|e| view! {
-                <span class="node-editor__error">{e}</span>
+                <span class="node-editor__error">
+                    {match e {
+                        JsonProblem::Required => flow_text(lang(), FlowText::Required).to_owned(),
+                        JsonProblem::Parse(message) => invalid_json(lang(), &message),
+                    }}
+                </span>
             })}
         </label>
     }
@@ -137,9 +188,9 @@ fn JsonField(
 
 #[component]
 fn TextField(
-    label: String,
+    label: Signal<String>,
     initial: String,
-    placeholder: String,
+    placeholder: Signal<String>,
     optional: bool,
     write: Callback<Option<String>>,
 ) -> impl IntoView {
@@ -158,11 +209,11 @@ fn TextField(
     };
     view! {
         <label class="node-editor__field">
-            <span class="node-editor__label">{label}</span>
+            <span class="node-editor__label">{move || label.get()}</span>
             <input
                 type="text"
                 class="field"
-                placeholder=placeholder
+                placeholder=move || placeholder.get()
                 spellcheck="false"
                 autocomplete="off"
                 prop:value=move || raw.get()
@@ -231,16 +282,17 @@ fn node_editor_body(
     id: String,
     node: Node,
 ) -> impl IntoView {
+    let t = use_flow_text();
     let kind_label = match &node.kind {
-        NodeKind::TriggerState(_) => "Trigger",
-        NodeKind::TriggerSchedule(_) => "Schedule",
-        NodeKind::TriggerSun(_) => "Sun",
-        NodeKind::TriggerSignal(_) => "Signal",
-        NodeKind::If(_) => "If",
-        NodeKind::Delay(_) => "Delay",
-        NodeKind::Command(_) => "Command",
-        NodeKind::FlowEnable(_) => "Flow switch",
-        NodeKind::Notify(_) => "Notify",
+        NodeKind::TriggerState(_) => FlowText::NodeTrigger,
+        NodeKind::TriggerSchedule(_) => FlowText::Schedule,
+        NodeKind::TriggerSun(_) => FlowText::NodeSun,
+        NodeKind::TriggerSignal(_) => FlowText::NodeSignal,
+        NodeKind::If(_) => FlowText::NodeIf,
+        NodeKind::Delay(_) => FlowText::NodeDelay,
+        NodeKind::Command(_) => FlowText::NodeCommand,
+        NodeKind::FlowEnable(_) => FlowText::NodeFlowSwitch,
+        NodeKind::Notify(_) => FlowText::Notify,
     };
     let id_display = id.clone();
     let close = move |_: web_sys::MouseEvent| selected.set(None);
@@ -258,42 +310,42 @@ fn node_editor_body(
     view! {
         <section
             class="node-editor"
-            aria-label="Node editor"
+            aria-label=move || t(FlowText::NodeEditor)
             on:focusin=move |_| form.arm()
             on:click=move |_| form.arm()
             on:change=move |_| form.arm()
         >
             <header class="node-editor__header">
                 <div class="node-editor__title">
-                    <span class="chip">{kind_label}</span>
+                    <span class="chip">{move || t(kind_label)}</span>
                     <code class="node-editor__id">{id_display}</code>
                 </div>
                 <button
                     type="button"
                     class="btn btn--ghost"
-                    aria-label="Close editor"
+                    aria-label=move || t(FlowText::CloseEditor)
                     on:click=close
                 >
-                    "Close"
+                    {move || t(FlowText::Close)}
                 </button>
             </header>
             <TextField
-                label="Name".into()
+                label=word(FlowText::Name)
                 initial=initial_name
-                placeholder="(auto)".into()
+                placeholder=word(FlowText::Auto)
                 optional=true
                 write=name_write
             />
             {kind_fields}
             <footer class="node-editor__footer">
                 <button type="button" class="btn btn--ghost node-editor__delete" on:click=delete>
-                    "Delete card"
+                    {move || t(FlowText::DeleteCard)}
                 </button>
                 <span class="node-editor__keys">
                     <kbd>"⌫"</kbd>
-                    " delete · "
+                    {move || format!(" {} · ", t(FlowText::HintDelete))}
                     <kbd>"⌘D"</kbd>
-                    " duplicate"
+                    {move || format!(" {}", t(FlowText::HintDuplicate))}
                 </span>
             </footer>
         </section>
@@ -326,6 +378,7 @@ fn flow_enable_fields(
     p: oikos_core::flow::FlowEnableParams,
 ) -> impl IntoView {
     let house = expect_context::<House>();
+    let t = use_flow_text();
     let own_id = form.editor.draft.with_untracked(|f| f.id.clone());
     let others: Vec<(String, String)> = house.flows.with_untracked(|flows| {
         flows
@@ -359,9 +412,11 @@ fn flow_enable_fields(
     let enabled = p.enabled;
     view! {
         <label class="node-editor__field">
-            <span class="node-editor__label">"Flow"</span>
+            <span class="node-editor__label">{move || t(FlowText::NodeFlow)}</span>
             <select class="field" on:change=on_target>
-                <option value="" selected=target.is_none()>"This flow"</option>
+                <option value="" selected=target.is_none()>
+                    {move || t(FlowText::ThisFlowCap)}
+                </option>
                 {(!known)
                     .then(|| {
                         let gone = target.clone().unwrap_or_default();
@@ -377,10 +432,14 @@ fn flow_enable_fields(
             </select>
         </label>
         <label class="node-editor__field">
-            <span class="node-editor__label">"Action"</span>
+            <span class="node-editor__label">{move || t(FlowText::NodeAction)}</span>
             <select class="field" on:change=on_state>
-                <option value="enable" selected=enabled>"Enable"</option>
-                <option value="disable" selected=!enabled>"Disable"</option>
+                <option value="enable" selected=enabled>
+                    {move || t(FlowText::Enable)}
+                </option>
+                <option value="disable" selected=!enabled>
+                    {move || t(FlowText::Disable)}
+                </option>
             </select>
         </label>
     }
@@ -388,7 +447,20 @@ fn flow_enable_fields(
 
 /// The `notify` editor: title and body text, the channel and severity of the alert, and
 /// whether it arrives silently.
+/// A severity as a word; one the table does not know stays as the hub names it.
+fn severity_word(lang: Lang, severity: &str) -> String {
+    let word = match severity {
+        "info" => FlowText::SevInfo,
+        "warning" => FlowText::SevWarning,
+        "critical" => FlowText::SevCritical,
+        other => return other.to_owned(),
+    };
+    flow_text(lang, word).to_owned()
+}
+
 fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> impl IntoView {
+    let t = use_flow_text();
+    let lang = use_lang();
     let title_id = id.clone();
     let title_write = Callback::new(move |value: Option<String>| {
         form.update(&title_id, |n| {
@@ -436,21 +508,21 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
     let silent = p.silent.unwrap_or(false);
     view! {
         <TextField
-            label="Title".into()
+            label=word(FlowText::TitleLabel)
             initial=p.title
-            placeholder="Door open".into()
+            placeholder=word(FlowText::TitleExample)
             optional=false
             write=title_write
         />
         <TextField
-            label="Body".into()
+            label=word(FlowText::BodyLabel)
             initial=p.body.unwrap_or_default()
-            placeholder="(none)".into()
+            placeholder=word(FlowText::NoneParen)
             optional=true
             write=body_write
         />
         <label class="node-editor__field">
-            <span class="node-editor__label">"Channel"</span>
+            <span class="node-editor__label">{move || t(FlowText::Channel)}</span>
             <select class="field" on:change=on_channel>
                 {oikos_core::flow::NOTIFY_CHANNELS
                     .iter()
@@ -462,25 +534,36 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
             </select>
         </label>
         <label class="node-editor__field">
-            <span class="node-editor__label">"Severity"</span>
+            <span class="node-editor__label">{move || t(FlowText::Severity)}</span>
             <select class="field" on:change=on_severity>
                 {oikos_core::flow::NOTIFY_SEVERITIES
                     .iter()
                     .map(|s| {
                         let chosen = *s == severity;
-                        view! { <option value=*s selected=chosen>{*s}</option> }
+                        view! {
+                            <option value=*s selected=chosen>
+                                {move || severity_word(lang(), s)}
+                            </option>
+                        }
                     })
                     .collect_view()}
             </select>
         </label>
         <label class="node-editor__field">
-            <span class="node-editor__label">"Silent"</span>
-            <input type="checkbox" aria-label="Silent" prop:checked=silent on:change=on_silent />
+            <span class="node-editor__label">{move || t(FlowText::Silent)}</span>
+            <input
+                type="checkbox"
+                aria-label=move || t(FlowText::Silent)
+                prop:checked=silent
+                on:change=on_silent
+            />
         </label>
     }
 }
 
 fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
+    let t = use_flow_text();
+    let lang = use_lang();
     match kind {
         NodeKind::TriggerState(p) => {
             let entity_id = id.clone();
@@ -509,20 +592,20 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             });
             view! {
                 <TextField
-                    label="Entity".into()
+                    label=word(FlowText::Entity)
                     initial=p.entity
-                    placeholder="entity.id".into()
+                    placeholder=plain("entity.id")
                     optional=false
                     write=entity_write
                 />
                 <JsonField
-                    label="Fires when it becomes (JSON, optional)".into()
+                    label=word(FlowText::FiresWhen)
                     initial=p.to.unwrap_or(serde_json::Value::Null)
                     optional=true
                     write=to_write
                 />
                 <JsonField
-                    label="Only after (previous, JSON, optional)".into()
+                    label=word(FlowText::OnlyAfter)
                     initial=p.from.unwrap_or(serde_json::Value::Null)
                     optional=true
                     write=from_write
@@ -566,7 +649,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     .into_iter()
                     .map(|option| {
                         let is_selected = selected == option;
-                        let label = option.clone().unwrap_or_else(|| "any".to_owned());
+                        let label = option.clone();
                         let chip_id = chip_id.clone();
                         view! {
                             <button
@@ -584,7 +667,11 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                                     });
                                 }
                             >
-                                {label}
+                                {move || {
+                                    label
+                                        .clone()
+                                        .unwrap_or_else(|| t(FlowText::AnySignal).to_owned())
+                                }}
                             </button>
                         }
                     })
@@ -592,14 +679,18 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             };
             view! {
                 <TextField
-                    label="Entity".into()
+                    label=word(FlowText::Entity)
                     initial=p.entity
-                    placeholder="device_automation.id".into()
+                    placeholder=plain("device_automation.id")
                     optional=false
                     write=entity_write
                 />
-                <div class="override__field" role="group" aria-label="Signal">
-                    <span class="override__label">"Signal"</span>
+                <div
+                    class="override__field"
+                    role="group"
+                    aria-label=move || t(FlowText::NodeSignal)
+                >
+                    <span class="override__label">{move || t(FlowText::NodeSignal)}</span>
                     <div class="override__chips signal-chips">{chips}</div>
                 </div>
             }
@@ -661,14 +752,16 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             let cfg = Signal::from(expect_context::<House>().flows_config);
             view! {
                 <label class="node-editor__field">
-                    <span class="node-editor__label">"Compare"</span>
+                    <span class="node-editor__label">{move || t(FlowText::NodeCompare)}</span>
                     <select class="field" on:change=on_op>
                         {["eq", "ne", "gt", "lt", "gte", "lte", "is_dark"]
                             .into_iter()
                             .map(|o| {
                                 let selected = op_str(current_op) == o;
                                 view! {
-                                    <option value=o selected=selected>{o}</option>
+                                    <option value=o selected=selected>
+                                        {move || op_label(lang(), o)}
+                                    </option>
                                 }
                             })
                             .collect_view()}
@@ -677,36 +770,38 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 <Show
                     when=not_dark
                     fallback=move || view! {
-                        <p class="node-editor__hint">"Is it dark now? (sun below -6°)"</p>
+                        <p class="node-editor__hint">{move || t(FlowText::IsDark)}</p>
                         <FallbackBadge cfg=cfg />
                     }
                 >
                     <JsonField
-                        label="Value (JSON)".into()
+                        label=word(FlowText::ValueJson)
                         initial=live.run(()).and_then(|i| i.value).unwrap_or(serde_json::Value::Null)
                         optional=false
                         write=value_write
                     />
                     <TextField
-                        label="Entity (defaults to trigger value)".into()
+                        label=word(FlowText::EntityDefaults)
                         initial=live.run(()).and_then(|i| i.entity).unwrap_or_default()
-                        placeholder="entity.id".into()
+                        placeholder=plain("entity.id")
                         optional=true
                         write=entity_write
                     />
                     <label class="node-editor__field">
-                        <span class="node-editor__label">"When the value is unknown"</span>
+                        <span class="node-editor__label">{move || t(FlowText::WhenUnknown)}</span>
                         <select class="field" on:change=move |ev| on_missing.run(ev)>
                             {[
-                                ("fail", "Fail"),
-                                ("true", "Take Yes"),
-                                ("false", "Take No"),
+                                ("fail", FlowText::MissingFail),
+                                ("true", FlowText::MissingTrue),
+                                ("false", FlowText::MissingFalse),
                             ]
                                 .into_iter()
                                 .map(|(value, label)| {
                                     let selected = missing_str(live.run(()).and_then(|i| i.missing)) == value;
                                     view! {
-                                        <option value=value selected=selected>{label}</option>
+                                        <option value=value selected=selected>
+                                            {move || t(label)}
+                                        </option>
                                     }
                                 })
                                 .collect_view()}
@@ -765,16 +860,16 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             });
             view! {
                 <TextField
-                    label="Duration".into()
+                    label=word(FlowText::Duration)
                     initial=p.for_
-                    placeholder="5m, 1h30m, 45s".into()
+                    placeholder=plain("5m, 1h30m, 45s")
                     optional=false
                     write=for_write
                 />
                 <TextField
-                    label="Up to (random)".into()
+                    label=word(FlowText::UpToRandom)
                     initial=p.up_to.unwrap_or_default()
-                    placeholder="(exact duration)".into()
+                    placeholder=word(FlowText::ExactDuration)
                     optional=true
                     write=up_to_write
                 />
@@ -805,14 +900,14 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             });
             view! {
                 <TextField
-                    label="Entity".into()
+                    label=word(FlowText::Entity)
                     initial=p.entity
-                    placeholder="entity.id".into()
+                    placeholder=plain("entity.id")
                     optional=false
                     write=entity_write
                 />
                 <JsonField
-                    label=r#"Command (JSON, e.g. {"type":"turn_on"})"#.into()
+                    label=word(FlowText::CommandJson)
                     initial=command_json
                     optional=false
                     write=cmd_write
@@ -828,6 +923,15 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn json_fields_take_a_decimal_comma() {
+        assert_eq!(parse_json_input("21,5"), Ok(json!(21.5)));
+        assert_eq!(parse_json_input("21.5"), Ok(json!(21.5)));
+        assert_eq!(parse_json_input("true"), Ok(json!(true)));
+        assert_eq!(parse_json_input("\"ON\""), Ok(json!("ON")));
+        assert!(parse_json_input("{oops").is_err());
+    }
 
     #[test]
     fn flipping_to_is_dark_and_back_keeps_the_operands() {

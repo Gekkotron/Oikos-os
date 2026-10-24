@@ -5,30 +5,20 @@ use std::collections::BTreeMap;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::command::command_name;
 use oikos_core::flow::{Node, NodeKind, Op, SunWhich, parse_duration};
-use oikos_core::model::{Command, Hs};
+use oikos_core::model::{Command, Hs, Kind};
 use serde_json::Value;
 
 use crate::flows::{humanise, value_text};
 use crate::format::entity_title;
+use crate::i18n::Lang;
+use crate::i18n::flows::{self as t, FlowText, flow_text};
+use crate::i18n::format::{number, with_unit};
+use crate::i18n::states::{StateCtx, state_word};
 use crate::schedule::describe;
 
-fn event_name(which: SunWhich) -> &'static str {
-    match which {
-        SunWhich::Sunrise => "sunrise",
-        SunWhich::Sunset => "sunset",
-        SunWhich::Dusk => "civil dusk",
-        SunWhich::Dawn => "civil dawn",
-    }
-}
-
 /// The card's sentence: "At sunset", "15 min after sunrise", "15 min before civil dusk".
-pub fn sun_summary(which: SunWhich, offset_minutes: i32) -> String {
-    let name = event_name(which);
-    match offset_minutes {
-        0 => format!("At {name}"),
-        n if n > 0 => format!("{n} min after {name}"),
-        n => format!("{} min before {name}", n.unsigned_abs()),
-    }
+pub fn sun_summary(lang: Lang, which: SunWhich, offset_minutes: i32) -> String {
+    t::sun_sentence(lang, which, offset_minutes)
 }
 
 /// What a card does in a flow; drives its colour.
@@ -60,7 +50,7 @@ pub struct Ctx<'a> {
     /// `(id, name)` of every flow.
     pub flows: &'a [(String, String)],
     /// The UI language of the sentences.
-    pub lang: crate::i18n::Lang,
+    pub lang: Lang,
 }
 
 fn entity_text(id: &str, ctx: &Ctx) -> String {
@@ -69,24 +59,68 @@ fn entity_text(id: &str, ctx: &Ctx) -> String {
         .map_or_else(|| id.to_owned(), |e| entity_title(ctx.lang, e))
 }
 
-/// A number without a trailing `.0`.
-fn number_text(n: f64) -> String {
-    if n.fract() == 0.0 && n.abs() < 1e15 {
-        format!("{}", n as i64)
-    } else {
-        n.to_string()
+fn lower_first(s: &str) -> String {
+    let mut chars = s.chars();
+    chars
+        .next()
+        .map(|c| c.to_lowercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// The word for an on/off value of an entity. English says on/off; French says "allumée" for a
+/// light, the device-class word for a binary sensor ("ouvert") and "activé" for the rest.
+fn bool_word(lang: Lang, entity: Option<&EntityView>, on: bool) -> String {
+    if lang == Lang::En {
+        return if on { "on" } else { "off" }.into();
+    }
+    match entity {
+        Some(e) if e.kind == Kind::Light => if on { "allumée" } else { "éteinte" }.into(),
+        Some(e) if e.kind == Kind::BinarySensor => lower_first(&state_word(
+            lang,
+            StateCtx::BinarySensor(e.device_class.clone()),
+            if on { "on" } else { "off" },
+        )),
+        _ => if on { "activé" } else { "désactivé" }.into(),
     }
 }
 
-/// A value as a sentence reads it: booleans `on`/`off`, numbers followed by the unit.
-fn value_words(value: &Value, unit: Option<&str>) -> String {
+/// The vocabulary an entity's string states belong to.
+fn state_ctx(e: &EntityView) -> StateCtx {
+    match e.kind {
+        Kind::Cover => StateCtx::Cover,
+        Kind::Climate | Kind::WaterHeater => StateCtx::Hvac,
+        Kind::AlarmPanel => StateCtx::Alarm,
+        Kind::Vacuum => StateCtx::Vacuum,
+        Kind::BinarySensor => StateCtx::BinarySensor(e.device_class.clone()),
+        Kind::Generic if e.component == "lock" => StateCtx::Lock,
+        _ => StateCtx::Choice,
+    }
+}
+
+/// A value as a sentence reads it: booleans on/off, numbers followed by the unit, known state
+/// words translated, anything else as it is.
+pub(crate) fn value_words(
+    lang: Lang,
+    value: &Value,
+    unit: Option<&str>,
+    entity: Option<&EntityView>,
+) -> String {
     match value {
-        Value::Bool(true) => "on".into(),
-        Value::Bool(false) => "off".into(),
-        Value::Number(_) => match unit.filter(|u| !u.is_empty()) {
-            Some(u) => format!("{} {u}", value_text(value)),
-            None => value_text(value),
-        },
+        Value::Bool(b) => bool_word(lang, entity, *b),
+        Value::Number(n) => {
+            let text = n
+                .as_f64()
+                .map_or_else(|| value_text(value), |f| number(lang, f));
+            with_unit(text, unit)
+        }
+        Value::String(s) if lang == Lang::Fr => {
+            let word = state_word(lang, entity.map_or(StateCtx::Choice, state_ctx), s);
+            if word == crate::format::word(s) {
+                s.clone()
+            } else {
+                lower_first(&word)
+            }
+        }
         other => value_text(other),
     }
 }
@@ -97,85 +131,101 @@ fn unit_of<'a>(id: &str, ctx: &'a Ctx) -> Option<&'a str> {
 
 /// A generic control as a sentence: "Lock Front door", "Set Bedroom fan percentage to 60",
 /// "Activate Scene 1" (a press has no value).
-fn control_sentence(control: &str, value: Option<&Value>, e: &str) -> String {
+fn control_sentence(lang: Lang, control: &str, value: Option<&Value>, e: &str) -> String {
     let name = control.replace('_', " ");
     // TODO: table-only dispatch. The lock/unlock wording is the one control name matched
     // here; a `sentence` hint on the table's `ControlDef` would let the table own it.
     match (control, value) {
-        ("locked", Some(Value::Bool(true))) => format!("Lock {e}"),
-        ("locked", Some(Value::Bool(false))) => format!("Unlock {e}"),
+        ("locked", Some(Value::Bool(true))) => {
+            format!("{} {e}", flow_text(lang, FlowText::Lock))
+        }
+        ("locked", Some(Value::Bool(false))) => {
+            format!("{} {e}", flow_text(lang, FlowText::Unlock))
+        }
         (_, None) => format!("{} {e}", crate::format::word(control)),
-        (_, Some(v)) => format!("Set {e} {name} to {}", value_words(v, None)),
+        (_, Some(v)) => t::set_control(lang, e, &name, &value_words(lang, v, None, None)),
     }
 }
 
-/// A colour word for a hue (0..360) and saturation (0..100): "white" when barely saturated.
-fn colour_name(hs: Hs) -> &'static str {
+/// The colour word of a hue (0..360) and saturation (0..100): white when barely saturated.
+fn colour_name(hs: Hs) -> FlowText {
     if hs.s < 15.0 {
-        return "white";
+        return FlowText::ColourWhite;
     }
     match hs.h.rem_euclid(360.0) {
-        h if h < 15.0 => "red",
-        h if h < 45.0 => "orange",
-        h if h < 70.0 => "yellow",
-        h if h < 165.0 => "green",
-        h if h < 195.0 => "cyan",
-        h if h < 255.0 => "blue",
-        h if h < 285.0 => "purple",
-        h if h < 330.0 => "magenta",
-        h if h < 345.0 => "pink",
-        _ => "red",
+        h if h < 15.0 => FlowText::ColourRed,
+        h if h < 45.0 => FlowText::ColourOrange,
+        h if h < 70.0 => FlowText::ColourYellow,
+        h if h < 165.0 => FlowText::ColourGreen,
+        h if h < 195.0 => FlowText::ColourCyan,
+        h if h < 255.0 => FlowText::ColourBlue,
+        h if h < 285.0 => FlowText::ColourPurple,
+        h if h < 330.0 => FlowText::ColourMagenta,
+        h if h < 345.0 => FlowText::ColourPink,
+        _ => FlowText::ColourRed,
     }
 }
 
 /// "Turn on LED", "Turn on LED at 39 % in magenta with breathe".
 fn turn_on_sentence(
+    lang: Lang,
     e: &str,
     brightness: Option<u8>,
     color: Option<Hs>,
     effect: Option<&str>,
 ) -> String {
-    let mut s = format!("Turn on {e}");
+    let mut s = format!("{} {e}", flow_text(lang, FlowText::TurnOn));
     if let Some(b) = brightness {
-        s += &format!(" at {} %", (f64::from(b) * 100.0 / 255.0).round());
+        s += &t::at_brightness(lang, (f64::from(b) * 100.0 / 255.0).round());
     }
     if let Some(c) = color {
-        s += &format!(" in {}", colour_name(c));
+        s += &t::in_colour(lang, colour_name(c));
     }
     if let Some(fx) = effect {
-        s += &format!(" with {}", fx.replace('_', " "));
+        s += &t::with_effect(lang, &fx.replace('_', " "));
     }
     s
 }
 
 fn command_sentence(command: &Command, entity: &str, ctx: &Ctx) -> String {
+    let lang = ctx.lang;
     let e = entity_text(entity, ctx);
+    let verb = |k: FlowText| format!("{} {e}", flow_text(lang, k));
     match command {
         Command::TurnOn {
             brightness,
             color,
             effect,
-        } => turn_on_sentence(&e, *brightness, *color, effect.as_deref()),
-        Command::TurnOff => format!("Turn off {e}"),
-        Command::Toggle => format!("Toggle {e}"),
-        Command::Open => format!("Open {e}"),
-        Command::Close => format!("Close {e}"),
-        Command::Stop => format!("Stop {e}"),
-        Command::Press => format!("Press {e}"),
-        Command::SetPosition { position } => format!("Set {e} to {position} %"),
+        } => turn_on_sentence(lang, &e, *brightness, *color, effect.as_deref()),
+        Command::TurnOff => verb(FlowText::TurnOff),
+        Command::Toggle => verb(FlowText::Toggle),
+        Command::Open => verb(FlowText::Open),
+        Command::Close => verb(FlowText::Close),
+        Command::Stop => verb(FlowText::Stop),
+        Command::Press => verb(FlowText::Press),
+        Command::SetPosition { position } => {
+            t::set_to(lang, &e, &with_unit(position.to_string(), Some("%")))
+        }
         Command::SetTemperature { temperature } => {
-            format!("Set {e} to {} °C", number_text(*temperature))
+            t::set_to(lang, &e, &with_unit(number(lang, *temperature), Some("°C")))
         }
-        Command::SetNumber { value } => {
-            let v = number_text(*value);
-            match unit_of(entity, ctx).filter(|u| !u.is_empty()) {
-                Some(u) => format!("Set {e} to {v} {u}"),
-                None => format!("Set {e} to {v}"),
-            }
+        Command::SetNumber { value } => t::set_to(
+            lang,
+            &e,
+            &with_unit(
+                number(lang, *value),
+                unit_of(entity, ctx).filter(|u| !u.is_empty()),
+            ),
+        ),
+        Command::SelectOption { option } => t::set_to(lang, &e, option),
+        Command::SetHvacMode { mode } => {
+            let word = match lang {
+                Lang::En => mode.to_string(),
+                Lang::Fr => lower_first(&state_word(lang, StateCtx::Hvac, mode)),
+            };
+            t::set_mode(lang, &e, &word)
         }
-        Command::SelectOption { option } => format!("Set {e} to {option}"),
-        Command::SetHvacMode { mode } => format!("Set {e} mode to {mode}"),
-        Command::Control { control, value } => control_sentence(control, value.as_ref(), &e),
+        Command::Control { control, value } => control_sentence(lang, control, value.as_ref(), &e),
         other => format!("{} {e}", humanise(command_name(other))),
     }
 }
@@ -192,66 +242,66 @@ fn op_words(op: Op) -> &'static str {
 
 /// The card's sentence, generated from its parameters; ignores the node's name.
 pub fn sentence(node: &Node, ctx: &Ctx) -> String {
+    let lang = ctx.lang;
     match &node.kind {
         NodeKind::TriggerState(p) => {
             let e = entity_text(&p.entity, ctx);
+            let entity = ctx.entities.get(&p.entity);
             match &p.to {
-                None => format!("When {e} changes"),
-                Some(Value::Bool(b)) => {
-                    format!("When {e} turns {}", if *b { "on" } else { "off" })
-                }
-                Some(v) => format!(
-                    "When {e} becomes {}",
-                    value_words(v, unit_of(&p.entity, ctx))
+                None => t::when_changes(lang, &e),
+                Some(Value::Bool(b)) => t::when_turns(
+                    lang,
+                    &e,
+                    *b,
+                    entity.is_some_and(|x| x.kind == Kind::Light),
+                    &bool_word(lang, entity, *b),
+                ),
+                Some(v) => t::when_becomes(
+                    lang,
+                    &e,
+                    &value_words(lang, v, unit_of(&p.entity, ctx), entity),
                 ),
             }
         }
-        NodeKind::TriggerSignal(p) => match &p.signal {
-            Some(signal) => format!("When {} sends {signal}", entity_text(&p.entity, ctx)),
-            None => format!("When {} sends a signal", entity_text(&p.entity, ctx)),
-        },
-        NodeKind::TriggerSchedule(p) => describe(&p.cron),
-        NodeKind::TriggerSun(p) => sun_summary(p.which, p.offset()),
-        NodeKind::If(p) if p.op == Op::IsDark => "Is it dark now? (sun below -6°)".to_owned(),
+        NodeKind::TriggerSignal(p) => {
+            t::when_sends(lang, &entity_text(&p.entity, ctx), p.signal.as_deref())
+        }
+        NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
+        NodeKind::TriggerSun(p) => sun_summary(lang, p.which, p.offset()),
+        NodeKind::If(p) if p.op == Op::IsDark => flow_text(lang, FlowText::IsDark).to_owned(),
         NodeKind::If(p) => {
-            let (e, unit) = match &p.entity {
-                Some(id) => (entity_text(id, ctx), unit_of(id, ctx)),
-                None => ("Trigger value".to_owned(), None),
+            let (e, unit, entity) = match &p.entity {
+                Some(id) => (entity_text(id, ctx), unit_of(id, ctx), ctx.entities.get(id)),
+                None => (
+                    flow_text(lang, FlowText::TriggerValue).to_owned(),
+                    None,
+                    None,
+                ),
             };
-            let v = value_words(p.value.as_ref().unwrap_or(&Value::Null), unit);
+            let v = value_words(lang, p.value.as_ref().unwrap_or(&Value::Null), unit, entity);
             match p.op {
-                Op::Eq => format!("{e} is {v}?"),
-                Op::Ne => format!("{e} is not {v}?"),
-                op => format!("{e} {} {v}?", op_words(op)),
+                Op::Eq => t::is_value(lang, &e, &v),
+                Op::Ne => t::is_not_value(lang, &e, &v),
+                op => t::ask(lang, &format!("{e} {} {v}", op_words(op))),
             }
         }
-        NodeKind::Delay(p) => match &p.up_to {
-            Some(up_to) => format!(
-                "Wait {} to {}",
-                duration_words(&p.for_),
-                duration_words(up_to)
-            ),
-            None => format!("Wait {}", duration_words(&p.for_)),
-        },
+        NodeKind::Delay(p) => t::wait(
+            lang,
+            &duration_words(&p.for_),
+            p.up_to.as_deref().map(duration_words).as_deref(),
+        ),
         NodeKind::Command(p) => command_sentence(&p.command, &p.entity, ctx),
-        NodeKind::Notify(p) => {
-            if p.title.trim().is_empty() {
-                "Notify".to_owned()
-            } else {
-                format!("Notify \"{}\"", p.title)
-            }
-        }
+        NodeKind::Notify(p) => t::notify(lang, &p.title),
         NodeKind::FlowEnable(p) => {
-            let verb = if p.enabled { "Enable" } else { "Disable" };
             let target = match &p.flow {
-                None => "this flow".to_owned(),
+                None => flow_text(lang, FlowText::ThisFlow).to_owned(),
                 Some(id) => ctx
                     .flows
                     .iter()
                     .find(|(fid, _)| fid == id)
                     .map_or_else(|| id.clone(), |(_, name)| name.clone()),
             };
-            format!("{verb} {target}")
+            t::flow_switch(lang, p.enabled, &target)
         }
     }
 }
@@ -296,8 +346,8 @@ pub fn subline(node: &Node, ctx: &Ctx) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
-/// `"5m"` as "5 min", `"1h30m"` as "1 h 30 min", `"45s"` as "45 s"; text that is not a duration
-/// comes back unchanged.
+/// `"5m"` as "5 min", `"1h30m"` as "1 h 30 min", `"45s"` as "45 s" (no-break space between a
+/// number and its unit, in both languages); text that is not a duration comes back unchanged.
 pub fn duration_words(spec: &str) -> String {
     let Ok(d) = parse_duration(spec) else {
         return spec.to_owned();
@@ -307,7 +357,7 @@ pub fn duration_words(spec: &str) -> String {
     let parts: Vec<String> = [(h, "h"), (m, "min"), (s, "s")]
         .into_iter()
         .filter(|(n, _)| *n > 0)
-        .map(|(n, unit)| format!("{n} {unit}"))
+        .map(|(n, unit)| with_unit(n.to_string(), Some(unit)))
         .collect();
     parts.join(" ")
 }
@@ -318,10 +368,15 @@ mod tests {
 
     #[test]
     fn summary_line_renders_expected_string() {
-        assert_eq!(sun_summary(SunWhich::Sunset, 0), "At sunset");
-        assert_eq!(sun_summary(SunWhich::Sunrise, 15), "15 min after sunrise");
-        assert_eq!(sun_summary(SunWhich::Dusk, -15), "15 min before civil dusk");
-        assert_eq!(sun_summary(SunWhich::Dawn, 0), "At civil dawn");
+        let en = |w, o| sun_summary(Lang::En, w, o);
+        assert_eq!(en(SunWhich::Sunset, 0), "At sunset");
+        assert_eq!(en(SunWhich::Sunrise, 15), "15\u{a0}min after sunrise");
+        assert_eq!(en(SunWhich::Dusk, -15), "15\u{a0}min before civil dusk");
+        assert_eq!(en(SunWhich::Dawn, 0), "At civil dawn");
+        assert_eq!(
+            sun_summary(Lang::Fr, SunWhich::Sunrise, 15),
+            "15\u{a0}min après le lever du soleil"
+        );
     }
     use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
 
@@ -379,6 +434,10 @@ mod tests {
     }
 
     fn text(json: &str) -> String {
+        text_in(Lang::En, json)
+    }
+
+    fn text_in(lang: Lang, json: &str) -> String {
         let entities = house();
         let areas = areas();
         let flows = vec![(
@@ -391,18 +450,71 @@ mod tests {
                 entities: &entities,
                 areas: &areas,
                 flows: &flows,
-                lang: crate::i18n::Lang::En,
+                lang,
             },
         )
+    }
+
+    #[test]
+    fn french_twins_of_the_english_sentences() {
+        let fr = |json: &str| text_in(Lang::Fr, json);
+        let off = r#"{"id":"a","type":"command","params":{"entity":"led","command":{"type":"turn_off"}}}"#;
+        assert_eq!(fr(off), "Éteindre LED");
+        let on =
+            r#"{"id":"a","type":"command","params":{"entity":"l1","command":{"type":"turn_on"}}}"#;
+        assert_eq!(fr(on), "Allumer Lumière TV");
+        let changes = r#"{"id":"a","type":"trigger.state","params":{"entity":"l1"}}"#;
+        assert_eq!(fr(changes), "Quand Lumière TV change");
+        let is_on = r#"{"id":"a","type":"if","params":{"entity":"l1","op":"eq","value":true}}"#;
+        assert_eq!(fr(is_on), "Lumière TV est allumée\u{a0}?");
+        let turns = r#"{"id":"a","type":"trigger.state","params":{"entity":"l1","to":true}}"#;
+        assert_eq!(fr(turns), "Quand Lumière TV s'allume");
+        let gt = r#"{"id":"a","type":"if","params":{"entity":"lux","op":"gt","value":16}}"#;
+        assert_eq!(fr(gt), "Entrée > 16\u{a0}lx\u{a0}?");
+        let wait = r#"{"id":"a","type":"delay","params":{"for":"1h30m","up_to":"2h"}}"#;
+        assert_eq!(fr(wait), "Attendre de 1\u{a0}h 30\u{a0}min à 2\u{a0}h");
+        let notify = r#"{"id":"a","type":"notify","params":{"title":"Porte"}}"#;
+        assert_eq!(fr(notify), "Notifier «\u{a0}Porte\u{a0}»");
+        let dark = r#"{"id":"d","type":"if","params":{"op":"is_dark"}}"#;
+        assert_eq!(fr(dark), "Fait-il nuit\u{a0}? (soleil sous \u{2212}6°)");
+        let daily = r#"{"id":"s","type":"trigger.schedule","params":{"cron":"0 7 * * *"}}"#;
+        assert_eq!(text(daily), "Every day at 07:00");
+        assert_eq!(fr(daily), "Tous les jours à 07:00");
+        let weekdays = r#"{"id":"s","type":"trigger.schedule","params":{"cron":"0 7 * * 1-5"}}"#;
+        assert_eq!(fr(weekdays), "Du lundi au vendredi à 07:00");
+        let enable = r#"{"id":"a","type":"flow.enable","params":{"enabled":false}}"#;
+        assert_eq!(fr(enable), "Désactiver cette automatisation");
+    }
+
+    #[test]
+    fn french_colours_and_numbers() {
+        let fr = |json: &str| text_in(Lang::Fr, json);
+        let on = |cmd: &str| {
+            fr(&format!(
+                r#"{{"id":"a","type":"command","params":{{"entity":"led","command":{cmd}}}}}"#
+            ))
+        };
+        assert_eq!(
+            on(r#"{"type":"turn_on","brightness":100,"color":{"h":295.0,"s":100.0}}"#),
+            "Allumer LED à 39\u{a0}% en magenta"
+        );
+        assert_eq!(
+            on(r#"{"type":"turn_on","color":{"h":30.0,"s":4.0},"effect":"breathe"}"#),
+            "Allumer LED en blanc avec breathe"
+        );
+        assert_eq!(
+            on(r#"{"type":"set_temperature","temperature":21.5}"#),
+            "Régler LED sur 21,5\u{a0}°C"
+        );
     }
 
     #[test]
     fn sun_and_is_dark_cards_read_as_sentences() {
         let sun =
             r#"{"id":"s","type":"trigger.sun","params":{"which":"dusk","offset_minutes":-15}}"#;
-        assert_eq!(text(sun), "15 min before civil dusk");
+        assert_eq!(text(sun), "15\u{a0}min before civil dusk");
         let dark = r#"{"id":"d","type":"if","params":{"op":"is_dark"}}"#;
-        assert_eq!(text(dark), "Is it dark now? (sun below -6°)");
+        assert_eq!(text(dark), "Is it dark now? (sun below \u{2212}6°)");
     }
 
     #[test]
@@ -415,7 +527,7 @@ mod tests {
     #[test]
     fn if_gt_uses_unit() {
         let n = r#"{"id":"a","type":"if","params":{"entity":"lux","op":"gt","value":16}}"#;
-        assert_eq!(text(n), "Entrée > 16 lx?");
+        assert_eq!(text(n), "Entrée > 16\u{a0}lx?");
     }
 
     #[test]
@@ -434,7 +546,7 @@ mod tests {
         assert_eq!(on(r#"{"type":"turn_on"}"#), "Turn on LED");
         assert_eq!(
             on(r#"{"type":"turn_on","brightness":100,"color":{"h":295.0,"s":100.0}}"#),
-            "Turn on LED at 39 % in magenta"
+            "Turn on LED at 39\u{a0}% in magenta"
         );
         assert_eq!(
             on(r#"{"type":"turn_on","color":{"h":30.0,"s":4.0}}"#),
@@ -449,7 +561,7 @@ mod tests {
     #[test]
     fn command_set_number() {
         let n = r#"{"id":"a","type":"command","params":{"entity":"p1","command":{"type":"set_number","value":100}}}"#;
-        assert_eq!(text(n), "Set Power 1 to 100 %");
+        assert_eq!(text(n), "Set Power 1 to 100\u{a0}%");
     }
 
     #[test]
@@ -465,12 +577,12 @@ mod tests {
                 r#"{{"id":"a","type":"delay","params":{{"for":"{s}"}}}}"#
             ))
         };
-        assert_eq!(d("5m"), "Wait 5 min");
-        assert_eq!(d("1h30m"), "Wait 1 h 30 min");
-        assert_eq!(duration_words("45s"), "45 s");
+        assert_eq!(d("5m"), "Wait 5\u{a0}min");
+        assert_eq!(d("1h30m"), "Wait 1\u{a0}h 30\u{a0}min");
+        assert_eq!(duration_words("45s"), "45\u{a0}s");
         assert_eq!(duration_words("junk"), "junk");
         let random = text(r#"{"id":"a","type":"delay","params":{"for":"1m","up_to":"2h"}}"#);
-        assert_eq!(random, "Wait 1 min to 2 h");
+        assert_eq!(random, "Wait 1\u{a0}min to 2\u{a0}h");
     }
 
     #[test]
@@ -584,6 +696,40 @@ mod generic_tests {
             command_sentence(&c("activate", None), "Scene 1", &ctx),
             "Activate Scene 1"
         );
+        let fr = Ctx {
+            lang: crate::i18n::Lang::Fr,
+            ..ctx_of(&entities)
+        };
+        assert_eq!(
+            command_sentence(&c("locked", Some(json!(true))), "Porte", &fr),
+            "Verrouiller Porte"
+        );
+        assert_eq!(
+            command_sentence(&c("percentage", Some(json!(60))), "Ventilo", &fr),
+            "Régler Ventilo sur 60 (percentage)"
+        );
+        assert_eq!(
+            command_sentence(
+                &Command::SetHvacMode {
+                    mode: "heat".into()
+                },
+                "Clim",
+                &fr
+            ),
+            "Régler Clim en mode chauffage"
+        );
+    }
+
+    #[test]
+    fn string_values_follow_the_entity_kind() {
+        let mut climate = ent("c", "Clim");
+        climate.kind = Kind::Climate;
+        let mut cover = ent("v", "Volet");
+        cover.kind = Kind::Cover;
+        let value = |lang, v: &str, e: &EntityView| value_words(lang, &json!(v), None, Some(e));
+        assert_eq!(value(crate::i18n::Lang::Fr, "heat", &climate), "chauffage");
+        assert_eq!(value(crate::i18n::Lang::Fr, "open", &cover), "ouvert");
+        assert_eq!(value(crate::i18n::Lang::Fr, "whatever", &cover), "whatever");
     }
 
     #[test]
@@ -603,5 +749,11 @@ mod generic_tests {
         };
         assert_eq!(sentence(&node(Some("on")), &ctx), "When Remote sends on");
         assert_eq!(sentence(&node(None), &ctx), "When Remote sends a signal");
+        let fr = Ctx {
+            lang: crate::i18n::Lang::Fr,
+            ..ctx_of(&entities)
+        };
+        assert_eq!(sentence(&node(Some("on")), &fr), "Quand Remote envoie on");
+        assert_eq!(sentence(&node(None), &fr), "Quand Remote envoie un signal");
     }
 }

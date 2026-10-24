@@ -5,12 +5,15 @@ use leptos::task::spawn_local;
 
 use crate::api;
 use crate::components::toast::Toasts;
+use crate::i18n::flows::flow_switch;
+use crate::i18n::use_lang;
 
 /// A switch that enables or disables flow `id`; `invalid` flows cannot be toggled.
 #[component]
 pub fn FlowSwitch(id: String, name: String, enabled: bool, invalid: bool) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
-    let label = format!("Enable {name}");
+    let lang = use_lang();
+    let label = move || flow_switch(lang(), true, &name);
     let toggle = move |_| {
         let id = id.clone();
         spawn_local(async move {

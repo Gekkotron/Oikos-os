@@ -13,6 +13,8 @@ use crate::flow_list::{
     self, Filters, FlowListPrefs, Grouping, ListRow, Section, ViewMode, decode_prefs, encode_prefs,
 };
 use crate::house::House;
+use crate::i18n::flows::{FlowText, flow_text};
+use crate::i18n::{Key, text, use_lang};
 use bar::FlowsBar;
 use card::FlowCard;
 use room_menu::{RoomMenu, provide_open_menu};
@@ -108,6 +110,7 @@ fn section_view(
     mode: ViewMode,
     prefs: RwSignal<FlowListPrefs>,
 ) -> impl IntoView {
+    let lang = use_lang();
     let section = {
         let key = key.clone();
         Memo::new(move |_| sections.with(|all| all.iter().find(|s| s.key == key).cloned()))
@@ -155,7 +158,7 @@ fn section_view(
                             view! {
                                 <span
                                     class="flow-section__warn"
-                                    title="A flow in this room needs attention"
+                                    title=move || flow_text(lang(), FlowText::RoomNeedsAttention)
                                 >
                                     "⚠"
                                 </span>
@@ -177,12 +180,14 @@ pub fn FlowsScreen() -> impl IntoView {
     let query = RwSignal::new(String::new());
     Effect::new(move |_| prefs.with(save_prefs));
 
+    let lang = use_lang();
     let all_rows = Memo::new(move |_| {
+        let lang = lang();
         house.flows.with(|flows| {
             house.areas.with(|areas| {
                 house
                     .entities
-                    .with(|entities| flow_list::rows(flows, areas, entities))
+                    .with(|entities| flow_list::rows(lang, flows, areas, entities))
             })
         })
     });
@@ -214,7 +219,10 @@ pub fn FlowsScreen() -> impl IntoView {
     let empty = Memo::new(move |_| shown.with(Vec::is_empty));
     let sections = Memo::new(move |_| {
         let rows = shown.get();
-        house.areas.with(|areas| flow_list::sections(rows, areas))
+        let lang = lang();
+        house
+            .areas
+            .with(|areas| flow_list::sections(lang, rows, areas))
     });
     let section_keys = Memo::new(move |_| {
         sections.with(|all| all.iter().map(|s| s.key.clone()).collect::<Vec<_>>())
@@ -224,9 +232,9 @@ pub fn FlowsScreen() -> impl IntoView {
         if empty.get() {
             return view! {
                 <div class="flow-list__empty">
-                    <p>"No flows match"</p>
+                    <p>{move || flow_text(lang(), FlowText::NoFlowsMatch)}</p>
                     <button type="button" class="btn" on:click=clear_filters>
-                        "Clear filters"
+                        {move || flow_text(lang(), FlowText::ClearFilters)}
                     </button>
                 </div>
             }
@@ -246,18 +254,18 @@ pub fn FlowsScreen() -> impl IntoView {
         <div class="flows">
             <header class="sheet__header">
                 <div class="sheet__titles">
-                    <h1 class="sheet__title">"Flows"</h1>
+                    <h1 class="sheet__title">{move || flow_text(lang(), FlowText::PageTitle)}</h1>
                 </div>
                 <A href="/flows/new" attr:class="btn flows-new">
-                    "New flow"
+                    {move || text(lang(), Key::NewFlow)}
                 </A>
             </header>
             <Show
                 when=move || house.flows.with(|f| !f.is_empty())
-                fallback=|| {
+                fallback=move || {
                     view! {
                         <p class="flow-list__empty">
-                            "No flows yet. Ask the assistant to create one."
+                            {move || flow_text(lang(), FlowText::NoFlowsYet)}
                         </p>
                     }
                 }

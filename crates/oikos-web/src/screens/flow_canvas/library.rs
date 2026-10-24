@@ -9,6 +9,7 @@ use super::Editor;
 use crate::flow_picker::{Entry, Group, entries};
 use crate::flow_text::{Ctx, Role, role};
 use crate::house::House;
+use crate::i18n::flows::{FlowText, flow_text};
 use crate::icons::node_icon;
 
 /// The card a library row is being dragged to the canvas as, while a drag is on. Provided by
@@ -21,14 +22,17 @@ pub struct Dragging(pub StoredValue<Option<NodeKind>>);
 #[derive(Clone, Copy)]
 pub struct Fresh(pub RwSignal<Option<String>>);
 
-fn header(group: Group) -> &'static str {
-    match group {
-        Group::When => "WHEN · TRIGGER",
-        Group::And => "AND · CHECK",
-        Group::Then => "THEN · ACTION",
-        Group::Wait => "WAIT",
-        Group::Flow => "FLOW",
-    }
+fn header(lang: crate::i18n::Lang, group: Group) -> &'static str {
+    flow_text(
+        lang,
+        match group {
+            Group::When => FlowText::SectionWhen,
+            Group::And => FlowText::SectionAnd,
+            Group::Then => FlowText::SectionThen,
+            Group::Wait => FlowText::SectionWait,
+            Group::Flow => FlowText::SectionFlow,
+        },
+    )
 }
 
 /// The role colour of a section header.
@@ -96,20 +100,21 @@ pub fn Library(on_add: Callback<NodeKind>, query: RwSignal<String>) -> impl Into
     let on_key = move |ev: ev::KeyboardEvent| {
         let last = results.with_untracked(Vec::len).saturating_sub(1);
         let modifier = ev.meta_key() || ev.ctrl_key();
-        match ev.key().as_str() {
-            "z" | "Z" if modifier && added.get_value() => {
+        // Key names compared in lower case, so they read as ids, not as words.
+        match ev.key().to_ascii_lowercase().as_str() {
+            "z" if modifier && added.get_value() => {
                 ev.prevent_default();
                 editor.step(ev.shift_key());
             }
-            "ArrowDown" => {
+            "arrowdown" => {
                 ev.prevent_default();
                 highlight.update(|i| *i = (*i + 1).min(last));
             }
-            "ArrowUp" => {
+            "arrowup" => {
                 ev.prevent_default();
                 highlight.update(|i| *i = i.saturating_sub(1));
             }
-            "Enter" => {
+            "enter" => {
                 ev.prevent_default();
                 if let Some(entry) =
                     results.with_untracked(|r| r.get(highlight.get_untracked()).cloned())
@@ -118,7 +123,7 @@ pub fn Library(on_add: Callback<NodeKind>, query: RwSignal<String>) -> impl Into
                     added.set_value(true);
                 }
             }
-            "Escape" => query.set(String::new()),
+            "escape" => query.set(String::new()),
             _ => {}
         }
     };
@@ -135,7 +140,7 @@ pub fn Library(on_add: Callback<NodeKind>, query: RwSignal<String>) -> impl Into
                         "flow-library__header flow-library__header--{}",
                         role_suffix(header_role(entry.group))
                     );
-                    view! { <li class=class role="presentation">{header(entry.group)}</li> }
+                    view! { <li class=class role="presentation">{move || header(lang(), entry.group)}</li> }
                 });
                 last = Some(entry.group);
                 let class = format!(
@@ -180,15 +185,15 @@ pub fn Library(on_add: Callback<NodeKind>, query: RwSignal<String>) -> impl Into
     };
 
     view! {
-        <section class="flow-library" aria-label="Add a card">
+        <section class="flow-library" aria-label=move || flow_text(lang(), FlowText::AddCard)>
             <header class="flow-drawer__header">
-                <h2 class="flow-drawer__title">"Add a card"</h2>
+                <h2 class="flow-drawer__title">{move || flow_text(lang(), FlowText::AddCard)}</h2>
             </header>
             <input
                 class="field flow-library__search"
                 type="search"
-                placeholder="Search a card or an entity"
-                aria-label="Search cards"
+                placeholder=move || flow_text(lang(), FlowText::SearchCards)
+                aria-label=move || flow_text(lang(), FlowText::SearchCardsLabel)
                 prop:value=move || query.get()
                 on:input=move |ev| {
                     added.set_value(false);
@@ -199,7 +204,9 @@ pub fn Library(on_add: Callback<NodeKind>, query: RwSignal<String>) -> impl Into
             <ul class="flow-library__list" role="listbox">
                 {list}
                 <Show when=move || results.with(Vec::is_empty)>
-                    <li class="flow-library__empty">"Nothing matches"</li>
+                    <li class="flow-library__empty">
+                        {move || flow_text(lang(), FlowText::NothingMatches)}
+                    </li>
                 </Show>
             </ul>
         </section>

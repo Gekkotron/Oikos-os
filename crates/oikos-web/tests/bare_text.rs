@@ -54,14 +54,21 @@ const TECH_LINES: &[&str] = &[
 fn flagged(source: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip_depth: Option<i32> = None;
+    let mut skip_top = false;
     let mut pending_cfg_test = false;
     // Brace depth inside a `view!` block, where a literal alone on its line is view text.
     let mut view_depth = 0;
     for raw in source.lines() {
         let line = strip_comment(raw);
         if let Some(depth) = skip_depth.as_mut() {
+            // A multi-line raw string (`br#"{ … }"#`) unbalances `braces`, so a top-level test
+            // module ends at its `}` in the first column, not when the count reaches zero.
             *depth += braces(&line);
-            if *depth <= 0 {
+            if if skip_top {
+                line.trim_end() == "}"
+            } else {
+                *depth <= 0
+            } {
                 skip_depth = None;
             }
             continue;
@@ -77,6 +84,7 @@ fn flagged(source: &str) -> Vec<String> {
                 let depth = braces(&line);
                 if depth > 0 {
                     skip_depth = Some(depth);
+                    skip_top = !raw.starts_with(char::is_whitespace);
                     continue;
                 }
                 // `#[cfg(test)]` then `mod tests { … }` on one line: nothing to scan.
@@ -448,4 +456,23 @@ fn ignores_technical_literals() {
     assert!(flagged(r#"format!("robot robot--{}", state)"#).is_empty());
     assert!(flagged(r#"let d = format!("H{x_end}V{y_min}");"#).is_empty());
     assert!(flagged(r#"let links = host.closest(".sidebar a");"#).is_empty());
+}
+
+/// A top-level test module holding a multi-line raw string ends at its closing brace, even with
+/// trailing blanks; what follows is scanned again.
+#[test]
+fn a_top_level_test_module_ends_at_its_closing_brace() {
+    let source = [
+        "#[cfg(test)]",
+        "mod tests {",
+        "    const JSON: &[u8] = br#\"{",
+        "  \"id\": 1",
+        "}\"#;",
+        "    fn t() { let _ = \"Test only words\"; }",
+        "}  ",
+        "fn shown() { let _ = \"Shown words\"; }",
+    ]
+    .join("\n");
+    let source = source.as_str();
+    assert_eq!(flagged(source), ["Shown words"]);
 }

@@ -1,5 +1,13 @@
 //! The schedule picker's pure half: the five friendly choices, their mapping to and from a
-//! five-field cron expression, and a plain-English reading of any expression.
+//! five-field cron expression, and a plain-language reading of any expression.
+
+use chrono::Weekday;
+
+use crate::i18n::Lang;
+use crate::i18n::flows::{
+    DaysText, custom_schedule, days_at, days_text, every_hour_at, every_minute, every_minutes,
+};
+use crate::i18n::format::weekday_short;
 
 /// What the picker shows. `days` are 0 = Sunday … 6 = Saturday, sorted and without duplicates.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,18 +24,23 @@ pub enum SchedulePick {
     Advanced(String),
 }
 
-const DAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/// The weekday of a cron day index (0 = Sunday … 6 = Saturday).
+fn weekday(day: u8) -> Weekday {
+    [
+        Weekday::Sun,
+        Weekday::Mon,
+        Weekday::Tue,
+        Weekday::Wed,
+        Weekday::Thu,
+        Weekday::Fri,
+        Weekday::Sat,
+    ][usize::from(day % 7)]
+}
 
 /// The weekday names, Monday first, as `(day index, name)` for the picker's chips.
-pub const WEEK_CHIPS: [(u8, &str); 7] = [
-    (1, "Mon"),
-    (2, "Tue"),
-    (3, "Wed"),
-    (4, "Thu"),
-    (5, "Fri"),
-    (6, "Sat"),
-    (0, "Sun"),
-];
+pub fn week_chips(lang: Lang) -> [(u8, &'static str); 7] {
+    [1, 2, 3, 4, 5, 6, 0].map(|d| (d, weekday_short(lang, weekday(d))))
+}
 
 /// The cron expression of a pick.
 pub fn to_cron(pick: &SchedulePick) -> String {
@@ -123,27 +136,31 @@ pub fn from_cron(cron: &str) -> SchedulePick {
     }
 }
 
-/// A plain-English reading of a cron expression.
-pub fn describe(cron: &str) -> String {
+/// A plain-language reading of a cron expression.
+pub fn describe(lang: Lang, cron: &str) -> String {
     match from_cron(cron) {
-        SchedulePick::EveryMinutes(1) | SchedulePick::EveryMinutes(0) => "Every minute".into(),
-        SchedulePick::EveryMinutes(n) => format!("Every {n} minutes"),
-        SchedulePick::Hourly { minute } => format!("Every hour at :{minute:02}"),
-        SchedulePick::Daily { hour, minute } => format!("Every day at {hour:02}:{minute:02}"),
+        SchedulePick::EveryMinutes(1) | SchedulePick::EveryMinutes(0) => every_minute(lang),
+        SchedulePick::EveryMinutes(n) => every_minutes(lang, n),
+        SchedulePick::Hourly { minute } => every_hour_at(lang, minute),
+        SchedulePick::Daily { hour, minute } => days_at(
+            lang,
+            days_text(lang, DaysText::EveryDay),
+            &format!("{hour:02}:{minute:02}"),
+        ),
         SchedulePick::Weekdays { days, hour, minute } => {
             let who = match days[..] {
-                [1, 2, 3, 4, 5] => "Weekdays".to_owned(),
-                [0, 6] => "Weekends".to_owned(),
-                [0, 1, 2, 3, 4, 5, 6] => "Every day".to_owned(),
+                [1, 2, 3, 4, 5] => days_text(lang, DaysText::Weekdays).to_owned(),
+                [0, 6] => days_text(lang, DaysText::Weekends).to_owned(),
+                [0, 1, 2, 3, 4, 5, 6] => days_text(lang, DaysText::EveryDay).to_owned(),
                 _ => days
                     .iter()
-                    .map(|d| DAY_NAMES[usize::from(*d)])
+                    .map(|d| weekday_short(lang, weekday(*d)))
                     .collect::<Vec<_>>()
                     .join(", "),
             };
-            format!("{who} at {hour:02}:{minute:02}")
+            days_at(lang, &who, &format!("{hour:02}:{minute:02}"))
         }
-        SchedulePick::Advanced(text) => format!("Custom: {text}"),
+        SchedulePick::Advanced(text) => custom_schedule(lang, &text),
     }
 }
 
@@ -200,13 +217,35 @@ mod tests {
 
     #[test]
     fn descriptions_read_as_english() {
-        assert_eq!(describe("*/10 * * * *"), "Every 10 minutes");
-        assert_eq!(describe("* * * * *"), "Every minute");
-        assert_eq!(describe("15 * * * *"), "Every hour at :15");
-        assert_eq!(describe("30 7 * * *"), "Every day at 07:30");
-        assert_eq!(describe("30 7 * * 1-5"), "Weekdays at 07:30");
-        assert_eq!(describe("0 9 * * 0,6"), "Weekends at 09:00");
-        assert_eq!(describe("0 9 * * 1,3"), "Mon, Wed at 09:00");
-        assert_eq!(describe("0 */2 1 * *"), "Custom: 0 */2 1 * *");
+        let d = |c: &str| describe(Lang::En, c);
+        assert_eq!(d("*/10 * * * *"), "Every 10 minutes");
+        assert_eq!(d("* * * * *"), "Every minute");
+        assert_eq!(d("15 * * * *"), "Every hour at hh:15");
+        assert_eq!(d("30 7 * * *"), "Every day at 07:30");
+        assert_eq!(d("30 7 * * 1-5"), "Weekdays at 07:30");
+        assert_eq!(d("0 9 * * 0,6"), "Weekends at 09:00");
+        assert_eq!(d("0 9 * * 1,3"), "Mon, Wed at 09:00");
+        assert_eq!(d("0 */2 1 * *"), "Custom: 0 */2 1 * *");
+    }
+
+    #[test]
+    fn descriptions_read_as_french() {
+        let d = |c: &str| describe(Lang::Fr, c);
+        assert_eq!(d("*/10 * * * *"), "Toutes les 10 minutes");
+        assert_eq!(d("* * * * *"), "Toutes les minutes");
+        assert_eq!(d("15 * * * *"), "Toutes les heures à hh:15");
+        assert_eq!(d("0 7 * * *"), "Tous les jours à 07:00");
+        assert_eq!(d("0 7 * * 1-5"), "Du lundi au vendredi à 07:00");
+        assert_eq!(d("0 9 * * 0,6"), "Le week-end à 09:00");
+        assert_eq!(d("0 9 * * 1,3"), "Lun., Mer. à 09:00");
+        assert_eq!(d("0 */2 1 * *"), "Personnalisé\u{A0}: 0 */2 1 * *");
+    }
+
+    #[test]
+    fn week_chips_start_on_monday() {
+        let chips = week_chips(Lang::Fr);
+        assert_eq!(chips[0], (1, "Lun."));
+        assert_eq!(chips[6], (0, "Dim."));
+        assert_eq!(week_chips(Lang::En)[5], (6, "Sat"));
     }
 }

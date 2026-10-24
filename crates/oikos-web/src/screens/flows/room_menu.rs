@@ -10,6 +10,8 @@ use wasm_bindgen::JsCast;
 use crate::api;
 use crate::components::toast::Toasts;
 use crate::house::House;
+use crate::i18n::flows::{FlowText, delete_flow_prompt, use_flow_text};
+use crate::i18n::{Key, use_lang, use_text};
 
 /// Which flow's ⋯ menu is open (its id), held by the page rather than by each menu: a row the
 /// list rebuilds keeps its menu open, only one menu is ever open, and one pair of window
@@ -59,6 +61,9 @@ pub fn RoomMenu(
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
     let OpenMenu(open_menu) = expect_context::<OpenMenu>();
+    let lang = use_lang();
+    let t = use_flow_text();
+    let key_text = use_text();
     let open = {
         let id = id.clone();
         Memo::new(move |_| open_menu.with(|o| o.as_deref() == Some(id.as_str())))
@@ -101,7 +106,7 @@ pub fn RoomMenu(
         });
     };
 
-    let item = move |label: String, area: Option<String>, checked: bool| {
+    let item = move |label: Signal<String>, area: Option<String>, checked: bool| {
         let target = area.clone();
         view! {
             <button
@@ -110,13 +115,13 @@ pub fn RoomMenu(
                 class="room-menu__item"
                 aria-checked=checked.to_string()
                 disabled=invalid
-                title=invalid.then_some("Fix this flow first")
+                title=move || invalid.then(|| t(FlowText::FixFlowFirst))
                 on:click=move |_| move_to(target.clone())
             >
                 <span class="room-menu__check" aria-hidden="true">
                     {checked.then_some("✓")}
                 </span>
-                {label}
+                {move || label.get()}
             </button>
         }
     };
@@ -129,7 +134,7 @@ pub fn RoomMenu(
                     .filter(|a| a.id != UNASSIGNED_AREA)
                     .map(|a| {
                         let checked = current.as_deref() == Some(a.id.as_str());
-                        item(a.name.clone(), Some(a.id.clone()), checked).into_any()
+                        item(Signal::stored(a.name.clone()), Some(a.id.clone()), checked).into_any()
                     })
                     .collect_view()
             })
@@ -146,15 +151,15 @@ pub fn RoomMenu(
             }
         });
     };
-    let prompt = StoredValue::new(format!("Delete “{name}”?"));
+    let name = StoredValue::new(name);
 
     view! {
         <span class="room-menu">
             <button
                 type="button"
                 class="btn btn--ghost btn--icon room-menu__button"
-                aria-label="Flow actions"
-                title="Flow actions"
+                aria-label=move || t(FlowText::FlowActions)
+                title=move || t(FlowText::FlowActions)
                 aria-haspopup="menu"
                 aria-expanded=move || open.get().to_string()
                 on:click=move |_| {
@@ -179,13 +184,17 @@ pub fn RoomMenu(
                                         attr:role="menuitem"
                                     >
                                         <span class="room-menu__check" aria-hidden="true"></span>
-                                        "Open"
+                                        {move || t(FlowText::OpenFlow)}
                                     </A>
                                     <p class="room-menu__head" role="presentation">
-                                        "Move to room"
+                                        {move || t(FlowText::MoveToRoom)}
                                     </p>
                                     {rooms.clone()}
-                                    {item("No room".to_owned(), None, none_checked)}
+                                    {item(
+                                        Signal::derive(move || t(FlowText::NoRoom).to_owned()),
+                                        None,
+                                        none_checked,
+                                    )}
                                     <button
                                         type="button"
                                         role="menuitem"
@@ -194,16 +203,17 @@ pub fn RoomMenu(
                                         on:click=move |_| confirming.set(true)
                                     >
                                         <span class="room-menu__check" aria-hidden="true"></span>
-                                        "Delete flow…"
+                                        {move || t(FlowText::DeleteFlow)}
                                     </button>
                                 }
                             }
                         }
                     >
-                        <div class="room-menu__confirm" role="alertdialog" aria-label="Delete flow">
+                        <div class="room-menu__confirm" role="alertdialog" aria-label=move || t(FlowText::DeleteFlowLabel)>
                             <p class="room-menu__prompt">
-                                <strong>{move || prompt.get_value()}</strong>
-                                " This can't be undone."
+                                <strong>{move || delete_flow_prompt(lang(), &name.get_value())}</strong>
+                                " "
+                                {move || t(FlowText::CantUndo)}
                             </p>
                             <div class="room-menu__actions">
                                 <button
@@ -212,10 +222,10 @@ pub fn RoomMenu(
                                     node_ref=cancel_button
                                     on:click=move |_| confirming.set(false)
                                 >
-                                    "Cancel"
+                                    {move || t(FlowText::Cancel)}
                                 </button>
                                 <button type="button" class="btn btn--danger" on:click=delete>
-                                    "Delete"
+                                    {move || key_text(Key::Delete)}
                                 </button>
                             </div>
                         </div>

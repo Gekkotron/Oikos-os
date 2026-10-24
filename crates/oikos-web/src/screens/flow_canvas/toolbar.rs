@@ -19,6 +19,8 @@ use crate::flow_edit::slug_id;
 use crate::flow_layout::{tidy, with_resolved_positions};
 use crate::flow_list::clear_stale_area;
 use crate::house::House;
+use crate::i18n::flows::{FlowText, save_failed, use_flow_text};
+use crate::i18n::use_lang;
 use crate::icons::{CHECK, PENCIL, PLAY, X_MARK};
 use crate::nav::use_back;
 use crate::screens::flow_schedule::SaveBlocked;
@@ -31,6 +33,8 @@ fn EditControls(
     original: Signal<Flow>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let lang = use_lang();
+    let t = use_flow_text();
     let blocked = use_context::<SaveBlocked>();
     let is_blocked = move || blocked.is_some_and(|b| b.0.get());
     let house = expect_context::<House>();
@@ -94,7 +98,7 @@ fn EditControls(
                     }
                     house.refresh_flows_config();
                 }
-                Err(e) => toasts.push(e.error),
+                Err(e) => toasts.push(save_failed(untrack(lang), &e.error)),
             }
             saving.set(false);
         });
@@ -103,17 +107,17 @@ fn EditControls(
         <button
             type="button"
             class="btn btn--ghost"
-            aria-label="Tidy"
-            title="Arrange the cards automatically"
+            aria-label=move || t(FlowText::Tidy)
+            title=move || t(FlowText::TidyTitle)
             on:click=move |_| editor.edit(|f| *f = tidy(f))
         >
-            "Tidy"
+            {move || t(FlowText::Tidy)}
         </button>
         <button
             type="button"
             class="btn btn--ghost btn--icon flow-toolbar__undo"
-            aria-label="Undo"
-            title="Undo"
+            aria-label=move || t(FlowText::Undo)
+            title=move || t(FlowText::Undo)
             disabled=move || !editor.can_undo()
             on:click=move |_| {
                 editor.step(false);
@@ -124,8 +128,8 @@ fn EditControls(
         <button
             type="button"
             class="btn btn--ghost btn--icon"
-            aria-label="Cancel editing"
-            title="Cancel"
+            aria-label=move || t(FlowText::CancelEditing)
+            title=move || t(FlowText::Cancel)
             disabled=move || saving.get()
             on:click=cancel
             inner_html=X_MARK
@@ -133,8 +137,12 @@ fn EditControls(
         <button
             type="button"
             class="btn btn--icon"
-            aria-label=move || if saving.get() { "Saving".to_string() } else { "Save".to_string() }
-            title=move || if saving.get() { "Saving…".to_string() } else { "Save".to_string() }
+            aria-label=move || {
+                if saving.get() { t(FlowText::Saving) } else { t(FlowText::Save) }
+            }
+            title=move || {
+                if saving.get() { t(FlowText::SavingEllipsis) } else { t(FlowText::Save) }
+            }
             disabled=move || saving.get() || is_blocked()
             on:click=save
             inner_html=CHECK
@@ -150,6 +158,7 @@ fn ReadControls(
     selection: RwSignal<Option<Selection>>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let t = use_flow_text();
     let invalid = Memo::new(move |_| view.with(|v| v.invalid.is_some()));
     let busy = Memo::new(move |_| view.with(|v| v.active_run.is_some()));
     // The switch takes plain values: it is rebuilt when one of them changes.
@@ -185,8 +194,8 @@ fn ReadControls(
         <button
             type="button"
             class="btn btn--icon"
-            aria-label="Run now"
-            title="Run now"
+            aria-label=move || t(FlowText::RunNow)
+            title=move || t(FlowText::RunNow)
             disabled=move || invalid.get() || busy.get()
             on:click=run_now
             inner_html=PLAY
@@ -194,8 +203,8 @@ fn ReadControls(
         <button
             type="button"
             class="btn btn--ghost btn--icon flow-toolbar__edit"
-            aria-label="Edit layout"
-            title="Edit layout"
+            aria-label=move || t(FlowText::EditLayout)
+            title=move || t(FlowText::EditLayout)
             disabled=move || invalid.get()
             on:click=enter_edit
             inner_html=PENCIL
@@ -214,6 +223,7 @@ pub fn Toolbar(
     panel: Signal<Panel>,
     selection: RwSignal<Option<Selection>>,
 ) -> impl IntoView {
+    let t = use_flow_text();
     let showing_runs = move || panel.get() == Panel::Runs;
     let name = move || view.with(|v| v.definition.name.clone());
     // The first keystroke after focusing the field records one undo step; the rest join it.
@@ -229,10 +239,10 @@ pub fn Toolbar(
         editor.draft.update(|f| f.name = text);
     };
     let mode = move || {
-        view.with(|v| match v.definition.mode {
-            FlowMode::Single => "single",
-            FlowMode::Restart => "restart",
-        })
+        t(view.with(|v| match v.definition.mode {
+            FlowMode::Single => FlowText::ModeSingle,
+            FlowMode::Restart => FlowText::ModeRestart,
+        }))
     };
     let house = expect_context::<House>();
     // A room the house no longer has reads as "No room" (and is cleared on save).
@@ -269,7 +279,7 @@ pub fn Toolbar(
     let back = use_back();
     view! {
         <div class="flow-toolbar flow-toolbar--title">
-            <A href=move || back.get() attr:class="flow-toolbar__back" attr:aria-label="Back">
+            <A href=move || back.get() attr:class="flow-toolbar__back" attr:aria-label=move || t(FlowText::Back)>
                 "←"
             </A>
             <Show
@@ -279,7 +289,7 @@ pub fn Toolbar(
                 <input
                     type="text"
                     class="flow-toolbar__name flow-toolbar__name--input"
-                    aria-label="Flow name"
+                    aria-label=move || t(FlowText::FlowName)
                     spellcheck="false"
                     autocomplete="off"
                     prop:value=move || editor.draft.with(|f| f.name.clone())
@@ -297,12 +307,12 @@ pub fn Toolbar(
             >
                 <select
                     class="field flow-toolbar__room"
-                    aria-label="Room"
+                    aria-label=move || t(FlowText::GroupRoom)
                     prop:value=draft_room
                     on:change=pick_room
                 >
                     <option value="" selected=move || draft_room().is_empty()>
-                        "No room"
+                        {move || t(FlowText::NoRoom)}
                     </option>
                     {move || {
                         let current = draft_room();
@@ -357,7 +367,7 @@ pub fn Toolbar(
                     runs_open.set(true);
                 }
             >
-                "Runs"
+                {move || t(FlowText::Runs)}
             </button>
         </div>
     }
