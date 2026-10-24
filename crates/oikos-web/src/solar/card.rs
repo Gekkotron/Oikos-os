@@ -4,6 +4,7 @@
 use chrono::{DateTime, Utc};
 use leptos::prelude::*;
 use leptos_router::components::A;
+use oikos_api::{SolarPeriod, SolarView};
 
 use super::curve::{day_curve, producing_span};
 use super::measured::SolarMeasured;
@@ -35,6 +36,36 @@ struct CardData {
     now_x: Option<f64>,
 }
 
+/// The measured points of the curve, `(period end, kW)`, and whether they are the forecast's own
+/// estimates (nothing is measured): the periods already over.
+pub(crate) fn curve_points(
+    real: Vec<(u64, f64)>,
+    day: &[SolarPeriod],
+    now: u64,
+) -> (Vec<(u64, f64)>, bool) {
+    if real.is_empty() {
+        let est = day
+            .iter()
+            .filter(|p| p.end <= now)
+            .map(|p| (p.end, p.estimate))
+            .collect();
+        (est, true)
+    } else {
+        (real, false)
+    }
+}
+
+/// Today's forecast total, kWh: the hub's figure, else the sum of the day's periods.
+pub(crate) fn today_total(s: &SolarView, day: &[SolarPeriod]) -> Option<f64> {
+    s.today.estimate.or_else(|| {
+        (!day.is_empty()).then(|| {
+            day.iter()
+                .map(|p| p.estimate * f64::from(p.minutes) / 60.0)
+                .sum()
+        })
+    })
+}
+
 fn card_data(house: House, now: u64, measured: Option<SolarMeasured>) -> Option<CardData> {
     let zone = house.flows_config.with(|c| house_place(c.as_ref()).1);
     house.solar.with(|s| {
@@ -44,24 +75,9 @@ fn card_data(house: House, now: u64, measured: Option<SolarMeasured>) -> Option<
         let day = periods_in(&s.periods, from, to);
         let today_kwh = measured.and_then(|m| m.today_kwh.get());
         let real: Vec<(u64, f64)> = measured.map(|m| m.periods.get()).unwrap_or_default();
-        let (points, is_forecast) = if real.is_empty() {
-            let est = day
-                .iter()
-                .filter(|p| p.end <= now)
-                .map(|p| (p.end, p.estimate))
-                .collect();
-            (est, true)
-        } else {
-            (real, false)
-        };
+        let (points, is_forecast) = curve_points(real, &day, now);
         let so_far = forecast_so_far(&day, now);
-        let total = s.today.estimate.or_else(|| {
-            (!day.is_empty()).then(|| {
-                day.iter()
-                    .map(|p| p.estimate * f64::from(p.minutes) / 60.0)
-                    .sum()
-            })
-        });
+        let total = today_total(s, &day);
         let mut data = CardData {
             measured: today_kwh,
             so_far,
@@ -101,14 +117,7 @@ pub fn SolarCard() -> impl IntoView {
     let title = move || {
         let d = data.get()?;
         let l = lang.get();
-        let total = d
-            .total
-            .map_or_else(|| "–".to_owned(), |t| i18n::solar_kwh(l, t));
-        let unit = i18n::solar_text(l, SolarText::Kwh);
-        Some(match d.measured {
-            Some(m) => format!("{} / {total} {unit}", i18n::solar_kwh(l, m)),
-            None => format!("≈ {} / {total} {unit}", i18n::solar_kwh(l, d.so_far)),
-        })
+        Some(i18n::solar_title(l, d.measured, d.so_far, d.total))
     };
     let bottom = move || {
         let d = data.get()?;

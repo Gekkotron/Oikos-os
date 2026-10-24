@@ -30,6 +30,7 @@ use crate::screens::history_detail::HistoryDetailScreen;
 use crate::screens::room::RoomScreen;
 use crate::screens::security::SecurityScreen;
 use crate::screens::settings::{SettingsPageScreen, SettingsScreen};
+use crate::screens::solar::SolarScreen;
 use crate::screens::weather::WeatherScreen;
 use crate::shell::Shell;
 use crate::theme::install_theme;
@@ -171,6 +172,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/security") view=SecurityScreen />
                     <Route path=path!("/climate") view=ClimateScreen />
                     <Route path=path!("/weather") view=WeatherScreen />
+                    <Route path=path!("/solar") view=SolarScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
                     <Route path=path!("/flows") view=FlowsScreen />

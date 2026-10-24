@@ -111,6 +111,7 @@ pub enum Key {
     Security,
     Climate,
     Weather,
+    Solar,
     Beta,
     Alerts,
     Settings,
@@ -188,6 +189,7 @@ impl Key {
         Key::Security,
         Key::Climate,
         Key::Weather,
+        Key::Solar,
         Key::Beta,
         Key::Alerts,
         Key::Settings,
@@ -266,6 +268,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Security => ("Security", "Sécurité"),
         Key::Climate => ("Climate", "Climat"),
         Key::Weather => ("Weather", "Météo"),
+        Key::Solar => ("Solar", "Solaire"),
         Key::Beta => ("Beta", "Bêta"),
         Key::Alerts => ("Alerts", "Alertes"),
         Key::Settings => ("Settings", "Réglages"),
@@ -851,6 +854,21 @@ pub enum SolarText {
     Left,
     Tomorrow,
     Kwh,
+    Kw,
+    Today,
+    Peak,
+    BestHours,
+    Gap,
+    GapSub,
+    Yesterday,
+    Accuracy,
+    Roofs,
+    Roof,
+    Month,
+    NextDays,
+    Unavailable,
+    EnableHint,
+    Credit,
 }
 
 /// A fixed word of the solar card.
@@ -861,11 +879,172 @@ pub fn solar_text(lang: Lang, k: SolarText) -> &'static str {
         Left => ("left", "reste"),
         Tomorrow => ("Tomorrow", "Demain"),
         Kwh => ("kWh", "kWh"),
+        Kw => ("kW", "kW"),
+        Today => ("Today", "Aujourd'hui"),
+        Peak => ("Forecast peak", "Pic prévu"),
+        BestHours => ("Best hours", "Meilleures heures"),
+        Gap => ("Gap", "Écart"),
+        GapSub => (
+            "measured vs forecast so far",
+            "mesuré vs prévu à cette heure",
+        ),
+        Yesterday => ("Yesterday", "Hier"),
+        Accuracy => ("7-day accuracy", "Précision sur 7 jours"),
+        Roofs => ("Roofs", "Toits"),
+        Roof => ("Roof", "Toit"),
+        Month => ("This month", "Ce mois-ci"),
+        NextDays => ("Next 7 days", "7 prochains jours"),
+        Unavailable => (
+            "The solar forecast is unavailable.",
+            "Les prévisions solaires sont indisponibles.",
+        ),
+        EnableHint => (
+            "Enable [solcast] in oikos.toml and put the API key in secrets/solcast.key.",
+            "Activez [solcast] dans oikos.toml et placez la clé d'API dans secrets/solcast.key.",
+        ),
+        Credit => ("Forecasts by Solcast", "Prévisions Solcast"),
     };
     match lang {
         Lang::En => en,
         Lang::Fr => fr,
     }
+}
+
+/// The solar card's and page's headline: measured / forecast total, or the forecast so far with
+/// "≈" while nothing is measured.
+pub fn solar_title(lang: Lang, measured: Option<f64>, so_far: f64, total: Option<f64>) -> String {
+    let total = total.map_or_else(|| "–".to_owned(), |t| solar_kwh(lang, t));
+    let unit = solar_text(lang, SolarText::Kwh);
+    match measured {
+        Some(m) => format!("{} / {total} {unit}", solar_kwh(lang, m)),
+        None => format!("≈ {} / {total} {unit}", solar_kwh(lang, so_far)),
+    }
+}
+
+/// "Range 9.8–14.1 kWh".
+pub fn solar_range(lang: Lang, low: f64, high: f64) -> String {
+    let word = match lang {
+        Lang::En => "Range",
+        Lang::Fr => "Fourchette",
+    };
+    format!(
+        "{word} {}–{} {}",
+        solar_kwh(lang, low),
+        solar_kwh(lang, high),
+        solar_text(lang, SolarText::Kwh)
+    )
+}
+
+/// A kW figure with one decimal: "0.8 kW".
+pub fn solar_kw(lang: Lang, v: f64) -> String {
+    format!(
+        "{} {}",
+        home_number(lang, v + 0.0, 1),
+        solar_text(lang, SolarText::Kw)
+    )
+}
+
+/// "Now 0.8 kW · forecast 0.7 kW"; the measured part is left out without a measure.
+pub fn solar_power_line(lang: Lang, measured: Option<f64>, forecast: Option<f64>) -> String {
+    let (now, fc) = match lang {
+        Lang::En => ("Now", "forecast"),
+        Lang::Fr => ("Maintenant", "prévu"),
+    };
+    match (measured, forecast) {
+        (Some(m), Some(f)) => format!("{now} {} · {fc} {}", solar_kw(lang, m), solar_kw(lang, f)),
+        (Some(m), None) => format!("{now} {}", solar_kw(lang, m)),
+        (None, Some(f)) => format!("{now} {fc} {}", solar_kw(lang, f)),
+        (None, None) => String::new(),
+    }
+}
+
+/// "above 0.5 kW".
+pub fn solar_above(lang: Lang, kw: f64) -> String {
+    match lang {
+        Lang::En => format!("above {}", solar_kw(lang, kw)),
+        Lang::Fr => format!("au-dessus de {}", solar_kw(lang, kw)),
+    }
+}
+
+/// A signed whole percent: "−11 %", "+4 %", "0 %".
+pub fn solar_percent(lang: Lang, p: i32) -> String {
+    let sign = match p {
+        p if p < 0 => "−",
+        0 => "",
+        _ => "+",
+    };
+    format!("{sign}{} %", home_number(lang, f64::from(p.abs()), 0))
+}
+
+/// The sub-line of yesterday's tile: "forecast 11.6 · −6 %", or, for a forecast made late,
+/// "forecast at 9:42 am 11.6".
+pub fn solar_yesterday_sub(
+    lang: Lang,
+    forecast: f64,
+    gap: Option<i32>,
+    made_late_at: Option<NaiveTime>,
+) -> String {
+    let word = match lang {
+        Lang::En => "forecast",
+        Lang::Fr => "prévu",
+    };
+    let f = solar_kwh(lang, forecast);
+    if let Some(at) = made_late_at {
+        let at_word = match lang {
+            Lang::En => "at",
+            Lang::Fr => "à",
+        };
+        return format!("{word} {at_word} {} {f}", home_time(lang, at));
+    }
+    match gap {
+        Some(g) => format!("{word} {f} · {}", solar_percent(lang, g)),
+        None => format!("{word} {f}"),
+    }
+}
+
+/// "Roof 1 5.1 · Roof 2 7.3" from `(position, kWh)` pairs.
+pub fn solar_roofs(lang: Lang, roofs: &[(u32, Option<f64>)]) -> String {
+    roofs
+        .iter()
+        .map(|(n, kwh)| {
+            format!(
+                "{} {n} {}",
+                solar_text(lang, SolarText::Roof),
+                kwh.map_or_else(|| "–".to_owned(), |k| solar_kwh(lang, k))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// The page footer: "Updated at 9:02 pm · next around 10:00 pm · Solcast calls 3 / 10 today";
+/// the "next" part is left out when no call is planned.
+pub fn solar_footer(
+    lang: Lang,
+    updated: Option<NaiveTime>,
+    next: Option<NaiveTime>,
+    calls: u32,
+    limit: u32,
+) -> String {
+    let (next_word, calls_fmt) = match lang {
+        Lang::En => (
+            "next around",
+            format!("Solcast calls {calls} / {limit} today"),
+        ),
+        Lang::Fr => (
+            "prochaine vers",
+            format!("appels Solcast {calls} / {limit} aujourd'hui"),
+        ),
+    };
+    [
+        updated.map(|at| updated_at(lang, at)),
+        next.map(|at| format!("{next_word} {}", home_time(lang, at))),
+        Some(calls_fmt),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ")
 }
 
 /// kWh with one decimal and the language's separator, without the unit.
@@ -921,10 +1100,72 @@ mod tests {
                 SolarText::Left,
                 SolarText::Tomorrow,
                 SolarText::Kwh,
+                SolarText::Kw,
+                SolarText::Today,
+                SolarText::Peak,
+                SolarText::BestHours,
+                SolarText::Gap,
+                SolarText::GapSub,
+                SolarText::Yesterday,
+                SolarText::Accuracy,
+                SolarText::Roofs,
+                SolarText::Roof,
+                SolarText::Month,
+                SolarText::NextDays,
+                SolarText::Unavailable,
+                SolarText::EnableHint,
+                SolarText::Credit,
             ] {
                 assert!(!solar_text(lang, k).is_empty(), "{k:?}");
             }
         }
+        let t = |h, m| NaiveTime::from_hms_opt(h, m, 0).unwrap();
+        assert_eq!(
+            solar_title(Lang::En, Some(6.4), 0.0, Some(12.4)),
+            "6.4 / 12.4 kWh"
+        );
+        assert_eq!(
+            solar_title(Lang::Fr, None, 3.0, Some(12.4)),
+            "≈ 3,0 / 12,4 kWh"
+        );
+        assert_eq!(solar_range(Lang::En, 9.8, 14.1), "Range 9.8–14.1 kWh");
+        assert_eq!(solar_range(Lang::Fr, 9.8, 14.1), "Fourchette 9,8–14,1 kWh");
+        assert_eq!(
+            solar_power_line(Lang::En, Some(0.8), Some(0.7)),
+            "Now 0.8 kW · forecast 0.7 kW"
+        );
+        assert_eq!(
+            solar_power_line(Lang::Fr, Some(0.8), Some(0.7)),
+            "Maintenant 0,8 kW · prévu 0,7 kW"
+        );
+        assert_eq!(
+            solar_power_line(Lang::En, None, Some(0.7)),
+            "Now forecast 0.7 kW"
+        );
+        assert_eq!(solar_above(Lang::Fr, 0.5), "au-dessus de 0,5 kW");
+        assert_eq!(solar_percent(Lang::En, -11), "−11 %");
+        assert_eq!(solar_percent(Lang::En, 4), "+4 %");
+        assert_eq!(solar_percent(Lang::En, 0), "0 %");
+        assert_eq!(
+            solar_yesterday_sub(Lang::En, 11.6, Some(-6), None),
+            "forecast 11.6 · −6 %"
+        );
+        assert_eq!(
+            solar_yesterday_sub(Lang::En, 11.6, Some(-6), Some(t(9, 42))),
+            "forecast at 9:42 am 11.6"
+        );
+        assert_eq!(
+            solar_roofs(Lang::Fr, &[(1, Some(5.1)), (2, Some(7.3))]),
+            "Toit 1 5,1 · Toit 2 7,3"
+        );
+        assert_eq!(
+            solar_footer(Lang::En, Some(t(21, 2)), Some(t(22, 0)), 3, 10),
+            "Updated at 9:02 pm · next around 10:00 pm · Solcast calls 3 / 10 today"
+        );
+        assert_eq!(
+            solar_footer(Lang::Fr, Some(t(21, 2)), None, 3, 10),
+            "Mis à jour à 21 h 02 · appels Solcast 3 / 10 aujourd'hui"
+        );
         assert_eq!(solar_kwh(Lang::Fr, 6.44), "6,4");
         assert_eq!(solar_kwh(Lang::En, 6.44), "6.4");
         let t = Some((8.1, 5.0, 11.0));
@@ -1032,6 +1273,7 @@ mod tests {
             | Key::Security
             | Key::Climate
             | Key::Weather
+            | Key::Solar
             | Key::Beta
             | Key::Alerts
             | Key::Settings
@@ -1100,7 +1342,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 72);
+        assert_eq!(Key::ALL.len(), 73);
     }
     fn window(room: Option<&str>) -> Activity {
         Activity::Open(Opening {
