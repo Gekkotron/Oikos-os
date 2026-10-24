@@ -183,7 +183,7 @@ When the house has no ambiance at all, the Home row invitation and the "Mes ambi
     { "type": "category", "what": "lights", "to": "on", "brightness": 30, "area": "living_room" },  // brightness in %, 1..=100
     { "type": "category", "what": "plugs", "to": "off" },
     { "type": "category", "what": "covers", "to": "close" },
-    { "type": "device", "entity": "select.house_mode", "command": { "type": "select", "option": "night" } },
+    { "type": "device", "entity": "select.house_mode", "command": { "type": "select_option", "option": "night" } },
     { "type": "climate", "zone": null, "setpoint": 16.0, "mode": null, "hours": 12 },
     { "type": "climate", "zone": null, "clear": true },
     { "type": "flow", "flow": "away_lights", "do": "enable" }
@@ -193,19 +193,29 @@ When the house has no ambiance at all, the Home row invitation and the "Mes ambi
 
 - `area: null` / `zone: null` means the whole house / every zone. `subtitle`, `icon`, `except`, `brightness`, `mode` and `setpoint` are optional. The `command` object is exactly what `send_command` accepts. The ids in this example are placeholders.
 - Unknown top-level fields are kept on round trip, like `Flow.extra`, so the Android app can add display fields later.
+- The `setpoint` of a climate action is raw JSON, a number or the string `"off"`, and `mode` is a string (`heat` or `cool`). The hub turns `{setpoint, mode, minutes: hours × 60}` into `oikos_climate::view::OverrideRequest` with serde, so the climate crate's own parsing and range checks apply.
+- The device `command` is the `Command` tag of `oikos_core::model` (for a select, `select_option` with `option`), exactly as `send_command` takes it.
 
 ### A.3 Apply report
+
+The report is one line per action, in order. Its shape is `ApplyReport { ambiance, started_at, actions: [ActionReport] }` and each `ActionReport` is `{ index, outcome, total, failed: [{id, reason}], skipped: [{id, reason}], reason }`:
 
 ```json
 {
   "ambiance": "bonne_nuit",
   "started_at": 1761331200,
   "actions": [
-    { "index": 0, "outcome": "ok", "entities": ["light.a", "light.b"] },
-    { "index": 2, "outcome": "failed", "entities": ["switch.c"], "reason": "no state echo" },
-    { "index": 3, "outcome": "skipped", "entities": ["cover.d"], "reason": "offline" }
+    { "index": 0, "outcome": "ok", "total": 2, "failed": [], "skipped": [], "reason": null },
+    { "index": 2, "outcome": "failed", "total": 3, "failed": [{ "id": "switch.c", "reason": "no state echo" }], "skipped": [], "reason": null },
+    { "index": 3, "outcome": "ok", "total": 2, "failed": [], "skipped": [{ "id": "cover.d", "reason": "offline" }], "reason": null },
+    { "index": 4, "outcome": "skipped", "total": 0, "failed": [], "skipped": [], "reason": "the climate engine is off" }
   ]
 }
 ```
 
-A category action with some failures and some successes is reported as `failed` and lists only the failing entities, with the total count. The builder may split this into per-entity lines if it reads better.
+- `total` counts the entities (or the zones, for a climate action) the action targeted. `failed` and `skipped` list them by id, each with its reason. `reason` is set when the whole action was skipped or found nothing to do (for example `no matching entities`, `no active zone`, `no longer exists`).
+- The outcome rule:
+  - `failed` if anything failed;
+  - `skipped` if nothing was attempted;
+  - `ok` otherwise, even when some offline entities were skipped. They are still listed in `skipped`.
+- An entity already in the target state is not commanded and counts as `ok`.

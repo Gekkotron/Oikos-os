@@ -76,6 +76,17 @@ The body takes `kind` (`switch`, `number`, `button` or `select`) and `name`; for
 
 A widget `kind` is one of `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera` or `water-heater`, with a `span` from the kind's allowed set (`1x1`, `2x1`, `2x2`, `1x2`). A dashboard id is 1 to 64 characters of letters, digits, `_` and `-`, and not `house`.
 
+## Ambiances
+
+See [Ambiances](../users/ambiances.md) for the action types and the report. An ambiance id is 1 to 48 characters of `a-z`, `0-9` and `_`. The body of `PUT` is `{"id", "name", "subtitle"?, "icon"?, "pinned", "order", "actions": […]}`; an `id` in the body may be left out (the path id is used) and must equal the path id otherwise. Unknown top-level fields are kept.
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/ambiances` | Every stored ambiance as `{id, ambiance, invalid}`: valid ones first, by `order`, then the invalid ones with the reason in `invalid`. |
+| `PUT /api/v1/ambiances/{id}` | Creates or replaces an ambiance and returns its view. The shape is checked, then the house: unknown entities, areas, flows, zones and `except` ids are refused, and a climate action is refused while the climate engine is off. `422` for a body or a reference the house refuses (the error names the action by its index, e.g. `action 2: …`), `503` while the broker link is down. |
+| `DELETE /api/v1/ambiances/{id}` | Removes an ambiance (`204`), valid or not. `404` for an id that is not an ambiance; `503` while the broker link is down. |
+| `POST /api/v1/ambiances/{id}/apply` | Runs the actions once, in order, and returns the [apply report](../users/ambiances.md#reading-the-report) (`200`). `404` for an unknown id; `422` for an invalid ambiance or one that is already running; `503` while the broker link is down. |
+
 ## Flows
 
 See [Flow nodes](flow-nodes.md) for the document format.
@@ -193,6 +204,8 @@ Units are metric: °C, km/h, mm, hPa and %. `fetched_at` is unix seconds. Any nu
 | `weather_changed` | No payload: the weather was refreshed with new data, refetch `GET /api/v1/weather`. |
 | `home_settings_changed` | `{settings}`: the home settings document changed. |
 | `climate_changed` | `{zone}`: one zone's document changed, or the house settings when `zone` is `null`. |
+| `ambiances_changed` | `{ambiances}`: the stored ambiances (the same list as `GET /api/v1/ambiances`) after one was saved, deleted or arrived from the broker. |
+| `ambiance_applied` | `{report}`: the [apply report](../users/ambiances.md#reading-the-report) of a run, whichever client started it. |
 
 ## Errors
 
