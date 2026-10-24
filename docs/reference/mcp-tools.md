@@ -90,6 +90,7 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 | Tool | What it does |
 | --- | --- |
 | `get_history` | One slice of an entity's history, available only when `[history] url` is set. Args: `entity`, `what`, and by `what`: `series` needs `range` (`24h`, `7d`, `30d`, `1y`); `daily` needs `days` (7, 30 or 365) and `kind` (`counter` or `power`); `today` needs `kind`; `last_change` needs nothing more. The reply is a one-field object named after `what`. Errors read `history_unavailable: …` or `not_recorded: …`. |
+| `get_grid_day` | What crossed the grid meter on one house-local day, per half hour: kWh bought off-peak and peak, kWh sold, with the day's totals and off-peak bands (the shape of `GET /history/grid_day`). Args: `date` (`YYYY-MM-DD`, today when absent). Errors read `history_unavailable: …`, `no_grid_meter: …` or `bad_request: …`. |
 
 ## Weather
 
@@ -107,8 +108,8 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 
 | Tool | What it does |
 | --- | --- |
-| `get_home_settings` | The home settings: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a temperature sensor), `cold_below` and `hot_above` (°C); a field that is not set is `null`. |
-| `set_home_settings` | Replaces the home settings (retained on `oikos/ui/_home`) and returns them. Read them with `get_home_settings` first and send the whole document back. Args: `settings`. `eco_setpoint` must be from 5 to 30, `cold_below` and `hot_above` from 5 to 35 with `cold_below` lower (the web uses 15 and 26 when unset); an entity of the wrong kind is refused with the reason. |
+| `get_home_settings` | The home settings: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a temperature sensor), `cold_below` and `hot_above` (°C); a field that is not set is `null`. `off_peak` lists the off-peak windows in force, `off_peak_history` the dated windows of past days. |
+| `set_home_settings` | Replaces the home settings (retained on `oikos/ui/_home`) and returns them. Read them with `get_home_settings` first and send the whole document back. Args: `settings`. `eco_setpoint` must be from 5 to 30, `cold_below` and `hot_above` from 5 to 35 with `cold_below` lower (the web uses 15 and 26 when unset); an entity of the wrong kind is refused with the reason. `off_peak` takes `{start, end}` `HH:MM` windows (crossing midnight allowed, no overlap); a change applies from today and past days keep theirs; `off_peak_history` is kept by the hub and ignored when sent. |
 
 ## Climate
 

@@ -672,6 +672,13 @@ pub enum HomeText {
     Saved,
     NotANumber,
     CouldNotSave,
+    OffPeakHours,
+    OffPeakHint,
+    AddWindow,
+    RemoveWindow,
+    BadTime,
+    StartEqualsEnd,
+    WindowsOverlap,
 }
 
 /// A fixed word of the Home panel.
@@ -707,6 +714,19 @@ pub fn home_text(lang: Lang, k: HomeText) -> &'static str {
         Saved => ("Saved", "Enregistré"),
         NotANumber => ("Enter a number", "Saisissez un nombre"),
         CouldNotSave => ("Could not save", "Enregistrement impossible"),
+        OffPeakHours => ("Off-peak hours", "Heures creuses"),
+        OffPeakHint => (
+            "From your electricity contract. The Energy chart splits what you buy by these hours; past days keep the hours they had.",
+            "Celles de votre contrat d'électricité. Le graphique Énergie sépare vos achats selon ces heures ; les jours passés gardent les leurs.",
+        ),
+        AddWindow => ("Add a period", "Ajouter une plage"),
+        RemoveWindow => ("Remove", "Retirer"),
+        BadTime => ("Enter a time as HH:MM", "Saisissez une heure HH:MM"),
+        StartEqualsEnd => (
+            "A period must not start and end at the same time",
+            "Une plage ne peut pas commencer et finir à la même heure",
+        ),
+        WindowsOverlap => ("Periods overlap", "Des plages se chevauchent"),
     };
     if lang == Lang::Fr { fr } else { en }
 }

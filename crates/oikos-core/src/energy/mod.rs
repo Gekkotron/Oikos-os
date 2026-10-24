@@ -3,10 +3,12 @@
 
 mod flow;
 mod meters;
+mod tariff;
 mod units;
 
 pub use flow::*;
 pub use meters::*;
+pub use tariff::*;
 pub use units::*;
 
 #[cfg(test)]

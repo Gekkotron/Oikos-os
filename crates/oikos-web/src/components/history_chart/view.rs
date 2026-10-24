@@ -166,7 +166,7 @@ async fn fetch_for(
 
 fn map_error(err: HistoryApiError) -> State {
     match err {
-        HistoryApiError::NotRecorded => State::NotRecorded,
+        HistoryApiError::NotRecorded | HistoryApiError::NoGridMeter => State::NotRecorded,
         HistoryApiError::Unavailable => State::Unavailable,
         HistoryApiError::BadRequest(m) | HistoryApiError::Other(m) => State::Error(m),
     }

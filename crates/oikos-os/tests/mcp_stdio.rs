@@ -49,6 +49,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "set_group",
     "delete_group",
     "get_history",
+    "get_grid_day",
     "send_notification",
     "list_alerts",
     "climate_status",

@@ -135,6 +135,10 @@ Energy (`/energy`): the live power flow as in the app. Solar on top, the house i
 
 Roles come from the `energyRole` override (`solar`, `grid`, `grid_export`, `battery`, `house`, `consumer`, `water`), set from the entity sheet or over MCP.
 
+Between the diagram and the cards, the **grid day chart** shows what crossed the grid meter on one day, in half-hour bars. What you bought from the grid sits above the zero line, off-peak (light blue) under peak (dark blue); what you sold, the solar export, sits below it in yellow. The off-peak periods are shaded behind the bars. Above the chart, the day's totals: bought with its off-peak and peak split, and sold. ‹ and › move to the previous or next day, from the first day with data up to today; today's bars fill up as the day goes on, refreshed about once a minute while the page is open. Hover or tap a bar for its half hour and values.
+
+The chart reads the lifetime counters paired with the entities that carry the `grid` role (bought) and their export twin or a `grid_export` entity (sold), so it needs [history](history.md) and a grid meter with an energy counter. The split comes from the off-peak hours in Settings › Home; without them every bar is one colour ("Bought"). A day keeps the off-peak hours that were in force on it, so changing your contract does not recolour past days.
+
 ## Security
 
 Security (`/security`): the alarm panel as a hero card (arm modes, Disarm, inline code when the panel asks for one), the opted-in actions (`securityAction`, asking first unless `securityAsk` is off), a summary line ("1 smoke · 2 open" or "All clear"), the safety and intrusion sensors in sections (Openings, Motion, Fire, Water, Other) as two-column tiles, and the recent alerts. `securityHidden` takes a sensor off the tab.
@@ -176,19 +180,20 @@ Devices: the administration view of the Zigbee devices. Each row shows the devic
 
 Settings (`/settings`): a short list, one row per page, with a status on the right. A row opens its page at `/settings/<page>`, which has a Back link and its own breadcrumb (Settings › page):
 
-- **Home** (**Maison**, `/settings/home`): the home header settings, described below.
+- **Home** (**Maison**, `/settings/home`): the home header settings and the off-peak hours, described below.
 - **Appearance** (`/settings/appearance`), status the current theme: the theme switch (Auto, Night Glass, Ivoire), the same choice as the header's theme button.
 - **Zigbee2MQTT** (`/settings/zigbee2mqtt`), status the number of firmware updates waiting, or the bridge state when there are none: the bridge (version, coordinator, permit join, state), the updates waiting, the counts (devices, entities, primary entities, areas, ignored topics) and the way to the [devices](#devices) list.
 - **Broker** (`/settings/broker`), status Online, Connecting… or Offline: the MQTT connection, with the reason when it is down.
 - **AI assistants (MCP)** (`/settings/mcp`): the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop, built from the page's origin, so they always carry the hub's real address. The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
 - **About** (`/settings/about`), status the version: the product, its version and the hub's address.
 
-The **Home** page (**Maison** in French, `/settings/home`) holds the settings of the home header, with one Save button for the whole panel. Its five fields:
+The **Home** page (**Maison** in French, `/settings/home`) holds the settings of the home header and the off-peak hours, with one Save button for the whole panel. Its fields:
 
 - **Eco setpoint (°C)**: from 5 to 30. Leave it empty to turn off the "Heating in eco" case.
 - **Cold below (°C)** and **Hot above (°C)**: the thresholds of the sentence, from 5 to 35. Each one shows its default (15 and 26) as a placeholder when empty. The cold threshold must stay below the hot one; an invalid value shows its error next to the field.
 - **Mode selector**: the select entity behind the house mode pill. Choose "None" to hide the pill.
 - **Indoor sensor**: the temperature sensor for the indoor value, picked from a list grouped by room. "Automatic (median of rooms)" uses the median of the room values.
+- **Off-peak hours**: the off-peak periods of your electricity contract, as start–end times (**Add a period**, **Remove**). A period may cross midnight (22:00–06:00); periods must not overlap. The same hours apply every day. A change applies from the start of the day you save it; earlier days keep the hours they had, and the first hours you set also cover the days recorded before them.
 
 ## Alerts
 

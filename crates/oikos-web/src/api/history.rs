@@ -3,7 +3,9 @@
 
 use super::encode_id;
 use gloo_net::http::Request;
-use oikos_api::{EnergyKind, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange};
+use oikos_api::{
+    EnergyKind, GridDay, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange,
+};
 
 /// Why a history call failed: variant per status class the hub returns.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -14,6 +16,8 @@ pub enum HistoryApiError {
     NotRecorded,
     #[error("history unavailable")]
     Unavailable,
+    #[error("no grid meter")]
+    NoGridMeter,
     #[error("{0}")]
     Other(String),
 }
@@ -61,6 +65,13 @@ pub(crate) fn today_url(entity: &str, kind: EnergyKind) -> String {
     )
 }
 
+pub(crate) fn grid_day_url(date: Option<&str>) -> String {
+    match date {
+        Some(d) => format!("/api/v1/history/grid_day?date={}", encode_id(d)),
+        None => "/api/v1/history/grid_day".to_string(),
+    }
+}
+
 pub(crate) fn last_change_url(ids: &[&str]) -> String {
     let mut out = String::from("/api/v1/history/last_change");
     for (i, id) in ids.iter().enumerate() {
@@ -81,6 +92,9 @@ pub(crate) fn classify_status(status: u16, body: &str) -> HistoryApiError {
     match status {
         400 => {
             HistoryApiError::BadRequest(error_message(body).unwrap_or_else(|| "bad_request".into()))
+        }
+        404 if error_message(body).as_deref() == Some("no_grid_meter") => {
+            HistoryApiError::NoGridMeter
         }
         404 => HistoryApiError::NotRecorded,
         503 => HistoryApiError::Unavailable,
@@ -134,6 +148,11 @@ pub async fn fetch_today(entity: &str, kind: EnergyKind) -> Result<HistoryToday,
     fetch(&today_url(entity, kind)).await
 }
 
+/// `/grid_day` for `date` (`YYYY-MM-DD`), today when `None`.
+pub async fn fetch_grid_day(date: Option<&str>) -> Result<GridDay, HistoryApiError> {
+    fetch(&grid_day_url(date)).await
+}
+
 /// `/last_change` for `ids`; chunks into 50-id requests and concatenates the `items` in input
 /// order. Returns an empty `LastChange { items: [] }` for an empty input (no HTTP call).
 pub async fn fetch_last_change(ids: &[String]) -> Result<LastChange, HistoryApiError> {
@@ -153,6 +172,27 @@ pub async fn fetch_last_change(ids: &[String]) -> Result<LastChange, HistoryApiE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn grid_day_url_with_and_without_date() {
+        assert_eq!(grid_day_url(None), "/api/v1/history/grid_day");
+        assert_eq!(
+            grid_day_url(Some("2026-10-23")),
+            "/api/v1/history/grid_day?date=2026-10-23"
+        );
+    }
+
+    #[test]
+    fn no_grid_meter_is_its_own_error() {
+        assert!(matches!(
+            classify_status(404, r#"{"error":"no_grid_meter"}"#),
+            HistoryApiError::NoGridMeter
+        ));
+        assert!(matches!(
+            classify_status(404, r#"{"error":"not_recorded"}"#),
+            HistoryApiError::NotRecorded
+        ));
+    }
 
     #[test]
     fn series_url_uses_wire_range_names_and_encodes_id() {

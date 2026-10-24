@@ -4702,6 +4702,167 @@ html:has(.flow-canvas-screen) {
   padding: 0 16px;
 }
 
+/* Grid day chart: under the diagram, as wide as the cards below. */
+.energy-day {
+  min-height: 0;
+  gap: 6px;
+}
+
+.energy-day__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.energy-day__title {
+  flex: 1;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.energy-day__nav {
+  flex: none;
+  width: 40px;
+  padding: 0;
+  font-size: 1.2rem;
+}
+
+.energy-day__totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+}
+
+.energy-day__total {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.energy-day__split,
+.energy-day__detail,
+.energy-day__empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.energy-day__detail {
+  min-height: 1.2em;
+  margin: 0;
+}
+
+.energy-day__empty {
+  margin: 12px 0;
+}
+
+.energy-day__skeleton {
+  height: 180px;
+  border-radius: var(--radius-card);
+  background: var(--card-border);
+  opacity: 0.4;
+}
+
+.energy-day__svg {
+  display: block;
+  width: 100%;
+  max-width: 960px;
+  height: auto;
+  margin-inline: auto;
+  overflow: visible;
+}
+
+.energy-day__band {
+  fill: var(--tariff-band);
+}
+
+.energy-day__gridline {
+  stroke: var(--card-border);
+  stroke-dasharray: 3 4;
+}
+
+.energy-day__zero {
+  stroke: var(--muted);
+  stroke-width: 1.2;
+}
+
+.energy-day__axis {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.energy-day__hit {
+  fill: transparent;
+}
+
+.energy-day__slot {
+  cursor: pointer;
+  outline: none;
+}
+
+.energy-day__slot--active .energy-day__hit,
+.energy-day__slot:focus-visible .energy-day__hit {
+  fill: var(--card-border);
+}
+
+.energy-day__bar--off-peak {
+  fill: var(--tariff-off-peak);
+}
+
+.energy-day__bar--peak,
+.energy-day__bar--bought {
+  fill: var(--tariff-peak);
+}
+
+.energy-day__bar--export {
+  fill: var(--grid-export);
+}
+
+.energy-day__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.energy-day__legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.energy-day__key {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.energy-day__key--off-peak {
+  background: var(--tariff-off-peak);
+}
+
+.energy-day__key--peak,
+.energy-day__key--bought {
+  background: var(--tariff-peak);
+}
+
+.energy-day__key--export {
+  background: var(--grid-export);
+}
+
+@media (max-width: 520px) {
+  .energy-day__axis--wide {
+    display: none;
+  }
+
+  .energy-day__axis {
+    font-size: 12px;
+  }
+}
+
 .energy-card .card__icon {
   color: inherit;
 }
@@ -6480,5 +6641,25 @@ html:has(.flow-canvas-screen) {
 }
 
 .home-settings__save {
+  align-self: flex-start;
+}
+
+.home-settings__window {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-settings__window .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-settings__window .btn {
+  flex: none;
+  width: auto;
+}
+
+.home-settings__add {
   align-self: flex-start;
 }

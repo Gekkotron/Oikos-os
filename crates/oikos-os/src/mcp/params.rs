@@ -439,6 +439,12 @@ pub enum HistoryWhat {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetGridDayParams {
+    /// The house-local day, `YYYY-MM-DD`; today when absent.
+    pub date: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetHistoryParams {
     /// The entity id, as `list_entities` returns it.
     pub entity: String,

@@ -201,7 +201,7 @@ impl SettingsPage {
 
     fn hint(self) -> &'static str {
         match self {
-            SettingsPage::Home => "Eco setpoint, house mode, indoor temperature",
+            SettingsPage::Home => "Eco setpoint, house mode, indoor temperature, off-peak hours",
             SettingsPage::Appearance => "Theme",
             SettingsPage::Zigbee2mqtt => "Bridge, firmware updates and devices",
             SettingsPage::Broker => "MQTT connection",
