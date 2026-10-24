@@ -6003,6 +6003,12 @@ html:has(.flow-canvas-screen) {
   width: 90px;
 }
 
+/* Buttons keep their own width on wide screens (`.btn` grows by default). */
+.climate-panel .btn {
+  flex: none;
+  padding-inline: 16px;
+}
+
 .climate-hold__short {
   display: none;
 }
@@ -6055,6 +6061,7 @@ html:has(.flow-canvas-screen) {
 .climate-decisions__older {
   opacity: 0.7;
 }
+
 
 .climate-field {
   display: flex;
@@ -6353,6 +6360,118 @@ html:has(.flow-canvas-screen) {
 .climate-field--inline {
   flex-direction: row;
   align-items: center;
+}
+
+/* Narrow: the rooms become a row of chips above the panel, and everything stacks. */
+@media (max-width: 1099px) {
+  .climate-screen__body,
+  .climate-panel__lower {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .climate-rooms {
+    flex-direction: row;
+    gap: 6px;
+    margin: 0 -8px;
+    padding: 0 8px 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+
+  .climate-room {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--chip-border);
+    border-radius: 99px;
+    white-space: nowrap;
+  }
+
+  .climate-room--selected {
+    border-color: transparent;
+  }
+
+  .climate-room__sub {
+    display: none;
+  }
+
+  .climate-room__temp {
+    font-weight: 400;
+  }
+}
+
+/* Phones: the same seven columns, narrower; blocks keep only their temperature. */
+@media (max-width: 640px) {
+  .climate-panel > .card {
+    padding: 12px;
+  }
+
+  .climate-status__figures {
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .climate-status__state {
+    align-self: stretch;
+  }
+
+  .climate-status__state > .chip {
+    flex: 1;
+  }
+
+  .climate-hold__long {
+    display: none;
+  }
+
+  .climate-hold > .btn {
+    flex: 1;
+  }
+
+  .climate-hold__short {
+    display: inline;
+  }
+
+  .climate-timeline__cal {
+    grid-template-columns: 22px repeat(7, minmax(0, 1fr));
+    gap: 3px;
+  }
+
+  .climate-timeline__hours,
+  .climate-timeline__col {
+    height: 360px;
+  }
+
+  .climate-timeline__col {
+    border-radius: 8px;
+  }
+
+  .climate-timeline__hour {
+    right: 2px;
+    font-size: 9px;
+  }
+
+  .climate-timeline__times,
+  .climate-timeline__hour--minor,
+  .climate-timeline__dname-rest {
+    display: none;
+  }
+
+  .climate-timeline__bar {
+    left: 2px;
+    right: 2px;
+    align-items: center;
+    padding: 3px 0 0;
+    border-radius: 6px;
+  }
+
+  .climate-timeline__temp {
+    font: 700 11px/14px var(--font-body);
+  }
 }
 
 /* Phones: the sidebar is a drawer that slides in over the page, behind the header's menu button.

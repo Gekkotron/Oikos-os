@@ -79,10 +79,15 @@ pub fn RoomPanel(
     let now = Signal::derive(move || week_minute(clock.get(), tz.get()));
 
     let reading = move || {
+        zone.with(|z| {
+            z.reading
+                .map_or_else(|| "No reading".to_owned(), degrees_text)
+        })
+    };
+    let reading_label = move || {
         zone.with(|z| match (z.reading, z.reading_age_s) {
-            (Some(t), Some(age)) => format!("{} · {}", degrees_text(t), age_text(age)),
-            (Some(t), None) => degrees_text(t),
-            _ => "No reading".to_owned(),
+            (Some(_), Some(age)) => format!("Now · {}", age_text(age)),
+            _ => "Now".to_owned(),
         })
     };
     let target = move || {
@@ -288,7 +293,7 @@ pub fn RoomPanel(
                 }}
                 <div class="climate-status__figures">
                     <div class="climate-status__figure">
-                        <span class="climate-status__label">"Now"</span>
+                        <span class="climate-status__label">{reading_label}</span>
                         <strong class="climate-status__reading">{reading}</strong>
                     </div>
                     <div class="climate-status__figure">
