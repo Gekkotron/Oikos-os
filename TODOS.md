@@ -6,7 +6,13 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ### P1 — correctness / forward-compat
 
-- **Check the four new widget renderers in a browser** (`dashboards/{room_group,flow_button,energy_stat,history_widget}.rs`, `styles/widgets.css`): only unit-tested so far.
+- **New widget cards — browser check 2026-10-24 (all four render with live data, desktop and phone).** Polish found:
+  - HistoryChart widget nests the chart's own framed card inside the widget card (double border); drop one frame.
+  - Chart caption leaks the internal fill mode "held-until-next-row" (`components/history_chart/view.rs:280`, also on the history page) and wraps in two cramped columns in a 2x1 widget.
+  - Time axis labels collide at the right edge ("12:00now").
+  - New widget strings are English only on the FR UI: metric labels, "Run", "Last 24 hours", and the group summaries "All on/off/open/closed" (`groups.rs`). Route them through `i18n.rs`.
+  - EnergyStat label "Today (kWh)" repeats the unit shown in the value ("12.4 kWh").
+  - RoomGroup at 1x1: the cover summary ("All closed") wraps beside the three buttons; stack them or hide the text at 1x1.
 - **HistoryChart widget ranges.** The chart only knows Day/Week/Month, so the widget's 1h, 6h and 24h ranges all show a day. Either add short ranges to the chart or limit the widget's range choice to what it can draw.
 - **EnergyStat kWh never refreshes.** Today/week/month are fetched once (when the counter set changes); a dashboard left open overnight keeps yesterday's "Today". Refetch on a timer or at midnight.
 - `Camera` / `Lock` widgets: not offered by the library yet; add them with their cards.
