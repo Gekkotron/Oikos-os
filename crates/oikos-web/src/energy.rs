@@ -80,65 +80,36 @@ pub fn positions(diagram: &[EnergyNode]) -> BTreeMap<String, (f64, f64)> {
     out
 }
 
-/// A cubic edge, node to house.
+/// A straight edge, node to house.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Edge {
     pub start: (f64, f64),
-    pub c1: (f64, f64),
-    pub c2: (f64, f64),
     pub end: (f64, f64),
 }
 
 impl Edge {
-    pub fn reversed(&self) -> Edge {
-        Edge {
-            start: self.end,
-            c1: self.c2,
-            c2: self.c1,
-            end: self.start,
-        }
-    }
-
-    /// The SVG path: `M x y C x1 y1, x2 y2, x y`.
+    /// The SVG path: `M x y L x y`.
     pub fn path(&self) -> String {
         format!(
-            "M {} {} C {} {}, {} {}, {} {}",
-            self.start.0,
-            self.start.1,
-            self.c1.0,
-            self.c1.1,
-            self.c2.0,
-            self.c2.1,
-            self.end.0,
-            self.end.1
+            "M {} {} L {} {}",
+            self.start.0, self.start.1, self.end.0, self.end.1
         )
     }
 }
 
-/// The edge between `node` and the house `hub`, kept `clearance` px from both centres. A side
-/// node joins the house side to side at circle-centre height; a node above (solar) passes
-/// `below`, the bottom of its labels, as its start height instead.
+/// The spoke between `node` and the house `hub`: a straight line along their centres, kept
+/// `clearance` px from both, so every edge leaves the house at its own point on the rim and
+/// meets its node head-on. A node above (solar) passes `below`, the bottom of its labels, as
+/// its start instead.
 pub fn edge(node: (f64, f64), hub: (f64, f64), clearance: f64, below: Option<f64>) -> Edge {
-    if let Some(below) = below {
-        let start = (node.0, below);
-        let end = (hub.0, hub.1 - clearance);
-        let mid_y = (start.1 + end.1) / 2.0;
-        return Edge {
-            start,
-            c1: (start.0, mid_y),
-            c2: (end.0, mid_y),
-            end,
-        };
-    }
-    let side = if node.0 < hub.0 { 1.0 } else { -1.0 };
-    let start = (node.0 + side * clearance, node.1);
-    let end = (hub.0 - side * clearance, hub.1);
-    let mid_x = (start.0 + end.0) / 2.0;
+    let from = below.map_or(node, |y| (node.0, y));
+    let (dx, dy) = (hub.0 - from.0, hub.1 - from.1);
+    let len = dx.hypot(dy).max(f64::EPSILON);
+    let (ux, uy) = (dx / len, dy / len);
+    let lead = if below.is_some() { 0.0 } else { clearance };
     Edge {
-        start,
-        c1: (mid_x, start.1),
-        c2: (mid_x, end.1),
-        end,
+        start: (from.0 + ux * lead, from.1 + uy * lead),
+        end: (hub.0 - ux * clearance, hub.1 - uy * clearance),
     }
 }
 
@@ -479,12 +450,34 @@ mod tests {
         let solar = edge((130.0, 30.0), hub, CLEARANCE, Some(80.0));
         assert_eq!(solar.start, (130.0, 80.0));
         assert_eq!(solar.end, (130.0, 130.0 - CLEARANCE));
-        assert_eq!(e.reversed().start, e.end);
-        assert_eq!(e.reversed().reversed(), e);
         assert_eq!(
             edge((0.0, 0.0), (100.0, 0.0), 26.0, None).path(),
-            "M 26 0 C 50 0, 50 0, 74 0"
+            "M 26 0 L 74 0"
         );
+    }
+
+    /// A consumer up or down the arc gets its own spoke along the centre line: no shared
+    /// start on the house's side and no hook into the node.
+    #[test]
+    fn arc_edges_are_spokes() {
+        let hub = (130.0, 130.0);
+        let dist = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1);
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let ends: Vec<_> = [(213.2, 50.0), (228.8, 130.0), (213.2, 210.0)]
+            .into_iter()
+            .map(|at| {
+                let e = edge(at, hub, CLEARANCE, None);
+                assert!(close(dist(e.start, at), CLEARANCE));
+                assert!(close(dist(e.end, hub), CLEARANCE));
+                // Start, end and both centres on one line.
+                let cross =
+                    (e.end.0 - e.start.0) * (hub.1 - at.1) - (e.end.1 - e.start.1) * (hub.0 - at.0);
+                assert!(close(cross, 0.0));
+                e.end
+            })
+            .collect();
+        assert!(ends[0].1 < hub.1 && ends[2].1 > hub.1);
+        assert!(close(ends[1].1, hub.1));
     }
 
     #[test]
