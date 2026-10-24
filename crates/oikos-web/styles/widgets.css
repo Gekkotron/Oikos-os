@@ -1,0 +1,99 @@
+/* Dashboard widgets with their own card: room group, flow button, energy stat, history chart.
+   Tokens only. */
+
+.widget-room,
+.widget-flow,
+.widget-stat,
+.widget-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: var(--card-min-height);
+  padding: var(--card-padding);
+}
+
+.widget-room__head,
+.widget-flow__head,
+.widget-stat__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.widget-room__icon,
+.widget-flow__icon,
+.widget-stat__icon {
+  display: inline-flex;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--accent-amber);
+}
+
+.widget-room__icon svg,
+.widget-flow__icon svg,
+.widget-stat__icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.widget-room__name,
+.widget-flow__name,
+.widget-stat__label,
+.widget-history__title {
+  min-width: 0;
+  overflow: hidden;
+  font: var(--type-card-name);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* On a 1x1 card the buttons drop under the state line instead of squeezing it. */
+.widget-room__covers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.widget-room__state,
+.widget-room__empty {
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+.widget-room__state {
+  white-space: nowrap;
+}
+
+.widget-room__empty {
+  margin: 0;
+}
+
+.widget-flow__run {
+  align-self: flex-start;
+  min-height: var(--touch-min);
+}
+
+.widget-stat__value {
+  margin-top: auto;
+  color: var(--ink);
+}
+
+.widget-history {
+  min-width: 0;
+}
+
+/* The widget is the card: the chart drops its own frame inside it. */
+.widget-history .history-chart {
+  padding: 0;
+  background: none;
+  border: 0;
+}
+
+.widget-history__title {
+  color: var(--muted);
+}

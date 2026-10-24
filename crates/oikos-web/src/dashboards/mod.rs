@@ -1,7 +1,11 @@
 pub mod config_sheet;
 pub mod edit;
+pub mod energy_stat;
+pub mod flow_button;
 pub mod grid;
+pub mod history_widget;
 pub mod library;
+pub mod room_group;
 pub mod widget;
 
 use leptos::prelude::*;

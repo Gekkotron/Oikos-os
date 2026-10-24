@@ -2,62 +2,36 @@
 
 Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness or user-visible safety (do next), **P2** = polish or test coverage, **P3** = cosmetic or opportunistic.
 
-## Dashboards (landed on `feat/dashboards`, 2026-10-22)
+## Dashboards (landed on `feat/dashboards`, 2026-10-22; triaged 2026-10-24)
 
 ### P1 — correctness / forward-compat
 
-- **Rich widget renderers for the 6 deferred kinds.** In v1 these render only the `Unavailable` placeholder (see spec "v1 widget renderer coverage"). Edit `crates/oikos-web/src/dashboards/widget.rs` for each:
-  - `RoomGroup` → `cards::group::{CoverGroupCard,LightGroupCard}`
-  - `FlowButton` → trigger via `api::run_flow`
-  - `EnergyStat` → `cards::sensor::SensorCard` or a new metric card
-  - `HistoryChart` → new chart card
-  - `Camera` → `cards::camera::*` once it exists
-  - `Lock` → `cards::lock::*` once it exists
-- **FlowButton validator alignment, spec vs plan.** The hub validator used to require `WidgetConfig::Entity` for FlowButton (plan brief error). Fixed to require `WidgetConfig::Flow` per spec. Verify end-to-end that an in-browser FlowButton save round-trips. (Patched in 6c714cd — keep an eye on it under smoke.)
-- **EditState resets on broker echo.** `EditState` is created inside the dashboards-tracking closure in `screens/dashboard.rs`. Any broker echo (including the hub's own echo after Save) rebuilds the state and discards unsaved draft edits. Fix: hoist state keyed by dashboard id outside the closure; only sync `original` from the hub when the draft isn't dirty.
-- **Hub reorder is "all-or-nothing at validation", not at MQTT publish.** A mid-loop publish failure leaves broker + local store half-reordered (but mutually consistent). Rare on a healthy local broker; still worth a WHY comment, or publish all N messages before updating any local state so the local store rolls back on the first `Publish` error.
-- **Two concurrent PUTs can pick the same `next_free_order`.** Lock is released between the read and the publish. Fine for single-user v1; add a serialization guard if the hub ever grows multi-writer.
+- **History chart is English only on the FR UI** (widget and history page): "Last 24 hours", "now", weekday names, "min/max". Route `components/history_chart/{format,view}.rs` through `i18n.rs`.
+- **HistoryChart widget ranges.** The chart only knows Day/Week/Month, so the widget's 1h, 6h and 24h ranges all show a day. Either add short ranges to the chart or limit the widget's range choice to what it can draw.
+- **EnergyStat kWh never refreshes.** Today/week/month are fetched once (when the counter set changes); a dashboard left open overnight keeps yesterday's "Today". Refetch on a timer or at midnight.
+- `Camera` / `Lock` widgets: not offered by the library yet; add them with their cards.
 
 ### P2 — polish / test coverage
 
+- `Grid` keys tiles by widget id alone and `WidgetView` takes the widget once, so a title change from the config sheet only shows after a remount.
 - Dashboards fetched once at startup; no retry/refresh on WS reconnect. Trigger a re-fetch on the WS reconnect event.
-- Deep-linking an authored dashboard id shows "Unknown dashboard" briefly before the fetch lands. Add a loading state in `screens/dashboard.rs` or in the picker fallback.
-- `.dashboards-picker__menu` uses `position: fixed` with no offsets — likely opens over the trigger. Anchor it under `.dashboards-picker` (`position: absolute`) and add top/left offsets. Outside-click and trigger-click don't close it. The fix needs both the anchoring and an outside-click handler.
-- Grid comment claims spans wider than the column count "are clamped there" — no clamp rule exists. Rephrase to say WHY no clamp is needed (max span is 2 = min column count 2).
-- `with_untracked` on `house.entities` means an entity arriving after the dashboard mounts leaves its widget stuck on `Unavailable` until remount. Memo on presence would fix it.
-- `Grid` keys tiles by widget id alone — an edit that changes a widget's span or config under the same id does not re-render. Key on `(id, span, config)` or similar.
-- Save button has no in-flight guard; a double click sends two PUTs. Disable while the request is in flight.
-- Toggling pencil off while dirty keeps the unsaved draft on the grid with no indicator.
-- `widget_with_wrong_span_rejected` test doesn't assert the full violation text ("span 2x2 not allowed"); tighten it.
-- Add a tie-break-by-id test for `DashboardStore::list()` ordering.
-- No test that `delete_dashboard` on an unknown id returns `UnknownDashboard`.
-- `order_route_shadows_id_route` asserts `is_success()` only — tighten to `== NO_CONTENT`.
-- Dashboard delete has no confirmation dialog. Route the `DashboardSettingsSheet` delete button through the `Confirming` context (`components::confirm::Confirming`) before calling the API.
-- `DashboardSettingsSheet` delete/reorder swallow API errors with `is_ok()` and no feedback. Toast on failure.
-- `WidgetConfigSheet` has no entity/target picker — swap-target requires delete + re-add. Add a picker scoped to the matching kind.
-- HistoryChart entry filter in `AddWidgetPicker` uses Sensor entities only; spec says "any entity with history". Refine when the entity-history catalog is wired.
-- Energy metric list is hard-coded in `add_picker.rs`; could drift from hub source. Expose a single source of truth.
-- Overlay z-index 1 vs tools z-index 2 depends on no inner card element exceeding z-index 1 — audit each `WidgetView` variant.
-- Save-success `selected_widget.set(None)` runs post-await — a widget selected mid-flight is cleared. Make the reset conditional on the index actually still matching the pre-flight widget.
-- `widget_config_tagged_by_kind_shape` test name doesn't match what it does — rename or add the `to_value` keys assertion the name implies.
-- Dashboard-store tests reach into `store.entries` directly instead of using the `invalid_reason()` helper.
-- The DashboardScreen comment calls dashboards a "retained-topic fetch" — they're actually a one-shot HTTP fetch at start-up. Rephrase to "start-up fetch".
+- Overlay z-index 1 vs tools z-index 2 depends on no inner card element exceeding z-index 1 — audit the new widget cards (`widgets.css`).
+- Edits made to the draft while a Save is in flight are overwritten by the hub's reply.
+- Deep-linking an authored dashboard id shows "Unknown dashboard" briefly before the fetch lands. Add a loaded flag and a loading state in `screens/dashboard.rs`.
+- `WidgetConfigSheet` has no entity/target picker — swap-target requires delete + re-add.
+- HistoryChart entry filter in the widget library uses Sensor entities only; spec says "any entity with history".
 
 ### P3 — cosmetic / backlog
 
-- `path/body id mismatch` returns 422 while flows PUT returns 400 — intentional divergence per the dashboards brief, but worth normalizing across all PUT routes.
-- Three dashboard HTTP handlers have no doc comments (only `put_dashboard` does).
-- Widget kinds `Lock` and `Camera` have no matching `Kind` variants in `oikos-core`; their widget groups are empty. Add device-kind inventory when those entity classes land. See the P1 item "Rich widget renderers for the 6 deferred kinds".
-- Hub.rs has one unrelated rustfmt-only hunk in the history_feed closure (harmless churn).
-- `make_widget` in `AddWidgetPicker` panics natively (`js_sys::Date` is wasm-only); native tests use a fixed id instead. Fine, since those paths are wasm-only in production.
-- Normalize commit attribution across the branch — 11 of 24 commits ended up with `Co-Authored-By: Claude Sonnet 5.5` or `Haiku 5.5` instead of the requested `Opus 4.7` line because sub-agents' own session rules overrode the dispatch brief. If the user wants a uniform trailer, a one-pass rebase can rewrite them.
+- Two concurrent PUTs can pick the same `next_free_order` (lock released between read and publish). Fine single-user; add a guard if the hub grows multi-writer.
+- `path/body id mismatch` returns 422 while flows PUT returns 400 — normalize across PUT routes.
 
 ## Climate engine v1 (landed on sc-critical-meissner-823c, 2026-10-22)
 
 Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/superpowers/plans/2026-10-22-climate-engine.md`.
 
 - Follow-up designs, each its own brainstorm: shutters, comfort ↔ cost slider with prices, ML layers.
-- **Open (before merge):** run the DB-gated climate tests against a TimescaleDB (`TEST_DATABASE_URL=… cargo test -p oikos-os --test history_db climate learn_zone`).
+- **Open:** run the DB-gated climate tests against a TimescaleDB (`TEST_DATABASE_URL=… cargo test -p oikos-os --test history_db climate learn_zone`).
 
 ### Deferred follow-ups (from the SDD reviews; none blocks enabling the feature)
 
@@ -99,20 +73,30 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 
 ## Other backlog ideas (unrelated to dashboards)
 
-### In progress
-
-- [ ] Flexible groups — hand-made groups across rooms (e.g. "all upstairs lights"), with their own MQTT discovery and state topics. Branch: `feat/flexible-groups` (5 commits ahead of main: design, plan, MQTT contract, API `GroupSpec`, hub group id/discovery/state).
-
 ### Homey-gap features
 
-- [ ] Category views — the Home grouped by what a device *does*, not just by room. Branch: `feat/category-views` (worktree exists, no commits yet).
+- [ ] Category views — the Home grouped by what a device *does*, not just by room. Not started (the `feat/category-views` branch is gone).
 
 ### Hub & web polish
 
 - [ ] Dashboard-wide search bar — the current search is only on the Z2M diagnostics screen (`screens/devices.rs`); add an equivalent on the dashboard/Home so any entity can be found by name across rooms.
 - [ ] Card titles break mid-word on the entity sheet readout card.
+- [ ] Vacuum card animation — while the vacuum is cleaning, show a small brush in the card's top-right corner that moves (spins or sweeps), idle otherwise. See `cards/vacuum.rs`, `components/robot.rs` and the vacuum rules in `styles/cards.css`; respect `prefers-reduced-motion`.
 - [ ] Address the ~47 deferred minors from the flow-canvas redesign SDD ledger (`.superpowers/sdd/2026-10-20-flow-canvas-redesign/`).
 - [ ] Housekeeping: cap/clean `target/` so it stops filling the disk.
+
+### Solar card and page — readability (reported 2026-10-24)
+
+The Home solar card and the `/solar` page read as messy (`solar/card.rs`, `solar/curve.rs`, `screens/solar.rs`, strings in `i18n.rs`):
+
+- [ ] Headline "4,0 / 3,8 kWh" has no labels — say which figure is measured and which is the forecast (e.g. "4,0 kWh produits · prévu 3,8").
+- [ ] **"reste ≈ 1,6" reads as nonsense once production beats the forecast.** It is `now.remaining_today` = the forecast summed from now to midnight (`oikos-solcast` `remaining()`), so "4,0 / 3,8 · reste ≈ 1,6" seems to say 1,6 kWh are still missing although 4,0 > 3,8 is already done. Replace it with an end-of-day projection when the measured figure is known: "fin de journée ≈ 5,6 kWh" = measured + forecast still to come (EN "≈ 5.6 kWh by tonight"); fall back to "encore ≈ 1,6 kWh prévus" without a measurement. Always print the kWh unit. Applies to the card and `/solar` (`i18n::solar_bottom`).
+- [ ] The card caption wraps mid-group ("Demain 1,9 kWh (1–" / "3)"); keep "(1–3)" with its value (non-breaking space or a shorter line), or drop the range on the card.
+- [ ] The measured fill is opaque and drawn over the forecast: before "now" it hides the forecast band and the dashed median, so measured vs forecast can't be compared. Draw measured as a line (or a translucent fill) above the band, and keep the median visible across the whole day.
+- [ ] The measured series ends with a steep straight drop to a vertical edge just before the now line (linear join of the last hourly point to the current reading). Smooth or step it, and end it exactly at now.
+- [ ] The p10–p90 band colour is a muddy grey-brown on the dark theme; use a translucent tint of the solar accent.
+- [ ] The page chart has a single gridline ("1,0 kW") and no time axis; add hour ticks (e.g. 6h, 12h, 18h) and a second kW gridline.
+- [ ] The dashed now line overshoots the top of the plot area; clip it to the chart.
 
 ### Flows
 

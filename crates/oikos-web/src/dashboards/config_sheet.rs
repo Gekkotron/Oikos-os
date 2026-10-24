@@ -7,6 +7,8 @@ use oikos_api::HOUSE_ID;
 use oikos_core::dashboard::{Dashboard, Span, Widget, WidgetConfig, WidgetKind, allowed_spans};
 
 use crate::api;
+use crate::components::confirm::{ConfirmBar, Confirming};
+use crate::components::toast::Toasts;
 use crate::dashboards::edit::EditState;
 use crate::house::House;
 
@@ -141,7 +143,7 @@ fn shifted_order(mut ids: Vec<String>, id: &str, delta: isize) -> Vec<String> {
 
 /// Persists a reorder and mirrors it into the in-memory list, since the hub does not
 /// push dashboard structure. House stays first; it is not part of the reorder payload.
-fn move_dashboard(house: House, id: String, delta: isize) {
+fn move_dashboard(house: House, toasts: Toasts, id: String, delta: isize) {
     let ids: Vec<String> = house
         .dashboards
         .get_untracked()
@@ -151,14 +153,15 @@ fn move_dashboard(house: House, id: String, delta: isize) {
         .collect();
     let ids = shifted_order(ids, &id, delta);
     spawn_local(async move {
-        if api::reorder_dashboards(&ids).await.is_ok() {
-            house.dashboards.update(|v| {
+        match api::reorder_dashboards(&ids).await {
+            Ok(_) => house.dashboards.update(|v| {
                 v.sort_by_key(|dv| {
                     ids.iter()
                         .position(|i| *i == dv.dashboard.id)
                         .map_or(0, |p| p + 1)
                 });
-            });
+            }),
+            Err(e) => toasts.push(e.error),
         }
     });
 }
@@ -167,6 +170,8 @@ fn move_dashboard(house: House, id: String, delta: isize) {
 #[component]
 pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl IntoView {
     let house = expect_context::<House>();
+    let toasts = expect_context::<Toasts>();
+    let confirming = expect_context::<Confirming>();
     let navigate = use_navigate();
     let initial_name = state.draft.with_untracked(|d| d.name.clone());
     let show_header = move || state.draft.with(|d| d.show_header);
@@ -204,7 +209,7 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                     type="button"
                     class="btn"
                     on:click=move |_| {
-                        move_dashboard(house, state.draft.get_untracked().id, -1)
+                        move_dashboard(house, toasts, state.draft.get_untracked().id, -1)
                     }
                 >
                     "Move up"
@@ -213,28 +218,54 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                     type="button"
                     class="btn"
                     on:click=move |_| {
-                        move_dashboard(house, state.draft.get_untracked().id, 1)
+                        move_dashboard(house, toasts, state.draft.get_untracked().id, 1)
                     }
                 >
                     "Move down"
                 </button>
             </div>
-            <button
-                type="button"
-                class="btn btn--danger"
-                on:click=move |_| {
-                    let id = state.draft.get_untracked().id;
-                    let navigate = navigate.clone();
-                    spawn_local(async move {
-                        if api::delete_dashboard(&id).await.is_ok() {
-                            house.dashboards.update(|v| v.retain(|dv| dv.dashboard.id != id));
-                            navigate(&format!("/dashboards/{HOUSE_ID}"), Default::default());
-                        }
-                    });
+            <Show
+                when=move || confirming.is_asking(&state.draft.with(|d| d.id.clone()))
+                fallback=move || {
+                    view! {
+                        <button
+                            type="button"
+                            class="btn btn--danger"
+                            on:click=move |_| confirming.ask(&state.draft.get_untracked().id)
+                        >
+                            "Delete dashboard"
+                        </button>
+                    }
                 }
             >
-                "Delete dashboard"
-            </button>
+                <ConfirmBar
+                    question=format!("Delete {}?", state.draft.with_untracked(|d| d.name.clone()))
+                    yes="Delete"
+                    on_yes=Callback::new({
+                        let navigate = navigate.clone();
+                        move |()| {
+                            confirming.clear();
+                            let id = state.draft.get_untracked().id;
+                            let navigate = navigate.clone();
+                            spawn_local(async move {
+                                match api::delete_dashboard(&id).await {
+                                    Ok(_) => {
+                                        house
+                                            .dashboards
+                                            .update(|v| v.retain(|dv| dv.dashboard.id != id));
+                                        navigate(
+                                            &format!("/dashboards/{HOUSE_ID}"),
+                                            Default::default(),
+                                        );
+                                    }
+                                    Err(e) => toasts.push(e.error),
+                                }
+                            });
+                        }
+                    })
+                    on_cancel=Callback::new(move |()| confirming.clear())
+                />
+            </Show>
             <button type="button" class="btn" on:click=move |_| on_close.run(())>"Close"</button>
         </aside>
     }

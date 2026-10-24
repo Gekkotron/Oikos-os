@@ -43,15 +43,28 @@ fn local(unix: i64) -> OffsetDateTime {
 }
 
 /// X-axis tick labels for a range ending at `now_secs`: a list of `(position in 0..=1, label)`.
-/// `now` is always the final label at position `1.0`.
+/// `now` is always the final label at position `1.0`. On the day and month axes, whose ticks
+/// are instants, a tick closer to `now` than [`NOW_GAP`] is dropped so the two labels do not run
+/// into each other; week and year labels name whole slots and are kept.
 pub fn tick_labels(range: HistoryRange, now_secs: i64) -> Vec<(f64, String)> {
-    match range {
+    let mut out = match range {
         HistoryRange::Day => day_ticks(now_secs),
-        HistoryRange::Week => week_ticks(now_secs),
+        HistoryRange::Week => return week_ticks(now_secs),
         HistoryRange::Month => month_ticks(now_secs),
-        HistoryRange::Year => year_ticks(now_secs),
-    }
+        HistoryRange::Year => return year_ticks(now_secs),
+    };
+    let last = out.len().saturating_sub(1);
+    let mut i = 0;
+    out.retain(|(pos, _)| {
+        let keep = i == last || *pos <= 1.0 - NOW_GAP;
+        i += 1;
+        keep
+    });
+    out
 }
+
+/// The smallest gap, as a fraction of the axis, between a tick and the final `now` label.
+const NOW_GAP: f64 = 0.12;
 
 fn day_ticks(now_secs: i64) -> Vec<(f64, String)> {
     let start = now_secs - 86_400;
@@ -218,9 +231,21 @@ mod tests {
     }
 
     #[test]
+    fn a_tick_next_to_now_is_dropped() {
+        // Every quarter hour of a day, so some "now" falls just after a 6-hourly tick.
+        for step in 0..96 {
+            let now = 1_792_497_600 + step * 900;
+            let out = tick_labels(HistoryRange::Day, now);
+            let (last, rest) = out.split_last().unwrap();
+            assert_eq!(last.1, "now");
+            assert!(rest.iter().all(|(p, _)| *p <= 1.0 - NOW_GAP), "{out:?}");
+        }
+    }
+
+    #[test]
     fn tick_labels_for_24h_uses_6h_steps() {
-        // noon on 2026-10-21 Europe/Paris
-        let labels: Vec<String> = tick_labels(HistoryRange::Day, 1_792_497_600)
+        // 17:00 on 2026-10-20 Europe/Paris: every 6-hourly tick is clear of "now".
+        let labels: Vec<String> = tick_labels(HistoryRange::Day, 1_792_497_600 + 3 * 3_600)
             .into_iter()
             .map(|(_, s)| s)
             .collect();

@@ -13,20 +13,12 @@ use oikos_core::dashboard::{
 };
 use oikos_core::model::Kind;
 
+use super::energy_stat::ENERGY_METRICS;
 use crate::flow_edit::fold_accents;
 use crate::format::{entity_title, room_name};
 use crate::house::House;
+use crate::i18n::{Lang, widget_text};
 use crate::icons::{BOLT, HOUSE, PLAY, entity_icon};
-
-/// Metrics the hub's energy widget understands; there is no entity behind them to list.
-const ENERGY_METRICS: [(&str, &str); 6] = [
-    ("today_kwh", "Today (kWh)"),
-    ("week_kwh", "This week (kWh)"),
-    ("month_kwh", "This month (kWh)"),
-    ("grid_power_now", "Grid power now"),
-    ("pv_power_now", "Solar power now"),
-    ("self_consumption_pct", "Self-consumption"),
-];
 
 /// A timestamp is unique enough: widgets are added by hand, one click at a time.
 #[cfg(target_arch = "wasm32")]
@@ -220,7 +212,7 @@ pub fn entries(
             id.to_owned(),
             Entry {
                 section: Section::Energy,
-                title: label.to_owned(),
+                title: widget_text(Lang::En, label).to_owned(),
                 sub: None,
                 icon: BOLT,
                 kind: WidgetKind::EnergyStat,

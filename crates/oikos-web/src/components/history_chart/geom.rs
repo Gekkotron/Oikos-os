@@ -27,7 +27,8 @@ pub struct Bar {
     pub kwh: f64,
 }
 
-/// Auto-scale from the mean column with 10% headroom top and bottom. Falls back to `0..1` on
+/// Auto-scale from the min/max band with 10% headroom top and bottom, so the band and the
+/// legend's min/max stay inside the axis labels. Falls back to `0..1` on
 /// empty input, and expands to a 1-unit range when every value is the same (so a flat line
 /// doesn't collapse against a zero-height viewBox).
 pub fn y_scale(points: &[(i64, f64, f64, f64)]) -> YScale {
@@ -36,12 +37,8 @@ pub fn y_scale(points: &[(i64, f64, f64, f64)]) -> YScale {
     }
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for p in points {
-        if p.1 < lo {
-            lo = p.1;
-        }
-        if p.1 > hi {
-            hi = p.1;
-        }
+        lo = lo.min(p.1).min(p.2);
+        hi = hi.max(p.1).max(p.3);
     }
     let range = hi - lo;
     if range == 0.0 {
@@ -159,6 +156,14 @@ mod tests {
         let s = y_scale(&p);
         assert!((s.min - 19.0).abs() < 1e-6);
         assert!((s.max - 31.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn y_scale_covers_the_min_max_band() {
+        let p = vec![(0, 20.0, 10.0, 25.0), (1, 22.0, 21.0, 30.0)];
+        let s = y_scale(&p);
+        assert!((s.min - 8.0).abs() < 1e-6);
+        assert!((s.max - 32.0).abs() < 1e-6);
     }
 
     #[test]
