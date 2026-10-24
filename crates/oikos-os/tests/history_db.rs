@@ -839,6 +839,7 @@ async fn grid_day_totals_match_counter_increase_db() {
     let counters = GridCounters {
         bought: vec!["bought".into()],
         sold: vec!["sold".into()],
+        ..GridCounters::default()
     };
     let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 23);
     let now = paris("2026-10-24 09:00:00");

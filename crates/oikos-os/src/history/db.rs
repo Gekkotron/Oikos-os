@@ -265,16 +265,25 @@ impl Db {
         Ok(row.map(|r| r.get(0)))
     }
 
-    /// Oldest value time over `entities`, if any.
+    /// Oldest value time over `entities`, if any: one indexed `ORDER BY time LIMIT 1` per id,
+    /// so the answer never scans an entity's history.
     pub async fn first_time_of(&self, entities: &[String]) -> Result<Option<Micros>, sqlx::Error> {
-        let row = sqlx::query(
-            "SELECT MIN(time) FROM entity_state WHERE entity_id = ANY($1::text[]) AND num IS NOT NULL",
-        )
-        .bind(entities)
-        .fetch_one(&self.pool)
-        .await?;
-        let t: Option<DateTime<Utc>> = row.get(0);
-        Ok(t.map(dt_to_micros))
+        let mut first: Option<Micros> = None;
+        for id in entities {
+            let row = sqlx::query(
+                "SELECT time FROM entity_state
+                 WHERE entity_id = $1 AND num IS NOT NULL
+                 ORDER BY time ASC LIMIT 1",
+            )
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+            if let Some(row) = row {
+                let t = dt_to_micros(row.get::<DateTime<Utc>, _>(0));
+                first = Some(first.map_or(t, |f| f.min(t)));
+            }
+        }
+        Ok(first)
     }
 
     /// Latest value time per requested id, missing ids absent from the map.

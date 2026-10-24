@@ -39,11 +39,19 @@ const PRODUCED: &str = "energy_produced";
 pub struct EnergyMeters;
 
 /// The lifetime counters of what crosses the grid meter: `bought` from the grid, `sold` to it.
-/// Ids sorted, each counted once.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// Ids sorted, each counted once; `factors` holds kWh per counter unit (Wh is 0.001).
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct GridCounters {
     pub bought: Vec<String>,
     pub sold: Vec<String>,
+    pub factors: BTreeMap<String, f64>,
+}
+
+impl GridCounters {
+    /// kWh per unit of counter `id`; 1 for an unknown id.
+    pub fn factor(&self, id: &str) -> f64 {
+        self.factors.get(id).copied().unwrap_or(1.0)
+    }
 }
 
 impl EnergyMeters {
@@ -57,16 +65,22 @@ impl EnergyMeters {
             v.dedup();
             v
         };
-        let bought = with(EnergyRole::Grid)
+        let bought: Vec<&EnergyEntity> = with(EnergyRole::Grid)
             .filter_map(|g| Self::meter_for(g, all))
             .collect();
-        let sold = with(EnergyRole::Grid)
+        let sold: Vec<&EnergyEntity> = with(EnergyRole::Grid)
             .filter_map(|g| Self::reverse_for(g, all))
             .chain(with(EnergyRole::GridExport).filter_map(|x| Self::meter_for(x, all)))
+            .collect();
+        let factors = bought
+            .iter()
+            .chain(&sold)
+            .filter_map(|e| Some((e.id.clone(), EnergyUnits::factor(e.unit.as_deref())?)))
             .collect();
         GridCounters {
             bought: ids(bought),
             sold: ids(sold),
+            factors,
         }
     }
 
@@ -399,6 +413,16 @@ mod tests {
                 "0x2222_energy_produced_a_zigbee2mqtt"
             ]
         );
+    }
+
+    #[test]
+    fn grid_counters_carry_unit_factor() {
+        let mut all = clamp("0x1111", "dev_one");
+        all[0].role = Some(EnergyRole::Grid);
+        all[2].unit = Some("Wh".to_string()); // energy_a
+        let c = EnergyMeters::grid_counters(&all);
+        assert_eq!(c.factor("0x1111_energy_a_zigbee2mqtt"), 0.001);
+        assert_eq!(c.factor("0x1111_energy_produced_a_zigbee2mqtt"), 1.0);
     }
 
     #[test]

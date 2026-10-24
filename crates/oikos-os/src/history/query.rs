@@ -80,11 +80,20 @@ fn local_minute(zone: Tz, at: Micros) -> u16 {
 
 const MINUTE: Micros = 60_000_000;
 
-/// Each counter's carry (last reading before the day) and its readings within the day.
+/// One counter's carry (last reading before the day), its readings within the day and its kWh
+/// per unit.
+#[derive(Clone, Debug)]
+pub struct CounterDay {
+    pub carry: Option<f64>,
+    pub samples: Vec<Sample>,
+    pub factor: f64,
+}
+
+/// The bought and sold counters' readings for the day.
 #[derive(Clone, Debug, Default)]
 pub struct DayReadings {
-    pub bought: Vec<(Option<f64>, Vec<Sample>)>,
-    pub sold: Vec<(Option<f64>, Vec<Sample>)>,
+    pub bought: Vec<CounterDay>,
+    pub sold: Vec<CounterDay>,
 }
 
 /// Everything [`build_grid_day`] needs, read beforehand.
@@ -106,10 +115,14 @@ pub fn build_grid_day(input: &DayInput) -> GridDay {
     let windows = windows_for(input.history, input.date);
     let off_peak_at = |at: Micros| is_off_peak(windows, local_minute(zone, at));
 
-    let rises = |counters: &[(Option<f64>, Vec<Sample>)]| -> Vec<(Micros, f64)> {
+    let rises = |counters: &[CounterDay]| -> Vec<(Micros, f64)> {
         counters
             .iter()
-            .flat_map(|(carry, samples)| increases(*carry, samples))
+            .flat_map(|c| {
+                increases(c.carry, &c.samples)
+                    .into_iter()
+                    .map(move |(at, rise)| (at, rise * c.factor))
+            })
             .collect()
     };
     let slots = slot_starts(day_start, day_end, input.now);
@@ -205,7 +218,11 @@ pub async fn grid_day(
                 } else {
                     Vec::new()
                 };
-                out.push((carry, samples));
+                out.push(CounterDay {
+                    carry,
+                    samples,
+                    factor: counters.factor(id),
+                });
             }
             Ok::<_, sqlx::Error>(out)
         }
@@ -470,9 +487,33 @@ mod tests {
         }]
     }
 
+    fn kwh(carry: Option<f64>, samples: Vec<Sample>) -> CounterDay {
+        CounterDay {
+            carry,
+            samples,
+            factor: 1.0,
+        }
+    }
+
+    #[test]
+    fn grid_day_scales_wh_counters() {
+        let h = history();
+        let r = DayReadings {
+            bought: vec![CounterDay {
+                carry: Some(100_000.0),
+                samples: vec![sample("2026-10-23 08:00:00", 100_400.0)],
+                factor: 0.001,
+            }],
+            sold: vec![],
+        };
+        let day = build_grid_day(&input("2026-10-23", &h, &r, at("2026-10-24 09:00:00")));
+        assert_eq!(day.totals.peak, 0.4);
+        assert_eq!(day.slots[16].peak, 0.4);
+    }
+
     fn readings() -> DayReadings {
         DayReadings {
-            bought: vec![(
+            bought: vec![kwh(
                 Some(100.0),
                 vec![
                     sample("2026-10-23 01:40:00", 100.4),
@@ -480,7 +521,7 @@ mod tests {
                     sample("2026-10-23 13:00:00", 101.5),
                 ],
             )],
-            sold: vec![(Some(5.0), vec![sample("2026-10-23 13:10:00", 5.6)])],
+            sold: vec![kwh(Some(5.0), vec![sample("2026-10-23 13:10:00", 5.6)])],
         }
     }
 
@@ -562,13 +603,13 @@ mod tests {
             },
         ];
         let r = DayReadings {
-            bought: vec![(Some(1.0), vec![sample("2026-10-22 08:00:00", 2.0)])],
+            bought: vec![kwh(Some(1.0), vec![sample("2026-10-22 08:00:00", 2.0)])],
             sold: vec![],
         };
         let day = build_grid_day(&input("2026-10-22", &h, &r, at("2026-10-24 09:00:00")));
         assert_eq!((day.totals.off_peak, day.totals.peak), (1.0, 0.0));
         let r = DayReadings {
-            bought: vec![(Some(1.0), vec![sample("2026-10-23 08:00:00", 2.0)])],
+            bought: vec![kwh(Some(1.0), vec![sample("2026-10-23 08:00:00", 2.0)])],
             sold: vec![],
         };
         let day = build_grid_day(&input("2026-10-23", &h, &r, at("2026-10-24 09:00:00")));
