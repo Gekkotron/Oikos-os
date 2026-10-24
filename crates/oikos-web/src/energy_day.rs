@@ -27,6 +27,20 @@ pub fn shift_day(day: &str, by: i64, first: Option<&str>, today: &str) -> Option
     Some(next.format("%Y-%m-%d").to_string())
 }
 
+/// Whether `reply` answers the request for `requested` (`None` is the hub's today), so a late
+/// reply for another day is dropped.
+pub fn accepts(requested: Option<&str>, reply: &GridDay) -> bool {
+    match requested {
+        Some(day) => reply.date == day,
+        None => reply.date == reply.today,
+    }
+}
+
+/// The day the card shows: the one asked for, else the hub's today once known.
+pub fn shown_day(requested: Option<&str>, today: Option<&str>) -> Option<String> {
+    requested.or(today).map(str::to_string)
+}
+
 /// The kWh at the top (bought) and bottom (sold) of the chart.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Scale {
@@ -163,6 +177,37 @@ mod tests {
             has_export,
             tariffs,
         }
+    }
+
+    #[test]
+    fn stale_reply_is_rejected() {
+        let d = day(vec![], true, false); // date 2026-10-23, today 2026-10-24
+        assert!(accepts(Some("2026-10-23"), &d));
+        assert!(!accepts(Some("2026-10-22"), &d));
+        // Today is asked as `None`: only a reply for the hub's today answers it.
+        assert!(!accepts(None, &d));
+        let today = GridDay {
+            date: "2026-10-24".into(),
+            ..d
+        };
+        assert!(accepts(None, &today));
+    }
+
+    #[test]
+    fn shown_day_follows_the_request() {
+        assert_eq!(
+            shown_day(Some("2026-10-20"), Some("2026-10-24")).as_deref(),
+            Some("2026-10-20")
+        );
+        assert_eq!(
+            shown_day(None, Some("2026-10-24")).as_deref(),
+            Some("2026-10-24")
+        );
+        assert_eq!(shown_day(None, None), None);
+        assert_eq!(
+            shown_day(Some("2026-10-20"), None).as_deref(),
+            Some("2026-10-20")
+        );
     }
 
     #[test]

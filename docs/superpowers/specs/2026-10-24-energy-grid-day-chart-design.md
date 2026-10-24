@@ -30,8 +30,8 @@ house is not on this chart.
   "Today", "Yesterday", or the date.
 - Today's chart is live: the current half hour fills up as the day goes on, refreshed about
   once a minute while the page is visible.
-- Off-peak hours are a hub setting: any number of windows at minute precision (this house:
-  01:34–07:04 and 12:05–14:34; a window may cross midnight, for example 22:00–06:00). Edited
+- Off-peak hours are a hub setting: any number of windows at minute precision (tariffs often
+  use odd minutes such as 02:04–07:34; a window may cross midnight, for example 22:00–06:00). Edited
   from the web Settings.
 - Works for any house (the project is generic): whatever entity carries the `grid` energy role,
   whatever off-peak windows are set.
@@ -55,10 +55,10 @@ house is not on this chart.
 ## Data the chart is built from
 
 Energy roles are already set by the user on their meters (`ui.energyRole`: `grid`,
-`grid_export`, `solar`, `consumer`, …). This house's grid meter is a two-clamp Zigbee power
-meter: clamp A carries the `grid` role, with a lifetime "bought" counter (`energy_a`, kWh) and a
-lifetime "sold" counter (`energy_produced_a`, kWh). There is no Linky / tariff-indexed counter,
-so the tariff split comes from the off-peak setting, not the meter.
+`grid_export`, `solar`, `consumer`, …). A common grid meter is a clamp power meter whose clamp
+on the grid line carries the `grid` role, with a lifetime "bought" counter and a lifetime "sold"
+counter on the same device. Such a meter has no tariff-indexed counter (unlike a Linky read
+through a TIC module), so the tariff split comes from the off-peak setting, not the meter.
 
 Counters, not power: the bars are counter increases, which are exact. A rough mockup from
 10-minute power averages showed almost no export because averaging nets import against export
@@ -89,7 +89,7 @@ Add to `HomeSettings` (`crates/oikos-api/src/home.rs`), the retained home settin
 hub already validates, stores and broadcasts (`crates/oikos-os/src/home.rs`):
 
 ```json
-"off_peak": [ { "start": "01:34", "end": "07:04" }, { "start": "12:05", "end": "14:34" } ]
+"off_peak": [ { "start": "02:04", "end": "07:34" }, { "start": "13:00", "end": "15:30" } ]
 ```
 
 - Local wall-clock times, `HH:MM`, 24-hour. `start == end` is refused. `end < start` means the
@@ -225,7 +225,7 @@ the new endpoint and setting (`docs/users`, `docs/reference`; not the README).
 ## Testing expectations
 
 - Pure functions for slicing a day by half hours and tariff windows (midnight-crossing window,
-  DST days with 46 and 50 slots, windows at odd minutes like 01:34) with unit tests.
+  DST days with 46 and 50 slots, windows at odd minutes like 02:04) with unit tests.
 - Hub query tested against the history test database (`crates/oikos-os/tests/history_db.rs`):
   totals equal counter increase, split adds up, counter reset does not go negative, today is
   partial.

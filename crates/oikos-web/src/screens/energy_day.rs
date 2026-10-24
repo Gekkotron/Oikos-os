@@ -8,8 +8,8 @@ use leptos::task::spawn_local;
 use crate::api::history::HistoryApiError;
 use crate::components::now::Now;
 use crate::energy_day::{
-    GridDay, aria_summary, day_label, has_data, scale, shift_day, tick_hours, tooltip, totals_text,
-    x_of,
+    GridDay, aria_summary, day_label, has_data, scale, shift_day, shown_day, tick_hours, tooltip,
+    totals_text, x_of,
 };
 
 /// Drawing width on a wide screen, and on a phone, where a narrower drawing keeps the chart
@@ -39,6 +39,8 @@ fn view_width() -> f64 {
 }
 
 type Loaded = Option<Result<GridDay, HistoryApiError>>;
+/// The hub's today and first day with data, from the last good reply.
+type Known = Option<(String, Option<String>)>;
 
 #[cfg(target_arch = "wasm32")]
 fn page_hidden() -> bool {
@@ -47,16 +49,27 @@ fn page_hidden() -> bool {
         .is_some_and(|d| d.hidden())
 }
 
+/// Fetches the requested day; a reply that arrives after the user moved on is dropped.
 #[cfg(target_arch = "wasm32")]
-fn load(day: Option<String>, data: RwSignal<Loaded>) {
+fn load(day: RwSignal<Option<String>>, data: RwSignal<Loaded>, known: RwSignal<Known>) {
+    let requested = day.get_untracked();
     spawn_local(async move {
-        let result = crate::api::history::fetch_grid_day(day.as_deref()).await;
-        data.set(Some(result));
+        let result = crate::api::history::fetch_grid_day(requested.as_deref()).await;
+        if day.try_get_untracked() != Some(requested.clone()) {
+            return;
+        }
+        if let Ok(d) = &result {
+            if !crate::energy_day::accepts(requested.as_deref(), d) {
+                return;
+            }
+            known.try_set(Some((d.today.clone(), d.first_date.clone())));
+        }
+        data.try_set(Some(result));
     });
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn load(_day: Option<String>, _data: RwSignal<Loaded>) {}
+fn load(_day: RwSignal<Option<String>>, _data: RwSignal<Loaded>, _known: RwSignal<Known>) {}
 
 /// The bars, gridlines, bands and labels of one day, as SVG children.
 fn chart(day: &GridDay, hover: RwSignal<Option<usize>>, view_w: f64) -> impl IntoView + use<> {
@@ -189,28 +202,35 @@ pub fn GridDayCard() -> impl IntoView {
     // `None` is today, as the hub sees it.
     let day: RwSignal<Option<String>> = RwSignal::new(None);
     let data: RwSignal<Loaded> = RwSignal::new(None);
+    let known: RwSignal<Known> = RwSignal::new(None);
     let hover: RwSignal<Option<usize>> = RwSignal::new(None);
     let view_w = view_width();
 
     Effect::new(move |_| {
-        let chosen = day.get();
+        day.track();
         hover.set(None);
-        load(chosen, data);
+        load(day, data, known);
     });
     // Today follows the minute clock while the page is visible.
     Effect::new(move |prev: Option<u64>| {
         let t = now.0.get();
         #[cfg(target_arch = "wasm32")]
         if prev.is_some() && day.get_untracked().is_none() && !page_hidden() {
-            load(None, data);
+            load(day, data, known);
         }
         let _ = prev;
         t
     });
 
-    let loaded = move || data.with(|d| d.as_ref().and_then(|r| r.as_ref().ok()).cloned());
-    let shown_date =
-        move || loaded().map(|d| (d.date.clone(), d.today.clone(), d.first_date.clone()));
+    // Navigation follows the requested day and the last known today, so a failed load never
+    // strands the arrows.
+    let shown_date = move || {
+        known.with(|k| {
+            let (today, first) = k.clone()?;
+            let date = shown_day(day.get().as_deref(), Some(&today))?;
+            Some((date, today, first))
+        })
+    };
     let label = move || {
         shown_date()
             .map(|(date, today, _)| day_label(&date, &today))
@@ -231,7 +251,7 @@ pub fn GridDayCard() -> impl IntoView {
         None => view! { <div class="energy-day__skeleton" aria-busy="true"></div> }.into_any(),
         Some(Err(HistoryApiError::Unavailable)) => view! {
             <p class="energy-day__empty">
-                "History is off. "
+                "History is off or unreachable. "
                 <a href="https://gekkotron.github.io/Oikos-os/docs/users/history">"Set it up"</a>
             </p>
         }
