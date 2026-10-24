@@ -1559,12 +1559,14 @@ pub fn solar_bottom(
     tomorrow: Option<(f64, f64, f64)>,
 ) -> String {
     let unit = solar_text(lang, SolarText::Kwh);
-    let projection = remaining.filter(|r| *r >= 0.05).map(|r| match (measured, lang) {
-        (Some(m), Lang::En) => format!("≈ {} {unit} by tonight", solar_kwh(lang, m + r)),
-        (Some(m), Lang::Fr) => format!("fin de journée ≈ {} {unit}", solar_kwh(lang, m + r)),
-        (None, Lang::En) => format!("≈ {} {unit} more expected", solar_kwh(lang, r)),
-        (None, Lang::Fr) => format!("encore ≈ {} {unit} prévus", solar_kwh(lang, r)),
-    });
+    let projection = remaining
+        .filter(|r| *r >= 0.05)
+        .map(|r| match (measured, lang) {
+            (Some(m), Lang::En) => format!("≈ {} {unit} by tonight", solar_kwh(lang, m + r)),
+            (Some(m), Lang::Fr) => format!("fin de journée ≈ {} {unit}", solar_kwh(lang, m + r)),
+            (None, Lang::En) => format!("≈ {} {unit} more expected", solar_kwh(lang, r)),
+            (None, Lang::Fr) => format!("encore ≈ {} {unit} prévus", solar_kwh(lang, r)),
+        });
     let next = tomorrow.map(|(t, lo, hi)| {
         format!(
             "{} {} {unit} ({}–{})",
