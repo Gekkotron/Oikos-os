@@ -146,19 +146,19 @@ pub fn SolarCard() -> impl IntoView {
     let field = move |pick: fn(&CardData) -> String| {
         move || data.get().map(|d| pick(&d)).unwrap_or_default()
     };
-    let measured_class = move || {
-        if data.get().is_some_and(|d| d.measured_is_forecast) {
-            "solar-curve__measured solar-curve__measured--forecast"
-        } else {
-            "solar-curve__measured"
-        }
+    // Production is a line over the forecast; while nothing is measured, the hours already past
+    // are a faint fill under the forecast instead.
+    let measured_area = move || {
+        data.get()
+            .filter(|d| d.measured_is_forecast)
+            .map(|d| d.measured_area)
+            .unwrap_or_default()
     };
-    let measured_line_class = move || {
-        if data.get().is_some_and(|d| d.measured_is_forecast) {
-            "solar-curve__measured-line solar-curve__measured-line--forecast"
-        } else {
-            "solar-curve__measured-line"
-        }
+    let measured_line = move || {
+        data.get()
+            .filter(|d| !d.measured_is_forecast)
+            .map(|d| d.measured_line)
+            .unwrap_or_default()
     };
     let now_line = move || {
         data.get().and_then(|d| {
@@ -176,9 +176,9 @@ pub fn SolarCard() -> impl IntoView {
             </span>
             <svg class="solar-curve" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true">
                 <path class="solar-curve__forecast" d=field(|d| d.forecast_area.clone()) />
-                <path class=measured_class d=field(|d| d.measured_area.clone()) />
+                <path class="solar-curve__measured" d=measured_area />
                 <path class="solar-curve__line" d=field(|d| d.forecast_line.clone()) />
-                <path class=measured_line_class d=field(|d| d.measured_line.clone()) />
+                <path class="solar-curve__measured-line" d=measured_line />
                 {now_line}
             </svg>
             {move || bottom().map(|b| view! { <span class="solar-card__line">{b}</span> })}

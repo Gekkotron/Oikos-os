@@ -138,16 +138,15 @@ async fn solar_page_shows_top_curve_tiles_days_footer() {
         text.contains("6.4 kWh produced · 12.4 kWh forecast"),
         "{text}"
     );
-    let line = host
-        .query_selector(".solar-curve__measured-line")
-        .unwrap()
-        .expect("measured line");
-    assert!(
-        line.get_attribute("d")
+    let d = |sel: &str| {
+        host.query_selector(sel)
+            .unwrap()
+            .and_then(|e| e.get_attribute("d"))
             .unwrap_or_default()
-            .starts_with("M "),
-        "no measured line"
-    );
+    };
+    // No measured periods: the hours already past are a faint fill, with no production line.
+    assert!(d(".solar-curve__measured").starts_with("M "), "no fill");
+    assert_eq!(d(".solar-curve__measured-line"), "");
     assert!(count(&host, ".solar-curve__hour") >= 3);
     assert!(text.contains("Range 9.8–14.1 kWh"), "{text}");
     assert!(text.contains("Forecast peak"), "{text}");

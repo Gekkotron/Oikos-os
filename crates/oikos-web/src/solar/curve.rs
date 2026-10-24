@@ -57,11 +57,11 @@ fn grid_step(max_kw: f64) -> f64 {
             .take_while(|k| f64::from(*k) * step < max_kw)
             .count()
     };
-    [0.5, 1.0, 2.0, 5.0, 10.0]
+    [0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0]
         .into_iter()
         .find(|s| (max_kw / s).ceil() <= 5.0 && lines(*s) > 0)
         .or_else(|| (lines(0.25) > 0).then_some(0.25))
-        .unwrap_or(10.0)
+        .unwrap_or(500.0)
 }
 
 /// `(x px, local hour)` of every house-local whole hour that is a multiple of 3 strictly inside
@@ -328,7 +328,9 @@ mod tests {
         assert_eq!(strong, vec![2.0, 4.0, 6.0]);
         // Very weak day: finer steps rather than no line.
         assert_eq!(grid_of(0.3), vec![0.25]);
-        for peak in [0.3, 0.9, 2.0, 3.5, 5.0, 9.0, 15.0] {
+        // A large installation keeps round steps rather than crowding the bottom.
+        assert_eq!(grid_of(60.0), vec![20.0, 40.0, 60.0]);
+        for peak in [0.3, 0.9, 2.0, 3.5, 5.0, 9.0, 15.0, 48.0, 120.0, 900.0] {
             let g = grid_of(peak);
             assert!(!g.is_empty() && g.len() <= 4, "{peak}: {g:?}");
             assert!(g.iter().all(|kw| *kw < peak * 1.1));

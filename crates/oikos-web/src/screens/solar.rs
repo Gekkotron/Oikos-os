@@ -363,19 +363,21 @@ fn CurveCard(
     let field = move |pick: fn(&Curve) -> String| {
         move || curve.get().map(|c| pick(&c.0)).unwrap_or_default()
     };
-    let measured_class = move || {
-        if curve.get().is_some_and(|c| c.1) {
-            "solar-curve__measured solar-curve__measured--forecast"
-        } else {
-            "solar-curve__measured"
-        }
+    // Production is a line over the band; while nothing is measured, the hours already past are
+    // a faint fill instead.
+    let measured_area = move || {
+        curve
+            .get()
+            .filter(|c| c.1)
+            .map(|c| c.0.measured_area)
+            .unwrap_or_default()
     };
-    let measured_line_class = move || {
-        if curve.get().is_some_and(|c| c.1) {
-            "solar-curve__measured-line solar-curve__measured-line--forecast"
-        } else {
-            "solar-curve__measured-line"
-        }
+    let measured_line = move || {
+        curve
+            .get()
+            .filter(|c| !c.1)
+            .map(|c| c.0.measured_line)
+            .unwrap_or_default()
     };
     let now_line = move || {
         curve.get().and_then(|c| {
@@ -443,12 +445,12 @@ fn CurveCard(
                 <path class="solar-curve__band" d=field(|c| c.band.clone()) />
                 {move || {
                     (tab.get() == Tab::Today)
-                        .then(|| view! { <path class=measured_class d=field(|c| c.measured_area.clone()) /> })
+                        .then(|| view! { <path class="solar-curve__measured" d=measured_area /> })
                 }}
                 <path class="solar-curve__line solar-curve__line--dashed" d=field(|c| c.forecast_line.clone()) />
                 {move || {
                     (tab.get() == Tab::Today)
-                        .then(|| view! { <path class=measured_line_class d=field(|c| c.measured_line.clone()) /> })
+                        .then(|| view! { <path class="solar-curve__measured-line" d=measured_line /> })
                 }}
                 {now_line}
                 {hours}

@@ -6404,7 +6404,7 @@ html:has(.flow-canvas-screen) {
 
 .solar-curve__measured {
   fill: var(--solar);
-  fill-opacity: 0.25;
+  fill-opacity: 0.14;
   stroke: none;
 }
 
@@ -6414,10 +6414,6 @@ html:has(.flow-canvas-screen) {
   stroke-width: 2;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
-}
-
-.solar-curve__measured-line--forecast {
-  stroke-opacity: 0.55;
 }
 
 .solar-curve__now {
@@ -6845,17 +6841,16 @@ html:has(.flow-canvas-screen) {
 
 .solar-page__svg .solar-curve__band {
   fill: var(--solar);
-  fill-opacity: 0.22;
-  stroke: none;
+  fill-opacity: 0.26;
+  stroke: var(--solar);
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .solar-page__svg .solar-curve__line--dashed {
   stroke-dasharray: 5 4;
   stroke-width: 1.5;
-}
-
-.solar-curve__measured--forecast {
-  fill-opacity: 0.12;
 }
 
 .solar-curve__grid {

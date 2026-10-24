@@ -217,21 +217,12 @@ async fn card_with_measured_shows_measured_title() {
             .unwrap_or_default()
             .starts_with("M ")
     );
-    assert!(
-        host.query_selector(".solar-curve__measured-line--forecast")
-            .unwrap()
-            .is_none()
-    );
+    // Production is drawn as a line only: no fill stacked on the forecast.
     let path = host
         .query_selector(".solar-curve__measured")
         .unwrap()
         .expect("measured path");
-    assert!(!path.get_attribute("d").unwrap_or_default().is_empty());
-    assert!(
-        host.query_selector(".solar-curve__measured--forecast")
-            .unwrap()
-            .is_none()
-    );
+    assert_eq!(path.get_attribute("d").unwrap_or_default(), "");
 }
 
 #[wasm_bindgen_test]
@@ -240,11 +231,15 @@ async fn card_without_measured_shows_forecast_fill() {
     let title = text(&host, ".solar-card__title");
     assert!(title.trim().starts_with("≈ "), "{title}");
     assert!(title.contains("so far · 12.4 kWh forecast"), "{title}");
-    assert!(
-        host.query_selector(".solar-curve__measured--forecast")
+    let d = |sel: &str| {
+        host.query_selector(sel)
             .unwrap()
-            .is_some()
-    );
+            .and_then(|e| e.get_attribute("d"))
+            .unwrap_or_default()
+    };
+    // The hours already past are a faint fill; there is no production line.
+    assert!(!d(".solar-curve__measured").is_empty());
+    assert_eq!(d(".solar-curve__measured-line"), "");
 }
 
 #[wasm_bindgen_test]
