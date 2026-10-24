@@ -7481,9 +7481,12 @@ html:has(.flow-canvas-screen) {
   align-items: stretch;
 }
 
-.alarm-row__body .btn {
+.alarm-row__body .btn,
+.alarm-section__actions .btn {
+  flex: none;
   width: auto;
-  align-self: flex-start;
+  padding: 0 16px;
+  align-self: flex-end;
 }
 
 .alarm-row__modes {
