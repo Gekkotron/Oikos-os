@@ -8,7 +8,7 @@ use oikos_api::DashboardView;
 use oikos_core::model::{Kind, StateValue};
 
 use crate::ambiances::about::AmbiancesAboutScreen;
-use crate::ambiances::editor_placeholder::AmbianceEditorPlaceholder;
+use crate::ambiances::editor::AmbianceEditorScreen;
 use crate::ambiances::page::AmbiancesScreen;
 use crate::ambiances::report::AmbianceReportScreen;
 use crate::commands::Pending;
@@ -178,8 +178,8 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
                     <Route path=path!("/ambiances") view=AmbiancesScreen />
                     <Route path=path!("/ambiances/about") view=AmbiancesAboutScreen />
-                    <Route path=path!("/ambiances/new") view=AmbianceEditorPlaceholder />
-                    <Route path=path!("/ambiances/:id") view=AmbianceEditorPlaceholder />
+                    <Route path=path!("/ambiances/new") view=AmbianceEditorScreen />
+                    <Route path=path!("/ambiances/:id") view=AmbianceEditorScreen />
                     <Route path=path!("/ambiances/:id/report") view=AmbianceReportScreen />
                     <Route path=path!("/flows") view=FlowsScreen />
                     <Route path=path!("/flows/new") view=NewFlowScreen />

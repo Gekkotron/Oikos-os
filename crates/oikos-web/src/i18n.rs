@@ -133,6 +133,40 @@ pub enum Key {
     AmbiancesAbout1,
     AmbiancesAbout2,
     AmbiancesAbout3,
+    AmbName,
+    AmbSubtitle,
+    AmbIcon,
+    AmbActions,
+    AmbAddAction,
+    AmbCategoryType,
+    AmbDeviceType,
+    AmbHeatingType,
+    AmbAutomationType,
+    AmbWhere,
+    AmbWholeHouse,
+    AmbSeeWhich,
+    AmbHold,
+    AmbBackToSchedule,
+    AmbHours,
+    AmbEveryZone,
+    AmbSwitchOn,
+    AmbSwitchOff,
+    AmbRun,
+    AmbSave,
+    AmbTryIt,
+    AmbSaveFirst,
+    AmbWhat,
+    AmbTo,
+    AmbLights,
+    AmbPlugs,
+    AmbCovers,
+    AmbOpen,
+    AmbClose,
+    AmbTemperature,
+    AmbZone,
+    AmbSearchDevice,
+    AmbCommand,
+    AmbValue,
     Alerts,
     Settings,
     Devices,
@@ -231,6 +265,40 @@ impl Key {
         Key::AmbiancesAbout1,
         Key::AmbiancesAbout2,
         Key::AmbiancesAbout3,
+        Key::AmbName,
+        Key::AmbSubtitle,
+        Key::AmbIcon,
+        Key::AmbActions,
+        Key::AmbAddAction,
+        Key::AmbCategoryType,
+        Key::AmbDeviceType,
+        Key::AmbHeatingType,
+        Key::AmbAutomationType,
+        Key::AmbWhere,
+        Key::AmbWholeHouse,
+        Key::AmbSeeWhich,
+        Key::AmbHold,
+        Key::AmbBackToSchedule,
+        Key::AmbHours,
+        Key::AmbEveryZone,
+        Key::AmbSwitchOn,
+        Key::AmbSwitchOff,
+        Key::AmbRun,
+        Key::AmbSave,
+        Key::AmbTryIt,
+        Key::AmbSaveFirst,
+        Key::AmbWhat,
+        Key::AmbTo,
+        Key::AmbLights,
+        Key::AmbPlugs,
+        Key::AmbCovers,
+        Key::AmbOpen,
+        Key::AmbClose,
+        Key::AmbTemperature,
+        Key::AmbZone,
+        Key::AmbSearchDevice,
+        Key::AmbCommand,
+        Key::AmbValue,
         Key::Alerts,
         Key::Settings,
         Key::Devices,
@@ -345,6 +413,43 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
             "After a tap, a message says it is done or how many devices did not respond; the last run of each mood is on its page.",
             "Après un geste, un message dit si c'est fait ou combien d'appareils n'ont pas répondu ; le dernier lancement de chaque ambiance est sur sa page.",
         ),
+        Key::AmbName => ("Name", "Nom"),
+        Key::AmbSubtitle => ("Subtitle", "Sous-titre"),
+        Key::AmbIcon => ("Icon", "Icône"),
+        Key::AmbActions => ("Actions", "Actions"),
+        Key::AmbAddAction => ("Add an action", "Ajouter une action"),
+        Key::AmbCategoryType => (
+            "Every light, plug or shutter",
+            "Éclairages, prises ou volets",
+        ),
+        Key::AmbDeviceType => ("One device", "Un appareil"),
+        Key::AmbHeatingType => ("Heating", "Chauffage"),
+        Key::AmbAutomationType => ("Automation", "Automatisation"),
+        Key::AmbWhere => ("Where", "Où"),
+        Key::AmbWholeHouse => ("Whole house", "Toute la maison"),
+        Key::AmbSeeWhich => ("See which", "Voir lesquels"),
+        Key::AmbHold => ("Hold", "Maintenir"),
+        Key::AmbBackToSchedule => ("Back to the schedule", "Revenir au programme"),
+        Key::AmbHours => ("Hours", "Heures"),
+        Key::AmbEveryZone => ("Every zone", "Toutes les zones"),
+        Key::AmbSwitchOn => ("Switch on", "Activer"),
+        Key::AmbSwitchOff => ("Switch off", "Désactiver"),
+        Key::AmbRun => ("Run", "Lancer"),
+        Key::AmbSave => ("Save", "Enregistrer"),
+        Key::AmbTryIt => ("Try it", "Essayer"),
+        Key::AmbSaveFirst => ("Save first", "Enregistrez d'abord"),
+        Key::AmbWhat => ("What", "Quoi"),
+        Key::AmbTo => ("To", "Sur"),
+        Key::AmbLights => ("Lights", "Éclairages"),
+        Key::AmbPlugs => ("Plugs", "Prises"),
+        Key::AmbCovers => ("Shutters", "Volets"),
+        Key::AmbOpen => ("Open", "Ouvrir"),
+        Key::AmbClose => ("Close", "Fermer"),
+        Key::AmbTemperature => ("Temperature", "Température"),
+        Key::AmbZone => ("Zone", "Zone"),
+        Key::AmbSearchDevice => ("Search a device", "Chercher un appareil"),
+        Key::AmbCommand => ("Command", "Commande"),
+        Key::AmbValue => ("Value", "Valeur"),
         Key::Alerts => ("Alerts", "Alertes"),
         Key::Settings => ("Settings", "Réglages"),
         Key::Devices => ("Devices", "Appareils"),
@@ -636,6 +741,16 @@ pub fn ambiance_delete_question(lang: Lang, name: &str) -> String {
     match lang {
         Lang::En => format!("Delete {name}?"),
         Lang::Fr => format!("Supprimer {name} ?"),
+    }
+}
+
+/// The live count under a category action: "1 device" / "3 devices".
+pub fn category_count(lang: Lang, n: usize) -> String {
+    match (lang, n == 1) {
+        (Lang::En, true) => "1 device".to_owned(),
+        (Lang::En, false) => format!("{n} devices"),
+        (Lang::Fr, true) => "1 appareil".to_owned(),
+        (Lang::Fr, false) => format!("{n} appareils"),
     }
 }
 
@@ -1097,6 +1212,13 @@ mod tests {
         }
     }
     #[test]
+    fn category_count_is_singular_for_one() {
+        assert_eq!(category_count(Lang::En, 1), "1 device");
+        assert_eq!(category_count(Lang::En, 3), "3 devices");
+        assert_eq!(category_count(Lang::Fr, 1), "1 appareil");
+        assert_eq!(category_count(Lang::Fr, 0), "0 appareils");
+    }
+    #[test]
     fn browser_language_picks_french_only_for_fr() {
         assert_eq!(from_browser("fr-FR"), Lang::Fr);
         assert_eq!(from_browser("FR"), Lang::Fr);
@@ -1201,6 +1323,40 @@ mod tests {
             | Key::AmbiancesAbout1
             | Key::AmbiancesAbout2
             | Key::AmbiancesAbout3
+            | Key::AmbName
+            | Key::AmbSubtitle
+            | Key::AmbIcon
+            | Key::AmbActions
+            | Key::AmbAddAction
+            | Key::AmbCategoryType
+            | Key::AmbDeviceType
+            | Key::AmbHeatingType
+            | Key::AmbAutomationType
+            | Key::AmbWhere
+            | Key::AmbWholeHouse
+            | Key::AmbSeeWhich
+            | Key::AmbHold
+            | Key::AmbBackToSchedule
+            | Key::AmbHours
+            | Key::AmbEveryZone
+            | Key::AmbSwitchOn
+            | Key::AmbSwitchOff
+            | Key::AmbRun
+            | Key::AmbSave
+            | Key::AmbTryIt
+            | Key::AmbSaveFirst
+            | Key::AmbWhat
+            | Key::AmbTo
+            | Key::AmbLights
+            | Key::AmbPlugs
+            | Key::AmbCovers
+            | Key::AmbOpen
+            | Key::AmbClose
+            | Key::AmbTemperature
+            | Key::AmbZone
+            | Key::AmbSearchDevice
+            | Key::AmbCommand
+            | Key::AmbValue
             | Key::Alerts
             | Key::Settings
             | Key::Devices
@@ -1268,7 +1424,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 93);
+        assert_eq!(Key::ALL.len(), 127);
     }
     fn window(room: Option<&str>) -> Activity {
         Activity::Open(Opening {

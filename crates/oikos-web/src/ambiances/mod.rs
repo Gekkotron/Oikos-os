@@ -4,8 +4,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 pub mod about;
+pub mod action_forms;
 pub mod actions;
-pub mod editor_placeholder;
+pub mod editor;
 pub mod page;
 pub mod report;
 

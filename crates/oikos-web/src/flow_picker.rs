@@ -79,7 +79,7 @@ fn turn_on() -> Command {
 }
 
 /// The commands offered for an entity of this kind.
-fn commands(entity: &EntityView, current: Option<&Scalar>) -> Vec<Command> {
+pub(crate) fn commands(entity: &EntityView, current: Option<&Scalar>) -> Vec<Command> {
     match entity.kind {
         Kind::Light | Kind::Switch => vec![turn_on(), Command::TurnOff, Command::Toggle],
         Kind::Cover => vec![Command::Open, Command::Close, Command::Stop],
