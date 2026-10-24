@@ -421,23 +421,54 @@ fn CurveCard(
             })
             .collect_view()
     };
+    // One entry per series drawn: the measured line or the estimated fill on Today only, and
+    // the now line while it is inside the span.
+    let legend = move || {
+        let l = lang.get();
+        let today = tab.get() == Tab::Today;
+        let (estimated, has_now) = curve
+            .get()
+            .map(|c| (c.1, c.0.now_x.is_some()))
+            .unwrap_or_default();
+        [
+            Some(("band", T::LegendRange)),
+            Some(("forecast", T::LegendForecast)),
+            (today && !estimated).then_some(("measured", T::LegendMeasured)),
+            (today && estimated).then_some(("so-far", T::LegendSoFar)),
+            (today && has_now).then_some(("now", T::LegendNow)),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|(kind, text)| {
+            view! {
+                <li>
+                    <span class=format!("solar-legend__swatch solar-legend__swatch--{kind}") />
+                    {solar_text(l, text)}
+                </li>
+            }
+        })
+        .collect_view()
+    };
     view! {
         <div class="solar-page__curve">
-            <div class="solar-tabs">
-                <button
-                    type="button"
-                    aria-pressed=pressed(Tab::Today)
-                    on:click=move |_| tab.set(Tab::Today)
-                >
-                    {move || solar_text(lang.get(), T::Today)}
-                </button>
-                <button
-                    type="button"
-                    aria-pressed=pressed(Tab::Tomorrow)
-                    on:click=move |_| tab.set(Tab::Tomorrow)
-                >
-                    {move || solar_text(lang.get(), T::Tomorrow)}
-                </button>
+            <div class="solar-page__curve-head">
+                <div class="solar-tabs">
+                    <button
+                        type="button"
+                        aria-pressed=pressed(Tab::Today)
+                        on:click=move |_| tab.set(Tab::Today)
+                    >
+                        {move || solar_text(lang.get(), T::Today)}
+                    </button>
+                    <button
+                        type="button"
+                        aria-pressed=pressed(Tab::Tomorrow)
+                        on:click=move |_| tab.set(Tab::Tomorrow)
+                    >
+                        {move || solar_text(lang.get(), T::Tomorrow)}
+                    </button>
+                </div>
+                <ul class="solar-legend">{legend}</ul>
             </div>
             <svg class="solar-page__svg" viewBox="0 0 600 198" role="img"
                 aria-label=move || solar_text(lang.get(), T::CardLabel)>

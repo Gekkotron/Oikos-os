@@ -227,9 +227,8 @@ async fn card_with_measured_shows_measured_title() {
 
 #[wasm_bindgen_test]
 async fn card_without_measured_shows_forecast_fill() {
-    // At noon some daylight hours are past; with the real clock the test failed before sunrise.
-    let zone = chrono_tz::Europe::Paris;
-    let noon = at(local_date(zone, now_s()), 12, 0);
+    // At noon: just after midnight no period is over yet, so there is no fill to see.
+    let noon = at(local_date(chrono_tz::Europe::Paris, now_s()), 12, 0);
     let (host, _) = mount_at(None, Some(solar(now_s(), false)), None, Some(noon)).await;
     let title = text(&host, ".solar-card__title");
     assert!(title.trim().starts_with("≈ "), "{title}");

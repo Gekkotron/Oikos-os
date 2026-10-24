@@ -25,6 +25,11 @@ pub enum SolarText {
     Unavailable,
     EnableHint,
     Credit,
+    LegendRange,
+    LegendForecast,
+    LegendMeasured,
+    LegendSoFar,
+    LegendNow,
 }
 
 /// A fixed word of the solar card.
@@ -58,6 +63,11 @@ pub fn solar_text(lang: Lang, k: SolarText) -> &'static str {
             "Activez [solcast] dans oikos.toml et placez la clé d'API dans secrets/solcast.key.",
         ),
         Credit => ("Forecasts by Solcast", "Prévisions Solcast"),
+        LegendRange => ("Likely range", "Fourchette probable"),
+        LegendForecast => ("Forecast", "Prévision"),
+        LegendMeasured => ("Measured", "Mesuré"),
+        LegendSoFar => ("Estimated so far", "Estimé jusqu'ici"),
+        LegendNow => ("Now", "Maintenant"),
     };
     match lang {
         Lang::En => en,

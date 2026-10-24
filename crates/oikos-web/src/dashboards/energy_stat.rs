@@ -65,16 +65,17 @@ pub fn metric_label(lang: Lang, id: &str) -> Option<&'static str> {
 }
 
 /// The live reading of a power or self-consumption metric, "—" while unknown.
-fn live_text(metric: Metric, ui: &EnergyUi) -> String {
+fn live_text(lang: Lang, metric: Metric, ui: &EnergyUi) -> String {
     match metric {
         Metric::Power(kind) => ui
             .diagram
             .iter()
             .find(|n| n.kind == kind)
-            .map_or_else(|| "—".to_owned(), node_value_text),
-        Metric::SelfConsumption => ui
-            .self_consumption
-            .map_or_else(|| "—".to_owned(), |p| format!("{p} %")),
+            .map_or_else(|| "—".to_owned(), |n| node_value_text(lang, n)),
+        Metric::SelfConsumption => ui.self_consumption.map_or_else(
+            || "—".to_owned(),
+            |p| crate::i18n::format::with_unit(p.to_string(), Some("%")),
+        ),
         Metric::Consumption { .. } => "—".to_owned(),
     }
 }
@@ -149,8 +150,8 @@ pub fn EnergyStatWidget(metric: String, title: Option<String>) -> impl IntoView 
         });
     }
     let text = move || match parsed {
-        Metric::Consumption { .. } => energy_text(kwh.get()),
-        _ => ui.with(|u| live_text(parsed, u)),
+        Metric::Consumption { .. } => energy_text(lang(), kwh.get()),
+        _ => ui.with(|u| live_text(lang(), parsed, u)),
     };
 
     view! {
@@ -232,10 +233,23 @@ mod tests {
             self_consumption: Some(62),
             ..EnergyUi::default()
         };
-        assert_eq!(live_text(Metric::Power(NodeKind::Solar), &ui), "1.5 kW");
-        assert_eq!(live_text(Metric::Power(NodeKind::Grid), &ui), "—");
-        assert_eq!(live_text(Metric::Power(NodeKind::Battery), &ui), "—");
-        assert_eq!(live_text(Metric::SelfConsumption, &ui), "62 %");
+        assert_eq!(
+            live_text(Lang::En, Metric::Power(NodeKind::Solar), &ui),
+            "1.5\u{a0}kW"
+        );
+        assert_eq!(live_text(Lang::En, Metric::Power(NodeKind::Grid), &ui), "—");
+        assert_eq!(
+            live_text(Lang::En, Metric::Power(NodeKind::Battery), &ui),
+            "—"
+        );
+        assert_eq!(
+            live_text(Lang::En, Metric::SelfConsumption, &ui),
+            "62\u{a0}%"
+        );
+        assert_eq!(
+            live_text(Lang::Fr, Metric::Power(NodeKind::Solar), &ui),
+            "1,5\u{a0}kW"
+        );
     }
 
     #[test]
