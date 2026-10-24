@@ -418,8 +418,8 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
             "Une ambiance met la maison dans un état connu d'un seul geste : elle lance ses actions une fois, dans l'ordre.",
         ),
         Key::AmbiancesAbout2 => (
-            "\"Every light\", \"every plug\" and \"every shutter\" include devices you add later. Door, siren and chime switches are never counted as plugs.",
-            "« Tous les éclairages », « toutes les prises » et « tous les volets » incluent les appareils ajoutés plus tard. Les interrupteurs de porte, sirènes et carillons ne comptent jamais comme des prises.",
+            "\"Every light\", \"every plug\" and \"every shutter\" include devices you add later. Only switches shown as a plug count as plugs.",
+            "« Tous les éclairages », « toutes les prises » et « tous les volets » incluent les appareils ajoutés plus tard. Seuls les interrupteurs affichés comme prise comptent comme des prises.",
         ),
         Key::AmbiancesAbout3 => (
             "After a tap, a message says it is done or how many devices did not respond; the last run of each mood is on its page.",
@@ -758,11 +758,11 @@ pub fn ambiance_delete_question(lang: Lang, name: &str) -> String {
 
 /// The live count under a category action: "1 device" / "3 devices".
 pub fn category_count(lang: Lang, n: usize) -> String {
-    match (lang, n == 1) {
-        (Lang::En, true) => "1 device".to_owned(),
-        (Lang::En, false) => format!("{n} devices"),
-        (Lang::Fr, true) => "1 appareil".to_owned(),
-        (Lang::Fr, false) => format!("{n} appareils"),
+    match (lang, n) {
+        (Lang::En, 1) => "1 device".to_owned(),
+        (Lang::En, _) => format!("{n} devices"),
+        (Lang::Fr, 0 | 1) => format!("{n} appareil"),
+        (Lang::Fr, _) => format!("{n} appareils"),
     }
 }
 
@@ -1228,7 +1228,8 @@ mod tests {
         assert_eq!(category_count(Lang::En, 1), "1 device");
         assert_eq!(category_count(Lang::En, 3), "3 devices");
         assert_eq!(category_count(Lang::Fr, 1), "1 appareil");
-        assert_eq!(category_count(Lang::Fr, 0), "0 appareils");
+        assert_eq!(category_count(Lang::Fr, 0), "0 appareil");
+        assert_eq!(category_count(Lang::Fr, 2), "2 appareils");
     }
     #[test]
     fn browser_language_picks_french_only_for_fr() {

@@ -67,7 +67,7 @@ pub fn HomeAmbiances() -> impl IntoView {
                     busy.set(Some(id.clone()));
                     let (id, name) = (id.clone(), name.clone());
                     leptos::task::spawn_local(async move {
-                        apply_and_toast(id, name, toasts, lang.get_untracked()).await;
+                        apply_and_toast(house, id, name, toasts, lang.get_untracked()).await;
                         busy.try_set(None);
                     });
                 }

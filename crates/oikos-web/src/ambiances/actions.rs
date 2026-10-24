@@ -12,11 +12,21 @@ use crate::house::House;
 use crate::i18n::{self, Lang};
 
 /// Applies ambiance `id` and toasts the outcome: done, how many devices did not respond, or the
-/// hub's error. Returns whether the request succeeded. Toasts are text only, so the partial
+/// hub's error, and keeps the report for "Last run". Returns whether the request succeeded. Toasts are text only, so the partial
 /// message has no link; the report stays reachable from the page.
-pub async fn apply_and_toast(id: String, name: String, toasts: Toasts, lang: Lang) -> bool {
+pub async fn apply_and_toast(
+    house: House,
+    id: String,
+    name: String,
+    toasts: Toasts,
+    lang: Lang,
+) -> bool {
     match apply_ambiance(&id).await {
         Ok(report) => {
+            // The hub also pushes the report; keeping it here covers a missed event.
+            house
+                .ambiance_reports
+                .try_update(|m| _ = m.insert(id.clone(), report.clone()));
             let failed = failed_count(&report);
             toasts.push(if failed == 0 {
                 i18n::ambiance_done(lang, &name)

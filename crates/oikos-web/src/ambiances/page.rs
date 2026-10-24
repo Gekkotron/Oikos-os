@@ -211,7 +211,7 @@ pub fn AmbiancesScreen() -> impl IntoView {
                                     applying.set(Some(apply_id.clone()));
                                     let (id, name) = (apply_id.clone(), apply_name.clone());
                                     leptos::task::spawn_local(async move {
-                                        apply_and_toast(id, name, toasts, lang.get_untracked()).await;
+                                        apply_and_toast(house, id, name, toasts, lang.get_untracked()).await;
                                         applying.try_set(None);
                                     });
                                 }

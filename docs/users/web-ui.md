@@ -170,7 +170,7 @@ After a run, **Last run** opens the report (`/ambiances/<id>/report`), with the 
 
 ### How it works
 
-**How it works** (`/ambiances/about`) explains the same rules as this page. A mood runs its actions once, in order. "Every light", "every plug" and "every shutter" include devices you add later. Door, siren and chime switches are never counted as plugs, so type a switch as a plug first if you want it in that category.
+**How it works** (`/ambiances/about`) explains the same rules as this page. A mood runs its actions once, in order. "Every light", "every plug" and "every shutter" include devices you add later. Only switches shown as a plug count as plugs, so set a switch to show as a plug to include it.
 
 ## Energy
 

@@ -459,10 +459,11 @@ async fn report_page_lists_failed_and_skipped() {
     ] {
         assert!(text.contains(expected), "{expected} missing from {text}");
     }
-    assert!(
-        text.contains("am") || text.contains("pm"),
-        "no time in {text}"
-    );
+    // The page shows the browser-local time of the run, computed the same way.
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(1_792_402_860_f64 * 1000.0));
+    let time = chrono::NaiveTime::from_hms_opt(date.get_hours(), date.get_minutes(), 0).unwrap();
+    let expected = oikos_web::i18n::home_time(Lang::En, time);
+    assert!(text.contains(&expected), "{expected} missing from {text}");
 }
 
 #[wasm_bindgen_test]

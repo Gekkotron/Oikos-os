@@ -433,3 +433,137 @@ async fn unknown_fields_survive_edit() {
     assert_eq!(body["order"], 7);
     assert_eq!(body["tint"], serde_json::json!({"hue": 40}));
 }
+
+fn lights_off_except(ids: &[&str]) -> AmbianceAction {
+    AmbianceAction::Category(CategoryAction {
+        what: Category::Lights,
+        to: Target::Off,
+        brightness: None,
+        area: None,
+        except: ids.iter().map(|s| (*s).to_owned()).collect(),
+    })
+}
+
+#[wasm_bindgen_test]
+async fn a_vanished_except_id_is_flagged_and_can_be_cleared() {
+    let stub = FetchStub::install();
+    let saved = mood("mood_a", 1, vec![lights_off_except(&["gone"])]);
+    stub.reply(
+        "PUT",
+        "/api/v1/ambiances/mood_a",
+        200,
+        &serde_json::to_string(&view(saved.clone())).unwrap(),
+    );
+    let m = mount("/ambiances/mood_a", |h| {
+        h.areas.set(vec![area("salon", "Salon")]);
+        h.entities
+            .set([("l1".to_owned(), light("l1", "salon"))].into());
+        seed(h, vec![view(saved.clone())]);
+    });
+    settle().await;
+    assert_eq!(all(&m.host, ".ambiance-action--missing").len(), 1);
+    one(&m.host, ".ambiance-count__toggle").click();
+    settle().await;
+    let items = all(&m.host, ".ambiance-member");
+    assert_eq!(items.len(), 2, "the lamp and the vanished id");
+    let gone = items
+        .iter()
+        .find(|i| i.text_content().unwrap().contains("gone (missing)"))
+        .expect("vanished id listed");
+    let checkbox: web_sys::HtmlInputElement = gone
+        .query_selector("input")
+        .unwrap()
+        .unwrap()
+        .unchecked_into();
+    assert!(!checkbox.checked(), "left alone, so unticked");
+    checkbox.click();
+    settle().await;
+    assert!(all(&m.host, ".ambiance-action--missing").is_empty());
+    one(&m.host, ".ambiance-save").click();
+    settle().await;
+    assert!(
+        put_body(&stub)["actions"][0]["except"].is_null(),
+        "an empty except is left out"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn where_does_not_offer_the_unassigned_area() {
+    let _stub = FetchStub::install();
+    let m = mount("/ambiances/mood_a", |h| {
+        h.areas.set(vec![
+            area("salon", "Salon"),
+            area(oikos_core::model::UNASSIGNED_AREA, "Unassigned"),
+        ]);
+        seed(h, vec![view(mood("mood_a", 1, vec![lights_off()]))]);
+    });
+    settle().await;
+    let values: Vec<String> = all(&m.host, ".ambiance-where option")
+        .iter()
+        .map(|o| o.get_attribute("value").unwrap_or_default())
+        .collect();
+    assert_eq!(values, ["", "salon"]);
+}
+
+#[wasm_bindgen_test]
+async fn a_new_mood_cannot_be_saved_before_the_list_loads() {
+    let _stub = FetchStub::install();
+    let m = mount("/ambiances/new", |_| {});
+    settle().await;
+    set_value(&one(&m.host, ".ambiance-name"), "Cosy", "input");
+    settle().await;
+    let save = one(&m.host, ".ambiance-save");
+    assert!(disabled(&save), "list not loaded yet");
+    seed(m.house, vec![]);
+    settle().await;
+    assert!(!disabled(&save));
+}
+
+#[wasm_bindgen_test]
+async fn saving_replaces_the_history_entry_and_falls_back_to_the_route_id() {
+    let stub = FetchStub::install();
+    stub.reply(
+        "PUT",
+        "/api/v1/ambiances/mood_a",
+        200,
+        &serde_json::to_string(&view(mood("mood_a", 1, vec![]))).unwrap(),
+    );
+    let m = mount("/ambiances/mood_a", |h| {
+        seed(h, vec![view(mood("mood_a", 1, vec![]))])
+    });
+    settle().await;
+    // The hub removed the mood while the form was open.
+    seed(m.house, vec![]);
+    settle().await;
+    set_value(&one(&m.host, ".ambiance-name"), "Kept", "input");
+    settle().await;
+    let history = web_sys::window().unwrap().history().unwrap();
+    let before = history.length().unwrap();
+    one(&m.host, ".ambiance-save").click();
+    settle().await;
+    assert_eq!(put_body(&stub)["id"], "mood_a");
+    assert_eq!(history.length().unwrap(), before, "replace, not push");
+}
+
+#[wasm_bindgen_test]
+async fn try_it_keeps_the_report_for_last_run() {
+    let stub = FetchStub::install();
+    stub.reply(
+        "POST",
+        "/api/v1/ambiances/mood_a/apply",
+        200,
+        r#"{"ambiance":"mood_a","started_at":1792402860,"actions":[]}"#,
+    );
+    let m = mount("/ambiances/mood_a", |h| {
+        seed(h, vec![view(mood("mood_a", 1, vec![]))])
+    });
+    settle().await;
+    one(&m.host, ".ambiance-try").click();
+    settle().await;
+    assert!(
+        m.house
+            .ambiance_reports
+            .get_untracked()
+            .contains_key("mood_a")
+    );
+}

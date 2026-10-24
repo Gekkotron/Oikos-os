@@ -8,6 +8,7 @@ use oikos_api::{ActionReport, Ambiance, ApplyReport, Outcome, Problem};
 use super::{HouseView, action_sentence};
 use crate::house::House;
 use crate::i18n::{self, Key, Lang, use_text};
+use crate::nav::BackLink;
 
 /// The time of day of `unix` seconds on the browser's clock; UTC off the browser.
 fn local_time(unix: u64) -> NaiveTime {
@@ -149,6 +150,7 @@ pub fn AmbianceReportScreen() -> impl IntoView {
     view! {
         <div class="sheet ambiances">
             <header class="sheet__header">
+                <BackLink />
                 <h1 class="sheet__title">
                     {move || {
                         ambiance

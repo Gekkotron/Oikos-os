@@ -9,7 +9,7 @@ use oikos_api::{
     AmbianceAction, Category, CategoryAction, ClimateAction, DeviceAction, EntityView, FlowAction,
     FlowDo, Target, category_members,
 };
-use oikos_core::model::{Command, Kind};
+use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
 use serde_json::{Value, json};
 
 use crate::flow_edit::fold_accents;
@@ -330,9 +330,56 @@ fn set_what(c: &mut CategoryAction, what: Category) {
     c.what = what;
     c.except.clear();
     if !targets(what).contains(&c.to) {
-        c.to = targets(what)[usize::from(what != Category::Covers)];
+        // Off and close are the same intent, as are on and open.
+        c.to = match c.to {
+            Target::Off => targets(what)[1],
+            Target::Close => targets(what)[1],
+            _ => targets(what)[0],
+        };
     }
     fix_brightness(c);
+}
+
+/// The ids in `c.except` that no entity of the house has any more: the hub refuses to save an
+/// action that still names one, so the form must show them to be cleared.
+pub fn stale_excepts(c: &CategoryAction, entities: &BTreeMap<String, EntityView>) -> Vec<String> {
+    c.except
+        .iter()
+        .filter(|id| !entities.contains_key(*id))
+        .cloned()
+        .collect()
+}
+
+/// One checkbox of the "See which" list: ticked unless `id` is in `except`.
+fn member_item(
+    rows: Rows,
+    key: u64,
+    cat: Memo<CategoryAction>,
+    id: String,
+    label: String,
+) -> impl IntoView {
+    let checked_id = id.clone();
+    view! {
+        <li>
+            <label class="ambiance-member">
+                <input
+                    type="checkbox"
+                    prop:checked=move || cat.with(|c| !c.except.contains(&checked_id))
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        let id = id.clone();
+                        edit_category(rows, key, |c| {
+                            c.except.retain(|e| e != &id);
+                            if !on {
+                                c.except.push(id);
+                            }
+                        });
+                    }
+                />
+                <span>{label}</span>
+            </label>
+        </li>
+    }
 }
 
 /// The entities a category action targets as `(id, label, area)`.
@@ -504,6 +551,7 @@ pub fn CategoryForm(rows: Rows, key: u64) -> impl IntoView {
                             });
                         let known = areas
                             .into_iter()
+                            .filter(|a| a.id != UNASSIGNED_AREA)
                             .map(|a| {
                                 let selected = current.as_deref() == Some(a.id.as_str());
                                 view! { <option value=a.id.clone() selected=selected>{a.name.clone()}</option> }
@@ -538,37 +586,29 @@ pub fn CategoryForm(rows: Rows, key: u64) -> impl IntoView {
                                     <ul class="ambiance-members__list">
                                         {items
                                             .into_iter()
-                                            .map(|(id, label)| {
-                                                let checked_id = id.clone();
-                                                view! {
-                                                    <li>
-                                                        <label class="ambiance-member">
-                                                            <input
-                                                                type="checkbox"
-                                                                prop:checked=move || {
-                                                                    cat.with(|c| !c.except.contains(&checked_id))
-                                                                }
-                                                                on:change=move |ev| {
-                                                                    let on = event_target_checked(&ev);
-                                                                    let id = id.clone();
-                                                                    edit_category(rows, key, |c| {
-                                                                        c.except.retain(|e| e != &id);
-                                                                        if !on {
-                                                                            c.except.push(id);
-                                                                        }
-                                                                    });
-                                                                }
-                                                            />
-                                                            <span>{label}</span>
-                                                        </label>
-                                                    </li>
-                                                }
-                                            })
+                                            .map(|(id, label)| member_item(rows, key, cat, id, label))
                                             .collect_view()}
                                     </ul>
                                 }
                             })
                             .collect_view()
+                    }}
+                    {move || {
+                        let gone = cat.with(|c| house.entities.with(|m| stale_excepts(c, m)));
+                        (!gone.is_empty())
+                            .then(|| {
+                                view! {
+                                    <ul class="ambiance-members__list">
+                                        {gone
+                                            .into_iter()
+                                            .map(|id| {
+                                                let label = format!("{id} {}", t(Key::AmbianceMissing));
+                                                member_item(rows, key, cat, id, label)
+                                            })
+                                            .collect_view()}
+                                    </ul>
+                                }
+                            })
                     }}
                 </div>
             </Show>
@@ -1169,6 +1209,40 @@ mod tests {
         assert_eq!(c.brightness, None);
         assert!(c.except.is_empty());
         set_what(&mut c, Category::Plugs);
+        assert_eq!(c.to, Target::On, "open maps back to on");
+    }
+
+    #[test]
+    fn changing_what_maps_the_intent_across_kinds() {
+        let mut c = CategoryAction {
+            what: Category::Lights,
+            to: Target::Off,
+            brightness: None,
+            area: None,
+            except: Vec::new(),
+        };
+        set_what(&mut c, Category::Covers);
+        assert_eq!(c.to, Target::Close);
+        set_what(&mut c, Category::Lights);
         assert_eq!(c.to, Target::Off);
+        c.to = Target::On;
+        set_what(&mut c, Category::Covers);
+        assert_eq!(c.to, Target::Open);
+        set_what(&mut c, Category::Plugs);
+        assert_eq!(c.to, Target::On);
+    }
+
+    #[test]
+    fn stale_excepts_lists_only_unknown_entities() {
+        let known = entity(Kind::Light, Capabilities::default());
+        let entities = BTreeMap::from([("e".to_owned(), known)]);
+        let c = CategoryAction {
+            what: Category::Lights,
+            to: Target::Off,
+            brightness: None,
+            area: None,
+            except: vec!["e".into(), "gone".into()],
+        };
+        assert_eq!(stale_excepts(&c, &entities), vec!["gone".to_owned()]);
     }
 }

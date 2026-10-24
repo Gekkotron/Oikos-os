@@ -6,11 +6,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use leptos::prelude::*;
+use leptos_router::NavigateOptions;
 use leptos_router::hooks::{use_navigate, use_params_map};
 use oikos_api::{AMBIANCE_ICONS, Ambiance, AmbianceAction, AreaView, EntityView};
 
 use super::action_forms::{
-    AddAction, AutomationForm, CategoryForm, DeviceForm, HeatingForm, Row, Rows,
+    AddAction, AutomationForm, CategoryForm, DeviceForm, HeatingForm, Row, Rows, stale_excepts,
 };
 use super::actions::{apply_and_toast, upsert};
 use super::{HouseView, action_sentence, next_order, slug_id};
@@ -46,10 +47,12 @@ fn is_missing(
     zones: Option<&[(String, String)]>,
 ) -> bool {
     match action {
-        AmbianceAction::Category(c) => c
-            .area
-            .as_deref()
-            .is_some_and(|id| !areas.iter().any(|a| a.id == id)),
+        AmbianceAction::Category(c) => {
+            c.area
+                .as_deref()
+                .is_some_and(|id| !areas.iter().any(|a| a.id == id))
+                || !stale_excepts(c, entities).is_empty()
+        }
         AmbianceAction::Device(d) => !entities.contains_key(&d.entity),
         AmbianceAction::Climate(c) => match (c.zone.as_deref(), zones) {
             (Some(id), Some(zones)) => !zones.iter().any(|(z, _)| z == id),
@@ -57,6 +60,18 @@ fn is_missing(
         },
         AmbianceAction::Flow(f) => !flows.iter().any(|(id, _)| id == &f.flow),
     }
+}
+
+/// Leaves the editor for the list without leaving the editor in the history: Back from the list
+/// must not reopen a form that would send the user straight back.
+fn leave(navigate: &impl Fn(&str, NavigateOptions)) {
+    navigate(
+        "/ambiances",
+        NavigateOptions {
+            replace: true,
+            ..Default::default()
+        },
+    );
 }
 
 fn blank() -> Ambiance {
@@ -86,16 +101,23 @@ pub fn AmbianceEditorScreen() -> impl IntoView {
     let name = RwSignal::new(String::new());
     let subtitle = RwSignal::new(String::new());
     let icon = RwSignal::new(None::<String>);
-    let pinned = RwSignal::new(
-        is_new
-            && house.ambiances.with_untracked(|list| {
-                list.iter()
-                    .filter_map(|v| v.ambiance.as_ref())
-                    .filter(|a| a.pinned)
-                    .count()
-                    < HOME_MAX
-            }),
-    );
+    let pinned = RwSignal::new(false);
+    let pin_touched = RwSignal::new(false);
+    // A new mood is pinned while the Home row has room; that needs the list, so it waits for it
+    // (unless the user already chose).
+    if is_new {
+        Effect::new(move |_| {
+            if house.ambiances_loaded.get() && !pin_touched.get_untracked() {
+                pinned.set(house.ambiances.with_untracked(|list| {
+                    list.iter()
+                        .filter_map(|v| v.ambiance.as_ref())
+                        .filter(|a| a.pinned)
+                        .count()
+                        < HOME_MAX
+                }));
+            }
+        });
+    }
     let rows: Rows = RwSignal::new(Vec::new());
     let counter = RwSignal::new(0u64);
     let expanded = RwSignal::new(None::<u64>);
@@ -170,7 +192,7 @@ pub fn AmbianceEditorScreen() -> impl IntoView {
                     );
                     inited.set(true);
                 }
-                None if loaded => navigate("/ambiances", Default::default()),
+                None if loaded => leave(&navigate),
                 None => {}
             }
         });
@@ -198,8 +220,12 @@ pub fn AmbianceEditorScreen() -> impl IntoView {
 
     let save = {
         let navigate = navigate.clone();
+        let edit_id = edit_id.clone();
         move |_| {
-            let mut ambiance = build(stored.get_untracked().unwrap_or_else(blank));
+            let mut ambiance = build(stored.get_untracked().unwrap_or_else(|| Ambiance {
+                id: edit_id.clone().unwrap_or_default(),
+                ..blank()
+            }));
             ambiance.name = ambiance.name.trim().to_owned();
             if is_new {
                 house.ambiances.with_untracked(|list| {
@@ -214,7 +240,7 @@ pub fn AmbianceEditorScreen() -> impl IntoView {
                 match put_ambiance(&ambiance).await {
                     Ok(view) => {
                         upsert(house, view);
-                        navigate("/ambiances", Default::default());
+                        leave(&navigate);
                     }
                     Err(e) => toasts.push(e.error),
                 }
@@ -228,7 +254,7 @@ pub fn AmbianceEditorScreen() -> impl IntoView {
         };
         trying.set(true);
         leptos::task::spawn_local(async move {
-            apply_and_toast(a.id, a.name, toasts, lang.get_untracked()).await;
+            apply_and_toast(house, a.id, a.name, toasts, lang.get_untracked()).await;
             trying.try_set(false);
         });
     };
@@ -242,7 +268,7 @@ pub fn AmbianceEditorScreen() -> impl IntoView {
                 match delete_ambiance(&id).await {
                     Ok(()) => {
                         house.ambiances.update(|list| list.retain(|v| v.id != id));
-                        navigate("/ambiances", Default::default());
+                        leave(&navigate);
                     }
                     Err(e) => toasts.push(e.error),
                 }
@@ -457,7 +483,10 @@ pub fn AmbianceEditorScreen() -> impl IntoView {
                         class:switch--on=move || pinned.get()
                         aria-checked=move || pinned.get().to_string()
                         aria-label=move || t(Key::AmbianceShowOnHome)
-                        on:click=move |_| pinned.update(|p| *p = !*p)
+                        on:click=move |_| {
+                            pin_touched.set(true);
+                            pinned.update(|p| *p = !*p);
+                        }
                     >
                         <span class="switch__knob"></span>
                     </button>
@@ -474,7 +503,10 @@ pub fn AmbianceEditorScreen() -> impl IntoView {
                 <button
                     type="button"
                     class="btn btn--primary ambiance-save"
-                    disabled=move || saving.get() || name.with(|n| n.trim().is_empty())
+                    disabled=move || {
+                        saving.get() || name.with(|n| n.trim().is_empty())
+                            || (is_new && !house.ambiances_loaded.get())
+                    }
                     on:click=save
                 >
                     {move || t(Key::AmbSave)}

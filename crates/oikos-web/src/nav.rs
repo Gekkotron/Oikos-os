@@ -52,6 +52,7 @@ pub fn use_back_anchor() -> impl Fn(&str) + Clone + 'static {
 fn is_form(path: &str) -> bool {
     path == "/groups/new"
         || path == "/flows/new"
+        || path == "/ambiances/new"
         || (path.starts_with("/groups/") && path.ends_with("/edit"))
 }
 
@@ -89,6 +90,8 @@ fn parent_of(path: &str) -> String {
         "/flows".to_owned()
     } else if child("/groups/").is_some() {
         "/groups".to_owned()
+    } else if child("/ambiances/").is_some() {
+        "/ambiances".to_owned()
     } else if child("/settings/").is_some() {
         "/settings".to_owned()
     } else {
@@ -208,6 +211,8 @@ mod tests {
         assert_eq!(back_target(&edited), "/dashboards/mine");
         let flow = walk(&["/flows", "/flows/new", "/flows/porch"]);
         assert_eq!(back_target(&flow), "/flows");
+        let mood = walk(&["/ambiances", "/ambiances/new", "/ambiances/night"]);
+        assert_eq!(back_target(&mood), "/ambiances");
     }
 
     #[test]
@@ -216,6 +221,14 @@ mod tests {
         assert_eq!(back_target(&walk(&["/alerts/a1"])), "/alerts");
         assert_eq!(back_target(&walk(&["/flows/porch"])), "/flows");
         assert_eq!(back_target(&walk(&["/groups/salon/edit"])), "/groups");
+        for page in [
+            "/ambiances/night",
+            "/ambiances/night/report",
+            "/ambiances/about",
+            "/ambiances/new",
+        ] {
+            assert_eq!(back_target(&walk(&[page])), "/ambiances", "{page}");
+        }
         assert_eq!(back_target(&walk(&["/settings/zigbee2mqtt"])), "/settings");
         assert_eq!(back_target(&walk(&["/group/salon"])), "/");
         assert_eq!(back_target(&walk(&["/entity/lamp"])), "/");
