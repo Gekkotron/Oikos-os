@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+pub mod alarm;
 pub mod alerts;
 pub mod ambiances;
 pub mod cli;

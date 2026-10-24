@@ -2296,6 +2296,7 @@ dependencies = [
  "futures-util",
  "iana-time-zone",
  "mime_guess",
+ "oikos-alarm",
  "oikos-api",
  "oikos-climate",
  "oikos-core",

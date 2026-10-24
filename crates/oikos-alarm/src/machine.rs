@@ -34,6 +34,7 @@ pub enum Phase {
 /// What asked for the last arm or disarm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum Source {
     Presence,
     Remote,

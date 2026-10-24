@@ -34,6 +34,7 @@ use oikos_push::fcm::{FcmError, FcmTransport, HttpFcm, ServiceAccount};
 use oikos_push::{PushService, Rejected};
 use tokio::sync::{broadcast, mpsc, watch};
 
+use crate::alarm::AlarmHub;
 use crate::climate::ClimateHub;
 use crate::clock;
 use crate::config::{AclSource, Config};
@@ -201,6 +202,8 @@ pub struct Hub {
     groups_enabled: bool,
     /// The climate engine's documents, present only while `[climate] enabled`.
     pub(crate) climate: Option<ClimateHub>,
+    /// The alarm's documents; the engine always listens and idles while the alarm is off.
+    pub(crate) alarm: AlarmHub,
     /// `[weather] enabled` and `refresh_minutes`.
     pub(crate) weather_enabled: bool,
     pub(crate) weather_refresh_minutes: u64,
@@ -339,6 +342,7 @@ impl Hub {
                 .climate
                 .enabled
                 .then(|| ClimateHub::new(&cfg.climate.prefix)),
+            alarm: AlarmHub::new(&cfg.alarm.prefix),
             weather_enabled: cfg.weather.enabled,
             weather_refresh_minutes: cfg.weather.refresh_minutes,
             weather_city: cfg.weather.city.trim().to_owned(),
@@ -536,6 +540,10 @@ impl Hub {
         }
         // Climate documents are the engine's own data, never devices.
         if self.ingest_climate(topic, payload) {
+            return Vec::new();
+        }
+        // The same for the alarm's documents.
+        if self.ingest_alarm(topic, payload, retain) {
             return Vec::new();
         }
         if !retain && self.climate.is_some() && topic == self.push.responses_topic() {
@@ -832,12 +840,14 @@ impl Hub {
             .into_iter()
             .flat_map(oikos_climate::topics::filters)
             .chain(self.climate.is_some().then(|| self.push.responses_topic()));
+        let alarm = oikos_alarm::topics::filters(&self.alarm.prefix);
         self.frigate
             .iter()
             .map(|(topic, _)| topic.clone())
             .chain(gateway)
             .chain(acl)
             .chain(climate)
+            .chain(alarm)
             .collect()
     }
 

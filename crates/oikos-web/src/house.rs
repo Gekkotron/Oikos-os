@@ -223,6 +223,8 @@ impl House {
             WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
             // The Climate screen reads its own view: tell it to refetch.
             WsEvent::ClimateChanged { .. } => self.climate_rev.update(|r| *r += 1),
+            // The alarm screen arrives with the web wave; nothing reads it yet.
+            WsEvent::AlarmChanged => {}
             WsEvent::WeatherChanged => self.refresh_weather(),
             WsEvent::HomeSettingsChanged { settings } => self.home_settings.set(settings),
             WsEvent::AmbiancesChanged { ambiances } => {

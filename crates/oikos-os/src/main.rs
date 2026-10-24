@@ -53,6 +53,9 @@ async fn main() -> anyhow::Result<ExitCode> {
             cfg.climate
                 .validate()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
+            cfg.alarm
+                .validate()
+                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
             cfg.weather
                 .validate()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;

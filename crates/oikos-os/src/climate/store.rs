@@ -97,7 +97,7 @@ fn apply_zone(docs: &mut ZoneDocs, doc: ZoneDoc, zone: &str, payload: &[u8]) -> 
 
 /// Applies a validated document. An empty payload resets to the default; a refused one keeps
 /// `slot` and stores the reason in `invalid`.
-fn apply_validated<T: DeserializeOwned + Default + PartialEq>(
+pub(crate) fn apply_validated<T: DeserializeOwned + Default + PartialEq>(
     slot: &mut T,
     invalid: &mut Option<String>,
     payload: &[u8],
