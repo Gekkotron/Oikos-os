@@ -49,6 +49,81 @@ fn finite(v: f64) -> f64 {
     if v.is_finite() { v } else { 0.0 }
 }
 
+/// The tangent at the middle point of three (d3's `curveMonotoneX`): zero at a peak or a trough,
+/// never steeper than either side, so the curve stays between its points.
+fn inner_slope(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
+    let (h0, h1) = (b.0 - a.0, c.0 - b.0);
+    if h0 <= 0.0 || h1 <= 0.0 {
+        return 0.0;
+    }
+    let (s0, s1) = ((b.1 - a.1) / h0, (c.1 - b.1) / h1);
+    if s0 * s1 <= 0.0 {
+        return 0.0;
+    }
+    let p = (s0 * h1 + s1 * h0) / (h0 + h1);
+    finite(2.0 * s0.signum() * s0.abs().min(s1.abs()).min(0.5 * p.abs()))
+}
+
+/// The tangent at an end of the line, from its neighbour's tangent `t`.
+fn end_slope(a: (f64, f64), b: (f64, f64), t: f64) -> f64 {
+    let h = b.0 - a.0;
+    if h > 0.0 {
+        finite((3.0 * (b.1 - a.1) / h - t) / 2.0)
+    } else {
+        t
+    }
+}
+
+/// The smooth line through `pts` after its first point, as ` C …` segments: a monotone cubic,
+/// so it passes through every point and never overshoots them (no dip below zero, no false peak).
+fn smooth_tail(pts: &[(f64, f64)]) -> String {
+    let n = pts.len();
+    if n < 2 {
+        return String::new();
+    }
+    let mut t = vec![0.0; n];
+    for i in 1..n - 1 {
+        t[i] = inner_slope(pts[i - 1], pts[i], pts[i + 1]);
+    }
+    if n == 2 {
+        let h = pts[1].0 - pts[0].0;
+        let s = if h > 0.0 {
+            (pts[1].1 - pts[0].1) / h
+        } else {
+            0.0
+        };
+        t = vec![finite(s); 2];
+    } else {
+        t[0] = end_slope(pts[0], pts[1], t[1]);
+        t[n - 1] = end_slope(pts[n - 2], pts[n - 1], t[n - 2]);
+    }
+    let mut out = String::new();
+    for i in 0..n - 1 {
+        let (a, b) = (pts[i], pts[i + 1]);
+        let dx = (b.0 - a.0) / 3.0;
+        out.push_str(&format!(
+            " C {} {} {}",
+            pt(a.0 + dx, a.1 + dx * t[i]),
+            pt(b.0 - dx, b.1 - dx * t[i + 1]),
+            pt(b.0, b.1)
+        ));
+    }
+    out
+}
+
+/// Each inner point blended with its neighbours (¼ ½ ¼), which softens a passing cloud into a
+/// gentle dip; the ends stay as measured, so the line starts at sunrise and ends on today's value.
+fn soften(pts: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    if pts.len() < 3 {
+        return pts.to_vec();
+    }
+    let mut out = pts.to_vec();
+    for i in 1..pts.len() - 1 {
+        out[i].1 = (pts[i - 1].1 + 2.0 * pts[i].1 + pts[i + 1].1) / 4.0;
+    }
+    out
+}
+
 /// The kW step between gridlines: the smallest round step that draws at most 4 lines strictly
 /// below `max_kw`; 0.25 kW only when no larger step draws any line.
 fn grid_step(max_kw: f64) -> f64 {
@@ -126,6 +201,7 @@ pub fn day_curve(
             Some((x_of(at), kw.max(0.0)))
         })
         .collect();
+    let measured_pts = soften(&measured_pts);
 
     let top = inside
         .iter()
@@ -151,35 +227,32 @@ pub fn day_curve(
         return curve;
     }
 
-    let line: Vec<String> = inside
-        .iter()
-        .map(|p| pt(x_of(mid(p)), y_of(p.estimate)))
-        .collect();
-    curve.forecast_line = format!("M {}", line.join(" L "));
+    let series = |kw: fn(&SolarPeriod) -> f64| -> Vec<(f64, f64)> {
+        inside.iter().map(|p| (x_of(mid(p)), y_of(kw(p)))).collect()
+    };
+    // A smooth line from its first point, `x y C …`.
+    let smooth = |pts: &[(f64, f64)]| format!("{}{}", pt(pts[0].0, pts[0].1), smooth_tail(pts));
+
+    let line = series(|p| p.estimate);
+    curve.forecast_line = format!("M {}", smooth(&line));
     curve.forecast_area = format!(
         "M {} L {} L {} Z",
-        pt(x_of(mid(inside[0])), h),
-        line.join(" L "),
-        pt(x_of(mid(inside[inside.len() - 1])), h)
+        pt(line[0].0, h),
+        smooth(&line),
+        pt(line[line.len() - 1].0, h)
     );
-    let up: Vec<String> = inside
-        .iter()
-        .map(|p| pt(x_of(mid(p)), y_of(p.high)))
-        .collect();
-    let down: Vec<String> = inside
-        .iter()
-        .rev()
-        .map(|p| pt(x_of(mid(p)), y_of(p.low)))
-        .collect();
-    curve.band = format!("M {} L {} Z", up.join(" L "), down.join(" L "));
+    let up = series(|p| p.high);
+    let mut down = series(|p| p.low);
+    down.reverse();
+    curve.band = format!("M {} L {} Z", smooth(&up), smooth(&down));
 
     if let (Some(first), Some(last)) = (measured_pts.first(), measured_pts.last()) {
-        let pts: Vec<String> = measured_pts.iter().map(|m| pt(m.0, y_of(m.1))).collect();
-        curve.measured_line = format!("M {}", pts.join(" L "));
+        let pts: Vec<(f64, f64)> = measured_pts.iter().map(|m| (m.0, y_of(m.1))).collect();
+        curve.measured_line = format!("M {}", smooth(&pts));
         curve.measured_area = format!(
             "M {} L {} L {} Z",
             pt(first.0, h),
-            pts.join(" L "),
+            smooth(&pts),
             pt(last.0, h)
         );
     }
@@ -212,6 +285,63 @@ mod tests {
         }
     }
 
+    fn numbers(s: &str) -> Vec<f64> {
+        s.replace(['M', 'L', 'C', 'Z'], " ")
+            .split_whitespace()
+            .map(|n| n.parse().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn soften_blends_inner_points_and_keeps_the_ends() {
+        let pts = [(0.0, 0.0), (1.0, 0.0), (2.0, 4.0), (3.0, 0.0), (4.0, 2.0)];
+        let ys: Vec<f64> = soften(&pts).iter().map(|p| p.1).collect();
+        assert_eq!(ys, vec![0.0, 1.0, 2.0, 1.5, 2.0]);
+        // x never moves; two points or fewer are left as they are.
+        assert!(soften(&pts).iter().zip(&pts).all(|(a, b)| a.0 == b.0));
+        assert_eq!(soften(&pts[..2]), pts[..2].to_vec());
+        assert!(soften(&[]).is_empty());
+    }
+
+    #[test]
+    fn smooth_line_goes_through_every_point() {
+        let pts = [(0.0, 40.0), (25.0, 10.0), (50.0, 30.0), (75.0, 5.0)];
+        let tail = smooth_tail(&pts);
+        assert_eq!(tail.matches(" C ").count(), 3, "{tail}");
+        for (x, y) in &pts[1..] {
+            assert!(tail.contains(&pt(*x, *y)), "{tail}");
+        }
+        assert_eq!(smooth_tail(&pts[..1]), "");
+        assert_eq!(smooth_tail(&[]), "");
+    }
+
+    #[test]
+    fn smooth_line_never_overshoots_its_points() {
+        // A flat run then a jump: control points stay between their segment's two ends, so the
+        // curve never dips below zero nor peaks above the data.
+        let pts = [
+            (0.0, 40.0),
+            (10.0, 40.0),
+            (20.0, 5.0),
+            (30.0, 5.0),
+            (40.0, 20.0),
+        ];
+        let tail = smooth_tail(&pts);
+        for (i, seg) in tail.split(" C ").skip(1).enumerate() {
+            let n = numbers(seg);
+            let (lo, hi) = (pts[i].1.min(pts[i + 1].1), pts[i].1.max(pts[i + 1].1));
+            for y in [n[1], n[3]] {
+                assert!(y >= lo - 0.05 && y <= hi + 0.05, "segment {i}: {seg}");
+            }
+            for x in [n[0], n[2]] {
+                assert!(x >= pts[i].0 && x <= pts[i + 1].0, "segment {i}: {seg}");
+            }
+        }
+        // Two points at the same x stay finite.
+        let tail = smooth_tail(&[(10.0, 5.0), (10.0, 20.0), (20.0, 10.0)]);
+        assert!(!tail.contains("NaN") && !tail.contains("inf"), "{tail}");
+    }
+
     #[test]
     fn span_skips_dark_periods() {
         let day = vec![
@@ -238,14 +368,8 @@ mod tests {
         // max 4.4 kW: the 4.0 high sits at 40 - 40 * 4 / 4.4.
         assert!(c.band.contains("75.0 3.6"), "{}", c.band);
         for s in [&c.forecast_area, &c.forecast_line, &c.band] {
-            for pair in s
-                .replace(['M', 'L', 'Z'], " ")
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .chunks(2)
-            {
-                let y: f64 = pair[1].parse().unwrap();
-                assert!((0.0..=40.0).contains(&y), "{s}");
+            for pair in numbers(s).chunks(2) {
+                assert!((0.0..=40.0).contains(&pair[1]), "{s}");
             }
         }
         assert!(c.grid.len() <= 4);
@@ -281,7 +405,12 @@ mod tests {
         let c = day_curve(&day, &measured, (0, 3600), 2700, 100.0, 40.0);
         // First period is over (midpoint 25), the second is in progress and ends at now (75).
         assert!(c.measured_line.starts_with("M 25.0"), "{}", c.measured_line);
-        assert!(c.measured_line.contains("L 75.0"), "{}", c.measured_line);
+        assert!(c.measured_line.contains(" C "), "{}", c.measured_line);
+        assert!(
+            c.measured_line.ends_with(" 75.0 26.4"),
+            "{}",
+            c.measured_line
+        );
         assert_eq!(c.now_x, Some(75.0));
         assert!(
             c.measured_area.ends_with("75.0 40.0 Z"),
@@ -291,7 +420,7 @@ mod tests {
         // A period starting at or after now has no point.
         let c = day_curve(&day, &measured, (0, 3600), 1800, 100.0, 40.0);
         assert!(!c.measured_line.contains("75.0"), "{}", c.measured_line);
-        assert!(!c.measured_line.contains("L"), "{}", c.measured_line);
+        assert!(!c.measured_line.contains('C'), "{}", c.measured_line);
         clean(&c);
     }
 
