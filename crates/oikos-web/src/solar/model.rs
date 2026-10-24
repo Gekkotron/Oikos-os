@@ -3,9 +3,9 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{Duration, NaiveDate, TimeZone};
+use chrono::{Datelike, Duration, NaiveDate, TimeZone};
 use chrono_tz::Tz;
-use oikos_api::{HistorySeries, SolarDay, SolarPeriod, SolarView};
+use oikos_api::{HistorySeries, SolarDay, SolarForecastDay, SolarPeriod, SolarView};
 use oikos_core::energy::{EnergyEntity, EnergyMeters, EnergyRole, EnergyUnits, PowerUnits};
 
 /// Age, in seconds, past which the solar card is hidden (24 h).
@@ -197,6 +197,119 @@ pub fn tomorrow(s: &SolarView, today: NaiveDate) -> Option<&SolarDay> {
     s.days
         .iter()
         .find(|d| NaiveDate::parse_from_str(&d.date, "%Y-%m-%d").ok() == Some(next))
+}
+
+/// Measured so far against forecast so far, as a signed whole percent. Hidden (`None`) when
+/// nothing is measured or the forecast so far is under 0.1 kWh.
+pub fn gap_percent(measured: Option<f64>, forecast_so_far: f64) -> Option<i32> {
+    let m = measured?;
+    (forecast_so_far >= 0.1)
+        .then(|| ((m - forecast_so_far) / forecast_so_far * 100.0).round() as i32)
+}
+
+/// The kW above which the best hours are listed: 60 % of the day's peak.
+pub fn best_hours_floor(peak_kw: f64) -> f64 {
+    0.6 * peak_kw
+}
+
+/// kWh per house-local date from `/history/daily` rows (`t` is the day's start in unix seconds),
+/// each value multiplied by `sign`. Rows with a negative `t` are skipped.
+pub fn daily_by_date(zone: Tz, days: &[(i64, f64)], sign: f64) -> BTreeMap<NaiveDate, f64> {
+    days.iter()
+        .filter(|(t, _)| *t >= 0)
+        .map(|(t, v)| (local_date(zone, *t as u64), v * sign))
+        .collect()
+}
+
+/// Sum per date of several maps; a date missing from any map is dropped.
+pub fn sum_daily(maps: &[BTreeMap<NaiveDate, f64>]) -> BTreeMap<NaiveDate, f64> {
+    let Some((first, rest)) = maps.split_first() else {
+        return BTreeMap::new();
+    };
+    first
+        .iter()
+        .filter_map(|(d, v)| {
+            rest.iter()
+                .try_fold(*v, |acc, m| m.get(d).map(|x| acc + x))
+                .map(|total| (*d, total))
+        })
+        .collect()
+}
+
+/// Yesterday's tile: measured, the forecast made for that day, the gap and whether the forecast
+/// was made late.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Yesterday {
+    pub measured: f64,
+    pub forecast: Option<f64>,
+    pub gap: Option<i32>,
+    /// `made_at` of the forecast when it came more than an hour after sunrise.
+    pub made_late_at: Option<u64>,
+}
+
+fn forecast_for(
+    forecasts: &[SolarForecastDay],
+    date: NaiveDate,
+) -> impl Iterator<Item = &SolarForecastDay> {
+    forecasts
+        .iter()
+        .filter(move |f| NaiveDate::parse_from_str(&f.date, "%Y-%m-%d").ok() == Some(date))
+}
+
+/// Yesterday's figures; `None` without a measured value for `date`. With several forecast rows
+/// for the day, the earliest one is used.
+pub fn yesterday(
+    measured: &BTreeMap<NaiveDate, f64>,
+    forecasts: &[SolarForecastDay],
+    date: NaiveDate,
+    sunrise_utc: Option<u64>,
+) -> Option<Yesterday> {
+    let m = *measured.get(&date)?;
+    let row = forecast_for(forecasts, date).min_by_key(|f| f.made_at);
+    let forecast = row.map(|f| f.estimate);
+    Some(Yesterday {
+        measured: m,
+        forecast,
+        gap: forecast.and_then(|f| gap_percent(Some(m), f)),
+        made_late_at: row
+            .zip(sunrise_utc)
+            .filter(|(f, sr)| f.made_at > sr + 3600)
+            .map(|(f, _)| f.made_at),
+    })
+}
+
+/// Mean absolute error, in percent of the forecast, over the days with a morning forecast above
+/// 0.5 kWh and a measured value. `None` under three such days.
+pub fn accuracy(
+    measured: &BTreeMap<NaiveDate, f64>,
+    forecasts: &[SolarForecastDay],
+    sunrise_of: impl Fn(NaiveDate) -> Option<u64>,
+) -> Option<u32> {
+    let errors: Vec<f64> = forecasts
+        .iter()
+        .filter_map(|f| {
+            let date = NaiveDate::parse_from_str(&f.date, "%Y-%m-%d").ok()?;
+            let m = *measured.get(&date)?;
+            let morning = sunrise_of(date).is_none_or(|sr| f.made_at <= sr + 3600);
+            (f.estimate > 0.5 && morning).then(|| (m - f.estimate).abs() / f.estimate * 100.0)
+        })
+        .collect();
+    (errors.len() >= 3).then(|| (errors.iter().sum::<f64>() / errors.len() as f64).round() as u32)
+}
+
+/// Production since the 1st of `today`'s month: the measured days before `today` plus
+/// `today_kwh`. `None` when both are empty.
+pub fn month_so_far(
+    measured: &BTreeMap<NaiveDate, f64>,
+    today: NaiveDate,
+    today_kwh: Option<f64>,
+) -> Option<f64> {
+    let first = today.with_day(1)?;
+    let past: Vec<f64> = measured.range(first..today).map(|(_, v)| *v).collect();
+    if past.is_empty() && today_kwh.is_none() {
+        return None;
+    }
+    Some(past.iter().sum::<f64>() + today_kwh.unwrap_or(0.0))
 }
 
 #[cfg(test)]
@@ -417,5 +530,89 @@ mod tests {
             Some("2026-10-25")
         );
         assert!(tomorrow(&view(0, &["2026-10-26"]), date(2026, 10, 24)).is_none());
+    }
+
+    fn fc(d: &str, estimate: f64, made_at: u64) -> SolarForecastDay {
+        SolarForecastDay {
+            date: d.into(),
+            estimate,
+            low: estimate * 0.8,
+            high: estimate * 1.2,
+            made_at,
+        }
+    }
+
+    fn meas(items: &[(NaiveDate, f64)]) -> BTreeMap<NaiveDate, f64> {
+        items.iter().cloned().collect()
+    }
+
+    #[test]
+    fn gap_is_signed_and_hidden_on_tiny_forecast() {
+        assert_eq!(gap_percent(Some(6.4), 7.2), Some(-11));
+        assert_eq!(gap_percent(Some(1.0), 0.05), None);
+        assert_eq!(gap_percent(None, 7.2), None);
+    }
+
+    #[test]
+    fn best_hours_floor_is_sixty_percent_of_peak() {
+        assert!((best_hours_floor(5.0) - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn accuracy_needs_three_morning_days_over_half_a_kwh() {
+        let m = meas(&[
+            (date(2026, 10, 20), 9.0),
+            (date(2026, 10, 21), 11.0),
+            (date(2026, 10, 22), 12.0),
+            (date(2026, 10, 23), 0.3),
+        ]);
+        let sunrise = |_d: NaiveDate| Some(1_000u64);
+        let mut f = vec![
+            fc("2026-10-20", 10.0, 500),
+            fc("2026-10-21", 10.0, 500),
+            fc("2026-10-22", 10.0, 500),
+            fc("2026-10-23", 0.4, 500),
+        ];
+        assert_eq!(accuracy(&m, &f, sunrise), Some(13));
+        f[2].made_at = 1_000 + 7_200;
+        assert_eq!(accuracy(&m, &f, sunrise), None);
+    }
+
+    #[test]
+    fn yesterday_marks_a_late_forecast() {
+        let d = date(2026, 10, 23);
+        let m = meas(&[(d, 9.0)]);
+        let f = [fc("2026-10-23", 10.0, 1_000 + 7_200)];
+        let y = yesterday(&m, &f, d, Some(1_000)).unwrap();
+        assert_eq!(y.measured, 9.0);
+        assert_eq!(y.forecast, Some(10.0));
+        assert_eq!(y.gap, Some(-10));
+        assert_eq!(y.made_late_at, Some(1_000 + 7_200));
+        let early = [fc("2026-10-23", 10.0, 900)];
+        assert_eq!(
+            yesterday(&m, &early, d, Some(1_000)).unwrap().made_late_at,
+            None
+        );
+        assert!(yesterday(&BTreeMap::new(), &f, d, Some(1_000)).is_none());
+    }
+
+    #[test]
+    fn daily_by_date_uses_house_zone_and_sign() {
+        let (midnight, _) = day_bounds(Paris, date(2026, 10, 24));
+        let out = daily_by_date(Paris, &[(midnight as i64, -3.0), (-5, 1.0)], -1.0);
+        assert_eq!(out.get(&date(2026, 10, 24)), Some(&3.0));
+        assert_eq!(out.len(), 1);
+        let a = meas(&[(date(2026, 10, 1), 1.0), (date(2026, 10, 2), 2.0)]);
+        let b = meas(&[(date(2026, 10, 2), 3.0)]);
+        assert_eq!(sum_daily(&[a, b]), meas(&[(date(2026, 10, 2), 5.0)]));
+    }
+
+    #[test]
+    fn month_so_far_on_the_first() {
+        let m = meas(&[(date(2026, 9, 30), 4.0)]);
+        assert_eq!(month_so_far(&m, date(2026, 10, 1), Some(2.0)), Some(2.0));
+        assert_eq!(month_so_far(&m, date(2026, 10, 1), None), None);
+        let m = meas(&[(date(2026, 10, 1), 4.0), (date(2026, 10, 2), 5.0)]);
+        assert_eq!(month_so_far(&m, date(2026, 10, 3), Some(1.0)), Some(10.0));
     }
 }
