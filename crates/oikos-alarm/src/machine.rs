@@ -374,8 +374,92 @@ fn sos(rt: &mut Runtime, s: &AlarmSettings, remote: &str, now: u64) -> Vec<Effec
     )
 }
 
+/// True when the alarm is turned on with at least one tracker home: presence may arm right away
+/// once everyone leaves. With everyone away it is false (§6.1, edge not level).
+pub fn initial_ready(trackers: &BTreeMap<String, Presence>) -> bool {
+    trackers.values().any(|p| *p == Presence::Home)
+}
+
+fn tracker(
+    rt: &mut Runtime,
+    s: &AlarmSettings,
+    entity: &str,
+    seen: Presence,
+    now: u64,
+) -> Vec<Effect> {
+    if !s.presence.trackers.iter().any(|t| t == entity) {
+        return vec![];
+    }
+    let previous = rt.trackers.insert(entity.to_string(), seen);
+    let came_home = seen == Presence::Home && previous != Some(Presence::Home);
+    let mut fx = vec![];
+    if came_home {
+        rt.auto_arm_ready = true;
+        if s.presence.disarm && !matches!(rt.phase, Phase::Disarmed) {
+            fx = disarm(rt, Source::Presence, now);
+        }
+    }
+    let all_away = s
+        .presence
+        .trackers
+        .iter()
+        .all(|t| rt.trackers.get(t) == Some(&Presence::Away));
+    if !all_away {
+        rt.everyone_away_since = None;
+    } else if rt.everyone_away_since.is_none() {
+        rt.everyone_away_since = Some(now);
+    }
+    fx
+}
+
+/// Whether presence would arm now; `next_deadline` mirrors the same conditions.
+fn auto_arm_due(rt: &Runtime, s: &AlarmSettings, now: u64) -> bool {
+    s.presence.arm
+        && !s.presence.trackers.is_empty()
+        && rt.auto_arm_ready
+        && matches!(rt.phase, Phase::Disarmed)
+        && rt
+            .everyone_away_since
+            .is_some_and(|t| t + u64::from(s.presence.arm_after_s) <= now)
+}
+
+/// Boot: picks up the retained phase after a restart (§9).
+fn resume(rt: &mut Runtime, s: &AlarmSettings, world: &World, now: u64) -> Vec<Effect> {
+    match rt.phase.clone() {
+        Phase::Arming { mode, until } if now >= until => enter_armed(rt, s, world, mode, None, now),
+        Phase::Pending { mode, until } if now >= until => {
+            let cause = rt.cause.clone();
+            let ring_until = until + u64::from(s.siren_s);
+            if now < ring_until {
+                rt.enter(
+                    Phase::Triggered {
+                        back_to: Some(mode),
+                        until: ring_until,
+                    },
+                    None,
+                    now,
+                );
+                rt.motion_hits.clear();
+                vec![Effect::SirensOn, Effect::Alert { cause }]
+            } else {
+                // The ring was missed, the alert is still raised.
+                return_from_ring(rt, s, world, Some(mode), now);
+                vec![Effect::Alert { cause }]
+            }
+        }
+        Phase::Triggered { until, .. } if until > now => vec![Effect::SirensOn],
+        Phase::Triggered { back_to, .. } => return_from_ring(rt, s, world, back_to, now),
+        _ => vec![],
+    }
+}
+
 fn tick(rt: &mut Runtime, s: &AlarmSettings, world: &World, now: u64) -> Vec<Effect> {
     rt.motion_hits.retain(|(at, _)| hit_alive(*at, now, s));
+    if auto_arm_due(rt, s, now) {
+        let fx = arm(rt, s, world, ArmMode::Away, Source::Presence, now);
+        rt.auto_arm_ready = false;
+        return fx;
+    }
     match rt.phase.clone() {
         Phase::Arming { mode, until } if now >= until => enter_armed(rt, s, world, mode, None, now),
         Phase::Pending { mode, until } if now >= until => {
@@ -400,15 +484,26 @@ pub fn step(
     // Settings drift: forget sensors that are no longer watched.
     rt.open_at_arm.retain(|e| s.sensor(e).is_some());
     rt.motion_hits.retain(|(_, e)| s.sensor(e).is_some());
+    rt.trackers.retain(|e, _| s.presence.trackers.contains(e));
     match ev {
         Event::Arm { mode, source } => arm(rt, s, world, mode, source, now),
         Event::Disarm { source } => disarm(rt, source, now),
         Event::Sensor { entity, on } => sensor(rt, s, &entity, on, now),
         Event::Signal { entity, signal } => match remote_action(s, &entity, &signal) {
             Some(RemoteAction::Sos) => sos(rt, s, &entity, now),
-            _ => vec![],
+            Some(RemoteAction::Disarm) => disarm(rt, Source::Remote, now),
+            Some(action) => {
+                let mode = match action {
+                    RemoteAction::Away => ArmMode::Away,
+                    RemoteAction::Home => ArmMode::Home,
+                    _ => ArmMode::Night,
+                };
+                arm(rt, s, world, mode, Source::Remote, now)
+            }
+            None => vec![],
         },
-        Event::Tracker { .. } | Event::Resume => vec![],
+        Event::Tracker { entity, seen } => tracker(rt, s, &entity, seen, now),
+        Event::Resume => resume(rt, s, world, now),
         Event::Tick => tick(rt, s, world, now),
     }
 }
@@ -898,7 +993,8 @@ mod tests {
 
     #[test]
     fn disarm_sets_auto_arm_ready_from_trackers() {
-        let s = settings();
+        let mut s = settings();
+        s.presence.trackers = vec!["tracker.a".into()];
         let mut rt = armed(&s, ArmMode::Away);
         rt.trackers.insert("tracker.a".into(), Presence::Home);
         let ev = Event::Disarm {
@@ -1014,6 +1110,322 @@ mod tests {
             mode: ArmMode::Away,
         };
         assert_eq!(next_deadline(&rt, &s), None);
+    }
+
+    fn trackers_settings() -> AlarmSettings {
+        let mut s = settings();
+        s.presence.trackers = vec!["tracker.a".into(), "tracker.b".into()];
+        s.remotes[0].signals.extend([
+            ("arm_all_zones".to_string(), RemoteAction::Away),
+            ("arm_day_zones".to_string(), RemoteAction::Home),
+            ("arm_night_zones".to_string(), RemoteAction::Night),
+            ("disarm".to_string(), RemoteAction::Disarm),
+        ]);
+        s
+    }
+
+    fn seen(entity: &str, seen: Presence) -> Event {
+        Event::Tracker {
+            entity: entity.into(),
+            seen,
+        }
+    }
+
+    fn ready_runtime() -> Runtime {
+        Runtime {
+            auto_arm_ready: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn everyone_away_arms_after_grace() {
+        let s = trackers_settings();
+        let mut rt = ready_runtime();
+        let t = 1000;
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), t);
+        assert_eq!(rt.everyone_away_since, None);
+        go(&mut rt, &s, seen("tracker.b", Presence::Away), t + 10);
+        assert_eq!(rt.everyone_away_since, Some(t + 10));
+        assert_eq!(next_deadline(&rt, &s), Some(t + 130));
+        assert!(go(&mut rt, &s, Event::Tick, t + 129).is_empty());
+        assert_eq!(rt.phase, Phase::Disarmed);
+        let fx = go(&mut rt, &s, Event::Tick, t + 130);
+        assert_eq!(
+            rt.phase,
+            Phase::Armed {
+                mode: ArmMode::Away
+            }
+        );
+        assert_eq!(rt.source, Some(Source::Presence));
+        assert_eq!(fx, vec![Effect::Chirp]);
+        assert!(!rt.auto_arm_ready);
+        assert_eq!(next_deadline(&rt, &s), None);
+    }
+
+    #[test]
+    fn unknown_tracker_blocks_auto_arm() {
+        let s = trackers_settings();
+        let mut rt = ready_runtime();
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), 0);
+        go(&mut rt, &s, seen("tracker.b", Presence::Unknown), 0);
+        go(&mut rt, &s, Event::Tick, 1000);
+        assert_eq!(rt.phase, Phase::Disarmed);
+        go(&mut rt, &s, seen("tracker.b", Presence::Away), 2000);
+        go(&mut rt, &s, Event::Tick, 2119);
+        assert_eq!(rt.phase, Phase::Disarmed);
+        go(&mut rt, &s, Event::Tick, 2120);
+        assert!(matches!(rt.phase, Phase::Armed { .. }));
+    }
+
+    #[test]
+    fn disarm_while_away_stays_disarmed() {
+        let s = trackers_settings();
+        let mut rt = ready_runtime();
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), 0);
+        go(&mut rt, &s, seen("tracker.b", Presence::Away), 0);
+        go(&mut rt, &s, Event::Tick, 120);
+        assert!(matches!(rt.phase, Phase::Armed { .. }));
+        let ev = Event::Disarm {
+            source: Source::Command,
+        };
+        go(&mut rt, &s, ev, 200);
+        assert!(!rt.auto_arm_ready);
+        assert_eq!(next_deadline(&rt, &s), None);
+        for t in (300..3900).step_by(60) {
+            go(&mut rt, &s, Event::Tick, t);
+        }
+        assert_eq!(rt.phase, Phase::Disarmed);
+        go(&mut rt, &s, seen("tracker.a", Presence::Home), 4000);
+        assert!(rt.auto_arm_ready);
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), 4100);
+        go(&mut rt, &s, Event::Tick, 4219);
+        assert_eq!(rt.phase, Phase::Disarmed);
+        go(&mut rt, &s, Event::Tick, 4220);
+        assert!(matches!(rt.phase, Phase::Armed { .. }));
+    }
+
+    #[test]
+    fn enable_with_everyone_away_does_not_arm() {
+        let away = BTreeMap::from([
+            ("tracker.a".to_string(), Presence::Away),
+            ("tracker.b".to_string(), Presence::Away),
+        ]);
+        assert!(!initial_ready(&away));
+        let mixed = BTreeMap::from([
+            ("tracker.a".to_string(), Presence::Away),
+            ("tracker.b".to_string(), Presence::Home),
+        ]);
+        assert!(initial_ready(&mixed));
+        assert!(!initial_ready(&BTreeMap::new()));
+    }
+
+    #[test]
+    fn tracker_home_disarms() {
+        let s = trackers_settings();
+        let mut rt = armed(&s, ArmMode::Away);
+        go(&mut rt, &s, sensor_ev("window", true), 10);
+        rt.alert_ids = vec!["alarm-1".into()];
+        let fx = go(&mut rt, &s, seen("tracker.a", Presence::Home), 20);
+        assert_eq!(fx, vec![Effect::SirensOff, Effect::ResolveAlerts]);
+        assert_eq!(rt.phase, Phase::Disarmed);
+        assert_eq!(rt.source, Some(Source::Presence));
+        assert!(rt.auto_arm_ready);
+    }
+
+    #[test]
+    fn tracker_home_noop_when_already_home() {
+        let s = trackers_settings();
+        let mut rt = Runtime::default();
+        go(&mut rt, &s, seen("tracker.a", Presence::Home), 0);
+        let ev = Event::Arm {
+            mode: ArmMode::Night,
+            source: Source::Command,
+        };
+        go(&mut rt, &s, ev, 1);
+        go(&mut rt, &s, Event::Tick, 61);
+        assert_eq!(
+            rt.phase,
+            Phase::Armed {
+                mode: ArmMode::Night
+            }
+        );
+        assert!(go(&mut rt, &s, seen("tracker.a", Presence::Home), 70).is_empty());
+        assert_eq!(
+            rt.phase,
+            Phase::Armed {
+                mode: ArmMode::Night
+            }
+        );
+    }
+
+    #[test]
+    fn unlisted_tracker_is_ignored_and_stale_ones_dropped() {
+        let s = trackers_settings();
+        let mut rt = Runtime::default();
+        go(&mut rt, &s, seen("tracker.zzz", Presence::Home), 0);
+        assert!(rt.trackers.is_empty());
+        rt.trackers.insert("tracker.old".into(), Presence::Home);
+        go(&mut rt, &s, Event::Tick, 1);
+        assert!(rt.trackers.is_empty());
+    }
+
+    #[test]
+    fn presence_switches_off() {
+        let mut s = trackers_settings();
+        s.presence.arm = false;
+        let mut rt = ready_runtime();
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), 0);
+        go(&mut rt, &s, seen("tracker.b", Presence::Away), 0);
+        assert_eq!(next_deadline(&rt, &s), None);
+        go(&mut rt, &s, Event::Tick, 10_000);
+        assert_eq!(rt.phase, Phase::Disarmed);
+
+        let mut s = trackers_settings();
+        s.presence.disarm = false;
+        let mut rt = armed(&s, ArmMode::Away);
+        go(&mut rt, &s, seen("tracker.a", Presence::Home), 5);
+        assert_eq!(
+            rt.phase,
+            Phase::Armed {
+                mode: ArmMode::Away
+            }
+        );
+        assert!(rt.auto_arm_ready);
+    }
+
+    #[test]
+    fn remote_signals_map_to_actions() {
+        let s = trackers_settings();
+        let sig = |signal: &str| Event::Signal {
+            entity: "remote.x".into(),
+            signal: signal.into(),
+        };
+        let mut rt = Runtime::default();
+        go(&mut rt, &s, sig("arm_all_zones"), 0);
+        assert_eq!(
+            rt.phase,
+            Phase::Arming {
+                mode: ArmMode::Away,
+                until: 60
+            }
+        );
+        assert_eq!(rt.source, Some(Source::Remote));
+        go(&mut rt, &s, sig("disarm"), 5);
+        assert_eq!(rt.phase, Phase::Disarmed);
+        go(&mut rt, &s, sig("arm_day_zones"), 10);
+        assert!(matches!(
+            rt.phase,
+            Phase::Arming {
+                mode: ArmMode::Home,
+                ..
+            }
+        ));
+        go(&mut rt, &s, sig("disarm"), 11);
+        go(&mut rt, &s, sig("arm_night_zones"), 12);
+        assert!(matches!(
+            rt.phase,
+            Phase::Arming {
+                mode: ArmMode::Night,
+                ..
+            }
+        ));
+        let before = rt.clone();
+        assert!(go(&mut rt, &s, sig("nope"), 13).is_empty());
+        let unknown = Event::Signal {
+            entity: "remote.other".into(),
+            signal: "disarm".into(),
+        };
+        assert!(go(&mut rt, &s, unknown, 14).is_empty());
+        assert_eq!(rt, before);
+    }
+
+    #[test]
+    fn resume_cases() {
+        let s = settings();
+        let away = ArmMode::Away;
+        let with = |phase: Phase| Runtime {
+            phase,
+            cause: vec!["door".into()],
+            ..Default::default()
+        };
+        // Arming past its end.
+        let mut rt = with(Phase::Arming {
+            mode: away,
+            until: 100,
+        });
+        assert_eq!(go(&mut rt, &s, Event::Resume, 150), vec![Effect::Chirp]);
+        assert_eq!(rt.phase, Phase::Armed { mode: away });
+        // Arming / Pending not yet due: the hub resumes the countdown.
+        let mut rt = with(Phase::Arming {
+            mode: away,
+            until: 100,
+        });
+        assert!(go(&mut rt, &s, Event::Resume, 50).is_empty());
+        let mut rt = with(Phase::Pending {
+            mode: away,
+            until: 100,
+        });
+        assert!(go(&mut rt, &s, Event::Resume, 50).is_empty());
+        assert!(matches!(rt.phase, Phase::Pending { .. }));
+        // Pending past its end, ring still due.
+        let alert = Effect::Alert {
+            cause: vec!["door".into()],
+        };
+        let mut rt = with(Phase::Pending {
+            mode: away,
+            until: 100,
+        });
+        assert_eq!(
+            go(&mut rt, &s, Event::Resume, 200),
+            vec![Effect::SirensOn, alert.clone()]
+        );
+        assert_eq!(
+            rt.phase,
+            Phase::Triggered {
+                back_to: Some(away),
+                until: 280
+            }
+        );
+        // Pending deadline missed long ago: re-armed, alert still raised, no chirp.
+        let mut rt = with(Phase::Pending {
+            mode: away,
+            until: 100,
+        });
+        assert_eq!(go(&mut rt, &s, Event::Resume, 280), vec![alert]);
+        assert_eq!(rt.phase, Phase::Armed { mode: away });
+        // Triggered still ringing.
+        let mut rt = with(Phase::Triggered {
+            back_to: Some(away),
+            until: 300,
+        });
+        assert_eq!(go(&mut rt, &s, Event::Resume, 200), vec![Effect::SirensOn]);
+        assert!(matches!(rt.phase, Phase::Triggered { .. }));
+        // Triggered over.
+        assert_eq!(go(&mut rt, &s, Event::Resume, 300), vec![Effect::SirensOff]);
+        assert_eq!(rt.phase, Phase::Armed { mode: away });
+        let mut rt = with(Phase::Triggered {
+            back_to: None,
+            until: 10,
+        });
+        go(&mut rt, &s, Event::Resume, 20);
+        assert_eq!(rt.phase, Phase::Disarmed);
+        // Idle phases.
+        assert!(go(&mut rt, &s, Event::Resume, 30).is_empty());
+        let mut rt = with(Phase::Armed { mode: away });
+        assert!(go(&mut rt, &s, Event::Resume, 30).is_empty());
+    }
+
+    #[test]
+    fn auto_arm_deadline_is_acted_on_by_a_tick() {
+        let s = trackers_settings();
+        let mut rt = ready_runtime();
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), 0);
+        go(&mut rt, &s, seen("tracker.b", Presence::Away), 0);
+        let at = next_deadline(&rt, &s).unwrap();
+        go(&mut rt, &s, Event::Tick, at);
+        assert!(matches!(rt.phase, Phase::Armed { .. }));
+        assert!(next_deadline(&rt, &s).is_none_or(|d| d > at));
     }
 
     #[test]
