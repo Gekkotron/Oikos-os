@@ -1317,7 +1317,6 @@ pub fn updated_at(lang: Lang, at: NaiveTime) -> String {
 #[derive(Clone, Copy, Debug)]
 pub enum SolarText {
     CardLabel,
-    Left,
     Tomorrow,
     Kwh,
     Kw,
@@ -1342,7 +1341,6 @@ pub fn solar_text(lang: Lang, k: SolarText) -> &'static str {
     use SolarText::*;
     let (en, fr) = match k {
         CardLabel => ("Solar forecast", "Prévisions solaires"),
-        Left => ("left", "reste"),
         Tomorrow => ("Tomorrow", "Demain"),
         Kwh => ("kWh", "kWh"),
         Kw => ("kW", "kW"),
@@ -1376,14 +1374,46 @@ pub fn solar_text(lang: Lang, k: SolarText) -> &'static str {
     }
 }
 
-/// The solar card's and page's headline: measured / forecast total, or the forecast so far with
-/// "≈" while nothing is measured.
+/// Binds the words of one part of a line with no-break spaces, so a narrow box only wraps
+/// between parts.
+fn no_break(part: &str) -> String {
+    part.replace(' ', "\u{a0}")
+}
+
+/// The solar card's and page's headline: "5.2 kWh produced · 3.8 kWh forecast", or the forecast
+/// so far with "≈" while nothing is measured. The forecast part is left out without a total.
 pub fn solar_title(lang: Lang, measured: Option<f64>, so_far: f64, total: Option<f64>) -> String {
-    let total = total.map_or_else(|| "–".to_owned(), |t| solar_kwh(lang, t));
     let unit = solar_text(lang, SolarText::Kwh);
-    match measured {
-        Some(m) => format!("{} / {total} {unit}", solar_kwh(lang, m)),
-        None => format!("≈ {} / {total} {unit}", solar_kwh(lang, so_far)),
+    let done = match (measured, lang) {
+        (Some(m), Lang::En) => format!("{} {unit} produced", solar_kwh(lang, m)),
+        (Some(m), Lang::Fr) => format!("{} {unit} produits", solar_kwh(lang, m)),
+        (None, Lang::En) => format!("≈ {} {unit} so far", solar_kwh(lang, so_far)),
+        (None, Lang::Fr) => format!("≈ {} {unit} jusqu'ici", solar_kwh(lang, so_far)),
+    };
+    let forecast = total.map(|t| match lang {
+        Lang::En => format!("{} {unit} forecast", solar_kwh(lang, t)),
+        Lang::Fr => format!("prévu {} {unit}", solar_kwh(lang, t)),
+    });
+    [Some(done), forecast]
+        .into_iter()
+        .flatten()
+        .map(|p| no_break(&p))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// A whole hour as a short axis label: "12 h" in French, "12 pm" in English.
+pub fn solar_hour(lang: Lang, hour: u32) -> String {
+    match lang {
+        Lang::Fr => format!("{hour} h"),
+        Lang::En => {
+            let h12 = match hour % 12 {
+                0 => 12,
+                h => h,
+            };
+            let suffix = if hour % 24 < 12 { "am" } else { "pm" };
+            format!("{h12} {suffix}")
+        }
     }
 }
 
@@ -1518,38 +1548,38 @@ pub fn solar_kwh(lang: Lang, v: f64) -> String {
     home_number(lang, v + 0.0, 1)
 }
 
-/// The solar card's second line: what is left today and tomorrow's range; a part without data is
-/// left out. Tomorrow is `(estimate, low, high)` in kWh.
+/// The solar card's second line: the end-of-day projection (measured plus the forecast still to
+/// come; "more expected" while nothing is measured) and tomorrow's range; a part without data is
+/// left out, and so is the projection once less than 0.05 kWh is left. Tomorrow is
+/// `(estimate, low, high)` in kWh.
 pub fn solar_bottom(
     lang: Lang,
     remaining: Option<f64>,
+    measured: Option<f64>,
     tomorrow: Option<(f64, f64, f64)>,
 ) -> String {
-    let left = remaining.map(|r| match lang {
-        Lang::En => format!(
-            "≈ {} {}",
-            solar_kwh(lang, r),
-            solar_text(lang, SolarText::Left)
-        ),
-        Lang::Fr => format!(
-            "{} ≈ {}",
-            solar_text(lang, SolarText::Left),
-            solar_kwh(lang, r)
-        ),
-    });
+    let unit = solar_text(lang, SolarText::Kwh);
+    let projection = remaining
+        .filter(|r| *r >= 0.05)
+        .map(|r| match (measured, lang) {
+            (Some(m), Lang::En) => format!("≈ {} {unit} by tonight", solar_kwh(lang, m + r)),
+            (Some(m), Lang::Fr) => format!("fin de journée ≈ {} {unit}", solar_kwh(lang, m + r)),
+            (None, Lang::En) => format!("≈ {} {unit} more expected", solar_kwh(lang, r)),
+            (None, Lang::Fr) => format!("encore ≈ {} {unit} prévus", solar_kwh(lang, r)),
+        });
     let next = tomorrow.map(|(t, lo, hi)| {
         format!(
-            "{} {} {} ({}–{})",
+            "{} {} {unit} ({}–{})",
             solar_text(lang, SolarText::Tomorrow),
             solar_kwh(lang, t),
-            solar_text(lang, SolarText::Kwh),
             home_number(lang, lo.round() + 0.0, 0),
             home_number(lang, hi.round() + 0.0, 0),
         )
     });
-    [left, next]
+    [projection, next]
         .into_iter()
         .flatten()
+        .map(|p| no_break(&p))
         .collect::<Vec<_>>()
         .join(" · ")
 }
@@ -1563,7 +1593,6 @@ mod tests {
         for lang in [Lang::En, Lang::Fr] {
             for k in [
                 SolarText::CardLabel,
-                SolarText::Left,
                 SolarText::Tomorrow,
                 SolarText::Kwh,
                 SolarText::Kw,
@@ -1586,14 +1615,32 @@ mod tests {
             }
         }
         let t = |h, m| NaiveTime::from_hms_opt(h, m, 0).unwrap();
+        let nb = |s: &str| s.replace('~', "\u{a0}");
         assert_eq!(
-            solar_title(Lang::En, Some(6.4), 0.0, Some(12.4)),
-            "6.4 / 12.4 kWh"
+            solar_title(Lang::En, Some(5.2), 0.0, Some(3.8)),
+            nb("5.2~kWh~produced · 3.8~kWh~forecast")
         );
         assert_eq!(
-            solar_title(Lang::Fr, None, 3.0, Some(12.4)),
-            "≈ 3,0 / 12,4 kWh"
+            solar_title(Lang::Fr, Some(5.2), 0.0, Some(3.8)),
+            nb("5,2~kWh~produits · prévu~3,8~kWh")
         );
+        assert_eq!(
+            solar_title(Lang::En, None, 1.2, Some(3.8)),
+            nb("≈~1.2~kWh~so~far · 3.8~kWh~forecast")
+        );
+        assert_eq!(
+            solar_title(Lang::Fr, None, 1.2, Some(3.8)),
+            nb("≈~1,2~kWh~jusqu'ici · prévu~3,8~kWh")
+        );
+        assert_eq!(
+            solar_title(Lang::En, Some(5.2), 0.0, None),
+            nb("5.2~kWh~produced")
+        );
+        assert_eq!(solar_hour(Lang::Fr, 12), "12 h");
+        assert_eq!(solar_hour(Lang::En, 12), "12 pm");
+        assert_eq!(solar_hour(Lang::En, 9), "9 am");
+        assert_eq!(solar_hour(Lang::En, 0), "12 am");
+        assert_eq!(solar_hour(Lang::En, 18), "6 pm");
         assert_eq!(solar_range(Lang::En, 9.8, 14.1), "Range 9.8–14.1 kWh");
         assert_eq!(solar_range(Lang::Fr, 9.8, 14.1), "Fourchette 9,8–14,1 kWh");
         assert_eq!(
@@ -1634,18 +1681,28 @@ mod tests {
         );
         assert_eq!(solar_kwh(Lang::Fr, 6.44), "6,4");
         assert_eq!(solar_kwh(Lang::En, 6.44), "6.4");
-        let t = Some((8.1, 5.0, 11.0));
+        let t = Some((1.9, 1.2, 2.6));
         assert_eq!(
-            solar_bottom(Lang::En, Some(5.2), t),
-            "≈ 5.2 left · Tomorrow 8.1 kWh (5–11)"
+            solar_bottom(Lang::En, Some(1.6), Some(4.0), t),
+            nb("≈~5.6~kWh~by~tonight · Tomorrow~1.9~kWh~(1–3)")
         );
         assert_eq!(
-            solar_bottom(Lang::Fr, Some(5.2), t),
-            "reste ≈ 5,2 · Demain 8,1 kWh (5–11)"
+            solar_bottom(Lang::Fr, Some(1.6), Some(4.0), t),
+            nb("fin~de~journée~≈~5,6~kWh · Demain~1,9~kWh~(1–3)")
         );
-        assert_eq!(solar_bottom(Lang::En, None, t), "Tomorrow 8.1 kWh (5–11)");
-        assert_eq!(solar_bottom(Lang::En, Some(5.2), None), "≈ 5.2 left");
-        assert_eq!(solar_bottom(Lang::En, None, None), "");
+        assert_eq!(
+            solar_bottom(Lang::En, Some(1.6), None, t),
+            nb("≈~1.6~kWh~more~expected · Tomorrow~1.9~kWh~(1–3)")
+        );
+        assert_eq!(
+            solar_bottom(Lang::Fr, Some(1.6), None, None),
+            nb("encore~≈~1,6~kWh~prévus")
+        );
+        assert_eq!(
+            solar_bottom(Lang::En, Some(0.04), Some(4.0), t),
+            nb("Tomorrow~1.9~kWh~(1–3)")
+        );
+        assert_eq!(solar_bottom(Lang::En, None, Some(4.0), None), "");
     }
     #[test]
     fn group_states_in_french_agree_in_number() {

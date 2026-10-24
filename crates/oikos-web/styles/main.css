@@ -6386,6 +6386,7 @@ html:has(.flow-canvas-screen) {
   flex: 1 1 0;
   min-height: 24px;
   width: 100%;
+  overflow: hidden;
 }
 
 .solar-curve__forecast {
@@ -6402,8 +6403,17 @@ html:has(.flow-canvas-screen) {
 }
 
 .solar-curve__measured {
-  fill: var(--accent-amber);
+  fill: var(--solar);
+  fill-opacity: 0.14;
   stroke: none;
+}
+
+.solar-curve__measured-line {
+  fill: none;
+  stroke: var(--solar);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
 }
 
 .solar-curve__now {
@@ -6826,21 +6836,21 @@ html:has(.flow-canvas-screen) {
   display: block;
   width: 100%;
   height: auto;
+  overflow: hidden;
 }
 
 .solar-page__svg .solar-curve__band {
-  fill: var(--accent-amber);
-  fill-opacity: 0.12;
-  stroke: none;
+  fill: var(--solar);
+  fill-opacity: 0.26;
+  stroke: var(--solar);
+  stroke-opacity: 0.4;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .solar-page__svg .solar-curve__line--dashed {
   stroke-dasharray: 5 4;
   stroke-width: 1.5;
-}
-
-.solar-curve__measured--forecast {
-  fill-opacity: 0.35;
 }
 
 .solar-curve__grid {
@@ -6852,6 +6862,16 @@ html:has(.flow-canvas-screen) {
 .solar-curve__label {
   fill: var(--muted);
   font-size: 10px;
+}
+
+.solar-curve__hour {
+  text-anchor: middle;
+}
+
+.solar-curve__tick {
+  stroke: var(--card-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .solar-page__label {

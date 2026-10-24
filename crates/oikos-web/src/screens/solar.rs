@@ -18,7 +18,7 @@ use crate::i18n::{self, Lang, SolarText as T, WeatherText, solar_text, weather_t
 use crate::nav::BackLink;
 use crate::screens::flow_canvas::sun::house_place;
 use crate::solar::card::{curve_points, today_is_current, today_total};
-use crate::solar::curve::{Curve, day_curve, producing_span};
+use crate::solar::curve::{Curve, day_curve, hour_ticks, producing_span};
 use crate::solar::measured::{Generation, SolarMeasured};
 use crate::solar::model::{
     SolarSources, Yesterday, accuracy, best_hours_floor, daily_by_date, day_bounds,
@@ -67,6 +67,9 @@ struct PageData {
     limit: u32,
     stale_at: Option<NaiveTime>,
 }
+
+/// The curve, whether its measured line is the forecast's own estimates, and the hour ticks.
+type PageCurve = (Curve, bool, Vec<(f64, u32)>);
 
 fn local_time(zone: Tz, t: u64) -> Option<NaiveTime> {
     DateTime::<Utc>::from_timestamp(t as i64, 0).map(|t| t.with_timezone(&zone).time())
@@ -179,13 +182,14 @@ fn page_data(
     })
 }
 
-/// The curve of the chosen tab and whether its measured area is the forecast's own estimates.
+/// The curve of the chosen tab, whether its measured line is the forecast's own estimates, and
+/// the `(x, local hour)` ticks of its span.
 fn page_curve(
     house: House,
     now: u64,
     measured: Option<SolarMeasured>,
     tab: Tab,
-) -> Option<(Curve, bool)> {
+) -> Option<PageCurve> {
     let zone = house.flows_config.with(|c| house_place(c.as_ref()).1);
     house.solar.with(|s| {
         let s: &SolarView = s.as_ref()?;
@@ -197,13 +201,21 @@ fn page_curve(
                 let real = measured.map(|m| m.periods.get()).unwrap_or_default();
                 let (points, is_forecast) = curve_points(real, &day, now);
                 let span = producing_span(&day)?;
-                Some((day_curve(&day, &points, span, now, W, H), is_forecast))
+                Some((
+                    day_curve(&day, &points, span, now, W, H),
+                    is_forecast,
+                    hour_ticks(span, zone, W),
+                ))
             }
             Tab::Tomorrow => {
                 let (from, to) = day_bounds(zone, today + Duration::days(1));
                 let day = periods_in(&s.periods, from, to);
                 let span = producing_span(&day)?;
-                Some((day_curve(&day, &[], span, 0, W, H), false))
+                Some((
+                    day_curve(&day, &[], span, 0, W, H),
+                    false,
+                    hour_ticks(span, zone, W),
+                ))
             }
         }
     })
@@ -344,24 +356,52 @@ fn tiles(d: &PageData, lang: Lang) -> Vec<AnyView> {
 #[component]
 fn CurveCard(
     lang: RwSignal<Lang>,
-    curve: Memo<Option<(Curve, bool)>>,
+    curve: Memo<Option<PageCurve>>,
     tab: RwSignal<Tab>,
 ) -> impl IntoView {
     let pressed = move |t: Tab| move || (tab.get() == t).to_string();
     let field = move |pick: fn(&Curve) -> String| {
         move || curve.get().map(|c| pick(&c.0)).unwrap_or_default()
     };
-    let measured_class = move || {
-        if curve.get().is_some_and(|c| c.1) {
-            "solar-curve__measured solar-curve__measured--forecast"
-        } else {
-            "solar-curve__measured"
-        }
+    // Production is a line over the band; while nothing is measured, the hours already past are
+    // a faint fill instead.
+    let measured_area = move || {
+        curve
+            .get()
+            .filter(|c| c.1)
+            .map(|c| c.0.measured_area)
+            .unwrap_or_default()
+    };
+    let measured_line = move || {
+        curve
+            .get()
+            .filter(|c| !c.1)
+            .map(|c| c.0.measured_line)
+            .unwrap_or_default()
     };
     let now_line = move || {
-        curve.get().and_then(|c| c.0.now_x).map(|x| {
-            view! { <line class="solar-curve__now" x1=x x2=x y1="0" y2=H /> }
+        curve.get().and_then(|c| {
+            c.0.now_x.map(|x| {
+                view! { <line class="solar-curve__now" x1=x x2=x y1=c.0.now_top y2=H /> }
+            })
         })
+    };
+    let hours = move || {
+        let l = lang.get();
+        curve
+            .get()
+            .map(|c| c.2)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(x, hour)| {
+                view! {
+                    <line class="solar-curve__tick" x1=x x2=x y1=H y2=H + 4.0 />
+                    <text class="solar-curve__label solar-curve__hour" x=x y=H + 14.0>
+                        {i18n::solar_hour(l, hour)}
+                    </text>
+                }
+            })
+            .collect_view()
     };
     let grid = move || {
         let l = lang.get();
@@ -399,16 +439,21 @@ fn CurveCard(
                     {move || solar_text(lang.get(), T::Tomorrow)}
                 </button>
             </div>
-            <svg class="solar-page__svg" viewBox="0 0 600 180" role="img"
+            <svg class="solar-page__svg" viewBox="0 0 600 198" role="img"
                 aria-label=move || solar_text(lang.get(), T::CardLabel)>
                 {grid}
                 <path class="solar-curve__band" d=field(|c| c.band.clone()) />
                 {move || {
                     (tab.get() == Tab::Today)
-                        .then(|| view! { <path class=measured_class d=field(|c| c.measured_area.clone()) /> })
+                        .then(|| view! { <path class="solar-curve__measured" d=measured_area /> })
                 }}
                 <path class="solar-curve__line solar-curve__line--dashed" d=field(|c| c.forecast_line.clone()) />
+                {move || {
+                    (tab.get() == Tab::Today)
+                        .then(|| view! { <path class="solar-curve__measured-line" d=measured_line /> })
+                }}
                 {now_line}
+                {hours}
             </svg>
         </div>
     }
@@ -419,7 +464,7 @@ fn CurveCard(
 fn content(
     data: Memo<Option<PageData>>,
     lang: RwSignal<Lang>,
-    curve: Memo<Option<(Curve, bool)>>,
+    curve: Memo<Option<PageCurve>>,
     tab: RwSignal<Tab>,
 ) -> impl IntoView {
     let from_data = move |f: fn(&PageData, Lang) -> String| {
@@ -441,7 +486,7 @@ fn content(
                 <div>
                     {from_data(|d, l| i18n::solar_power_line(l, d.measured_kw, d.forecast_kw))}
                 </div>
-                <div>{from_data(|d, l| i18n::solar_bottom(l, d.remaining, d.tomorrow))}</div>
+                <div>{from_data(|d, l| i18n::solar_bottom(l, d.remaining, d.measured, d.tomorrow))}</div>
             </div>
         </div>
 

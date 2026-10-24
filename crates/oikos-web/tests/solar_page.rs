@@ -119,7 +119,7 @@ fn count(host: &web_sys::Element, selector: &str) -> u32 {
 
 #[wasm_bindgen_test]
 async fn solar_page_shows_top_curve_tiles_days_footer() {
-    let host = mount(Some(solar(2)), true).await;
+    let host = mount_with(Some(solar(2)), true, RwSignal::new(noon())).await;
     assert!(host.query_selector(".solar-page__top").unwrap().is_some());
     assert!(
         host.query_selector(".solar-page__curve svg")
@@ -128,10 +128,26 @@ async fn solar_page_shows_top_curve_tiles_days_footer() {
     );
     assert!(host.query_selector(".sheet__back").unwrap().is_some());
     assert_eq!(count(&host, ".solar-day"), 7);
-    let text = host.text_content().unwrap_or_default();
+    let text = host
+        .text_content()
+        .unwrap_or_default()
+        .replace('\u{a0}', " ");
     assert!(text.contains("Forecasts by Solcast"), "{text}");
     assert!(text.contains("Roof 2"), "{text}");
-    assert!(text.contains("6.4 / 12.4 kWh"), "{text}");
+    assert!(
+        text.contains("6.4 kWh produced · 12.4 kWh forecast"),
+        "{text}"
+    );
+    let d = |sel: &str| {
+        host.query_selector(sel)
+            .unwrap()
+            .and_then(|e| e.get_attribute("d"))
+            .unwrap_or_default()
+    };
+    // No measured periods: the hours already past are a faint fill, with no production line.
+    assert!(d(".solar-curve__measured").starts_with("M "), "no fill");
+    assert_eq!(d(".solar-curve__measured-line"), "");
+    assert!(count(&host, ".solar-curve__hour") >= 3);
     assert!(text.contains("Range 9.8–14.1 kWh"), "{text}");
     assert!(text.contains("Forecast peak"), "{text}");
     assert!(text.contains("Best hours"), "{text}");
