@@ -433,7 +433,8 @@ pub fn CategoryForm(rows: Rows, key: u64) -> impl IntoView {
         let mut c = cat.get();
         c.except.clear();
         let list = house.entities.with(|m| members(lang.get(), &c, m));
-        house.areas.with(|areas| group_by_room(list, areas))
+        let lang = lang.get();
+        house.areas.with(|areas| group_by_room(lang, list, areas))
     });
 
     view! {
