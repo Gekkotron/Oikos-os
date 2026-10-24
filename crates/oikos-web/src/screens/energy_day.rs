@@ -11,7 +11,7 @@ use crate::energy_day::{
     GridDay, aria_summary, day_label, has_data, scale, shift_day, shown_day, tick_hours, tooltip,
     totals_text, x_of,
 };
-use crate::i18n::energy::{EnergyText, energy_text as word};
+use crate::i18n::energy::{EnergyText, energy_text as word, history_error};
 use crate::i18n::format::time;
 use crate::i18n::{Key, Lang, text, use_lang};
 
@@ -274,7 +274,9 @@ pub fn GridDayCard() -> impl IntoView {
             </p>
         }
         .into_any(),
-        Some(Err(err)) => view! { <p class="energy-day__empty">{err.to_string()}</p> }.into_any(),
+        Some(Err(err)) => {
+            view! { <p class="energy-day__empty">{history_error(lang(), &err)}</p> }.into_any()
+        }
         Some(Ok(d)) if !has_data(&d) => {
             view! { <p class="energy-day__empty">{word(lang(), EnergyText::NoData)}</p> }.into_any()
         }

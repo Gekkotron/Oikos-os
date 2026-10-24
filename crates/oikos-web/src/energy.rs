@@ -171,6 +171,7 @@ pub fn speed(watts: Option<f64>) -> f64 {
     0.5 + 1.5 * level(watts)
 }
 
+/// Not `i18n::format::number`: this one takes min/max fraction digits (kW to 1, counters to 3).
 /// `value` with `min..=max` fraction digits, the integer part grouped (narrow no-break space in
 /// French, thin space in English) and the language's decimal separator.
 fn number(lang: Lang, value: f64, min: usize, max: usize) -> String {
@@ -593,8 +594,8 @@ mod tests {
         let ui = EnergyFlow::build(&es, 0, None);
         assert_eq!(
             aria_sentence(Lang::En, &ui),
-            "Solar 3.2 kilowatts to the house. Exporting 400 watts to the grid. \
-             House uses 2.8 kilowatts. Water heater 1.7 kilowatts. AC 600 watts."
+            "Solar 3.2\u{a0}kilowatts to the house. Exporting 400\u{a0}watts to the grid. \
+             House uses 2.8\u{a0}kilowatts. Water heater 1.7\u{a0}kilowatts. AC 600\u{a0}watts."
         );
     }
 
@@ -634,8 +635,8 @@ mod tests {
         let ui = EnergyFlow::build(&es, 0, None);
         assert_eq!(
             aria_sentence(Lang::Fr, &ui),
-            "Solaire 3,2 kilowatts vers la maison. Exportation de 400 watts vers le réseau. \
-             La maison consomme 2,8 kilowatts. AC 600 watts."
+            "Solaire 3,2\u{a0}kilowatts vers la maison. Exportation de 400\u{a0}watts vers le réseau. \
+             La maison consomme 2,8\u{a0}kilowatts. AC 600\u{a0}watts."
         );
         assert_eq!(node_label(Lang::Fr, ui.node("grid").unwrap()), "Réseau");
         assert_eq!(node_label(Lang::Fr, ui.node("house").unwrap()), "Maison");

@@ -51,7 +51,7 @@ pub fn energy_text(lang: Lang, k: EnergyText) -> &'static str {
             "Long-press a power sensor on Home and choose an energy role.",
             "Appuyez longuement sur un capteur de puissance dans Maison et choisissez un rôle énergétique.",
         ),
-        GoHome => ("Go to Home", "Aller à Maison"),
+        GoHome => ("Go to Home", "Aller à l'accueil"),
         AllConsumers => ("All consumers", "Consommation"),
         DayCard => (
             "Grid exchange by half hour",
@@ -93,7 +93,24 @@ pub fn part_names(lang: Lang) -> (&'static str, &'static str, &'static str, &'st
 
 /// A power read aloud: "3.2 kilowatts", "400 watts" (the same words in both languages).
 pub fn spoken_power(number: String, kilo: bool) -> String {
-    format!("{number} {}", if kilo { "kilowatts" } else { "watts" })
+    format!("{number}\u{A0}{}", if kilo { "kilowatts" } else { "watts" })
+}
+
+/// A failed history call as a line: a translated lead, then the hub's own text as received.
+pub fn history_error(lang: Lang, err: &crate::api::history::HistoryApiError) -> String {
+    use crate::api::history::HistoryApiError as E;
+    match err {
+        E::NotRecorded => match lang {
+            Lang::En => "Not recorded yet".into(),
+            Lang::Fr => "Pas encore enregistré".into(),
+        },
+        E::Unavailable => energy_text(lang, EnergyText::HistoryOff).into(),
+        E::NoGridMeter => energy_text(lang, EnergyText::GiveGridRole).into(),
+        E::BadRequest(m) | E::Other(m) => match lang {
+            Lang::En => format!("History error: {m}"),
+            Lang::Fr => format!("Erreur d'historique\u{A0}: {m}"),
+        },
+    }
 }
 
 /// `s` with its first letter in lower case, to run a label into a sentence.
@@ -226,6 +243,30 @@ mod tests {
             SolarExport,
         ];
         crate::i18n::assert_table(ALL, energy_text, &[]);
+    }
+
+    #[test]
+    fn history_errors_are_led_in_french() {
+        use crate::api::history::HistoryApiError as E;
+        assert_eq!(history_error(Lang::En, &E::NotRecorded), "Not recorded yet");
+        assert_eq!(
+            history_error(Lang::Fr, &E::NotRecorded),
+            "Pas encore enregistré"
+        );
+        assert_eq!(
+            history_error(Lang::Fr, &E::Other("boom".into())),
+            "Erreur d'historique\u{A0}: boom"
+        );
+        assert_eq!(
+            history_error(Lang::En, &E::BadRequest("bad".into())),
+            "History error: bad"
+        );
+    }
+
+    #[test]
+    fn spoken_power_keeps_number_and_unit_together() {
+        assert_eq!(spoken_power("3,2".into(), true), "3,2\u{A0}kilowatts");
+        assert_eq!(spoken_power("400".into(), false), "400\u{A0}watts");
     }
 
     #[test]

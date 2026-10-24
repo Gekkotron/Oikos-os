@@ -466,7 +466,7 @@ pub fn EnergyScreen() -> impl IntoView {
     let folded = move || ui.with(|u| u.consumers.len() > ARC_SLOTS);
 
     // Shared KwhToday map, installed once by App::install_history_refresh.
-    let kwh_today = expect_context::<KwhToday>().0;
+    let kwh_map = expect_context::<KwhToday>().0;
 
     view! {
         <section class="energy">
@@ -556,7 +556,7 @@ pub fn EnergyScreen() -> impl IntoView {
                             children=move |id| {
                                 let card_id = id.clone();
                                 let today = Signal::derive(move || {
-                                    today_for_card(&card_id, house, ui, kwh_today)
+                                    today_for_card(&card_id, house, ui, kwh_map)
                                 });
                                 view! {
                                     <EnergyCard id=id ui=ui open=open names=names today=today />

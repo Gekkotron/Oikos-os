@@ -131,7 +131,7 @@ async fn live_house_shows_nodes_and_cards() {
         .get_attribute("aria-label")
         .unwrap();
     assert!(
-        aria.contains("Importing 253 watts from the grid."),
+        aria.contains("Importing 253\u{a0}watts from the grid."),
         "{aria}"
     );
 
@@ -269,6 +269,7 @@ async fn energy_follows_the_language_toggle() {
     for word in ["Off-peak", "Consumption", "Bought", "Today", "Grid"] {
         assert!(!fr.contains(word), "{word:?} left in {fr}");
     }
+    assert!(fr.contains("Oven") && !fr.contains("Four"), "{fr}");
     assert!(text(&host, ".energy-day__detail").is_empty());
     let prev = host
         .query_selector(".energy-day__nav")
@@ -308,6 +309,7 @@ async fn energy_follows_the_language_toggle() {
     ] {
         assert!(!en.contains(word), "{word:?} left in {en}");
     }
+    assert!(en.contains("Oven"), "{en}");
     let prev = host
         .query_selector(".energy-day__nav")
         .unwrap()
