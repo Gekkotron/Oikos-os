@@ -12,7 +12,7 @@ use oikos_web::components::toast::Toasts;
 use std::sync::{Arc, Mutex};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
-use web_sys::{Element, HtmlElement};
+use web_sys::{Element, HtmlElement, HtmlInputElement};
 wasm_bindgen_test_configure!(run_in_browser);
 
 fn zone(id: &str, name: &str, state: ZoneState, setpoint: Option<f64>) -> ZoneView {
@@ -127,7 +127,7 @@ async fn room_list_marks_the_selected_room_and_selects_on_click() {
 }
 
 #[wasm_bindgen_test]
-async fn refetch_keeps_selection_and_draft() {
+async fn refetch_keeps_the_draft_and_the_open_editor() {
     let mut start = zone("living-room", "Living room", ZoneState::Active, Some(16.0));
     start.settings.rules = Rules {
         heat: Some(ModeRules {
@@ -179,11 +179,35 @@ async fn refetch_keeps_selection_and_draft() {
             .is_some()
     );
 
-    // A refetch: the same zone with a fresh reading.
+    // Edit the draft: the block goes to 21 °C.
+    let temp: HtmlInputElement = host
+        .query_selector(".climate-timeline__editor input[type=number]")
+        .unwrap()
+        .expect("temperature field")
+        .unchecked_into();
+    temp.set_value("21");
+    temp.dispatch_event(&web_sys::Event::new("change").unwrap())
+        .unwrap();
+    tick().await;
+
+    // A refetch: a fresh reading, and approved rules changed elsewhere (the block at 17 °C).
     let mut fresh = start;
     fresh.reading = Some(19.4);
+    if let Some(heat) = fresh.settings.rules.heat.as_mut() {
+        heat.blocks[0].setpoint = Setpoint::Temp(17.0);
+    }
     current.set(fresh);
     tick().await;
+
+    let shown = host
+        .query_selector(".climate-timeline__bar .climate-timeline__temp")
+        .unwrap()
+        .and_then(|n| n.text_content());
+    assert_eq!(
+        shown.as_deref(),
+        Some("21°"),
+        "the draft wins over the refetch"
+    );
 
     assert!(
         host.query_selector(".climate-timeline__editor")

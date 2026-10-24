@@ -5824,7 +5824,8 @@ html:has(.flow-canvas-screen) {
 }
 
 /* The Climate screen takes the whole content width, not the 1200 px other screens keep. */
-.screen:has(.climate-screen) {
+.screen:has(.climate-screen),
+.shell__content:has(.climate-screen) > .content-header {
   max-width: none;
 }
 
@@ -6218,7 +6219,8 @@ html:has(.flow-canvas-screen) {
   flex-direction: column;
   box-sizing: border-box;
   min-height: 4px;
-  padding: 6px 8px;
+  /* No vertical padding: the block's height is its time span, however short. */
+  padding: 0 8px;
   border-radius: 10px;
   color: var(--temp-ink);
   overflow: hidden;
@@ -6259,6 +6261,7 @@ html:has(.flow-canvas-screen) {
 }
 
 .climate-timeline__temp {
+  padding-top: 6px;
   font: 700 16px/18px var(--font-display);
 }
 
@@ -6465,11 +6468,12 @@ html:has(.flow-canvas-screen) {
     left: 2px;
     right: 2px;
     align-items: center;
-    padding: 3px 0 0;
+    padding: 0;
     border-radius: 6px;
   }
 
   .climate-timeline__temp {
+    padding-top: 3px;
     font: 700 11px/14px var(--font-body);
   }
 }
