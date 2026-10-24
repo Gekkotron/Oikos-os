@@ -47,7 +47,7 @@ While `legacy_prefix` is set the hub also reads `oikos-push/notification/+`, `oi
 
 ## Alarm pushes
 
-The native alarm sends on its own channel, `alarm`, from source `alarm`. A triggered alarm is a critical alert with a **Disarm** button: tapping it sends the reply on `oikos/push/responses`, and the hub disarms the alarm. That reply topic is subscribed while the alarm is on. A plain arm or disarm sends no push, and an armed house with an open window sends a quiet note. See [Alarm](alarm.md#phone-push).
+The native alarm sends on its own channel, `alarm`, from source `alarm`. A triggered alarm is a critical alert with a **Disarm** button: tapping it sends the reply on `oikos/push/responses`, and the hub disarms the alarm. The hub listens on the reply topic at all times. A plain arm or disarm sends no push, and an armed house with an open window sends a quiet note. See [Alarm](alarm.md#phone-push).
 
 ## Switching over from OikosPush
 

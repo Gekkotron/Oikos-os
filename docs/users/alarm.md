@@ -121,7 +121,7 @@ The alarm can follow your phones. List the trackers (the `device_tracker` entiti
 - **Arm away** when **every** tracker has read *away* for 120 s (the default). The 120 s absorbs a geofence flapping at the edge. An unknown or unavailable tracker blocks the auto-arm, so a phone with a dead battery never arms the house by accident.
 - **Disarm** when **any** tracker changes to *home*. Only the change counts: a phone that is already home when someone arms the house by hand does not disarm it.
 
-Presence works on edges, not levels. It arms once for each time the house empties. After any disarm, from anywhere (the panel, a remote, the push button, or turning the alarm on), presence won't arm again until a tracker reads home and the house empties again. So if you disarm to let someone in while you are out, the alarm stays disarmed until you come back and leave again.
+Presence works on edges, not levels. It arms once for each time the house empties. After any disarm, from anywhere (the panel, a remote, the push button, or turning the alarm on), presence won't arm again until a tracker reads home and the house empties again (or one is already home when you disarm, in which case it arms as soon as the house empties). So if you disarm to let someone in while you are out, the alarm stays disarmed until you come back and leave again.
 
 A presence arm skips the exit delay, because you have already left. A manual arm waits out the exit delay (60 s by default).
 
@@ -129,7 +129,7 @@ The hub reads the trackers' state at start-up too. A phone that came home while 
 
 ## Phone push
 
-The alarm sends its pushes on the `alarm` channel. Four kinds of push can arrive:
+The alarm sends its pushes on the `alarm` channel. Three kinds of push can arrive:
 
 - **Triggered**: a critical alert, titled *Alarm*, that names what tripped it: the door or window, the motions and their rooms, or an SOS. It has a **Disarm** button. Tapping it disarms the alarm and stops the sirens. Each new trip sends a new alert, and the earlier one is cleared when the alarm is disarmed.
 - **Armed with open sensors**: a quiet note that names the sensors watched for closing.
@@ -148,7 +148,7 @@ After a restart the hub does not count sensor states that the broker replays as 
 If another controller, such as Jeedom, runs your alarm today, move over in this order. Do not run both alarms with live sirens at the same time, because every trip would ring twice.
 
 1. Enable the native alarm here, with the same sensors, sirens and modes as the other controller. Leave the other controller's scenarios that ring the sirens as they are for now.
-2. Test it with the sirens disconnected or on a test siren: open each sensor, press each remote, check the pushes and the Disarm button, and check the arm and disarm chirp.
+2. Test it with the sirens disconnected or on a test siren: open each sensor, press each remote, check the pushes and the Disarm button, and check the arm chirp.
 3. Switch over: disarm the other controller's alarm and remove its alarm logic, its scenarios that ring the sirens, and its discovery topic. Its `alarm_control_panel` config is retained on the broker, so publish an empty retained message to that discovery `config` topic too. Otherwise the old panel stays on the Security page next to the native one.
 
 Then the Security page shows only `oikos_alarm_house`.
