@@ -231,11 +231,12 @@ pub fn HomeHeader() -> impl IntoView {
             .map(|m| view! { <ModePill mode=m lang=lang /> })
     };
 
-    let solar_visible = move || {
+    // A memo, so the card subtree is rebuilt only when visibility flips, not on every clock tick.
+    let solar_visible = Memo::new(move |_| {
         house
             .solar
             .with(|s| solar_card_visible(s.as_ref(), now.get()))
-    };
+    });
     let card = move || {
         if !card_visible() {
             return None;
@@ -267,10 +268,10 @@ pub fn HomeHeader() -> impl IntoView {
                 <div class="home-header__chips">{lights} {indoor} {heating} {mode}</div>
             </div>
             {move || {
-                if solar_visible() {
+                if solar_visible.get() {
                     view! { <div class="home-header__cards">{card} <SolarCard /></div> }.into_any()
                 } else {
-                    card().into_any()
+                    view! { {card} }.into_any()
                 }
             }}
         </section>

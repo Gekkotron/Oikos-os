@@ -211,3 +211,31 @@ async fn solar_changed_refetch_does_not_panic() {
     tick().await;
     assert!(host.query_selector(".home-header").unwrap().is_some());
 }
+
+#[wasm_bindgen_test]
+async fn clock_tick_keeps_the_card_node() {
+    use oikos_web::components::now::Now;
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let house = House::new();
+    house.solar.set(Some(solar(now_s(), false)));
+    let clock = RwSignal::new(now_s());
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(house);
+            provide_context(Toasts::new());
+            provide_context(Pending::new());
+            provide_context(Now(clock));
+            view! { <Router><HomeHeader /></Router> }
+        },
+    ));
+    tick().await;
+    let before = host.query_selector(".solar-card").unwrap().expect("card");
+    clock.update(|t| *t += 60);
+    tick().await;
+    let after = host.query_selector(".solar-card").unwrap().expect("card");
+    assert!(before.is_same_node(Some(&after)));
+    assert!(before.is_connected());
+}

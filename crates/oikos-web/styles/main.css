@@ -6469,6 +6469,7 @@ html:has(.flow-canvas-screen) {
 
   .solar-curve {
     flex: none;
+    min-height: 0;
     height: 22px;
   }
 
