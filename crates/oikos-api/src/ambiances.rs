@@ -2,7 +2,7 @@
 //! (no house needed); checks against the house belong to the hub.
 
 use crate::views::EntityView;
-use oikos_core::model::{Availability, Command, EntityCategory, Kind, StateValue, SwitchType};
+use oikos_core::model::{Availability, Command, EntityCategory, Kind, StateValue};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -253,8 +253,8 @@ fn validate_climate(c: &ClimateAction) -> Result<(), String> {
         return Err("setpoint must be a number or \"off\"".into());
     }
     if c.clear {
-        if c.setpoint.is_some() || c.mode.is_some() {
-            return Err("clear cannot come with a setpoint or a mode".into());
+        if c.setpoint.is_some() || c.mode.is_some() || c.hours.is_some() {
+            return Err("clear cannot come with a setpoint, a mode or hours".into());
         }
         return Ok(());
     }
@@ -267,8 +267,12 @@ fn validate_climate(c: &ClimateAction) -> Result<(), String> {
     }
 }
 
+/// Cover classes that are window coverings; garages, gates, doors and dampers never belong.
+const WINDOW_COVERINGS: [&str; 6] = ["shutter", "blind", "curtain", "shade", "awning", "window"];
+
 /// The entities a category action targets, offline ones included (the UI counts them).
-/// A hidden entity still belongs: hiding only removes a card.
+/// A hidden entity still belongs: hiding only removes a card. Groups (hub and Zigbee2MQTT),
+/// hub-owned virtual entities and the Zigbee2MQTT bridge never belong.
 pub fn category_members<'a>(
     action: &CategoryAction,
     entities: &'a [EntityView],
@@ -280,6 +284,12 @@ pub fn category_members<'a>(
                 && e.enabled_by_default
                 && e.part_of.is_none()
                 && !e.id.starts_with("group_")
+                && !e.id.starts_with("virtual_")
+                && !e.capabilities.z2m_group
+                && !e
+                    .device_id
+                    .as_deref()
+                    .is_some_and(|d| d.starts_with("zigbee2mqtt_bridge_"))
                 && !action.except.contains(&e.id)
                 && action.area.as_ref().is_none_or(|a| &e.area == a)
                 && in_category(action.what, e)
@@ -290,11 +300,16 @@ pub fn category_members<'a>(
 fn in_category(what: Category, e: &EntityView) -> bool {
     match what {
         Category::Lights => e.kind == Kind::Light,
-        Category::Plugs => matches!(
-            SwitchType::of(e.protocol_kind, &e.ui),
-            Some(SwitchType::Switch | SwitchType::Plug)
-        ),
-        Category::Covers => e.kind == Kind::Cover,
+        Category::Plugs => {
+            e.protocol_kind == Kind::Switch
+                && matches!(e.ui.show_as.as_deref(), None | Some("plug"))
+        }
+        Category::Covers => {
+            e.kind == Kind::Cover
+                && e.device_class
+                    .as_deref()
+                    .is_none_or(|class| WINDOW_COVERINGS.contains(&class))
+        }
     }
 }
 
@@ -529,6 +544,10 @@ mod tests {
             "clear with setpoint",
             climate(json!({"clear": true, "setpoint": 16})),
         ));
+        cases.push((
+            "clear with hours",
+            climate(json!({"clear": true, "hours": 2})),
+        ));
         cases.push(("empty climate", climate(json!({"zone": "z"}))));
         cases.push(("setpoint without hours", climate(json!({"setpoint": 16}))));
         for h in [0, 721] {
@@ -651,6 +670,67 @@ mod tests {
         let all = [entity("group_x", Kind::Light), entity("lamp", Kind::Light)];
         let a = act(Category::Lights, Target::Off);
         assert_eq!(ids(category_members(&a, &all)), ["lamp"]);
+    }
+
+    #[test]
+    fn virtual_entities_and_the_z2m_bridge_are_never_plugs() {
+        let mut permit_join = switch_as("bridge_0x00124b0022983b3e_permit_join_zigbee2mqtt", None);
+        permit_join.device_id = Some("zigbee2mqtt_bridge_0x00124b0022983b3e".into());
+        let all = [
+            switch_as("virtual_guest_mode", None),
+            permit_join,
+            switch_as("plain", None),
+        ];
+        let a = act(Category::Plugs, Target::Off);
+        assert_eq!(ids(category_members(&a, &all)), ["plain"]);
+    }
+
+    #[test]
+    fn z2m_groups_are_not_category_members() {
+        let mut group = entity("1_light_zigbee2mqtt", Kind::Light);
+        group.capabilities.z2m_group = true;
+        let all = [group, entity("lamp", Kind::Light)];
+        let a = act(Category::Lights, Target::Off);
+        assert_eq!(ids(category_members(&a, &all)), ["lamp"]);
+    }
+
+    #[test]
+    fn covers_are_window_coverings_only() {
+        let cover = |id: &str, class: Option<&str>| {
+            let mut e = entity(id, Kind::Cover);
+            e.device_class = class.map(Into::into);
+            e
+        };
+        let all = [
+            cover("plain", None),
+            cover("shutter", Some("shutter")),
+            cover("blind", Some("blind")),
+            cover("curtain", Some("curtain")),
+            cover("shade", Some("shade")),
+            cover("awning", Some("awning")),
+            cover("window", Some("window")),
+            cover("garage", Some("garage")),
+            cover("gate", Some("gate")),
+            cover("door", Some("door")),
+            cover("damper", Some("damper")),
+        ];
+        let a = act(Category::Covers, Target::Close);
+        assert_eq!(
+            ids(category_members(&a, &all)),
+            [
+                "plain", "shutter", "blind", "curtain", "shade", "awning", "window"
+            ]
+        );
+    }
+
+    #[test]
+    fn unknown_show_as_is_not_a_plug() {
+        let all = [
+            switch_as("fan", Some("fan")),
+            switch_as("plug", Some("plug")),
+        ];
+        let a = act(Category::Plugs, Target::Off);
+        assert_eq!(ids(category_members(&a, &all)), ["plug"]);
     }
 
     #[test]

@@ -21,7 +21,8 @@ impl Hub {
     /// locally so the next read sees it before the broker echo arrives.
     pub async fn set_ambiance(&self, mut a: Ambiance) -> Result<AmbianceView, HubError> {
         validate_ambiance(&a).map_err(HubError::Rejected)?;
-        self.check_ambiance_house(&mut a)?;
+        let stored = self.ambiance(&a.id).and_then(|view| view.ambiance);
+        self.check_ambiance_house(&mut a, stored.as_ref())?;
         let payload = serde_json::to_string(&a)
             .map_err(|err| HubError::Rejected(format!("serialize: {err}")))?;
         self.publish(Publish {
@@ -62,9 +63,18 @@ impl Hub {
     }
 
     /// Checks every action against the house; a category's area is stored as its resolved id.
-    /// Publishes nothing.
-    fn check_ambiance_house(&self, a: &mut Ambiance) -> Result<(), HubError> {
+    /// An action equal to one of the stored version is not checked again, so an ambiance whose
+    /// entity, area, flow or zone has since gone can still be renamed or reordered. Publishes
+    /// nothing.
+    fn check_ambiance_house(
+        &self,
+        a: &mut Ambiance,
+        stored: Option<&Ambiance>,
+    ) -> Result<(), HubError> {
         for (index, action) in a.actions.iter_mut().enumerate() {
+            if stored.is_some_and(|s| s.actions.contains(action)) {
+                continue;
+            }
             let reject = |why: String| HubError::Rejected(format!("action {index}: {why}"));
             match action {
                 AmbianceAction::Device(device) => {

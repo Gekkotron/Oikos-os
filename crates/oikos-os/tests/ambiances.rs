@@ -674,3 +674,204 @@ async fn climate_every_zone_reaches_only_active_zones() {
     assert_eq!(overrides_of(&hub, "living"), 1);
     assert_eq!(overrides_of(&hub, "attic"), 0);
 }
+
+// Final-review fixes.
+
+#[tokio::test]
+async fn bridge_switch_and_z2m_group_are_not_category_members() {
+    let (hub, rx) = hub_with_timeout(50);
+    hub.ingest(
+        "oikos/switch/1221051039810110150109113116116_0x00124b0022983b3e/permit_join/config",
+        &fixture(
+            "discovery/switch__1221051039810110150109113116116_0x00124b0022983b3e__permit_join.json",
+        ),
+    );
+    hub.ingest(
+        "oikos/light/1221051039810110150109113116116_1/light/config",
+        &fixture("discovery/light__1221051039810110150109113116116_1__light.json"),
+    );
+    let log = echo(rx, Arc::clone(&hub), false);
+    let plugs = AmbianceAction::Category(CategoryAction {
+        what: Category::Plugs,
+        to: Target::Off,
+        brightness: None,
+        area: None,
+        except: vec![],
+    });
+    save(&hub, &ambiance("night", vec![plugs, lights(Target::Off)]));
+
+    let report = hub.apply_ambiance("night").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Skipped, Outcome::Skipped]);
+    assert!(report.actions.iter().all(|a| a.total == 0), "{report:?}");
+    tokio::task::yield_now().await;
+    assert!(published(&log).is_empty(), "{:?}", published(&log));
+}
+
+/// Waits for the next `AmbianceApplied` broadcast.
+async fn next_applied(events: &mut tokio::sync::broadcast::Receiver<WsEvent>) -> ApplyReport {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let WsEvent::AmbianceApplied { report } = events.recv().await.expect("open") {
+                return report;
+            }
+        }
+    })
+    .await
+    .expect("an AmbianceApplied within 2 s")
+}
+
+#[tokio::test]
+async fn dropped_apply_still_finishes_and_reports() {
+    let (hub, rx) = led_hub(200, true);
+    hub.ingest(SWITCH_TOPIC, &fixture(SWITCH_FIXTURE));
+    let _log = echo(rx, Arc::clone(&hub), false);
+    // The switch never echoes, so the run outlives the caller's patience.
+    save(
+        &hub,
+        &ambiance("a", vec![device(SWITCH_ID, turn_on()), lights(Target::Off)]),
+    );
+    let mut events = hub.subscribe();
+
+    let dropped = tokio::time::timeout(Duration::from_millis(20), hub.apply_ambiance("a")).await;
+    assert!(dropped.is_err(), "the caller gave up first");
+
+    let report = next_applied(&mut events).await;
+    assert_eq!(report.ambiance, "a");
+    assert_eq!(outcomes(&report), [Outcome::Failed, Outcome::Ok]);
+    // The run is over, so the lock is free again.
+    let again = hub.apply_ambiance("a").await.expect("runs again");
+    assert_eq!(again.actions.len(), 2);
+}
+
+#[tokio::test]
+async fn resave_with_an_unchanged_action_on_a_vanished_entity_is_accepted() {
+    let (hub, _rx) = hub();
+    hub.ingest(SWITCH_TOPIC, &fixture(SWITCH_FIXTURE));
+    let mut a = ambiance("a", vec![device(SWITCH_ID, turn_on())]);
+    hub.set_ambiance(a.clone()).await.expect("first save");
+    hub.ingest(SWITCH_TOPIC, b"");
+
+    a.pinned = !a.pinned;
+    hub.set_ambiance(a.clone())
+        .await
+        .expect("an unchanged action is not checked again");
+
+    let mut changed = a.clone();
+    changed.actions[0] = device(SWITCH_ID, Command::TurnOff);
+    assert!(rejected(hub.set_ambiance(changed).await).contains(SWITCH_ID));
+
+    a.actions.push(device("ghost", Command::TurnOff));
+    let why = rejected(hub.set_ambiance(a).await);
+    assert!(why.contains("action 1") && why.contains("ghost"), "{why}");
+}
+
+#[tokio::test]
+async fn every_target_offline_is_said_once_for_the_action() {
+    let (hub, rx) = hub_with_timeout(50);
+    let mut config: serde_json::Value = serde_json::from_slice(&fixture(TV_FIXTURE)).expect("json");
+    config["availability"][0]["topic"] = "test/tv_availability".into();
+    hub.ingest(TV_TOPIC, config.to_string().as_bytes());
+    hub.ingest(TV_STATE_TOPIC, br#"{"state":"ON","brightness":100}"#);
+    hub.ingest("test/tv_availability", br#"{"state":"offline"}"#);
+    let log = echo(rx, Arc::clone(&hub), false);
+    save(
+        &hub,
+        &ambiance(
+            "night",
+            vec![lights(Target::Off), device(TV_ID, Command::TurnOff)],
+        ),
+    );
+
+    let report = hub.apply_ambiance("night").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Skipped, Outcome::Skipped]);
+    for action in &report.actions {
+        assert_eq!(action.reason.as_deref(), Some("every target is offline"));
+        assert_eq!(action.skipped.len(), 1);
+    }
+    tokio::task::yield_now().await;
+    assert!(published(&log).is_empty(), "{:?}", published(&log));
+}
+
+#[tokio::test]
+async fn category_in_a_vanished_area_is_skipped() {
+    let (hub, rx) = led_hub(50, true);
+    let log = echo(rx, Arc::clone(&hub), false);
+    save(
+        &hub,
+        &ambiance("night", vec![category(Some("gone_room"), vec![])]),
+    );
+
+    let report = hub.apply_ambiance("night").await.expect("apply");
+
+    assert_eq!(outcomes(&report), [Outcome::Skipped]);
+    assert_eq!(
+        report.actions[0].reason.as_deref(),
+        Some("no longer exists")
+    );
+    tokio::task::yield_now().await;
+    assert!(published(&log).is_empty(), "{:?}", published(&log));
+}
+
+#[tokio::test]
+async fn a_large_category_does_not_overflow_the_publish_queue() {
+    let (hub, mut publisher) = hub_with_timeout(500);
+    let base: serde_json::Value = serde_json::from_slice(&fixture(LED_FIXTURE)).expect("json");
+    for n in 0..80 {
+        let mut config = base.clone();
+        config["unique_id"] = format!("bulk{n}_light").into();
+        config["device"]["identifiers"] = serde_json::json!([format!("bulk{n}")]);
+        config["state_topic"] = format!("test/bulk{n}").into();
+        config["command_topic"] = format!("test/bulk{n}/set").into();
+        hub.ingest(
+            &format!("oikos/light/bulk{n}/light/config"),
+            config.to_string().as_bytes(),
+        );
+        hub.ingest(&format!("test/bulk{n}"), br#"{"state":"ON"}"#);
+    }
+    // The broker: every light echoes the state it was sent.
+    let broker = Arc::clone(&hub);
+    tokio::spawn(async move {
+        while let Some(publish) = publisher.recv().await {
+            if let Some(state) = publish.topic.strip_suffix("/set") {
+                broker.ingest(state, publish.payload.as_bytes());
+            }
+        }
+    });
+    save(&hub, &ambiance("night", vec![lights(Target::Off)]));
+
+    let report = hub.apply_ambiance("night").await.expect("apply");
+
+    let action = &report.actions[0];
+    assert_eq!(action.total, 80);
+    assert!(action.failed.is_empty(), "{:?}", action.failed);
+    assert_eq!(outcomes(&report), [Outcome::Ok]);
+}
+
+#[tokio::test]
+async fn set_ambiance_refuses_an_alarm_code() {
+    let (hub, _rx) = hub();
+    hub.ingest(
+        "oikos/alarm_control_panel/jeedom/house_alarm/config",
+        &fixture("discovery/alarm_control_panel__jeedom__house_alarm.json"),
+    );
+    let arm = device(
+        "jeedom_house_alarm",
+        Command::Arm {
+            mode: oikos_core::model::AlarmMode::Away,
+            code: Some("1234".to_owned()),
+        },
+    );
+    let why = rejected(hub.set_ambiance(ambiance("a", vec![arm])).await);
+    assert!(why.contains("alarm codes are not allowed"), "{why}");
+    let disarm = device(
+        "jeedom_house_alarm",
+        Command::Disarm {
+            code: Some("1234".to_owned()),
+        },
+    );
+    let why = rejected(hub.set_ambiance(ambiance("a", vec![disarm])).await);
+    assert!(why.contains("alarm codes are not allowed"), "{why}");
+    assert!(hub.ambiances().is_empty());
+}

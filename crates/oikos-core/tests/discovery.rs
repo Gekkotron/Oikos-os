@@ -441,6 +441,18 @@ fn bindings_availability_topic_rule() {
 }
 
 #[test]
+fn z2m_group_is_flagged_and_a_device_is_not() {
+    let group = parse_fixture("light__1221051039810110150109113116116_1__light");
+    assert!(group.capabilities.z2m_group);
+    let cover_group = parse_fixture("cover__1221051039810110150109113116116_2__cover");
+    assert!(cover_group.capabilities.z2m_group);
+    let light = parse_fixture("light__0x00124b0011b6b80f__light_4");
+    assert!(!light.capabilities.z2m_group);
+    let empty = capabilities::from_config(Kind::Light, &json!({"group": []}));
+    assert!(!empty.z2m_group);
+}
+
+#[test]
 fn capabilities_from_config_reads_alarm_code() {
     let cfg = json!({
         "supported_features": ["arm_home", "arm_custom_bypass"],

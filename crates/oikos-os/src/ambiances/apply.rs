@@ -10,11 +10,15 @@ use oikos_api::{
     entity_views, plan_category,
 };
 use oikos_climate::doc::ZoneState;
+use oikos_core::model::{Availability, UNASSIGNED_AREA};
 
 use crate::clock;
 use crate::hub::{Hub, HubError};
 
 const GONE: &str = "no longer exists";
+const OFFLINE: &str = "offline";
+/// Category commands go out this many at a time, well under the 64-slot publish queue.
+const COMMAND_CHUNK: usize = 16;
 
 /// Holds an ambiance id in `ambiances_running`; dropping it, on any exit, lets it run again.
 struct RunLock {
@@ -74,13 +78,19 @@ impl Tally {
         } else {
             Outcome::Ok
         };
+        let all_offline = outcome == Outcome::Skipped
+            && !self.skipped.is_empty()
+            && self.skipped.iter().all(|p| p.reason == OFFLINE);
+        let reason = self
+            .reason
+            .or_else(|| all_offline.then(|| "every target is offline".to_owned()));
         ActionReport {
             index,
             outcome,
             total: self.total,
             failed: self.failed,
             skipped: self.skipped,
-            reason: self.reason,
+            reason,
         }
     }
 }
@@ -95,7 +105,9 @@ fn problem(id: &str, reason: impl Into<String>) -> Problem {
 impl Hub {
     /// Runs the ambiance's actions in order. A failing or skipped action never stops the run;
     /// the report says what each one did. Refused up front while the broker is down, for an
-    /// unknown or invalid ambiance, and while the same ambiance is already running.
+    /// unknown or invalid ambiance, and while the same ambiance is already running. The run
+    /// is a task of its own, so a caller that goes away (a closed HTTP request) does not cut
+    /// it short: it still finishes, broadcasts its report and releases the lock.
     pub async fn apply_ambiance(self: &Arc<Self>, id: &str) -> Result<ApplyReport, HubError> {
         if !matches!(*self.connection().borrow(), ConnectionStatus::Online) {
             return Err(HubError::Publish("broker offline".to_owned()));
@@ -111,30 +123,45 @@ impl Hub {
                 ));
             }
         };
-        let Some(_lock) = RunLock::take(self, id) else {
+        let Some(lock) = RunLock::take(self, id) else {
             return Err(HubError::Rejected("already running".to_owned()));
         };
 
-        let started_at = clock::now();
-        let mut actions = Vec::with_capacity(ambiance.actions.len());
-        for (index, action) in ambiance.actions.iter().enumerate() {
-            let tally = match action {
-                AmbianceAction::Category(a) => self.apply_category(a).await,
-                AmbianceAction::Device(a) => self.apply_device(a).await,
-                AmbianceAction::Climate(a) => self.apply_climate(a).await,
-                AmbianceAction::Flow(a) => self.apply_flow(a).await,
+        let hub = Arc::clone(self);
+        let id = id.to_owned();
+        let run = tokio::spawn(async move {
+            let _lock = lock;
+            let started_at = clock::now();
+            let mut actions = Vec::with_capacity(ambiance.actions.len());
+            for (index, action) in ambiance.actions.iter().enumerate() {
+                let tally = match action {
+                    AmbianceAction::Category(a) => hub.apply_category(a).await,
+                    AmbianceAction::Device(a) => hub.apply_device(a).await,
+                    AmbianceAction::Climate(a) => hub.apply_climate(a).await,
+                    AmbianceAction::Flow(a) => hub.apply_flow(a).await,
+                };
+                actions.push(tally.report(index));
+            }
+            let report = ApplyReport {
+                ambiance: id,
+                started_at,
+                actions,
             };
-            actions.push(tally.report(index));
-        }
-        let report = ApplyReport {
-            ambiance: id.to_owned(),
-            started_at,
-            actions,
-        };
-        self.broadcast(WsEvent::AmbianceApplied {
-            report: report.clone(),
+            hub.broadcast(WsEvent::AmbianceApplied {
+                report: report.clone(),
+            });
+            report
         });
-        Ok(report)
+        run.await
+            .map_err(|_| HubError::Rejected("apply task failed".to_owned()))
+    }
+
+    /// True when `area` is still a room of the house.
+    fn area_exists(&self, area: &str) -> bool {
+        self.read()
+            .effective_areas()
+            .iter()
+            .any(|a| a.id == area && a.id != UNASSIGNED_AREA)
     }
 
     /// The house as it is right now; never held across an await.
@@ -143,33 +170,38 @@ impl Hub {
     }
 
     async fn apply_category(&self, action: &CategoryAction) -> Tally {
+        if action
+            .area
+            .as_deref()
+            .is_some_and(|area| !self.area_exists(area))
+        {
+            return Tally::skipped_whole(0, GONE);
+        }
         let plan = plan_category(action, &self.views_now());
         let mut tally = Tally {
             total: plan.send.len() + plan.already.len() + plan.offline.len(),
             ok: plan.already.len(),
-            skipped: plan
-                .offline
-                .iter()
-                .map(|id| problem(id, "offline"))
-                .collect(),
+            skipped: plan.offline.iter().map(|id| problem(id, OFFLINE)).collect(),
             ..Tally::default()
         };
         if tally.total == 0 {
             tally.reason = Some("no matching entities".to_owned());
         }
-        let results = join_all(plan.send.into_iter().map(|(id, cmd)| async move {
-            let result = self.send_command(&id, cmd).await;
-            (id, result)
-        }))
-        .await;
-        for (id, result) in results {
-            match result {
-                Ok(response) if response.accepted => tally.ok += 1,
-                Ok(response) => tally.failed.push(problem(
-                    &id,
-                    response.reason.unwrap_or_else(|| "not accepted".to_owned()),
-                )),
-                Err(err) => tally.failed.push(problem(&id, err.to_string())),
+        for chunk in plan.send.chunks(COMMAND_CHUNK) {
+            let results = join_all(chunk.iter().map(|(id, cmd)| async move {
+                let result = self.send_command(id, cmd.clone()).await;
+                (id, result)
+            }))
+            .await;
+            for (id, result) in results {
+                match result {
+                    Ok(response) if response.accepted => tally.ok += 1,
+                    Ok(response) => tally.failed.push(problem(
+                        id,
+                        response.reason.unwrap_or_else(|| "not accepted".to_owned()),
+                    )),
+                    Err(err) => tally.failed.push(problem(id, err.to_string())),
+                }
             }
         }
         tally
@@ -184,8 +216,8 @@ impl Hub {
             total: 1,
             ..Tally::default()
         };
-        if view.state.availability == oikos_core::model::Availability::Offline {
-            tally.skipped.push(problem(&action.entity, "offline"));
+        if view.state.availability == Availability::Offline {
+            tally.skipped.push(problem(&action.entity, OFFLINE));
         } else if already_there(view, &action.command) {
             tally.ok = 1;
         } else {
