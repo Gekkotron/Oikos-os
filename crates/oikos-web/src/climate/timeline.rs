@@ -20,6 +20,8 @@ const DAY_END: u16 = 1440;
 /// The temperatures a block can hold (`ModeRules` validation accepts 0 to 40).
 const MIN_TEMP: f64 = 0.0;
 const MAX_TEMP: f64 = 40.0;
+/// The base of a new schedule, and of one whose base is switched back on from Off.
+pub const NEW_BASE: f64 = 16.0;
 
 /// Which end of a block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,6 +129,17 @@ pub fn set_setpoint(rules: &ModeRules, block: usize, sp: Setpoint) -> ModeRules 
             b.evidence = None;
         }
     }
+    out
+}
+
+/// Sets the mode's base, the setpoint outside the blocks; a temperature is kept within 0 to 40.
+pub fn set_base(rules: &ModeRules, sp: Setpoint) -> ModeRules {
+    let mut out = rules.clone();
+    out.base = match sp {
+        Setpoint::Temp(t) if t.is_finite() => Setpoint::Temp(t.clamp(MIN_TEMP, MAX_TEMP)),
+        Setpoint::Temp(_) => return out,
+        Setpoint::Off => Setpoint::Off,
+    };
     out
 }
 
@@ -679,9 +692,61 @@ pub fn WeekTimeline(
     };
     view! {
         <div class="climate-timeline">
-            <p class="climate-timeline__base">
-                "Base " <strong>{base}</strong> " outside the blocks"
-            </p>
+            {if editable {
+                let base_temp = move || {
+                    rules.with(|r| match r.base {
+                        Setpoint::Temp(t) => t.to_string(),
+                        Setpoint::Off => String::new(),
+                    })
+                };
+                let base_off = move || rules.with(|r| r.base == Setpoint::Off);
+                view! {
+                    <div class="climate-timeline__base climate-timeline__base--edit">
+                        <label class="climate-field climate-field--inline">
+                            <span>"Base"</span>
+                            <input
+                                class="field climate-timeline__base-input"
+                                type="number"
+                                step="0.5"
+                                min="0"
+                                max="40"
+                                aria-label="Base temperature"
+                                prop:value=base_temp
+                                disabled=base_off
+                                on:change=move |ev| {
+                                    if let Ok(t) = event_target_value(&ev).trim().parse::<f64>() {
+                                        on_change.run(set_base(&rules.get_untracked(), Setpoint::Temp(t)));
+                                    }
+                                }
+                            />
+                        </label>
+                        <label class="climate-field climate-field--inline">
+                            <input
+                                type="checkbox"
+                                prop:checked=base_off
+                                on:change=move |ev| {
+                                    let sp = if event_target_checked(&ev) {
+                                        Setpoint::Off
+                                    } else {
+                                        Setpoint::Temp(NEW_BASE)
+                                    };
+                                    on_change.run(set_base(&rules.get_untracked(), sp));
+                                }
+                            />
+                            <span>"Off"</span>
+                        </label>
+                        <span>"outside the blocks"</span>
+                    </div>
+                }
+                    .into_any()
+            } else {
+                view! {
+                    <p class="climate-timeline__base">
+                        "Base " <strong>{base}</strong> " outside the blocks"
+                    </p>
+                }
+                    .into_any()
+            }}
             <div class="climate-timeline__cal">
                 <span class="climate-timeline__corner"></span>
                 {headers}
@@ -742,6 +807,21 @@ mod tests {
 
     fn at(s: &str) -> HhMm {
         HhMm::parse(s).unwrap()
+    }
+
+    #[test]
+    fn set_base_clamps_a_temperature_and_keeps_the_blocks() {
+        let m = mode(vec![block(&[Day::Mon], "07:00", "09:00", 21.0)]);
+        let next = set_base(&m, Setpoint::Temp(15.5));
+        assert_eq!(next.base, Setpoint::Temp(15.5));
+        assert_eq!(next.blocks, m.blocks);
+        assert_eq!(
+            set_base(&m, Setpoint::Temp(55.0)).base,
+            Setpoint::Temp(40.0)
+        );
+        assert_eq!(set_base(&m, Setpoint::Off).base, Setpoint::Off);
+        assert_eq!(set_base(&m, Setpoint::Temp(f64::NAN)), m);
+        valid(&set_base(&m, Setpoint::Off));
     }
 
     #[test]

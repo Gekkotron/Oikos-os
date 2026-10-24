@@ -15,6 +15,141 @@ use wasm_bindgen_test::*;
 use web_sys::{Element, HtmlElement, HtmlInputElement};
 wasm_bindgen_test_configure!(run_in_browser);
 
+#[path = "support/fetch_stub.rs"]
+mod fetch_stub;
+use fetch_stub::FetchStub;
+
+async fn settle() {
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    tick().await;
+}
+
+/// Tests load no stylesheet: the columns need a height for the vertical pointer mapping.
+fn install_layout() {
+    let document = web_sys::window().unwrap().document().unwrap();
+    if document.get_element_by_id("rooms-test-layout").is_some() {
+        return;
+    }
+    let style = document.create_element("style").unwrap();
+    style.set_id("rooms-test-layout");
+    style.set_text_content(Some(
+        ".climate-timeline__col { position: relative; height: 480px; } \
+         .climate-timeline__bar { position: absolute; left: 0; right: 0; }",
+    ));
+    document.head().unwrap().append_child(&style).unwrap();
+}
+
+fn find_button(host: &Element, label: &str) -> Option<HtmlElement> {
+    let all = host.query_selector_all("button").unwrap();
+    (0..all.length())
+        .filter_map(|i| all.item(i))
+        .map(|n| n.unchecked_into::<HtmlElement>())
+        .find(|b| b.text_content().as_deref() == Some(label))
+}
+
+async fn mount_rules(zone: ZoneView) -> Element {
+    install_layout();
+    let current = RwSignal::new(zone);
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        view! {
+            <RulesPanel
+                zone=current.into()
+                on_changed=Callback::new(|_| {})
+                now=Signal::from((Day::Mon, 0))
+            />
+        }
+    });
+    std::mem::forget(mounted);
+    tick().await;
+    host
+}
+
+#[wasm_bindgen_test]
+async fn a_room_without_rules_can_create_a_schedule() {
+    let stub = FetchStub::install();
+    stub.reply("PUT", "/api/v1/climate/zones/bedroom-2", 200, "{}");
+    let host = mount_rules(zone("bedroom-2", "Bedroom 2", ZoneState::Pending, None)).await;
+    assert!(
+        host.text_content()
+            .unwrap()
+            .contains("No approved schedule yet")
+    );
+
+    find_button(&host, "Create schedule")
+        .expect("Create schedule")
+        .click();
+    settle().await;
+    assert_eq!(
+        host.query_selector_all(".climate-timeline__col")
+            .unwrap()
+            .length(),
+        7
+    );
+    let base: HtmlInputElement = host
+        .query_selector(".climate-timeline__base-input")
+        .unwrap()
+        .expect("base field")
+        .unchecked_into();
+    assert_eq!(base.value(), "16");
+    base.set_value("15.5");
+    base.dispatch_event(&web_sys::Event::new("change").unwrap())
+        .unwrap();
+    tick().await;
+
+    // Tap Monday just after 18:00 (blocks snap down to the quarter): two hours at base + 2.
+    let monday = host
+        .query_selector(".climate-timeline__col")
+        .unwrap()
+        .unwrap();
+    let rect = monday.get_bounding_client_rect();
+    let init = web_sys::PointerEventInit::new();
+    init.set_bubbles(true);
+    init.set_client_x((rect.left() + rect.width() / 2.0) as i32);
+    init.set_client_y((rect.top() + rect.height() * 0.76) as i32);
+    monday
+        .dispatch_event(&web_sys::PointerEvent::new_with_event_init_dict("click", &init).unwrap())
+        .unwrap();
+    tick().await;
+
+    find_button(&host, "Save").expect("Save").click();
+    settle().await;
+    let puts: Vec<_> = stub
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "PUT")
+        .collect();
+    assert_eq!(puts.len(), 1, "{puts:?}");
+    assert_eq!(puts[0].url, "/api/v1/climate/zones/bedroom-2");
+    let body = &puts[0].body;
+    assert!(body.contains("\"base\":15.5"), "{body}");
+    assert!(body.contains("\"setpoint\":17.5"), "{body}");
+    assert!(body.contains("18:00") && body.contains("20:00"), "{body}");
+}
+
+#[wasm_bindgen_test]
+async fn cancelling_a_new_schedule_goes_back_to_none() {
+    let host = mount_rules(zone("bedroom-3", "Bedroom 3", ZoneState::Pending, None)).await;
+    find_button(&host, "Create schedule")
+        .expect("Create schedule")
+        .click();
+    tick().await;
+    find_button(&host, "Cancel").expect("Cancel").click();
+    tick().await;
+    assert!(
+        host.text_content()
+            .unwrap()
+            .contains("No approved schedule yet")
+    );
+    assert!(
+        host.query_selector(".climate-timeline__col")
+            .unwrap()
+            .is_none()
+    );
+}
+
 fn zone(id: &str, name: &str, state: ZoneState, setpoint: Option<f64>) -> ZoneView {
     ZoneView {
         zone: id.into(),
