@@ -27,15 +27,11 @@ file: src/dashboards/edit.rs  # not translated yet
 file: src/dashboards/grid.rs  # not translated yet
 file: src/dashboards/library.rs  # not translated yet
 file: src/dashboards/mod.rs  # not translated yet
-file: src/energy.rs  # not translated yet
-file: src/energy_day.rs  # not translated yet
 file: src/nav.rs  # not translated yet
 file: src/override_editor.rs  # not translated yet
 file: src/rooms.rs  # not translated yet
 file: src/screens/dashboard.rs  # not translated yet
 file: src/screens/devices.rs  # not translated yet
-file: src/screens/energy.rs  # not translated yet
-file: src/screens/energy_day.rs  # not translated yet
 file: src/screens/entity_sheet.rs  # not translated yet
 file: src/screens/generic_panel.rs  # not translated yet
 file: src/screens/group_sheet_v2.rs  # not translated yet

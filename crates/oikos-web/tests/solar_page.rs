@@ -180,6 +180,30 @@ async fn tomorrow_tab_hides_measured_area() {
     );
 }
 
+/// The legend's entries, in order.
+fn legend(host: &web_sys::Element) -> Vec<String> {
+    let items = host.query_selector_all(".solar-legend li").unwrap();
+    (0..items.length())
+        .map(|i| items.item(i).unwrap().text_content().unwrap_or_default())
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn legend_names_each_series_of_the_tab() {
+    let host = mount_with(Some(solar(2)), true, RwSignal::new(noon())).await;
+    // Nothing measured: the past hours are the forecast's estimate, not a production line.
+    assert_eq!(
+        legend(&host),
+        ["Likely range", "Forecast", "Estimated so far", "Now"]
+    );
+    assert_eq!(count(&host, ".solar-legend__swatch"), 4);
+    let buttons = host.query_selector_all(".solar-tabs button").unwrap();
+    let tomorrow: web_sys::HtmlElement = buttons.item(1).unwrap().unchecked_into();
+    tomorrow.click();
+    tick().await;
+    assert_eq!(legend(&host), ["Likely range", "Forecast"]);
+}
+
 #[wasm_bindgen_test]
 async fn one_site_has_no_roofs_tile() {
     let host = mount(Some(solar(1)), true).await;

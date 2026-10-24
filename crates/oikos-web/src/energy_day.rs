@@ -1,19 +1,29 @@
 //! Pure presentation of the Energy tab's grid day chart: day labels and navigation, the bar
 //! scale, hour ticks, tooltip and totals wording.
 
-use chrono::{Duration, NaiveDate, NaiveTime};
+use chrono::{Datelike, Duration, NaiveDate, NaiveTime};
 pub use oikos_api::{GridDay, GridSlot, GridTotals};
+
+use crate::i18n::Lang;
+use crate::i18n::energy::{self as words, EnergyText, lower_first, part_names};
+use crate::i18n::format::{date_short, decimal, weekday_short, with_unit};
 
 fn date(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
 }
 
-/// "Today", "Yesterday", else "Thu 22 Oct"; an unparsable date is shown as is.
-pub fn day_label(day: &str, today: &str) -> String {
+/// "Today", "Yesterday", else "Thu Oct 22" ("jeu. 22 oct."); an unparsable date is shown as is.
+pub fn day_label(lang: Lang, day: &str, today: &str) -> String {
     match (date(day), date(today)) {
-        (Some(d), Some(t)) if d == t => "Today".into(),
-        (Some(d), Some(t)) if d.succ_opt() == Some(t) => "Yesterday".into(),
-        (Some(d), _) => d.format("%a %-d %b").to_string(),
+        (Some(d), Some(t)) if d == t => words::energy_text(lang, EnergyText::Today).into(),
+        (Some(d), Some(t)) if d.succ_opt() == Some(t) => {
+            words::energy_text(lang, EnergyText::Yesterday).into()
+        }
+        (Some(d), _) => format!(
+            "{} {}",
+            weekday_short(lang, d.weekday()),
+            date_short(lang, d)
+        ),
         _ => day.to_string(),
     }
 }
@@ -78,34 +88,51 @@ pub fn slot_range(local: &str) -> String {
 }
 
 /// The bar's details: its half hour and every non-zero part.
-pub fn tooltip(slot: &GridSlot, tariffs: bool) -> String {
+pub fn tooltip(lang: Lang, slot: &GridSlot, tariffs: bool) -> String {
+    let (off_peak, peak, bought, sold) = part_names(lang);
     let mut parts = vec![slot_range(&slot.local)];
     let mut push = |name: &str, v: f64| {
         if v > 0.0 {
-            parts.push(format!("{name} {v:.2}"));
+            parts.push(format!("{name} {}", decimal(lang, v, 2)));
         }
     };
     if tariffs {
-        push("off-peak", slot.off_peak);
-        push("peak", slot.peak);
+        push(off_peak, slot.off_peak);
+        push(peak, slot.peak);
     } else {
-        push("bought", slot.off_peak + slot.peak);
+        push(bought, slot.off_peak + slot.peak);
     }
-    push("sold", slot.export);
+    push(sold, slot.export);
     if parts.len() == 1 {
         parts.push("0".into());
     }
-    format!("{} kWh", parts.join(" · "))
+    with_unit(parts.join(" · "), Some("kWh"))
 }
 
 /// The bought line, its off-peak / peak split with tariffs, and the sold line with export.
-pub fn totals_text(day: &GridDay) -> (String, Option<String>, Option<String>) {
+pub fn totals_text(lang: Lang, day: &GridDay) -> (String, Option<String>, Option<String>) {
     let t = &day.totals;
-    let bought = format!("Bought {:.1} kWh", t.off_peak + t.peak);
-    let split = day
-        .tariffs
-        .then(|| format!("off-peak {:.1} · peak {:.1}", t.off_peak, t.peak));
-    let sold = day.has_export.then(|| format!("Sold {:.1} kWh", t.export));
+    let (off_peak, peak, _, _) = part_names(lang);
+    let kwh = |v: f64| with_unit(decimal(lang, v, 1), Some("kWh"));
+    let bought = format!(
+        "{} {}",
+        words::energy_text(lang, EnergyText::Bought),
+        kwh(t.off_peak + t.peak)
+    );
+    let split = day.tariffs.then(|| {
+        format!(
+            "{off_peak} {} · {peak} {}",
+            decimal(lang, t.off_peak, 1),
+            decimal(lang, t.peak, 1)
+        )
+    });
+    let sold = day.has_export.then(|| {
+        format!(
+            "{} {}",
+            words::energy_text(lang, EnergyText::Sold),
+            kwh(t.export)
+        )
+    });
     (bought, split, sold)
 }
 
@@ -127,22 +154,15 @@ pub fn has_data(day: &GridDay) -> bool {
 }
 
 /// One sentence for screen readers.
-pub fn aria_summary(day: &GridDay) -> String {
-    let (bought, split, sold) = totals_text(day);
-    let lower_first = |s: String| {
-        let mut chars = s.chars();
-        chars
-            .next()
-            .map(|c| c.to_lowercase().chain(chars).collect())
-            .unwrap_or_default()
-    };
-    let mut parts = vec![lower_first(bought)];
+pub fn aria_summary(lang: Lang, day: &GridDay) -> String {
+    let (bought, split, sold) = totals_text(lang, day);
+    let mut parts = vec![lower_first(&bought)];
     parts.extend(split);
-    parts.extend(sold.map(lower_first));
-    format!(
-        "Grid on {}: {}.",
-        day_label(&day.date, &day.today),
-        parts.join(", ")
+    parts.extend(sold.map(|s| lower_first(&s)));
+    words::grid_summary(
+        lang,
+        &day_label(lang, &day.date, &day.today),
+        &parts.join(", "),
     )
 }
 
@@ -212,10 +232,22 @@ mod tests {
 
     #[test]
     fn day_labels() {
-        assert_eq!(day_label("2026-10-24", "2026-10-24"), "Today");
-        assert_eq!(day_label("2026-10-23", "2026-10-24"), "Yesterday");
-        assert_eq!(day_label("2026-10-22", "2026-10-24"), "Thu 22 Oct");
-        assert_eq!(day_label("garbage", "2026-10-24"), "garbage");
+        assert_eq!(day_label(Lang::En, "2026-10-24", "2026-10-24"), "Today");
+        assert_eq!(day_label(Lang::En, "2026-10-23", "2026-10-24"), "Yesterday");
+        assert_eq!(
+            day_label(Lang::En, "2026-10-22", "2026-10-24"),
+            "Thu Oct 22"
+        );
+        assert_eq!(
+            day_label(Lang::Fr, "2026-10-22", "2026-10-24"),
+            "Jeu. 22 oct."
+        );
+        assert_eq!(
+            day_label(Lang::Fr, "2026-10-24", "2026-10-24"),
+            "Aujourd'hui"
+        );
+        assert_eq!(day_label(Lang::Fr, "2026-10-23", "2026-10-24"), "Hier");
+        assert_eq!(day_label(Lang::En, "garbage", "2026-10-24"), "garbage");
     }
 
     #[test]
@@ -259,30 +291,51 @@ mod tests {
     fn tooltip_omits_zero_parts() {
         let s = slot("14:30", 0.21, 0.1, 0.05);
         assert_eq!(
-            tooltip(&s, true),
-            "14:30–15:00 · off-peak 0.21 · peak 0.10 · sold 0.05 kWh"
+            tooltip(Lang::En, &s, true),
+            "14:30–15:00 · off-peak 0.21 · peak 0.10 · sold 0.05\u{a0}kWh"
+        );
+        assert_eq!(
+            tooltip(Lang::Fr, &s, true),
+            "14:30–15:00 · heures creuses 0,21 · heures pleines 0,10 · vendu 0,05\u{a0}kWh"
         );
         let s = slot("14:30", 0.0, 0.1, 0.0);
-        assert_eq!(tooltip(&s, true), "14:30–15:00 · peak 0.10 kWh");
+        assert_eq!(
+            tooltip(Lang::En, &s, true),
+            "14:30–15:00 · peak 0.10\u{a0}kWh"
+        );
         let s = slot("14:30", 0.2, 0.1, 0.0);
-        assert_eq!(tooltip(&s, false), "14:30–15:00 · bought 0.30 kWh");
+        assert_eq!(
+            tooltip(Lang::En, &s, false),
+            "14:30–15:00 · bought 0.30\u{a0}kWh"
+        );
         let s = slot("14:30", 0.0, 0.0, 0.0);
-        assert_eq!(tooltip(&s, true), "14:30–15:00 · 0 kWh");
+        assert_eq!(tooltip(Lang::En, &s, true), "14:30–15:00 · 0\u{a0}kWh");
     }
 
     #[test]
     fn totals_without_tariffs_or_export() {
         let d = day(vec![slot("00:00", 7.21, 9.9, 3.12)], true, true);
         assert_eq!(
-            totals_text(&d),
+            totals_text(Lang::En, &d),
             (
-                "Bought 17.1 kWh".to_string(),
+                "Bought 17.1\u{a0}kWh".to_string(),
                 Some("off-peak 7.2 · peak 9.9".to_string()),
-                Some("Sold 3.1 kWh".to_string())
+                Some("Sold 3.1\u{a0}kWh".to_string())
+            )
+        );
+        assert_eq!(
+            totals_text(Lang::Fr, &d),
+            (
+                "Acheté 17,1\u{a0}kWh".to_string(),
+                Some("heures creuses 7,2 · heures pleines 9,9".to_string()),
+                Some("Vendu 3,1\u{a0}kWh".to_string())
             )
         );
         let d = day(vec![slot("00:00", 0.0, 2.0, 0.0)], false, false);
-        assert_eq!(totals_text(&d), ("Bought 2.0 kWh".to_string(), None, None));
+        assert_eq!(
+            totals_text(Lang::En, &d),
+            ("Bought 2.0\u{a0}kWh".to_string(), None, None)
+        );
     }
 
     #[test]
@@ -314,8 +367,12 @@ mod tests {
     fn aria_summary_reads_the_totals() {
         let d = day(vec![slot("00:00", 7.21, 9.9, 3.12)], true, true);
         assert_eq!(
-            aria_summary(&d),
-            "Grid on Yesterday: bought 17.1 kWh, off-peak 7.2 · peak 9.9, sold 3.1 kWh."
+            aria_summary(Lang::En, &d),
+            "Grid on Yesterday: bought 17.1\u{a0}kWh, off-peak 7.2 · peak 9.9, sold 3.1\u{a0}kWh."
+        );
+        assert_eq!(
+            aria_summary(Lang::Fr, &d),
+            "Réseau, hier\u{a0}: acheté 17,1\u{a0}kWh, heures creuses 7,2 · heures pleines 9,9, vendu 3,1\u{a0}kWh."
         );
     }
 }
