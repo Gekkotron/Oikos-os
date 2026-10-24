@@ -10,7 +10,7 @@ use super::{ModeSelect, Sender};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::components::card_place::{CardPlace, use_card_place};
 use crate::components::robot::Robot;
-use crate::format::{display_value, word};
+use crate::format::word;
 use crate::i18n::{Key, Lang, text, use_lang, use_text};
 use crate::icons::vacuum_action_icon;
 
@@ -46,7 +46,7 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
     let lang = use_lang();
     let t = use_text();
     let in_sheet = use_card_place() == CardPlace::Sheet;
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let label = super::live_value(&entity);
     let (activity, battery, fan) = match &entity.state.value {
         StateValue::Vacuum(v) => (v.state.clone(), v.battery, v.fan_speed.clone()),
         _ => (None, None, None),
@@ -160,7 +160,7 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
     // Without a sentence the state line says what the hub said.
     let state_line = vacuum_sentence(Lang::En, activity.as_deref())
         .is_none()
-        .then(|| Signal::derive(move || label.clone()));
+        .then_some(label);
     let caption_activity = activity.clone();
     let caption = move || {
         vacuum_caption(lang(), caption_activity.as_deref(), caption_fan.as_deref())

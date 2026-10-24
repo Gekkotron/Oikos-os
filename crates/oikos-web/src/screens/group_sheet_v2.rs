@@ -195,7 +195,10 @@ fn member_row(house: House, kind: Kind, member: GroupMemberView) -> impl IntoVie
                     .find(|a| a.id == e.area)
                     .map_or_else(|| e.area.clone(), |a| a.name.clone())
             });
-            format!("{room} · {}", display_value(&e.state, e.unit.as_deref()))
+            format!(
+                "{room} · {}",
+                display_value(crate::i18n::Lang::En, &e.state, e.unit.as_deref())
+            )
         }
         None => "Not found".to_owned(),
     };

@@ -13,7 +13,7 @@ use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
 use serde_json::{Value, json};
 
 use crate::flow_edit::fold_accents;
-use crate::format::{entity_title, list_label};
+use crate::format::{entity_title, kind_search_words, list_label};
 use crate::house::House;
 use crate::i18n::{self, Key, Lang, use_text};
 use crate::screens::group_wizard::group_by_room;
@@ -384,13 +384,14 @@ fn member_item(
 
 /// The entities a category action targets as `(id, label, area)`.
 fn members(
+    lang: Lang,
     c: &CategoryAction,
     entities: &BTreeMap<String, EntityView>,
 ) -> Vec<(String, String, String)> {
     let all: Vec<EntityView> = entities.values().cloned().collect();
     category_members(c, &all)
         .into_iter()
-        .map(|e| (e.id.clone(), list_label(e), e.area.clone()))
+        .map(|e| (e.id.clone(), list_label(lang, e), e.area.clone()))
         .collect()
 }
 
@@ -425,13 +426,13 @@ pub fn CategoryForm(rows: Rows, key: u64) -> impl IntoView {
     let listing = RwSignal::new(false);
     let count = Memo::new(move |_| {
         let c = cat.get();
-        house.entities.with(|m| members(&c, m).len())
+        house.entities.with(|m| members(lang.get(), &c, m).len())
     });
     // Every member, the ones left alone included, so they can be ticked again.
     let rooms = Memo::new(move |_| {
         let mut c = cat.get();
         c.except.clear();
-        let list = house.entities.with(|m| members(&c, m));
+        let list = house.entities.with(|m| members(lang.get(), &c, m));
         house.areas.with(|areas| group_by_room(list, areas))
     });
 
@@ -646,6 +647,7 @@ const SEARCH_MAX: usize = 8;
 #[component]
 pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
     let t = use_text();
+    let lang = lang();
     let house = expect_context::<House>();
     let dev = device_memo(rows, key);
     let query = RwSignal::new(String::new());
@@ -672,18 +674,21 @@ pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
             m.values()
                 .filter(|e| e.is_primary() && !e.id.starts_with("group_"))
                 .filter(|e| {
-                    fold_accents(&list_label(e)).contains(&needle)
+                    fold_accents(&list_label(lang.get(), e)).contains(&needle)
                         || fold_accents(&e.name).contains(&needle)
+                        || kind_search_words(e)
+                            .iter()
+                            .any(|w| fold_accents(w).contains(&needle))
                 })
                 .take(SEARCH_MAX)
-                .map(|e| (e.id.clone(), list_label(e)))
+                .map(|e| (e.id.clone(), list_label(lang.get(), e)))
                 .collect::<Vec<_>>()
         })
     });
     let title = move || {
         let id = dev.with(|d| d.entity.clone());
         match entity.get() {
-            Some(e) => entity_title(&e),
+            Some(e) => entity_title(lang.get(), &e),
             None => format!("{id} {}", t(Key::AmbianceMissing)),
         }
     };

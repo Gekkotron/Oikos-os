@@ -6,7 +6,6 @@ use oikos_core::model::StateValue;
 
 use super::Sender;
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::display_value;
 
 /// The word for a binary sensor: "Open"/"Closed" for doors and windows, "Motion"/"Clear" for
 /// motion, "Smoke"/"Clear" for smoke, "On"/"Off" otherwise.
@@ -26,8 +25,10 @@ pub fn binary_text(device_class: Option<&str>, on: bool) -> &'static str {
 pub fn BinarySensorCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let text = match &entity.state.value {
-        StateValue::OnOff(on) => binary_text(entity.device_class.as_deref(), *on).to_owned(),
-        _ => display_value(&entity.state, entity.unit.as_deref()),
+        StateValue::OnOff(on) => {
+            Signal::stored(binary_text(entity.device_class.as_deref(), *on).to_owned())
+        }
+        _ => super::live_value(&entity),
     };
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);

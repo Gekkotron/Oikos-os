@@ -13,7 +13,10 @@ use crate::format::entity_title;
 use crate::schedule::describe;
 
 fn entity_label(id: &str, entities: &BTreeMap<String, EntityView>) -> String {
-    entities.get(id).map_or_else(|| id.to_owned(), entity_title)
+    // The sentences around this label are English until the flows area is translated.
+    entities
+        .get(id)
+        .map_or_else(|| id.to_owned(), |e| entity_title(crate::i18n::Lang::En, e))
 }
 
 pub(crate) fn humanise(command: &str) -> String {

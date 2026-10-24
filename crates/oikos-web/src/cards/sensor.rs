@@ -17,8 +17,8 @@ use crate::icons::DROP;
 use crate::rooms::shows_on_home;
 
 /// The text a sensor shows: the value with its unit, "—" while unknown or unavailable.
-pub fn sensor_text(state: &EntityState, unit: Option<&str>) -> String {
-    display_value(state, unit)
+pub fn sensor_text(lang: crate::i18n::Lang, state: &EntityState, unit: Option<&str>) -> String {
+    display_value(lang, state, unit)
 }
 
 /// The number a sensor reports, whether sent as a number or as numeric text.
@@ -163,8 +163,8 @@ fn humidity_body(entity: &EntityView) -> impl IntoView + use<> {
 #[component]
 pub fn SensorCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let text = sensor_text(&entity.state, entity.unit.as_deref());
-    let class = match value_class(&text) {
+    let text = super::live_value(&entity);
+    let class = move || match value_class(&text.get()) {
         "card__value" => "card__value card__value--big",
         long => long,
     };
@@ -319,7 +319,7 @@ mod tests {
             value: StateValue::Text("unknown".into()),
             ..Default::default()
         };
-        assert_eq!(sensor_text(&s, Some("W")), "—");
+        assert_eq!(sensor_text(crate::i18n::Lang::En, &s, Some("W")), "—");
     }
     #[test]
     fn numeric_sensor_text() {
@@ -327,6 +327,9 @@ mod tests {
             value: StateValue::Number(42.0),
             ..Default::default()
         };
-        assert_eq!(sensor_text(&s, Some("W")), "42 W");
+        assert_eq!(
+            sensor_text(crate::i18n::Lang::En, &s, Some("W")),
+            "42\u{a0}W"
+        );
     }
 }

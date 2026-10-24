@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 use crate::flow_edit::fold_accents;
 use crate::flow_text::{Ctx, sentence, subline};
-use crate::format::entity_title;
+use crate::format::{entity_title, kind_search_words};
 use crate::screens::flow_canvas::sun::sun_params_from_preset;
 
 /// Most entities a query lists, so the list stays short.
@@ -225,10 +225,11 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             .entities
             .values()
             .filter(|e| e.is_primary())
-            .map(|e| (entity_title(e), e))
+            .map(|e| (entity_title(ctx.lang, e), e))
             .filter(|(title, e)| {
+                let [en, fr] = kind_search_words(e);
                 let hay = fold_accents(&format!(
-                    "{title} {}",
+                    "{title} {} {en} {fr}",
                     e.device_name.as_deref().unwrap_or_default()
                 ));
                 words.iter().all(|w| hay.contains(w))
@@ -337,8 +338,32 @@ mod tests {
             entities,
             areas: &areas,
             flows: &[],
+            lang: crate::i18n::Lang::En,
         };
         entries(query, &ctx)
+    }
+
+    #[test]
+    fn the_kind_word_finds_entities_in_either_language() {
+        let entities = house(vec![ent("c1", "Shutter living", Kind::Cover)]);
+        let areas: Vec<AreaView> = Vec::new();
+        for (lang, query) in [
+            (crate::i18n::Lang::Fr, "cover"),
+            (crate::i18n::Lang::En, "volet"),
+        ] {
+            let ctx = Ctx {
+                entities: &entities,
+                areas: &areas,
+                flows: &[],
+                lang,
+            };
+            let got = entries(query, &ctx);
+            assert!(
+                got.iter().any(|e| e.label.contains("Shutter living")),
+                "{query}: {:?}",
+                got.iter().map(|e| e.label.clone()).collect::<Vec<_>>()
+            );
+        }
     }
 
     fn count(entries: &[Entry], group: Group) -> usize {
@@ -400,6 +425,7 @@ mod tests {
             entities: &entities,
             areas: &areas,
             flows: &[],
+            lang: crate::i18n::Lang::En,
         };
         let got = entries("table", &ctx);
         let entity: Vec<_> = got.iter().filter(|e| e.label.contains("Lumière")).collect();

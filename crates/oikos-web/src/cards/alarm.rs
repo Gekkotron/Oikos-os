@@ -7,7 +7,6 @@ use oikos_core::model::{AlarmMode, CodeFormat, Command};
 
 use super::Sender;
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::display_value;
 
 /// The button label for an arming mode.
 pub fn mode_label(mode: AlarmMode) -> &'static str {
@@ -29,7 +28,7 @@ fn code_for(required: bool, typed: &str) -> Option<String> {
 #[component]
 pub fn AlarmPanelCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let label = super::live_value(&entity);
     let caps = &entity.capabilities;
     let (arm_required, disarm_required) = (caps.code_arm_required, caps.code_disarm_required);
     let numeric = caps.code_format == CodeFormat::Number;

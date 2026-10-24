@@ -145,7 +145,7 @@ pub fn ClimateGroupCard(entity: EntityView) -> impl IntoView {
     };
     let unit = entity.unit.as_deref();
     let now_text = thermostat_text(range_of(&entity.state.attributes), mode.as_deref(), unit);
-    let target_text = degrees(target, unit);
+    let target_text = degrees(crate::i18n::current_lang(), target, unit);
     let caps = &entity.capabilities;
 
     let on_step = {
@@ -283,8 +283,8 @@ pub fn CoverGroupEntityCard(entity: EntityView) -> impl IntoView {
     let id = entity.id.clone();
     let text = {
         let id = id.clone();
-        let fallback = crate::format::display_value(&entity.state, entity.unit.as_deref());
-        move || house_summary(&id).map_or_else(|| fallback.clone(), |s| cover_text(lang(), &s))
+        let fallback = super::live_value(&entity);
+        move || house_summary(&id).map_or_else(|| fallback.get(), |s| cover_text(lang(), &s))
     };
     let on_command = {
         let id = id.clone();
@@ -317,10 +317,10 @@ pub fn LightGroupEntityCard(entity: EntityView) -> impl IntoView {
     };
     let toggle_view = {
         let id = id.clone();
-        let fallback = crate::format::display_value(&entity.state, entity.unit.as_deref());
+        let fallback = super::live_value(&entity);
         move || {
             let (on, label, available) = house_summary(&id).map_or_else(
-                || (on_now, fallback.clone(), true),
+                || (on_now, fallback.get(), true),
                 |s| (s.on > 0, light_text(lang(), &s), s.available),
             );
             view! { <PowerToggle on=on label=label on_toggle=toggle disabled=!available /> }

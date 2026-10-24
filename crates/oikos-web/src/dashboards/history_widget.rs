@@ -28,7 +28,7 @@ pub fn HistoryWidget(entity: EntityView, range: DashboardHistoryRange) -> impl I
     let power_pair = Memo::new(move |_| house.entities.with(|m| power_pair_of(m, &id)));
     view! {
         <article class="card widget-history">
-            <span class="widget-history__title">{entity_title(&entity)}</span>
+            <span class="widget-history__title">{entity_title(crate::i18n::current_lang(), &entity)}</span>
             <HistoryChart
                 entity_id=entity.id.clone()
                 range=chart_range(range)

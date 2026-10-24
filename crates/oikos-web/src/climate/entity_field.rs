@@ -10,11 +10,16 @@ use oikos_core::model::Kind;
 use crate::format::{list_label, room_name};
 use crate::house::House;
 
+// Labels stay English until the climate area is translated (its text around them is English).
+const LANG: crate::i18n::Lang = crate::i18n::Lang::En;
+
 /// Every entity as `(id, label)`, sorted by label.
 fn options(house: House) -> Vec<(String, String)> {
-    let mut list: Vec<(String, String)> = house
-        .entities
-        .with(|m| m.values().map(|e| (e.id.clone(), list_label(e))).collect());
+    let mut list: Vec<(String, String)> = house.entities.with(|m| {
+        m.values()
+            .map(|e| (e.id.clone(), list_label(LANG, e)))
+            .collect()
+    });
     list.sort_by_key(|(_, label)| label.to_lowercase());
     list
 }
@@ -44,7 +49,7 @@ fn thermometers_by_room(
             .entry(key)
             .or_insert_with(|| (room, Vec::new()))
             .1
-            .push((e.id.clone(), list_label(e)));
+            .push((e.id.clone(), list_label(LANG, e)));
     }
     groups
         .into_values()
@@ -59,8 +64,8 @@ fn thermometers_by_room(
 fn label_with_room(house: House, id: &str) -> String {
     house.entities.with(|m| match m.get(id) {
         Some(e) => match house.areas.with(|a| room_name(a, &e.area)) {
-            Some(room) => format!("{} ({room})", list_label(e)),
-            None => list_label(e),
+            Some(room) => format!("{} ({room})", list_label(LANG, e)),
+            None => list_label(LANG, e),
         },
         None => id.to_owned(),
     })
@@ -70,7 +75,7 @@ fn label_with_room(house: House, id: &str) -> String {
 fn label_of(house: House, id: &str) -> String {
     house
         .entities
-        .with(|m| m.get(id).map(list_label))
+        .with(|m| m.get(id).map(|e| list_label(LANG, e)))
         .unwrap_or_else(|| id.to_owned())
 }
 

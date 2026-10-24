@@ -162,7 +162,10 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
             .entity_ids
             .iter()
             .filter(|id| **id != entity.id)
-            .filter_map(|id| m.get(id).map(|e| (e.id.clone(), list_label(e))))
+            .filter_map(|id| {
+                m.get(id)
+                    .map(|e| (e.id.clone(), list_label(crate::i18n::Lang::En, e)))
+            })
             .collect()
     });
     let dash = || "—".to_owned();
@@ -245,7 +248,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
                     .map_or_else(|| e.area.clone(), |a| a.name.clone())
             });
             let availability = e.state.availability;
-            let title = match title_suffix(&e) {
+            let title = match title_suffix(crate::i18n::Lang::En, &e) {
                 Some(suffix) => format!("{} · {suffix}", e.name),
                 None => e.name.clone(),
             };
@@ -254,7 +257,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
                 <div class="sheet__titles">
                     <h1 class="sheet__title">{wrap_id(&title)}</h1>
                     <p class="sheet__subtitle">
-                        {area} " · " {type_word(&e)} " · "
+                        {area} " · " {type_word(crate::i18n::Lang::En, &e)} " · "
                         <span class=availability_class(availability)></span>
                         " "
                         {availability_word(availability)}

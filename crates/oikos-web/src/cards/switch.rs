@@ -24,7 +24,7 @@ pub fn SwitchCard(entity: EntityView) -> impl IntoView {
             sender.send(&id, power_command(!on), with_on(&state, !on));
         })
     };
-    let name = entity_title(&entity);
+    let name = entity_title(crate::i18n::current_lang(), &entity);
     let trailing = view! { <ToggleSwitch on=on aria_label=name on_toggle=toggle /> }.into_any();
     let state_line = Signal::derive(move || switch_state_line(lang(), known));
     let pending = sender.pending(&entity.id);
