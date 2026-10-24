@@ -310,44 +310,13 @@ pub fn out_anchor(kind: &NodeKind, at: Pt, port: Option<&str>) -> Pt {
     }
 }
 
-/// Where each wire enters its target, by edge: on the card's left edge, the wires into one
-/// card sorted by the height they leave at and spread over the middle 60 % (a lone wire enters
-/// halfway down), so they do not pile onto one point.
-pub fn in_anchors(flow: &Flow, pos: &BTreeMap<String, Pt>) -> BTreeMap<Key, Pt> {
-    let mut incoming: BTreeMap<&str, Vec<(Key, f64)>> = BTreeMap::new();
-    for edge in &flow.edges {
-        let (Some(from), Some(&at), true) = (
-            flow.node(&edge.from),
-            pos.get(&edge.from),
-            pos.contains_key(&edge.to),
-        ) else {
-            continue;
-        };
-        let leave = out_anchor(&from.kind, at, edge.port.as_deref()).y;
-        let key = (edge.from.clone(), edge.port.clone(), edge.to.clone());
-        incoming.entry(&edge.to).or_default().push((key, leave));
+/// Where a wire enters a card at `at`: the input pin, on its left edge halfway down. Every
+/// wire into one card meets there, as the card has a single input.
+pub fn in_anchor(at: Pt) -> Pt {
+    Pt {
+        x: at.x,
+        y: at.y + NODE_H / 2.0,
     }
-    let mut out = BTreeMap::new();
-    for (to, mut wires) in incoming {
-        wires.sort_by(|a, b| a.1.total_cmp(&b.1));
-        let at = pos[to];
-        let last = wires.len().saturating_sub(1);
-        for (i, (key, _)) in wires.into_iter().enumerate() {
-            let down = if last == 0 {
-                0.5
-            } else {
-                0.2 + 0.6 * i as f64 / last as f64
-            };
-            out.insert(
-                key,
-                Pt {
-                    x: at.x,
-                    y: at.y + NODE_H * down,
-                },
-            );
-        }
-    }
-    out
 }
 
 /// A piece of a wire.
@@ -485,17 +454,16 @@ fn finish(from: Pt, path: &[Seg]) -> Route {
 }
 
 /// Every edge's wire, in edge order, keyed by `(from, port, to)`: from its [`out_anchor`] to
-/// its [`in_anchors`] entry, routed around every card but its own two ends. Edges whose ends
+/// its [`in_anchor`], routed around every card but its own two ends. Edges whose ends
 /// have no position are left out.
 pub fn routes(flow: &Flow, pos: &BTreeMap<String, Pt>) -> Vec<(Key, Route)> {
-    let anchors = in_anchors(flow, pos);
     flow.edges
         .iter()
         .filter_map(|edge| {
             let from = flow.node(&edge.from)?;
             let start = out_anchor(&from.kind, *pos.get(&edge.from)?, edge.port.as_deref());
             let key = (edge.from.clone(), edge.port.clone(), edge.to.clone());
-            let end = *anchors.get(&key)?;
+            let end = in_anchor(*pos.get(&edge.to)?);
             let obstacles: Vec<Rect> = pos
                 .iter()
                 .filter(|(id, _)| **id != edge.from && **id != edge.to)
@@ -728,32 +696,25 @@ mod tests {
     }
 
     #[test]
-    fn led_triggers_spread() {
+    fn wires_end_on_the_input_pin() {
+        // The canvas draws one input pin, halfway down the left edge (graph.rs), so every wire
+        // into a card, however many there are, must end on it.
         let flow = led();
         let pos = auto_layout(&flow);
-        let tv = pos["tv_on"];
-        let mut ys: Vec<f64> = in_anchors(&flow, &pos)
-            .into_iter()
-            .filter(|((_, _, to), _)| to == "tv_on")
-            .map(|(_, at)| {
-                assert_eq!(at.x, tv.x);
-                assert!(at.y > tv.y && at.y < tv.y + NODE_H, "{at:?} off {tv:?}");
-                at.y
-            })
-            .collect();
-        assert_eq!(ys.len(), 5);
-        ys.sort_by(f64::total_cmp);
-        ys.dedup();
-        assert_eq!(ys.len(), 5, "{ys:?}");
-    }
-
-    #[test]
-    fn single_wire_enters_at_the_middle() {
-        let flow = led();
-        let pos = auto_layout(&flow);
-        let anchors = in_anchors(&flow, &pos);
-        let key = ("wait".to_owned(), None, "off".to_owned());
-        assert_eq!(anchors[&key].y, pos["off"].y + NODE_H / 2.0);
+        let all = routes(&flow, &pos);
+        let into_tv = all.iter().filter(|((_, _, to), _)| to == "tv_on").count();
+        assert_eq!(into_tv, 5);
+        for ((from, port, to), route) in &all {
+            let end = *route_samples(&route.d, 48).last().unwrap();
+            let pin = Pt {
+                x: pos[to].x,
+                y: pos[to].y + NODE_H / 2.0,
+            };
+            assert!(
+                (end.x - pin.x).abs() < 1e-6 && (end.y - pin.y).abs() < 1e-6,
+                "{from} -{port:?}-> {to} ends at {end:?}, pin at {pin:?}"
+            );
+        }
     }
 
     #[test]
