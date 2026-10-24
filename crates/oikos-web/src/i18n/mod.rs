@@ -5,6 +5,7 @@ use leptos::prelude::*;
 mod ambiances;
 pub mod climate;
 mod dashboards;
+pub mod energy;
 pub mod flows;
 pub mod format;
 mod home;
