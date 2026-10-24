@@ -1,0 +1,914 @@
+//! FR/EN text: flows (automations), their card sentences, schedules and the card library.
+
+use super::*;
+use oikos_core::flow::SunWhich;
+
+const NBSP: char = '\u{A0}';
+
+/// Fixed words of the flows area. Sentences with values are the helper functions below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlowText {
+    // Verbs a card sentence starts with.
+    TurnOn,
+    TurnOff,
+    Toggle,
+    Open,
+    Close,
+    Stop,
+    Press,
+    Lock,
+    Unlock,
+    Wait,
+    Notify,
+    Enable,
+    Disable,
+    // Words inside sentences.
+    ThisFlow,
+    ThisFlowCap,
+    TriggerValue,
+    IsDark,
+    NoTrigger,
+    NoRoom,
+    GroupTag,
+    // Colours of a light, lower case, read in a card title.
+    ColourWhite,
+    ColourRed,
+    ColourOrange,
+    ColourYellow,
+    ColourGreen,
+    ColourCyan,
+    ColourBlue,
+    ColourPurple,
+    ColourMagenta,
+    ColourPink,
+    // Run state and what fired a run.
+    ManualRun,
+    ScheduleRun,
+    SunRun,
+    // Card library entries.
+    Schedule,
+    ScheduleSub,
+    SunEvent,
+    SunEventSub,
+    WhenDark,
+    WhenDarkSub,
+    WaitCard,
+    WaitSub,
+    NotifySub,
+    DisableSelfSub,
+    EnableFlow,
+    EnableFlowSub,
+    DefaultNotifyTitle,
+    SectionWhen,
+    SectionAnd,
+    SectionThen,
+    SectionWait,
+    SectionFlow,
+    SearchCards,
+    SearchCardsLabel,
+    // List screen.
+    FilterDeviceState,
+    FilterButtonEvent,
+    FilterManual,
+    SearchFlows,
+    SearchFlowsLabel,
+    Sort,
+    SortName,
+    SortLastRun,
+    GroupBy,
+    GroupRoom,
+    GroupNone,
+    ViewLabel,
+    ViewList,
+    ViewCards,
+    StatusAll,
+    StatusOn,
+    StatusOff,
+    NeedsAttention,
+    RoomNeedsAttention,
+    NoFlowsMatch,
+    ClearFilters,
+    NoFlowsYet,
+    NoRunsYet,
+    FixFlowFirst,
+    FlowActions,
+    OpenFlow,
+    MoveToRoom,
+    DeleteFlow,
+    CantUndo,
+    Cancel,
+    // Canvas.
+    PanelLibrary,
+    PanelSettings,
+    PanelRuns,
+    CloseRuns,
+    DeleteWire,
+    CannotRun,
+    UnknownFlow,
+    BackToFlows,
+    NodeEditor,
+    CloseEditor,
+    Name,
+    Auto,
+    DeleteCard,
+    HintDelete,
+    HintDuplicate,
+    Required,
+    NodeTrigger,
+    NodeSun,
+    NodeSignal,
+    NodeIf,
+    NodeDelay,
+    NodeCommand,
+    NodeFlowSwitch,
+    TitleLabel,
+    TitleExample,
+    BodyLabel,
+    NoneParen,
+    Silent,
+    Entity,
+    FiresWhen,
+    OnlyAfter,
+    AnySignal,
+    ValueJson,
+    EntityDefaults,
+    MissingFail,
+    MissingTrue,
+    MissingFalse,
+    Duration,
+    UpToRandom,
+    ExactDuration,
+    CommandJson,
+    ParisFallback,
+    SunRise,
+    SunSet,
+    SunDawn,
+    SunDusk,
+    TimingAt,
+    TimingBefore,
+    TimingAfter,
+    NoEventWeek,
+    Tidy,
+    TidyTitle,
+    Undo,
+    CancelEditing,
+    Saving,
+    SavingEllipsis,
+    Save,
+    RunNow,
+    EditLayout,
+    FlowName,
+    Runs,
+    ZoomIn,
+    ZoomOut,
+    FitView,
+    Minimap,
+    // Schedule picker.
+    EveryNMinutes,
+    Hourly,
+    Daily,
+    Weekdays,
+    Advanced,
+    PickOneDay,
+}
+
+impl FlowText {
+    pub const ALL: &'static [FlowText] = &[
+        FlowText::TurnOn,
+        FlowText::TurnOff,
+        FlowText::Toggle,
+        FlowText::Open,
+        FlowText::Close,
+        FlowText::Stop,
+        FlowText::Press,
+        FlowText::Lock,
+        FlowText::Unlock,
+        FlowText::Wait,
+        FlowText::Notify,
+        FlowText::Enable,
+        FlowText::Disable,
+        FlowText::ThisFlow,
+        FlowText::ThisFlowCap,
+        FlowText::TriggerValue,
+        FlowText::IsDark,
+        FlowText::NoTrigger,
+        FlowText::NoRoom,
+        FlowText::GroupTag,
+        FlowText::ColourWhite,
+        FlowText::ColourRed,
+        FlowText::ColourOrange,
+        FlowText::ColourYellow,
+        FlowText::ColourGreen,
+        FlowText::ColourCyan,
+        FlowText::ColourBlue,
+        FlowText::ColourPurple,
+        FlowText::ColourMagenta,
+        FlowText::ColourPink,
+        FlowText::ManualRun,
+        FlowText::ScheduleRun,
+        FlowText::SunRun,
+        FlowText::Schedule,
+        FlowText::ScheduleSub,
+        FlowText::SunEvent,
+        FlowText::SunEventSub,
+        FlowText::WhenDark,
+        FlowText::WhenDarkSub,
+        FlowText::WaitCard,
+        FlowText::WaitSub,
+        FlowText::NotifySub,
+        FlowText::DisableSelfSub,
+        FlowText::EnableFlow,
+        FlowText::EnableFlowSub,
+        FlowText::DefaultNotifyTitle,
+        FlowText::SectionWhen,
+        FlowText::SectionAnd,
+        FlowText::SectionThen,
+        FlowText::SectionWait,
+        FlowText::SectionFlow,
+        FlowText::SearchCards,
+        FlowText::SearchCardsLabel,
+        FlowText::FilterDeviceState,
+        FlowText::FilterButtonEvent,
+        FlowText::FilterManual,
+        FlowText::SearchFlows,
+        FlowText::SearchFlowsLabel,
+        FlowText::Sort,
+        FlowText::SortName,
+        FlowText::SortLastRun,
+        FlowText::GroupBy,
+        FlowText::GroupRoom,
+        FlowText::GroupNone,
+        FlowText::ViewLabel,
+        FlowText::ViewList,
+        FlowText::ViewCards,
+        FlowText::StatusAll,
+        FlowText::StatusOn,
+        FlowText::StatusOff,
+        FlowText::NeedsAttention,
+        FlowText::RoomNeedsAttention,
+        FlowText::NoFlowsMatch,
+        FlowText::ClearFilters,
+        FlowText::NoFlowsYet,
+        FlowText::NoRunsYet,
+        FlowText::FixFlowFirst,
+        FlowText::FlowActions,
+        FlowText::OpenFlow,
+        FlowText::MoveToRoom,
+        FlowText::DeleteFlow,
+        FlowText::CantUndo,
+        FlowText::Cancel,
+        FlowText::PanelLibrary,
+        FlowText::PanelSettings,
+        FlowText::PanelRuns,
+        FlowText::CloseRuns,
+        FlowText::DeleteWire,
+        FlowText::CannotRun,
+        FlowText::UnknownFlow,
+        FlowText::BackToFlows,
+        FlowText::NodeEditor,
+        FlowText::CloseEditor,
+        FlowText::Name,
+        FlowText::Auto,
+        FlowText::DeleteCard,
+        FlowText::HintDelete,
+        FlowText::HintDuplicate,
+        FlowText::Required,
+        FlowText::NodeTrigger,
+        FlowText::NodeSun,
+        FlowText::NodeSignal,
+        FlowText::NodeIf,
+        FlowText::NodeDelay,
+        FlowText::NodeCommand,
+        FlowText::NodeFlowSwitch,
+        FlowText::TitleLabel,
+        FlowText::TitleExample,
+        FlowText::BodyLabel,
+        FlowText::NoneParen,
+        FlowText::Silent,
+        FlowText::Entity,
+        FlowText::FiresWhen,
+        FlowText::OnlyAfter,
+        FlowText::AnySignal,
+        FlowText::ValueJson,
+        FlowText::EntityDefaults,
+        FlowText::MissingFail,
+        FlowText::MissingTrue,
+        FlowText::MissingFalse,
+        FlowText::Duration,
+        FlowText::UpToRandom,
+        FlowText::ExactDuration,
+        FlowText::CommandJson,
+        FlowText::ParisFallback,
+        FlowText::SunRise,
+        FlowText::SunSet,
+        FlowText::SunDawn,
+        FlowText::SunDusk,
+        FlowText::TimingAt,
+        FlowText::TimingBefore,
+        FlowText::TimingAfter,
+        FlowText::NoEventWeek,
+        FlowText::Tidy,
+        FlowText::TidyTitle,
+        FlowText::Undo,
+        FlowText::CancelEditing,
+        FlowText::Saving,
+        FlowText::SavingEllipsis,
+        FlowText::Save,
+        FlowText::RunNow,
+        FlowText::EditLayout,
+        FlowText::FlowName,
+        FlowText::Runs,
+        FlowText::ZoomIn,
+        FlowText::ZoomOut,
+        FlowText::FitView,
+        FlowText::Minimap,
+        FlowText::EveryNMinutes,
+        FlowText::Hourly,
+        FlowText::Daily,
+        FlowText::Weekdays,
+        FlowText::Advanced,
+        FlowText::PickOneDay,
+    ];
+}
+
+pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
+    use FlowText as T;
+    let (en, fr) = match k {
+        T::TurnOn => ("Turn on", "Allumer"),
+        T::TurnOff => ("Turn off", "Éteindre"),
+        T::Toggle => ("Toggle", "Basculer"),
+        T::Open => ("Open", "Ouvrir"),
+        T::Close => ("Close", "Fermer"),
+        T::Stop => ("Stop", "Arrêter"),
+        T::Press => ("Press", "Appuyer sur"),
+        T::Lock => ("Lock", "Verrouiller"),
+        T::Unlock => ("Unlock", "Déverrouiller"),
+        T::Wait => ("Wait", "Attendre"),
+        T::Notify => ("Notify", "Notifier"),
+        T::Enable => ("Enable", "Activer"),
+        T::Disable => ("Disable", "Désactiver"),
+        T::ThisFlow => ("this flow", "cette automatisation"),
+        T::ThisFlowCap => ("This flow", "Cette automatisation"),
+        T::TriggerValue => ("Trigger value", "Valeur du déclencheur"),
+        T::IsDark => (
+            "Is it dark now? (sun below -6°)",
+            "Fait-il nuit\u{A0}? (soleil sous -6°)",
+        ),
+        T::NoTrigger => ("No trigger", "Aucun déclencheur"),
+        T::NoRoom => ("No room", "Sans pièce"),
+        T::GroupTag => ("(Group)", "(Groupe)"),
+        T::ColourWhite => ("white", "blanc"),
+        T::ColourRed => ("red", "rouge"),
+        T::ColourOrange => ("orange", "orange"),
+        T::ColourYellow => ("yellow", "jaune"),
+        T::ColourGreen => ("green", "vert"),
+        T::ColourCyan => ("cyan", "cyan"),
+        T::ColourBlue => ("blue", "bleu"),
+        T::ColourPurple => ("purple", "violet"),
+        T::ColourMagenta => ("magenta", "magenta"),
+        T::ColourPink => ("pink", "rose"),
+        T::ManualRun => ("manual", "manuel"),
+        T::ScheduleRun => ("schedule", "programmation"),
+        T::SunRun => ("sun", "soleil"),
+        T::Schedule => ("Schedule", "Programmation"),
+        T::ScheduleSub => (
+            "At a set time, or on a repeat",
+            "À heure fixe ou de façon répétée",
+        ),
+        T::SunEvent => ("Sun event", "Événement solaire"),
+        T::SunEventSub => (
+            "Sunrise, sunset, dusk or dawn",
+            "Lever ou coucher du soleil, crépuscule ou aube",
+        ),
+        T::WhenDark => ("When it's dark", "Quand il fait nuit"),
+        T::WhenDarkSub => ("Between dusk and dawn", "Entre le crépuscule et l'aube"),
+        T::WaitCard => ("Wait", "Attente"),
+        T::WaitSub => ("A fixed or random delay", "Une attente fixe ou aléatoire"),
+        T::NotifySub => (
+            "A push to your phone",
+            "Une notification sur votre téléphone",
+        ),
+        T::DisableSelfSub => ("Stops it from running again", "L'empêche de se relancer"),
+        T::EnableFlow => ("Enable a flow", "Activer une automatisation"),
+        T::EnableFlowSub => (
+            "Switches another flow on or off",
+            "Active ou désactive une autre automatisation",
+        ),
+        T::DefaultNotifyTitle => ("Notification", "Notification"),
+        T::SectionWhen => ("WHEN · TRIGGER", "Déclencheurs"),
+        T::SectionAnd => ("AND · CHECK", "Conditions"),
+        T::SectionThen => ("THEN · ACTION", "Actions"),
+        T::SectionWait => ("WAIT", "Attente"),
+        T::SectionFlow => ("FLOW", "Automatisation"),
+        T::SearchCards => (
+            "Search a card or an entity",
+            "Rechercher une carte ou une entité",
+        ),
+        T::SearchCardsLabel => ("Search cards", "Rechercher des cartes"),
+        T::FilterDeviceState => ("Device state", "État d'un appareil"),
+        T::FilterButtonEvent => ("Button / event", "Bouton / événement"),
+        T::FilterManual => ("Manual", "Manuel"),
+        T::SearchFlows => (
+            "Search flows, devices, rooms…",
+            "Rechercher une automatisation, un appareil, une pièce…",
+        ),
+        T::SearchFlowsLabel => ("Search flows", "Rechercher des automatisations"),
+        T::Sort => ("Sort", "Tri"),
+        T::SortName => ("Name", "Nom"),
+        T::SortLastRun => ("Last run", "Dernier lancement"),
+        T::GroupBy => ("Group", "Regroupement"),
+        T::GroupRoom => ("Room", "Pièce"),
+        T::GroupNone => ("None", "Aucun"),
+        T::ViewLabel => ("View", "Affichage"),
+        T::ViewList => ("List", "Liste"),
+        T::ViewCards => ("Cards", "Cartes"),
+        T::StatusAll => ("All", "Toutes"),
+        T::StatusOn => ("On", "Actives"),
+        T::StatusOff => ("Off", "Inactives"),
+        T::NeedsAttention => ("⚠ Needs attention", "⚠ À vérifier"),
+        T::RoomNeedsAttention => (
+            "A flow in this room needs attention",
+            "Une automatisation de cette pièce demande votre attention",
+        ),
+        T::NoFlowsMatch => ("No flows match", "Aucune automatisation ne correspond"),
+        T::ClearFilters => ("Clear filters", "Effacer les filtres"),
+        T::NoFlowsYet => (
+            "No flows yet. Ask the assistant to create one.",
+            "Aucune automatisation pour l'instant. Demandez à l'assistant d'en créer une.",
+        ),
+        T::NoRunsYet => ("No runs yet", "Aucun lancement pour l'instant"),
+        T::FixFlowFirst => (
+            "Fix this flow first",
+            "Corrigez d'abord cette automatisation",
+        ),
+        T::FlowActions => ("Flow actions", "Actions de l'automatisation"),
+        T::OpenFlow => ("Open", "Ouvrir"),
+        T::MoveToRoom => ("Move to room", "Déplacer vers une pièce"),
+        T::DeleteFlow => ("Delete flow…", "Supprimer l'automatisation…"),
+        T::CantUndo => (" This can't be undone.", " Cette action est irréversible."),
+        T::Cancel => ("Cancel", "Annuler"),
+        T::PanelLibrary => ("Card library", "Bibliothèque de cartes"),
+        T::PanelSettings => ("Card settings", "Réglages de la carte"),
+        T::PanelRuns => ("Recent runs", "Lancements récents"),
+        T::CloseRuns => ("Close runs", "Fermer les lancements"),
+        T::DeleteWire => ("Delete wire", "Supprimer le lien"),
+        T::CannotRun => (
+            "This flow cannot run",
+            "Cette automatisation ne peut pas se lancer",
+        ),
+        T::UnknownFlow => ("Unknown flow", "Automatisation inconnue"),
+        T::BackToFlows => ("Back to flows", "Retour aux automatisations"),
+        T::NodeEditor => ("Node editor", "Éditeur de carte"),
+        T::CloseEditor => ("Close editor", "Fermer l'éditeur"),
+        T::Name => ("Name", "Nom"),
+        T::Auto => ("(auto)", "(auto)"),
+        T::DeleteCard => ("Delete card", "Supprimer la carte"),
+        T::HintDelete => ("delete", "supprimer"),
+        T::HintDuplicate => ("duplicate", "dupliquer"),
+        T::Required => ("required", "obligatoire"),
+        T::NodeTrigger => ("Trigger", "Déclencheur"),
+        T::NodeSun => ("Sun", "Soleil"),
+        T::NodeSignal => ("Signal", "Signal"),
+        T::NodeIf => ("If", "Si"),
+        T::NodeDelay => ("Delay", "Attente"),
+        T::NodeCommand => ("Command", "Commande"),
+        T::NodeFlowSwitch => ("Flow switch", "Interrupteur d'automatisation"),
+        T::TitleLabel => ("Title", "Titre"),
+        T::TitleExample => ("Door open", "Porte ouverte"),
+        T::BodyLabel => ("Body", "Message"),
+        T::NoneParen => ("(none)", "(aucun)"),
+        T::Silent => ("Silent", "Silencieuse"),
+        T::Entity => ("Entity", "Entité"),
+        T::FiresWhen => (
+            "Fires when it becomes (JSON, optional)",
+            "Se déclenche quand elle devient (JSON, facultatif)",
+        ),
+        T::OnlyAfter => (
+            "Only after (previous, JSON, optional)",
+            "Seulement après (valeur précédente, JSON, facultatif)",
+        ),
+        T::AnySignal => ("any", "n'importe lequel"),
+        T::ValueJson => ("Value (JSON)", "Valeur (JSON)"),
+        T::EntityDefaults => (
+            "Entity (defaults to trigger value)",
+            "Entité (par défaut\u{A0}: valeur du déclencheur)",
+        ),
+        T::MissingFail => ("Fail", "Échouer"),
+        T::MissingTrue => ("Take Yes", "Prendre «\u{A0}Oui\u{A0}»"),
+        T::MissingFalse => ("Take No", "Prendre «\u{A0}Non\u{A0}»"),
+        T::Duration => ("Duration", "Durée"),
+        T::UpToRandom => ("Up to (random)", "Jusqu'à (aléatoire)"),
+        T::ExactDuration => ("(exact duration)", "(durée exacte)"),
+        T::CommandJson => (
+            r#"Command (JSON, e.g. {"type":"turn_on"})"#,
+            r#"Commande (JSON, p. ex. {"type":"turn_on"})"#,
+        ),
+        T::ParisFallback => ("Paris fallback", "Paris par défaut"),
+        T::SunRise => ("Sunrise", "Lever du soleil"),
+        T::SunSet => ("Sunset", "Coucher du soleil"),
+        T::SunDawn => ("Dawn", "Aube"),
+        T::SunDusk => ("Dusk", "Crépuscule"),
+        T::TimingAt => ("At the event", "À l'événement"),
+        T::TimingBefore => ("Before", "Avant"),
+        T::TimingAfter => ("After", "Après"),
+        T::NoEventWeek => (
+            "No event in the next week",
+            "Aucun événement la semaine prochaine",
+        ),
+        T::Tidy => ("Tidy", "Ranger"),
+        T::TidyTitle => (
+            "Arrange the cards automatically",
+            "Ranger les cartes automatiquement",
+        ),
+        T::Undo => ("Undo", "Défaire"),
+        T::CancelEditing => ("Cancel editing", "Annuler la modification"),
+        T::Saving => ("Saving", "Enregistrement"),
+        T::SavingEllipsis => ("Saving…", "Enregistrement…"),
+        T::Save => ("Save", "Enregistrer"),
+        T::RunNow => ("Run now", "Lancer maintenant"),
+        T::EditLayout => ("Edit layout", "Modifier la disposition"),
+        T::FlowName => ("Flow name", "Nom de l'automatisation"),
+        T::Runs => ("Runs", "Lancements"),
+        T::ZoomIn => ("Zoom in", "Zoom avant"),
+        T::ZoomOut => ("Zoom out", "Zoom arrière"),
+        T::FitView => ("Fit view", "Ajuster la vue"),
+        T::Minimap => ("Minimap", "Mini-carte"),
+        T::EveryNMinutes => ("Every N minutes", "Toutes les N minutes"),
+        T::Hourly => ("Hourly", "Toutes les heures"),
+        T::Daily => ("Daily", "Tous les jours"),
+        T::Weekdays => ("Weekdays", "Jours de la semaine"),
+        T::Advanced => ("Advanced", "Avancé"),
+        T::PickOneDay => ("Pick at least one day", "Choisissez au moins un jour"),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// The word on a run's badge: "Running" / "En cours".
+pub fn run_status(lang: Lang, status: oikos_api::RunStatus) -> &'static str {
+    use oikos_api::RunStatus as S;
+    let (en, fr) = match status {
+        S::Running => ("Running", "En cours"),
+        S::Done => ("Done", "Terminé"),
+        S::Failed => ("Failed", "Échec"),
+        S::Cancelled => ("Cancelled", "Annulé"),
+        S::Skipped => ("Skipped", "Ignoré"),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+fn pick(lang: Lang, en: String, fr: String) -> String {
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// A question: "…?" in English, "…\u{A0}?" in French.
+pub fn ask(lang: Lang, s: &str) -> String {
+    match lang {
+        Lang::En => format!("{s}?"),
+        Lang::Fr => format!("{s}{NBSP}?"),
+    }
+}
+
+/// "When Door changes" / "Quand Door change".
+pub fn when_changes(lang: Lang, e: &str) -> String {
+    pick(
+        lang,
+        format!("When {e} changes"),
+        format!("Quand {e} change"),
+    )
+}
+
+/// "When Lamp turns on" / "Quand Lamp s'allume". `word` is the French state word for anything
+/// but a light ("activé", "ouvert"); English always says on/off.
+pub fn when_turns(lang: Lang, e: &str, on: bool, light: bool, word: &str) -> String {
+    let en = format!("When {e} turns {}", if on { "on" } else { "off" });
+    let fr = match (light, on) {
+        (true, true) => format!("Quand {e} s'allume"),
+        (true, false) => format!("Quand {e} s'éteint"),
+        (false, _) => format!("Quand {e} devient {word}"),
+    };
+    pick(lang, en, fr)
+}
+
+/// "When Door becomes open" / "Quand Door devient ouvert".
+pub fn when_becomes(lang: Lang, e: &str, v: &str) -> String {
+    pick(
+        lang,
+        format!("When {e} becomes {v}"),
+        format!("Quand {e} devient {v}"),
+    )
+}
+
+/// "When Remote sends on" / "Quand Remote envoie on"; no `signal` reads "sends a signal".
+pub fn when_sends(lang: Lang, e: &str, signal: Option<&str>) -> String {
+    match signal {
+        Some(s) => pick(
+            lang,
+            format!("When {e} sends {s}"),
+            format!("Quand {e} envoie {s}"),
+        ),
+        None => pick(
+            lang,
+            format!("When {e} sends a signal"),
+            format!("Quand {e} envoie un signal"),
+        ),
+    }
+}
+
+/// "Remote sends on" / "Remote envoie on", the list row's trigger text.
+pub fn sends(lang: Lang, e: &str, signal: Option<&str>) -> String {
+    match signal {
+        Some(s) => pick(lang, format!("{e} sends {s}"), format!("{e} envoie {s}")),
+        None => pick(
+            lang,
+            format!("{e} signals"),
+            format!("{e} envoie un signal"),
+        ),
+    }
+}
+
+/// "Lamp is on?" / "Lamp est allumée\u{A0}?".
+pub fn is_value(lang: Lang, e: &str, v: &str) -> String {
+    ask(
+        lang,
+        &pick(lang, format!("{e} is {v}"), format!("{e} est {v}")),
+    )
+}
+
+/// "Lamp is not on?" / "Lamp n'est pas allumée\u{A0}?".
+pub fn is_not_value(lang: Lang, e: &str, v: &str) -> String {
+    ask(
+        lang,
+        &pick(
+            lang,
+            format!("{e} is not {v}"),
+            format!("{e} n'est pas {v}"),
+        ),
+    )
+}
+
+/// "Wait 5 min" / "Attendre 5 min"; with `up_to`, "Wait 1 min to 2 h" / "Attendre de 1 min à 2 h".
+pub fn wait(lang: Lang, for_: &str, up_to: Option<&str>) -> String {
+    match up_to {
+        Some(b) => pick(
+            lang,
+            format!("Wait {for_} to {b}"),
+            format!("Attendre de {for_} à {b}"),
+        ),
+        None => pick(lang, format!("Wait {for_}"), format!("Attendre {for_}")),
+    }
+}
+
+/// `Notify "Door open"` / `Notifier « Porte ouverte »`; no title reads "Notify" / "Notifier".
+pub fn notify(lang: Lang, title: &str) -> String {
+    if title.trim().is_empty() {
+        return flow_text(lang, FlowText::Notify).to_owned();
+    }
+    pick(
+        lang,
+        format!("Notify \"{title}\""),
+        format!("Notifier «{NBSP}{title}{NBSP}»"),
+    )
+}
+
+/// "Set Lamp to 50 %" / "Régler Lamp sur 50 %".
+pub fn set_to(lang: Lang, e: &str, v: &str) -> String {
+    pick(
+        lang,
+        format!("Set {e} to {v}"),
+        format!("Régler {e} sur {v}"),
+    )
+}
+
+/// "Set Heater mode to heat" / "Régler le mode de Heater sur chauffage".
+pub fn set_mode(lang: Lang, e: &str, mode: &str) -> String {
+    pick(
+        lang,
+        format!("Set {e} mode to {mode}"),
+        format!("Régler le mode de {e} sur {mode}"),
+    )
+}
+
+/// "Set Fan percentage to 60" / "Régler percentage de Fan sur 60".
+pub fn set_control(lang: Lang, e: &str, control: &str, v: &str) -> String {
+    pick(
+        lang,
+        format!("Set {e} {control} to {v}"),
+        format!("Régler {control} de {e} sur {v}"),
+    )
+}
+
+/// " at 39 %" / " à 39 %", appended to a "Turn on" sentence (no-break space before the unit).
+pub fn at_brightness(lang: Lang, percent: f64) -> String {
+    pick(
+        lang,
+        format!(" at {percent}{NBSP}%"),
+        format!(" à {percent}{NBSP}%"),
+    )
+}
+
+/// " in magenta" / " en magenta".
+pub fn in_colour(lang: Lang, colour: FlowText) -> String {
+    let w = flow_text(lang, colour);
+    pick(lang, format!(" in {w}"), format!(" en {w}"))
+}
+
+/// " with breathe" / " avec breathe"; the effect is the device's own word, never translated.
+pub fn with_effect(lang: Lang, effect: &str) -> String {
+    pick(lang, format!(" with {effect}"), format!(" avec {effect}"))
+}
+
+/// "Enable Heating" / "Activer Heating"; `target` is a flow name or [`FlowText::ThisFlow`].
+pub fn flow_switch(lang: Lang, enabled: bool, target: &str) -> String {
+    let verb = flow_text(
+        lang,
+        if enabled {
+            FlowText::Enable
+        } else {
+            FlowText::Disable
+        },
+    );
+    format!("{verb} {target}")
+}
+
+/// `(English name, French "at" sentence, French name with its article)`.
+fn sun_ref(which: SunWhich) -> (&'static str, &'static str, &'static str) {
+    match which {
+        SunWhich::Sunrise => ("sunrise", "Au lever du soleil", "le lever du soleil"),
+        SunWhich::Sunset => ("sunset", "Au coucher du soleil", "le coucher du soleil"),
+        SunWhich::Dusk => ("civil dusk", "Au crépuscule civil", "le crépuscule civil"),
+        SunWhich::Dawn => ("civil dawn", "À l'aube civile", "l'aube civile"),
+    }
+}
+
+/// "At sunset", "15 min after sunrise", "15 min before civil dusk" / "Au coucher du soleil",
+/// "15 min après le lever du soleil", "15 min avant le crépuscule civil".
+pub fn sun_sentence(lang: Lang, which: SunWhich, offset_minutes: i32) -> String {
+    let (en, fr_at, fr_ref) = sun_ref(which);
+    let n = offset_minutes.unsigned_abs();
+    match (lang, offset_minutes) {
+        (Lang::En, 0) => format!("At {en}"),
+        (Lang::Fr, 0) => fr_at.to_owned(),
+        (Lang::En, o) if o > 0 => format!("{n}{NBSP}min after {en}"),
+        (Lang::Fr, o) if o > 0 => format!("{n}{NBSP}min après {fr_ref}"),
+        (Lang::En, _) => format!("{n}{NBSP}min before {en}"),
+        (Lang::Fr, _) => format!("{n}{NBSP}min avant {fr_ref}"),
+    }
+}
+
+/// The name of a sun event as a select option: "Sunrise" / "Lever du soleil".
+pub fn sun_name(lang: Lang, which: SunWhich) -> &'static str {
+    flow_text(
+        lang,
+        match which {
+            SunWhich::Sunrise => FlowText::SunRise,
+            SunWhich::Sunset => FlowText::SunSet,
+            SunWhich::Dusk => FlowText::SunDusk,
+            SunWhich::Dawn => FlowText::SunDawn,
+        },
+    )
+}
+
+/// "Delete “Name”?" / "Supprimer «\u{A0}Name\u{A0}»\u{A0}?".
+pub fn delete_flow_prompt(lang: Lang, name: &str) -> String {
+    pick(
+        lang,
+        format!("Delete “{name}”?"),
+        format!("Supprimer «{NBSP}{name}{NBSP}»{NBSP}?"),
+    )
+}
+
+/// "Couldn't save: <hub text>" / "Enregistrement impossible\u{A0}: <hub text>"; the hub's own
+/// text comes as received.
+pub fn save_failed(lang: Lang, hub: &str) -> String {
+    pick(
+        lang,
+        format!("Couldn't save: {hub}"),
+        format!("Enregistrement impossible{NBSP}: {hub}"),
+    )
+}
+
+/// "Next runs (Europe/Paris)" / "Prochains lancements (Europe/Paris)".
+pub fn next_runs(lang: Lang, zone: &str) -> String {
+    pick(
+        lang,
+        format!("Next runs ({zone})"),
+        format!("Prochains lancements ({zone})"),
+    )
+}
+
+/// "2:10 left" / "2:10 restant": the countdown of a parked delay.
+pub fn time_left(lang: Lang, clock: &str) -> String {
+    pick(lang, format!("{clock} left"), format!("{clock} restant"))
+}
+
+/// "Every minute" / "Toutes les minutes".
+pub fn every_minute(lang: Lang) -> String {
+    pick(lang, "Every minute".into(), "Toutes les minutes".into())
+}
+
+/// "Every 10 minutes" / "Toutes les 10 minutes".
+pub fn every_minutes(lang: Lang, n: u8) -> String {
+    pick(
+        lang,
+        format!("Every {n} minutes"),
+        format!("Toutes les {n} minutes"),
+    )
+}
+
+/// "Every hour at :15" / "Toutes les heures à :15".
+pub fn every_hour_at(lang: Lang, minute: u8) -> String {
+    pick(
+        lang,
+        format!("Every hour at :{minute:02}"),
+        format!("Toutes les heures à :{minute:02}"),
+    )
+}
+
+/// Which days a weekly schedule runs on, when that has a name of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DaysText {
+    Weekdays,
+    Weekends,
+    EveryDay,
+}
+
+pub fn days_text(lang: Lang, d: DaysText) -> &'static str {
+    let (en, fr) = match d {
+        DaysText::Weekdays => ("Weekdays", "Du lundi au vendredi"),
+        DaysText::Weekends => ("Weekends", "Le week-end"),
+        DaysText::EveryDay => ("Every day", "Tous les jours"),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// "Weekdays at 07:00" / "Du lundi au vendredi à 07:00".
+pub fn days_at(lang: Lang, who: &str, time: &str) -> String {
+    pick(lang, format!("{who} at {time}"), format!("{who} à {time}"))
+}
+
+/// "Custom: 0 */2 1 * *" / "Personnalisé\u{A0}: 0 */2 1 * *".
+pub fn custom_schedule(lang: Lang, cron: &str) -> String {
+    pick(
+        lang,
+        format!("Custom: {cron}"),
+        format!("Personnalisé{NBSP}: {cron}"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Same word in both languages.
+    const SAME: &[FlowText] = &[
+        FlowText::ColourOrange,
+        FlowText::ColourCyan,
+        FlowText::ColourMagenta,
+        FlowText::DefaultNotifyTitle,
+        FlowText::Auto,
+        FlowText::NodeSignal,
+    ];
+
+    #[test]
+    fn every_word_has_both_languages() {
+        assert_table(FlowText::ALL, flow_text, SAME);
+    }
+
+    #[test]
+    fn french_questions_take_a_no_break_space() {
+        assert_eq!(ask(Lang::En, "Lamp is on"), "Lamp is on?");
+        assert_eq!(ask(Lang::Fr, "Lamp est allumée"), "Lamp est allumée\u{A0}?");
+    }
+
+    #[test]
+    fn sun_sentences_in_both_languages() {
+        assert_eq!(
+            sun_sentence(Lang::Fr, SunWhich::Sunset, 0),
+            "Au coucher du soleil"
+        );
+        assert_eq!(
+            sun_sentence(Lang::Fr, SunWhich::Sunrise, 15),
+            "15\u{A0}min après le lever du soleil"
+        );
+        assert_eq!(
+            sun_sentence(Lang::Fr, SunWhich::Dawn, -15),
+            "15\u{A0}min avant l'aube civile"
+        );
+        assert_eq!(
+            sun_sentence(Lang::Fr, SunWhich::Dusk, 0),
+            "Au crépuscule civil"
+        );
+    }
+}

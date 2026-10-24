@@ -12,16 +12,17 @@ use crate::components::now::Now;
 use crate::flow_list::ListRow;
 use crate::flows::status_word;
 use crate::format::format_timestamp;
+use crate::i18n::{Lang, use_lang};
 use crate::icons::trigger_icon;
 
 /// The last run as "Done · 2 min ago", or "No runs yet".
-pub(super) fn last_run(flow: &FlowView, now: u64) -> String {
+pub(super) fn last_run(lang: Lang, flow: &FlowView, now: u64) -> String {
     flow.runs.first().map_or_else(
         || "No runs yet".to_owned(),
         |run| {
             format!(
                 "{} · {}",
-                status_word(run.status),
+                status_word(lang, run.status),
                 relative_time(run.started_at, now)
             )
         },
@@ -61,6 +62,7 @@ pub(super) fn invalid_badge(flow: &FlowView) -> Option<impl IntoView + use<>> {
 #[component]
 pub fn FlowRow(row: ListRow, #[prop(optional)] menu: Option<AnyView>) -> impl IntoView {
     let now = expect_context::<Now>();
+    let lang = use_lang();
     let flow = row.view.clone();
     let id = flow.definition.id.clone();
     let href = format!("/flows/{}", api::encode_id(&id));
@@ -87,7 +89,7 @@ pub fn FlowRow(row: ListRow, #[prop(optional)] menu: Option<AnyView>) -> impl In
                 <span class="flow-row__trigger">{trigger}</span>
                 <span class="flow-row__dot" aria-hidden="true">" · "</span>
                 <span class="flow-row__run" class:flow-row__run--failed=failed title=started>
-                    {move || last_run(&run_flow, now.0.get())}
+                    {move || last_run(lang(), &run_flow, now.0.get())}
                 </span>
             </span>
             <span class="flow-row__switch">

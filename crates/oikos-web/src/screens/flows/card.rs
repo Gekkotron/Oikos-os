@@ -9,11 +9,13 @@ use crate::components::flow_switch::FlowSwitch;
 use crate::components::now::Now;
 use crate::flow_list::ListRow;
 use crate::format::format_timestamp;
+use crate::i18n::use_lang;
 
 /// A card of the grid view. `menu` is the slot at the bottom end for the ⋯ menu.
 #[component]
 pub fn FlowCard(row: ListRow, #[prop(optional)] menu: Option<AnyView>) -> impl IntoView {
     let now = expect_context::<Now>();
+    let lang = use_lang();
     let flow = row.view.clone();
     let id = flow.definition.id.clone();
     let href = format!("/flows/{}", api::encode_id(&id));
@@ -46,7 +48,7 @@ pub fn FlowCard(row: ListRow, #[prop(optional)] menu: Option<AnyView>) -> impl I
             <p class="flow-tile__trigger">{row.trigger_text.clone()}</p>
             <div class="flow-tile__bottom">
                 <span class="flow-row__run" class:flow-row__run--failed=failed title=started>
-                    {move || last_run(&run_flow, now.0.get())}
+                    {move || last_run(lang(), &run_flow, now.0.get())}
                 </span>
                 {restart.then(|| view! { <span class="flow-tag">"restart"</span> })}
                 <span class="flow-tile__menu">{menu}</span>

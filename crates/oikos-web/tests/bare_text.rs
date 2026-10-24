@@ -54,14 +54,17 @@ const TECH_LINES: &[&str] = &[
 fn flagged(source: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip_depth: Option<i32> = None;
+    let mut skip_top = false;
     let mut pending_cfg_test = false;
     // Brace depth inside a `view!` block, where a literal alone on its line is view text.
     let mut view_depth = 0;
     for raw in source.lines() {
         let line = strip_comment(raw);
         if let Some(depth) = skip_depth.as_mut() {
+            // A multi-line raw string (`br#"{ … }"#`) unbalances `braces`, so a top-level test
+            // module ends at its `}` in the first column, not when the count reaches zero.
             *depth += braces(&line);
-            if *depth <= 0 {
+            if if skip_top { raw == "}" } else { *depth <= 0 } {
                 skip_depth = None;
             }
             continue;
@@ -77,6 +80,7 @@ fn flagged(source: &str) -> Vec<String> {
                 let depth = braces(&line);
                 if depth > 0 {
                     skip_depth = Some(depth);
+                    skip_top = !raw.starts_with(char::is_whitespace);
                     continue;
                 }
                 // `#[cfg(test)]` then `mod tests { … }` on one line: nothing to scan.

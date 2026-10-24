@@ -33,7 +33,6 @@ file: src/components/alarm_hero.rs  # not translated yet
 file: src/components/alert_row.rs  # not translated yet
 file: src/components/confirm.rs  # not translated yet
 file: src/components/dial.rs  # not translated yet
-file: src/components/flow_switch.rs  # not translated yet
 file: src/components/history_chart/format.rs  # not translated yet
 file: src/components/history_chart/view.rs  # not translated yet
 file: src/components/hs_wheel.rs  # not translated yet
@@ -46,14 +45,9 @@ file: src/dashboards/library.rs  # not translated yet
 file: src/dashboards/mod.rs  # not translated yet
 file: src/energy.rs  # not translated yet
 file: src/energy_day.rs  # not translated yet
-file: src/flow_list.rs  # not translated yet
-file: src/flow_picker.rs  # not translated yet
-file: src/flow_text.rs  # not translated yet
-file: src/flows.rs  # not translated yet
 file: src/nav.rs  # not translated yet
 file: src/override_editor.rs  # not translated yet
 file: src/rooms.rs  # not translated yet
-file: src/schedule.rs  # not translated yet
 file: src/screens/alert_detail.rs  # not translated yet
 file: src/screens/alerts.rs  # not translated yet
 file: src/screens/climate.rs  # not translated yet

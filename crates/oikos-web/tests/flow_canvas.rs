@@ -235,7 +235,7 @@ async fn pills_read_as_sentences() {
     let html = host.inner_html();
     assert_eq!(
         text(&host, "[data-node=wait] .flow-node__title"),
-        "Wait 5 min",
+        "Wait 5\u{a0}min",
         "{html}"
     );
     assert_eq!(count(&host, ".flow-node--wait"), 1, "{html}");
@@ -953,14 +953,14 @@ async fn field_edit_is_one_undo_step() {
     tick().await;
     assert_eq!(
         text(&host, "[data-node=wait] .flow-node__title"),
-        "Wait 10 min"
+        "Wait 10\u{a0}min"
     );
     click(&host, ".flow-toolbar button[aria-label=Undo]");
     tick().await;
     let html = host.inner_html();
     assert_eq!(
         text(&host, "[data-node=wait] .flow-node__title"),
-        "Wait 5 min",
+        "Wait 5\u{a0}min",
         "{html}"
     );
     assert!(

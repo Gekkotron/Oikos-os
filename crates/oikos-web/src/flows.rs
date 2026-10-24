@@ -10,13 +10,14 @@ use oikos_core::flow::{Flow, Node, NodeKind, parse_duration};
 
 use crate::flow_text::sun_summary;
 use crate::format::entity_title;
+use crate::i18n::Lang;
+use crate::i18n::flows::{self as t, FlowText, flow_text};
 use crate::schedule::describe;
 
-fn entity_label(id: &str, entities: &BTreeMap<String, EntityView>) -> String {
-    // The sentences around this label are English until the flows area is translated.
+fn entity_label(lang: Lang, id: &str, entities: &BTreeMap<String, EntityView>) -> String {
     entities
         .get(id)
-        .map_or_else(|| id.to_owned(), |e| entity_title(crate::i18n::Lang::En, e))
+        .map_or_else(|| id.to_owned(), |e| entity_title(lang, e))
 }
 
 pub(crate) fn humanise(command: &str) -> String {
@@ -29,67 +30,89 @@ pub(crate) fn humanise(command: &str) -> String {
 }
 
 /// `Enable <flow>` / `Disable this flow`: what a flow switch does, in words.
-fn flow_switch_text(p: &oikos_core::flow::FlowEnableParams) -> String {
-    format!(
-        "{} {}",
-        if p.enabled { "Enable" } else { "Disable" },
-        p.flow.as_deref().unwrap_or("this flow")
+fn flow_switch_text(lang: Lang, p: &oikos_core::flow::FlowEnableParams) -> String {
+    t::flow_switch(
+        lang,
+        p.enabled,
+        p.flow
+            .as_deref()
+            .unwrap_or_else(|| flow_text(lang, FlowText::ThisFlow)),
     )
 }
 
-fn summary_label(node: &Node) -> String {
+/// A command's name as a short label: "Turn on" / "Allumer"; a command with no word of its own
+/// keeps the prettified id.
+fn command_label(lang: Lang, name: &str) -> String {
+    let known = match name {
+        "turn_on" => Some(FlowText::TurnOn),
+        "turn_off" => Some(FlowText::TurnOff),
+        "toggle" => Some(FlowText::Toggle),
+        "open" => Some(FlowText::Open),
+        "close" => Some(FlowText::Close),
+        "stop" => Some(FlowText::Stop),
+        "press" => Some(FlowText::Press),
+        _ => None,
+    };
+    known.map_or_else(|| humanise(name), |k| flow_text(lang, k).to_owned())
+}
+
+fn summary_label(lang: Lang, node: &Node) -> String {
     if let Some(name) = &node.name {
         return name.clone();
     }
     match &node.kind {
-        NodeKind::TriggerState(_) => "Trigger".into(),
-        NodeKind::TriggerSchedule(p) => describe(&p.cron),
-        NodeKind::TriggerSun(_) => "Sun".into(),
-        NodeKind::TriggerSignal(_) => "Signal".into(),
-        NodeKind::If(_) => "If".into(),
-        NodeKind::Delay(p) => match &p.up_to {
-            Some(up_to) => format!("Delay {}–{up_to}", p.for_),
-            None => format!("Delay {}", p.for_),
-        },
-        NodeKind::Command(p) => humanise(command_name(&p.command)),
-        NodeKind::FlowEnable(p) => flow_switch_text(p),
-        NodeKind::Notify(_) => "Notify".into(),
+        NodeKind::TriggerState(_) => flow_text(lang, FlowText::NodeTrigger).into(),
+        NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
+        NodeKind::TriggerSun(_) => flow_text(lang, FlowText::NodeSun).into(),
+        NodeKind::TriggerSignal(_) => flow_text(lang, FlowText::NodeSignal).into(),
+        NodeKind::If(_) => flow_text(lang, FlowText::NodeIf).into(),
+        NodeKind::Delay(p) => {
+            let head = flow_text(lang, FlowText::NodeDelay);
+            match &p.up_to {
+                Some(up_to) => format!("{head} {}–{up_to}", p.for_),
+                None => format!("{head} {}", p.for_),
+            }
+        }
+        NodeKind::Command(p) => command_label(lang, command_name(&p.command)),
+        NodeKind::FlowEnable(p) => flow_switch_text(lang, p),
+        NodeKind::Notify(_) => flow_text(lang, FlowText::Notify).into(),
     }
 }
 
 /// Just the trigger node(s) in words: "Every 10 minutes" for a schedule, the entity label
 /// for a state trigger. Multiple triggers are joined by " · ".
-pub fn trigger_summary(flow: &Flow, entities: &BTreeMap<String, EntityView>) -> String {
+pub fn trigger_summary(lang: Lang, flow: &Flow, entities: &BTreeMap<String, EntityView>) -> String {
     let parts: Vec<String> = flow
         .nodes
         .iter()
         .filter_map(|n| match &n.kind {
-            NodeKind::TriggerState(p) => Some(entity_label(&p.entity, entities)),
-            NodeKind::TriggerSignal(p) => Some(match &p.signal {
-                Some(signal) => format!("{} sends {signal}", entity_label(&p.entity, entities)),
-                None => format!("{} signals", entity_label(&p.entity, entities)),
-            }),
-            NodeKind::TriggerSchedule(p) => Some(describe(&p.cron)),
-            NodeKind::TriggerSun(p) => Some(sun_summary(p.which, p.offset())),
+            NodeKind::TriggerState(p) => Some(entity_label(lang, &p.entity, entities)),
+            NodeKind::TriggerSignal(p) => Some(t::sends(
+                lang,
+                &entity_label(lang, &p.entity, entities),
+                p.signal.as_deref(),
+            )),
+            NodeKind::TriggerSchedule(p) => Some(describe(lang, &p.cron)),
+            NodeKind::TriggerSun(p) => Some(sun_summary(lang, p.which, p.offset())),
             _ => None,
         })
         .collect();
     if parts.is_empty() {
-        "No trigger".to_owned()
+        flow_text(lang, FlowText::NoTrigger).to_owned()
     } else {
         parts.join(" · ")
     }
 }
 
 /// One line for the flow list: the layers joined by ` → `, siblings by ` / `.
-pub fn summary(flow: &Flow) -> String {
+pub fn summary(lang: Lang, flow: &Flow) -> String {
     flow.layers()
         .iter()
         .map(|layer| {
             layer
                 .iter()
                 .filter_map(|id| flow.node(id))
-                .map(summary_label)
+                .map(|n| summary_label(lang, n))
                 .collect::<Vec<_>>()
                 .join(" / ")
         })
@@ -109,21 +132,26 @@ pub fn value_text(value: &serde_json::Value) -> String {
 /// {value}"` for an entity change, press or signal, and `schedule` or `sun` for a timed run
 /// (read from its first step, the trigger node). Computed here instead of printing the
 /// engine's detail, which carries the raw entity id.
-pub fn trigger_line(run: &RunView, flow: &Flow, entities: &BTreeMap<String, EntityView>) -> String {
+pub fn trigger_line(
+    lang: Lang,
+    run: &RunView,
+    flow: &Flow,
+    entities: &BTreeMap<String, EntityView>,
+) -> String {
     if run.manual {
-        return "manual".to_owned();
+        return flow_text(lang, FlowText::ManualRun).to_owned();
     }
-    if let Some(t) = &run.trigger {
+    if let Some(trigger) = &run.trigger {
         return format!(
             "{} = {}",
-            entity_label(&t.entity, entities),
-            value_text(&t.value)
+            entity_label(lang, &trigger.entity, entities),
+            value_text(&trigger.value)
         );
     }
     let first = run.steps.first().and_then(|s| flow.node(&s.node));
     match first.map(|n| &n.kind) {
-        Some(NodeKind::TriggerSchedule(_)) => "schedule".to_owned(),
-        Some(NodeKind::TriggerSun(_)) => "sun".to_owned(),
+        Some(NodeKind::TriggerSchedule(_)) => flow_text(lang, FlowText::ScheduleRun).to_owned(),
+        Some(NodeKind::TriggerSun(_)) => flow_text(lang, FlowText::SunRun).to_owned(),
         _ => String::new(),
     }
 }
@@ -211,14 +239,8 @@ pub fn highlight(flow: &Flow, run: Option<&RunView>) -> Highlight {
 }
 
 /// The word shown on a run's badge.
-pub fn status_word(status: RunStatus) -> &'static str {
-    match status {
-        RunStatus::Running => "Running",
-        RunStatus::Done => "Done",
-        RunStatus::Failed => "Failed",
-        RunStatus::Cancelled => "Cancelled",
-        RunStatus::Skipped => "Skipped",
-    }
+pub fn status_word(lang: Lang, status: RunStatus) -> &'static str {
+    t::run_status(lang, status)
 }
 
 /// `at - start` as a short log offset: `+0s`, `+45s`, `+2m 10s`, `+1h 03m`. A step whose
@@ -289,7 +311,7 @@ mod tests {
     #[test]
     fn summary_of_reference_flow() {
         assert_eq!(
-            summary(&reference()),
+            summary(Lang::En, &reference()),
             "Motion → If → Turn on / Delay 5m → Turn off"
         );
     }
@@ -364,7 +386,7 @@ mod tests {
             }
         }
         assert_eq!(parked_deadline(&random, "wait", 100), Some(700));
-        let label = random.node("wait").map(summary_label);
+        let label = random.node("wait").map(|n| summary_label(Lang::En, n));
         assert_eq!(label.as_deref(), Some("Delay 5m–10m"));
         // The true branch leads to a command, not a delay.
         let run = running(vec![step("moving", StepOutcome::Ok, "true")]);
@@ -410,11 +432,14 @@ mod tests {
             value: serde_json::json!(true),
             previous: serde_json::json!(false),
         });
-        assert_eq!(trigger_line(&run, &reference(), &none), "m = true");
+        assert_eq!(
+            trigger_line(Lang::En, &run, &reference(), &none),
+            "m = true"
+        );
         // Only a run started by hand is manual, whatever its trigger node.
         run.trigger = None;
         run.manual = true;
-        assert_eq!(trigger_line(&run, &reference(), &none), "manual");
+        assert_eq!(trigger_line(Lang::En, &run, &reference(), &none), "manual");
         // A timed run carries no trigger; its first step names the trigger node.
         let mut timed = reference();
         let motion = timed.nodes.iter_mut().find(|n| n.id == "motion").unwrap();
@@ -422,12 +447,12 @@ mod tests {
             serde_json::from_value(serde_json::json!({"cron": "0 7 * * *"})).unwrap(),
         );
         run.manual = false;
-        assert_eq!(trigger_line(&run, &timed, &none), "schedule");
+        assert_eq!(trigger_line(Lang::En, &run, &timed, &none), "schedule");
         let motion = timed.nodes.iter_mut().find(|n| n.id == "motion").unwrap();
         motion.kind = NodeKind::TriggerSun(
             serde_json::from_value(serde_json::json!({"which": "sunset"})).unwrap(),
         );
-        assert_eq!(trigger_line(&run, &timed, &none), "sun");
+        assert_eq!(trigger_line(Lang::En, &run, &timed, &none), "sun");
     }
 
     #[test]
@@ -451,22 +476,25 @@ mod tests {
         let other = node(
             r#"{ "id": "b", "type": "flow.enable", "params": { "flow": "force-heating-loop", "enabled": true } }"#,
         );
-        assert_eq!(summary_label(&schedule), "Every 10 minutes");
-        assert_eq!(summary_label(&this), "Disable this flow");
-        assert_eq!(summary_label(&other), "Enable force-heating-loop");
+        assert_eq!(summary_label(Lang::En, &schedule), "Every 10 minutes");
+        assert_eq!(summary_label(Lang::En, &this), "Disable this flow");
+        assert_eq!(summary_label(Lang::En, &other), "Enable force-heating-loop");
     }
 
     #[test]
     fn trigger_summary_joins_every_trigger() {
         let entities = BTreeMap::new();
         let mut flow = reference();
-        assert_eq!(trigger_summary(&flow, &entities), "m");
+        assert_eq!(trigger_summary(Lang::En, &flow, &entities), "m");
         flow.nodes.push(node(
             r#"{ "id": "s", "type": "trigger.schedule", "params": { "cron": "*/10 * * * *" } }"#,
         ));
-        assert_eq!(trigger_summary(&flow, &entities), "m · Every 10 minutes");
+        assert_eq!(
+            trigger_summary(Lang::En, &flow, &entities),
+            "m · Every 10 minutes"
+        );
         flow.nodes.retain(|n| !n.kind.is_trigger());
-        assert_eq!(trigger_summary(&flow, &entities), "No trigger");
+        assert_eq!(trigger_summary(Lang::En, &flow, &entities), "No trigger");
     }
 
     #[test]
@@ -482,8 +510,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            trigger_summary(&flow, &BTreeMap::new()),
-            "15 min after sunset"
+            trigger_summary(Lang::En, &flow, &BTreeMap::new()),
+            "15\u{a0}min after sunset"
         );
     }
 
@@ -504,8 +532,30 @@ mod tests {
     }
 
     #[test]
+    fn labels_and_statuses_in_french() {
+        assert_eq!(
+            summary(Lang::Fr, &reference()),
+            "Motion → Si → Allumer / Attente 5m → Éteindre"
+        );
+        assert_eq!(
+            trigger_summary(Lang::Fr, &Flow::default(), &BTreeMap::new()),
+            "Aucun déclencheur"
+        );
+        assert_eq!(status_word(Lang::Fr, RunStatus::Done), "Terminé");
+        let none = BTreeMap::new();
+        let mut run = running(vec![]);
+        run.manual = true;
+        assert_eq!(trigger_line(Lang::Fr, &run, &reference(), &none), "manuel");
+        let this = node(r#"{ "id": "a", "type": "flow.enable", "params": { "enabled": false } }"#);
+        assert_eq!(
+            summary_label(Lang::Fr, &this),
+            "Désactiver cette automatisation"
+        );
+    }
+
+    #[test]
     fn status_words_and_classes() {
-        assert_eq!(status_word(RunStatus::Cancelled), "Cancelled");
+        assert_eq!(status_word(Lang::En, RunStatus::Cancelled), "Cancelled");
         assert_eq!(status_class(RunStatus::Running), "run--running");
         assert_eq!(status_class(RunStatus::Skipped), "run--skipped");
     }

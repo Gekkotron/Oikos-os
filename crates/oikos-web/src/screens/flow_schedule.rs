@@ -5,7 +5,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::schedule::{SchedulePick, WEEK_CHIPS, describe, from_cron, to_cron};
+use crate::i18n::use_lang;
+use crate::schedule::{SchedulePick, describe, from_cron, to_cron, week_chips};
 
 /// Set while a schedule editor holds an expression the hub rejects; the Save button reads it.
 #[derive(Clone, Copy)]
@@ -75,6 +76,7 @@ fn tick_text(rfc3339: &str) -> String {
 /// expression to `write`.
 #[component]
 pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView {
+    let lang = use_lang();
     let blocked = use_context::<SaveBlocked>();
     let pick = RwSignal::new(from_cron(&initial));
     let ticks = RwSignal::new(Vec::<String>::new());
@@ -242,10 +244,9 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
         if !matches!(pick.get_untracked(), SchedulePick::Weekdays { .. }) {
             return ().into_any();
         }
-        let day_chips = WEEK_CHIPS
-            .iter()
+        let day_chips = week_chips(lang())
+            .into_iter()
             .map(|(day, name)| {
-                let day = *day;
                 let on = move || {
                     pick.with(
                         |p| matches!(p, SchedulePick::Weekdays { days, .. } if days.contains(&day)),
@@ -270,7 +271,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
                             });
                         }
                     >
-                        {*name}
+                        {name}
                     </button>
                 }
             })
@@ -320,7 +321,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
                 3 => view! { {time_input()} {days_input()} }.into_any(),
                 _ => advanced_input(),
             }}
-            <p class="sched-summary">{move || describe(&to_cron(&pick.get()))}</p>
+            <p class="sched-summary">{move || describe(lang(), &to_cron(&pick.get()))}</p>
             {move || {
                 error
                     .get()

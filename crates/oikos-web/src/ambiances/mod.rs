@@ -174,7 +174,7 @@ fn lookup<'a>(list: &'a [(String, String)], id: &str) -> Option<&'a str> {
 }
 
 /// One readable line for an action: "Every light in the house: off", "Desk lamp: turn off".
-/// Device commands reuse the flow card sentence, which is English only.
+/// Device commands reuse the flow card sentence, in the same language.
 pub fn action_sentence(action: &AmbianceAction, house: &HouseView, lang: Lang) -> String {
     match action {
         AmbianceAction::Category(c) => {
@@ -250,7 +250,12 @@ fn device_sentence(
         None => (entity.to_owned(), or_missing(lang, None, entity)),
     };
     let rest = full.replacen(&title, " ", 1);
-    let rest = rest.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Split on plain spaces only: a no-break space in "21 °C" must survive.
+    let rest = rest
+        .split(' ')
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut chars = rest.chars();
     let rest = match chars.next() {
         Some(c) => c.to_lowercase().chain(chars).collect(),
@@ -496,7 +501,7 @@ mod tests {
         assert_eq!(s(&device("ghost"), Lang::En), "ghost (missing): turn off");
         assert_eq!(
             s(&device("ghost"), Lang::Fr),
-            "ghost (introuvable) : turn off"
+            "ghost (introuvable) : éteindre"
         );
 
         assert_eq!(

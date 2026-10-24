@@ -142,6 +142,7 @@ fn offset_for(timing: Timing, minutes: i32) -> Option<i32> {
 
 /// The editor of a `trigger.sun` node: event, timing chips, summary and next fire times.
 pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> impl IntoView {
+    let lang = crate::i18n::use_lang();
     let params = move || {
         node.with(|n| match &n.kind {
             NodeKind::TriggerSun(p) => p.clone(),
@@ -257,7 +258,7 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
                 />
             </label>
         </Show>
-        <p class="node-editor__hint">{move || sun_summary(which.get(), offset.get())}</p>
+        <p class="node-editor__hint">{move || sun_summary(lang(), which.get(), offset.get())}</p>
         <FallbackBadge cfg=cfg />
         <div class="node-editor__field">
             <span class="node-editor__label">"Next fires"</span>

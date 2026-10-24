@@ -4,6 +4,7 @@ use leptos::prelude::*;
 
 mod ambiances;
 mod dashboards;
+pub mod flows;
 pub mod format;
 mod home;
 mod solar;

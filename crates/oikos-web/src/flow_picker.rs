@@ -13,6 +13,8 @@ use serde_json::{Value, json};
 use crate::flow_edit::fold_accents;
 use crate::flow_text::{Ctx, sentence, subline};
 use crate::format::{entity_title, kind_search_words};
+use crate::i18n::Lang;
+use crate::i18n::flows::{FlowText, flow_text};
 use crate::screens::flow_canvas::sun::sun_params_from_preset;
 
 /// Most entities a query lists, so the list stays short.
@@ -55,8 +57,10 @@ fn entry(group: Group, kind: NodeKind, ctx: &Ctx) -> Entry {
     }
 }
 
-/// What the picker appends to a card that targets a group entity.
-const GROUP_SUFFIX: &str = " (Group)";
+/// What the picker appends to a card that targets a group entity: " (Group)" / " (Groupe)".
+fn group_suffix(lang: Lang) -> String {
+    format!(" {}", flow_text(lang, FlowText::GroupTag))
+}
 
 fn is_group_id(entity_id: &str) -> bool {
     entity_id.starts_with("group_")
@@ -145,14 +149,14 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 cron: "0 * * * *".into(),
                 ..Default::default()
             }),
-            Some("Schedule"),
-            "At a set time, or on a repeat",
+            Some(FlowText::Schedule),
+            FlowText::ScheduleSub,
         ),
         (
             Group::When,
             NodeKind::TriggerSun(sun_params_from_preset(SunWhich::Sunset, None)),
-            Some("Sun event"),
-            "Sunrise, sunset, dusk or dawn",
+            Some(FlowText::SunEvent),
+            FlowText::SunEventSub,
         ),
         (
             Group::And,
@@ -163,8 +167,8 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 missing: None,
                 extra: Default::default(),
             }),
-            Some("When it's dark"),
-            "Between dusk and dawn",
+            Some(FlowText::WhenDark),
+            FlowText::WhenDarkSub,
         ),
         (
             Group::Wait,
@@ -172,17 +176,18 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 for_: "5m".into(),
                 ..Default::default()
             }),
-            Some("Wait"),
-            "A fixed or random delay",
+            Some(FlowText::WaitCard),
+            FlowText::WaitSub,
         ),
         (
             Group::Then,
             NodeKind::Notify(NotifyParams {
-                title: "Notification".into(),
+                // A default written into the stored flow: the language active now.
+                title: flow_text(ctx.lang, FlowText::DefaultNotifyTitle).into(),
                 ..Default::default()
             }),
-            Some("Notify"),
-            "A push to your phone",
+            Some(FlowText::Notify),
+            FlowText::NotifySub,
         ),
         (
             Group::Flow,
@@ -192,7 +197,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 ..Default::default()
             }),
             None,
-            "Stops it from running again",
+            FlowText::DisableSelfSub,
         ),
         (
             Group::Flow,
@@ -201,22 +206,41 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 flow: None,
                 ..Default::default()
             }),
-            Some("Enable a flow"),
-            "Switches another flow on or off",
+            Some(FlowText::EnableFlow),
+            FlowText::EnableFlowSub,
         ),
     ];
+    // The label a generic card reads in `lang`; the sentence of a card with no target reads
+    // poorly, so the picker names it.
+    let label_in = |lang: Lang, kind: &NodeKind, label: Option<FlowText>| match label {
+        Some(l) => flow_text(lang, l).to_owned(),
+        None => {
+            let other = Ctx {
+                entities: ctx.entities,
+                areas: ctx.areas,
+                flows: ctx.flows,
+                lang,
+            };
+            entry(Group::Flow, kind.clone(), &other).label
+        }
+    };
     let mut out: Vec<Entry> = generic
         .into_iter()
+        // Typing the English or the French word finds a card, whatever the UI language.
+        .filter(|(_, kind, label, _)| {
+            needle.is_empty()
+                || [Lang::En, Lang::Fr]
+                    .into_iter()
+                    .any(|l| fold_accents(&label_in(l, kind, *label)).contains(&needle))
+        })
         .map(|(group, kind, label, sub)| {
             let mut e = entry(group, kind, ctx);
-            e.sub = Some(sub.to_owned());
-            // The sentence of a card with no target reads poorly; the picker names it.
+            e.sub = Some(flow_text(ctx.lang, sub).to_owned());
             if let Some(label) = label {
-                e.label = label.to_owned();
+                e.label = flow_text(ctx.lang, label).to_owned();
             }
             e
         })
-        .filter(|e| needle.is_empty() || fold_accents(&e.label).contains(&needle))
         .collect();
 
     if !needle.is_empty() {
@@ -287,7 +311,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             }
             if is_group_id(&e.id) {
                 for entry in &mut out[first..] {
-                    entry.label.push_str(GROUP_SUFFIX);
+                    entry.label.push_str(&group_suffix(ctx.lang));
                 }
             }
         }
@@ -364,6 +388,51 @@ mod tests {
                 got.iter().map(|e| e.label.clone()).collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn generic_cards_read_and_search_in_both_languages() {
+        let entities = BTreeMap::new();
+        let areas: Vec<AreaView> = Vec::new();
+        let ctx = |lang| Ctx {
+            entities: &entities,
+            areas: &areas,
+            flows: &[],
+            lang,
+        };
+        let fr = entries("", &ctx(crate::i18n::Lang::Fr));
+        let labels: Vec<_> = fr.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(labels[0], "Programmation");
+        assert!(labels.contains(&"Quand il fait nuit"));
+        assert!(
+            matches!(&fr[3].kind, NodeKind::Notify(p) if p.title == "Notification"),
+            "the stored default follows the language at creation"
+        );
+        // The English word finds the card on the French UI, and the French word on the English UI.
+        let wait_fr = entries("wait", &ctx(crate::i18n::Lang::Fr));
+        assert_eq!(wait_fr.len(), 1);
+        assert_eq!(wait_fr[0].label, "Attente");
+        let wait_en = entries("attente", &ctx(crate::i18n::Lang::En));
+        assert_eq!(wait_en.len(), 1);
+        assert_eq!(wait_en[0].label, "Wait");
+    }
+
+    #[test]
+    fn group_tag_follows_the_language() {
+        let entities = house(vec![ent("group_a", "Salon", Kind::Light)]);
+        let areas: Vec<AreaView> = Vec::new();
+        let ctx = Ctx {
+            entities: &entities,
+            areas: &areas,
+            flows: &[],
+            lang: crate::i18n::Lang::Fr,
+        };
+        let got = entries("salon", &ctx);
+        assert!(
+            got.iter().all(|e| e.label.ends_with(" (Groupe)")),
+            "{got:?}"
+        );
+        assert!(got.iter().any(|e| e.label == "Allumer Salon (Groupe)"));
     }
 
     fn count(entries: &[Entry], group: Group) -> usize {

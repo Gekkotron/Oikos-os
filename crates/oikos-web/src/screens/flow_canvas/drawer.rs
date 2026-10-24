@@ -13,13 +13,22 @@ use crate::flow_text::{Ctx, title};
 use crate::flows::{run_duration, status_class, status_word, step_offset, trigger_line};
 use crate::format::format_timestamp;
 use crate::house::House;
+use crate::i18n::use_lang;
 use crate::icons::X_MARK;
 
 #[component]
 fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl IntoView {
     let house = expect_context::<House>();
     let now = expect_context::<Now>();
-    let trigger = house.entities.with(|e| trigger_line(&run, &flow, e));
+    let lang = use_lang();
+    let trigger = {
+        let (run, flow) = (run.clone(), flow.clone());
+        move || {
+            house
+                .entities
+                .with(|e| trigger_line(lang(), &run, &flow, e))
+        }
+    };
     let started = run.started_at;
     let duration = run_duration(run.started_at, run.ended_at);
     let names: Vec<(String, String)> = house.flows.with_untracked(|flows| {
@@ -96,7 +105,7 @@ fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl I
         >
             <details>
                 <summary>
-                    <span class="run__status">{status_word(run.status)}</span>
+                    <span class="run__status">{move || status_word(lang(), run.status)}</span>
                     <span class="run__time" title=format_timestamp(started)>
                         {move || relative_time(started, now.0.get())}
                     </span>

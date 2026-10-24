@@ -13,6 +13,7 @@ use crate::flow_list::{
     self, Filters, FlowListPrefs, Grouping, ListRow, Section, ViewMode, decode_prefs, encode_prefs,
 };
 use crate::house::House;
+use crate::i18n::use_lang;
 use bar::FlowsBar;
 use card::FlowCard;
 use room_menu::{RoomMenu, provide_open_menu};
@@ -177,12 +178,14 @@ pub fn FlowsScreen() -> impl IntoView {
     let query = RwSignal::new(String::new());
     Effect::new(move |_| prefs.with(save_prefs));
 
+    let lang = use_lang();
     let all_rows = Memo::new(move |_| {
+        let lang = lang();
         house.flows.with(|flows| {
             house.areas.with(|areas| {
                 house
                     .entities
-                    .with(|entities| flow_list::rows(flows, areas, entities))
+                    .with(|entities| flow_list::rows(lang, flows, areas, entities))
             })
         })
     });
@@ -214,7 +217,10 @@ pub fn FlowsScreen() -> impl IntoView {
     let empty = Memo::new(move |_| shown.with(Vec::is_empty));
     let sections = Memo::new(move |_| {
         let rows = shown.get();
-        house.areas.with(|areas| flow_list::sections(rows, areas))
+        let lang = lang();
+        house
+            .areas
+            .with(|areas| flow_list::sections(lang, rows, areas))
     });
     let section_keys = Memo::new(move |_| {
         sections.with(|all| all.iter().map(|s| s.key.clone()).collect::<Vec<_>>())

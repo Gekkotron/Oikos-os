@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::flow_edit::fold_accents;
 use crate::flows::trigger_summary;
+use crate::i18n::Lang;
+use crate::i18n::flows::{FlowText, flow_text};
 
 /// The key of the section holding flows with no (known) room.
 pub const NO_ROOM_KEY: &str = "__no_room__";
@@ -163,6 +165,7 @@ pub fn trigger_kinds(view: &FlowView) -> BTreeSet<TriggerKind> {
 /// The rows for `flows`, in the given order. A flow whose area is unknown (or `Unassigned`)
 /// has no room.
 pub fn rows(
+    lang: Lang,
     flows: &[FlowView],
     areas: &[AreaView],
     entities: &BTreeMap<String, EntityView>,
@@ -177,7 +180,7 @@ pub fn rows(
                 .filter(|id| *id != UNASSIGNED_AREA)
                 .and_then(|id| areas.iter().find(|a| a.id == id));
             ListRow {
-                trigger_text: trigger_summary(&view.definition, entities),
+                trigger_text: trigger_summary(lang, &view.definition, entities),
                 kinds: trigger_kinds(view),
                 room: area.map(|a| a.id.clone()),
                 room_name: area.map(|a| a.name.clone()),
@@ -261,7 +264,7 @@ pub fn sort_rows(rows: &mut [ListRow], sort: Sort) {
 
 /// Cuts `rows` into rooms following `areas` (the hub's order, `Unassigned` skipped, empty
 /// rooms omitted), then the flows with no room under "No room". Row order is preserved.
-pub fn sections(rows: Vec<ListRow>, areas: &[AreaView]) -> Vec<Section> {
+pub fn sections(lang: Lang, rows: Vec<ListRow>, areas: &[AreaView]) -> Vec<Section> {
     let mut out: Vec<Section> = areas
         .iter()
         .filter(|a| a.id != UNASSIGNED_AREA)
@@ -274,7 +277,7 @@ pub fn sections(rows: Vec<ListRow>, areas: &[AreaView]) -> Vec<Section> {
         .collect();
     let mut no_room = Section {
         key: NO_ROOM_KEY.to_owned(),
-        title: "No room".to_owned(),
+        title: flow_text(lang, FlowText::NoRoom).to_owned(),
         rows: Vec::new(),
         attention: false,
     };
@@ -471,7 +474,7 @@ mod tests {
     }
 
     fn row(v: FlowView) -> ListRow {
-        rows(&[v], &[], &BTreeMap::new()).remove(0)
+        rows(Lang::En, &[v], &[], &BTreeMap::new()).remove(0)
     }
 
     fn row_in(v: FlowView, room: &str, room_name: &str) -> ListRow {
@@ -547,7 +550,12 @@ mod tests {
         unassigned.definition.area = Some(UNASSIGNED_AREA.into());
         let mut known = view("c", "C", &[]);
         known.definition.area = Some("salon".into());
-        let out = rows(&[ghost, unassigned, known], &areas, &BTreeMap::new());
+        let out = rows(
+            Lang::En,
+            &[ghost, unassigned, known],
+            &areas,
+            &BTreeMap::new(),
+        );
         assert_eq!(
             (out[0].room.clone(), out[0].room_name.clone()),
             (None, None)
@@ -667,7 +675,7 @@ mod tests {
             row_in(view("in_b", "B", &[]), "b", "Bedroom"),
             row_in(view("in_b2", "B2", &[]), "b", "Bedroom"),
         ];
-        let out = sections(list, &areas);
+        let out = sections(Lang::En, list, &areas);
         let keys: Vec<&str> = out.iter().map(|s| s.key.as_str()).collect();
         assert_eq!(keys, ["b", "a", NO_ROOM_KEY]);
         assert_eq!(out[0].title, "Bedroom");
@@ -682,7 +690,7 @@ mod tests {
             row_in(invalid("bad"), "a", "Attic"),
             row_in(view("ok2", "Ok2", &[]), "b", "Bedroom"),
         ];
-        let out = sections(list, &[area("a", "Attic"), area("b", "Bedroom")]);
+        let out = sections(Lang::En, list, &[area("a", "Attic"), area("b", "Bedroom")]);
         assert!(out[0].attention);
         assert!(!out[1].attention);
     }
