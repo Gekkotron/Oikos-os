@@ -2,9 +2,10 @@
 
 pub mod entity_field;
 pub mod proposal;
+pub mod room_list;
+pub mod room_panel;
 pub mod settings_sheet;
 pub mod timeline;
-pub mod zone_card;
 
 use chrono::{DateTime, Datelike, Timelike};
 use chrono_tz::Tz;

@@ -1,7 +1,10 @@
-//! The Climate screen: one card per zone, the house settings and the engine's banners.
+//! The Climate screen: the room list, the selected room's panel, the house settings and the
+//! engine's banners.
 //!
-//! Only the zone list is keyed by zone id; the cards, the settings sheet and their local state
-//! live outside the closures that react to a refetch, so a refresh never resets them.
+//! Only the zone list is keyed by zone id; the panels, the settings sheet and their local state
+//! live outside the closures that react to a refetch, so a refresh never resets them. Every
+//! room's panel stays mounted and only the selected one shows, so switching rooms keeps an edit
+//! in progress too.
 
 use chrono_tz::Tz;
 use leptos::prelude::*;
@@ -9,9 +12,10 @@ use leptos::task::spawn_local;
 use oikos_climate::view::{ClimateView, ZoneView};
 
 use crate::api::climate as api;
-use crate::climate::parse_zone;
+use crate::climate::room_list::RoomList;
+use crate::climate::room_panel::RoomPanel;
 use crate::climate::settings_sheet::SettingsSheet;
-use crate::climate::zone_card::ZoneCard;
+use crate::climate::{parse_zone, pick_zone};
 use crate::house::House;
 
 /// The zone ids of `view` in display order.
@@ -52,13 +56,18 @@ pub fn ClimateScreen() -> impl IntoView {
     });
 
     let ids = Memo::new(move |_| climate.with(|v| zone_ids(v.as_ref())));
+    let selected = RwSignal::new(None::<String>);
+    let current = Memo::new(move |_| ids.with(|ids| pick_zone(ids, selected.get().as_deref())));
+    let zones = Signal::derive(move || {
+        climate.with(|v| v.as_ref().map(|v| v.zones.clone()).unwrap_or_default())
+    });
     let tz = Signal::derive(move || {
         climate.with(|v| v.as_ref().map_or(Tz::UTC, |v| parse_zone(&v.timezone)))
     });
     let loaded = move || climate.with(|v| v.is_some());
 
     view! {
-        <div class="climate">
+        <div class="climate-screen">
             <header class="sheet__header">
                 <div class="sheet__titles">
                     <h1 class="sheet__title">
@@ -108,21 +117,36 @@ pub fn ClimateScreen() -> impl IntoView {
                 }}
             </Show>
             <Show when=move || loaded() && ids.with(|i| i.is_empty())>
-                <p class="climate__empty">"No room has a climate device"</p>
+                <p class="climate-screen__empty">"No room has a climate device"</p>
             </Show>
-            <div class="climate__zones">
-                <For each=move || ids.get() key=|id| id.clone() let:id>
-                    {
-                        let fallback = find_zone(climate.get_untracked().as_ref(), &id);
-                        let zone = Memo::new(move |last: Option<&ZoneView>| {
-                            find_zone(climate.get().as_ref(), &id)
-                                .or_else(|| last.cloned())
-                                .or_else(|| fallback.clone())
-                                .expect("a keyed zone was in the view when its card was built")
-                        });
-                        view! { <ZoneCard zone=zone.into() tz=tz on_changed=reload /> }
-                    }
-                </For>
+            <div class="climate-screen__body" hidden=move || ids.with(|i| i.is_empty())>
+                <RoomList
+                    zones=zones
+                    selected=current.into()
+                    on_select=Callback::new(move |id| selected.set(Some(id)))
+                />
+                <div class="climate-screen__panels">
+                    <For each=move || ids.get() key=|id| id.clone() let:id>
+                        {
+                            let fallback = find_zone(climate.get_untracked().as_ref(), &id);
+                            let shown = {
+                                let id = id.clone();
+                                move || current.with(|c| c.as_deref() == Some(id.as_str()))
+                            };
+                            let zone = Memo::new(move |last: Option<&ZoneView>| {
+                                find_zone(climate.get().as_ref(), &id)
+                                    .or_else(|| last.cloned())
+                                    .or_else(|| fallback.clone())
+                                    .expect("a keyed zone was in the view when its panel was built")
+                            });
+                            view! {
+                                <div class="climate-screen__panel" hidden=move || !shown()>
+                                    <RoomPanel zone=zone.into() tz=tz on_changed=reload />
+                                </div>
+                            }
+                        }
+                    </For>
+                </div>
             </div>
         </div>
     }

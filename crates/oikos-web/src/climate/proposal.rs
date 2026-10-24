@@ -288,7 +288,7 @@ pub fn RulesPanel(
     });
     view! {
         <section class="climate-rules" aria-label="Approved rules">
-            <h3 class="climate-proposal__title">"Approved rules"</h3>
+            <h3 class="climate-proposal__title">"This week"</h3>
             <Show
                 when=move || !empty()
                 fallback=|| view! { <p class="climate-proposal__none">"No approved schedule yet"</p> }

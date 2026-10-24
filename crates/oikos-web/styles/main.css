@@ -5823,29 +5823,172 @@ html:has(.flow-canvas-screen) {
   vertical-align: middle;
 }
 
-.climate {
+/* The Climate screen takes the whole content width, not the 1200 px other screens keep. */
+.screen:has(.climate-screen) {
+  max-width: none;
+}
+
+.climate-screen {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.climate__zones {
+/* The header button keeps its own width instead of sharing the row with the title. */
+.climate-screen .sheet__header > .btn {
+  flex: none;
+  padding: 0 20px;
+}
+
+/* Wide: the room list beside the selected room's panel. */
+.climate-screen__body {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: 240px minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.climate-screen__body[hidden],
+.climate-screen__panel[hidden] {
+  display: none;
+}
+
+.climate-rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+}
+
+.climate-room {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--ink);
+  font: var(--type-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.climate-room--selected {
+  background: var(--nav-active-bg);
+  color: var(--nav-active-ink);
+}
+
+.climate-room__name,
+.climate-room__temp {
+  font-weight: 600;
+}
+
+.climate-room__name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.climate-room__sub {
+  grid-column: 1 / -1;
+  font: var(--type-label);
+  color: var(--muted);
+}
+
+.climate-room__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.climate-temp--none {
+  background: var(--chip-border);
+}
+
+.climate-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.climate-panel--orphan {
+  opacity: 0.7;
+}
+
+.climate-panel > .card {
+  padding: 16px;
+}
+
+.climate-status,
+.climate-week,
+.climate-learn-card,
+.climate-decisions {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 
-.climate__empty,
-.climate-learn__text,
-.climate-zone__reason,
-.climate-zone__target-label,
-.climate-field__label {
-  color: var(--ink-dim, inherit);
-  opacity: 0.8;
+.climate-status__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
-.climate-zone__header,
-.climate-zone__target,
+.climate-status__name {
+  margin: 0;
+  font: var(--type-card-value);
+}
+
+.climate-status__figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 32px;
+}
+
+.climate-status__figure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.climate-status__label,
+.climate-status__reason,
+.climate-screen__empty,
+.climate-learn__text,
+.climate-field__label {
+  font: var(--type-label);
+  color: var(--muted);
+}
+
+.climate-status__reading {
+  font: var(--type-display);
+  letter-spacing: var(--type-display-spacing);
+}
+
+.climate-status__target {
+  font: 700 22px/28px var(--font-display);
+}
+
+.climate-status__why {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.climate-status__state {
+  align-self: flex-start;
+}
+
 .climate-hold,
 .climate-learn,
 .climate-overrides {
@@ -5855,14 +5998,17 @@ html:has(.flow-canvas-screen) {
   gap: 8px;
 }
 
-.climate-zone__name {
-  flex: 1 1 auto;
-  margin: 0;
-  font: var(--type-title, var(--type-body));
+.climate-hold__setpoint {
+  flex: 0 0 90px;
+  width: 90px;
 }
 
-.climate-zone--orphan {
-  opacity: 0.7;
+.climate-hold__short {
+  display: none;
+}
+
+.climate-overrides {
+  color: var(--accent-amber);
 }
 
 .climate-overrides__list {
@@ -5871,25 +6017,43 @@ html:has(.flow-canvas-screen) {
   padding-left: 18px;
 }
 
-.climate-hold__setpoint {
-  flex: 0 0 90px;
-  width: 90px;
+.climate-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  font: var(--type-label);
+  color: var(--muted);
+}
+
+.climate-legend__swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.climate-panel__lower {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.climate-decisions > .chip {
+  align-self: flex-start;
 }
 
 .climate-decisions__list {
-  margin: 8px 0 0;
+  margin: 0;
   padding-left: 18px;
   font: var(--type-label);
 }
 
 .climate-decisions__older {
   opacity: 0.7;
-}
-
-/* The header button keeps its own width instead of sharing the row with the title. */
-.climate .sheet__header > .btn {
-  flex: none;
-  padding: 0 20px;
 }
 
 .climate-field {
@@ -5938,12 +6102,6 @@ html:has(.flow-canvas-screen) {
 }
 
 /* Climate: week timeline and proposal panel */
-.climate-zone__extra {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .climate-proposal,
 .climate-rules {
   display: flex;

@@ -1,6 +1,7 @@
-//! One zone of the Climate screen: reading, target, state, overrides, learning and decisions.
+//! One room of the Climate screen: its status (reading, target, state, holds), its week, its
+//! proposal, learning, thermometer and decisions.
 //!
-//! The card is built once per zone and reads its data from a signal, so a refetch updates the
+//! The panel is built once per zone and reads its data from a signal, so a refetch updates the
 //! text in place and keeps what the person is doing (the open decision list, the hold input).
 
 use chrono_tz::Tz;
@@ -66,7 +67,7 @@ where
 }
 
 #[component]
-pub fn ZoneCard(
+pub fn RoomPanel(
     zone: Signal<ZoneView>,
     tz: Signal<Tz>,
     /// Called after any change so the screen refetches.
@@ -272,124 +273,146 @@ pub fn ZoneCard(
     };
 
     view! {
-        <article class="card climate-zone" class:climate-zone--orphan=move || zone.with(|z| z.orphan)>
-            <header class="climate-zone__header">
-                <h2 class="climate-zone__name">{move || zone.with(|z| z.name.clone())}</h2>
+        <section class="climate-panel" class:climate-panel--orphan=move || zone.with(|z| z.orphan)>
+            <div class="card climate-status">
+                <header class="climate-status__header">
+                    <h2 class="climate-status__name">{move || zone.with(|z| z.name.clone())}</h2>
+                    {move || {
+                        zone.with(|z| z.orphan)
+                            .then(|| view! { <span class="badge">"No climate device"</span> })
+                    }}
+                </header>
                 {move || {
-                    zone.with(|z| z.orphan).then(|| view! { <span class="badge">"No climate device"</span> })
+                    zone.with(|z| z.settings_invalid.clone())
+                        .map(|e| view! { <p class="badge climate-status__invalid">{e}</p> })
                 }}
-                <span class="climate-zone__reading">{reading}</span>
-            </header>
-            {move || {
-                zone.with(|z| z.settings_invalid.clone())
-                    .map(|e| view! { <p class="badge climate-zone__invalid">{e}</p> })
-            }}
-            <div class="climate-zone__target">
-                <span class="climate-zone__target-label">"Target"</span>
-                <strong>{target}</strong>
-                {move || {
-                    source()
-                        .map(|(word, reason)| {
-                            view! {
-                                <span class="chip climate-zone__source">{word}</span>
-                                <span class="climate-zone__reason">{reason}</span>
-                            }
-                        })
-                }}
-            </div>
-            <div class="segmented climate-zone__state" role="group" aria-label="Zone state">
-                {state_buttons}
-            </div>
-            <ThermometerField
-                value=Signal::derive(move || zone.with(|z| z.settings.sensor.clone()))
-                auto=Signal::derive(move || {
-                    zone.with(|z| z.settings.sensor.is_none().then(|| z.room_sensor.clone()).flatten())
-                })
-                on_change=set_sensor
-            />
-            {overrides}
-            {move || {
-                holdable
-                    .get()
-                    .then(|| {
-                        let hold_1h = hold_1h.clone();
-                        let hold_2h = hold_2h.clone();
-                        let hold_next = hold_next.clone();
-                        view! {
-                            <div class="climate-hold">
-                                <input
-                                    class="field climate-hold__setpoint"
-                                    type="number"
-                                    step="0.5"
-                                    aria-label="Hold temperature"
-                                    prop:value=move || setpoint.get()
-                                    on:input=move |ev| setpoint.set(event_target_value(&ev))
-                                />
-                                <button type="button" class="btn" on:click=move |_| hold_1h(60)>
-                                    "1 h"
-                                </button>
-                                <button type="button" class="btn" on:click=move |_| hold_2h(120)>
-                                    "2 h"
-                                </button>
-                                {move || {
-                                    until_change()
-                                        .map(|m| {
-                                            let hold_next = hold_next.clone();
-                                            view! {
-                                                <button
-                                                    type="button"
-                                                    class="btn"
-                                                    on:click=move |_| hold_next(m)
-                                                >
-                                                    "Until next change"
-                                                </button>
-                                            }
-                                        })
-                                }}
-                            </div>
-                        }
-                    })
-            }}
-            <div class="climate-learn">
-                <span class="climate-learn__text">{learn_line}</span>
-                {move || {
-                    can_learn()
-                        .then(|| {
-                            let learn_id = learn_id.clone();
-                            view! {
-                                <button
-                                    type="button"
-                                    class="btn btn--compact"
-                                    on:click=move |_| {
-                                        let id = learn_id.clone();
-                                        act(
-                                            toasts,
-                                            on_changed,
-                                            async move { api::learn(&id).await.map(|_| ()) },
-                                        );
+                <div class="climate-status__figures">
+                    <div class="climate-status__figure">
+                        <span class="climate-status__label">"Now"</span>
+                        <strong class="climate-status__reading">{reading}</strong>
+                    </div>
+                    <div class="climate-status__figure">
+                        <span class="climate-status__label">"Target"</span>
+                        <strong class="climate-status__target">{target}</strong>
+                        {move || {
+                            source()
+                                .map(|(word, reason)| {
+                                    view! {
+                                        <span class="climate-status__why">
+                                            <span class="chip climate-status__source">{word}</span>
+                                            <span class="climate-status__reason">{reason}</span>
+                                        </span>
                                     }
-                                >
-                                    "Learn now"
-                                </button>
+                                })
+                        }}
+                    </div>
+                </div>
+                <div class="segmented climate-status__state" role="group" aria-label="Zone state">
+                    {state_buttons}
+                </div>
+                {move || {
+                    holdable
+                        .get()
+                        .then(|| {
+                            let hold_1h = hold_1h.clone();
+                            let hold_2h = hold_2h.clone();
+                            let hold_next = hold_next.clone();
+                            view! {
+                                <div class="climate-hold">
+                                    <input
+                                        class="field climate-hold__setpoint"
+                                        type="number"
+                                        step="0.5"
+                                        aria-label="Hold temperature"
+                                        prop:value=move || setpoint.get()
+                                        on:input=move |ev| setpoint.set(event_target_value(&ev))
+                                    />
+                                    <button type="button" class="btn" on:click=move |_| hold_1h(60)>
+                                        "1 h"
+                                    </button>
+                                    <button type="button" class="btn" on:click=move |_| hold_2h(120)>
+                                        "2 h"
+                                    </button>
+                                    {move || {
+                                        until_change()
+                                            .map(|m| {
+                                                let hold_next = hold_next.clone();
+                                                view! {
+                                                    <button
+                                                        type="button"
+                                                        class="btn"
+                                                        on:click=move |_| hold_next(m)
+                                                    >
+                                                        <span class="climate-hold__long">
+                                                            "Until next change"
+                                                        </span>
+                                                        <span class="climate-hold__short">"Next change"</span>
+                                                    </button>
+                                                }
+                                            })
+                                    }}
+                                </div>
                             }
                         })
                 }}
+                {overrides}
             </div>
-            <div class="climate-zone__extra">
-                {proposal}
+            <div class="card climate-week">
                 <RulesPanel zone=zone on_changed=on_changed now=now />
+                <p class="climate-legend">
+                    <span><i class="climate-legend__swatch climate-temp--low"></i>"≤ 16°"</span>
+                    <span><i class="climate-legend__swatch climate-temp--mid"></i>"17 – 19°"</span>
+                    <span><i class="climate-legend__swatch climate-temp--high"></i>"≥ 20°"</span>
+                </p>
             </div>
-            <div class="climate-decisions">
-                <button
-                    type="button"
-                    class="chip"
-                    aria-expanded=move || open.get().to_string()
-                    on:click=move |_| open.update(|o| *o = !*o)
-                >
-                    {move || if open.get() { "Hide decisions" } else { "Recent decisions" }}
-                </button>
-                <Show when=move || open.get()>{list}</Show>
+            {move || proposal().map(|p| view! { <div class="card climate-proposal-card">{p}</div> })}
+            <div class="climate-panel__lower">
+                <div class="card climate-learn-card">
+                    <div class="climate-learn">
+                        <span class="climate-learn__text">{learn_line}</span>
+                        {move || {
+                            can_learn()
+                                .then(|| {
+                                    let learn_id = learn_id.clone();
+                                    view! {
+                                        <button
+                                            type="button"
+                                            class="btn btn--compact"
+                                            on:click=move |_| {
+                                                let id = learn_id.clone();
+                                                act(
+                                                    toasts,
+                                                    on_changed,
+                                                    async move { api::learn(&id).await.map(|_| ()) },
+                                                );
+                                            }
+                                        >
+                                            "Learn now"
+                                        </button>
+                                    }
+                                })
+                        }}
+                    </div>
+                    <ThermometerField
+                        value=Signal::derive(move || zone.with(|z| z.settings.sensor.clone()))
+                        auto=Signal::derive(move || {
+                            zone.with(|z| z.settings.sensor.is_none().then(|| z.room_sensor.clone()).flatten())
+                        })
+                        on_change=set_sensor
+                    />
+                </div>
+                <div class="card climate-decisions">
+                    <button
+                        type="button"
+                        class="chip"
+                        aria-expanded=move || open.get().to_string()
+                        on:click=move |_| open.update(|o| *o = !*o)
+                    >
+                        {move || if open.get() { "Hide decisions" } else { "Recent decisions" }}
+                    </button>
+                    <Show when=move || open.get()>{list}</Show>
+                </div>
             </div>
-        </article>
+        </section>
     }
 }
