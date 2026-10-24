@@ -971,3 +971,65 @@ async fn climate_replies_still_routed() {
     tokio::task::yield_now().await;
     assert_eq!(hub.alarm_view().state, "disarmed");
 }
+
+#[tokio::test(start_paused = true)]
+async fn unresponsive_siren_delays_neither_alert_nor_disarm() {
+    let mut rig = Rig::with(|hub, settings| {
+        with_sirens(hub, settings);
+        // Online, but the switch never echoes its command.
+        hub.ingest("fx/siren/avail", b"online");
+    })
+    .await;
+    rig.hub.ingest_message("fx/siren", b"OFF", false);
+    rig.command(arm(oikos_core::model::AlarmMode::Away)).await;
+    rig.advance(61).await;
+    rig.clear();
+    rig.hub.ingest_message("fx/front_door", b"open", false);
+    // Pump without echoing the siren command: only the alarm's own topics.
+    let hub = Arc::clone(&rig.hub);
+    let pump = |rig: &mut Rig| {
+        for p in drain(&mut rig.rx) {
+            hub.ingest_message(&p.topic, p.payload.as_bytes(), p.retain);
+            rig.log.push(p);
+        }
+    };
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+        pump(&mut rig);
+    }
+    tokio::time::advance(std::time::Duration::from_millis(2100)).await;
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+        pump(&mut rig);
+    }
+    assert_eq!(rig.state(), "triggered");
+    let alerts = rig.alarm_alerts();
+    assert_eq!(alerts.len(), 1, "{alerts:?}");
+    assert!(
+        alerts[0].body.contains("(no confirmation)"),
+        "{}",
+        alerts[0].body
+    );
+    assert_eq!(rig.sent(MQTT_SIREN), ["ON"]);
+
+    // A disarm right away completes without waiting for the siren either.
+    let hub2 = Arc::clone(&rig.hub);
+    let disarm = tokio::spawn(async move {
+        hub2.send_command(
+            "oikos_alarm_house",
+            oikos_core::model::Command::Disarm { code: None },
+        )
+        .await
+    });
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+        pump(&mut rig);
+    }
+    tokio::time::advance(std::time::Duration::from_millis(2100)).await;
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+        pump(&mut rig);
+    }
+    assert!(disarm.await.unwrap().unwrap().accepted);
+    assert_eq!(rig.state(), "disarmed");
+}

@@ -21,6 +21,10 @@ const SOURCE: &str = "alarm";
 /// Every alert the alarm raises has an id that starts with this; replies are routed by it.
 pub(crate) const ALERT_PREFIX: &str = "alarm-";
 
+/// How long an entity siren has to confirm a command before it counts as failed, so one
+/// unresponsive siren delays neither the alert nor a disarm.
+const ALARM_SIREN_CONFIRM: Duration = Duration::from_secs(2);
+
 /// The id of the offline warning of a watched sensor.
 fn offline_id(entity: &str) -> String {
     format!("{ALERT_PREFIX}offline-{entity}")
@@ -112,7 +116,14 @@ impl Hub {
                 value: Some(Value::Bool(on)),
             },
         };
-        match self.send_command(entity, cmd).await {
+        let sent = tokio::time::timeout(ALARM_SIREN_CONFIRM, self.send_command(entity, cmd)).await;
+        match sent.unwrap_or_else(|_| {
+            Ok(oikos_api::CommandResponse {
+                accepted: false,
+                reason: Some("no confirmation".to_owned()),
+                state: None,
+            })
+        }) {
             Ok(reply) if reply.accepted => Ok(()),
             Ok(reply) => Err(reply.reason.unwrap_or_else(|| "refused".to_owned())),
             Err(err) => Err(err.to_string()),
