@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use leptos::task::tick;
 use oikos_climate::doc::{Block, Day, Evidence, HhMm, ModeRules, Setpoint};
 use oikos_web::climate::timeline::WeekTimeline;
+use oikos_web::i18n::Lang;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 use web_sys::{Element, HtmlElement, PointerEvent, PointerEventInit};
@@ -43,29 +44,42 @@ async fn mount_with(
     editable: bool,
     now: Option<(Day, u16)>,
 ) -> Element {
+    mount_in(rules, editable, now, RwSignal::new(Lang::En)).await
+}
+
+/// [`mount_with`] under the language signal the test flips.
+async fn mount_in(
+    rules: RwSignal<ModeRules>,
+    editable: bool,
+    now: Option<(Day, u16)>,
+    lang: RwSignal<Lang>,
+) -> Element {
     install_layout();
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     host.set_attribute("style", "width: 700px").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
-    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || match now {
-        Some(now) => view! {
-            <WeekTimeline
-                rules=rules.into()
-                editable=editable
-                on_change=Callback::new(move |next| rules.set(next))
-                now=Signal::from(now)
-            />
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(lang);
+        match now {
+            Some(now) => view! {
+                <WeekTimeline
+                    rules=rules.into()
+                    editable=editable
+                    on_change=Callback::new(move |next| rules.set(next))
+                    now=Signal::from(now)
+                />
+            }
+            .into_any(),
+            None => view! {
+                <WeekTimeline
+                    rules=rules.into()
+                    editable=editable
+                    on_change=Callback::new(move |next| rules.set(next))
+                />
+            }
+            .into_any(),
         }
-        .into_any(),
-        None => view! {
-            <WeekTimeline
-                rules=rules.into()
-                editable=editable
-                on_change=Callback::new(move |next| rules.set(next))
-            />
-        }
-        .into_any(),
     });
     // Keep the view alive for the rest of the test.
     std::mem::forget(mounted);
@@ -281,4 +295,106 @@ async fn tapping_a_block_when_viewing_shows_its_times() {
             .unwrap()
             .is_none()
     );
+}
+
+fn input(host: &Element, selector: &str) -> web_sys::HtmlInputElement {
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("{selector}"))
+        .unchecked_into()
+}
+
+fn change(field: &web_sys::HtmlInputElement, value: &str) {
+    field.set_value(value);
+    field
+        .dispatch_event(&web_sys::Event::new("change").unwrap())
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn the_timeline_reads_and_parses_in_french_and_flips_back() {
+    let lang = RwSignal::new(Lang::Fr);
+    let rules = RwSignal::new(ModeRules {
+        base: Setpoint::Temp(15.5),
+        blocks: vec![block(&[Day::Mon], "07:00", "09:00", 18.5)],
+    });
+    let host = mount_in(rules, true, None, lang).await;
+    let bar: HtmlElement = col(&host, Day::Mon)
+        .query_selector(".climate-timeline__bar")
+        .unwrap()
+        .expect("Monday bar")
+        .unchecked_into();
+    bar.click();
+    tick().await;
+    let text = || host.text_content().unwrap_or_default();
+
+    // French words, French decimals, French day names.
+    for french in [
+        "Lun.",
+        "Mar.",
+        "Dim.",
+        "Température",
+        "Supprimer la plage",
+        "hors des plages",
+        "Touchez un emplacement vide",
+        "Base",
+        "18,5°",
+    ] {
+        assert!(text().contains(french), "{french} in {}", text());
+    }
+    for english in ["Mon", "Delete block", "outside the blocks", "Tap an"] {
+        assert!(!text().contains(english), "{english} in {}", text());
+    }
+    chip(&host, "Lun.");
+    let days = || {
+        host.query_selector(".climate-timeline__days")
+            .unwrap()
+            .and_then(|n| n.get_attribute("aria-label"))
+    };
+    assert_eq!(days().as_deref(), Some("Jours"));
+    assert_eq!(
+        input(&host, ".climate-timeline__base-input").value(),
+        "15,5"
+    );
+
+    // A number typed with a comma is read as a decimal point.
+    let temperature = input(&host, ".climate-timeline__editor input[inputmode=decimal]");
+    assert_eq!(temperature.value(), "18,5");
+    change(&temperature, "19,5");
+    tick().await;
+    assert_eq!(
+        rules.with_untracked(|r| r.blocks[0].setpoint),
+        Setpoint::Temp(19.5)
+    );
+    change(&input(&host, ".climate-timeline__base-input"), "16,5");
+    tick().await;
+    assert_eq!(rules.with_untracked(|r| r.base), Setpoint::Temp(16.5));
+    // A point still works, and a word is refused.
+    change(&temperature, "20.5");
+    tick().await;
+    assert_eq!(
+        rules.with_untracked(|r| r.blocks[0].setpoint),
+        Setpoint::Temp(20.5)
+    );
+    change(&temperature, "warm");
+    tick().await;
+    assert_eq!(
+        rules.with_untracked(|r| r.blocks[0].setpoint),
+        Setpoint::Temp(20.5)
+    );
+
+    lang.set(Lang::En);
+    tick().await;
+    assert_eq!(days().as_deref(), Some("Days"));
+    for english in ["Mon", "Delete block", "outside the blocks", "20.5°"] {
+        assert!(text().contains(english), "{english} in {}", text());
+    }
+    for french in ["Lun.", "Supprimer la plage", "hors des plages"] {
+        assert!(!text().contains(french), "{french} in {}", text());
+    }
+    assert_eq!(
+        input(&host, ".climate-timeline__editor input[inputmode=decimal]").value(),
+        "20.5"
+    );
+    chip(&host, "Mon");
 }

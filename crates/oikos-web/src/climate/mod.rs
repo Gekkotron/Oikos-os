@@ -12,79 +12,101 @@ use chrono_tz::Tz;
 use oikos_climate::doc::{Day, Decision, Mode, Rules, Setpoint, Source, ZoneState};
 use oikos_climate::view::{DecisionRow, LearnStatus, ZoneView};
 
+use crate::i18n::Lang;
+use crate::i18n::climate::{ClimateText, climate_text, learning_progress};
+use crate::i18n::format::{ago, decimal, weekday_short};
+use crate::i18n::states::{StateCtx, state_word};
+
 /// What the learner's state says, in one line.
-pub fn learn_status_text(status: &LearnStatus) -> String {
+pub fn learn_status_text(lang: Lang, status: &LearnStatus) -> String {
+    let word = |k| climate_text(lang, k).to_owned();
     match status {
-        LearnStatus::Off => "Learning is off".into(),
-        LearnStatus::HistoryOff => "History is off: rules can't be learned".into(),
-        LearnStatus::NotEnough { days, needed } => {
-            format!("Learning: {days} of {needed} days so far")
-        }
-        LearnStatus::UpToDate => "Rules up to date".into(),
-        LearnStatus::Proposed => "New rules to review".into(),
-        LearnStatus::Rejected => "Last proposal rejected".into(),
+        LearnStatus::Off => word(ClimateText::LearnOff),
+        LearnStatus::HistoryOff => word(ClimateText::LearnHistoryOff),
+        LearnStatus::NotEnough { days, needed } => learning_progress(lang, *days, *needed),
+        LearnStatus::UpToDate => word(ClimateText::LearnUpToDate),
+        LearnStatus::Proposed => word(ClimateText::LearnProposed),
+        LearnStatus::Rejected => word(ClimateText::LearnRejected),
     }
 }
 
-/// How old a reading is: "just now", "10 min ago", "2 h ago", "3 d ago".
-pub fn age_text(secs: u64) -> String {
-    match secs {
-        0..60 => "just now".into(),
-        60..3600 => format!("{} min ago", secs / 60),
-        3600..86_400 => format!("{} h ago", secs / 3600),
-        _ => format!("{} d ago", secs / 86_400),
-    }
+/// How old a reading is: "just now", "10 min ago", "2 h ago", "il y a 3 j".
+pub fn age_text(lang: Lang, secs: u64) -> String {
+    ago(lang, secs)
 }
 
-/// A temperature without a trailing ".0": `21`, `20.5`.
-pub fn degrees_text(t: f64) -> String {
-    let s = format!("{t:.1}");
-    format!("{}°", s.strip_suffix(".0").unwrap_or(&s))
+/// A temperature without a trailing ".0": `21°`, `20.5°` (`20,5°` in French).
+pub fn degrees_text(lang: Lang, t: f64) -> String {
+    let s = decimal(lang, t, 1);
+    let trimmed = s
+        .strip_suffix(".0")
+        .or_else(|| s.strip_suffix(",0"))
+        .unwrap_or(&s);
+    format!("{trimmed}°")
 }
 
-pub fn setpoint_text(sp: Option<Setpoint>) -> String {
+pub fn setpoint_text(lang: Lang, sp: Option<Setpoint>) -> String {
     match sp {
-        Some(Setpoint::Temp(t)) => degrees_text(t),
-        Some(Setpoint::Off) => "Off".into(),
+        Some(Setpoint::Temp(t)) => degrees_text(lang, t),
+        Some(Setpoint::Off) => state_word(lang, StateCtx::Hvac, "off"),
         None => "—".into(),
     }
 }
 
-trait ShortDay {
-    fn short(self) -> &'static str;
+/// The short name of `day`: "Mon" / "Lun.".
+pub fn day_short(lang: Lang, day: Day) -> &'static str {
+    use chrono::Weekday as W;
+    weekday_short(
+        lang,
+        match day {
+            Day::Mon => W::Mon,
+            Day::Tue => W::Tue,
+            Day::Wed => W::Wed,
+            Day::Thu => W::Thu,
+            Day::Fri => W::Fri,
+            Day::Sat => W::Sat,
+            Day::Sun => W::Sun,
+        },
+    )
 }
 
-impl ShortDay for Day {
-    fn short(self) -> &'static str {
-        match self {
-            Day::Mon => "Mon",
-            Day::Tue => "Tue",
-            Day::Wed => "Wed",
-            Day::Thu => "Thu",
-            Day::Fri => "Fri",
-            Day::Sat => "Sat",
-            Day::Sun => "Sun",
-        }
-    }
-}
-
-pub fn mode_word(mode: Option<Mode>) -> &'static str {
+pub fn mode_word(lang: Lang, mode: Option<Mode>) -> String {
     match mode {
-        Some(Mode::Heat) => "Heat",
-        Some(Mode::Cool) => "Cool",
-        None => "Idle",
+        Some(Mode::Heat) => state_word(lang, StateCtx::Hvac, "heat"),
+        Some(Mode::Cool) => state_word(lang, StateCtx::Hvac, "cool"),
+        None => climate_text(lang, ClimateText::Idle).to_owned(),
     }
 }
 
-pub fn source_word(source: Source) -> &'static str {
-    match source {
-        Source::Safety => "Safety",
-        Source::Override => "Override",
-        Source::Holiday => "Holiday",
-        Source::Away => "Away",
-        Source::Schedule => "Schedule",
-        Source::Idle => "Idle",
-    }
+pub fn source_word(lang: Lang, source: Source) -> &'static str {
+    climate_text(
+        lang,
+        match source {
+            Source::Safety => ClimateText::SrcSafety,
+            Source::Override => ClimateText::SrcOverride,
+            Source::Holiday => ClimateText::SrcHoliday,
+            Source::Away => ClimateText::SrcAway,
+            Source::Schedule => ClimateText::SrcSchedule,
+            Source::Idle => ClimateText::Idle,
+        },
+    )
+}
+
+/// The word for the source of an older history row, which the hub sends as a raw string.
+pub fn history_source(lang: Lang, raw: &str) -> String {
+    let known = match raw {
+        "safety" => Some(Source::Safety),
+        "override" => Some(Source::Override),
+        "holiday" => Some(Source::Holiday),
+        "away" => Some(Source::Away),
+        "schedule" => Some(Source::Schedule),
+        "idle" => Some(Source::Idle),
+        _ => None,
+    };
+    known.map_or_else(
+        || crate::format::word(raw),
+        |s| source_word(lang, s).to_owned(),
+    )
 }
 
 /// The house zone from its IANA name; UTC when the name is unknown.
@@ -105,15 +127,18 @@ pub fn clock_text(unix: u64, tz: Tz) -> String {
 }
 
 /// When a hold ends, in `tz`: "07:00" today, "tomorrow 07:00", else "Mon 07:00".
-pub fn until_text(until: u64, now: u64, tz: Tz) -> String {
+pub fn until_text(lang: Lang, until: u64, now: u64, tz: Tz) -> String {
     let (Some(end), Some(start)) = (local(until, tz), local(now, tz)) else {
         return "—".into();
     };
     let clock = format!("{:02}:{:02}", end.hour(), end.minute());
     match (end.date_naive() - start.date_naive()).num_days() {
         0 => clock,
-        1 => format!("tomorrow {clock}"),
-        _ => format!("{} {clock}", Day::from_chrono(end.weekday()).short()),
+        1 => format!("{} {clock}", climate_text(lang, ClimateText::Tomorrow)),
+        _ => format!(
+            "{} {clock}",
+            day_short(lang, Day::from_chrono(end.weekday()))
+        ),
     }
 }
 
@@ -128,25 +153,27 @@ pub fn week_minute(now: u64, tz: Tz) -> (Day, u16) {
 }
 
 /// One decision as a list line: "14:05 · Schedule · Heat 21° · reason".
-pub fn decision_line(d: &Decision, tz: Tz) -> String {
+pub fn decision_line(lang: Lang, d: &Decision, tz: Tz) -> String {
     format!(
         "{} · {} · {} {} · {}",
         clock_text(d.at, tz),
-        source_word(d.source),
-        mode_word(d.mode),
-        setpoint_text(d.setpoint),
+        source_word(lang, d.source),
+        mode_word(lang, d.mode),
+        setpoint_text(lang, d.setpoint),
         d.reason
     )
 }
 
 /// An older history row as a list line.
-pub fn row_line(r: &DecisionRow, tz: Tz) -> String {
-    let setpoint = r.setpoint.map_or_else(|| "—".to_owned(), degrees_text);
+pub fn row_line(lang: Lang, r: &DecisionRow, tz: Tz) -> String {
+    let setpoint = r
+        .setpoint
+        .map_or_else(|| "—".to_owned(), |t| degrees_text(lang, t));
     format!(
         "{} · {} · {} {} · {}",
         clock_text(r.at, tz),
-        crate::format::word(&r.source),
-        crate::format::word(&r.mode),
+        history_source(lang, &r.source),
+        state_word(lang, StateCtx::Hvac, &r.mode),
         setpoint,
         r.reason
     )
@@ -198,29 +225,33 @@ pub fn room_band(z: &ZoneView) -> Option<TempBand> {
 }
 
 /// The room list's line under a zone's name: "Heat 16° · Active", "Pending · no schedule".
-pub fn room_subline(z: &ZoneView) -> String {
+pub fn room_subline(lang: Lang, z: &ZoneView) -> String {
+    let word = |k| climate_text(lang, k);
     if z.orphan {
-        return "No climate device".into();
+        return word(ClimateText::NoClimateDevice).into();
     }
     match z.settings.state {
-        ZoneState::Off => "Off".into(),
-        ZoneState::Pending if z.settings.rules.is_empty() => "Pending · no schedule".into(),
-        ZoneState::Pending => "Pending".into(),
+        ZoneState::Off => word(ClimateText::ZoneOff).into(),
+        ZoneState::Pending if z.settings.rules.is_empty() => {
+            word(ClimateText::PendingNoSchedule).into()
+        }
+        ZoneState::Pending => word(ClimateText::ZonePending).into(),
         ZoneState::Active => {
             let line = z.decision.as_ref().map_or_else(
-                || "Active · no decision yet".to_owned(),
+                || word(ClimateText::ActiveNoDecision).to_owned(),
                 |d| {
                     format!(
-                        "{} {} · Active",
-                        mode_word(d.mode),
-                        setpoint_text(d.setpoint)
+                        "{} {} · {}",
+                        mode_word(lang, d.mode),
+                        setpoint_text(lang, d.setpoint),
+                        word(ClimateText::ZoneActive)
                     )
                 },
             );
             if z.overrides.is_empty() {
                 line
             } else {
-                format!("{line} · held")
+                format!("{line} · {}", word(ClimateText::Held))
             }
         }
     }
@@ -313,12 +344,13 @@ mod tests {
 
     #[test]
     fn room_subline_reads_each_state() {
+        let en = Lang::En;
         let mut orphan = zone_view(ZoneState::Active);
         orphan.orphan = true;
-        assert_eq!(room_subline(&orphan), "No climate device");
-        assert_eq!(room_subline(&zone_view(ZoneState::Off)), "Off");
+        assert_eq!(room_subline(en, &orphan), "No climate device");
+        assert_eq!(room_subline(en, &zone_view(ZoneState::Off)), "Off");
         let pending = zone_view(ZoneState::Pending);
-        assert_eq!(room_subline(&pending), "Pending · no schedule");
+        assert_eq!(room_subline(en, &pending), "Pending · no schedule");
         let mut scheduled = pending.clone();
         scheduled.settings.rules = Rules {
             heat: Some(ModeRules {
@@ -327,13 +359,13 @@ mod tests {
             }),
             cool: None,
         };
-        assert_eq!(room_subline(&scheduled), "Pending");
+        assert_eq!(room_subline(en, &scheduled), "Pending");
         assert_eq!(
-            room_subline(&zone_view(ZoneState::Active)),
+            room_subline(en, &zone_view(ZoneState::Active)),
             "Active · no decision yet"
         );
         let active = decided(zone_view(ZoneState::Active), Setpoint::Temp(16.0));
-        assert_eq!(room_subline(&active), "Heat 16° · Active");
+        assert_eq!(room_subline(en, &active), "Heat 16° · Active");
         let mut held = active.clone();
         held.overrides.push(Override {
             entity: None,
@@ -342,7 +374,7 @@ mod tests {
             until: 0,
             origin: OverrideOrigin::Hand,
         });
-        assert_eq!(room_subline(&held), "Heat 16° · Active · held");
+        assert_eq!(room_subline(en, &held), "Heat 16° · Active · held");
     }
 
     #[test]
@@ -376,32 +408,36 @@ mod tests {
     #[test]
     fn learn_status_text_reads_each_state() {
         assert_eq!(
-            learn_status_text(&LearnStatus::NotEnough {
-                days: 6,
-                needed: 10
-            }),
+            learn_status_text(
+                Lang::En,
+                &LearnStatus::NotEnough {
+                    days: 6,
+                    needed: 10
+                }
+            ),
             "Learning: 6 of 10 days so far"
         );
         assert_eq!(
-            learn_status_text(&LearnStatus::HistoryOff),
+            learn_status_text(Lang::En, &LearnStatus::HistoryOff),
             "History is off: rules can't be learned"
         );
         assert_eq!(
-            learn_status_text(&LearnStatus::Proposed),
+            learn_status_text(Lang::En, &LearnStatus::Proposed),
             "New rules to review"
         );
         assert_eq!(
-            learn_status_text(&LearnStatus::UpToDate),
+            learn_status_text(Lang::En, &LearnStatus::UpToDate),
             "Rules up to date"
         );
     }
 
     #[test]
     fn age_text_picks_the_unit() {
-        assert_eq!(age_text(45), "just now");
-        assert_eq!(age_text(600), "10 min ago");
-        assert_eq!(age_text(7200), "2 h ago");
-        assert_eq!(age_text(3 * 86_400), "3 d ago");
+        let en = Lang::En;
+        assert_eq!(age_text(en, 45), "just now");
+        assert_eq!(age_text(en, 600), "10\u{A0}min ago");
+        assert_eq!(age_text(en, 7200), "2\u{A0}h ago");
+        assert_eq!(age_text(en, 3 * 86_400), "3\u{A0}d ago");
     }
 
     fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> u64 {
@@ -428,24 +464,30 @@ mod tests {
     fn until_text_names_the_day_when_not_today() {
         let paris = parse_zone("Europe/Paris");
         let now = at(2026, 1, 5, 10, 0); // Monday 11:00 in Paris
-        assert_eq!(until_text(at(2026, 1, 5, 12, 0), now, paris), "13:00");
         assert_eq!(
-            until_text(at(2026, 1, 6, 6, 0), now, paris),
+            until_text(Lang::En, at(2026, 1, 5, 12, 0), now, paris),
+            "13:00"
+        );
+        assert_eq!(
+            until_text(Lang::En, at(2026, 1, 6, 6, 0), now, paris),
             "tomorrow 07:00"
         );
-        assert_eq!(until_text(at(2026, 1, 8, 6, 0), now, paris), "Thu 07:00");
+        assert_eq!(
+            until_text(Lang::En, at(2026, 1, 8, 6, 0), now, paris),
+            "Thu 07:00"
+        );
         // 23:30 UTC is already tomorrow in Paris.
         assert_eq!(
-            until_text(at(2026, 1, 5, 23, 30), now, paris),
+            until_text(Lang::En, at(2026, 1, 5, 23, 30), now, paris),
             "tomorrow 00:30"
         );
     }
 
     #[test]
     fn degrees_drop_a_trailing_zero() {
-        assert_eq!(degrees_text(21.0), "21°");
-        assert_eq!(degrees_text(20.5), "20.5°");
-        assert_eq!(setpoint_text(Some(Setpoint::Off)), "Off");
+        assert_eq!(degrees_text(Lang::En, 21.0), "21°");
+        assert_eq!(degrees_text(Lang::En, 20.5), "20.5°");
+        assert_eq!(setpoint_text(Lang::En, Some(Setpoint::Off)), "Off");
     }
 
     fn rules(blocks: Vec<Block>) -> Rules {
@@ -466,6 +508,61 @@ mod tests {
             setpoint: Setpoint::Temp(21.0),
             evidence: None,
         }
+    }
+
+    #[test]
+    fn french_room_lines_and_ages() {
+        let fr = Lang::Fr;
+        let active = decided(zone_view(ZoneState::Active), Setpoint::Temp(16.5));
+        assert_eq!(room_subline(fr, &active), "Chauffage 16,5° · Active");
+        let mut held = active.clone();
+        held.overrides.push(Override {
+            entity: None,
+            setpoint: Some(Setpoint::Temp(19.5)),
+            mode: None,
+            until: 0,
+            origin: OverrideOrigin::Hand,
+        });
+        assert_eq!(
+            room_subline(fr, &held),
+            "Chauffage 16,5° · Active · maintenue"
+        );
+        assert_eq!(
+            room_subline(fr, &zone_view(ZoneState::Pending)),
+            "En attente · aucune programmation"
+        );
+        assert_eq!(age_text(fr, 45), "à l'instant");
+        assert_eq!(age_text(fr, 600), "il y a 10\u{A0}min");
+        assert_eq!(degrees_text(fr, 20.5), "20,5°");
+        assert_eq!(setpoint_text(fr, Some(Setpoint::Off)), "Arrêt");
+        assert_eq!(mode_word(fr, None), "Au repos");
+        assert_eq!(source_word(fr, Source::Schedule), "Programmation");
+        assert_eq!(
+            learn_status_text(fr, &LearnStatus::UpToDate),
+            "Règles à jour"
+        );
+    }
+
+    #[test]
+    fn french_until_names_the_day() {
+        let paris = parse_zone("Europe/Paris");
+        let now = at(2026, 1, 5, 10, 0);
+        assert_eq!(
+            until_text(Lang::Fr, at(2026, 1, 6, 6, 0), now, paris),
+            "demain 07:00"
+        );
+        assert_eq!(
+            until_text(Lang::Fr, at(2026, 1, 8, 6, 0), now, paris),
+            "Jeu. 07:00"
+        );
+    }
+
+    #[test]
+    fn history_rows_use_the_known_words() {
+        assert_eq!(history_source(Lang::Fr, "schedule"), "Programmation");
+        assert_eq!(history_source(Lang::Fr, "override"), "Dérogation");
+        assert_eq!(history_source(Lang::En, "away"), "Away");
+        assert_eq!(history_source(Lang::Fr, "mystery_source"), "Mystery source");
     }
 
     #[test]

@@ -10,8 +10,10 @@ use super::climate::stepped;
 use super::{ModeSelect, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::components::card_place::{CardPlace, use_card_place};
-use crate::format::{degrees, word};
-use crate::i18n::{Key, use_text};
+use crate::format::degrees;
+use crate::i18n::climate::{ClimateText, climate_text, heating_power, use_climate_text};
+use crate::i18n::states::{StateCtx, state_word};
+use crate::i18n::{Key, Lang, use_text};
 
 fn with_water_heater(
     state: &EntityState,
@@ -42,7 +44,7 @@ struct HeaterView {
 }
 
 impl HeaterView {
-    fn from_state(state: &EntityState) -> Self {
+    fn from_state(lang: Lang, state: &EntityState) -> Self {
         let mode = match &state.value {
             StateValue::WaterHeater(w) => w.mode.as_deref(),
             _ => None,
@@ -59,10 +61,15 @@ impl HeaterView {
             .and_then(serde_json::Value::as_f64)
             .filter(|t| t.is_finite());
         let (heating, chip) = match (power, mode) {
-            (Some(p), _) if p > 0 => (true, Some(format!("Heating · {p} %"))),
-            (Some(_), _) => (false, Some("Idle".to_owned())),
-            (None, Some(m)) if m.eq_ignore_ascii_case("off") => (false, Some("Off".to_owned())),
-            (None, Some(m)) => (true, Some(word(m))),
+            (Some(p), _) if p > 0 => (true, Some(heating_power(lang, p))),
+            (Some(_), _) => (
+                false,
+                Some(climate_text(lang, ClimateText::Idle).to_owned()),
+            ),
+            (None, Some(m)) if m.eq_ignore_ascii_case("off") => {
+                (false, Some(state_word(lang, StateCtx::Hvac, "off")))
+            }
+            (None, Some(m)) => (true, Some(state_word(lang, StateCtx::Hvac, m))),
             (None, None) => (false, None),
         };
         Self {
@@ -77,6 +84,8 @@ impl HeaterView {
 #[component]
 pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let t = use_text();
+    let ct = use_climate_text();
     let label = super::live_value(&entity);
     let target_text = degrees(
         crate::i18n::current_lang(),
@@ -112,32 +121,35 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
             let guess = with_water_heater(&state, |w| w.mode = Some(picked.clone()));
             sender.send(&id, Command::SetHvacMode { mode: picked }, guess);
         });
-        view! { <ModeSelect label="Mode" options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
+        view! { <ModeSelect label=t(Key::Mode) options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
     });
 
-    let heater = HeaterView::from_state(&entity.state);
+    let heater = HeaterView::from_state(crate::i18n::current_lang(), &entity.state);
     let chip = heater.chip.map(|text| {
         view! {
             <span class="heater__chip" class:heater__chip--heating=heater.heating>{text}</span>
         }
     });
-    let inlet = heater.inlet.map(|t| {
-        let text = degrees(crate::i18n::current_lang(), Some(t), entity.unit.as_deref());
+    let inlet = heater.inlet.map(|degrees_in| {
+        let text = degrees(
+            crate::i18n::current_lang(),
+            Some(degrees_in),
+            entity.unit.as_deref(),
+        );
         view! {
             <span class="heater__inlet">
                 <span aria-hidden="true">"↓ "</span>
-                "Inlet " {text}
+                {move || ct(ClimateText::Inlet)} " " {text}
             </span>
         }
     });
     // The tile keeps the reading; the target and mode are one tap away, in the sheet.
     let in_sheet = use_card_place() == CardPlace::Sheet;
     let stepper = (in_sheet && target.is_some()).then(|| {
-        view! { <Stepper label=target_text caption="Target" can_step=true on_step=on_step /> }
+        view! { <Stepper label=target_text caption=ct(ClimateText::Target) can_step=true on_step=on_step /> }
     });
     let mode_select = mode_select.filter(|_| in_sheet);
 
-    let t = use_text();
     let open = open_entity(&entity.id);
     // The menu leads to the sheet, so the sheet has none.
     let trailing = (!in_sheet).then(|| {
@@ -173,7 +185,7 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
                     </span>
                     <div class="heater__info">
                         <div class="heater__reading">
-                            <span class="heater__caption">"Tank"</span>
+                            <span class="heater__caption">{move || ct(ClimateText::Tank)}</span>
                             <span class="heater__now">{label}</span>
                         </div>
                         {chip}
@@ -190,6 +202,7 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::HeaterView;
+    use crate::i18n::Lang;
     use oikos_core::model::{EntityState, StateValue, WaterHeaterState};
     use serde_json::json;
 
@@ -210,19 +223,37 @@ mod tests {
 
     #[test]
     fn power_above_zero_is_heating() {
-        let v = HeaterView::from_state(&state(
-            Some("heat"),
-            json!({"inlet_temperature": 17.9, "power": 43}),
-        ));
+        let v = HeaterView::from_state(
+            Lang::En,
+            &state(
+                Some("heat"),
+                json!({"inlet_temperature": 17.9, "power": 43}),
+            ),
+        );
         assert!(v.heating);
         assert_eq!(v.power, Some(43));
         assert_eq!(v.inlet, Some(17.9));
-        assert_eq!(v.chip.as_deref(), Some("Heating · 43 %"));
+        assert_eq!(v.chip.as_deref(), Some("Heating · 43\u{A0}%"));
+    }
+
+    #[test]
+    fn the_chip_reads_in_french() {
+        let fr = |mode, attrs| HeaterView::from_state(Lang::Fr, &state(mode, attrs)).chip;
+        assert_eq!(
+            fr(Some("heat"), json!({"power": 43})).as_deref(),
+            Some("En chauffe · 43\u{A0}%")
+        );
+        assert_eq!(
+            fr(Some("heat"), json!({"power": 0})).as_deref(),
+            Some("Au repos")
+        );
+        assert_eq!(fr(Some("off"), json!({})).as_deref(), Some("Arrêt"));
+        assert_eq!(fr(Some("eco"), json!({})).as_deref(), Some("Éco"));
     }
 
     #[test]
     fn power_zero_is_idle_even_in_heat_mode() {
-        let v = HeaterView::from_state(&state(Some("heat"), json!({"power": 0})));
+        let v = HeaterView::from_state(Lang::En, &state(Some("heat"), json!({"power": 0})));
         assert!(!v.heating);
         assert_eq!(v.power, Some(0));
         assert_eq!(v.chip.as_deref(), Some("Idle"));
@@ -230,7 +261,7 @@ mod tests {
 
     #[test]
     fn without_power_the_mode_decides() {
-        let v = HeaterView::from_state(&state(Some("eco"), json!({})));
+        let v = HeaterView::from_state(Lang::En, &state(Some("eco"), json!({})));
         assert!(v.heating);
         assert_eq!(v.power, None);
         assert_eq!(v.chip.as_deref(), Some("Eco"));
@@ -238,24 +269,27 @@ mod tests {
 
     #[test]
     fn mode_off_without_power_is_off() {
-        let v = HeaterView::from_state(&state(Some("off"), json!({})));
+        let v = HeaterView::from_state(Lang::En, &state(Some("off"), json!({})));
         assert!(!v.heating);
         assert_eq!(v.chip.as_deref(), Some("Off"));
     }
 
     #[test]
     fn no_mode_and_no_power_has_no_chip() {
-        let v = HeaterView::from_state(&state(None, json!({})));
+        let v = HeaterView::from_state(Lang::En, &state(None, json!({})));
         assert!(!v.heating);
         assert_eq!(v.chip, None);
     }
 
     #[test]
     fn non_numeric_attributes_are_ignored() {
-        let v = HeaterView::from_state(&state(
-            Some("off"),
-            json!({"power": "43", "inlet_temperature": null}),
-        ));
+        let v = HeaterView::from_state(
+            Lang::En,
+            &state(
+                Some("off"),
+                json!({"power": "43", "inlet_temperature": null}),
+            ),
+        );
         assert_eq!(v.power, None);
         assert_eq!(v.inlet, None);
         assert!(!v.heating);
@@ -263,17 +297,17 @@ mod tests {
 
     #[test]
     fn inlet_is_optional() {
-        let with = HeaterView::from_state(&state(None, json!({"inlet_temperature": 12})));
+        let with = HeaterView::from_state(Lang::En, &state(None, json!({"inlet_temperature": 12})));
         assert_eq!(with.inlet, Some(12.0));
-        let without = HeaterView::from_state(&state(None, json!({"power": 10})));
+        let without = HeaterView::from_state(Lang::En, &state(None, json!({"power": 10})));
         assert_eq!(without.inlet, None);
     }
 
     #[test]
     fn power_is_clamped_to_a_percentage() {
-        let v = HeaterView::from_state(&state(None, json!({"power": 140.4})));
+        let v = HeaterView::from_state(Lang::En, &state(None, json!({"power": 140.4})));
         assert_eq!(v.power, Some(100));
-        let v = HeaterView::from_state(&state(None, json!({"power": -5})));
+        let v = HeaterView::from_state(Lang::En, &state(None, json!({"power": -5})));
         assert_eq!(v.power, Some(0));
         assert!(!v.heating);
     }

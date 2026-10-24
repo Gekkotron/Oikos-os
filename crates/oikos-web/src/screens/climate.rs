@@ -17,6 +17,8 @@ use crate::climate::room_panel::RoomPanel;
 use crate::climate::settings_sheet::SettingsSheet;
 use crate::climate::{parse_zone, pick_zone};
 use crate::house::House;
+use crate::i18n::climate::{ClimateText, use_climate_text};
+use crate::i18n::{Key, use_text};
 
 /// The zone ids of `view` in display order.
 pub fn zone_ids(view: Option<&ClimateView>) -> Vec<String> {
@@ -32,6 +34,8 @@ pub fn find_zone(view: Option<&ClimateView>, id: &str) -> Option<ZoneView> {
 #[component]
 pub fn ClimateScreen() -> impl IntoView {
     let house = expect_context::<House>();
+    let t = use_climate_text();
+    let text = use_text();
     let climate = RwSignal::new(None::<ClimateView>);
     let failed = RwSignal::new(None::<String>);
     let settings_open = RwSignal::new(false);
@@ -71,18 +75,17 @@ pub fn ClimateScreen() -> impl IntoView {
             <header class="sheet__header">
                 <div class="sheet__titles">
                     <h1 class="sheet__title">
-                        "Climate" <span class="badge climate__beta">"Beta"</span>
+                        {move || text(Key::Climate)}
+                        <span class="badge climate__beta">{move || text(Key::Beta)}</span>
                     </h1>
-                    <p class="sheet__subtitle">
-                        "Still being tested: check what the engine decides before you rely on it."
-                    </p>
+                    <p class="sheet__subtitle">{move || t(ClimateText::Subtitle)}</p>
                 </div>
                 <button
                     type="button"
                     class="btn btn--compact"
                     on:click=move |_| settings_open.update(|o| *o = !*o)
                 >
-                    "Settings"
+                    {move || text(Key::Settings)}
                 </button>
             </header>
             {move || failed.get().map(|e| view! { <p class="badge climate__error">{e}</p> })}
@@ -95,7 +98,7 @@ pub fn ClimateScreen() -> impl IntoView {
                 (loaded() && !climate.with(|v| v.as_ref().is_some_and(|v| v.history)))
                     .then(|| view! {
                         <p class="badge climate__banner">
-                            "History is off: rules can't be learned until a history database is set up."
+                            {move || t(ClimateText::HistoryOffBanner)}
                         </p>
                     })
             }}
@@ -117,7 +120,7 @@ pub fn ClimateScreen() -> impl IntoView {
                 }}
             </Show>
             <Show when=move || loaded() && ids.with(|i| i.is_empty())>
-                <p class="climate-screen__empty">"No room has a climate device"</p>
+                <p class="climate-screen__empty">{move || t(ClimateText::NoRoomClimate)}</p>
             </Show>
             <div class="climate-screen__body" hidden=move || ids.with(|i| i.is_empty())>
                 <RoomList

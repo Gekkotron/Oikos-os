@@ -8,7 +8,10 @@ use oikos_climate::doc::{
 use oikos_climate::view::{LearnStatus, ZoneView};
 use oikos_web::climate::proposal::RulesPanel;
 use oikos_web::climate::room_list::RoomList;
+use oikos_web::climate::room_panel::RoomPanel;
 use oikos_web::components::toast::Toasts;
+use oikos_web::house::House;
+use oikos_web::i18n::Lang;
 use std::sync::{Arc, Mutex};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -316,7 +319,7 @@ async fn refetch_keeps_the_draft_and_the_open_editor() {
 
     // Edit the draft: the block goes to 21 °C.
     let temp: HtmlInputElement = host
-        .query_selector(".climate-timeline__editor input[type=number]")
+        .query_selector(".climate-timeline__editor input[inputmode=decimal]")
         .unwrap()
         .expect("temperature field")
         .unchecked_into();
@@ -351,4 +354,98 @@ async fn refetch_keeps_the_draft_and_the_open_editor() {
         "the block editor stays open"
     );
     assert!(find("Save").is_some(), "still editing");
+}
+
+/// The room list and panel mounted with a language the test flips.
+fn mount_room(zone: ZoneView, lang: RwSignal<Lang>) -> Element {
+    let host = host();
+    let zones = vec![zone.clone()];
+    let current = RwSignal::new(zone);
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(House::new());
+        provide_context(oikos_web::components::now::install_now());
+        provide_context(lang);
+        view! {
+            <RoomList
+                zones=Signal::from(zones.clone())
+                selected=Signal::from(Some("bedroom-1".to_owned()))
+                on_select=Callback::new(|_: String| {})
+            />
+            <RoomPanel
+                zone=current.into()
+                tz=Signal::from(chrono_tz::Tz::UTC)
+                on_changed=Callback::new(|_| {})
+            />
+        }
+    });
+    std::mem::forget(mounted);
+    host
+}
+
+#[wasm_bindgen_test]
+async fn the_room_follows_the_language_without_a_remount() {
+    let lang = RwSignal::new(Lang::Fr);
+    let host = mount_room(
+        zone("bedroom-1", "Bedroom 1", ZoneState::Active, Some(18.5)),
+        lang,
+    );
+    tick().await;
+    let text = || host.text_content().unwrap_or_default();
+    for french in [
+        "Consigne",
+        "Maintenant",
+        "Chauffage 18,5°",
+        "Programmation",
+        "Aucune programmation approuvée pour l'instant",
+        "Cette semaine",
+        "Apprendre maintenant",
+        "Décisions récentes",
+        "Active",
+        "Arrêt",
+        "En attente",
+    ] {
+        assert!(text().contains(french), "{french} in {}", text());
+    }
+    for english in [
+        "Target",
+        "Now",
+        "Heat 18",
+        "This week",
+        "Learn now",
+        "Recent decisions",
+        "Pending",
+    ] {
+        assert!(!text().contains(english), "{english} in {}", text());
+    }
+    let hold: HtmlInputElement = host
+        .query_selector(".climate-hold__setpoint")
+        .unwrap()
+        .expect("hold field")
+        .unchecked_into();
+    assert_eq!(
+        hold.get_attribute("aria-label").as_deref(),
+        Some("Température à maintenir")
+    );
+
+    lang.set(Lang::En);
+    tick().await;
+    for english in [
+        "Target",
+        "Now",
+        "Heat 18.5",
+        "This week",
+        "Learn now",
+        "Recent decisions",
+        "Pending",
+    ] {
+        assert!(text().contains(english), "{english} in {}", text());
+    }
+    for french in ["Consigne", "Maintenant", "Chauffage", "Cette semaine"] {
+        assert!(!text().contains(french), "{french} in {}", text());
+    }
+    assert_eq!(
+        hold.get_attribute("aria-label").as_deref(),
+        Some("Hold temperature")
+    );
 }
