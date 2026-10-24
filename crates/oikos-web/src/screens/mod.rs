@@ -19,4 +19,5 @@ pub mod home_settings_panel;
 pub mod room;
 pub mod security;
 pub mod settings;
+pub mod solar;
 pub mod weather;

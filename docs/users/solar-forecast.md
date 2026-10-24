@@ -86,6 +86,40 @@ Entity ids are `solar_<key>` for the keys below, for instance `solar_forecast_to
 - The entities come back on the next successful refresh.
 - Turning solar off removes the device on the next start, and the hub clears the retained cache and discovery it left on the broker.
 
+## In the web UI
+
+**The card.** On the house overview, the **Solar forecast** card sits beside the weather card. It shows:
+
+- measured and forecast production for today, in kWh;
+- a small day curve. The forecast is a light area with an outline. Measured production is an amber area up to now, and a dashed line marks now;
+- a bottom line with what is left today and tomorrow's forecast, with its low–high range.
+
+Click the card to open the solar page. The card is hidden when the hub has no forecast or the forecast is more than 24 hours old. When the forecast is stale but less than 24 hours old, the bottom line says "Data from HH:MM". On a phone the two cards stack, and the curve becomes a thin strip.
+
+**Measured or forecast.** The amber area is measured production. It comes from the entities whose energy role is **Solar**, set in the entity's settings as for the Energy tab. Several are added together, and **Invert** is honoured. When nothing is measured, the area shows the forecast so far in a lighter shade and the title starts with "≈". When their kWh counters exist, the card's "today" figures are the same as on the Energy page.
+
+When there is no solar entity, or history is off, the card fills the curve with the forecast up to now, and the title starts with "≈". That figure is the forecast so far, not a measurement.
+
+**The solar page.** Open it from the card, or at `/solar`. It has:
+
+- a top card with measured and forecast production today (with the range), power now measured against forecast, what is left today, and tomorrow;
+- a curve with **Today** and **Tomorrow** tabs. Tomorrow shows the forecast and its range only;
+- tiles:
+  - **Forecast peak**: today's highest expected power.
+  - **Best hours**: the longest run at or above 60 % of today's peak.
+  - **Gap**: measured against forecast so far.
+  - **Sun**: sunrise and sunset, from the location in `[flows]`.
+  - **Yesterday**: measured against the morning forecast. A forecast made more than an hour after sunrise is shown as "forecast at HH:MM".
+  - **7-day accuracy**: needs at least 3 days with a morning forecast above 0.5 kWh.
+  - **Roofs**: only with two or more rooftop sites.
+  - **This month**.
+- the next days as bars;
+- a footer with the update time, the next refresh and the Solcast calls used today.
+
+Each tile hides when its data is missing. **Yesterday**, **7-day accuracy** and **This month** need history.
+
+With solar disabled, the page says that the forecast is unavailable, and how to enable it: `[solcast]` in `oikos.toml`, and the API key in `secrets/solcast.key`.
+
 ## Flow idea
 
 "If the forecast for today is above 15 kWh, turn the water heater on at 11:00":

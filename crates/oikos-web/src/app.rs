@@ -33,6 +33,7 @@ use crate::screens::history_detail::HistoryDetailScreen;
 use crate::screens::room::RoomScreen;
 use crate::screens::security::SecurityScreen;
 use crate::screens::settings::{SettingsPageScreen, SettingsScreen};
+use crate::screens::solar::SolarScreen;
 use crate::screens::weather::WeatherScreen;
 use crate::shell::Shell;
 use crate::theme::install_theme;
@@ -89,6 +90,7 @@ pub fn App() -> impl IntoView {
     install_nav();
     crate::alerts::install_alerts_badge(house);
     install_history_refresh(house);
+    crate::solar::measured::install_solar_measured(house);
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
     Effect::new(move |_| {
         if let Some((id, reason)) = house.command_failed.get() {
@@ -142,6 +144,7 @@ pub fn App() -> impl IntoView {
     {
         house.refresh_flows_config();
         house.refresh_weather();
+        house.refresh_solar();
         house.refresh_ambiances();
         house.refresh_home_settings();
     }
@@ -161,6 +164,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/security") view=SecurityScreen />
                     <Route path=path!("/climate") view=ClimateScreen />
                     <Route path=path!("/weather") view=WeatherScreen />
+                    <Route path=path!("/solar") view=SolarScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
                     <Route path=path!("/ambiances") view=AmbiancesScreen />

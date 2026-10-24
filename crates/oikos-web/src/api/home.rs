@@ -1,7 +1,7 @@
-//! The home header's REST routes: the weather and the home settings.
+//! The home header's REST routes: the weather, the solar forecast and the home settings.
 
 use gloo_net::http::Request;
-use oikos_api::{ApiError, HomeSettings, WeatherView};
+use oikos_api::{ApiError, HomeSettings, SolarView, WeatherView};
 
 use super::core::{check, read_json};
 
@@ -12,6 +12,16 @@ pub async fn get_weather() -> Result<Option<WeatherView>, ApiError> {
         Ok(response) => read_json(response).await.map(Some),
         // `check` turned the 503 into this exact text; any other failure keeps its own message.
         Err(e) if e.error == "Weather unavailable" => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// The solar forecast; `Ok(None)` while the hub has none (solar off, or not fetched yet: 503).
+pub async fn get_solar() -> Result<Option<SolarView>, ApiError> {
+    let request = Request::get("/api/v1/solar").build();
+    match check(request, Some("Solar unavailable")).await {
+        Ok(response) => read_json(response).await.map(Some),
+        Err(e) if e.error == "Solar unavailable" => Ok(None),
         Err(e) => Err(e),
     }
 }

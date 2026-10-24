@@ -35,6 +35,7 @@ pub mod screens;
 pub mod security;
 pub mod settings_rules;
 pub mod shell;
+pub mod solar;
 pub mod theme;
 #[cfg(target_arch = "wasm32")]
 pub mod ws;

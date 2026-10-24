@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use oikos_api::{
     AlertView, AmbianceView, ApplyReport, AreaView, BridgeView, ConnectionStatus, Dashboard,
     DashboardView, DeviceView, EntityView, FlowView, FlowsConfigView, GroupView, HomeSettings,
-    IgnoredView, WeatherView, WsEvent,
+    IgnoredView, SolarView, WeatherView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -27,6 +27,10 @@ pub struct House {
     pub weather: RwSignal<Option<WeatherView>>,
     /// Whether the first weather fetch has answered (with weather or without).
     pub weather_loaded: RwSignal<bool>,
+    /// The solar forecast; `None` while the hub has none or a fetch failed.
+    pub solar: RwSignal<Option<SolarView>>,
+    /// Whether the first solar fetch has answered (with a forecast or without).
+    pub solar_loaded: RwSignal<bool>,
     /// The home settings; the default document until the first fetch answers.
     pub home_settings: RwSignal<HomeSettings>,
     /// The ambiances as the hub lists them, unreadable ones included.
@@ -62,6 +66,8 @@ impl House {
             flows_config: RwSignal::new(None),
             weather: RwSignal::new(None),
             weather_loaded: RwSignal::new(false),
+            solar: RwSignal::new(None),
+            solar_loaded: RwSignal::new(false),
             home_settings: RwSignal::new(HomeSettings::default()),
             ambiances: RwSignal::new(Vec::new()),
             ambiances_loaded: RwSignal::new(false),
@@ -93,6 +99,17 @@ impl House {
             if let Ok(cfg) = crate::api::get_flows_config().await {
                 flows_config.set(Some(cfg));
             }
+        });
+    }
+
+    /// Fetches the solar forecast into [`House::solar`]; none, or a failure, clears it so the
+    /// header hides the card.
+    pub fn refresh_solar(&self) {
+        let solar = self.solar;
+        let loaded = self.solar_loaded;
+        leptos::task::spawn_local(async move {
+            solar.set(crate::api::home::get_solar().await.ok().flatten());
+            loaded.set(true);
         });
     }
 
@@ -215,8 +232,7 @@ impl House {
             WsEvent::AmbianceApplied { report } => self
                 .ambiance_reports
                 .update(|m| _ = m.insert(report.ambiance.clone(), report)),
-            // The web solar views (a later plan) will use this.
-            WsEvent::SolarChanged => {}
+            WsEvent::SolarChanged => self.refresh_solar(),
         }
     }
 }
