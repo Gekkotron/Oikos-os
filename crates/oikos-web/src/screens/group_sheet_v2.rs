@@ -17,7 +17,7 @@ use crate::components::card_place::InSheet;
 use crate::components::toast::Toasts;
 use crate::format::{display_value, is_on};
 use crate::house::House;
-use crate::i18n::devices::{DeviceText, device_text};
+use crate::i18n::devices::{DeviceText, device_text, key_value};
 use crate::i18n::groups::{
     GroupText, delete_message, delete_question, group_text, group_text_signal, subtitle,
 };
@@ -57,8 +57,9 @@ pub fn GroupSheetV2Screen() -> impl IntoView {
         leptos::task::spawn_local(async move {
             match list_groups().await {
                 Ok(list) => group.set(Some(list.into_iter().find(|g| g.id == id))),
-                Err(_) => {
-                    toasts.push(group_text(untrack(lang), GroupText::CouldntLoad));
+                Err(e) => {
+                    let lead = group_text(untrack(lang), GroupText::CouldntLoad);
+                    toasts.push(key_value(untrack(lang), lead, &e.error));
                     group.set(Some(None));
                 }
             }
