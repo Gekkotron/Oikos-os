@@ -740,6 +740,33 @@ async fn test_chirp_publishes_chirp() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn test_chirp_entity_siren_pulses_on_then_off() {
+    let mut rig = Rig::with(|hub, settings| {
+        settings.sirens = vec![oikos_alarm::doc::Siren::Entity {
+            entity: entity_id(hub, "siren_plug"),
+            chirp_ms: Some(500),
+        }];
+    })
+    .await;
+    rig.clear();
+    rig.hub.alarm_test_chirp(0).unwrap();
+    rig.pump().await;
+    assert_eq!(rig.sent(SIREN_SET), ["ON"], "on right away");
+    rig.advance(1).await;
+    assert_eq!(rig.sent(SIREN_SET), ["ON", "OFF"], "off after chirp_ms");
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_chirp_reports_a_refused_publish() {
+    let rig = Rig::with(with_sirens).await;
+    rig.hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+    let err = rig.hub.alarm_test_chirp(1).unwrap_err();
+    assert!(matches!(err, HubError::Publish(_)), "{err:?}");
+}
+
+#[tokio::test(start_paused = true)]
 async fn push_disarm_reply_disarms() {
     let mut rig = armed_rig().await;
     trip(&mut rig).await;

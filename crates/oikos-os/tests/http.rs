@@ -185,6 +185,26 @@ async fn health_and_snapshot() {
 }
 
 #[tokio::test]
+async fn alarm_test_chirp_without_that_siren_is_422() {
+    let server = Server::start().await;
+
+    let response = server
+        .client
+        .post(server.url("/api/v1/alarm/test-chirp"))
+        .json(&json!({"siren": 0}))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = response.json().await.expect("json");
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("no siren"))
+    );
+}
+
+#[tokio::test]
 async fn command_unknown_entity_404() {
     let server = Server::start().await;
 

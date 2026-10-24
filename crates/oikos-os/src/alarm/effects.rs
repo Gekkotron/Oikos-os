@@ -146,22 +146,23 @@ impl Hub {
     /// Every siren with a chirp sounds once.
     fn alarm_chirp(self: &Arc<Self>) {
         for siren in self.alarm_settings().sirens {
-            self.alarm_chirp_siren(siren);
+            if let Err(err) = self.alarm_chirp_siren(siren) {
+                tracing::warn!(%err, "alarm chirp failed");
+            }
         }
     }
 
-    /// Sounds one siren's chirp, if it has one; true when there was a chirp to sound. An entity
-    /// siren's chirp is on, a pause, off; it runs on its own task so the step does not wait for it.
-    fn alarm_chirp_siren(self: &Arc<Self>, siren: Siren) -> bool {
+    /// Sounds one siren's chirp, if it has one: `Ok(true)` when there was a chirp to sound, and
+    /// `Err` when an MQTT chirp could not be published. An entity siren's chirp is on, a pause,
+    /// off; it runs on its own task so the step does not wait for it.
+    fn alarm_chirp_siren(self: &Arc<Self>, siren: Siren) -> Result<bool, String> {
         match siren {
             Siren::Mqtt { mqtt } => {
                 let Some(chirp) = &mqtt.chirp else {
-                    return false;
+                    return Ok(false);
                 };
-                if let Err(err) = self.alarm_publish(&mqtt.topic, chirp) {
-                    tracing::warn!(topic = %mqtt.topic, %err, "alarm chirp failed");
-                }
-                true
+                self.alarm_publish(&mqtt.topic, chirp)?;
+                Ok(true)
             }
             Siren::Entity {
                 entity,
@@ -176,9 +177,9 @@ impl Hub {
                         tracing::warn!(%entity, %err, "alarm chirp failed");
                     }
                 });
-                true
+                Ok(true)
             }
-            Siren::Entity { .. } => false,
+            Siren::Entity { .. } => Ok(false),
         }
     }
 
@@ -192,10 +193,10 @@ impl Hub {
             .get(index)
             .cloned()
             .ok_or_else(|| HubError::Rejected(format!("there is no siren {index}")))?;
-        if self.alarm_chirp_siren(siren) {
-            Ok(())
-        } else {
-            Err(HubError::Rejected(format!("siren {index} has no chirp")))
+        match self.alarm_chirp_siren(siren) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(HubError::Rejected(format!("siren {index} has no chirp"))),
+            Err(err) => Err(HubError::Publish(err)),
         }
     }
 
