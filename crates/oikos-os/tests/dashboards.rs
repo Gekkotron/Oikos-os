@@ -219,7 +219,7 @@ async fn reorder_happy_path() {
 async fn order_route_shadows_id_route() {
     let server = Server::start().await;
     let response = server.reorder(&[]).await;
-    assert!(response.status().is_success(), "{}", response.status());
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 /// An undecodable retained payload is stored as Invalid: GET hides it (404) but DELETE must

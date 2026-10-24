@@ -105,6 +105,9 @@ impl Hub {
             }
             updated
         };
+        // Validation above is all-or-nothing, but a publish failing mid-loop leaves the broker
+        // and the local store half-reordered; they still agree, since each write publishes
+        // and then ingests.
         for dashboard in &updated {
             self.write_dashboard(dashboard)?;
         }

@@ -237,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn widget_config_tagged_by_kind_shape() {
+    fn entity_widget_decodes_from_json() {
         let w: Widget = serde_json::from_str(
             r#"{ "id": "w", "kind": "light", "span": "1x1", "config": { "entity_id": "lamp" } }"#,
         )

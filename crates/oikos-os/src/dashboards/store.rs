@@ -233,10 +233,7 @@ mod tests {
     fn invalid_payload_is_rejected_with_reason() {
         let mut store = DashboardStore::new();
         assert_eq!(store.apply("d1", b"{"), StoreApplied::Changed);
-        match store.entries.get("d1") {
-            Some(Entry::Invalid { reason }) => assert!(!reason.is_empty()),
-            _ => panic!("expected an invalid entry"),
-        }
+        assert!(!store.invalid_reason("d1").expect("invalid").is_empty());
         assert!(store.get("d1").is_none());
         assert!(store.list().is_empty());
         assert_eq!(store.apply("d1", b"{"), StoreApplied::Unchanged);
@@ -255,15 +252,11 @@ mod tests {
         ]})
         .to_string();
         store.apply("d1", bytes.as_bytes());
-        match store.entries.get("d1") {
-            Some(Entry::Invalid { reason }) => {
-                assert!(
-                    reason.contains("w9") && reason.contains("light"),
-                    "{reason}"
-                )
-            }
-            _ => panic!("expected an invalid entry"),
-        }
+        let reason = store.invalid_reason("d1").expect("invalid");
+        assert!(
+            reason.contains("w9") && reason.contains("light"),
+            "{reason}"
+        );
     }
 
     #[test]
@@ -305,6 +298,16 @@ mod tests {
     }
 
     #[test]
+    fn list_breaks_order_ties_by_id() {
+        let mut store = DashboardStore::new();
+        store.apply("b", &payload("b", 1));
+        store.apply("c", &payload("c", 1));
+        store.apply("a", &payload("a", 1));
+        let ids: Vec<_> = store.list().into_iter().map(|d| d.id).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
+    }
+
+    #[test]
     fn next_free_order_starts_at_one_and_fills_above_max() {
         let mut store = DashboardStore::new();
         assert_eq!(store.next_free_order(), 1);
@@ -320,10 +323,8 @@ mod tests {
             store.apply("house", &payload("house", 1)),
             StoreApplied::Changed
         );
-        match store.entries.get("house") {
-            Some(Entry::Invalid { reason }) => assert!(reason.contains("house"), "{reason}"),
-            _ => panic!("expected an invalid entry"),
-        }
+        let reason = store.invalid_reason("house").expect("invalid");
+        assert!(reason.contains("house"), "{reason}");
         assert!(store.get("house").is_none());
         assert!(store.list().is_empty());
     }
