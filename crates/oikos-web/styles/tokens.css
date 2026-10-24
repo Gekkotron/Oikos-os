@@ -66,6 +66,12 @@
   --badge-border: rgb(255 255 255 / 14%);
   --toggle-on: #ffc457;
 
+  /* Climate setpoints: below 17 °C, 17 to 20 °C, 20 °C and up, and the text on them. */
+  --temp-low: #ffd95a;
+  --temp-mid: #ff9a3c;
+  --temp-high: #ff5a4e;
+  --temp-ink: #1a1206;
+
   /* Shape */
   --radius-card: 20px;
   --radius-nav: 24px;
@@ -149,6 +155,10 @@
   --ring-other: #4f6b4a;
   --badge-border: #ebe6da;
   --toggle-on: #b98a2c;
+  --temp-low: #f2cc55;
+  --temp-mid: #e58a3a;
+  --temp-high: #d04a36;
+  --temp-ink: #2a1a08;
   --radius-card: 24px;
   --font-display: "Manrope", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --type-display: 700 28px/32px var(--font-display);

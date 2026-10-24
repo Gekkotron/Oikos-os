@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Climate redesign mockup</title>
+<style>body{margin:0;padding:24px;background:#111;color:#ddd;font-family:system-ui,sans-serif}h2{margin:24px 0 4px}.subtitle{opacity:.7;margin:0 0 16px}.options{display:none}</style></head><body>
+<!-- Desktop: layout B in both themes -->
+<style>
+  .ng { --bg:#0b1020; --grad:radial-gradient(120% 90% at 50% 0%, #1d2b55 0%, #0b1020 100%); --ink:#e8ecff; --muted:rgb(232 236 255/65%);
+        --card:rgb(255 255 255/6%); --border:rgb(255 255 255/9%); --raised:rgb(255 255 255/4%); --chip:rgb(255 255 255/14%);
+        --sel:rgb(255 196 87/22%); --amber:#ffc457; --now:#ff7a9a; --radius:20px;
+        --t-yellow:#ffd95a; --t-orange:#ff9a3c; --t-red:#ff5a4e; --t-ink:#1a1206; }
+  .iv { --bg:#f3f0e8; --grad:#f3f0e8; --ink:#1f2420; --muted:#5f665c;
+        --card:#fffdf8; --border:#ebe6da; --raised:#f7f5ef; --chip:#d9d0c2;
+        --sel:#e3eadf; --amber:#8f6613; --now:#ac512b; --radius:24px;
+        --t-yellow:#f2cc55; --t-orange:#e58a3a; --t-red:#d04a36; --t-ink:#2a1a08; }
+  .shot { background:var(--grad); color:var(--ink); font:400 14px/20px Inter,system-ui,sans-serif; padding:20px; border-radius:12px; margin-bottom:24px; }
+  .shot h1 { font:700 26px/32px Manrope,Inter,sans-serif; letter-spacing:-.02em; margin:0; color:var(--ink); }
+  .beta { font-size:11px; border:1px solid var(--chip); border-radius:99px; padding:1px 8px; margin-left:8px; vertical-align:middle; }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+  .btn { border:1px solid var(--chip); border-radius:12px; padding:6px 12px; font-size:13px; background:var(--raised); color:var(--ink); display:inline-block; }
+  .btn.pri { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+  .layout { display:grid; grid-template-columns:240px 1fr; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:14px; }
+  .rail .room { display:grid; grid-template-columns:1fr auto; padding:10px 12px; border-radius:14px; margin-bottom:4px; }
+  .rail .room.sel { background:var(--sel); }
+  .rail .name { font-weight:600; } .rail .temp { font-weight:600; }
+  .rail .sub { grid-column:1/-1; font-size:12px; color:var(--muted); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .main { display:flex; flex-direction:column; gap:12px; min-width:0; }
+  .head { display:flex; flex-wrap:wrap; gap:16px 28px; align-items:center; }
+  .big { font:700 34px/38px Manrope,Inter,sans-serif; }
+  .lbl { font-size:12px; color:var(--muted); }
+  .seg { display:inline-flex; border:1px solid var(--chip); border-radius:12px; overflow:hidden; }
+  .seg span { padding:5px 12px; font-size:13px; } .seg .on { background:var(--sel); font-weight:600; }
+  .hold { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .field { width:64px; border:1px solid var(--chip); border-radius:10px; padding:5px 8px; font-size:13px; background:var(--raised); }
+  .ovr { font-size:12px; color:var(--amber); }
+  .cal { display:grid; grid-template-columns:36px repeat(7,1fr); gap:6px; }
+  .dh { text-align:center; font-size:12px; color:var(--muted); }
+  .dh.today { color:var(--ink); font-weight:700; }
+  .dh.today::after { content:""; display:block; width:18px; height:3px; border-radius:2px; background:var(--now); margin:3px auto 0; }
+  .hours { position:relative; height:420px; font-size:11px; color:var(--muted); }
+  .hours span { position:absolute; right:4px; transform:translateY(-50%); }
+  .col { position:relative; height:420px; background:var(--raised); border:1px solid var(--border); border-radius:12px; overflow:hidden;
+         background-image:repeating-linear-gradient(180deg, transparent 0 calc(100%/8 - 1px), var(--border) calc(100%/8 - 1px) calc(100%/8)); }
+  .col.today { border-color:var(--now); }
+  .blk { position:absolute; left:4px; right:4px; border-radius:10px; color:var(--t-ink); padding:6px 8px; box-sizing:border-box; overflow:hidden; }
+  .blk b { font:700 16px/18px Manrope,Inter,sans-serif; display:block; }
+  .blk i { font-style:normal; font-size:11px; opacity:.8; }
+  .now { position:absolute; left:0; right:0; height:2px; background:var(--now); }
+  .now::before { content:""; position:absolute; left:-1px; top:-4px; width:10px; height:10px; border-radius:50%; background:var(--now); }
+  .basenote { font-size:12px; color:var(--muted); display:flex; gap:16px; flex-wrap:wrap; align-items:center; }
+  .sw { display:inline-block; width:12px; height:12px; border-radius:4px; vertical-align:middle; margin-right:5px; }
+  .lower { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .lower h3 { margin:0 0 6px; font-size:14px; color:var(--ink); }
+  .lower li { font-size:12px; color:var(--muted); }
+  .lower ul { margin:0; padding-left:16px; }
+</style>
+
+<h2>Layout B, in the app's themes</h2>
+<p class="subtitle">Block colour follows its temperature: yellow (cool) → orange → red (warm). Outside the blocks = the base, shown as the plain column. Night Glass on top, Ivoire below. Living room is selected; it's Saturday ~20:30.</p>
+
+<div class="shot ng" id="ng"></div>
+<div class="shot iv" id="iv"></div>
+
+<script>
+(function () {
+  const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+  const TODAY = 5, NOW = 20.5;
+  // Living room: base 15°, 07:15–14:00 18.5°, 14:00–24:00 16°.
+  const blocks = [[7.25,14,18.5],[14,24,16]];
+  // My guess at the scale: ≤16° yellow, 17–19° orange, ≥20° red (smooth in between).
+  function tcol(t) {
+    if (t <= 16.5) return "var(--t-yellow)";
+    if (t < 19.5) return "var(--t-orange)";
+    return "var(--t-red)";
+  }
+  const hh = h => String(Math.floor(h)).padStart(2,"0") + ":" + String(Math.round((h%1)*60)).padStart(2,"0");
+  function cal() {
+    let s = '<div class="cal"><span></span>';
+    DAYS.forEach((d,i) => s += `<div class="dh${i===TODAY?" today":""}">${d}</div>`);
+    s += '<div class="hours">' + [0,3,6,9,12,15,18,21,24].map(h => `<span style="top:${h/24*100}%">${String(h).padStart(2,"0")}</span>`).join("") + '</div>';
+    DAYS.forEach((d,i) => {
+      s += `<div class="col${i===TODAY?" today":""}">`;
+      blocks.forEach(([a,b,t]) => s += `<div class="blk" style="top:${a/24*100}%;height:calc(${(b-a)/24*100}% - 3px);background:${tcol(t)}"><b>${t}°</b><i>${hh(a)} – ${hh(b)}</i></div>`);
+      if (i===TODAY) s += `<div class="now" style="top:${NOW/24*100}%"></div>`;
+      s += '</div>';
+    });
+    return s + '</div>';
+  }
+  const rail = `
+    <div class="card rail">
+      <div class="room sel"><span class="name"><i class="dot" style="background:var(--t-yellow)"></i>Living room</span><span class="temp">22.6°</span><span class="sub">Heat 16° · Active</span></div>
+      <div class="room"><span class="name"><i class="dot" style="background:var(--t-orange)"></i>Bedroom 1</span><span class="temp">18.7°</span><span class="sub">Heat 15.5° · Active</span></div>
+      <div class="room"><span class="name"><i class="dot" style="background:var(--chip)"></i>Bedroom 2</span><span class="temp">18.3°</span><span class="sub">Pending · no schedule</span></div>
+      <div class="room"><span class="name"><i class="dot" style="background:var(--chip)"></i>Bedroom 3</span><span class="temp">18.9°</span><span class="sub">Pending · no schedule</span></div>
+    </div>`;
+  const main = `
+    <div class="main">
+      <div class="card head">
+        <div><div class="lbl">Living room · now</div><div class="big">22.6°</div></div>
+        <div><div class="lbl">Target</div><div class="big" style="font-size:24px">Heat 16°</div><div class="lbl">Schedule · block until 24:00</div></div>
+        <div><div class="lbl">State</div><div class="seg"><span>Off</span><span>Pending</span><span class="on">Active</span></div></div>
+        <div><div class="lbl">Hold</div><div class="hold"><span class="field">19.5</span><span class="btn">1 h</span><span class="btn">2 h</span><span class="btn">Until next change</span></div>
+          <div class="ovr">Held 19.5° until 21:05 · set on a device · <u>Clear</u></div></div>
+      </div>
+      <div class="card">
+        <div class="top" style="margin-bottom:10px"><b>This week</b><span><span class="btn">Edit schedule</span></span></div>
+        ${cal()}
+        <div class="basenote" style="margin-top:10px">
+          <span>Base <b>15°</b> outside the blocks</span>
+          <span><i class="sw" style="background:var(--t-yellow)"></i>≤ 16°</span>
+          <span><i class="sw" style="background:var(--t-orange)"></i>17 – 19°</span>
+          <span><i class="sw" style="background:var(--t-red)"></i>≥ 20°</span>
+        </div>
+      </div>
+      <div class="lower">
+        <div class="card"><h3>Learning</h3><div class="lbl">Last proposal rejected · <span class="btn">Learn now</span></div><div class="lbl" style="margin-top:6px">Thermometer: auto (room sensor)</div></div>
+        <div class="card"><h3>Recent decisions</h3><ul><li>20:27 · Schedule · Heat 16° · held until 21:05</li><li>14:00 · Schedule · Heat 16° · block 1</li><li>07:15 · Schedule · Heat 18.5° · block 2</li></ul></div>
+      </div>
+    </div>`;
+  const page = `<div class="top"><h1>Climate<span class="beta">Beta</span></h1><span class="btn">Settings</span></div><div class="layout">${rail}${main}</div>`;
+  document.getElementById("ng").innerHTML = page;
+  document.getElementById("iv").innerHTML = page;
+})();
+</script>
+
+<!-- Phone: layout A (the left phone) -->
+<style>
+  .ph { --bg:#0b1020; --grad:radial-gradient(120% 90% at 50% 0%, #1d2b55 0%, #0b1020 100%); --ink:#e8ecff; --muted:rgb(232 236 255/65%);
+        --card:rgb(255 255 255/6%); --border:rgb(255 255 255/9%); --raised:rgb(255 255 255/4%); --chip:rgb(255 255 255/14%);
+        --sel:rgb(255 196 87/22%); --amber:#ffc457; --now:#ff7a9a;
+        --t-yellow:#ffd95a; --t-orange:#ff9a3c; --t-red:#ff5a4e; --t-ink:#1a1206;
+        width:390px; height:844px; overflow:hidden; border-radius:36px; border:8px solid #222; background:var(--grad); color:var(--ink);
+        font:400 14px/20px Inter,system-ui,sans-serif; padding:14px; box-sizing:border-box; display:flex; flex-direction:column; gap:10px; }
+  .phones { display:flex; gap:32px; flex-wrap:wrap; justify-content:center; }
+  .ph h1 { font:700 24px/28px Manrope,Inter,sans-serif; margin:4px 0 0; color:var(--ink); display:flex; justify-content:space-between; align-items:center; }
+  .btn { border:1px solid var(--chip); border-radius:12px; padding:4px 10px; font-size:12px; background:var(--raised); color:var(--ink); font-weight:400; }
+  .chips { display:flex; gap:6px; overflow:hidden; }
+  .chip { border:1px solid var(--chip); border-radius:99px; padding:5px 12px; font-size:13px; white-space:nowrap; }
+  .chip.on { background:var(--sel); font-weight:600; border-color:transparent; }
+  .chip .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:20px; padding:12px; }
+  .row { display:flex; justify-content:space-between; align-items:flex-end; }
+  .big { font:700 30px/32px Manrope,Inter,sans-serif; }
+  .lbl { font-size:11px; color:var(--muted); }
+  .seg { display:flex; border:1px solid var(--chip); border-radius:12px; overflow:hidden; margin-top:8px; }
+  .seg span { flex:1; text-align:center; padding:4px 0; font-size:12px; } .seg .on { background:var(--sel); font-weight:600; }
+  .hold { display:flex; gap:5px; margin-top:8px; } .hold span { flex:1; text-align:center; }
+  .ovr { font-size:11px; color:var(--amber); margin-top:6px; }
+  .cal { display:grid; grid-template-columns:22px repeat(7,1fr); gap:3px; }
+  .dh { text-align:center; font-size:11px; color:var(--muted); } .dh.today { color:var(--ink); font-weight:700; }
+  .hours { position:relative; font-size:9px; color:var(--muted); } .hours span { position:absolute; right:2px; transform:translateY(-50%); }
+  .col { position:relative; background:var(--raised); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .col.today { border-color:var(--now); }
+  .blk { position:absolute; left:2px; right:2px; border-radius:6px; color:var(--t-ink); text-align:center; font:700 11px/14px Inter,sans-serif; padding-top:3px; box-sizing:border-box; }
+  .blk i { display:block; font:400 11px/14px Inter,sans-serif; opacity:.8; font-style:normal; }
+  .now { position:absolute; left:0; right:0; height:2px; background:var(--now); }
+  .foot { font-size:11px; color:var(--muted); }
+  .wrap { display:flex; flex-direction:column; align-items:center; gap:8px; }
+  .wrap h3 { margin:0; }
+  .days { display:flex; gap:4px; } .days span { flex:1; text-align:center; border-radius:10px; padding:4px 0; font-size:12px; border:1px solid var(--chip); }
+  .days .on { background:var(--sel); font-weight:600; border-color:transparent; }
+  .strip { display:grid; grid-template-columns:28px 1fr; gap:3px 6px; align-items:center; font-size:10px; color:var(--muted); }
+  .strip .t { height:8px; border-radius:4px; background:var(--raised); position:relative; overflow:hidden; }
+  .strip .t b { position:absolute; top:0; bottom:0; }
+</style>
+
+<h2>Phone: two ways to fit the week</h2>
+<p class="subtitle">Both: room list becomes chips at the top, the status card shrinks, the rest (learning, decisions) stacks below the schedule. They differ in how the week is shown.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content"><h3>Whole week, squeezed</h3><p>Same 7-column calendar, narrower. Blocks show the temperature; times show on a tap. The full week stays one look.</p></div>
+  </div>
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content"><h3>Week strip + one day in detail</h3><p>A compact 7-line week overview, then day chips and a tall single-day timeline with full times. Swipe or tap a day.</p></div>
+  </div>
+</div>
+
+<div class="phones">
+  <div class="wrap"><h3>A</h3><div class="ph" id="pa"></div></div>
+  <div class="wrap"><h3>B</h3><div class="ph" id="pb"></div></div>
+</div>
+
+<script>
+(function () {
+  const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"], TODAY = 5, NOW = 20.5;
+  const blocks = [[7.25,14,18.5],[14,24,16]];
+  const col = t => t <= 16.5 ? "var(--t-yellow)" : t < 19.5 ? "var(--t-orange)" : "var(--t-red)";
+  const hh = h => String(Math.floor(h)).padStart(2,"0") + ":" + String(Math.round((h%1)*60)).padStart(2,"0");
+  const head = `
+    <h1>Climate <span class="btn">Settings</span></h1>
+    <div class="chips">
+      <span class="chip on"><i class="dot" style="background:var(--t-yellow)"></i>Living room 22.6°</span>
+      <span class="chip"><i class="dot" style="background:var(--t-orange)"></i>Bedroom 1 18.7°</span>
+      <span class="chip"><i class="dot" style="background:var(--chip)"></i>Bedroom 2 18.3°</span>
+    </div>
+    <div class="card">
+      <div class="row"><div><div class="lbl">Now</div><div class="big">22.6°</div></div>
+        <div style="text-align:right"><div class="lbl">Target · Schedule</div><div class="big" style="font-size:22px">Heat 16°</div></div></div>
+      <div class="seg"><span>Off</span><span>Pending</span><span class="on">Active</span></div>
+      <div class="hold"><span class="btn">19.5°</span><span class="btn">1 h</span><span class="btn">2 h</span><span class="btn">Next change</span></div>
+      <div class="ovr">Held 19.5° until 21:05 · Clear</div>
+    </div>`;
+  // A
+  const H = 360;
+  let a = `<div class="card" style="flex:1"><div class="row" style="margin-bottom:6px"><b>This week</b><span class="btn">Edit</span></div><div class="cal"><span></span>`;
+  DAYS.forEach((d,i) => a += `<div class="dh${i===TODAY?" today":""}">${d[0]}${d[1]}</div>`);
+  a += `<div class="hours" style="height:${H}px">` + [0,6,12,18,24].map(h => `<span style="top:${h/24*100}%">${String(h).padStart(2,"0")}</span>`).join("") + `</div>`;
+  DAYS.forEach((d,i) => {
+    a += `<div class="col${i===TODAY?" today":""}" style="height:${H}px">`;
+    blocks.forEach(([s,e,t]) => a += `<div class="blk" style="top:${s/24*100}%;height:calc(${(e-s)/24*100}% - 2px);background:${col(t)}">${t}°</div>`);
+    if (i===TODAY) a += `<div class="now" style="top:${NOW/24*100}%"></div>`;
+    a += `</div>`;
+  });
+  a += `</div><div class="foot" style="margin-top:6px">Base 15° · tap a block for its times</div></div>`;
+  document.getElementById("pa").innerHTML = head + a;
+  // B
+  let b = `<div class="card"><div class="row" style="margin-bottom:6px"><b>This week</b><span class="btn">Edit</span></div><div class="strip">`;
+  DAYS.forEach((d,i) => {
+    b += `<span style="${i===TODAY?"color:var(--ink);font-weight:700":""}">${d}</span><div class="t">`;
+    blocks.forEach(([s,e,t]) => b += `<b style="left:${s/24*100}%;width:${(e-s)/24*100}%;background:${col(t)}"></b>`);
+    if (i===TODAY) b += `<b style="left:${NOW/24*100}%;width:2px;background:var(--now)"></b>`;
+    b += `</div>`;
+  });
+  b += `</div></div>`;
+  b += `<div class="days">` + DAYS.map((d,i) => `<span class="${i===TODAY?"on":""}">${d}</span>`).join("") + `</div>`;
+  const DH = 250;
+  b += `<div class="card" style="display:grid;grid-template-columns:36px 1fr;gap:6px"><div class="hours" style="height:${DH}px">` +
+       [0,3,6,9,12,15,18,21,24].map(h => `<span style="top:${h/24*100}%">${String(h).padStart(2,"0")}</span>`).join("") +
+       `</div><div class="col today" style="height:${DH}px">`;
+  blocks.forEach(([s,e,t]) => b += `<div class="blk" style="top:${s/24*100}%;height:calc(${(e-s)/24*100}% - 2px);background:${col(t)};text-align:left;padding:6px 10px;font-size:15px">${t}°<i>${hh(s)} – ${hh(e)}</i></div>`);
+  b += `<div class="now" style="top:${NOW/24*100}%"></div></div></div>`;
+  document.getElementById("pb").innerHTML = head + b;
+})();
+</script>
+
+</body></html>

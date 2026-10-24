@@ -1,6 +1,8 @@
-//! The week timeline: seven day rows by 24 hours, the base setpoint as the background and each
-//! block as a bar. When editable, a block's ends drag in 15-minute steps and a click opens its
-//! popover (times, setpoint, delete) so editing also works without precise dragging.
+//! The week calendar: seven day columns with the hours going down, the base setpoint as the
+//! background and each block as a bar coloured by its temperature. When editable, a block's ends
+//! drag in 15-minute steps and a click opens its editor under the calendar (times, setpoint,
+//! delete) so editing also works without precise dragging; when viewing, a click shows the
+//! block's times under the calendar.
 //!
 //! The editing functions are pure: they take a block index into `blocks` and return new rules
 //! that still satisfy `ModeRules` validation (from < to, within 00:00 to 24:00, no overlap on a
@@ -10,7 +12,7 @@ use leptos::prelude::*;
 use oikos_climate::doc::{Day, HhMm, ModeRules, Setpoint};
 use wasm_bindgen::JsCast;
 
-use super::{ShortDay, setpoint_text};
+use super::{ShortDay, TempBand, setpoint_text, temp_band};
 
 /// The grid blocks snap to, in minutes.
 const STEP: u16 = 15;
@@ -34,6 +36,20 @@ fn snap(minutes: u16) -> u16 {
 /// "HH:MM" for minutes since midnight.
 fn hhmm_text(minutes: u16) -> String {
     format!("{:02}:{:02}", minutes / 60, minutes % 60)
+}
+
+/// One block as a line: "07:15 – 14:00 · 18.5° · 3/5" (the evidence only on a learned block).
+pub fn peek_text(b: &oikos_climate::doc::Block) -> String {
+    let mut out = format!(
+        "{} – {} · {}",
+        hhmm_text(b.from.0),
+        hhmm_text(b.to.0),
+        setpoint_text(Some(b.setpoint))
+    );
+    if let Some(e) = &b.evidence {
+        out.push_str(&format!(" · {}/{}", e.agree, e.of));
+    }
+    out
 }
 
 /// Moves one end of `rules.blocks[block]` to `to`, snapped to 15 minutes. The end keeps `from`
@@ -217,21 +233,26 @@ pub fn add_block(rules: &ModeRules, day: Day, minute: u16) -> Option<(ModeRules,
     Some((out, index))
 }
 
-/// The minute at `client_x` along a day track.
-fn minute_on(track: &web_sys::Element, client_x: i32) -> Option<u16> {
-    let rect = track.get_bounding_client_rect();
-    if rect.width() <= 0.0 {
+/// The minute at `client_y` down a day column.
+fn minute_on(col: &web_sys::Element, client_y: i32) -> Option<u16> {
+    let rect = col.get_bounding_client_rect();
+    if rect.height() <= 0.0 {
         return None;
     }
-    let fraction = ((f64::from(client_x) - rect.left()) / rect.width()).clamp(0.0, 1.0);
+    let fraction = ((f64::from(client_y) - rect.top()) / rect.height()).clamp(0.0, 1.0);
     Some((fraction * f64::from(DAY_END)).round() as u16)
 }
 
-/// The minute under the pointer along the day track the handle sits in.
+/// The minute under the pointer down the day column the handle sits in.
 fn minute_at(ev: &web_sys::PointerEvent) -> Option<u16> {
     let handle = ev.target()?.dyn_into::<web_sys::Element>().ok()?;
-    let track = handle.closest(".climate-timeline__track").ok()??;
-    minute_on(&track, ev.client_x())
+    let col = handle.closest(".climate-timeline__col").ok()??;
+    minute_on(&col, ev.client_y())
+}
+
+/// A percentage of the day for a style: `30.208`.
+fn day_percent(minutes: u16) -> f64 {
+    f64::from(minutes) / f64::from(DAY_END) * 100.0
 }
 
 fn capture(ev: &web_sys::PointerEvent) {
@@ -298,8 +319,8 @@ fn Handle(
     }
 }
 
-/// One block on one day row. Built when the block covers the day; its text and position follow
-/// the rules in place.
+/// One block in one day column. Built when the block covers the day; its text and position
+/// follow the rules in place.
 #[component]
 fn Bar(
     day: Day,
@@ -308,6 +329,8 @@ fn Bar(
     editable: bool,
     on_change: Callback<ModeRules>,
     selected: RwSignal<Option<usize>>,
+    /// The block whose times show under the calendar while viewing.
+    peek: RwSignal<Option<usize>>,
 ) -> impl IntoView {
     let covers = Memo::new(move |_| {
         rules.with(|r| r.blocks.get(block).is_some_and(|b| b.days.contains(&day)))
@@ -315,9 +338,9 @@ fn Bar(
     let style = move || {
         rules.with(|r| {
             r.blocks.get(block).map_or_else(String::new, |b| {
-                let left = f64::from(b.from.0) / f64::from(DAY_END) * 100.0;
-                let width = f64::from(b.to.0.saturating_sub(b.from.0)) / f64::from(DAY_END) * 100.0;
-                format!("left:{left:.3}%;width:{width:.3}%")
+                let top = day_percent(b.from.0);
+                let height = day_percent(b.to.0.saturating_sub(b.from.0));
+                format!("top:{top:.3}%;height:{height:.3}%")
             })
         })
     };
@@ -326,37 +349,49 @@ fn Bar(
             r.blocks.get(block).map(|b| {
                 let setpoint = setpoint_text(Some(b.setpoint));
                 match &b.evidence {
-                    Some(e) => format!("{setpoint} {}/{}", e.agree, e.of),
+                    Some(e) => format!("{setpoint} · {}/{}", e.agree, e.of),
                     None => setpoint,
                 }
             })
         })
     };
+    let times = move || {
+        rules.with(|r| {
+            r.blocks
+                .get(block)
+                .map(|b| format!("{} – {}", hhmm_text(b.from.0), hhmm_text(b.to.0)))
+        })
+    };
+    let band = move || rules.with(|r| r.blocks.get(block).map(|b| temp_band(b.setpoint)));
+    let title = move || rules.with(|r| r.blocks.get(block).map(peek_text));
     view! {
         <Show when=move || covers.get()>
             <div
                 class="climate-timeline__bar"
+                class:climate-temp--low=move || band() == Some(TempBand::Low)
+                class:climate-temp--mid=move || band() == Some(TempBand::Mid)
+                class:climate-temp--high=move || band() == Some(TempBand::High)
+                class:climate-temp--off=move || band() == Some(TempBand::Off)
                 class:climate-timeline__bar--editable=editable
+                class:climate-timeline__bar--peeked=move || peek.get() == Some(block)
                 class:climate-timeline__bar--selected=move || selected.get() == Some(block)
-                class:climate-timeline__bar--off=move || {
-                    rules.with(|r| r.blocks.get(block).is_some_and(|b| b.setpoint == Setpoint::Off))
-                }
                 style=style
-                role=editable.then_some("button")
-                tabindex=editable.then_some("0")
+                title=title
+                role="button"
+                tabindex="0"
                 on:click=move |_| {
-                    if editable {
-                        selected.update(|s| *s = if *s == Some(block) { None } else { Some(block) });
-                    }
+                    let open = if editable { selected } else { peek };
+                    open.update(|s| *s = if *s == Some(block) { None } else { Some(block) });
                 }
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
-                    if editable && (ev.key() == "Enter" || ev.key() == " ") {
+                    if ev.key() == "Enter" || ev.key() == " " {
                         ev.prevent_default();
-                        selected.set(Some(block));
+                        if editable { selected } else { peek }.set(Some(block));
                     }
                 }
             >
-                <span class="climate-timeline__label">{text}</span>
+                <span class="climate-timeline__temp">{text}</span>
+                <span class="climate-timeline__times">{times}</span>
                 {editable
                     .then(|| {
                         view! {
@@ -537,74 +572,123 @@ fn BlockEditor(
     }
 }
 
-/// Seven rows (Mon to Sun) by 24 hours for one mode's rules.
+/// Seven day columns (Mon to Sun) by 24 hours going down, for one mode's rules. With `now`,
+/// today's column is marked and a line sits at the current minute.
 #[component]
 pub fn WeekTimeline(
     rules: Signal<ModeRules>,
     editable: bool,
     on_change: Callback<ModeRules>,
+    #[prop(optional, into)] now: Option<Signal<(Day, u16)>>,
 ) -> impl IntoView {
     let selected = RwSignal::new(None::<usize>);
+    let peek = RwSignal::new(None::<usize>);
     let count = move || rules.with(|r| r.blocks.len());
     let base = move || rules.with(|r| setpoint_text(Some(r.base)));
-    let rows = Day::ALL
+    let is_today = move |day: Day| now.is_some_and(|n| n.with(|(d, _)| *d == day));
+    let headers = Day::ALL
         .into_iter()
         .map(|day| {
+            let (head, rest) = day.short().split_at(2);
             view! {
-                <div class="climate-timeline__row">
-                    <span class="climate-timeline__day">{day.short()}</span>
-                    <div
-                        class="climate-timeline__track"
-                        class:climate-timeline__track--editable=editable
-                        on:click=move |ev: web_sys::MouseEvent| {
-                            // Only the empty track: a click on a bar opens that bar.
-                            if !editable || ev.target() != ev.current_target() {
-                                return;
-                            }
-                            let Some(track) = ev
-                                .current_target()
-                                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                            else {
-                                return;
-                            };
-                            let Some(minute) = minute_on(&track, ev.client_x()) else {
-                                return;
-                            };
-                            if let Some((next, index)) = add_block(&rules.get_untracked(), day, minute) {
-                                on_change.run(next);
-                                selected.set(Some(index));
-                            }
+                <span
+                    class="climate-timeline__dh"
+                    class:climate-timeline__dh--today=move || is_today(day)
+                >
+                    <span class="climate-timeline__dname">{head}</span>
+                    <span class="climate-timeline__dname-rest">{rest}</span>
+                </span>
+            }
+        })
+        .collect_view();
+    let hours = (0u16..=24)
+        .step_by(3)
+        .map(|h| {
+            view! {
+                <span
+                    class="climate-timeline__hour"
+                    class:climate-timeline__hour--minor=h % 6 != 0
+                    style=format!("top:{:.3}%", day_percent(h * 60))
+                >
+                    {format!("{h:02}")}
+                </span>
+            }
+        })
+        .collect_view();
+    let cols = Day::ALL
+        .into_iter()
+        .map(|day| {
+            let now_line = move || {
+                now.and_then(|n| {
+                    let (d, minute) = n.get();
+                    (d == day).then(|| {
+                        view! {
+                            <div
+                                class="climate-timeline__now"
+                                style=format!("top:{:.3}%", day_percent(minute))
+                            ></div>
                         }
-                    >
-                        <For each=move || 0..count() key=|block| *block let:block>
-                            <Bar
-                                day=day
-                                block=block
-                                rules=rules
-                                editable=editable
-                                on_change=on_change
-                                selected=selected
-                            />
-                        </For>
-                    </div>
+                    })
+                })
+            };
+            view! {
+                <div
+                    class="climate-timeline__col"
+                    class:climate-timeline__col--editable=editable
+                    class:climate-timeline__col--today=move || is_today(day)
+                    on:click=move |ev: web_sys::MouseEvent| {
+                        // Only the empty column: a click on a bar opens that bar.
+                        if !editable || ev.target() != ev.current_target() {
+                            return;
+                        }
+                        let Some(col) = ev
+                            .current_target()
+                            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                        else {
+                            return;
+                        };
+                        let Some(minute) = minute_on(&col, ev.client_y()) else {
+                            return;
+                        };
+                        if let Some((next, index)) = add_block(&rules.get_untracked(), day, minute) {
+                            on_change.run(next);
+                            selected.set(Some(index));
+                        }
+                    }
+                >
+                    <For each=move || 0..count() key=|block| *block let:block>
+                        <Bar
+                            day=day
+                            block=block
+                            rules=rules
+                            editable=editable
+                            on_change=on_change
+                            selected=selected
+                            peek=peek
+                        />
+                    </For>
+                    {now_line}
                 </div>
             }
         })
         .collect_view();
-    let hours = [0u16, 6, 12, 18, 24]
-        .into_iter()
-        .map(|h| view! { <span>{format!("{h:02}")}</span> })
-        .collect_view();
+    let peeked = move || {
+        peek.get()
+            .filter(|_| !editable)
+            .and_then(|i| rules.with(|r| r.blocks.get(i).map(peek_text)))
+    };
     view! {
         <div class="climate-timeline">
             <p class="climate-timeline__base">
                 "Base " <strong>{base}</strong> " outside the blocks"
             </p>
-            <div class="climate-timeline__row climate-timeline__row--axis">
-                <span class="climate-timeline__day"></span>
+            <div class="climate-timeline__cal">
+                <span class="climate-timeline__corner"></span>
+                {headers}
                 <div class="climate-timeline__hours">{hours}</div>
+                {cols}
             </div>
-            {rows}
+            {move || peeked().map(|text| view! { <p class="climate-timeline__peek">{text}</p> })}
             {editable
                 .then(|| {
                     view! {
@@ -658,6 +742,17 @@ mod tests {
 
     fn at(s: &str) -> HhMm {
         HhMm::parse(s).unwrap()
+    }
+
+    #[test]
+    fn peek_text_reads_times_temp_and_evidence() {
+        let mut b = block(&[Day::Mon], "07:15", "14:00", 18.5);
+        assert_eq!(peek_text(&b), "07:15 – 14:00 · 18.5°");
+        b.evidence = Some(oikos_climate::doc::Evidence { agree: 3, of: 5 });
+        assert_eq!(peek_text(&b), "07:15 – 14:00 · 18.5° · 3/5");
+        b.evidence = None;
+        b.setpoint = Setpoint::Off;
+        assert_eq!(peek_text(&b), "07:15 – 14:00 · Off");
     }
 
     #[test]

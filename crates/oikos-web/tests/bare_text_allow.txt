@@ -25,9 +25,10 @@ file: src/cards/water_heater.rs  # not translated yet
 file: src/climate/entity_field.rs  # not translated yet
 file: src/climate/mod.rs  # not translated yet
 file: src/climate/proposal.rs  # not translated yet
+file: src/climate/room_list.rs  # not translated yet
+file: src/climate/room_panel.rs  # not translated yet
 file: src/climate/settings_sheet.rs  # not translated yet
 file: src/climate/timeline.rs  # not translated yet
-file: src/climate/zone_card.rs  # not translated yet
 file: src/commands.rs  # not translated yet
 file: src/components/alarm_hero.rs  # not translated yet
 file: src/components/alert_row.rs  # not translated yet

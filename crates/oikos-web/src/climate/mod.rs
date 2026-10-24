@@ -2,14 +2,15 @@
 
 pub mod entity_field;
 pub mod proposal;
+pub mod room_list;
+pub mod room_panel;
 pub mod settings_sheet;
 pub mod timeline;
-pub mod zone_card;
 
 use chrono::{DateTime, Datelike, Timelike};
 use chrono_tz::Tz;
 use oikos_climate::doc::{Day, Decision, Mode, Rules, Setpoint, Source, ZoneState};
-use oikos_climate::view::{DecisionRow, LearnStatus};
+use oikos_climate::view::{DecisionRow, LearnStatus, ZoneView};
 
 /// What the learner's state says, in one line.
 pub fn learn_status_text(status: &LearnStatus) -> String {
@@ -157,6 +158,82 @@ pub fn can_hold(state: ZoneState) -> bool {
     state == ZoneState::Active
 }
 
+/// How warm a setpoint is, for the block and room-dot colours.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TempBand {
+    Low,
+    Mid,
+    High,
+    Off,
+}
+
+impl TempBand {
+    /// The CSS class that paints the band.
+    pub fn class(self) -> &'static str {
+        match self {
+            TempBand::Low => "climate-temp--low",
+            TempBand::Mid => "climate-temp--mid",
+            TempBand::High => "climate-temp--high",
+            TempBand::Off => "climate-temp--off",
+        }
+    }
+}
+
+/// Below 17 °C is low, below 20 °C mid, else high.
+pub fn temp_band(sp: Setpoint) -> TempBand {
+    match sp {
+        Setpoint::Temp(t) if t < 17.0 => TempBand::Low,
+        Setpoint::Temp(t) if t < 20.0 => TempBand::Mid,
+        Setpoint::Temp(_) => TempBand::High,
+        Setpoint::Off => TempBand::Off,
+    }
+}
+
+/// The band of the zone's decided temperature; none without one (a neutral dot).
+pub fn room_band(z: &ZoneView) -> Option<TempBand> {
+    match z.decision.as_ref()?.setpoint? {
+        Setpoint::Temp(t) => Some(temp_band(Setpoint::Temp(t))),
+        Setpoint::Off => None,
+    }
+}
+
+/// The room list's line under a zone's name: "Heat 16° · Active", "Pending · no schedule".
+pub fn room_subline(z: &ZoneView) -> String {
+    if z.orphan {
+        return "No climate device".into();
+    }
+    match z.settings.state {
+        ZoneState::Off => "Off".into(),
+        ZoneState::Pending if z.settings.rules.is_empty() => "Pending · no schedule".into(),
+        ZoneState::Pending => "Pending".into(),
+        ZoneState::Active => {
+            let line = z.decision.as_ref().map_or_else(
+                || "Active · no decision yet".to_owned(),
+                |d| {
+                    format!(
+                        "{} {} · Active",
+                        mode_word(d.mode),
+                        setpoint_text(d.setpoint)
+                    )
+                },
+            );
+            if z.overrides.is_empty() {
+                line
+            } else {
+                format!("{line} · held")
+            }
+        }
+    }
+}
+
+/// The zone to show: `wanted` while it exists, else the first one.
+pub fn pick_zone(ids: &[String], wanted: Option<&str>) -> Option<String> {
+    wanted
+        .and_then(|w| ids.iter().find(|id| *id == w))
+        .or_else(|| ids.first())
+        .cloned()
+}
+
 /// Minutes from `(today, minute)` until the schedule of `mode` next changes level: the nearest
 /// block start or end within the coming week. `None` without blocks for the mode.
 pub fn minutes_to_next_change(rules: &Rules, mode: Mode, today: Day, minute: u16) -> Option<u32> {
@@ -182,6 +259,111 @@ pub fn minutes_to_next_change(rules: &Rules, mode: Mode, today: Day, minute: u16
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oikos_climate::doc::{Override, OverrideOrigin, ZoneSettings};
+
+    fn zone_view(state: ZoneState) -> ZoneView {
+        ZoneView {
+            zone: "z".into(),
+            name: "Z".into(),
+            orphan: false,
+            settings: ZoneSettings {
+                state,
+                ..ZoneSettings::default()
+            },
+            settings_invalid: None,
+            entities: vec![],
+            reading: None,
+            reading_age_s: None,
+            room_sensor: None,
+            decision: None,
+            overrides: vec![],
+            proposal: None,
+            learn: LearnStatus::Off,
+        }
+    }
+
+    fn decided(mut z: ZoneView, setpoint: Setpoint) -> ZoneView {
+        z.decision = Some(Decision {
+            zone: z.zone.clone(),
+            mode: Some(Mode::Heat),
+            setpoint: Some(setpoint),
+            source: Source::Schedule,
+            cause: None,
+            reason: String::new(),
+            reading: None,
+            reading_age_s: None,
+            outdoor_mean: None,
+            home: true,
+            applied: true,
+            at: 0,
+            entities: Default::default(),
+        });
+        z
+    }
+
+    #[test]
+    fn temp_band_cuts_at_17_and_20() {
+        assert_eq!(temp_band(Setpoint::Temp(16.5)), TempBand::Low);
+        assert_eq!(temp_band(Setpoint::Temp(17.0)), TempBand::Mid);
+        assert_eq!(temp_band(Setpoint::Temp(19.5)), TempBand::Mid);
+        assert_eq!(temp_band(Setpoint::Temp(20.0)), TempBand::High);
+        assert_eq!(temp_band(Setpoint::Off), TempBand::Off);
+        assert_eq!(TempBand::Mid.class(), "climate-temp--mid");
+    }
+
+    #[test]
+    fn room_subline_reads_each_state() {
+        let mut orphan = zone_view(ZoneState::Active);
+        orphan.orphan = true;
+        assert_eq!(room_subline(&orphan), "No climate device");
+        assert_eq!(room_subline(&zone_view(ZoneState::Off)), "Off");
+        let pending = zone_view(ZoneState::Pending);
+        assert_eq!(room_subline(&pending), "Pending · no schedule");
+        let mut scheduled = pending.clone();
+        scheduled.settings.rules = Rules {
+            heat: Some(ModeRules {
+                base: Setpoint::Temp(16.0),
+                blocks: vec![],
+            }),
+            cool: None,
+        };
+        assert_eq!(room_subline(&scheduled), "Pending");
+        assert_eq!(
+            room_subline(&zone_view(ZoneState::Active)),
+            "Active · no decision yet"
+        );
+        let active = decided(zone_view(ZoneState::Active), Setpoint::Temp(16.0));
+        assert_eq!(room_subline(&active), "Heat 16° · Active");
+        let mut held = active.clone();
+        held.overrides.push(Override {
+            entity: None,
+            setpoint: Some(Setpoint::Temp(19.5)),
+            mode: None,
+            until: 0,
+            origin: OverrideOrigin::Hand,
+        });
+        assert_eq!(room_subline(&held), "Heat 16° · Active · held");
+    }
+
+    #[test]
+    fn room_band_follows_the_decision_setpoint() {
+        let z = zone_view(ZoneState::Active);
+        assert_eq!(room_band(&z), None);
+        assert_eq!(
+            room_band(&decided(z.clone(), Setpoint::Temp(18.5))),
+            Some(TempBand::Mid)
+        );
+        assert_eq!(room_band(&decided(z, Setpoint::Off)), None);
+    }
+
+    #[test]
+    fn pick_zone_keeps_a_known_choice_and_falls_back() {
+        let ids = vec!["a".to_owned(), "b".to_owned()];
+        assert_eq!(pick_zone(&ids, Some("b")).as_deref(), Some("b"));
+        assert_eq!(pick_zone(&ids, Some("gone")).as_deref(), Some("a"));
+        assert_eq!(pick_zone(&ids, None).as_deref(), Some("a"));
+        assert_eq!(pick_zone(&[], Some("a")), None);
+    }
 
     #[test]
     fn only_an_active_zone_can_hold() {
