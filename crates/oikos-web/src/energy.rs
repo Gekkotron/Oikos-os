@@ -11,25 +11,58 @@ use oikos_core::energy::{
 };
 use oikos_core::model::StateValue;
 
-/// The diagram's viewBox, in px.
-pub const VIEW_W: f64 = 260.0;
+/// The diagram's viewBox height, in px; the width comes from the [`Layout`].
 pub const VIEW_H: f64 = 250.0;
 /// A node circle's radius.
 pub const NODE_R: f64 = 22.0;
 /// How far an edge stays from a node's centre.
 pub const CLEARANCE: f64 = 26.0;
 
-const SOLAR: (f64, f64) = (0.5, 0.12);
-const HOUSE: (f64, f64) = (0.5, 0.52);
-const GRID: (f64, f64) = (0.12, 0.52);
-const BOTTOM_LEFT: (f64, f64) = (0.15, 0.86);
+/// Where the diagram's nodes sit, as fractions of the viewBox.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layout {
+    /// The viewBox width, in px.
+    pub view_w: f64,
+    solar: (f64, f64),
+    house: (f64, f64),
+    grid: (f64, f64),
+    bottom_left: (f64, f64),
+    /// The arc slots right of the house, by how many consumer nodes are drawn (1..=3).
+    arc: [&'static [(f64, f64)]; ARC_SLOTS],
+}
 
-/// The arc slots right of the house, by how many consumer nodes are drawn (1..=3).
-fn arc_slots(n: usize) -> &'static [(f64, f64)] {
-    match n.clamp(1, ARC_SLOTS) {
-        1 => &[(0.86, 0.52)],
-        2 => &[(0.86, 0.34), (0.86, 0.72)],
-        _ => &[(0.82, 0.2), (0.88, 0.52), (0.82, 0.84)],
+impl Layout {
+    /// The phone drawing, nearly square: the app's layout.
+    pub const NARROW: Layout = Layout {
+        view_w: 260.0,
+        solar: (0.5, 0.12),
+        house: (0.5, 0.52),
+        grid: (0.12, 0.52),
+        bottom_left: (0.15, 0.86),
+        arc: [
+            &[(0.86, 0.52)],
+            &[(0.86, 0.34), (0.86, 0.72)],
+            &[(0.82, 0.2), (0.88, 0.52), (0.82, 0.84)],
+        ],
+    };
+
+    /// The wide-screen drawing, as wide as the day chart: the same rows, the sources and
+    /// consumers spread away from the house so the card can span the page.
+    pub const WIDE: Layout = Layout {
+        view_w: 720.0,
+        solar: (0.5, 0.12),
+        house: (0.5, 0.52),
+        grid: (0.2, 0.52),
+        bottom_left: (0.2, 0.86),
+        arc: [
+            &[(0.8, 0.52)],
+            &[(0.8, 0.34), (0.8, 0.72)],
+            &[(0.77, 0.2), (0.8, 0.52), (0.77, 0.84)],
+        ],
+    };
+
+    fn arc_slots(&self, n: usize) -> &'static [(f64, f64)] {
+        self.arc[n.clamp(1, ARC_SLOTS) - 1]
     }
 }
 
@@ -56,8 +89,8 @@ pub fn any_solar_active<'a>(entities: impl Iterator<Item = &'a EntityView>) -> b
 }
 
 /// Node centres in viewBox px, by node id.
-pub fn positions(diagram: &[EnergyNode]) -> BTreeMap<String, (f64, f64)> {
-    let px = |(x, y): (f64, f64)| (x * VIEW_W, y * VIEW_H);
+pub fn positions(diagram: &[EnergyNode], layout: &Layout) -> BTreeMap<String, (f64, f64)> {
+    let px = |(x, y): (f64, f64)| (x * layout.view_w, y * VIEW_H);
     let arc: Vec<&EnergyNode> = diagram
         .iter()
         .filter(|n| matches!(n.kind, NodeKind::Consumer | NodeKind::More))
@@ -65,15 +98,15 @@ pub fn positions(diagram: &[EnergyNode]) -> BTreeMap<String, (f64, f64)> {
     let mut out = BTreeMap::new();
     for n in diagram {
         let at = match n.kind {
-            NodeKind::Solar => SOLAR,
-            NodeKind::Grid => GRID,
-            NodeKind::House => HOUSE,
-            NodeKind::Battery | NodeKind::Water => BOTTOM_LEFT,
+            NodeKind::Solar => layout.solar,
+            NodeKind::Grid => layout.grid,
+            NodeKind::House => layout.house,
+            NodeKind::Battery | NodeKind::Water => layout.bottom_left,
             NodeKind::Consumer | NodeKind::More => continue,
         };
         out.insert(n.id.clone(), px(at));
     }
-    let slots = arc_slots(arc.len());
+    let slots = layout.arc_slots(arc.len());
     for (n, slot) in arc.iter().zip(slots) {
         out.insert(n.id.clone(), px(*slot));
     }
@@ -417,7 +450,7 @@ mod tests {
         ];
         es.extend((0..5).map(consumer));
         let ui = EnergyFlow::build(&es, 0, None);
-        let p = positions(&ui.diagram);
+        let p = positions(&ui.diagram, &Layout::NARROW);
         assert_eq!(p["solar"], (130.0, 30.0));
         assert_eq!(p["house"], (130.0, 130.0));
         assert_eq!(p["grid"], (31.2, 130.0));
@@ -432,9 +465,32 @@ mod tests {
 
         es.push(ent("b", "B", EnergyRole::Battery, "W", 5.0));
         let ui = EnergyFlow::build(&es, 0, None);
-        let p = positions(&ui.diagram);
+        let p = positions(&ui.diagram, &Layout::NARROW);
         assert_eq!(p["battery"], (39.0, 215.0));
         assert!(!p.contains_key("water"));
+    }
+
+    #[test]
+    fn wide_layout_spreads_the_rows() {
+        let mut es = vec![
+            ent("s", "S", EnergyRole::Solar, "W", 100.0),
+            ent("g", "G", EnergyRole::Grid, "W", 100.0),
+            ent("w", "Water", EnergyRole::Water, "L", 5.0),
+        ];
+        es.extend((0..5).map(consumer));
+        let ui = EnergyFlow::build(&es, 0, None);
+        let p = positions(&ui.diagram, &Layout::WIDE);
+        assert_eq!(p["solar"], (360.0, 30.0));
+        assert_eq!(p["house"], (360.0, 130.0));
+        assert_eq!(p["grid"], (144.0, 130.0));
+        assert_eq!(p["water"], (144.0, 215.0));
+        let arc: Vec<(f64, f64)> = ui
+            .diagram
+            .iter()
+            .filter(|n| matches!(n.kind, NodeKind::Consumer | NodeKind::More))
+            .map(|n| p[&n.id])
+            .collect();
+        assert_eq!(arc, vec![(554.4, 50.0), (576.0, 130.0), (554.4, 210.0)]);
     }
 
     #[test]
