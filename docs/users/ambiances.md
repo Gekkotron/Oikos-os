@@ -1,6 +1,6 @@
 ---
 title: Ambiances
-sidebar_position: 7
+sidebar_position: 15
 description: One-tap house states made of actions, the four action types, how categories pick their devices, and how to read the report after a run.
 ---
 
@@ -40,17 +40,19 @@ An ambiance belongs to the house, not to a room. A room only appears inside an a
 `what` is one of:
 
 - **`lights`**: every light, including switches you show as a light. `to` is `on` or `off`. With `on` you can set `brightness` (1 to 100 %); a light that cannot dim just turns on.
-- **`plugs`**: every switch that is a plain switch or a plug. `to` is `on` or `off`. Door, siren and chime switches are never plugs, so a house-wide "plugs off" never touches them. A relay you do not want switched off goes in `except`.
-- **`covers`**: every shutter, blind or cover. `to` is `open` or `close`.
+- **`plugs`**: every switch shown as a plain switch (no `showAs`) or as a plug (`showAs: "plug"`). `to` is `on` or `off`. Any other `showAs`, such as door, siren, chime or a value the hub does not know, is never a plug, so a house-wide "plugs off" never touches it. A relay you do not want switched off goes in `except`.
+- **`covers`**: every window covering: a cover with no device class, or with the class `shutter`, `blind`, `curtain`, `shade`, `awning` or `window`. Garage doors, gates, doors, dampers and any other class are never part of the category, so "close every cover" never moves a garage door. `to` is `open` or `close`.
 
 A category is not a fixed list. The devices are picked **when the ambiance is applied**, from the live house, so a light or plug you add next month is included without editing the ambiance. The rules behind the selection:
 
 - Disabled, diagnostic, configuration and folded entities are not part of a category. Entities hidden from the home screen are included: hidden is a display choice.
-- Groups are left out, so a light that belongs to a group is not commanded twice.
+- Group entities are left out, both the hub's groups and Zigbee2MQTT groups. Their members are already in the category, so each light is commanded once, not once more through its group.
+- Virtual entities (the hub's own `virtual_` entities) and the Zigbee2MQTT bridge (for example its Permit join switch) are never part of a category.
 - `area` limits the category to one room. Leave it out for the whole house.
 - `except` lists entity ids to leave alone.
 - An entity that is **already** in the target state is not commanded. A light already off under "every light off" counts as done, so the report stays clean when half the house is already off.
 - An entity that is offline is not commanded. It is listed as skipped with the reason `offline`.
+- If `area` names a room that has since been removed, the action is skipped with `no longer exists`.
 
 ### Device
 
@@ -73,7 +75,7 @@ The engine needs a duration, so "until I come back" is written as a long hold, p
 `flow` is a flow id and `do` is what to do with it:
 
 - `enable` or `disable` sets the flow's `enabled`, like a `flow.enable` node does in a flow.
-- `run` starts a manual run. The ambiance does not wait for the run to finish. Use it for anything an ambiance cannot do by itself, such as delays, conditions or notifications.
+- `run` starts a manual run. The ambiance does not wait for the run to finish. Use it for anything an ambiance cannot do by itself, such as delays, conditions or notifications. The action is `failed` when the flow is disabled, invalid or already running.
 
 ## Applying an ambiance
 
@@ -82,11 +84,12 @@ Actions run in order. Within one action, its commands go out together, and the n
 - A failure never stops the run. Every action reports what happened.
 - Only one run of the same ambiance can go at a time. A second request while it runs is refused with `already running`. Two different ambiances can run together.
 - The broker link must be online, or the apply is refused.
+- A run finishes even if the client that started it goes away (a closed page or a dropped request): its report is still sent on the WebSocket.
 - A restart of the hub ends a run, and clears the running state.
 
 ### References that disappear
 
-Saving checks every reference: unknown entities, areas, flows, zones and `except` ids are refused. If something is removed **after** the ambiance was saved, the ambiance stays valid and listed. Applying it reports that action as skipped with `no longer exists`, and the other actions still run.
+Saving checks every reference: unknown entities, areas, flows, zones and `except` ids are refused. An action left unchanged from the saved version is not checked again, so you can still rename, pin or reorder an ambiance after one of its devices was removed. If something is removed **after** the ambiance was saved, the ambiance stays valid and listed. Applying it reports that action as skipped with `no longer exists`, and the other actions still run.
 
 ## Reading the report
 
@@ -103,7 +106,7 @@ Applying an ambiance returns a report, with one line per action, in order:
 The outcome is:
 
 - **`failed`** when anything failed.
-- **`skipped`** when nothing was attempted. The action's `reason` says why: `no matching entities` (a category with no device in it), `no active zone` (a climate action with no zone running), `the climate engine is off`, `no longer exists`.
+- **`skipped`** when nothing was attempted. The action's `reason` says why: `no matching entities` (a category with no device in it), `every target is offline` (each targeted entity was offline; they are listed under `skipped`), `no active zone` (a climate action with no zone running), `the climate engine is off`, `no longer exists`.
 - **`ok`** otherwise. An action that skipped some offline entities is still `ok`; the offline ones are listed under `skipped`, so look there if a device did not change.
 
 The report is returned to whoever applied the ambiance and sent on the WebSocket to the other open clients. The hub does not keep it, so once the page is closed it is gone.

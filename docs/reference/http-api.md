@@ -83,9 +83,9 @@ See [Ambiances](../users/ambiances.md) for the action types and the report. An a
 | Route | What it does |
 | --- | --- |
 | `GET /api/v1/ambiances` | Every stored ambiance as `{id, ambiance, invalid}`: valid ones first, by `order`, then the invalid ones with the reason in `invalid`. |
-| `PUT /api/v1/ambiances/{id}` | Creates or replaces an ambiance and returns its view. The shape is checked, then the house: unknown entities, areas, flows, zones and `except` ids are refused, and a climate action is refused while the climate engine is off. `422` for a body or a reference the house refuses (the error names the action by its index, e.g. `action 2: …`), `503` while the broker link is down. |
+| `PUT /api/v1/ambiances/{id}` | Creates or replaces an ambiance and returns its view. The shape is checked, then the house: unknown entities, areas, flows, zones and `except` ids are refused, and a climate action is refused while the climate engine is off. An action equal to one of the stored version is not checked again. `422` for a body or a reference the house refuses (the error names the action by its index, e.g. `action 2: …`), `503` while the broker link is down. |
 | `DELETE /api/v1/ambiances/{id}` | Removes an ambiance (`204`), valid or not. `404` for an id that is not an ambiance; `503` while the broker link is down. |
-| `POST /api/v1/ambiances/{id}/apply` | Runs the actions once, in order, and returns the [apply report](../users/ambiances.md#reading-the-report) (`200`). `404` for an unknown id; `422` for an invalid ambiance or one that is already running; `503` while the broker link is down. |
+| `POST /api/v1/ambiances/{id}/apply` | Runs the actions once, in order, and returns the [apply report](../users/ambiances.md#reading-the-report) (`200`). `404` for an unknown id; `422` for an invalid ambiance or one that is already running; `503` while the broker link is down. The run finishes and broadcasts `ambiance_applied` even if the request is dropped. Categories leave out group entities (the hub's and Zigbee2MQTT groups), virtual entities, the Zigbee2MQTT bridge, covers whose device class is not a window covering, and switches whose `showAs` is anything but none or `plug`. A flow `run` action is `failed` when the flow is disabled, invalid or already running; an action whose every target is offline is `skipped` with the reason `every target is offline`. |
 
 ## Flows
 
@@ -215,8 +215,8 @@ Errors are `{"error": "…"}` with one of these statuses:
 | --- | --- |
 | `400` | A bad override patch, a flow body whose `id` differs from the path (`id mismatch`), a bad query parameter, or a body that is not valid JSON of the expected shape. |
 | `403` | The reserved `house` dashboard id, or media off the Frigate origin. |
-| `404` | An unknown entity, alert, action, flow, area, dashboard, group, virtual entity or route. |
-| `422` | A command refused, a bad virtual or group id or spec, a flow that is invalid, disabled or already running, an unknown room, or a dashboard that does not validate. |
+| `404` | An unknown entity, alert, action, flow, area, dashboard, group, virtual entity, ambiance or route. |
+| `422` | A command refused, a bad virtual or group id or spec, a flow that is invalid, disabled or already running, an unknown room, a dashboard that does not validate, or an ambiance that does not validate, names something the house does not know, or is already running. |
 | `502` | A picture URL or Frigate media that cannot be fetched. |
 | `503` | The broker link is down, so the write was refused and nothing was applied; or the feature is off (`[groups]`, `[climate]`, `[history]`). The same publish refusal is an in-band tool error over MCP. |
 
