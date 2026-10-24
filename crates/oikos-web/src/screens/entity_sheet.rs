@@ -186,7 +186,7 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
                     />
                     <Row
                         label=key_signal(Key::Battery)
-                        value=device.battery.map_or_else(dash, |b| format!("{b} %"))
+                        value=device.battery.map_or_else(dash, |b| format!("{b}\u{a0}%"))
                     />
                     <Row
                         label=text_signal(DeviceText::LinkQuality)

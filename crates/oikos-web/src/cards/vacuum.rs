@@ -67,7 +67,7 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
                 <span class="vacuum__battery-glyph" aria-hidden="true">
                     <span class="vacuum__battery-fill" style=fill></span>
                 </span>
-                {format!("{level}%")}
+                {format!("{level}\u{a0}%")}
             </span>
         }
     });
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(action_label(en, "pause"), "Pause");
         assert_eq!(action_label(en, "stop"), "Stop");
         assert_eq!(action_label(en, "custom_thing"), "Custom thing");
-        assert_eq!(action_label(Lang::Fr, "return_to_base"), "Retour base");
+        assert_eq!(action_label(Lang::Fr, "return_to_base"), "Retour à la base");
         assert_eq!(action_label(Lang::Fr, "locate"), "Localiser");
         assert_eq!(action_label(Lang::Fr, "start"), "Démarrer");
     }

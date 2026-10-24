@@ -208,6 +208,10 @@ pub fn ModeSelect(
     selected: Option<String>,
     on_select: Callback<String>,
     #[prop(optional)] captioned: bool,
+    /// True for climate modes (heat, cool, fan modes…), which have shared words. A device's
+    /// own options (a select, a tone, a fan speed) keep the words the device announced.
+    #[prop(optional)]
+    modes: bool,
 ) -> impl IntoView {
     let lang = use_lang();
     let items = options
@@ -217,7 +221,7 @@ pub fn ModeSelect(
             let raw = option.clone();
             view! {
                 <option value=option selected=is_selected>
-                    {move || option_word(lang(), &raw)}
+                    {move || if modes { option_word(lang(), &raw) } else { word(&raw) }}
                 </option>
             }
         })

@@ -184,7 +184,7 @@ pub fn ClimateGroupCard(entity: EntityView) -> impl IntoView {
         let on_select = Callback::new(move |picked: String| {
             sender.send(&id, Command::SetHvacMode { mode: picked }, None);
         });
-        view! { <ModeSelect label=Signal::derive(move || tk(Key::Mode).to_owned()) options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
+        view! { <ModeSelect label=Signal::derive(move || tk(Key::Mode).to_owned()) options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true modes=true /> }
     });
 
     let pending = sender.pending(&entity.id);

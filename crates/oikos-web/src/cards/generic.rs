@@ -138,7 +138,12 @@ pub(crate) fn control_view(
                 Some(GenericValue::Number(n)) => Some(*n),
                 _ => None,
             };
-            let label = current.map_or_else(|| "—".to_owned(), |n| format!("{n}"));
+            let label = Signal::derive(move || {
+                current.map_or_else(
+                    || "—".to_owned(),
+                    |n| crate::i18n::format::number(lang(), n),
+                )
+            });
             let on_step = Callback::new(move |dir: f64| {
                 if let Some(n) = current {
                     let next = (n + dir * step).clamp(range.min, range.max.max(range.min));

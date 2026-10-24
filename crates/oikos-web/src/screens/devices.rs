@@ -143,10 +143,10 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
                         })}
                     {device
                         .battery
-                        .map(|b| view! { <span class="chip-badge">{format!("{b} %")}</span> })}
+                        .map(|b| view! { <span class="chip-badge">{format!("{b}\u{a0}%")}</span> })}
                     {device
                         .linkquality
-                        .map(|q| view! { <span class="chip-badge">{move || link_quality_badge(lang(), q)}</span> })}
+                        .map(|q| view! { <span class="chip-badge">{move || link_quality_badge(q)}</span> })}
                     <span class="chip-badge" title=move || t(DeviceText::Entities)>
                         {entity_count}
                     </span>

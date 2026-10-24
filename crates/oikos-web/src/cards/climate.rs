@@ -127,7 +127,7 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
             let guess = with_climate(&state, |c| c.fan_mode = Some(picked.clone()));
             sender.send(&id, Command::SetFanMode { mode: picked }, guess);
         });
-        view! { <ModeSelect label=Signal::derive(move || t(Key::ModeFan)) options=caps.fan_modes.clone() selected=fan on_select=on_select captioned=true /> }
+        view! { <ModeSelect label=Signal::derive(move || t(Key::ModeFan)) options=caps.fan_modes.clone() selected=fan on_select=on_select captioned=true modes=true /> }
     });
 
     // "It's 22°", or the mode when the unit reports no room temperature.

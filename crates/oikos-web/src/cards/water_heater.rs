@@ -122,7 +122,7 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
             let guess = with_water_heater(&state, |w| w.mode = Some(picked.clone()));
             sender.send(&id, Command::SetHvacMode { mode: picked }, guess);
         });
-        view! { <ModeSelect label=Signal::derive(move || t(Key::Mode)) options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
+        view! { <ModeSelect label=Signal::derive(move || t(Key::Mode)) options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true modes=true /> }
     });
 
     let heater = {

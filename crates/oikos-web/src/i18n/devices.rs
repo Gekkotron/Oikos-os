@@ -244,7 +244,7 @@ pub fn device_text(lang: Lang, k: DeviceText) -> &'static str {
     let (en, fr) = match k {
         T::Cancel => ("Cancel", "Annuler"),
         T::Save => ("Save", "Enregistrer"),
-        T::PressAll => ("Press all", "Tout déclencher"),
+        T::PressAll => ("Press all", "Tout appuyer"),
         T::Locate => ("Locate", "Localiser"),
         T::Press => ("Press", "Appuyer"),
         T::Play => ("Play", "Sonner"),
@@ -263,8 +263,8 @@ pub fn device_text(lang: Lang, k: DeviceText) -> &'static str {
         T::NoColour => ("No colour set", "Aucune couleur définie"),
         T::White => ("White", "Blanc"),
         T::FanSpeed => ("Fan speed", "Vitesse du ventilateur"),
-        T::Dock => ("Dock", "Retour base"),
-        T::Spot => ("Spot", "Ponctuel"),
+        T::Dock => ("Dock", "Retour à la base"),
+        T::Spot => ("Spot", "Nettoyage localisé"),
         T::Mixed => ("Mixed", "Mixte"),
         T::Target => ("Target", "Consigne"),
         T::RoomNeedsName => ("A room needs a name", "Une pièce doit avoir un nom"),
@@ -278,8 +278,8 @@ pub fn device_text(lang: Lang, k: DeviceText) -> &'static str {
         T::Entities => ("Entities", "Entités"),
         T::Zigbee2mqttDevices => ("Zigbee2MQTT devices", "Appareils Zigbee2MQTT"),
         T::SearchPlaceholder => (
-            "Search name, room, model, vendor or IEEE",
-            "Rechercher un nom, une pièce, un modèle, un fabricant ou une adresse IEEE",
+            "Name, room, model, maker or IEEE",
+            "Nom, pièce, modèle, fabricant ou IEEE",
         ),
         T::SearchDevices => ("Search devices", "Rechercher des appareils"),
         T::Online => ("Online", "En ligne"),
@@ -377,7 +377,7 @@ pub fn device_text(lang: Lang, k: DeviceText) -> &'static str {
         T::TargetPresets => ("Target presets (°C)", "Consignes prédéfinies (°C)"),
         T::PresetsHint => (
             "Comma-separated, e.g. 19, 21, 23. Up to 6 chips.",
-            "Séparées par des virgules, par ex. 19, 21, 23. 6 puces au maximum.",
+            "Séparées par des points-virgules, par ex. 19 ; 21,5 ; 23. 6 valeurs au maximum.",
         ),
         T::ResetToDefaults => ("Reset to defaults", "Rétablir les valeurs par défaut"),
     };
@@ -444,12 +444,47 @@ pub fn ignored_topics(lang: Lang, n: usize) -> String {
     }
 }
 
-/// The link quality badge of a device row: "LQ 120" / "QL 120".
-pub fn link_quality_badge(lang: Lang, q: u32) -> String {
+/// The link quality badge of a device row: "LQI 120" (the Zigbee term, in both languages).
+pub fn link_quality_badge(q: u32) -> String {
+    format!("LQI {q}")
+}
+
+/// The climate presets as the text field shows them. They are stored as comma-separated numbers
+/// ("19, 21.5"); French shows "19 ; 21,5" since a comma is its decimal mark.
+pub fn presets_text(lang: Lang, stored: &str) -> String {
+    let pieces = stored
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
     match lang {
-        Lang::En => format!("LQ {q}"),
-        Lang::Fr => format!("QL {q}"),
+        Lang::En => pieces.collect::<Vec<_>>().join(", "),
+        Lang::Fr => pieces
+            .map(|p| {
+                if p.parse::<f64>().is_ok() {
+                    p.replace('.', ",")
+                } else {
+                    p.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(&format!("{NBSP}; ")),
     }
+}
+
+/// The stored presets for what was typed: numbers (a comma or a point as decimal mark) joined
+/// by ", ". A `;` is the separator when there is one, else a comma is. A piece that is not a
+/// number stays as typed, so nothing is dropped silently.
+pub fn presets_stored(text: &str) -> String {
+    let separator = if text.contains(';') { ';' } else { ',' };
+    text.split(separator)
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| match format::parse_decimal(p) {
+            Some(n) => n.to_string(),
+            None => p.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The button that clears one saved setting: "Clear order" / "Effacer order". `key` is a raw
@@ -534,6 +569,19 @@ mod tests {
         assert_eq!(
             device_text(Lang::Fr, DeviceText::LastUpdate),
             "Dernière mise à jour\u{a0}:"
+        );
+    }
+
+    #[test]
+    fn presets_read_and_write_in_both_languages() {
+        assert_eq!(presets_stored("19,5 ; 21"), "19.5, 21");
+        assert_eq!(presets_stored("19, 21.5, 23"), "19, 21.5, 23");
+        assert_eq!(presets_stored("19,5; ;21;"), "19.5, 21");
+        assert_eq!(presets_text(Lang::Fr, "19.5, 21"), "19,5\u{a0}; 21");
+        assert_eq!(presets_text(Lang::En, "19.5, 21"), "19.5, 21");
+        assert_eq!(
+            presets_stored(&presets_text(Lang::Fr, "19.5, 21, 23")),
+            "19.5, 21, 23"
         );
     }
 

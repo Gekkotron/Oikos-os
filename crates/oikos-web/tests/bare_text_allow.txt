@@ -38,7 +38,3 @@ text: oikos.  # the brand mark, not translated
 text: (max-width: 719px), (hover: none) and (pointer: coarse)  # media query, not text
 text: run {}  # CSS class list
 text: alarm_control_panel  # MQTT component name shown as code, not translated
-text: ArrowRight  # KeyboardEvent.key value, not shown
-text: ArrowLeft  # KeyboardEvent.key value, not shown
-text: ArrowUp  # KeyboardEvent.key value, not shown
-text: ArrowDown  # KeyboardEvent.key value, not shown

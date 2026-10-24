@@ -14,7 +14,8 @@ use crate::energy::energy_entities;
 use crate::format::word;
 use crate::house::House;
 use crate::i18n::devices::{
-    DeviceText, clear_setting, device_text, key_signal, key_value, text_signal, use_device_text,
+    DeviceText, clear_setting, device_text, key_signal, key_value, presets_stored, presets_text,
+    text_signal, use_device_text,
 };
 use crate::i18n::states::switch_type_word;
 use crate::i18n::{Key, Lang, current_lang, text, use_lang, use_text};
@@ -89,6 +90,43 @@ fn TextField(
                 }
             />
             {hint.map(|h| view! { <span class="override__hint">{move || h.get()}</span> })}
+        </label>
+    }
+}
+
+/// The climate presets: stored as comma-separated numbers, typed in the language's own form
+/// (French uses `;` between values, since `,` is its decimal mark). The text is kept apart from
+/// the draft so typing a trailing separator is not rewritten under the cursor.
+#[component]
+fn PresetsField(draft: Draft) -> impl IntoView {
+    let lang = use_lang();
+    let t = use_device_text();
+    let stored = move || draft.with(|d| d.climate_presets.clone().unwrap_or_default());
+    let text = RwSignal::new(presets_text(current_lang(), &stored()));
+    // Follow an outside change and a language change, unless the text already says the same.
+    Effect::new(move |previous: Option<Lang>| {
+        let (now, current) = (stored(), lang());
+        let switched = previous.is_some_and(|p| p != current);
+        if switched || text.with_untracked(|t| presets_stored(t)) != now {
+            text.set(presets_text(current, &now));
+        }
+        current
+    });
+    view! {
+        <label class="override__field">
+            <span class="override__label">{move || t(DeviceText::TargetPresets)}</span>
+            <input
+                class="field"
+                type="text"
+                prop:value=move || text.get()
+                on:input=move |ev| {
+                    let raw = event_target_value(&ev);
+                    let value = non_blank(presets_stored(&raw));
+                    draft.update(|d| d.climate_presets = value);
+                    text.set(raw);
+                }
+            />
+            <span class="override__hint">{move || t(DeviceText::PresetsHint)}</span>
         </label>
     }
 }
@@ -850,13 +888,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 </Show>
             </Section>
             <Section title=key_signal(Key::Climate) when=on(|s| s.climate_presets)>
-                <TextField
-                    label=tt(DeviceText::TargetPresets)
-                    draft=draft
-                    get=|d| d.climate_presets.clone()
-                    set=|d, v| d.climate_presets = v
-                    hint=tt(DeviceText::PresetsHint)
-                />
+                <PresetsField draft=draft />
             </Section>
             <OtherSaved draft=draft shown=shown />
             <p class="override__error" role="alert" hidden=move || error.with(Option::is_none)>

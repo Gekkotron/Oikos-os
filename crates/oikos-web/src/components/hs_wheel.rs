@@ -82,11 +82,11 @@ pub fn HsWheel(#[prop(into)] value: Signal<Option<Hs>>, on_pick: Callback<Hs>) -
     let cancel = move |_| preview.set(None);
     let key = move |ev: web_sys::KeyboardEvent| {
         let step = if ev.shift_key() { 15.0 } else { 5.0 };
-        let (dh, ds) = match ev.key().as_str() {
-            "ArrowRight" => (step, 0.0),
-            "ArrowLeft" => (-step, 0.0),
-            "ArrowUp" => (0.0, step),
-            "ArrowDown" => (0.0, -step),
+        let (dh, ds) = match ev.key().to_ascii_lowercase().as_str() {
+            "arrowright" => (step, 0.0),
+            "arrowleft" => (-step, 0.0),
+            "arrowup" => (0.0, step),
+            "arrowdown" => (0.0, -step),
             _ => return,
         };
         ev.prevent_default();
