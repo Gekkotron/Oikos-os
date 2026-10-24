@@ -7180,10 +7180,73 @@ html:has(.flow-canvas-screen) {
   padding: 12px 16px 8px;
 }
 
+.solar-page__curve-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-bottom: 8px;
+}
+
 .solar-tabs {
   display: inline-flex;
   gap: 4px;
-  margin-bottom: 8px;
+}
+
+/* Each swatch draws its series the way the chart does. */
+.solar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.solar-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.solar-legend__swatch {
+  box-sizing: border-box;
+  width: 16px;
+  height: 10px;
+  flex: none;
+}
+
+.solar-legend__swatch--band {
+  border: 1px solid color-mix(in srgb, var(--solar) 40%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--solar) 26%, transparent);
+}
+
+.solar-legend__swatch--so-far {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--solar) 14%, transparent);
+}
+
+.solar-legend__swatch--forecast,
+.solar-legend__swatch--measured {
+  height: 0;
+}
+
+.solar-legend__swatch--forecast {
+  border-top: 1.5px dashed var(--accent-amber);
+}
+
+.solar-legend__swatch--measured {
+  border-top: 2px solid var(--solar);
+  border-radius: 1px;
+}
+
+.solar-legend__swatch--now {
+  width: 0;
+  border-left: 1px dashed var(--muted);
 }
 
 .solar-tabs button {
