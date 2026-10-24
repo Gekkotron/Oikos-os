@@ -303,3 +303,192 @@ async fn alarm_documents_are_not_devices() {
     hub.ingest_message("oikos/alarm/state", b"not json", true);
     assert!(hub.snapshot().entities.is_empty());
 }
+
+/// A hub with the engine running and the alarm armed-capable: the door is closed, the engine
+/// has settled, and the hub's own retained publishes are echoed back as the broker would.
+struct Rig {
+    hub: Arc<Hub>,
+    rx: mpsc::Receiver<Publish>,
+    door: String,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Rig {
+    async fn new() -> Rig {
+        let (hub, rx) = hub();
+        house(&hub);
+        let door = entity_id(&hub, "front_door");
+        hub.ingest("fx/front_door", b"closed");
+        hub.set_alarm_settings(enabled_with(&door)).await.unwrap();
+        let task = hub.start_alarm();
+        let mut rig = Rig {
+            hub,
+            rx,
+            door,
+            task,
+        };
+        rig.advance(6).await;
+        rig
+    }
+
+    /// Lets the engine run, then echoes what the hub published back to it.
+    async fn pump(&mut self) {
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+            for p in drain(&mut self.rx) {
+                self.hub
+                    .ingest_message(&p.topic, p.payload.as_bytes(), p.retain);
+            }
+        }
+    }
+
+    async fn advance(&mut self, secs: u64) {
+        tokio::time::advance(std::time::Duration::from_secs(secs)).await;
+        self.pump().await;
+    }
+
+    fn state(&self) -> String {
+        self.hub.alarm_view().state
+    }
+
+    fn panel(&self) -> StateValue {
+        self.hub
+            .entity_view("oikos_alarm_house")
+            .unwrap()
+            .state
+            .value
+    }
+
+    async fn command(&mut self, cmd: oikos_core::model::Command) -> oikos_api::CommandResponse {
+        let hub = Arc::clone(&self.hub);
+        let reply = hub.send_command("oikos_alarm_house", cmd).await.unwrap();
+        self.pump().await;
+        reply
+    }
+}
+
+impl Drop for Rig {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+fn arm(mode: oikos_core::model::AlarmMode) -> oikos_core::model::Command {
+    oikos_core::model::Command::Arm { mode, code: None }
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_command_arms_and_disarms() {
+    use oikos_core::model::{AlarmMode, Command};
+    let mut rig = Rig::new().await;
+    let reply = rig.command(arm(AlarmMode::Away)).await;
+    assert!(reply.accepted, "{reply:?}");
+    assert_eq!(rig.state(), "arming");
+    assert_eq!(rig.panel(), StateValue::Alarm("arming".to_owned()));
+    let reply = rig.command(Command::Disarm { code: None }).await;
+    assert!(reply.accepted);
+    assert_eq!(rig.state(), "disarmed");
+    assert_eq!(rig.panel(), StateValue::Alarm("disarmed".to_owned()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn vacation_mode_refused() {
+    let mut rig = Rig::new().await;
+    let reply = rig
+        .command(arm(oikos_core::model::AlarmMode::Vacation))
+        .await;
+    assert!(!reply.accepted);
+    assert!(reply.reason.is_some());
+    assert_eq!(rig.state(), "disarmed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn commands_are_refused_while_disabled() {
+    use oikos_core::model::AlarmMode;
+    let (hub, _rx) = hub();
+    let reply = hub
+        .send_command("oikos_alarm_house", arm(AlarmMode::Away))
+        .await
+        .unwrap();
+    assert!(!reply.accepted);
+    assert_eq!(reply.reason.as_deref(), Some("alarm disabled"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn raw_mqtt_command_arms() {
+    let mut rig = Rig::new().await;
+    // A retained command is a replay, never a press.
+    rig.hub
+        .ingest_message("oikos/alarm/panel/set", b"ARM_NIGHT", true);
+    rig.pump().await;
+    assert_eq!(rig.state(), "disarmed");
+    rig.hub
+        .ingest_message("oikos/alarm/panel/set", b"ARM_NIGHT", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "arming");
+}
+
+#[tokio::test(start_paused = true)]
+async fn replayed_states_never_trigger() {
+    use oikos_core::model::AlarmMode;
+    let mut rig = Rig::new().await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+
+    rig.hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+    rig.pump().await;
+    rig.hub.set_connection(ConnectionStatus::Online);
+    rig.pump().await;
+    // The broker replays the retained contact as open: no previous value is known.
+    rig.hub.ingest_message("fx/front_door", b"open", true);
+    rig.pump().await;
+    assert_eq!(rig.state(), "armed_away");
+    rig.advance(10).await;
+    assert_eq!(rig.state(), "armed_away");
+}
+
+#[tokio::test(start_paused = true)]
+async fn door_open_triggers_via_registry() {
+    use oikos_core::model::AlarmMode;
+    let mut rig = Rig::new().await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+
+    rig.hub.ingest_message("fx/front_door", b"open", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "triggered");
+    assert_eq!(rig.panel(), StateValue::Alarm("triggered".to_owned()));
+    let attrs = rig
+        .hub
+        .entity_view("oikos_alarm_house")
+        .unwrap()
+        .state
+        .attributes;
+    assert_eq!(attrs["cause"], json!([rig.door]), "{attrs:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn runtime_persisted_retained() {
+    use oikos_alarm::machine::{Phase, Runtime};
+    use oikos_core::model::AlarmMode;
+    let mut rig = Rig::new().await;
+    let hub = Arc::clone(&rig.hub);
+    let reply = hub
+        .send_command("oikos_alarm_house", arm(AlarmMode::Away))
+        .await
+        .unwrap();
+    assert!(reply.accepted);
+    let seen = drain(&mut rig.rx);
+    let last = seen
+        .iter()
+        .rev()
+        .find(|p| p.topic == "oikos/alarm/state")
+        .expect("runtime published");
+    assert!(last.retain);
+    let rt: Runtime = serde_json::from_str(&last.payload).unwrap();
+    assert!(matches!(rt.phase, Phase::Arming { .. }));
+}

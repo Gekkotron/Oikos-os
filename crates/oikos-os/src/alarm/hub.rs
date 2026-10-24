@@ -13,7 +13,7 @@ use oikos_core::command::Publish;
 use oikos_core::model::{Entity, Kind, StateValue};
 use oikos_core::types::{Placement, type_def};
 
-use super::{ALARM_ENTITY_ID, entity, lock};
+use super::{ALARM_ENTITY_ID, engine, entity, lock};
 use crate::climate::store::{Applied, apply_validated};
 use crate::clock;
 use crate::hub::{Hub, HubError};
@@ -224,14 +224,9 @@ impl Hub {
         trackers
             .iter()
             .map(|id| {
-                let seen = match reg.state(id).map(|s| &s.value) {
-                    Some(StateValue::Generic(g)) => match g.fields.get("state") {
-                        Some(oikos_core::model::GenericValue::Text(t)) => presence_of(t),
-                        _ => Presence::Unknown,
-                    },
-                    Some(StateValue::Text(t)) => presence_of(t),
-                    _ => Presence::Unknown,
-                };
+                let seen = reg
+                    .state(id)
+                    .map_or(Presence::Unknown, |s| tracker_presence(&s.value));
                 (id.clone(), seen)
             })
             .collect()
@@ -256,7 +251,7 @@ impl Hub {
 
     /// Feeds a message to the alarm when `topic` is one of its documents; false when it is not,
     /// so the message goes on to the registry.
-    pub(crate) fn ingest_alarm(&self, topic: &str, payload: &[u8], _retain: bool) -> bool {
+    pub(crate) fn ingest_alarm(&self, topic: &str, payload: &[u8], retain: bool) -> bool {
         let Some(parsed) = topics::parse(&self.alarm.prefix, topic) else {
             return false;
         };
@@ -281,6 +276,8 @@ impl Hub {
                     }
                 }
             }
+            // The hub is the only writer once the engine runs: an echo may be older than memory.
+            AlarmTopic::Runtime if self.alarm.engine_started.load(Ordering::SeqCst) => false,
             AlarmTopic::Runtime => match serde_json::from_slice::<Runtime>(payload) {
                 Ok(rt) => {
                     self.alarm.runtime_loaded.store(true, Ordering::SeqCst);
@@ -296,13 +293,36 @@ impl Hub {
                     false
                 }
             },
-            // The engine acts on a non-retained command; a retained one is a replay, never a press.
-            AlarmTopic::PanelCommand => false,
+            // A non-retained command is a press; a retained one is a replay, never acted on.
+            AlarmTopic::PanelCommand => {
+                if !retain
+                    && let Some(cmd) = engine::parse_panel_command(payload)
+                    && let Some(hub) = self.me.upgrade()
+                    && tokio::runtime::Handle::try_current().is_ok()
+                {
+                    tokio::spawn(async move {
+                        let _ = hub.alarm_command(cmd).await;
+                    });
+                }
+                false
+            }
         };
         if changed {
             self.broadcast(WsEvent::AlarmChanged);
         }
         true
+    }
+}
+
+/// What a tracker's state value says: `home`, `not_home`, or unknown.
+pub(crate) fn tracker_presence(value: &StateValue) -> Presence {
+    match value {
+        StateValue::Generic(g) => match g.fields.get("state") {
+            Some(oikos_core::model::GenericValue::Text(t)) => presence_of(t),
+            _ => Presence::Unknown,
+        },
+        StateValue::Text(t) => presence_of(t),
+        _ => Presence::Unknown,
     }
 }
 

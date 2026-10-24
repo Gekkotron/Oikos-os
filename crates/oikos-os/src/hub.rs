@@ -34,7 +34,7 @@ use oikos_push::fcm::{FcmError, FcmTransport, HttpFcm, ServiceAccount};
 use oikos_push::{PushService, Rejected};
 use tokio::sync::{broadcast, mpsc, watch};
 
-use crate::alarm::AlarmHub;
+use crate::alarm::{ALARM_ENTITY_ID, AlarmHub};
 use crate::climate::ClimateHub;
 use crate::clock;
 use crate::config::{AclSource, Config};
@@ -1017,6 +1017,12 @@ impl Hub {
     /// entity is rejected before anything is published, and a broker link that is down is
     /// [`HubError::Publish`] right away rather than a wait for an echo that cannot come.
     pub async fn send_command(&self, id: &str, cmd: Command) -> Result<CommandResponse, HubError> {
+        if id == ALARM_ENTITY_ID {
+            let Some(hub) = self.me.upgrade() else {
+                return Err(HubError::Rejected("hub is shutting down".to_owned()));
+            };
+            return Ok(hub.alarm_command(cmd).await);
+        }
         if let Some(group_id) = id.strip_prefix("group_") {
             if !self.groups_enabled {
                 return Ok(CommandResponse {

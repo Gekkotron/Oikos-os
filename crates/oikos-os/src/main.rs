@@ -78,6 +78,7 @@ async fn main() -> anyhow::Result<ExitCode> {
             }
             let engine = hub.start_engine();
             let climate = hub.start_climate();
+            let alarm = hub.start_alarm();
             let push_retry = hub.push().spawn_retry_worker();
             let acl_tail = spawn_acl_tail(&cfg, &hub);
             let (link, mut link_task) = mqtt::start(
@@ -108,6 +109,7 @@ async fn main() -> anyhow::Result<ExitCode> {
             if let Some(task) = &climate {
                 task.abort();
             }
+            alarm.abort();
             if let Some(task) = &weather {
                 task.abort();
             }

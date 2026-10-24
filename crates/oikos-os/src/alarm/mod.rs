@@ -1,6 +1,7 @@
 //! The native alarm's hub side: the retained documents, the published panel entity and the
 //! settings API.
 
+pub(crate) mod engine;
 pub(crate) mod entity;
 pub(crate) mod hub;
 
@@ -24,8 +25,13 @@ pub struct AlarmHub {
     /// Set once the retained runtime document was read (or written by this hub).
     pub(crate) runtime_loaded: AtomicBool,
     /// Held for a whole engine pass, so two callers never drive the machine at once.
-    #[allow(dead_code)] // taken by the engine loop
     pub(crate) pass: tokio::sync::Mutex<()>,
+    /// Set once the engine has resumed: from then on the in-memory runtime is the truth and
+    /// the hub's own retained `<p>/state` echo is ignored (an older echo must not overwrite it).
+    pub(crate) engine_started: AtomicBool,
+    /// Unix seconds and the monotonic instant they were read at: the engine's clock is this
+    /// anchor plus the time elapsed since, so deadlines never depend on the wall clock moving.
+    pub(crate) anchor: (u64, tokio::time::Instant),
 }
 
 impl AlarmHub {
@@ -37,6 +43,8 @@ impl AlarmHub {
             runtime: Mutex::new(Runtime::default()),
             runtime_loaded: AtomicBool::new(false),
             pass: tokio::sync::Mutex::new(()),
+            engine_started: AtomicBool::new(false),
+            anchor: (crate::clock::now(), tokio::time::Instant::now()),
         }
     }
 }
