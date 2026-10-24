@@ -1,0 +1,230 @@
+/* My moods: the list, the report and "How it works". Tokens only. */
+
+.ambiances {
+  gap: 16px;
+}
+
+.ambiances__header {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+.ambiances__header .sheet__title {
+  flex: 1 1 auto;
+}
+
+.ambiances__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-min);
+  color: var(--muted);
+  font: var(--type-label);
+  text-decoration: underline;
+}
+
+.ambiances a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.ambiances__new {
+  flex: none;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.ambiances__hint {
+  margin: 0;
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+.ambiances__about p {
+  margin: 0 0 12px;
+  font: var(--type-body);
+  line-height: 1.5;
+}
+
+.ambiances__about p:last-child {
+  margin-bottom: 0;
+}
+
+.ambiances__empty p {
+  margin: 0;
+  font: var(--type-body);
+}
+
+.mood-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mood-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+}
+
+.mood-card--invalid {
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--card-border));
+}
+
+.mood-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mood-card__icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: var(--raised);
+  color: var(--accent-amber);
+}
+
+.mood-card__icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.mood-card__titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.mood-card__name {
+  margin: 0;
+  font: var(--type-card-value);
+  overflow-wrap: anywhere;
+}
+
+.mood-card__sub {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font: var(--type-label);
+  overflow-wrap: anywhere;
+}
+
+.mood-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mood-card__actions .btn {
+  flex: 0 1 auto;
+  padding: 0 16px;
+}
+
+.mood-card__actions .btn--round {
+  flex: none;
+  padding: 0;
+}
+
+.mood-card__actions .btn--round svg {
+  width: 18px;
+  height: 18px;
+}
+
+.mood-card__actions .confirm {
+  flex: 1 1 100%;
+}
+
+.mood-card__apply {
+  flex: 1 1 auto;
+}
+
+.mood-card__report {
+  align-self: flex-start;
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+/* The last run */
+.report__actions,
+.report__problems {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report__action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.report__action:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.report__sentence {
+  flex: 1 1 60%;
+  min-width: 0;
+  font: var(--type-body);
+  overflow-wrap: anywhere;
+}
+
+.report__outcome {
+  color: var(--connected);
+  font: var(--type-label);
+}
+
+.report__outcome--failed {
+  color: var(--danger);
+}
+
+.report__outcome--skipped {
+  color: var(--warning);
+}
+
+.report__reason,
+.report__heading {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+.report__problems {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font: var(--type-label);
+  overflow-wrap: anywhere;
+}
+
+.report__none {
+  margin: 0;
+  color: var(--muted);
+  font: var(--type-body);
+}

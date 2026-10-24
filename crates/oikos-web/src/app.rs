@@ -7,6 +7,10 @@ use leptos_router::path;
 use oikos_api::DashboardView;
 use oikos_core::model::{Kind, StateValue};
 
+use crate::ambiances::about::AmbiancesAboutScreen;
+use crate::ambiances::editor_placeholder::AmbianceEditorPlaceholder;
+use crate::ambiances::page::AmbiancesScreen;
+use crate::ambiances::report::AmbianceReportScreen;
 use crate::commands::Pending;
 use crate::components::confirm::Confirming;
 use crate::components::now::install_now;
@@ -172,6 +176,11 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/weather") view=WeatherScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
+                    <Route path=path!("/ambiances") view=AmbiancesScreen />
+                    <Route path=path!("/ambiances/about") view=AmbiancesAboutScreen />
+                    <Route path=path!("/ambiances/new") view=AmbianceEditorPlaceholder />
+                    <Route path=path!("/ambiances/:id") view=AmbianceEditorPlaceholder />
+                    <Route path=path!("/ambiances/:id/report") view=AmbianceReportScreen />
                     <Route path=path!("/flows") view=FlowsScreen />
                     <Route path=path!("/flows/new") view=NewFlowScreen />
                     <Route path=path!("/flows/:id") view=FlowCanvasScreen />

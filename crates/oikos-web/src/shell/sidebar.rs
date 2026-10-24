@@ -13,7 +13,9 @@ use crate::components::status_pill::StatusPill;
 use crate::dashboards::create_dashboard;
 use crate::house::House;
 use crate::i18n::{Key, Lang, unseen_alerts, use_text};
-use crate::icons::{BELL, BOLT, FLOW_NODES, GEAR, HOUSE, LAYERS, PLUS, SHIELD, THERMOMETER};
+use crate::icons::{
+    BELL, BOLT, FLOW_NODES, GEAR, HOUSE, LAYERS, PLUS, SHIELD, SPARKLE, THERMOMETER,
+};
 use crate::nav::BackStack;
 use crate::rooms::{sidebar_rooms, use_room_chips};
 
@@ -197,6 +199,12 @@ pub fn Sidebar(
                             <span class="sidebar__new-glyph" inner_html=PLUS></span>
                             {move || t(Key::NewDashboard)}
                         </button>
+                    </li>
+                    <li>
+                        <a class="sidebar__link" href="/ambiances" aria-current=current(Section::Ambiances)>
+                            <span class="nav__glyph" inner_html=SPARKLE></span>
+                            <span class="nav__label">{move || t(Key::Ambiances)}</span>
+                        </a>
                     </li>
                     <li>
                         <a class="sidebar__link" href="/flows" aria-current=current(Section::Automations)>

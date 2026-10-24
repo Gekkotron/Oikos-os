@@ -115,6 +115,24 @@ pub enum Key {
     Ambiances,
     NewAmbiance,
     AmbianceMissing,
+    Edit,
+    Delete,
+    MoveUp,
+    MoveDown,
+    AmbianceApply,
+    AmbianceShowOnHome,
+    AmbianceOnlyFour,
+    AmbianceEmpty,
+    AmbianceAddExamples,
+    AmbianceLastRun,
+    AmbianceNoReport,
+    OutcomeDone,
+    OutcomeFailed,
+    OutcomeSkipped,
+    AmbiancesHowItWorks,
+    AmbiancesAbout1,
+    AmbiancesAbout2,
+    AmbiancesAbout3,
     Alerts,
     Settings,
     Devices,
@@ -195,6 +213,24 @@ impl Key {
         Key::Ambiances,
         Key::NewAmbiance,
         Key::AmbianceMissing,
+        Key::Edit,
+        Key::Delete,
+        Key::MoveUp,
+        Key::MoveDown,
+        Key::AmbianceApply,
+        Key::AmbianceShowOnHome,
+        Key::AmbianceOnlyFour,
+        Key::AmbianceEmpty,
+        Key::AmbianceAddExamples,
+        Key::AmbianceLastRun,
+        Key::AmbianceNoReport,
+        Key::OutcomeDone,
+        Key::OutcomeFailed,
+        Key::OutcomeSkipped,
+        Key::AmbiancesHowItWorks,
+        Key::AmbiancesAbout1,
+        Key::AmbiancesAbout2,
+        Key::AmbiancesAbout3,
         Key::Alerts,
         Key::Settings,
         Key::Devices,
@@ -276,6 +312,39 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Ambiances => ("My moods", "Mes ambiances"),
         Key::NewAmbiance => ("New mood", "Nouvelle ambiance"),
         Key::AmbianceMissing => ("(missing)", "(introuvable)"),
+        Key::Edit => ("Edit", "Modifier"),
+        Key::Delete => ("Delete", "Supprimer"),
+        Key::MoveUp => ("Move up", "Monter"),
+        Key::MoveDown => ("Move down", "Descendre"),
+        Key::AmbianceApply => ("Apply", "Lancer"),
+        Key::AmbianceShowOnHome => ("Show on Home", "Afficher sur l'accueil"),
+        Key::AmbianceOnlyFour => (
+            "Only the first 4 pinned moods show on Home.",
+            "Seules les 4 premières ambiances épinglées s'affichent sur l'accueil.",
+        ),
+        Key::AmbianceEmpty => ("No mood yet.", "Aucune ambiance pour l'instant."),
+        Key::AmbianceAddExamples => ("Add the four examples", "Ajouter les quatre exemples"),
+        Key::AmbianceLastRun => ("Last run", "Dernier lancement"),
+        Key::AmbianceNoReport => (
+            "Not run since this page was opened.",
+            "Pas lancée depuis l'ouverture de la page.",
+        ),
+        Key::OutcomeDone => ("Done", "Fait"),
+        Key::OutcomeFailed => ("Failed", "Échec"),
+        Key::OutcomeSkipped => ("Skipped", "Ignoré"),
+        Key::AmbiancesHowItWorks => ("How it works", "Comment ça marche"),
+        Key::AmbiancesAbout1 => (
+            "A mood puts the house in a known state with one tap: it runs its actions once, in order.",
+            "Une ambiance met la maison dans un état connu d'un seul geste : elle lance ses actions une fois, dans l'ordre.",
+        ),
+        Key::AmbiancesAbout2 => (
+            "\"Every light\", \"every plug\" and \"every shutter\" include devices you add later. Door, siren and chime switches are never counted as plugs.",
+            "« Tous les éclairages », « toutes les prises » et « tous les volets » incluent les appareils ajoutés plus tard. Les interrupteurs de porte, sirènes et carillons ne comptent jamais comme des prises.",
+        ),
+        Key::AmbiancesAbout3 => (
+            "After a tap, a message says it is done or how many devices did not respond; the last run of each mood is on its page.",
+            "Après un geste, un message dit si c'est fait ou combien d'appareils n'ont pas répondu ; le dernier lancement de chaque ambiance est sur sa page.",
+        ),
         Key::Alerts => ("Alerts", "Alertes"),
         Key::Settings => ("Settings", "Réglages"),
         Key::Devices => ("Devices", "Appareils"),
@@ -541,6 +610,32 @@ pub fn ambiance_example(lang: Lang, i: usize) -> (&'static str, &'static str) {
     match lang {
         Lang::En => en,
         Lang::Fr => fr,
+    }
+}
+
+/// The toast after an ambiance ran with no failure: "Good night: done".
+pub fn ambiance_done(lang: Lang, name: &str) -> String {
+    match lang {
+        Lang::En => format!("{name}: done"),
+        Lang::Fr => format!("{name} : c'est fait"),
+    }
+}
+
+/// The toast after an ambiance ran and `n` devices failed.
+pub fn ambiance_partial(lang: Lang, name: &str, n: usize) -> String {
+    match (lang, n == 1) {
+        (Lang::En, true) => format!("{name}: 1 device did not respond"),
+        (Lang::En, false) => format!("{name}: {n} devices did not respond"),
+        (Lang::Fr, true) => format!("{name} : 1 appareil n'a pas répondu"),
+        (Lang::Fr, false) => format!("{name} : {n} appareils n'ont pas répondu"),
+    }
+}
+
+/// The question before deleting an ambiance.
+pub fn ambiance_delete_question(lang: Lang, name: &str) -> String {
+    match lang {
+        Lang::En => format!("Delete {name}?"),
+        Lang::Fr => format!("Supprimer {name} ?"),
     }
 }
 
@@ -1088,6 +1183,24 @@ mod tests {
             | Key::Ambiances
             | Key::NewAmbiance
             | Key::AmbianceMissing
+            | Key::Edit
+            | Key::Delete
+            | Key::MoveUp
+            | Key::MoveDown
+            | Key::AmbianceApply
+            | Key::AmbianceShowOnHome
+            | Key::AmbianceOnlyFour
+            | Key::AmbianceEmpty
+            | Key::AmbianceAddExamples
+            | Key::AmbianceLastRun
+            | Key::AmbianceNoReport
+            | Key::OutcomeDone
+            | Key::OutcomeFailed
+            | Key::OutcomeSkipped
+            | Key::AmbiancesHowItWorks
+            | Key::AmbiancesAbout1
+            | Key::AmbiancesAbout2
+            | Key::AmbiancesAbout3
             | Key::Alerts
             | Key::Settings
             | Key::Devices
@@ -1155,7 +1268,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 75);
+        assert_eq!(Key::ALL.len(), 93);
     }
     fn window(room: Option<&str>) -> Activity {
         Activity::Open(Opening {

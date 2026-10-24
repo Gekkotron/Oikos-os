@@ -3,6 +3,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+pub mod about;
+pub mod actions;
+pub mod editor_placeholder;
+pub mod page;
+pub mod report;
+
 use oikos_api::{
     Ambiance, AmbianceAction, AmbianceView, ApplyReport, AreaView, Category, CategoryAction,
     EntityView, FlowDo, Target,
