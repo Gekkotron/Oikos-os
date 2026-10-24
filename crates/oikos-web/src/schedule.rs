@@ -220,7 +220,7 @@ mod tests {
         let d = |c: &str| describe(Lang::En, c);
         assert_eq!(d("*/10 * * * *"), "Every 10 minutes");
         assert_eq!(d("* * * * *"), "Every minute");
-        assert_eq!(d("15 * * * *"), "Every hour at :15");
+        assert_eq!(d("15 * * * *"), "Every hour at hh:15");
         assert_eq!(d("30 7 * * *"), "Every day at 07:30");
         assert_eq!(d("30 7 * * 1-5"), "Weekdays at 07:30");
         assert_eq!(d("0 9 * * 0,6"), "Weekends at 09:00");
@@ -233,7 +233,7 @@ mod tests {
         let d = |c: &str| describe(Lang::Fr, c);
         assert_eq!(d("*/10 * * * *"), "Toutes les 10 minutes");
         assert_eq!(d("* * * * *"), "Toutes les minutes");
-        assert_eq!(d("15 * * * *"), "Toutes les heures à :15");
+        assert_eq!(d("15 * * * *"), "Toutes les heures à hh:15");
         assert_eq!(d("0 7 * * *"), "Tous les jours à 07:00");
         assert_eq!(d("0 7 * * 1-5"), "Du lundi au vendredi à 07:00");
         assert_eq!(d("0 9 * * 0,6"), "Le week-end à 09:00");

@@ -8,7 +8,7 @@ use oikos_api::{EntityView, RunStatus, RunView, StepOutcome};
 use oikos_core::command::command_name;
 use oikos_core::flow::{Flow, Node, NodeKind, parse_duration};
 
-use crate::flow_text::sun_summary;
+use crate::flow_text::{sun_summary, value_words};
 use crate::format::entity_title;
 use crate::i18n::Lang;
 use crate::i18n::flows::{self as t, FlowText, flow_text};
@@ -145,7 +145,14 @@ pub fn trigger_line(
         return format!(
             "{} = {}",
             entity_label(lang, &trigger.entity, entities),
-            value_text(&trigger.value)
+            value_words(
+                lang,
+                &trigger.value,
+                entities
+                    .get(&trigger.entity)
+                    .and_then(|e| e.unit.as_deref()),
+                entities.get(&trigger.entity),
+            )
         );
     }
     let first = run.steps.first().and_then(|s| flow.node(&s.node));
@@ -243,31 +250,18 @@ pub fn status_word(lang: Lang, status: RunStatus) -> &'static str {
     t::run_status(lang, status)
 }
 
-/// `at - start` as a short log offset: `+0s`, `+45s`, `+2m 10s`, `+1h 03m`. A step whose
-/// timestamp is before the run's start reads `+0s` (clock skew should not go backwards here,
-/// but we clamp instead of printing a negative).
+/// `at - start` as a short log offset: `+0 s`, `+45 s`, `+2 min 10 s`, `+1 h 03 min`, with a
+/// no-break space between a number and its unit (the units read the same in both languages). A
+/// step whose timestamp is before the run's start reads `+0 s` (clock skew should not go
+/// backwards here, but we clamp instead of printing a negative).
 pub fn step_offset(at: u64, start: u64) -> String {
-    let secs = at.saturating_sub(start);
-    if secs < 60 {
-        format!("+{secs}s")
-    } else if secs < 3_600 {
-        format!("+{}m {:02}s", secs / 60, secs % 60)
-    } else {
-        format!("+{}h {:02}m", secs / 3_600, (secs % 3_600) / 60)
-    }
+    format!("+{}", t::short_span(at.saturating_sub(start)))
 }
 
 /// `end - start` as a short run duration (same scale as [`step_offset`] without the `+`), or
 /// `None` when the run is still running.
 pub fn run_duration(start: u64, end: Option<u64>) -> Option<String> {
-    let secs = end?.saturating_sub(start);
-    if secs < 60 {
-        Some(format!("{secs}s"))
-    } else if secs < 3_600 {
-        Some(format!("{}m {:02}s", secs / 60, secs % 60))
-    } else {
-        Some(format!("{}h {:02}m", secs / 3_600, (secs % 3_600) / 60))
-    }
+    Some(t::short_span(end?.saturating_sub(start)))
 }
 
 /// The CSS class of a run's badge.
@@ -357,6 +351,30 @@ mod tests {
         assert_eq!(highlight(&reference(), None), Highlight::default());
     }
 
+    fn lamp(id: &str) -> EntityView {
+        use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
+        EntityView {
+            id: id.into(),
+            device_id: None,
+            name: "Lampe".into(),
+            device_name: None,
+            label: None,
+            kind: Kind::Light,
+            component: Kind::Light.component().to_string(),
+            protocol_kind: Kind::Light,
+            device_class: None,
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "salon".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui: UiOverride::default(),
+            state: EntityState::default(),
+        }
+    }
+
     fn running(steps: Vec<StepView>) -> RunView {
         RunView {
             id: "r".into(),
@@ -432,9 +450,18 @@ mod tests {
             value: serde_json::json!(true),
             previous: serde_json::json!(false),
         });
+        assert_eq!(trigger_line(Lang::En, &run, &reference(), &none), "m = on");
+        let lamp = lamp("m");
+        let lamps: BTreeMap<_, _> = [("m".to_owned(), lamp)].into();
+        run.trigger = Some(TriggerInfo {
+            entity: "m".into(),
+            value: serde_json::json!(true),
+            previous: serde_json::json!(false),
+        });
+        run.manual = false;
         assert_eq!(
-            trigger_line(Lang::En, &run, &reference(), &none),
-            "m = true"
+            trigger_line(Lang::Fr, &run, &reference(), &lamps),
+            "Lampe = allumée"
         );
         // Only a run started by hand is manual, whatever its trigger node.
         run.trigger = None;
@@ -562,14 +589,20 @@ mod tests {
 
     #[test]
     fn step_offsets_and_run_durations_read_as_short_log_times() {
-        assert_eq!(step_offset(1_000, 1_000), "+0s");
-        assert_eq!(step_offset(1_045, 1_000), "+45s");
-        assert_eq!(step_offset(1_130, 1_000), "+2m 10s");
-        assert_eq!(step_offset(1_000 + 3_600 + 180, 1_000), "+1h 03m");
+        assert_eq!(step_offset(1_000, 1_000), "+0\u{a0}s");
+        assert_eq!(step_offset(1_045, 1_000), "+45\u{a0}s");
+        assert_eq!(step_offset(1_130, 1_000), "+2\u{a0}min 10\u{a0}s");
+        assert_eq!(
+            step_offset(1_000 + 3_600 + 180, 1_000),
+            "+1\u{a0}h 03\u{a0}min"
+        );
         // Clock skew does not print a negative.
-        assert_eq!(step_offset(100, 500), "+0s");
-        assert_eq!(run_duration(1_000, Some(1_045)), Some("45s".into()));
-        assert_eq!(run_duration(1_000, Some(1_130)), Some("2m 10s".into()));
+        assert_eq!(step_offset(100, 500), "+0\u{a0}s");
+        assert_eq!(run_duration(1_000, Some(1_045)), Some("45\u{a0}s".into()));
+        assert_eq!(
+            run_duration(1_000, Some(1_130)),
+            Some("2\u{a0}min 10\u{a0}s".into())
+        );
         assert_eq!(run_duration(1_000, None), None);
     }
 }

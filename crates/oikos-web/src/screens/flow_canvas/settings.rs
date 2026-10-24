@@ -10,7 +10,8 @@ use super::graph::Selection;
 use super::sun::{FallbackBadge, sun_sheet};
 use crate::flow_edit::remove_node;
 use crate::house::House;
-use crate::i18n::flows::{FlowText, flow_text, use_flow_text};
+use crate::i18n::flows::{FlowText, flow_text, invalid_json, use_flow_text};
+use crate::i18n::format::parse_decimal;
 use crate::i18n::{Lang, use_lang};
 use crate::screens::flow_schedule::ScheduleField;
 
@@ -120,6 +121,16 @@ enum JsonProblem {
     Parse(String),
 }
 
+/// What a JSON field's text means: JSON, or a number typed with a decimal comma ("21,5"). The
+/// parser's message comes back as the error.
+fn parse_json_input(text: &str) -> Result<serde_json::Value, String> {
+    serde_json::from_str::<serde_json::Value>(text).or_else(|e| {
+        parse_decimal(text)
+            .map(serde_json::Value::from)
+            .ok_or_else(|| e.to_string())
+    })
+}
+
 #[component]
 fn JsonField(
     label: Signal<String>,
@@ -143,12 +154,12 @@ fn JsonField(
             }
             return;
         }
-        match serde_json::from_str::<serde_json::Value>(trimmed) {
+        match parse_json_input(trimmed) {
             Ok(value) => {
                 error.set(None);
                 write.run(Some(value));
             }
-            Err(e) => error.set(Some(JsonProblem::Parse(e.to_string()))),
+            Err(e) => error.set(Some(JsonProblem::Parse(e))),
         }
     };
     view! {
@@ -167,7 +178,7 @@ fn JsonField(
                 <span class="node-editor__error">
                     {match e {
                         JsonProblem::Required => flow_text(lang(), FlowText::Required).to_owned(),
-                        JsonProblem::Parse(message) => message,
+                        JsonProblem::Parse(message) => invalid_json(lang(), &message),
                     }}
                 </span>
             })}
@@ -912,6 +923,15 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn json_fields_take_a_decimal_comma() {
+        assert_eq!(parse_json_input("21,5"), Ok(json!(21.5)));
+        assert_eq!(parse_json_input("21.5"), Ok(json!(21.5)));
+        assert_eq!(parse_json_input("true"), Ok(json!(true)));
+        assert_eq!(parse_json_input("\"ON\""), Ok(json!("ON")));
+        assert!(parse_json_input("{oops").is_err());
+    }
 
     #[test]
     fn flipping_to_is_dark_and_back_keeps_the_operands() {

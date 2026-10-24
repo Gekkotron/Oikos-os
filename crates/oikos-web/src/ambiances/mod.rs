@@ -504,6 +504,27 @@ mod tests {
             "ghost (introuvable) : éteindre"
         );
 
+        let on_lamp = |command| {
+            AmbianceAction::Device(DeviceAction {
+                entity: "lamp".into(),
+                command,
+            })
+        };
+        let mode = on_lamp(Command::SetHvacMode {
+            mode: "heat".into(),
+        });
+        assert_eq!(s(&mode, Lang::En), "Desk lamp: set mode to heat");
+        assert_eq!(s(&mode, Lang::Fr), "Desk lamp : régler en mode chauffage");
+        let control = on_lamp(Command::Control {
+            control: "percentage".into(),
+            value: Some(serde_json::json!(60)),
+        });
+        assert_eq!(s(&control, Lang::En), "Desk lamp: set percentage to 60");
+        assert_eq!(
+            s(&control, Lang::Fr),
+            "Desk lamp : régler sur 60 (percentage)"
+        );
+
         assert_eq!(
             s(&heat(None, false), Lang::En),
             "Heating, every zone: 16 °C for 12 h"

@@ -84,9 +84,22 @@ fn bool_word(lang: Lang, entity: Option<&EntityView>, on: bool) -> String {
     }
 }
 
+/// The vocabulary an entity's string states belong to.
+fn state_ctx(e: &EntityView) -> StateCtx {
+    match e.kind {
+        Kind::Cover => StateCtx::Cover,
+        Kind::Climate | Kind::WaterHeater => StateCtx::Hvac,
+        Kind::AlarmPanel => StateCtx::Alarm,
+        Kind::Vacuum => StateCtx::Vacuum,
+        Kind::BinarySensor => StateCtx::BinarySensor(e.device_class.clone()),
+        Kind::Generic if e.component == "lock" => StateCtx::Lock,
+        _ => StateCtx::Choice,
+    }
+}
+
 /// A value as a sentence reads it: booleans on/off, numbers followed by the unit, known state
 /// words translated, anything else as it is.
-fn value_words(
+pub(crate) fn value_words(
     lang: Lang,
     value: &Value,
     unit: Option<&str>,
@@ -101,7 +114,7 @@ fn value_words(
             with_unit(text, unit)
         }
         Value::String(s) if lang == Lang::Fr => {
-            let word = state_word(lang, StateCtx::Choice, s);
+            let word = state_word(lang, entity.map_or(StateCtx::Choice, state_ctx), s);
             if word == crate::format::word(s) {
                 s.clone()
             } else {
@@ -463,7 +476,7 @@ mod tests {
         let notify = r#"{"id":"a","type":"notify","params":{"title":"Porte"}}"#;
         assert_eq!(fr(notify), "Notifier «\u{a0}Porte\u{a0}»");
         let dark = r#"{"id":"d","type":"if","params":{"op":"is_dark"}}"#;
-        assert_eq!(fr(dark), "Fait-il nuit\u{a0}? (soleil sous -6°)");
+        assert_eq!(fr(dark), "Fait-il nuit\u{a0}? (soleil sous \u{2212}6°)");
         let daily = r#"{"id":"s","type":"trigger.schedule","params":{"cron":"0 7 * * *"}}"#;
         assert_eq!(text(daily), "Every day at 07:00");
         assert_eq!(fr(daily), "Tous les jours à 07:00");
@@ -501,7 +514,7 @@ mod tests {
             r#"{"id":"s","type":"trigger.sun","params":{"which":"dusk","offset_minutes":-15}}"#;
         assert_eq!(text(sun), "15\u{a0}min before civil dusk");
         let dark = r#"{"id":"d","type":"if","params":{"op":"is_dark"}}"#;
-        assert_eq!(text(dark), "Is it dark now? (sun below -6°)");
+        assert_eq!(text(dark), "Is it dark now? (sun below \u{2212}6°)");
     }
 
     #[test]
@@ -693,8 +706,30 @@ mod generic_tests {
         );
         assert_eq!(
             command_sentence(&c("percentage", Some(json!(60))), "Ventilo", &fr),
-            "Régler percentage de Ventilo sur 60"
+            "Régler Ventilo sur 60 (percentage)"
         );
+        assert_eq!(
+            command_sentence(
+                &Command::SetHvacMode {
+                    mode: "heat".into()
+                },
+                "Clim",
+                &fr
+            ),
+            "Régler Clim en mode chauffage"
+        );
+    }
+
+    #[test]
+    fn string_values_follow_the_entity_kind() {
+        let mut climate = ent("c", "Clim");
+        climate.kind = Kind::Climate;
+        let mut cover = ent("v", "Volet");
+        cover.kind = Kind::Cover;
+        let value = |lang, v: &str, e: &EntityView| value_words(lang, &json!(v), None, Some(e));
+        assert_eq!(value(crate::i18n::Lang::Fr, "heat", &climate), "chauffage");
+        assert_eq!(value(crate::i18n::Lang::Fr, "open", &cover), "ouvert");
+        assert_eq!(value(crate::i18n::Lang::Fr, "whatever", &cover), "whatever");
     }
 
     #[test]

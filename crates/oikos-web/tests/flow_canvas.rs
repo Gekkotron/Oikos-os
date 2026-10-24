@@ -209,7 +209,7 @@ async fn replay_dims_the_rest() {
     assert_eq!(count(&host, ".flow-wire--live"), 0, "{html}");
     assert_eq!(
         text(&host, "[data-node=wait] .flow-node__step"),
-        "+0s",
+        "+0\u{a0}s",
         "{html}"
     );
     click(&host, ".run-list li:first-child");

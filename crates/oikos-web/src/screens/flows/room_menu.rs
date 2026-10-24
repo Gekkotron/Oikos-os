@@ -212,6 +212,7 @@ pub fn RoomMenu(
                         <div class="room-menu__confirm" role="alertdialog" aria-label=move || t(FlowText::DeleteFlowLabel)>
                             <p class="room-menu__prompt">
                                 <strong>{move || delete_flow_prompt(lang(), &name.get_value())}</strong>
+                                " "
                                 {move || t(FlowText::CantUndo)}
                             </p>
                             <div class="room-menu__actions">

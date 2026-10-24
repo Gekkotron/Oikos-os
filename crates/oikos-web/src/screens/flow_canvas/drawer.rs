@@ -41,9 +41,11 @@ fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl I
     let trigger = {
         let (run, flow) = (run.clone(), flow.clone());
         move || {
+            // Only the language is tracked: a state message must not rebuild every run.
+            let lang = lang();
             house
                 .entities
-                .with(|e| trigger_line(lang(), &run, &flow, e))
+                .with_untracked(|e| trigger_line(lang, &run, &flow, e))
         }
     };
     let started = run.started_at;
@@ -51,15 +53,15 @@ fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl I
     let steps = {
         let (run, flow) = (run.clone(), flow.clone());
         move || {
-            let names: Vec<(String, String)> = house.flows.with(|flows| {
+            let lang = lang();
+            let names: Vec<(String, String)> = house.flows.with_untracked(|flows| {
                 flows
                     .iter()
                     .map(|f| (f.definition.id.clone(), f.definition.name.clone()))
                     .collect()
             });
-            let lang = lang();
-            house.entities.with(|entities| {
-                house.areas.with(|areas| {
+            house.entities.with_untracked(|entities| {
+                house.areas.with_untracked(|areas| {
                     let ctx = Ctx {
                         entities,
                         areas,

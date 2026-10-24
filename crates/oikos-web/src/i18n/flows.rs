@@ -424,8 +424,8 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::ThisFlowCap => ("This flow", "Cette automatisation"),
         T::TriggerValue => ("Trigger value", "Valeur du déclencheur"),
         T::IsDark => (
-            "Is it dark now? (sun below -6°)",
-            "Fait-il nuit\u{A0}? (soleil sous -6°)",
+            "Is it dark now? (sun below \u{2212}6°)",
+            "Fait-il nuit\u{A0}? (soleil sous \u{2212}6°)",
         ),
         T::NoTrigger => ("No trigger", "Aucun déclencheur"),
         T::NoRoom => ("No room", "Sans pièce"),
@@ -518,7 +518,7 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::OpenFlow => ("Open", "Ouvrir"),
         T::MoveToRoom => ("Move to room", "Déplacer vers une pièce"),
         T::DeleteFlow => ("Delete flow…", "Supprimer l'automatisation…"),
-        T::CantUndo => (" This can't be undone.", " Cette action est irréversible."),
+        T::CantUndo => ("This can't be undone.", "Cette action est irréversible."),
         T::Cancel => ("Cancel", "Annuler"),
         T::PanelLibrary => ("Card library", "Bibliothèque de cartes"),
         T::PanelSettings => ("Card settings", "Réglages de la carte"),
@@ -638,8 +638,8 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::WireYes => ("yes", "oui"),
         T::WireNo => ("no", "non"),
         T::ParisWarning => (
-            "No latitude/longitude in [flows]: using Paris",
-            "Pas de latitude/longitude dans [flows]\u{A0}: Paris est utilisée",
+            "No latitude/longitude in [flows]: Paris is used by default",
+            "Pas de latitude/longitude dans [flows]\u{A0}: Paris est utilisé par défaut",
         ),
         T::EveryMinutesLabel => ("Every (minutes, 1–59)", "Toutes les (minutes, 1–59)"),
         T::AtMinuteLabel => ("At minute (:MM, 0–59)", "À la minute (:MM, 0–59)"),
@@ -778,13 +778,14 @@ pub fn is_not_value(lang: Lang, e: &str, v: &str) -> String {
 
 /// "Wait 5 min" / "Attendre 5 min"; with `up_to`, "Wait 1 min to 2 h" / "Attendre de 1 min à 2 h".
 pub fn wait(lang: Lang, for_: &str, up_to: Option<&str>) -> String {
+    let verb = flow_text(lang, FlowText::Wait);
     match up_to {
         Some(b) => pick(
             lang,
-            format!("Wait {for_} to {b}"),
-            format!("Attendre de {for_} à {b}"),
+            format!("{verb} {for_} to {b}"),
+            format!("{verb} de {for_} à {b}"),
         ),
-        None => pick(lang, format!("Wait {for_}"), format!("Attendre {for_}")),
+        None => format!("{verb} {for_}"),
     }
 }
 
@@ -809,21 +810,22 @@ pub fn set_to(lang: Lang, e: &str, v: &str) -> String {
     )
 }
 
-/// "Set Heater mode to heat" / "Régler le mode de Heater sur chauffage".
+/// "Set Heater mode to heat" / "Régler Heater en mode chauffage". The entity comes right after
+/// the verb, so a caller that cuts the title out still reads as a sentence.
 pub fn set_mode(lang: Lang, e: &str, mode: &str) -> String {
     pick(
         lang,
         format!("Set {e} mode to {mode}"),
-        format!("Régler le mode de {e} sur {mode}"),
+        format!("Régler {e} en mode {mode}"),
     )
 }
 
-/// "Set Fan percentage to 60" / "Régler percentage de Fan sur 60".
+/// "Set Fan percentage to 60" / "Régler Fan sur 60 (percentage)".
 pub fn set_control(lang: Lang, e: &str, control: &str, v: &str) -> String {
     pick(
         lang,
         format!("Set {e} {control} to {v}"),
-        format!("Régler {control} de {e} sur {v}"),
+        format!("Régler {e} sur {v} ({control})"),
     )
 }
 
@@ -917,6 +919,31 @@ pub fn save_failed(lang: Lang, hub: &str) -> String {
     )
 }
 
+/// A span of seconds as `45 s`, `2 min 10 s` or `1 h 03 min`.
+pub fn short_span(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}\u{a0}s")
+    } else if secs < 3_600 {
+        format!("{}\u{a0}min {:02}\u{a0}s", secs / 60, secs % 60)
+    } else {
+        format!(
+            "{}\u{a0}h {:02}\u{a0}min",
+            secs / 3_600,
+            (secs % 3_600) / 60
+        )
+    }
+}
+
+/// "Invalid JSON: <parser text>" / "JSON invalide\u{A0}: <parser text>"; the parser's own text
+/// comes as received.
+pub fn invalid_json(lang: Lang, detail: &str) -> String {
+    pick(
+        lang,
+        format!("Invalid JSON: {detail}"),
+        format!("JSON invalide{NBSP}: {detail}"),
+    )
+}
+
 /// "Next runs (Europe/Paris)" / "Prochains lancements (Europe/Paris)".
 pub fn next_runs(lang: Lang, zone: &str) -> String {
     pick(
@@ -945,12 +972,12 @@ pub fn every_minutes(lang: Lang, n: u8) -> String {
     )
 }
 
-/// "Every hour at :15" / "Toutes les heures à :15".
+/// "Every hour at hh:15" / "Toutes les heures à hh:15".
 pub fn every_hour_at(lang: Lang, minute: u8) -> String {
     pick(
         lang,
-        format!("Every hour at :{minute:02}"),
-        format!("Toutes les heures à :{minute:02}"),
+        format!("Every hour at hh:{minute:02}"),
+        format!("Toutes les heures à hh:{minute:02}"),
     )
 }
 
