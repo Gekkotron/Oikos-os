@@ -5,8 +5,8 @@ use super::edit::EditState;
 use super::widget::WidgetView;
 
 /// Column grid that places widgets by their declared span. Column counts per breakpoint
-/// live in `styles/main.css` (`.dashboard-grid`); a span wider than the column count is
-/// clamped there so no widget overflows on a phone.
+/// live in `styles/main.css` (`.dashboard-grid`). No clamp is needed: the widest span is 2
+/// columns and the grid never has fewer than 2, so no widget overflows on a phone.
 ///
 /// In edit mode each tile gets resize and move buttons. Reordering uses move-left/right
 /// buttons rather than HTML5 drag: drag needs DataTransfer plumbing (Firefox refuses to

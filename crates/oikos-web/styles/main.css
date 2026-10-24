@@ -5415,7 +5415,8 @@ html:has(.flow-canvas-screen) {
 }
 
 /* Dashboard grid: 2 columns on phones, 4 on tablets, 6 on desktop. Spans that exceed the
-   column count would create implicit columns, so they are clamped to the full row. */
+   column count would create implicit columns; none exists, as the widest span is 2 and the
+   grid never has fewer than 2 columns. */
 .dashboard-grid {
   display: grid;
   gap: 12px;
@@ -5461,6 +5462,20 @@ html:has(.flow-canvas-screen) {
 
 .dashboard-edit-toolbar .btn {
   flex: 0 0 auto;
+}
+
+/* An unsaved draft left on the grid after edit mode was switched off: a small amber dot on the
+   pencil. */
+.dashboard-edit-toolbar__pencil--dirty { position: relative; }
+.dashboard-edit-toolbar__pencil--dirty::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-amber);
 }
 .widget { position: relative; }
 /* Edit-mode move/resize controls: one pill floating on the tile's top edge, centred so it
