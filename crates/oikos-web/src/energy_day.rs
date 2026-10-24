@@ -38,12 +38,14 @@ fn half_up(x: f64) -> f64 {
     ((x / 0.5).ceil() * 0.5).max(0.5)
 }
 
-/// The day's largest bought and sold slot, each rounded up to the next 0.5 kWh (0.5 at least).
+/// The day's largest bought and sold slot, each rounded up to the next 0.5 kWh (0.5 at least);
+/// a day that sold nothing gets no room below zero.
 pub fn scale(day: &GridDay) -> Scale {
     let max = |f: fn(&GridSlot) -> f64| day.slots.iter().map(f).fold(0.0, f64::max);
+    let sold = max(|s| s.export);
     Scale {
         up: half_up(max(|s| s.off_peak + s.peak)),
-        down: half_up(max(|s| s.export)),
+        down: if sold > 0.0 { half_up(sold) } else { 0.0 },
     }
 }
 
@@ -189,7 +191,7 @@ mod tests {
     #[test]
     fn scale_rounds_up() {
         let d = day(vec![slot("00:00", 1.0, 0.73, 0.0)], true, false);
-        assert_eq!(scale(&d), Scale { up: 2.0, down: 0.5 });
+        assert_eq!(scale(&d), Scale { up: 2.0, down: 0.0 });
         let d = day(vec![slot("00:00", 0.1, 0.0, 1.2)], true, true);
         assert_eq!(scale(&d), Scale { up: 0.5, down: 1.5 });
     }

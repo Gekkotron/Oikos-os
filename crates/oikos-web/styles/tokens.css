@@ -30,6 +30,11 @@
   --warning: #ffc457;
   --warning-bg: rgb(255 196 87 / 15%);
   --solar: #ffc457;
+  /* Grid day chart: bought off-peak / peak, sold, and the off-peak band behind the bars. */
+  --tariff-off-peak: #8fd0f5;
+  --tariff-peak: #3d8fe0;
+  --grid-export: #ffc457;
+  --tariff-band: rgb(143 208 245 / 9%);
   --danger: #ff7a9a;
 
   /* Lit-room (active) and picker-selection accents layered on surfaces. */
@@ -103,6 +108,10 @@
   --warning: #8a5f12;
   --warning-bg: #fbf0d4;
   --solar: #c9973d;
+  --tariff-off-peak: #8cc3e6;
+  --tariff-peak: #2f6fb3;
+  --grid-export: #d9a53f;
+  --tariff-band: rgb(56 115 143 / 8%);
   --danger: #ac512b;
   --accent-soft: #fbf0d4;
   --accent-ring: rgb(201 151 61 / 45%);
