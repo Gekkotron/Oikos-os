@@ -17,6 +17,8 @@ use crate::house::House;
 use crate::i18n::{self, Lang};
 use crate::icons;
 use crate::screens::flow_canvas::sun::house_place;
+use crate::solar::card::SolarCard;
+use crate::solar::model::solar_card_visible;
 
 /// A temperature rounded to whole degrees, never "-0".
 pub(crate) fn degrees(lang: Lang, t: f64) -> String {
@@ -229,6 +231,11 @@ pub fn HomeHeader() -> impl IntoView {
             .map(|m| view! { <ModePill mode=m lang=lang /> })
     };
 
+    let solar_visible = move || {
+        house
+            .solar
+            .with(|s| solar_card_visible(s.as_ref(), now.get()))
+    };
     let card = move || {
         if !card_visible() {
             return None;
@@ -248,7 +255,7 @@ pub fn HomeHeader() -> impl IntoView {
     };
 
     view! {
-        <section class="home-header">
+        <section class="home-header" class:home-header--solar=solar_visible>
             <div class="home-header__main">
                 <p class="home-header__date">{date}</p>
                 <h2 class="home-header__greeting">{hello}</h2>
@@ -259,7 +266,13 @@ pub fn HomeHeader() -> impl IntoView {
                 }}
                 <div class="home-header__chips">{lights} {indoor} {heating} {mode}</div>
             </div>
-            {card}
+            {move || {
+                if solar_visible() {
+                    view! { <div class="home-header__cards">{card} <SolarCard /></div> }.into_any()
+                } else {
+                    card().into_any()
+                }
+            }}
         </section>
     }
 }

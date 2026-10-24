@@ -151,6 +151,7 @@ pub fn App() -> impl IntoView {
     {
         house.refresh_flows_config();
         house.refresh_weather();
+        house.refresh_solar();
         house.refresh_home_settings();
     }
     view! {

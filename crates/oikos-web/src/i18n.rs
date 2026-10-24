@@ -844,10 +844,102 @@ pub fn updated_at(lang: Lang, at: NaiveTime) -> String {
     )
 }
 
+/// A fixed word of the solar card.
+#[derive(Clone, Copy, Debug)]
+pub enum SolarText {
+    CardLabel,
+    Left,
+    Tomorrow,
+    Kwh,
+}
+
+/// A fixed word of the solar card.
+pub fn solar_text(lang: Lang, k: SolarText) -> &'static str {
+    use SolarText::*;
+    let (en, fr) = match k {
+        CardLabel => ("Solar forecast", "Prévisions solaires"),
+        Left => ("left", "reste"),
+        Tomorrow => ("Tomorrow", "Demain"),
+        Kwh => ("kWh", "kWh"),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// kWh with one decimal and the language's separator, without the unit.
+pub fn solar_kwh(lang: Lang, v: f64) -> String {
+    home_number(lang, v + 0.0, 1)
+}
+
+/// The solar card's second line: what is left today and tomorrow's range; a part without data is
+/// left out. Tomorrow is `(estimate, low, high)` in kWh.
+pub fn solar_bottom(
+    lang: Lang,
+    remaining: Option<f64>,
+    tomorrow: Option<(f64, f64, f64)>,
+) -> String {
+    let left = remaining.map(|r| match lang {
+        Lang::En => format!(
+            "≈ {} {}",
+            solar_kwh(lang, r),
+            solar_text(lang, SolarText::Left)
+        ),
+        Lang::Fr => format!(
+            "{} ≈ {}",
+            solar_text(lang, SolarText::Left),
+            solar_kwh(lang, r)
+        ),
+    });
+    let next = tomorrow.map(|(t, lo, hi)| {
+        format!(
+            "{} {} {} ({}–{})",
+            solar_text(lang, SolarText::Tomorrow),
+            solar_kwh(lang, t),
+            solar_text(lang, SolarText::Kwh),
+            home_number(lang, lo.round() + 0.0, 0),
+            home_number(lang, hi.round() + 0.0, 0),
+        )
+    });
+    [left, next]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::home_header::summary::Opening;
+    #[test]
+    fn solar_copy() {
+        for lang in [Lang::En, Lang::Fr] {
+            for k in [
+                SolarText::CardLabel,
+                SolarText::Left,
+                SolarText::Tomorrow,
+                SolarText::Kwh,
+            ] {
+                assert!(!solar_text(lang, k).is_empty(), "{k:?}");
+            }
+        }
+        assert_eq!(solar_kwh(Lang::Fr, 6.44), "6,4");
+        assert_eq!(solar_kwh(Lang::En, 6.44), "6.4");
+        let t = Some((8.1, 5.0, 11.0));
+        assert_eq!(
+            solar_bottom(Lang::En, Some(5.2), t),
+            "≈ 5.2 left · Tomorrow 8.1 kWh (5–11)"
+        );
+        assert_eq!(
+            solar_bottom(Lang::Fr, Some(5.2), t),
+            "reste ≈ 5,2 · Demain 8,1 kWh (5–11)"
+        );
+        assert_eq!(solar_bottom(Lang::En, None, t), "Tomorrow 8.1 kWh (5–11)");
+        assert_eq!(solar_bottom(Lang::En, Some(5.2), None), "≈ 5.2 left");
+        assert_eq!(solar_bottom(Lang::En, None, None), "");
+    }
     #[test]
     fn every_key_has_both_languages() {
         for &k in Key::ALL {

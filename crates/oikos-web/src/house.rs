@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use leptos::prelude::*;
 use oikos_api::{
     AlertView, AreaView, BridgeView, ConnectionStatus, Dashboard, DashboardView, DeviceView,
-    EntityView, FlowView, FlowsConfigView, GroupView, HomeSettings, IgnoredView, WeatherView,
-    WsEvent,
+    EntityView, FlowView, FlowsConfigView, GroupView, HomeSettings, IgnoredView, SolarView,
+    WeatherView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -27,6 +27,10 @@ pub struct House {
     pub weather: RwSignal<Option<WeatherView>>,
     /// Whether the first weather fetch has answered (with weather or without).
     pub weather_loaded: RwSignal<bool>,
+    /// The solar forecast; `None` while the hub has none or a fetch failed.
+    pub solar: RwSignal<Option<SolarView>>,
+    /// Whether the first solar fetch has answered (with a forecast or without).
+    pub solar_loaded: RwSignal<bool>,
     /// The home settings; the default document until the first fetch answers.
     pub home_settings: RwSignal<HomeSettings>,
     /// The hand-made groups by id (without the `group_` prefix), for the member counts on Home.
@@ -56,6 +60,8 @@ impl House {
             flows_config: RwSignal::new(None),
             weather: RwSignal::new(None),
             weather_loaded: RwSignal::new(false),
+            solar: RwSignal::new(None),
+            solar_loaded: RwSignal::new(false),
             home_settings: RwSignal::new(HomeSettings::default()),
             groups: RwSignal::new(BTreeMap::new()),
             dashboards: RwSignal::new(Vec::new()),
@@ -84,6 +90,17 @@ impl House {
             if let Ok(cfg) = crate::api::get_flows_config().await {
                 flows_config.set(Some(cfg));
             }
+        });
+    }
+
+    /// Fetches the solar forecast into [`House::solar`]; none, or a failure, clears it so the
+    /// header hides the card.
+    pub fn refresh_solar(&self) {
+        let solar = self.solar;
+        let loaded = self.solar_loaded;
+        leptos::task::spawn_local(async move {
+            solar.set(crate::api::home::get_solar().await.ok().flatten());
+            loaded.set(true);
         });
     }
 
@@ -187,8 +204,7 @@ impl House {
             WsEvent::ClimateChanged { .. } => self.climate_rev.update(|r| *r += 1),
             WsEvent::WeatherChanged => self.refresh_weather(),
             WsEvent::HomeSettingsChanged { settings } => self.home_settings.set(settings),
-            // The web solar views (a later plan) will use this.
-            WsEvent::SolarChanged => {}
+            WsEvent::SolarChanged => self.refresh_solar(),
         }
     }
 }

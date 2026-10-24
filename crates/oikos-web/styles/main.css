@@ -6315,6 +6315,82 @@ html:has(.flow-canvas-screen) {
   text-decoration: none;
 }
 
+.home-header--solar {
+  align-items: stretch;
+}
+
+.home-header__cards {
+  display: flex;
+  flex: none;
+  gap: 12px;
+}
+
+.solar-card {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  width: 220px;
+  box-sizing: border-box;
+  padding: 14px 18px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  text-decoration: none;
+}
+
+.solar-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.solar-card__icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  color: var(--accent-amber);
+}
+
+.solar-card__line {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.solar-curve {
+  flex: 1 1 0;
+  min-height: 24px;
+  width: 100%;
+}
+
+.solar-curve__forecast {
+  fill: var(--accent-amber);
+  fill-opacity: 0.18;
+  stroke: none;
+}
+
+.solar-curve__line {
+  fill: none;
+  stroke: var(--accent-amber);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.solar-curve__measured {
+  fill: var(--accent-amber);
+  stroke: none;
+}
+
+.solar-curve__now {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
 .wx__now {
   display: flex;
   align-items: center;
@@ -6381,6 +6457,19 @@ html:has(.flow-canvas-screen) {
 
   .wx__short {
     display: inline;
+  }
+
+  .home-header__cards {
+    flex-direction: column;
+  }
+
+  .solar-card {
+    width: auto;
+  }
+
+  .solar-curve {
+    flex: none;
+    height: 22px;
   }
 
   .home-header__weather {
