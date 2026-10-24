@@ -96,6 +96,19 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 - [ ] Address the ~47 deferred minors from the flow-canvas redesign SDD ledger (`.superpowers/sdd/2026-10-20-flow-canvas-redesign/`).
 - [ ] Housekeeping: cap/clean `target/` so it stops filling the disk.
 
+### Solar card and page — readability (reported 2026-10-24)
+
+The Home solar card and the `/solar` page read as messy (`solar/card.rs`, `solar/curve.rs`, `screens/solar.rs`, strings in `i18n.rs`):
+
+- [ ] Headline "4,0 / 3,8 kWh" has no labels — say which figure is measured and which is the forecast (e.g. "4,0 kWh produits · prévu 3,8").
+- [ ] "reste ≈ 1,6" has no unit; add kWh.
+- [ ] The card caption wraps mid-group ("Demain 1,9 kWh (1–" / "3)"); keep "(1–3)" with its value (non-breaking space or a shorter line), or drop the range on the card.
+- [ ] The measured fill is opaque and drawn over the forecast: before "now" it hides the forecast band and the dashed median, so measured vs forecast can't be compared. Draw measured as a line (or a translucent fill) above the band, and keep the median visible across the whole day.
+- [ ] The measured series ends with a steep straight drop to a vertical edge just before the now line (linear join of the last hourly point to the current reading). Smooth or step it, and end it exactly at now.
+- [ ] The p10–p90 band colour is a muddy grey-brown on the dark theme; use a translucent tint of the solar accent.
+- [ ] The page chart has a single gridline ("1,0 kW") and no time axis; add hour ticks (e.g. 6h, 12h, 18h) and a second kW gridline.
+- [ ] The dashed now line overshoots the top of the plot area; clip it to the chart.
+
 ### Flows
 
 - [ ] Bulk actions on the Flows page — enable, disable, delete or move several flows at once from the list. Deferred from the flow-list redesign (2026-10-22): the list acts on one flow at a time.
