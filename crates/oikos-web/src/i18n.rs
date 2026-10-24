@@ -112,6 +112,9 @@ pub enum Key {
     Climate,
     Weather,
     Beta,
+    Ambiances,
+    NewAmbiance,
+    AmbianceMissing,
     Alerts,
     Settings,
     Devices,
@@ -189,6 +192,9 @@ impl Key {
         Key::Climate,
         Key::Weather,
         Key::Beta,
+        Key::Ambiances,
+        Key::NewAmbiance,
+        Key::AmbianceMissing,
         Key::Alerts,
         Key::Settings,
         Key::Devices,
@@ -267,6 +273,9 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Climate => ("Climate", "Climat"),
         Key::Weather => ("Weather", "Météo"),
         Key::Beta => ("Beta", "Bêta"),
+        Key::Ambiances => ("My moods", "Mes ambiances"),
+        Key::NewAmbiance => ("New mood", "Nouvelle ambiance"),
+        Key::AmbianceMissing => ("(missing)", "(introuvable)"),
         Key::Alerts => ("Alerts", "Alertes"),
         Key::Settings => ("Settings", "Réglages"),
         Key::Devices => ("Devices", "Appareils"),
@@ -506,6 +515,141 @@ pub fn detail_text(lang: Lang, d: &Detail) -> String {
             "Coucher du soleil : position de la maison non réglée".to_owned()
         }
         (Lang::En, Detail::SunsetFallback) => "Sunset: house location not set".to_owned(),
+    }
+}
+
+/// The name and subtitle of the `i`-th example ambiance (0 to 3).
+pub fn ambiance_example(lang: Lang, i: usize) -> (&'static str, &'static str) {
+    let (en, fr) = match i {
+        0 => (
+            ("Good night", "The house goes to sleep"),
+            ("Bonne nuit", "La maison s'endort"),
+        ),
+        1 => (
+            ("I'm heading out", "Peace of mind"),
+            ("Je m'absente", "L'esprit tranquille"),
+        ),
+        2 => (
+            ("Quiet evening", "Dimmed lights"),
+            ("Soirée tranquille", "Lumières tamisées"),
+        ),
+        _ => (
+            ("A little reading", "Your favourite spot"),
+            ("Un peu de lecture", "Votre coin préféré"),
+        ),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// A category action: "Every light in the house: off" / "Tous les éclairages de la maison :
+/// éteindre". `what` is `lights`, `plugs` or `covers`, `to` is `on`, `off`, `open` or `close`;
+/// `area` is an area name, `None` for the whole house.
+pub fn category_sentence(
+    lang: Lang,
+    what: &str,
+    to: &str,
+    brightness: Option<u8>,
+    area: Option<&str>,
+) -> String {
+    match lang {
+        Lang::En => {
+            let noun = match what {
+                "lights" => "Every light",
+                "plugs" => "Every plug",
+                _ => "Every shutter",
+            };
+            let place = area.map_or_else(|| "the house".to_owned(), str::to_owned);
+            let verb = match (to, brightness) {
+                ("on", Some(n)) => format!("on at {n} %"),
+                _ => to.to_owned(),
+            };
+            format!("{noun} in {place}: {verb}")
+        }
+        Lang::Fr => {
+            let noun = match what {
+                "lights" => "Tous les éclairages",
+                "plugs" => "Toutes les prises",
+                _ => "Tous les volets",
+            };
+            let place = area.map_or_else(|| " de la maison".to_owned(), |a| format!(" — {a}"));
+            let verb = match (to, brightness) {
+                ("on", Some(n)) => format!("allumer à {n} %"),
+                ("on", None) => "allumer".to_owned(),
+                ("off", _) => "éteindre".to_owned(),
+                ("open", _) => "ouvrir".to_owned(),
+                _ => "fermer".to_owned(),
+            };
+            format!("{noun}{place} : {verb}")
+        }
+    }
+}
+
+/// A climate action. `zone` is a zone name, `None` for every zone; `setpoint` is the text to
+/// show (a temperature or "off"), `None` when the action sets none.
+pub fn climate_sentence(
+    lang: Lang,
+    zone: Option<&str>,
+    clear: bool,
+    setpoint: Option<&str>,
+    hours: Option<u32>,
+) -> String {
+    let fr = lang == Lang::Fr;
+    let head = match (zone, fr) {
+        (None, false) => "Heating, every zone".to_owned(),
+        (None, true) => "Chauffage, toutes les zones".to_owned(),
+        (Some(z), false) => format!("Heating, {z}"),
+        (Some(z), true) => format!("Chauffage, {z}"),
+    };
+    let colon = if fr { " : " } else { ": " };
+    if clear {
+        let tail = if fr {
+            "retour au programme"
+        } else {
+            "back to the schedule"
+        };
+        return format!("{head}{colon}{tail}");
+    }
+    let mut parts = Vec::new();
+    if let Some(sp) = setpoint {
+        parts.push(match (sp, fr) {
+            ("off", true) => "arrêt".to_owned(),
+            ("off", false) => "off".to_owned(),
+            (t, _) => format!("{t} °C"),
+        });
+    }
+    if let Some(h) = hours {
+        let for_ = if fr { "pendant" } else { "for" };
+        parts.push(format!("{for_} {h} h"));
+    }
+    if parts.is_empty() {
+        head
+    } else {
+        format!("{head}{colon}{}", parts.join(" "))
+    }
+}
+
+/// A flow action: "Automation Away lights: switch on". `do_` is `enable`, `disable` or `run`.
+pub fn flow_sentence(lang: Lang, name: &str, do_: &str) -> String {
+    match lang {
+        Lang::En => {
+            let verb = match do_ {
+                "enable" => "switch on",
+                "disable" => "switch off",
+                _ => "run",
+            };
+            format!("Automation {name}: {verb}")
+        }
+        Lang::Fr => {
+            let verb = match do_ {
+                "enable" => "activer",
+                "disable" => "désactiver",
+                _ => "lancer",
+            };
+            format!("Automatisation {name} : {verb}")
+        }
     }
 }
 
@@ -941,6 +1085,9 @@ mod tests {
             | Key::Climate
             | Key::Weather
             | Key::Beta
+            | Key::Ambiances
+            | Key::NewAmbiance
+            | Key::AmbianceMissing
             | Key::Alerts
             | Key::Settings
             | Key::Devices
@@ -1008,7 +1155,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 72);
+        assert_eq!(Key::ALL.len(), 75);
     }
     fn window(room: Option<&str>) -> Activity {
         Activity::Open(Opening {

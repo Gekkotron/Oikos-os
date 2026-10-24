@@ -60,6 +60,9 @@ pub struct Capabilities {
     pub code_format: CodeFormat,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generic: Option<crate::types::GenericCaps>,
+    /// A Zigbee2MQTT group (its config lists `group` members), not a device of its own.
+    #[serde(default)]
+    pub z2m_group: bool,
 }
 
 /// The expanded discovery config: topics, templates and payload constants.

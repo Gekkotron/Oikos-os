@@ -12,11 +12,11 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use oikos_api::{
-    AlertView, ApiError, AreaView, CommandResponse, ConnectionStatus, Dashboard, DashboardReorder,
-    DashboardView, EnergyKind, EntityView, FlowView, FlowWriteOutcome, FlowsConfigView, GridDay,
-    GroupSpec, GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, HomeSettings,
-    IgnoredView, LastChange, OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec,
-    WeatherView,
+    AlertView, Ambiance, AmbianceView, ApiError, ApplyReport, AreaView, CommandResponse,
+    ConnectionStatus, Dashboard, DashboardReorder, DashboardView, EnergyKind, EntityView, FlowView,
+    FlowWriteOutcome, FlowsConfigView, GridDay, GroupSpec, GroupView, HistoryDaily, HistoryRange,
+    HistorySeries, HistoryToday, HomeSettings, IgnoredView, LastChange, OverridePatch, RunView,
+    SchedulePreview, Snapshot, VirtualSpec, WeatherView,
 };
 use oikos_climate::doc::{HouseSettings, Rules, ZoneSettings};
 use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus, OverrideRequest};
@@ -61,6 +61,9 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/flows/{id}/run", post(run_flow))
         .route("/groups", get(list_groups))
         .route("/groups/{id}", put(put_group).delete(delete_group))
+        .route("/ambiances", get(list_ambiances))
+        .route("/ambiances/{id}", put(put_ambiance).delete(delete_ambiance))
+        .route("/ambiances/{id}/apply", post(apply_ambiance))
         .route("/weather", get(weather))
         .route("/solar", get(solar))
         .route("/home/settings", get(home_settings).put(put_home_settings))
@@ -193,7 +196,8 @@ impl From<HubError> for HttpError {
             | HubError::UnknownAction(_)
             | HubError::UnknownFlow(_)
             | HubError::UnknownArea(_)
-            | HubError::UnknownDashboard(_) => StatusCode::NOT_FOUND,
+            | HubError::UnknownDashboard(_)
+            | HubError::UnknownAmbiance(_) => StatusCode::NOT_FOUND,
             HubError::Rejected(_) | HubError::Command(_) | HubError::InvalidFlow(_) => {
                 StatusCode::UNPROCESSABLE_ENTITY
             }
@@ -648,6 +652,50 @@ async fn delete_group(
 ) -> Result<StatusCode, HttpError> {
     hub.delete_group(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The stored ambiances (`200`), the unreadable ones included with their reason.
+async fn list_ambiances(State(hub): HubState) -> Json<Vec<AmbianceView>> {
+    Json(hub.ambiances())
+}
+
+/// Creates or replaces an ambiance (`200` with its view). An empty body id is taken from the
+/// path; a different one is `422`, as is an ambiance the house refuses; `503` while the broker
+/// link is down.
+async fn put_ambiance(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<Ambiance>,
+) -> Result<Json<AmbianceView>, HttpError> {
+    let Json(mut ambiance) = body?;
+    if ambiance.id.is_empty() {
+        ambiance.id.clone_from(&id);
+    } else if ambiance.id != id {
+        return Err(HubError::Rejected(format!(
+            "the body id `{}` differs from the path id `{id}`",
+            ambiance.id
+        ))
+        .into());
+    }
+    Ok(Json(hub.set_ambiance(ambiance).await?))
+}
+
+/// Removes an ambiance (204); `404` for an id that is not one.
+async fn delete_ambiance(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    hub.delete_ambiance(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Runs an ambiance's actions once, in order, and returns the report (`200`); `404` for an
+/// unknown id, `422` for an invalid or already running one, `503` while the broker is offline.
+async fn apply_ambiance(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<Json<ApplyReport>, HttpError> {
+    Ok(Json(hub.apply_ambiance(&id).await?))
 }
 
 /// The outdoor weather (`200`); `503` while `[weather]` is off or before the first fetch.

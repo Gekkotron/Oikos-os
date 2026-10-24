@@ -39,6 +39,7 @@ pub fn connect(path: &str, house: House) {
                                     // them on every (re)connect.
                                     if connected {
                                         house.refresh_weather();
+                                        house.refresh_ambiances();
                                         house.refresh_home_settings();
                                     }
                                 }

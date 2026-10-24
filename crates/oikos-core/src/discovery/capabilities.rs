@@ -48,6 +48,15 @@ const ALARM_FEATURES: &[(&str, AlarmMode)] = &[
 
 /// Reads the capabilities of a `kind` entity from its expanded config.
 pub fn from_config(kind: Kind, cfg: &Value) -> Capabilities {
+    let mut caps = by_kind(kind, cfg);
+    caps.z2m_group = cfg
+        .get("group")
+        .and_then(Value::as_array)
+        .is_some_and(|members| !members.is_empty());
+    caps
+}
+
+fn by_kind(kind: Kind, cfg: &Value) -> Capabilities {
     match kind {
         Kind::Light => light(cfg),
         Kind::Cover => Capabilities {

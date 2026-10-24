@@ -10,6 +10,7 @@ use std::sync::{
 use std::time::Duration;
 
 use crate::alerts::{AlertStore, Applied};
+use crate::ambiances::AmbianceStore;
 use crate::dashboards::DashboardStore;
 use crate::flows::FlowStore;
 use crate::groups::{self, ApplyOutcome, GroupStore};
@@ -67,6 +68,8 @@ pub enum HubError {
     UnknownArea(String),
     #[error("unknown dashboard `{0}`")]
     UnknownDashboard(String),
+    #[error("unknown ambiance `{0}`")]
+    UnknownAmbiance(String),
     /// The flow cannot be saved or run: it does not validate, or names something the house
     /// does not have.
     #[error("invalid flow: {0}")]
@@ -215,6 +218,10 @@ pub struct Hub {
     pub(crate) solar_subscribed: tokio::sync::watch::Sender<bool>,
     /// The retained dashboard definitions, under `<ui_prefix>/dashboards/<id>`.
     dashboard_store: Mutex<DashboardStore>,
+    /// The retained ambiance definitions, under `<ui_prefix>/ambiances/<id>`.
+    ambiance_store: Mutex<AmbianceStore>,
+    /// Ids of the ambiances being applied right now.
+    pub(crate) ambiances_running: Mutex<BTreeSet<String>>,
     /// The home settings document, retained on `<ui_prefix>/_home`.
     pub(crate) home_settings: Mutex<oikos_api::HomeSettings>,
     /// The topic prefix flows are retained under, one topic per flow id.
@@ -344,6 +351,8 @@ impl Hub {
             solar: Mutex::default(),
             solar_subscribed: tokio::sync::watch::channel(false).0,
             dashboard_store: Mutex::new(DashboardStore::new()),
+            ambiance_store: Mutex::new(AmbianceStore::new()),
+            ambiances_running: Mutex::new(BTreeSet::new()),
             home_settings: Mutex::new(oikos_api::HomeSettings::default()),
             automation_prefix: cfg.topics.automation_prefix.clone(),
             zone: crate::flows::house_zone(&cfg.flows),
@@ -387,6 +396,10 @@ impl Hub {
             // Dashboard structure is not pushed over the WebSocket, so there is nothing to
             // broadcast; the store is read on demand.
             self.ingest_dashboard(id, payload);
+            return Vec::new();
+        }
+        if let Some(id) = self.ambiance_id_of(topic) {
+            self.ingest_ambiance(id, payload);
             return Vec::new();
         }
         if let Some(id) = self.flow_id_of(topic) {
@@ -1847,6 +1860,25 @@ impl Hub {
     /// Applies a retained dashboard payload to the store.
     pub(crate) fn ingest_dashboard(&self, id: &str, payload: &[u8]) {
         self.dashboard_store().apply(id, payload);
+    }
+
+    pub(crate) fn ambiance_store(&self) -> MutexGuard<'_, AmbianceStore> {
+        self.ambiance_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The topic of ambiance `id`.
+    pub fn ambiance_topic(&self, id: &str) -> String {
+        format!("{}/ambiances/{id}", self.ui_prefix)
+    }
+
+    /// The ambiance id when `topic` is exactly `<ui_prefix>/ambiances/<id>`.
+    fn ambiance_id_of<'a>(&self, topic: &'a str) -> Option<&'a str> {
+        let id = topic
+            .strip_prefix(self.ui_prefix.as_str())?
+            .strip_prefix("/ambiances/")?;
+        (!id.is_empty() && !id.contains('/')).then_some(id)
     }
 
     /// The receiving end of the engine requests, handed out once.

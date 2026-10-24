@@ -30,42 +30,14 @@ pub const GROUP_KINDS: &[Kind] = &[
     Kind::WaterHeater,
 ];
 
-const ID_MAX: usize = 48;
-
 /// "water heater" for `Kind::WaterHeater`.
 pub fn kind_word(kind: Kind) -> String {
     kind.component().replace('_', " ")
 }
 
-/// A group id from its name: lowercase, accents folded, `-`, `.` and whitespace as `_`, anything
-/// else outside `[a-z0-9_]` dropped, at most 48 characters, `_2`, `_3`, … appended on collision.
+/// A group id from its name; see [`crate::ambiances::slug_id`] for the rules.
 pub fn slug_group_id(name: &str, taken: &BTreeSet<String>) -> String {
-    let mut slug: String = fold_accents(name)
-        .chars()
-        .filter_map(|c| match c {
-            '-' | '.' => Some('_'),
-            c if c.is_whitespace() => Some('_'),
-            c if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' => Some(c),
-            _ => None,
-        })
-        .collect();
-    slug.truncate(ID_MAX);
-    if slug.is_empty() {
-        slug = "group".to_owned();
-    }
-    if !taken.contains(&slug) {
-        return slug;
-    }
-    for n in 2.. {
-        let suffix = format!("_{n}");
-        let mut base = slug.clone();
-        base.truncate(ID_MAX - suffix.len());
-        let candidate = format!("{base}{suffix}");
-        if !taken.contains(&candidate) {
-            return candidate;
-        }
-    }
-    unreachable!("an unbounded range always yields a free id")
+    crate::ambiances::slug_id(name, taken, "group")
 }
 
 /// The entities of `kind` (their effective kind, so `showAs` counts) matching `query`, grouped by

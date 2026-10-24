@@ -1,9 +1,10 @@
-//! The MCP server: thirty-four tools and the `oikos://snapshot` resource over the hub, served at
+//! The MCP server: forty-three tools and the `oikos://snapshot` resource over the hub, served at
 //! `/mcp` over streamable HTTP with stateful sessions, and the stdio proxy in front of it.
 //!
 //! A failed tool call is answered in-band (`isError: true` with the reason as text) rather
 //! than as a JSON-RPC error, so the assistant reads why and retries with better arguments.
 
+mod ambiance_tools;
 mod climate_tools;
 mod flow_tools;
 mod params;
@@ -44,6 +45,7 @@ impl OikosMcp {
             hub,
             tool_router: Self::tool_router()
                 + Self::flow_tool_router()
+                + Self::ambiance_tool_router()
                 + Self::climate_tool_router(),
         }
     }
@@ -137,7 +139,8 @@ fn instructions() -> String {
          groups (hub-published entities as `group_<id>` whose definition — kind, members, \
          hideMembers — is retained at `oikos/group/<id>/definition`); the hub fans group \
          commands out to member entities and republishes the combined state as members \
-         change. A flow is a \
+         change. Ambiances are one-tap house states: `list_ambiances`, `set_ambiance` (create or replace, validated against the house, retained on `<ui_prefix>/ambiances/<id>`), `delete_ambiance` and `apply_ambiance` (runs the actions once, in order, and returns one report line per action: `ok`, `failed` or `skipped` with the entities and reasons). An action is `category` (`what`: `lights`, `plugs` or `covers`; `to`: `on`/`off` or `open`/`close`; optional `brightness` in %, `area`, `except`. The set is resolved at apply time, so new devices are included; only switches typed `showAs: plug` are plugs; an untyped switch is a plain switch and is left out), `device` (`entity` plus the same `command` JSON as `send_command`), `climate` (`zone` or null for every active zone, `setpoint` and/or `mode` for `hours`, or `clear: true`) or `flow` (`flow` id, `do`: `enable`, `disable` or `run`). \
+         A flow is a \
          graph of nodes: `trigger.state` (an entity's state changes), `trigger.signal` (a remote press, an event or a tag scan: `entity` is a `device_automation.*`, `event.*` or `tag.*` id and `signal` optionally names one of its announced signals; the trigger value is the signal name, and `trigger.state` is refused on those entities), `trigger.schedule` (a \
          5-field cron in the house local time; it fires only while the flow is enabled and \
          the first run is at the next tick), `flow.enable` (sets another flow's `enabled`, or its own flow when `flow` is absent; a flow \
