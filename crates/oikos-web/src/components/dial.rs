@@ -212,13 +212,13 @@ pub fn Dial(
     max: f64,
     step: f64,
     disabled: bool,
-    #[prop(into)] aria_label: String,
+    #[prop(into)] aria_label: Signal<String>,
     /// The centre text and screen-reader text for a value ("15,5°").
     value_text: Callback<f64, String>,
     /// The centre text with no value to show, or while disabled ("—", "Off").
     #[prop(into)]
-    placeholder: String,
-    #[prop(into)] caption: String,
+    placeholder: Signal<String>,
+    #[prop(into)] caption: Signal<String>,
     /// The colour of the arc: `heat`, `cool`, `other` or `off`.
     #[prop(into)]
     tone: String,
@@ -325,7 +325,7 @@ pub fn Dial(
     };
     let centre = move || match shown.get() {
         Some(v) if !disabled => value_text.run(v),
-        _ => placeholder.clone(),
+        _ => placeholder.get(),
     };
     let now = move || shown.get().map(|v| v.to_string());
     let now_text = move || shown.get().map(|v| value_text.run(v));
@@ -337,7 +337,7 @@ pub fn Dial(
             viewBox="0 0 160 160"
             role="slider"
             tabindex="0"
-            aria-label=aria_label
+            aria-label=move || aria_label.get()
             aria-valuemin=min.to_string()
             aria-valuemax=max.to_string()
             aria-valuenow=now
@@ -349,7 +349,7 @@ pub fn Dial(
             <path class="dial__track" d=arc_path(START_DEG, START_DEG + SWEEP_DEG, R, C)></path>
             {fill}
             <text class="dial__value" x="80" y="86" text-anchor="middle">{centre}</text>
-            <text class="dial__caption" x="80" y="106" text-anchor="middle">{caption}</text>
+            <text class="dial__caption" x="80" y="106" text-anchor="middle">{move || caption.get()}</text>
         </svg>
     }
 }

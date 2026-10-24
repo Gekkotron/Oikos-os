@@ -149,7 +149,10 @@ pub fn LightCard(entity: EntityView) -> impl IntoView {
         }
     });
 
-    let name = entity_title(crate::i18n::current_lang(), &entity);
+    let name = {
+        let entity = entity.clone();
+        Signal::derive(move || entity_title(lang(), &entity))
+    };
     let trailing = view! { <ToggleSwitch on=on aria_label=name on_toggle=toggle /> }.into_any();
     let state_line = Signal::derive(move || light_state_line(lang(), known, brightness));
     let pending = sender.pending(&entity.id);

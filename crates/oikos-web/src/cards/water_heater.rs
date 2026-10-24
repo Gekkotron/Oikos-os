@@ -13,7 +13,7 @@ use crate::components::card_place::{CardPlace, use_card_place};
 use crate::format::degrees;
 use crate::i18n::climate::{ClimateText, climate_text, heating_power, use_climate_text};
 use crate::i18n::states::{StateCtx, state_word};
-use crate::i18n::{Key, Lang, use_text};
+use crate::i18n::{Key, Lang, use_lang, use_text};
 
 fn with_water_heater(
     state: &EntityState,
@@ -87,14 +87,15 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
     let t = use_text();
     let ct = use_climate_text();
     let label = super::live_value(&entity);
-    let target_text = degrees(
-        crate::i18n::current_lang(),
-        match &entity.state.value {
+    let lang = use_lang();
+    let target_text = {
+        let target = match &entity.state.value {
             StateValue::WaterHeater(w) => w.target,
             _ => None,
-        },
-        entity.unit.as_deref(),
-    );
+        };
+        let unit = entity.unit.clone();
+        Signal::derive(move || degrees(lang(), target, unit.as_deref()))
+    };
     let (target, mode) = match &entity.state.value {
         StateValue::WaterHeater(w) => (w.target, w.mode.clone()),
         _ => (None, None),
@@ -121,32 +122,41 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
             let guess = with_water_heater(&state, |w| w.mode = Some(picked.clone()));
             sender.send(&id, Command::SetHvacMode { mode: picked }, guess);
         });
-        view! { <ModeSelect label=t(Key::Mode) options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
+        view! { <ModeSelect label=Signal::derive(move || t(Key::Mode)) options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
     });
 
-    let heater = HeaterView::from_state(crate::i18n::current_lang(), &entity.state);
-    let chip = heater.chip.map(|text| {
-        view! {
-            <span class="heater__chip" class:heater__chip--heating=heater.heating>{text}</span>
-        }
-    });
-    let inlet = heater.inlet.map(|degrees_in| {
-        let text = degrees(
-            crate::i18n::current_lang(),
-            Some(degrees_in),
-            entity.unit.as_deref(),
-        );
-        view! {
-            <span class="heater__inlet">
-                <span aria-hidden="true">"↓ "</span>
-                {move || ct(ClimateText::Inlet)} " " {text}
-            </span>
-        }
-    });
+    let heater = {
+        let state = entity.state.clone();
+        Signal::derive(move || HeaterView::from_state(lang(), &state))
+    };
+    let chip = move || {
+        heater.get().chip.map(|text| {
+            view! {
+                <span
+                    class="heater__chip"
+                    class:heater__chip--heating=move || heater.get().heating
+                >
+                    {text}
+                </span>
+            }
+        })
+    };
+    let unit = entity.unit.clone();
+    let inlet = move || {
+        heater.get().inlet.map(|degrees_in| {
+            let text = degrees(lang(), Some(degrees_in), unit.as_deref());
+            view! {
+                <span class="heater__inlet">
+                    <span aria-hidden="true">"↓ "</span>
+                    {ct(ClimateText::Inlet)} " " {text}
+                </span>
+            }
+        })
+    };
     // The tile keeps the reading; the target and mode are one tap away, in the sheet.
     let in_sheet = use_card_place() == CardPlace::Sheet;
     let stepper = (in_sheet && target.is_some()).then(|| {
-        view! { <Stepper label=target_text caption=ct(ClimateText::Target) can_step=true on_step=on_step /> }
+        view! { <Stepper label=target_text caption=Signal::derive(move || ct(ClimateText::Target)) can_step=true on_step=on_step /> }
     });
     let mode_select = mode_select.filter(|_| in_sheet);
 
@@ -178,7 +188,7 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
                 <div class="heater__main">
                     <span
                         class="heater__tank"
-                        class:heater__tank--heating=heater.heating
+                        class:heater__tank--heating=move || heater.get().heating
                         aria-hidden="true"
                     >
                         <span class="heater__element"></span>

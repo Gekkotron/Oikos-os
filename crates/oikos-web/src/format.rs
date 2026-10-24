@@ -10,6 +10,15 @@ use crate::i18n::states::{self, StateCtx, on_off, state_word};
 
 const DASH: &str = "—";
 
+/// The value line of `entity`: [`display_value`], except that a switch shown as a light reads
+/// "On" / "Off" the way a light does.
+pub fn entity_value(lang: Lang, entity: &EntityView) -> String {
+    match &entity.state.value {
+        StateValue::OnOff(on) if shown_as_light(entity) => on_off(lang, true, *on).into(),
+        _ => display_value(lang, &entity.state, entity.unit.as_deref()),
+    }
+}
+
 /// The value a card shows: "On", "21.5 °C", "—" while nothing usable is known.
 pub fn display_value(lang: Lang, state: &EntityState, unit: Option<&str>) -> String {
     match &state.value {
@@ -164,6 +173,11 @@ pub fn kind_search_words(entity: &EntityView) -> [String; 2] {
     states::search_words(entity.kind, shown_type(entity))
 }
 
+/// True for a switch the user shows as a light.
+pub fn shown_as_light(entity: &EntityView) -> bool {
+    shown_type(entity) == Some(SwitchType::Light)
+}
+
 /// The type a switch is shown as, unless it is a plain switch.
 fn shown_type(entity: &EntityView) -> Option<SwitchType> {
     SwitchType::of(entity.protocol_kind, &entity.ui).filter(|t| *t != SwitchType::Switch)
@@ -240,17 +254,6 @@ fn date_time(s: &str) -> Option<String> {
     shaped.then(|| format!("{} {}", &s[..10], &s[11..16]))
 }
 
-/// Unix seconds as ISO 8601 UTC ("2026-10-19T09:41:00Z"); "—" when out of range.
-pub fn format_timestamp(seconds: u64) -> String {
-    let format =
-        time::macros::format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]Z");
-    i64::try_from(seconds)
-        .ok()
-        .and_then(|s| time::OffsetDateTime::from_unix_timestamp(s).ok())
-        .and_then(|t| t.format(&format).ok())
-        .unwrap_or_else(|| DASH.into())
-}
-
 /// `heat_cool` becomes "Heat cool".
 pub fn word(s: &str) -> String {
     let spaced = s.replace('_', " ");
@@ -307,7 +310,7 @@ pub fn generic_value(
 
 #[cfg(test)]
 mod tests {
-    use super::{display_value, entity_title, list_label, wrap_id};
+    use super::{display_value, entity_title, entity_value, list_label, wrap_id};
     use crate::i18n::Lang;
     use oikos_api::EntityView;
     use oikos_core::model::{
@@ -336,6 +339,20 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn a_switch_shown_as_a_light_reads_allume() {
+        let mut lamp = entity("Lampe", "Lampe", Kind::Switch, None);
+        lamp.ui.show_as = Some("light".into());
+        lamp.state.value = StateValue::OnOff(true);
+        assert_eq!(entity_value(Lang::Fr, &lamp), "Allumé");
+        lamp.state.value = StateValue::OnOff(false);
+        assert_eq!(entity_value(Lang::Fr, &lamp), "Éteint");
+        assert_eq!(entity_value(Lang::En, &lamp), "Off");
+        lamp.ui.show_as = None;
+        lamp.state.value = StateValue::OnOff(true);
+        assert_eq!(entity_value(Lang::Fr, &lamp), "Activé");
     }
 
     #[test]
@@ -602,20 +619,10 @@ mod tests {
 
 #[cfg(test)]
 mod ts_tests {
-    use super::{display_value, format_timestamp};
+    use super::display_value;
     use crate::i18n::Lang;
     use oikos_core::model::LightState;
     use oikos_core::model::{EntityState, GenericValue, StateValue};
-
-    #[test]
-    fn unix_epoch_formats_as_iso() {
-        assert_eq!(format_timestamp(0), "1970-01-01T00:00:00Z");
-    }
-
-    #[test]
-    fn a_recent_timestamp_formats_in_utc() {
-        assert_eq!(format_timestamp(1_792_402_860), "2026-10-19T09:41:00Z");
-    }
 
     fn generic_state(field: &str, v: GenericValue) -> EntityState {
         let mut g = oikos_core::model::GenericState::default();

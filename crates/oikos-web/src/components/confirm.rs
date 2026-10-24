@@ -36,21 +36,21 @@ impl Default for Confirming {
 
 #[component]
 pub fn ConfirmBar(
-    question: String,
-    yes: &'static str,
+    #[prop(into)] question: Signal<String>,
+    #[prop(into)] yes: Signal<String>,
     on_yes: Callback<()>,
     on_cancel: Callback<()>,
 ) -> impl IntoView {
-    let label = question.clone();
+    let t = crate::i18n::devices::use_device_text();
     view! {
-        <div class="confirm" role="group" aria-label=label>
-            <span class="confirm__question">{question}</span>
+        <div class="confirm" role="group" aria-label=move || question.get()>
+            <span class="confirm__question">{move || question.get()}</span>
             <span class="confirm__buttons">
                 <button type="button" class="btn btn--compact" on:click=move |_| on_yes.run(())>
-                    {yes}
+                    {move || yes.get()}
                 </button>
                 <button type="button" class="btn btn--compact" on:click=move |_| on_cancel.run(())>
-                    "Cancel"
+                    {move || t(crate::i18n::devices::DeviceText::Cancel)}
                 </button>
             </span>
         </div>

@@ -127,9 +127,11 @@ pub fn SwitchGroupCard(entity: EntityView) -> impl IntoView {
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
-            {move || {
-                view! { <PowerToggle on=on label=switch_text(lang(), on, counts) on_toggle=toggle /> }
-            }}
+            <PowerToggle
+                on=on
+                label=Signal::derive(move || switch_text(lang(), on, counts))
+                on_toggle=toggle
+            />
         </CardFrame>
     }
 }
@@ -145,7 +147,11 @@ pub fn ClimateGroupCard(entity: EntityView) -> impl IntoView {
     };
     let unit = entity.unit.as_deref();
     let now_text = thermostat_text(range_of(&entity.state.attributes), mode.as_deref(), unit);
-    let target_text = degrees(crate::i18n::current_lang(), target, unit);
+    let lang = use_lang();
+    let target_text = {
+        let unit = unit.map(str::to_owned);
+        Signal::derive(move || degrees(lang(), target, unit.as_deref()))
+    };
     let caps = &entity.capabilities;
 
     let on_step = {

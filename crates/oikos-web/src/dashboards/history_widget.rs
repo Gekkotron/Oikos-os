@@ -25,10 +25,12 @@ pub fn HistoryWidget(entity: EntityView, range: DashboardHistoryRange) -> impl I
     let house = expect_context::<House>();
     let flavor = flavor_for_unit(entity.unit.as_deref());
     let id = entity.id.clone();
+    let lang = crate::i18n::use_lang();
+    let title_entity = entity.clone();
     let power_pair = Memo::new(move |_| house.entities.with(|m| power_pair_of(m, &id)));
     view! {
         <article class="card widget-history">
-            <span class="widget-history__title">{entity_title(crate::i18n::current_lang(), &entity)}</span>
+            <span class="widget-history__title">{move || entity_title(lang(), &title_entity)}</span>
             <HistoryChart
                 entity_id=entity.id.clone()
                 range=chart_range(range)

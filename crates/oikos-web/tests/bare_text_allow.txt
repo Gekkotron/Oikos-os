@@ -11,12 +11,10 @@ file: src/cards/cover.rs  # not translated yet
 file: src/cards/generic.rs  # not translated yet
 file: src/cards/group.rs  # not translated yet
 file: src/cards/light.rs  # not translated yet
-file: src/cards/mod.rs  # not translated yet
 file: src/cards/number.rs  # not translated yet
 file: src/cards/select.rs  # not translated yet
 file: src/cards/vacuum.rs  # not translated yet
 file: src/commands.rs  # not translated yet
-file: src/components/confirm.rs  # not translated yet
 file: src/components/history_chart/format.rs  # not translated yet
 file: src/components/history_chart/view.rs  # not translated yet
 file: src/components/hs_wheel.rs  # not translated yet

@@ -40,7 +40,7 @@ pub fn DoorCard(entity: EntityView) -> impl IntoView {
     let lang = use_lang();
     let question = {
         let name = entity.name.clone();
-        move || action_question(lang(), SecurityText::VerbOpen, &name)
+        Signal::derive(move || action_question(lang(), SecurityText::VerbOpen, &name))
     };
     let send = {
         let id = entity.id.clone();
@@ -82,8 +82,8 @@ pub fn DoorCard(entity: EntityView) -> impl IntoView {
                 }
             >
                 <ConfirmBar
-                    question=question()
-                    yes=security_text(lang(), SecurityText::VerbOpen)
+                    question=question
+                    yes=Signal::derive(move || security_text(lang(), SecurityText::VerbOpen))
                     on_yes=send
                     on_cancel=Callback::new(move |()| confirming.clear())
                 />

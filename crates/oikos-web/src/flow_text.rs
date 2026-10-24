@@ -9,7 +9,7 @@ use oikos_core::model::{Command, Hs, Kind};
 use serde_json::Value;
 
 use crate::flows::{humanise, value_text};
-use crate::format::entity_title;
+use crate::format::{entity_title, shown_as_light};
 use crate::i18n::Lang;
 use crate::i18n::flows::{self as t, FlowText, flow_text};
 use crate::i18n::format::{number, with_unit};
@@ -74,7 +74,9 @@ fn bool_word(lang: Lang, entity: Option<&EntityView>, on: bool) -> String {
         return if on { "on" } else { "off" }.into();
     }
     match entity {
-        Some(e) if e.kind == Kind::Light => if on { "allumée" } else { "éteinte" }.into(),
+        Some(e) if e.kind == Kind::Light || shown_as_light(e) => {
+            if on { "allumée" } else { "éteinte" }.into()
+        }
         Some(e) if e.kind == Kind::BinarySensor => lower_first(&state_word(
             lang,
             StateCtx::BinarySensor(e.device_class.clone()),
@@ -407,6 +409,16 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn a_switch_shown_as_a_light_reads_allumee() {
+        let mut lamp = ent("s1", "Lampe", None, Kind::Switch, None);
+        lamp.ui.show_as = Some("light".into());
+        assert_eq!(bool_word(Lang::Fr, Some(&lamp), true), "allumée");
+        assert_eq!(bool_word(Lang::Fr, Some(&lamp), false), "éteinte");
+        let plain = ent("s2", "Prise", None, Kind::Switch, None);
+        assert_eq!(bool_word(Lang::Fr, Some(&plain), true), "activé");
     }
 
     fn house() -> BTreeMap<String, EntityView> {

@@ -24,8 +24,9 @@ use oikos_core::model::{Command, EntityState};
 
 use crate::commands::{Pending, fire_command};
 use crate::components::toast::Toasts;
-use crate::format::word;
+use crate::format::{choice_word, entity_value, word};
 use crate::house::House;
+use crate::i18n::{Key, use_lang, use_text};
 use oikos_api::EntityView;
 
 /// The contexts a card needs to send commands, captured while the card is built so event
@@ -77,23 +78,34 @@ impl Sender {
     }
 }
 
-/// The pill toggle with a sliding knob. The whole row is the tap target.
 /// The value line of `entity` ("21,5 °C", "Ouvert · 40 %"), following the language toggle.
 pub fn live_value(entity: &EntityView) -> Signal<String> {
     let lang = crate::i18n::use_lang();
-    let state = entity.state.clone();
-    let unit = entity.unit.clone();
-    Signal::derive(move || crate::format::display_value(lang(), &state, unit.as_deref()))
+    let entity = entity.clone();
+    Signal::derive(move || entity_value(lang(), &entity))
 }
 
+/// The option `raw` of a mode or choice list, in the language: a climate mode by its name, else
+/// the shared choice words, else its words.
+pub fn option_word(lang: crate::i18n::Lang, raw: &str) -> String {
+    let mode = text::mode_label(lang, raw);
+    if mode == word(raw) {
+        choice_word(lang, raw)
+    } else {
+        mode
+    }
+}
+
+/// The pill toggle with a sliding knob. The whole row is the tap target.
 #[component]
 pub fn PowerToggle(
     on: bool,
-    #[prop(into)] label: String,
+    #[prop(into)] label: Signal<String>,
     on_toggle: Callback<()>,
-    /// The accessible name when the visible label does not say what the switch is for.
+    /// The accessible name when the visible label does not say what the switch is for; empty
+    /// leaves the label to name it.
     #[prop(optional, into)]
-    aria_label: Option<String>,
+    aria_label: Signal<String>,
     /// Greys the switch out and ignores taps (a group with no member online).
     #[prop(optional, into)]
     disabled: Signal<bool>,
@@ -103,12 +115,12 @@ pub fn PowerToggle(
             type="button"
             class="power"
             role="switch"
-            aria-label=aria_label
+            aria-label=move || Some(aria_label.get()).filter(|l| !l.is_empty())
             aria-checked=on.to_string()
             disabled=move || disabled.get()
             on:click=move |_| on_toggle.run(())
         >
-            <span class="power__label">{label}</span>
+            <span class="power__label">{move || label.get()}</span>
             <span class="switch" class:switch--on=on>
                 <span class="switch__knob"></span>
             </span>
@@ -120,7 +132,7 @@ pub fn PowerToggle(
 #[component]
 pub fn ToggleSwitch(
     on: bool,
-    #[prop(into)] aria_label: String,
+    #[prop(into)] aria_label: Signal<String>,
     on_toggle: Callback<()>,
     /// Greys the switch out and ignores taps.
     #[prop(optional, into)]
@@ -131,7 +143,7 @@ pub fn ToggleSwitch(
             type="button"
             class="power power--compact"
             role="switch"
-            aria-label=aria_label
+            aria-label=move || aria_label.get()
             aria-checked=on.to_string()
             disabled=move || disabled.get()
             on:click=move |_| on_toggle.run(())
@@ -147,30 +159,36 @@ pub fn ToggleSwitch(
 /// nothing to step from; `on_step` receives `-1.0` or `1.0`. `caption` names the value above it.
 #[component]
 pub fn Stepper(
-    #[prop(into)] label: String,
+    #[prop(into)] label: Signal<String>,
     can_step: bool,
     on_step: Callback<f64>,
-    #[prop(optional)] caption: Option<&'static str>,
+    /// Empty draws no caption.
+    #[prop(optional, into)]
+    caption: Signal<String>,
 ) -> impl IntoView {
+    let t = use_text();
     view! {
         <div class="stepper">
             <button
                 type="button"
                 class="btn btn--round"
-                aria-label="Decrease"
+                aria-label=move || t(Key::Decrease)
                 disabled=!can_step
                 on:click=move |_| on_step.run(-1.0)
             >
                 "−"
             </button>
             <span class="stepper__value">
-                {caption.map(|c| view! { <span class="stepper__caption">{c}</span> })}
-                {label}
+                {move || {
+                    let c = caption.get();
+                    (!c.is_empty()).then(|| view! { <span class="stepper__caption">{c}</span> })
+                }}
+                {move || label.get()}
             </span>
             <button
                 type="button"
                 class="btn btn--round"
-                aria-label="Increase"
+                aria-label=move || t(Key::Increase)
                 disabled=!can_step
                 on:click=move |_| on_step.run(1.0)
             >
@@ -182,27 +200,33 @@ pub fn Stepper(
 
 /// A labelled `<select>` over `options`; `on_select` receives the picked option. `captioned`
 /// shows the label above the value, inside the pill, instead of leaving it to screen readers.
+/// The option words follow the language; the values sent stay the raw ones.
 #[component]
 pub fn ModeSelect(
-    #[prop(into)] label: String,
+    #[prop(into)] label: Signal<String>,
     options: Vec<String>,
     selected: Option<String>,
     on_select: Callback<String>,
     #[prop(optional)] captioned: bool,
 ) -> impl IntoView {
+    let lang = use_lang();
     let items = options
         .into_iter()
         .map(|option| {
             let is_selected = selected.as_deref() == Some(option.as_str());
-            let text = word(&option);
-            view! { <option value=option selected=is_selected>{text}</option> }
+            let raw = option.clone();
+            view! {
+                <option value=option selected=is_selected>
+                    {move || option_word(lang(), &raw)}
+                </option>
+            }
         })
         .collect_view();
     let on_change = move |ev| on_select.run(event_target_value(&ev));
     if captioned {
         return view! {
             <label class="pick">
-                <span class="pick__caption">{label}</span>
+                <span class="pick__caption">{move || label.get()}</span>
                 <select class="pick__select" on:change=on_change>
                     {items}
                 </select>
@@ -211,7 +235,7 @@ pub fn ModeSelect(
         .into_any();
     }
     view! {
-        <select class="select" aria-label=label on:change=on_change>
+        <select class="select" aria-label=move || label.get() on:change=on_change>
             {items}
         </select>
     }

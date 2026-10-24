@@ -14,8 +14,9 @@ use crate::cards::light::has_colour;
 use crate::components::hs_wheel::HsWheel;
 
 use crate::components::card_place::InSheet;
-use crate::format::{format_timestamp, list_label, title_suffix, type_word, wrap_id};
+use crate::format::{list_label, title_suffix, type_word, wrap_id};
 use crate::house::House;
+use crate::i18n::format::{date_time, local_date_time};
 use crate::icons::entity_icon;
 use crate::nav::BackLink;
 use crate::override_editor::OverrideEditor;
@@ -213,10 +214,14 @@ fn device_panel(house: House, entity: &EntityView) -> Option<AnyView> {
 fn state_panel(entity: &EntityView) -> impl IntoView + use<> {
     let value = pretty(&entity.state.value);
     let attributes = pretty(&entity.state.attributes);
-    let updated = entity
-        .state
-        .last_update
-        .map_or_else(|| "—".to_owned(), format_timestamp);
+    let lang = crate::i18n::use_lang();
+    let last_update = entity.state.last_update;
+    let updated = move || {
+        last_update.map_or_else(
+            || "—".to_owned(),
+            |secs| date_time(lang(), local_date_time(secs)),
+        )
+    };
     view! {
         <h3 class="sheet__subheading">"Value"</h3>
         <pre class="sheet__json">{value}</pre>

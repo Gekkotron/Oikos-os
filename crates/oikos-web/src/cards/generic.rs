@@ -8,6 +8,7 @@ use oikos_core::types::{self, ControlDef, GenericCaps, Shape, TypeDef};
 use super::{ModeSelect, PowerToggle, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::format::{generic_value, value_class, word};
+use crate::i18n::states::on_off;
 
 /// A control name as button text: `activate` becomes "Activate".
 pub fn control_label(name: &str) -> String {
@@ -81,6 +82,7 @@ pub(crate) fn control_view(
         StateValue::Generic(g) => g.clone(),
         _ => GenericState::default(),
     };
+    let lang = crate::i18n::use_lang();
     let id = entity.id.clone();
     let control = name.to_owned();
     let send = move |value: Option<serde_json::Value>| {
@@ -118,7 +120,7 @@ pub(crate) fn control_view(
                 None => view! {
                     <PowerToggle
                         on=on
-                        label=if on { "On" } else { "Off" }
+                        label=Signal::derive(move || on_off(lang(), false, on))
                         on_toggle=toggle
                         aria_label=control_label(name)
                     />
@@ -180,12 +182,12 @@ pub fn GenericCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let def = types::type_def(&entity.component);
     let caps = entity.capabilities.generic.clone();
-    let value = generic_value(
-        crate::i18n::current_lang(),
-        def,
-        caps.as_ref(),
-        &entity.state,
-    );
+    let lang = crate::i18n::use_lang();
+    let value = {
+        let caps = caps.clone();
+        let state = entity.state.clone();
+        Signal::derive(move || generic_value(lang(), def, caps.as_ref(), &state))
+    };
     let is_alert = match (def, &entity.state.value) {
         (Some(d), StateValue::Generic(g)) => types::alerting(d, g),
         _ => false,
@@ -202,13 +204,16 @@ pub fn GenericCard(entity: EntityView) -> impl IntoView {
         _ => None,
     };
     let media = primary_is_picture.then(|| picture(&entity));
-    let class = value_class(&value);
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending alert=is_alert>
             {media}
-            {(!value.is_empty()).then(|| view! { <span class=class>{value.clone()}</span> })}
+            {move || {
+                let text = value.get();
+                (!text.is_empty())
+                    .then(|| view! { <span class=value_class(&text)>{text.clone()}</span> })
+            }}
             {control.map(|c| view! { <div class="card__controls">{c}</div> })}
         </CardFrame>
     }
