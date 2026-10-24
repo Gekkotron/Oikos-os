@@ -138,6 +138,15 @@ See [Ambiances](../users/ambiances.md) for the action types, the category rules 
 | `delete_ambiance` | Removes an ambiance, valid or not. Args: `id`. |
 | `apply_ambiance` | Runs the actions once, in order, and returns one report line per action (`ok`, `failed` or `skipped`, with the entities and reasons). Args: `id`. Refused while the same ambiance is already running. |
 
+## Alarm
+
+The native alarm (optional, off by default). Its settings are a whole document and are off until `enabled` is true. Arming and disarming are not tools: they are `send_command` on the alarm entity `oikos_alarm_house`, with `{"type":"arm","mode":"away"}` (or `home`, `night`) and `{"type":"disarm"}`. See [Alarm](../users/alarm.md).
+
+| Tool | What it does |
+| --- | --- |
+| `alarm_status` | The settings (`enabled`, delays, sensors, sirens, remotes, presence), the panel state (`disarmed`, `arming`, `armed_away`, `armed_home`, `armed_night`, `pending`, `triggered`), its mode and source, `deadline`, `cause`, `open_at_arm`, any refused settings and the run-time warnings. |
+| `set_alarm_settings` | Replaces the settings document. Read them with `alarm_status` first and send the whole document back. A refusal names the reason and the previous document is kept. Args: `settings`. |
+
 ## Count
 
 Twenty-three tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs`, nine in `climate_tools.rs` and four in `ambiance_tools.rs`: 23 + 6 + 9 + 4 = 42.

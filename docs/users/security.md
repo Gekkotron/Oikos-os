@@ -10,6 +10,10 @@ There is no authentication yet, and that is deliberate for v1. The hub binds on 
 No port forwarding, and no exposure through a reverse proxy without authentication in front of it.
 :::
 
+## The native alarm
+
+The hub can run the alarm itself, optional and off by default (see [Alarm](alarm.md)). It has **no codes or PINs**: the panel asks for none to arm or disarm, because the hub has no authentication to protect a code with. Anyone who can reach the hub on your LAN can disarm it, and the remote and push Disarm buttons work without any check. Keep the alarm's sirens and the hub on your own network, and read the caveat above before you rely on it.
+
 ## What else to know
 
 - `get_entity` and the `bindings` it returns hand out the raw discovery config; for a bridge other than Zigbee2MQTT that config could carry credentials in topics or templates.

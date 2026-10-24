@@ -45,6 +45,10 @@ After each (re)connect the hub waits for its subscription to be acknowledged, th
 
 While `legacy_prefix` is set the hub also reads `oikos-push/notification/+`, `oikos-push/tokens/+` and `oikos-push/history`, so producers outside this repo and an app build that is not updated yet keep working; a token registered on both topics is sent to once. The hub never publishes there, except an empty retained payload clearing a dead token that came from `oikos-push/tokens/<id>`.
 
+## Alarm pushes
+
+The native alarm sends on its own channel, `alarm`, from source `alarm`. A triggered alarm is a critical alert with a **Disarm** button: tapping it sends the reply on `oikos/push/responses`, and the hub disarms the alarm. That reply topic is subscribed while the alarm is on. A plain arm or disarm sends no push, and an armed house with an open window sends a quiet note. See [Alarm](alarm.md#phone-push).
+
 ## Switching over from OikosPush
 
 0. **Broker ACL.** The hub connects as the `[mqtt] user` of `oikos.toml`. That user needs:
