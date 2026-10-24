@@ -20,6 +20,10 @@ use crate::energy::{
     positions, power_text, should_fire_mount, speed, stroke,
 };
 use crate::house::House;
+use crate::i18n::energy::{
+    EnergyText, energy_text as word, kwh_today, live_subtitle, meter_line, show_all_consumers,
+};
+use crate::i18n::{Key, Lang, text, use_lang};
 use crate::icons::{consumer_icon, role_icon};
 use crate::screens::energy_day::GridDayCard;
 
@@ -56,19 +60,19 @@ fn glyph(n: &EnergyNode) -> &'static str {
 }
 
 /// What a card shows as its lifetime figure: the water meter, or the node's energy counter.
-fn card_total(n: &EnergyNode) -> String {
+fn card_total(lang: Lang, n: &EnergyNode) -> String {
     if n.kind == NodeKind::Water {
         return n
             .water_total
-            .map(|v| format!("Meter {}", meter_text(v, n.water_total_unit.as_deref())))
+            .map(|v| meter_line(lang, &meter_text(lang, v, n.water_total_unit.as_deref())))
             .unwrap_or_default();
     }
     if !n.has_meter {
-        "No energy meter".to_string()
+        word(lang, EnergyText::NoEnergyMeter).to_string()
     } else if n.total_status == NodeStatus::Unavailable {
-        "Unavailable".to_string()
+        word(lang, EnergyText::Unavailable).to_string()
     } else {
-        energy_text(n.total_kwh)
+        energy_text(lang, n.total_kwh)
     }
 }
 
@@ -132,6 +136,7 @@ fn DiagramNode(
     open: Callback<String>,
     expanded: RwSignal<bool>,
 ) -> impl IntoView {
+    let lang = use_lang();
     let node = Memo::new(move |_| ui.with(|u| u.diagram.iter().find(|n| n.id == id).cloned()));
     let Some(first) = node.get_untracked() else {
         return ().into_any();
@@ -175,16 +180,16 @@ fn DiagramNode(
             </foreignObject>
             // The app's order: the value under the disc, the name under the value.
             <text class="energy-node__label" y=NODE_R + 23.0 text-anchor="middle">
-                {move || node.get().map(|n| short(node_label(&n))).unwrap_or_default()}
+                {move || node.get().map(|n| short(node_label(lang(), &n))).unwrap_or_default()}
             </text>
             <text class="energy-node__value" y=NODE_R + 11.0 text-anchor="middle">
                 {move || {
                     node.get()
                         .map(|n| {
                             if n.kind == NodeKind::More {
-                                power_text(n.value)
+                                power_text(lang(), n.value)
                             } else {
-                                node_value_text(&n)
+                                node_value_text(lang(), &n)
                             }
                         })
                         .unwrap_or_default()
@@ -203,6 +208,7 @@ fn EnergyCard(
     names: Memo<BTreeMap<String, String>>,
     today: Signal<Option<f64>>,
 ) -> impl IntoView {
+    let lang = use_lang();
     let node = Memo::new(move |_| ui.with(|u| u.cards.iter().find(|n| n.id == id).cloned()));
     let sensors_open = RwSignal::new(false);
     let on_head = move |_| {
@@ -224,7 +230,8 @@ fn EnergyCard(
         };
         let many = n.sensor_ids.len() > 1;
         let sensors = n.sensor_ids.clone();
-        let total = card_total(&n);
+        let lang_now = lang();
+        let total = card_total(lang_now, &n);
         Some(view! {
             <article class="card energy-card" class:card--offline=off>
                 <button
@@ -235,13 +242,13 @@ fn EnergyCard(
                     on:click=on_head
                 >
                     <span class="card__icon" inner_html=glyph(&n)></span>
-                    <span class="card__name">{node_label(&n)}</span>
+                    <span class="card__name">{node_label(lang_now, &n)}</span>
                 </button>
                 <div class="card__body">
-                    <span class="card__value">{node_value_text(&n)}</span>
+                    <span class="card__value">{node_value_text(lang_now, &n)}</span>
                     <span class="energy-card__total">{total}</span>
                     <span class="energy-tile-today">
-                        {move || today.get().map(|v| format!("{v:.1} kWh today"))}
+                        {move || today.get().map(|v| kwh_today(lang(), v))}
                     </span>
                 </div>
                 <Show when=move || many && sensors_open.get()>
@@ -420,6 +427,7 @@ pub fn EnergyScreen() -> impl IntoView {
         )
     });
 
+    let lang = use_lang();
     let order = StoredValue::new(None::<ConsumerOrder>);
     let ui = Memo::new(move |_| {
         let entities = house.entities.with(energy_entities);
@@ -441,12 +449,7 @@ pub fn EnergyScreen() -> impl IntoView {
     let loading = move || ui.with(|u| u.loading) && !online();
     let nothing = move || ui.with(|u| u.loading || u.empty);
 
-    let subtitle = move || {
-        ui.with(|u| match u.self_consumption {
-            Some(p) => format!("Live · self-consumption {p} %"),
-            None => "Live".to_string(),
-        })
-    };
+    let subtitle = move || ui.with(|u| live_subtitle(lang(), u.self_consumption));
     let hint = move || ui.with(|u| u.hint == Some(EnergyHint::CheckSign));
     let edges = move || {
         ui.with(|u| {
@@ -459,7 +462,7 @@ pub fn EnergyScreen() -> impl IntoView {
     };
     let nodes = move || ui.with(|u| u.diagram.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
     let cards = move || ui.with(|u| u.cards.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
-    let description = move || ui.with(aria_sentence);
+    let description = move || ui.with(|u| aria_sentence(lang(), u));
     let folded = move || ui.with(|u| u.consumers.len() > ARC_SLOTS);
 
     // Shared KwhToday map, installed once by App::install_history_refresh.
@@ -467,7 +470,7 @@ pub fn EnergyScreen() -> impl IntoView {
 
     view! {
         <section class="energy">
-            <h1 class="room__title">"Energy"</h1>
+            <h1 class="room__title">{move || text(lang(), Key::Energy)}</h1>
             <Show
                 when=move || !loading()
                 fallback=|| {
@@ -481,14 +484,14 @@ pub fn EnergyScreen() -> impl IntoView {
             >
                 <Show
                     when=move || !nothing()
-                    fallback=|| {
+                    fallback=move || {
                         view! {
                             <div class="energy__empty">
                                 <p class="room__empty">
-                                    "Long-press a power sensor on Home and choose an energy role."
+                                    {move || word(lang(), EnergyText::EmptyHint)}
                                 </p>
                                 <a class="btn btn--compact" href="/">
-                                    "Go to Home"
+                                    {move || word(lang(), EnergyText::GoHome)}
                                 </a>
                             </div>
                         }
@@ -496,7 +499,7 @@ pub fn EnergyScreen() -> impl IntoView {
                 >
                     <p class="energy__subtitle">{subtitle}</p>
                     <Show when=hint>
-                        <p class="energy__hint">"Check the grid or battery sign"</p>
+                        <p class="energy__hint">{move || word(lang(), EnergyText::CheckSign)}</p>
                     </Show>
                     <div
                         class="energy-diagram"
@@ -541,7 +544,7 @@ pub fn EnergyScreen() -> impl IntoView {
                             on:click=move |_| expanded.update(|e| *e = !*e)
                         >
                             {move || {
-                                format!("Show all {} consumers", ui.with(|u| u.consumers.len()))
+                                show_all_consumers(lang(), ui.with(|u| u.consumers.len()))
                             }}
                         </button>
                     </Show>
@@ -562,8 +565,13 @@ pub fn EnergyScreen() -> impl IntoView {
                         />
                     </div>
                     <Show when=move || folded() && expanded.get()>
-                        <section class="energy-more" aria-label="All consumers">
-                            <h2 class="energy-more__title">"All consumers"</h2>
+                        <section
+                            class="energy-more"
+                            aria-label=move || word(lang(), EnergyText::AllConsumers)
+                        >
+                            <h2 class="energy-more__title">
+                                {move || word(lang(), EnergyText::AllConsumers)}
+                            </h2>
                             <ul>
                                 {move || {
                                     ui.with(|u| {
@@ -571,8 +579,8 @@ pub fn EnergyScreen() -> impl IntoView {
                                             .iter()
                                             .map(|c| {
                                                 let sid = c.sensor_ids.first().cloned();
-                                                let name = node_label(c);
-                                                let value = node_value_text(c);
+                                                let name = node_label(lang(), c);
+                                                let value = node_value_text(lang(), c);
                                                 view! {
                                                     <li>
                                                         <button

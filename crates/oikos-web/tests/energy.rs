@@ -6,10 +6,14 @@ use leptos_router::components::Router;
 use oikos_api::{EntityView, WsEvent};
 use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride};
 use oikos_web::house::House;
+use oikos_web::i18n::Lang;
 use oikos_web::screens::energy::{EnergyScreen, KwhToday};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 use web_sys::{Element, Event, HtmlElement};
+#[path = "support/fetch_stub.rs"]
+mod fetch_stub;
+use fetch_stub::FetchStub;
 wasm_bindgen_test_configure!(run_in_browser);
 
 fn sensor(id: &str, name: &str, unit: &str, value: f64, ui: UiOverride) -> EntityView {
@@ -46,6 +50,10 @@ fn role(role: &str) -> UiOverride {
 }
 
 fn mount(entities: Vec<EntityView>) -> Element {
+    mount_lang(entities, RwSignal::new(Lang::En))
+}
+
+fn mount_lang(entities: Vec<EntityView>, lang: RwSignal<Lang>) -> Element {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -57,6 +65,7 @@ fn mount(entities: Vec<EntityView>) -> Element {
         host.clone().unchecked_into(),
         move || {
             provide_context(house);
+            provide_context(lang);
             // App installs this through install_history_refresh, which also fetches.
             provide_context(KwhToday(RwSignal::new(Default::default())));
             view! {
@@ -133,6 +142,7 @@ async fn live_house_shows_nodes_and_cards() {
         .find(|c| text(c, ".card__name") == "Grid")
         .expect("grid card");
     let body = grid_card.text_content().unwrap();
+    let body = body.replace('\u{a0}', " ");
     assert!(body.contains("253 W"), "{body}");
     assert!(body.contains("6\u{2009}584 kWh"), "{body}");
 }
@@ -184,4 +194,140 @@ async fn no_roles_shows_empty_state() {
     tick().await;
     assert!(text(&host, ".energy__empty").contains("energy role"));
     assert_eq!(count(&host, ".energy-diagram"), 0);
+}
+
+const GRID_DAY: &str = r#"{
+    "date": "2026-10-24", "today": "2026-10-24", "first_date": "2026-01-15",
+    "day_slots": 48,
+    "slots": [{"start": 0, "local": "00:00", "off_peak": 0.4, "peak": 0.2, "export": 0.1}],
+    "bands": [], "totals": {"off_peak": 7.2, "peak": 9.9, "export": 3.1},
+    "has_export": true, "tariffs": true
+}"#;
+
+fn all_text(host: &Element) -> String {
+    host.text_content().unwrap_or_default()
+}
+
+#[wasm_bindgen_test]
+async fn energy_follows_the_language_toggle() {
+    let stub = FetchStub::install();
+    stub.reply("GET", "/api/v1/history/grid_day", 200, GRID_DAY);
+    let mut grid = sensor("grid", "Grid power", "W", 1300.0, role("grid"));
+    grid.ui.energy_meter = Some("grid_energy".into());
+    let mut entities = vec![
+        grid,
+        sensor(
+            "grid_energy",
+            "Grid energy",
+            "kWh",
+            1250.0,
+            UiOverride::default(),
+        ),
+        sensor("solar", "Solar power", "W", 500.0, role("solar")),
+    ];
+    for (i, name) in ["Oven", "Dryer", "Fridge", "Washer"].iter().enumerate() {
+        entities.push(sensor(
+            &format!("c{i}"),
+            name,
+            "W",
+            400.0 - 100.0 * i as f64,
+            role("consumer"),
+        ));
+    }
+    let lang = RwSignal::new(Lang::Fr);
+    let host = mount_lang(entities, lang);
+    gloo_timers::future::TimeoutFuture::new(300).await;
+    tick().await;
+
+    let toggle: HtmlElement = host
+        .query_selector(".energy__more-toggle")
+        .unwrap()
+        .expect("toggle")
+        .unchecked_into();
+    toggle.click();
+    tick().await;
+
+    let fr = all_text(&host);
+    for word in [
+        "Énergie",
+        "En direct",
+        "Heures creuses",
+        "Heures pleines",
+        "Injection solaire",
+        "Consommation",
+        "Afficher les 4 consommateurs",
+        "Réseau",
+        "Maison",
+        "1,3\u{a0}kW",
+        "1\u{202f}250\u{a0}kWh",
+        "Acheté 17,1\u{a0}kWh",
+        "Vendu 3,1\u{a0}kWh",
+        "Aujourd'hui",
+    ] {
+        assert!(fr.contains(word), "missing {word:?} in {fr}");
+    }
+    for word in ["Off-peak", "Consumption", "Bought", "Today", "Grid"] {
+        assert!(!fr.contains(word), "{word:?} left in {fr}");
+    }
+    assert!(text(&host, ".energy-day__detail").is_empty());
+    let prev = host
+        .query_selector(".energy-day__nav")
+        .unwrap()
+        .unwrap()
+        .get_attribute("aria-label")
+        .unwrap();
+    assert_eq!(prev, "Jour précédent");
+
+    lang.set(Lang::En);
+    tick().await;
+    let en = all_text(&host);
+    for word in [
+        "Energy",
+        "Live",
+        "Off-peak",
+        "Peak",
+        "Solar export",
+        "All consumers",
+        "Show all 4 consumers",
+        "Grid",
+        "House",
+        "1.3\u{a0}kW",
+        "1\u{2009}250\u{a0}kWh",
+        "Bought 17.1\u{a0}kWh",
+        "Sold 3.1\u{a0}kWh",
+        "Today",
+    ] {
+        assert!(en.contains(word), "missing {word:?} in {en}");
+    }
+    for word in [
+        "Heures creuses",
+        "Consommation",
+        "Acheté",
+        "Aujourd'hui",
+        "Réseau",
+    ] {
+        assert!(!en.contains(word), "{word:?} left in {en}");
+    }
+    let prev = host
+        .query_selector(".energy-day__nav")
+        .unwrap()
+        .unwrap()
+        .get_attribute("aria-label")
+        .unwrap();
+    assert_eq!(prev, "Previous day");
+    drop(stub);
+}
+
+#[wasm_bindgen_test]
+async fn empty_state_follows_the_language() {
+    let lang = RwSignal::new(Lang::Fr);
+    let host = mount_lang(
+        vec![sensor("plain", "Plain", "W", 5.0, UiOverride::default())],
+        lang,
+    );
+    tick().await;
+    assert!(text(&host, ".energy__empty").contains("rôle énergétique"));
+    lang.set(Lang::En);
+    tick().await;
+    assert!(text(&host, ".energy__empty").contains("energy role"));
 }
