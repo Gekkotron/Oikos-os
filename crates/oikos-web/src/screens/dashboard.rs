@@ -33,11 +33,12 @@ pub fn DashboardScreen() -> impl IntoView {
         <Show
             when=move || id.get() == HOUSE_ID
             fallback=move || {
-                // Tracking `known` keeps the fallback reactive to the fetch landing after
-                // first paint.
+                // Reading `known` keeps the fallback reactive to the fetch landing after first
+                // paint. It must be read, not tracked: a memo runs (and subscribes to the list)
+                // only when read.
                 let current_id = id.get();
-                known.track();
-                match house.dashboard(&current_id) {
+                let found = known.get().then(|| house.dashboard(&current_id)).flatten();
+                match found {
                     Some(view) => {
                         // The sidebar's "New dashboard" lands here with ?edit=1.
                         let initial_edit = query.read_untracked().get("edit").as_deref() == Some("1");
