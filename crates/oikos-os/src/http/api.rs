@@ -11,6 +11,8 @@ use axum::http::StatusCode;
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
+use oikos_alarm::doc::AlarmSettings;
+use oikos_alarm::view::AlarmView;
 use oikos_api::{
     AlertView, Ambiance, AmbianceView, ApiError, ApplyReport, AreaView, CommandResponse,
     ConnectionStatus, Dashboard, DashboardReorder, DashboardView, EnergyKind, EntityView, FlowView,
@@ -67,6 +69,8 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/weather", get(weather))
         .route("/solar", get(solar))
         .route("/home/settings", get(home_settings).put(put_home_settings))
+        .route("/alarm", get(alarm))
+        .route("/alarm/settings", put(put_alarm_settings))
         .route("/climate", get(climate))
         .route("/climate/house", put(put_climate_house))
         .route("/climate/zones/{id}", put(put_climate_zone))
@@ -725,6 +729,22 @@ async fn put_home_settings(
 ) -> Result<Json<HomeSettings>, HttpError> {
     let Json(settings) = body?;
     Ok(Json(hub.set_home_settings(settings)?))
+}
+
+/// The alarm as one document (`200`): settings, state and warnings.
+async fn alarm(State(hub): HubState) -> Json<AlarmView> {
+    Json(hub.alarm_view())
+}
+
+/// Replaces the alarm settings (204); `422` when they do not validate or name an entity the
+/// house does not have, `503` while the broker link is down.
+async fn put_alarm_settings(
+    State(hub): HubState,
+    body: Body<AlarmSettings>,
+) -> Result<StatusCode, HttpError> {
+    let Json(settings) = body?;
+    hub.set_alarm_settings(settings).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// The climate engine as one document (`200`); `503` while `[climate] enabled` is false.

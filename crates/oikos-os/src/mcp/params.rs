@@ -511,6 +511,13 @@ pub struct ClimateZoneDetail {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct SetAlarmSettingsParams {
+    /// The whole alarm settings document; it replaces the current one.
+    pub settings: oikos_alarm::doc::AlarmSettings,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SetClimateSettingsParams {
     /// The whole house document; it replaces the current one.
     pub settings: oikos_climate::doc::HouseSettings,

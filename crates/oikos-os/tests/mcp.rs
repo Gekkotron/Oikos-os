@@ -72,6 +72,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "learn_climate_zone",
     "get_weather",
     "get_solar",
+    "alarm_status",
+    "set_alarm_settings",
 ];
 
 const LED_ID: &str = "0x60a423fffe94d1c6_light_zigbee2mqtt";
@@ -202,6 +204,7 @@ async fn lists_the_expected_tools() {
     assert!(instructions.contains("list_alerts"), "{instructions}");
     assert!(instructions.contains("`notify`"), "{instructions}");
     assert!(instructions.contains("climate_status"), "{instructions}");
+    assert!(instructions.contains("oikos_alarm_house"), "{instructions}");
 
     let tools = client.list_all_tools().await.expect("list tools");
     let mut names: Vec<&str> = tools.iter().map(|tool| tool.name.as_ref()).collect();
@@ -1365,4 +1368,23 @@ async fn set_climate_override_schema_accepts_zone_with_the_fields() {
     }
     // `additionalProperties: false` is fine only because every field is listed above.
     assert_eq!(schema["required"], json!(["zone"]), "{schema}");
+}
+
+#[tokio::test]
+async fn alarm_tools_read_and_replace_settings() {
+    let server = Server::start().await;
+    let client = server.client().await;
+    let status = call(&client, "alarm_status", json!({})).await;
+    let view = json_of("alarm_status", &status);
+    assert_eq!(view["enabled"], false);
+    assert_eq!(view["entity_id"], "oikos_alarm_house");
+
+    let bad = call(
+        &client,
+        "set_alarm_settings",
+        json!({"settings": {"siren_s": 5}}),
+    )
+    .await;
+    assert_eq!(bad.is_error, Some(true));
+    assert!(text_of(&bad).starts_with("rejected:"), "{}", text_of(&bad));
 }
