@@ -24,7 +24,7 @@ pub fn today_range(lang: Lang, range: &str) -> String {
     }
 }
 
-/// The sunset line of the card; `short` is "Sunset 6:42 pm" / "Coucher 18 h 42".
+/// The sunset line of the card; `short` is "Sunset 18:42" / "Coucher 18 h 42".
 pub fn card_sunset(lang: Lang, at: NaiveTime, short: bool) -> String {
     let time = home_time(lang, at);
     match (lang, short) {
@@ -180,7 +180,7 @@ pub fn wind_sub(lang: Lang, compass: Option<&str>, gusts: Option<&str>) -> Strin
         .join(" · ")
 }
 
-/// The sub-line of the sun tile: "sunrise 8:21 am".
+/// The sub-line of the sun tile: "sunrise 08:21".
 pub fn sunrise_sub(lang: Lang, at: NaiveTime) -> String {
     match lang {
         Lang::Fr => format!("lever {}", home_time(lang, at)),
@@ -190,14 +190,14 @@ pub fn sunrise_sub(lang: Lang, at: NaiveTime) -> String {
 
 /// A forecast day's heading: "Sam. 24" / "Sat 24".
 pub fn short_weekday(lang: Lang, date: NaiveDate) -> String {
-    const EN: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    const FR: [&str; 7] = ["Lun.", "Mar.", "Mer.", "Jeu.", "Ven.", "Sam.", "Dim."];
-    let table = if lang == Lang::Fr { FR } else { EN };
-    let day = table[date.weekday().num_days_from_monday() as usize];
-    format!("{day} {}", date.day())
+    format!(
+        "{} {}",
+        format::weekday_short(lang, date.weekday()),
+        date.day()
+    )
 }
 
-/// "Updated at 9:02 pm".
+/// "Updated at 21:02".
 pub fn updated_at(lang: Lang, at: NaiveTime) -> String {
     format!(
         "{} {}",

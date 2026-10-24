@@ -1,6 +1,6 @@
 //! FR/EN text: Home header: date, clock, greeting, mood, chips and the home settings panel.
 
-use chrono::{Datelike, NaiveDate, NaiveTime, Timelike, Weekday};
+use chrono::{Datelike, NaiveDate, NaiveTime, Timelike};
 
 use crate::home_header::mood::{Activity, Detail, Greeting, TempBand};
 use crate::home_header::summary::HeatingChip;
@@ -9,88 +9,25 @@ use super::*;
 
 /// The long date, weekday first: "Vendredi 23 octobre" / "Friday 23 October".
 pub fn home_date(lang: Lang, date: NaiveDate) -> String {
-    let (weekdays, months) = match lang {
-        Lang::Fr => (
-            [
-                "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche",
-            ],
-            [
-                "janvier",
-                "février",
-                "mars",
-                "avril",
-                "mai",
-                "juin",
-                "juillet",
-                "août",
-                "septembre",
-                "octobre",
-                "novembre",
-                "décembre",
-            ],
-        ),
-        Lang::En => (
-            [
-                "Monday",
-                "Tuesday",
-                "Wednesday",
-                "Thursday",
-                "Friday",
-                "Saturday",
-                "Sunday",
-            ],
-            [
-                "January",
-                "February",
-                "March",
-                "April",
-                "May",
-                "June",
-                "July",
-                "August",
-                "September",
-                "October",
-                "November",
-                "December",
-            ],
-        ),
-    };
-    let weekday = match date.weekday() {
-        Weekday::Mon => 0,
-        Weekday::Tue => 1,
-        Weekday::Wed => 2,
-        Weekday::Thu => 3,
-        Weekday::Fri => 4,
-        Weekday::Sat => 5,
-        Weekday::Sun => 6,
-    };
     format!(
         "{} {} {}",
-        weekdays[weekday],
+        format::weekday_long(lang, date.weekday()),
         date.day(),
-        months[date.month0() as usize]
+        format::month_long(lang, date.month())
     )
 }
 
-/// A clock time: "18 h 42" / "6:42 pm".
+/// A clock time: "18 h 42" / "18:42".
 pub fn home_time(lang: Lang, t: NaiveTime) -> String {
     match lang {
         Lang::Fr => format!("{} h {:02}", t.hour(), t.minute()),
-        Lang::En => {
-            let (_, hour) = t.hour12();
-            let suffix = if t.hour() < 12 { "am" } else { "pm" };
-            format!("{hour}:{:02} {suffix}", t.minute())
-        }
+        Lang::En => format::time(t),
     }
 }
 
 /// A number with `decimals` places and the language's decimal separator.
 pub fn home_number(lang: Lang, v: f64, decimals: usize) -> String {
-    let s = format!("{v:.decimals$}");
-    match lang {
-        Lang::Fr => s.replace('.', ","),
-        Lang::En => s,
-    }
+    format::decimal(lang, v, decimals)
 }
 
 /// The greeting for a band of the day.
@@ -405,10 +342,10 @@ mod tests {
     fn home_time_fr_en() {
         let t = |h, m| NaiveTime::from_hms_opt(h, m, 0).unwrap();
         assert_eq!(home_time(Lang::Fr, t(18, 42)), "18 h 42");
-        assert_eq!(home_time(Lang::En, t(18, 42)), "6:42 pm");
+        assert_eq!(home_time(Lang::En, t(18, 42)), "18:42");
         assert_eq!(home_time(Lang::Fr, t(9, 5)), "9 h 05");
-        assert_eq!(home_time(Lang::En, t(0, 7)), "12:07 am");
-        assert_eq!(home_time(Lang::En, t(12, 0)), "12:00 pm");
+        assert_eq!(home_time(Lang::En, t(0, 7)), "00:07");
+        assert_eq!(home_time(Lang::En, t(12, 0)), "12:00");
     }
     #[test]
     fn home_number_follows_language() {
@@ -464,7 +401,7 @@ mod tests {
         );
         assert_eq!(
             detail_text(Lang::En, &Detail::Sunset(sunset)),
-            "Sunset at 6:42 pm"
+            "Sunset at 18:42"
         );
         assert_eq!(
             detail_text(Lang::En, &Detail::SunsetFallback),

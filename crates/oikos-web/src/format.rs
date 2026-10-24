@@ -210,34 +210,12 @@ fn date_time(s: &str) -> Option<String> {
     shaped.then(|| format!("{} {}", &s[..10], &s[11..16]))
 }
 
-/// Integers without a decimal, everything else with one; from 1000 up no decimals and a thin
-/// space between thousands.
+// Until every caller passes the UI language (Task 3 of the FR/EN plan), values use English.
 fn number(n: f64) -> String {
-    if !n.is_finite() {
-        DASH.into()
-    } else if n.abs() >= 1000.0 {
-        let digits = format!("{:.0}", n.abs());
-        let mut out = String::new();
-        for (i, c) in digits.chars().enumerate() {
-            if i > 0 && (digits.len() - i) % 3 == 0 {
-                out.push('\u{2009}');
-            }
-            out.push(c);
-        }
-        if n < 0.0 { format!("-{out}") } else { out }
-    } else if n.fract() == 0.0 {
-        format!("{n:.0}")
-    } else {
-        format!("{n:.1}")
-    }
+    crate::i18n::format::number(crate::i18n::Lang::En, n)
 }
 
-fn with_unit(value: String, unit: Option<&str>) -> String {
-    match unit {
-        Some(u) if !u.is_empty() && value != DASH => format!("{value} {u}"),
-        _ => value,
-    }
-}
+use crate::i18n::format::with_unit;
 
 /// Unix seconds as ISO 8601 UTC ("2026-10-19T09:41:00Z"); "—" when out of range.
 pub fn format_timestamp(seconds: u64) -> String {
@@ -428,7 +406,7 @@ mod tests {
             value: StateValue::Number(21.0),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("°C")), "21 °C");
+        assert_eq!(display_value(&s, Some("°C")), "21\u{a0}°C");
     }
     #[test]
     fn fractional_number_keeps_one_decimal() {
@@ -436,7 +414,7 @@ mod tests {
             value: StateValue::Number(21.47),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("°C")), "21.5 °C");
+        assert_eq!(display_value(&s, Some("°C")), "21.5\u{a0}°C");
     }
     #[test]
     fn on_off_renders_on_and_off() {
@@ -482,7 +460,7 @@ mod tests {
             value: StateValue::Number(80.0),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("%")), "80 %");
+        assert_eq!(display_value(&s, Some("%")), "80\u{a0}%");
     }
     #[test]
     fn light_shows_brightness_when_on() {
@@ -516,7 +494,7 @@ mod tests {
             value: StateValue::Climate(c),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, None), "22 → 15 °C");
+        assert_eq!(display_value(&s, None), "22 → 15\u{a0}°C");
     }
     #[test]
     fn climate_shows_current_and_target() {
@@ -529,7 +507,7 @@ mod tests {
             value: StateValue::Climate(c),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("°C")), "20.5 → 21 °C");
+        assert_eq!(display_value(&s, Some("°C")), "20.5 → 21\u{a0}°C");
     }
 
     #[test]
@@ -538,7 +516,7 @@ mod tests {
             value: StateValue::Number(2199.34),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("kWh")), "2\u{2009}199 kWh");
+        assert_eq!(display_value(&s, Some("kWh")), "2\u{2009}199\u{a0}kWh");
         let big = EntityState {
             value: StateValue::Number(-1234567.0),
             ..Default::default()
@@ -567,7 +545,7 @@ mod tests {
 
     #[test]
     fn degrees_defaults_to_celsius() {
-        assert_eq!(super::degrees(Some(21.0), None), "21 °C");
+        assert_eq!(super::degrees(Some(21.0), None), "21\u{a0}°C");
         assert_eq!(super::degrees(None, None), "—");
     }
 

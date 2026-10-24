@@ -12,16 +12,7 @@ use crate::nav::BackLink;
 
 /// The time of day of `unix` seconds on the browser's clock; UTC off the browser.
 fn local_time(unix: u64) -> NaiveTime {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(unix as f64 * 1000.0));
-        NaiveTime::from_hms_opt(date.get_hours(), date.get_minutes(), 0).unwrap_or_default()
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let secs = (unix % 86_400) as u32;
-        NaiveTime::from_num_seconds_from_midnight_opt(secs, 0).unwrap_or_default()
-    }
+    i18n::format::local_date_time(unix).time()
 }
 
 /// The word for an outcome.

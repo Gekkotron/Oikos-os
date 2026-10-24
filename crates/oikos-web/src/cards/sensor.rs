@@ -327,6 +327,6 @@ mod tests {
             value: StateValue::Number(42.0),
             ..Default::default()
         };
-        assert_eq!(sensor_text(&s, Some("W")), "42 W");
+        assert_eq!(sensor_text(&s, Some("W")), "42\u{a0}W");
     }
 }

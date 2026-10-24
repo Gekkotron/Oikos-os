@@ -93,18 +93,11 @@ pub fn solar_title(lang: Lang, measured: Option<f64>, so_far: f64, total: Option
         .join(" · ")
 }
 
-/// A whole hour as a short axis label: "12 h" in French, "12 pm" in English.
+/// A whole hour as a short axis label: "12 h" in French, "12:00" in English.
 pub fn solar_hour(lang: Lang, hour: u32) -> String {
     match lang {
         Lang::Fr => format!("{hour} h"),
-        Lang::En => {
-            let h12 = match hour % 12 {
-                0 => 12,
-                h => h,
-            };
-            let suffix = if hour % 24 < 12 { "am" } else { "pm" };
-            format!("{h12} {suffix}")
-        }
+        Lang::En => format!("{:02}:00", hour % 24),
     }
 }
 
@@ -164,7 +157,7 @@ pub fn solar_percent(lang: Lang, p: i32) -> String {
 }
 
 /// The sub-line of yesterday's tile: "forecast 11.6 · −6 %", or, for a forecast made late,
-/// "forecast at 9:42 am 11.6".
+/// "forecast at 09:42 11.6".
 pub fn solar_yesterday_sub(
     lang: Lang,
     forecast: f64,
@@ -204,7 +197,7 @@ pub fn solar_roofs(lang: Lang, roofs: &[(u32, Option<f64>)]) -> String {
         .join(" · ")
 }
 
-/// The page footer: "Updated at 9:02 pm · next around 10:00 pm · Solcast calls 3 / 10 today";
+/// The page footer: "Updated at 21:02 · next around 22:00 · Solcast calls 3 / 10 today";
 /// the "next" part is left out when no call is planned.
 pub fn solar_footer(
     lang: Lang,
@@ -327,10 +320,10 @@ mod tests {
             nb("5.2~kWh~produced")
         );
         assert_eq!(solar_hour(Lang::Fr, 12), "12 h");
-        assert_eq!(solar_hour(Lang::En, 12), "12 pm");
-        assert_eq!(solar_hour(Lang::En, 9), "9 am");
-        assert_eq!(solar_hour(Lang::En, 0), "12 am");
-        assert_eq!(solar_hour(Lang::En, 18), "6 pm");
+        assert_eq!(solar_hour(Lang::En, 12), "12:00");
+        assert_eq!(solar_hour(Lang::En, 9), "09:00");
+        assert_eq!(solar_hour(Lang::En, 0), "00:00");
+        assert_eq!(solar_hour(Lang::En, 18), "18:00");
         assert_eq!(solar_range(Lang::En, 9.8, 14.1), "Range 9.8–14.1 kWh");
         assert_eq!(solar_range(Lang::Fr, 9.8, 14.1), "Fourchette 9,8–14,1 kWh");
         assert_eq!(
@@ -355,7 +348,7 @@ mod tests {
         );
         assert_eq!(
             solar_yesterday_sub(Lang::En, 11.6, Some(-6), Some(t(9, 42))),
-            "forecast at 9:42 am 11.6"
+            "forecast at 09:42 11.6"
         );
         assert_eq!(
             solar_roofs(Lang::Fr, &[(1, Some(5.1)), (2, Some(7.3))]),
@@ -363,7 +356,7 @@ mod tests {
         );
         assert_eq!(
             solar_footer(Lang::En, Some(t(21, 2)), Some(t(22, 0)), 3, 10),
-            "Updated at 9:02 pm · next around 10:00 pm · Solcast calls 3 / 10 today"
+            "Updated at 21:02 · next around 22:00 · Solcast calls 3 / 10 today"
         );
         assert_eq!(
             solar_footer(Lang::Fr, Some(t(21, 2)), None, 3, 10),
