@@ -5976,101 +5976,183 @@ html:has(.flow-canvas-screen) {
 .climate-timeline {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
-.climate-timeline__row {
-  display: flex;
-  align-items: center;
+/* The week: an hours gutter, then one column per day with the hours going down. */
+.climate-timeline__cal {
+  display: grid;
+  grid-template-columns: 36px repeat(7, minmax(0, 1fr));
   gap: 6px;
 }
 
-.climate-timeline__day {
-  flex: 0 0 30px;
+.climate-timeline__dh {
+  text-align: center;
   font: var(--type-label);
-  opacity: 0.8;
+  color: var(--muted);
 }
 
-.climate-timeline__track,
-.climate-timeline__hours {
+.climate-timeline__dh--today {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.climate-timeline__dh--today::after {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 3px;
+  margin: 3px auto 0;
+  border-radius: 2px;
+  background: var(--danger);
+}
+
+.climate-timeline__hours,
+.climate-timeline__col {
   position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
+  height: 420px;
 }
 
-.climate-timeline__track {
-  height: 28px;
-  border-radius: 6px;
-  background: rgb(88 225 255 / 10%);
-  background-image: repeating-linear-gradient(
-    to right,
-    transparent 0,
-    transparent calc(25% - 1px),
-    var(--card-border) calc(25% - 1px),
-    var(--card-border) 25%
-  );
-}
-
-.climate-timeline__hours {
-  display: flex;
-  justify-content: space-between;
+.climate-timeline__hour {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
   font: var(--type-label);
-  opacity: 0.7;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.climate-timeline__col {
+  min-width: 0;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: var(--raised);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(12.5% - 1px),
+    var(--card-border) calc(12.5% - 1px),
+    var(--card-border) 12.5%
+  );
+  overflow: hidden;
+}
+
+.climate-timeline__col--today {
+  border-color: var(--danger);
+}
+
+.climate-timeline__col--editable {
+  cursor: cell;
 }
 
 .climate-timeline__bar {
   position: absolute;
-  top: 2px;
-  bottom: 2px;
+  left: 4px;
+  right: 4px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   box-sizing: border-box;
-  min-width: 4px;
-  border-radius: 5px;
-  background: var(--accent-amber);
-  color: #1b1405;
+  min-height: 4px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  color: var(--temp-ink);
   overflow: hidden;
-}
-
-.climate-timeline__bar--off {
-  background: var(--chip-border);
-  color: var(--ink);
-}
-
-.climate-timeline__bar--editable {
   cursor: pointer;
+  container-type: size;
 }
 
-.climate-timeline__bar--selected {
-  outline: 2px solid var(--accent-cyan);
+.climate-temp--low {
+  background: var(--temp-low);
 }
 
-.climate-timeline__label {
-  flex: 1 1 auto;
-  padding: 0 8px;
+.climate-temp--mid {
+  background: var(--temp-mid);
+}
+
+.climate-temp--high {
+  background: var(--temp-high);
+}
+
+.climate-temp--off {
+  background: var(--raised);
+  border: 1px dashed var(--chip-border);
+  color: var(--muted);
+}
+
+.climate-timeline__bar--selected,
+.climate-timeline__bar--peeked {
+  outline: 2px solid var(--select);
+  outline-offset: 1px;
+}
+
+.climate-timeline__temp,
+.climate-timeline__times {
   overflow: hidden;
-  font: var(--type-label);
   white-space: nowrap;
   text-overflow: clip;
   pointer-events: none;
 }
 
+.climate-timeline__temp {
+  font: 700 16px/18px var(--font-display);
+}
+
+.climate-timeline__times {
+  font: var(--type-label);
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* A short block keeps only its temperature. */
+@container (max-height: 36px) {
+  .climate-timeline__times {
+    display: none;
+  }
+}
+
+.climate-timeline__now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--danger);
+  pointer-events: none;
+}
+
+.climate-timeline__now::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+/* Full-width strips at the top and bottom, never more than a quarter of the block each, so its
+   middle stays clickable. */
 .climate-timeline__handle {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 14px;
-  cursor: ew-resize;
+  left: 0;
+  right: 0;
+  height: min(10px, 25%);
+  cursor: ns-resize;
   touch-action: none;
-  background: rgb(0 0 0 / 28%);
+  background: rgb(0 0 0 / 22%);
 }
 
 .climate-timeline__handle--from {
-  left: 0;
+  top: 0;
 }
 
 .climate-timeline__handle--to {
-  right: 0;
+  bottom: 0;
+}
+
+.climate-timeline__peek {
+  margin: 0;
+  font: var(--type-body);
 }
 
 .climate-timeline__editor {
@@ -6083,10 +6165,6 @@ html:has(.flow-canvas-screen) {
 .climate-timeline__editor-actions {
   display: flex;
   gap: 8px;
-}
-
-.climate-timeline__track--editable {
-  cursor: cell;
 }
 
 .climate-timeline__hint {
@@ -6117,11 +6195,6 @@ html:has(.flow-canvas-screen) {
 .climate-field--inline {
   flex-direction: row;
   align-items: center;
-}
-
-/* Handles never cover more than a quarter of a bar each, so its middle stays clickable. */
-.climate-timeline__handle {
-  width: min(14px, 25%);
 }
 
 /* Phones: the sidebar is a drawer that slides in over the page, behind the header's menu button.

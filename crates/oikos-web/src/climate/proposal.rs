@@ -8,7 +8,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oikos_api::ApiError;
-use oikos_climate::doc::{Mode, ModeRules, Proposal, ProposalKind, Rules, Setpoint};
+use oikos_climate::doc::{Day, Mode, ModeRules, Proposal, ProposalKind, Rules, Setpoint};
 use oikos_climate::learn::diff;
 use oikos_climate::view::ZoneView;
 
@@ -39,6 +39,7 @@ fn RulesTimeline(
     rules: Signal<Rules>,
     editable: Signal<bool>,
     on_change: Callback<Rules>,
+    now: Signal<(Day, u16)>,
 ) -> impl IntoView {
     let modes = Memo::new(move |_| rules.with(present));
     let mode = RwSignal::new(modes.with_untracked(|m| m.first().copied().unwrap_or(Mode::Heat)));
@@ -79,9 +80,9 @@ fn RulesTimeline(
         let change = Callback::new(move |next: ModeRules| {
             on_change.run(with_mode(&rules.get_untracked(), m, next));
         });
-        rules
-            .with_untracked(|r| r.get(m).is_some())
-            .then(|| view! { <WeekTimeline rules=current editable=editable on_change=change /> })
+        rules.with_untracked(|r| r.get(m).is_some()).then(
+            || view! { <WeekTimeline rules=current editable=editable on_change=change now=now /> },
+        )
     };
     view! {
         {tabs}
@@ -104,6 +105,8 @@ pub fn ProposalPanel(
     approved: Signal<Rules>,
     /// Called after an approval or rejection so the screen refetches.
     on_changed: Callback<()>,
+    /// Today and the minute of the day in the house time zone.
+    now: Signal<(Day, u16)>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let learned = proposal.rules.clone();
@@ -195,6 +198,7 @@ pub fn ProposalPanel(
                 rules=edited.into()
                 editable=editing.into()
                 on_change=Callback::new(move |next| edited.set(next))
+                now=now
             />
             {move || editing.get().then(&changes_view)}
             <div class="climate-proposal__actions">
@@ -240,7 +244,12 @@ pub fn ProposalPanel(
 
 /// The zone's approved rules on a timeline; "Edit rules" saves through the zone settings.
 #[component]
-pub fn RulesPanel(zone: Signal<ZoneView>, on_changed: Callback<()>) -> impl IntoView {
+pub fn RulesPanel(
+    zone: Signal<ZoneView>,
+    on_changed: Callback<()>,
+    /// Today and the minute of the day in the house time zone.
+    now: Signal<(Day, u16)>,
+) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let id = zone.with_untracked(|z| z.zone.clone());
     let editing = RwSignal::new(false);
@@ -288,6 +297,7 @@ pub fn RulesPanel(zone: Signal<ZoneView>, on_changed: Callback<()>) -> impl Into
                     rules=shown
                     editable=editing.into()
                     on_change=Callback::new(move |next| draft.set(next))
+                    now=now
                 />
                 <div class="climate-proposal__actions">
                     {move || {

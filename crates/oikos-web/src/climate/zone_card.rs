@@ -17,7 +17,7 @@ use crate::climate::{
     age_text, can_hold, decision_line, degrees_text, learn_status_text, minutes_to_next_change,
     mode_word, row_line, setpoint_text, source_word, until_text, week_minute,
 };
-use crate::components::now::unix_now;
+use crate::components::now::{Now, unix_now};
 use crate::components::toast::Toasts;
 
 /// How many recent decisions the card lists before the older rows.
@@ -74,6 +74,8 @@ pub fn ZoneCard(
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let id = zone.with_untracked(|z| z.zone.clone());
+    let clock = expect_context::<Now>().0;
+    let now = Signal::derive(move || week_minute(clock.get(), tz.get()));
 
     let reading = move || {
         zone.with(|z| match (z.reading, z.reading_age_s) {
@@ -263,7 +265,7 @@ pub fn ZoneCard(
             zone.with_untracked(|z| {
                 z.proposal.clone().map(|p| {
                     let approved = Signal::derive(move || zone.with(|z| z.settings.rules.clone()));
-                    view! { <ProposalPanel zone=z.zone.clone() proposal=p approved=approved on_changed=on_changed /> }
+                    view! { <ProposalPanel zone=z.zone.clone() proposal=p approved=approved on_changed=on_changed now=now /> }
                 })
             })
         })
@@ -375,7 +377,7 @@ pub fn ZoneCard(
             </div>
             <div class="climate-zone__extra">
                 {proposal}
-                <RulesPanel zone=zone on_changed=on_changed />
+                <RulesPanel zone=zone on_changed=on_changed now=now />
             </div>
             <div class="climate-decisions">
                 <button

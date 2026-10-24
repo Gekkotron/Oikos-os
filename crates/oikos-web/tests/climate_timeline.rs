@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 use leptos::task::tick;
-use oikos_climate::doc::{Block, Day, HhMm, ModeRules, Setpoint};
+use oikos_climate::doc::{Block, Day, Evidence, HhMm, ModeRules, Setpoint};
 use oikos_web::climate::timeline::WeekTimeline;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -19,19 +19,53 @@ fn block(days: &[Day], from: &str, to: &str, t: f64) -> Block {
     }
 }
 
+/// Tests load no stylesheet: the columns need a height for the vertical pointer mapping.
+fn install_layout() {
+    let document = web_sys::window().unwrap().document().unwrap();
+    if document.get_element_by_id("timeline-test-layout").is_some() {
+        return;
+    }
+    let style = document.create_element("style").unwrap();
+    style.set_id("timeline-test-layout");
+    style.set_text_content(Some(
+        ".climate-timeline__col { position: relative; height: 480px; } \
+         .climate-timeline__bar { position: absolute; left: 0; right: 0; }",
+    ));
+    document.head().unwrap().append_child(&style).unwrap();
+}
+
 async fn mount(rules: RwSignal<ModeRules>) -> Element {
+    mount_with(rules, true, None).await
+}
+
+async fn mount_with(
+    rules: RwSignal<ModeRules>,
+    editable: bool,
+    now: Option<(Day, u16)>,
+) -> Element {
+    install_layout();
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     host.set_attribute("style", "width: 700px").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
-    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
-        view! {
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || match now {
+        Some(now) => view! {
             <WeekTimeline
                 rules=rules.into()
-                editable=true
+                editable=editable
+                on_change=Callback::new(move |next| rules.set(next))
+                now=Signal::from(now)
+            />
+        }
+        .into_any(),
+        None => view! {
+            <WeekTimeline
+                rules=rules.into()
+                editable=editable
                 on_change=Callback::new(move |next| rules.set(next))
             />
         }
+        .into_any(),
     });
     // Keep the view alive for the rest of the test.
     std::mem::forget(mounted);
@@ -39,23 +73,23 @@ async fn mount(rules: RwSignal<ModeRules>) -> Element {
     host
 }
 
-/// The day track of `day` (rows go Mon to Sun).
-fn track(host: &Element, day: Day) -> Element {
+/// The column of `day` (columns go Mon to Sun).
+fn col(host: &Element, day: Day) -> Element {
     let index = Day::ALL.iter().position(|d| *d == day).unwrap() as u32;
-    host.query_selector_all(".climate-timeline__track")
+    host.query_selector_all(".climate-timeline__col")
         .unwrap()
         .item(index)
         .unwrap()
         .unchecked_into()
 }
 
-/// Clicks `target` at `fraction` of its width (a browser click is a `PointerEvent`).
+/// Clicks `target` at `fraction` of its height (a browser click is a `PointerEvent`).
 fn click_at(target: &Element, fraction: f64) {
     let rect = target.get_bounding_client_rect();
     let init = PointerEventInit::new();
     init.set_bubbles(true);
-    init.set_client_x((rect.left() + rect.width() * fraction) as i32);
-    init.set_client_y((rect.top() + 1.0) as i32);
+    init.set_client_x((rect.left() + rect.width() / 2.0) as i32);
+    init.set_client_y((rect.top() + rect.height() * fraction) as i32);
     let event = PointerEvent::new_with_event_init_dict("click", &init).unwrap();
     target.dispatch_event(&event).unwrap();
 }
@@ -79,7 +113,7 @@ async fn tapping_an_empty_spot_adds_a_block_on_that_day() {
     });
     let host = mount(rules).await;
 
-    click_at(&track(&host, Day::Sun), 0.75);
+    click_at(&col(&host, Day::Sun), 0.75);
     tick().await;
     let added = rules
         .with_untracked(|r| r.blocks.get(1).cloned())
@@ -95,7 +129,7 @@ async fn tapping_an_empty_spot_adds_a_block_on_that_day() {
     );
 
     // A click on a bar opens it instead of adding a block.
-    let bar = track(&host, Day::Sat)
+    let bar = col(&host, Day::Sat)
         .query_selector(".climate-timeline__bar")
         .unwrap()
         .expect("Saturday bar");
@@ -120,7 +154,7 @@ async fn day_chips_extend_a_block_to_another_day() {
     });
     let host = mount(rules).await;
 
-    let bar: HtmlElement = track(&host, Day::Sat)
+    let bar: HtmlElement = col(&host, Day::Sat)
         .query_selector(".climate-timeline__bar")
         .unwrap()
         .expect("Saturday bar")
@@ -148,10 +182,103 @@ async fn day_chips_extend_a_block_to_another_day() {
         Some("true")
     );
     assert!(
-        track(&host, Day::Sun)
+        col(&host, Day::Sun)
             .query_selector(".climate-timeline__bar")
             .unwrap()
             .is_some(),
         "Sunday shows the block"
+    );
+}
+
+fn text(el: &Element, selector: &str) -> Option<String> {
+    el.query_selector(selector)
+        .unwrap()
+        .and_then(|n| n.text_content())
+}
+
+#[wasm_bindgen_test]
+async fn blocks_stand_in_their_day_column_by_time() {
+    let rules = RwSignal::new(ModeRules {
+        base: Setpoint::Temp(15.0),
+        blocks: vec![
+            block(&[Day::Mon], "07:15", "14:00", 18.5),
+            block(&[Day::Mon], "14:00", "24:00", 16.0),
+        ],
+    });
+    let host = mount_with(rules, false, None).await;
+
+    let bars = col(&host, Day::Mon)
+        .query_selector_all(".climate-timeline__bar")
+        .unwrap();
+    assert_eq!(bars.length(), 2);
+    let first: Element = bars.item(0).unwrap().unchecked_into();
+    let style = first.get_attribute("style").unwrap();
+    assert!(style.contains("top:30.208%"), "{style}");
+    assert!(style.contains("height:28.125%"), "{style}");
+    assert!(first.class_list().contains("climate-temp--mid"));
+    let second: Element = bars.item(1).unwrap().unchecked_into();
+    assert!(second.class_list().contains("climate-temp--low"));
+    assert_eq!(
+        text(&second, ".climate-timeline__temp").as_deref(),
+        Some("16°")
+    );
+    assert_eq!(
+        text(&second, ".climate-timeline__times").as_deref(),
+        Some("14:00 – 24:00")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn now_line_sits_on_today() {
+    let rules = RwSignal::new(ModeRules {
+        base: Setpoint::Temp(15.0),
+        blocks: vec![],
+    });
+    let host = mount_with(rules, false, Some((Day::Sat, 20 * 60 + 30))).await;
+
+    let lines = host.query_selector_all(".climate-timeline__now").unwrap();
+    assert_eq!(lines.length(), 1);
+    let saturday = col(&host, Day::Sat);
+    assert!(
+        saturday
+            .class_list()
+            .contains("climate-timeline__col--today")
+    );
+    let line = saturday
+        .query_selector(".climate-timeline__now")
+        .unwrap()
+        .expect("the line is in Saturday's column");
+    let style = line.get_attribute("style").unwrap();
+    assert!(style.contains("top:85.417%"), "{style}");
+}
+
+#[wasm_bindgen_test]
+async fn tapping_a_block_when_viewing_shows_its_times() {
+    let mut learned = block(&[Day::Mon], "07:15", "14:00", 18.5);
+    learned.evidence = Some(Evidence { agree: 3, of: 5 });
+    let rules = RwSignal::new(ModeRules {
+        base: Setpoint::Temp(15.0),
+        blocks: vec![learned],
+    });
+    let host = mount_with(rules, false, None).await;
+    let peek = || text(&host, ".climate-timeline__peek");
+    assert_eq!(peek(), None);
+
+    let bar: HtmlElement = col(&host, Day::Mon)
+        .query_selector(".climate-timeline__bar")
+        .unwrap()
+        .expect("Monday bar")
+        .unchecked_into();
+    bar.click();
+    tick().await;
+    assert_eq!(peek().as_deref(), Some("07:15 – 14:00 · 18.5° · 3/5"));
+
+    bar.click();
+    tick().await;
+    assert_eq!(peek(), None);
+    assert!(
+        host.query_selector(".climate-timeline__editor")
+            .unwrap()
+            .is_none()
     );
 }
