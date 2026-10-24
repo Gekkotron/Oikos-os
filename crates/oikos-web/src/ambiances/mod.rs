@@ -9,6 +9,7 @@ pub mod actions;
 pub mod editor;
 pub mod page;
 pub mod report;
+pub mod row;
 
 use oikos_api::{
     Ambiance, AmbianceAction, AmbianceView, ApplyReport, AreaView, Category, CategoryAction,

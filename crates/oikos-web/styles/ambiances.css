@@ -453,3 +453,123 @@
     flex: 1 1 100%;
   }
 }
+
+/* The Home row: four tiles across, two by two on a phone */
+.ambiances-row {
+  margin-bottom: 20px;
+}
+
+.ambiances-row__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.ambiances-row__title {
+  margin: 0;
+  color: var(--ink);
+  font: var(--type-card-value);
+}
+
+.ambiances-row__tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 700px) {
+  .ambiances-row__tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.ambiances-row__tiles > li {
+  display: flex;
+  min-width: 0;
+}
+
+.mood-tile {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  min-height: var(--touch-min);
+  padding: 14px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--card-bg);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.mood-tile:disabled {
+  cursor: default;
+}
+
+.mood-tile--pressed {
+  border-color: var(--accent-ring);
+  background: var(--card-on-bg);
+  color: var(--card-on-ink);
+  transform: scale(0.98);
+}
+
+.mood-tile__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 6px;
+  border-radius: 12px;
+  background: var(--raised);
+  color: var(--accent-amber);
+}
+
+.mood-tile__icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.mood-tile__name {
+  font: var(--type-card-value);
+  overflow-wrap: anywhere;
+}
+
+.mood-tile__sub {
+  color: var(--muted);
+  font: var(--type-label);
+  overflow-wrap: anywhere;
+}
+
+.mood-tile--pressed .mood-tile__sub {
+  color: inherit;
+}
+
+.mood-invite {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.mood-tile--invite {
+  flex: 1 1 200px;
+  justify-content: center;
+}
+
+.mood-invite__examples {
+  flex: 1 1 200px;
+  padding: 0 16px;
+}

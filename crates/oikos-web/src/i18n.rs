@@ -124,6 +124,10 @@ pub enum Key {
     AmbianceOnlyFour,
     AmbianceEmpty,
     AmbianceAddExamples,
+    AmbiancesRowTitle,
+    AmbianceInvite,
+    AmbianceChoose,
+    AmbianceAddLamp,
     AmbianceLastRun,
     AmbianceNoReport,
     OutcomeDone,
@@ -256,6 +260,10 @@ impl Key {
         Key::AmbianceOnlyFour,
         Key::AmbianceEmpty,
         Key::AmbianceAddExamples,
+        Key::AmbiancesRowTitle,
+        Key::AmbianceInvite,
+        Key::AmbianceChoose,
+        Key::AmbianceAddLamp,
         Key::AmbianceLastRun,
         Key::AmbianceNoReport,
         Key::OutcomeDone,
@@ -392,6 +400,10 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         ),
         Key::AmbianceEmpty => ("No mood yet.", "Aucune ambiance pour l'instant."),
         Key::AmbianceAddExamples => ("Add the four examples", "Ajouter les quatre exemples"),
+        Key::AmbiancesRowTitle => ("One mood, one tap", "Une ambiance, un geste"),
+        Key::AmbianceInvite => ("Create a mood", "Créer une ambiance"),
+        Key::AmbianceChoose => ("Choose your moods", "Choisir vos ambiances"),
+        Key::AmbianceAddLamp => ("Add a lamp", "Ajoutez une lampe"),
         Key::AmbianceLastRun => ("Last run", "Dernier lancement"),
         Key::AmbianceNoReport => (
             "Not run since this page was opened.",
@@ -1314,6 +1326,10 @@ mod tests {
             | Key::AmbianceOnlyFour
             | Key::AmbianceEmpty
             | Key::AmbianceAddExamples
+            | Key::AmbiancesRowTitle
+            | Key::AmbianceInvite
+            | Key::AmbianceChoose
+            | Key::AmbianceAddLamp
             | Key::AmbianceLastRun
             | Key::AmbianceNoReport
             | Key::OutcomeDone
@@ -1424,7 +1440,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 127);
+        assert_eq!(Key::ALL.len(), 131);
     }
     fn window(room: Option<&str>) -> Activity {
         Activity::Open(Opening {
