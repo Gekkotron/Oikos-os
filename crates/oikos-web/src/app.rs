@@ -98,6 +98,7 @@ pub fn App() -> impl IntoView {
     install_nav();
     crate::alerts::install_alerts_badge(house);
     install_history_refresh(house);
+    crate::solar::measured::install_solar_measured(house);
     // A command the hub gave up on: tell the user, then clear it so the next one fires again.
     Effect::new(move |_| {
         if let Some((id, reason)) = house.command_failed.get() {
