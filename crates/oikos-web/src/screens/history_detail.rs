@@ -95,7 +95,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
                     .map_or_else(|| e.area.clone(), |a| a.name.clone())
             });
             let availability = e.state.availability;
-            let title = match title_suffix(&e) {
+            let title = match title_suffix(crate::i18n::Lang::En, &e) {
                 Some(suffix) => format!("{} · {suffix}", e.name),
                 None => e.name.clone(),
             };
@@ -103,7 +103,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
                 <div class="sheet__titles">
                     <h1 class="sheet__title">{wrap_id(&title)}</h1>
                     <p class="sheet__subtitle">
-                        {area} " · " {type_word(&e)} " · "
+                        {area} " · " {type_word(crate::i18n::Lang::En, &e)} " · "
                         <span class=availability_class(availability)></span>
                         " "
                         {availability_word(availability)}

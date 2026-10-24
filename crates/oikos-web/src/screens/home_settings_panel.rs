@@ -193,11 +193,11 @@ fn field_of_message(message: &str) -> Option<Field> {
 
 /// The primary `select` entities as `(id, label)`, plus `keep` (the chosen one) even when it is
 /// not primary: the hub's virtual ones first, then by label.
-fn mode_options(house: House, keep: Option<&str>) -> Vec<(String, String)> {
+fn mode_options(house: House, lang: Lang, keep: Option<&str>) -> Vec<(String, String)> {
     let mut list: Vec<(String, String)> = house.entities.with(|m| {
         m.values()
             .filter(|e| e.kind == Kind::Select && (e.is_primary() || keep == Some(e.id.as_str())))
-            .map(|e| (e.id.clone(), list_label(e)))
+            .map(|e| (e.id.clone(), list_label(lang, e)))
             .collect()
     });
     list.sort_by_key(|(id, label)| (!id.starts_with("virtual_"), label.to_lowercase()));
@@ -341,7 +341,8 @@ pub fn HomeSettingsPanel() -> impl IntoView {
                     </option>
                     {move || {
                         let current = mode_value.get();
-                        let mut list = mode_options(house, current.as_deref());
+                        let mut list =
+                            mode_options(house, lang.map_or(Lang::En, |l| l.get()), current.as_deref());
                         if let Some(id) = current.as_ref()
                             && !list.iter().any(|(i, _)| i == id)
                         {

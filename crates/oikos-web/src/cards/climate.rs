@@ -144,7 +144,7 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
         "—".to_owned()
     };
     let disabled = is_off || target.is_none();
-    let name = entity_title(&entity);
+    let name = entity_title(crate::i18n::current_lang(), &entity);
 
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);

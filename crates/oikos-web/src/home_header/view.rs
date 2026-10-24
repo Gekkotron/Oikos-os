@@ -143,9 +143,11 @@ pub fn HomeHeader() -> impl IntoView {
             .alerts
             .with(|a| unseen_count(a, house.last_alerts_seen.get()));
         house.entities.with(|e| {
-            house
-                .areas
-                .with(|areas| house.home_settings.with(|s| summarize(e, areas, s, unseen)))
+            house.areas.with(|areas| {
+                house
+                    .home_settings
+                    .with(|s| summarize(lang.get(), e, areas, s, unseen))
+            })
         })
     });
     let utc = move || DateTime::<Utc>::from_timestamp(now.get() as i64, 0).unwrap_or_default();

@@ -46,7 +46,11 @@ pub fn VacuumCard(entity: EntityView) -> impl IntoView {
     let lang = use_lang();
     let t = use_text();
     let in_sheet = use_card_place() == CardPlace::Sheet;
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let label = display_value(
+        crate::i18n::current_lang(),
+        &entity.state,
+        entity.unit.as_deref(),
+    );
     let (activity, battery, fan) = match &entity.state.value {
         StateValue::Vacuum(v) => (v.state.clone(), v.battery, v.fan_speed.clone()),
         _ => (None, None, None),

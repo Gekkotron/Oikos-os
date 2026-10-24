@@ -42,7 +42,11 @@ fn with_position(state: &EntityState, position: u8) -> Option<EntityState> {
 #[component]
 pub fn CoverCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let label = display_value(
+        crate::i18n::current_lang(),
+        &entity.state,
+        entity.unit.as_deref(),
+    );
     // The folded "moving" child changes on its own, without rebuilding this card, so the badge
     // follows it through a memo (which only notifies when the answer flips).
     let house = expect_context::<House>();

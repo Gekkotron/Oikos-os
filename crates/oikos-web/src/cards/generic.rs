@@ -180,7 +180,12 @@ pub fn GenericCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let def = types::type_def(&entity.component);
     let caps = entity.capabilities.generic.clone();
-    let value = generic_value(def, caps.as_ref(), &entity.state);
+    let value = generic_value(
+        crate::i18n::current_lang(),
+        def,
+        caps.as_ref(),
+        &entity.state,
+    );
     let is_alert = match (def, &entity.state.value) {
         (Some(d), StateValue::Generic(g)) => types::alerting(d, g),
         _ => false,

@@ -29,7 +29,11 @@ fn code_for(required: bool, typed: &str) -> Option<String> {
 #[component]
 pub fn AlarmPanelCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let label = display_value(
+        crate::i18n::current_lang(),
+        &entity.state,
+        entity.unit.as_deref(),
+    );
     let caps = &entity.capabilities;
     let (arm_required, disarm_required) = (caps.code_arm_required, caps.code_disarm_required);
     let numeric = caps.code_format == CodeFormat::Number;

@@ -100,7 +100,10 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
     let links = move || {
         house.entities.with(|m| {
             ids.iter()
-                .filter_map(|id| m.get(id).map(|e| (e.id.clone(), list_label(e))))
+                .filter_map(|id| {
+                    m.get(id)
+                        .map(|e| (e.id.clone(), list_label(crate::i18n::Lang::En, e)))
+                })
                 .collect::<Vec<_>>()
         })
     };

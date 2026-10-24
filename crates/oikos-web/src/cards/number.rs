@@ -11,7 +11,11 @@ use crate::format::{display_value, value_class};
 #[component]
 pub fn NumberCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let label = display_value(
+        crate::i18n::current_lang(),
+        &entity.state,
+        entity.unit.as_deref(),
+    );
     let caps = &entity.capabilities;
     let (min, max, step) = (
         caps.min.unwrap_or(0.0),

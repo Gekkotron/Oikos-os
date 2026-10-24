@@ -27,7 +27,11 @@ pub fn BinarySensorCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let text = match &entity.state.value {
         StateValue::OnOff(on) => binary_text(entity.device_class.as_deref(), *on).to_owned(),
-        _ => display_value(&entity.state, entity.unit.as_deref()),
+        _ => display_value(
+            crate::i18n::current_lang(),
+            &entity.state,
+            entity.unit.as_deref(),
+        ),
     };
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);

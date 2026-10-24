@@ -77,8 +77,13 @@ impl HeaterView {
 #[component]
 pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let label = display_value(&entity.state, entity.unit.as_deref());
+    let label = display_value(
+        crate::i18n::current_lang(),
+        &entity.state,
+        entity.unit.as_deref(),
+    );
     let target_text = degrees(
+        crate::i18n::current_lang(),
         match &entity.state.value {
             StateValue::WaterHeater(w) => w.target,
             _ => None,
@@ -121,7 +126,7 @@ pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
         }
     });
     let inlet = heater.inlet.map(|t| {
-        let text = degrees(Some(t), entity.unit.as_deref());
+        let text = degrees(crate::i18n::current_lang(), Some(t), entity.unit.as_deref());
         view! {
             <span class="heater__inlet">
                 <span aria-hidden="true">"↓ "</span>

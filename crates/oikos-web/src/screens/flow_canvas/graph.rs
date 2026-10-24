@@ -360,6 +360,7 @@ pub fn Graph(
 /// One pill: reads its node, position and run state from `c` by id, so a card survives (and
 /// keeps its pointer capture) while the flow around it changes.
 fn card(id: String, c: Shared, house: House) -> impl IntoView {
+    let lang = crate::i18n::use_lang();
     let node_id = id.clone();
     let kind = Memo::new(move |_| c.flow.with(|f| f.node(&node_id).map(|n| n.kind.clone())));
     let node_id = id.clone();
@@ -373,6 +374,7 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
                         entities,
                         areas,
                         flows: &names,
+                        lang: lang(),
                     };
                     Some((title(node, &ctx), subline(node, &ctx)))
                 })

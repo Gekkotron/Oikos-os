@@ -4,27 +4,37 @@ use oikos_api::{AreaView, EntityView};
 use oikos_core::model::{EntityState, GenericValue, Kind, StateValue, SwitchType, UNASSIGNED_AREA};
 use oikos_core::types::{GenericCaps, TypeDef};
 
+use crate::i18n::Lang;
+use crate::i18n::format::{number, with_unit};
+use crate::i18n::states::{self, StateCtx, on_off, state_word};
+
 const DASH: &str = "—";
 
 /// The value a card shows: "On", "21.5 °C", "—" while nothing usable is known.
-pub fn display_value(state: &EntityState, unit: Option<&str>) -> String {
+pub fn display_value(lang: Lang, state: &EntityState, unit: Option<&str>) -> String {
     match &state.value {
-        StateValue::OnOff(true) => "On".into(),
-        StateValue::OnOff(false) => "Off".into(),
-        StateValue::Number(n) => with_unit(number(*n), unit),
+        StateValue::OnOff(on) => on_off(lang, false, *on).into(),
+        StateValue::Number(n) => with_unit(number(lang, *n), unit),
         StateValue::Text(s) if is_unusable(s) => DASH.into(),
         StateValue::Text(s) => with_unit(date_time(s).unwrap_or_else(|| s.clone()), unit),
         StateValue::Light(l) => match (l.on, l.brightness) {
-            (true, Some(b)) => format!("On · {} %", (u32::from(b) * 100 + 127) / 255),
-            (true, None) => "On".into(),
-            (false, _) => "Off".into(),
+            (true, Some(b)) => format!(
+                "{} · {}",
+                on_off(lang, true, true),
+                with_unit(((u32::from(b) * 100 + 127) / 255).to_string(), Some("%"))
+            ),
+            (on, _) => on_off(lang, true, on).into(),
         },
         StateValue::Cover(c) => {
-            let word = c.state.as_deref().map(word);
+            let word = c
+                .state
+                .as_deref()
+                .map(|s| state_word(lang, StateCtx::Cover, s));
+            let percent = |p: u8| with_unit(p.to_string(), Some("%"));
             match (word, c.position) {
-                (Some(w), Some(p)) => format!("{w} · {p} %"),
+                (Some(w), Some(p)) => format!("{w} · {}", percent(p)),
                 (Some(w), None) => w,
-                (None, Some(p)) => format!("{p} %"),
+                (None, Some(p)) => percent(p),
                 (None, None) => DASH.into(),
             }
         }
@@ -33,19 +43,32 @@ pub fn display_value(state: &EntityState, unit: Option<&str>) -> String {
             let unit = unit.filter(|u| !u.is_empty()).unwrap_or("°C");
             match (c.current, c.target) {
                 (Some(cur), Some(tgt)) => {
-                    format!("{} → {}", number(cur), with_unit(number(tgt), Some(unit)))
+                    format!(
+                        "{} → {}",
+                        number(lang, cur),
+                        with_unit(number(lang, tgt), Some(unit))
+                    )
                 }
-                (Some(v), None) | (None, Some(v)) => with_unit(number(v), Some(unit)),
-                (None, None) => c.mode.as_deref().map_or_else(|| DASH.into(), word),
+                (Some(v), None) | (None, Some(v)) => with_unit(number(lang, v), Some(unit)),
+                (None, None) => c
+                    .mode
+                    .as_deref()
+                    .map_or_else(|| DASH.into(), |m| state_word(lang, StateCtx::Hvac, m)),
             }
         }
-        StateValue::Alarm(s) => word(s),
-        StateValue::Vacuum(v) => v.state.as_deref().map_or_else(|| DASH.into(), word),
+        StateValue::Alarm(s) => state_word(lang, StateCtx::Alarm, s),
+        StateValue::Vacuum(v) => v
+            .state
+            .as_deref()
+            .map_or_else(|| DASH.into(), |s| state_word(lang, StateCtx::Vacuum, s)),
         StateValue::WaterHeater(w) => match (w.current, w.target) {
-            (Some(v), _) | (None, Some(v)) => with_unit(number(v), unit),
-            (None, None) => w.mode.as_deref().map_or_else(|| DASH.into(), word),
+            (Some(v), _) | (None, Some(v)) => with_unit(number(lang, v), unit),
+            (None, None) => w
+                .mode
+                .as_deref()
+                .map_or_else(|| DASH.into(), |m| state_word(lang, StateCtx::Hvac, m)),
         },
-        StateValue::Generic(_) => generic_value(None, None, state),
+        StateValue::Generic(_) => generic_value(lang, None, None, state),
         StateValue::Unknown => DASH.into(),
     }
 }
@@ -67,9 +90,9 @@ fn is_unusable(s: &str) -> bool {
 }
 
 /// A temperature as "21 °C" (Celsius when `unit` is unknown), "—" when there is none.
-pub fn degrees(value: Option<f64>, unit: Option<&str>) -> String {
+pub fn degrees(lang: Lang, value: Option<f64>, unit: Option<&str>) -> String {
     let unit = unit.filter(|u| !u.is_empty()).unwrap_or("°C");
-    value.map_or_else(|| DASH.into(), |v| with_unit(number(v), Some(unit)))
+    value.map_or_else(|| DASH.into(), |v| with_unit(number(lang, v), Some(unit)))
 }
 
 /// The CSS classes of a card's value line: values over nine characters get the smaller,
@@ -122,50 +145,57 @@ pub fn wrap_id(id: &str) -> String {
     out
 }
 
-/// "binary_sensor" as "Binary sensor".
-pub fn kind_word(kind: Kind) -> String {
-    serde_json::to_value(kind)
-        .ok()
-        .and_then(|v| v.as_str().map(word))
-        .unwrap_or_default()
+/// "binary_sensor" as "Binary sensor" / "Détecteur".
+pub fn kind_word(lang: Lang, kind: Kind) -> String {
+    states::kind_word(lang, kind).to_owned()
 }
 
 /// The word for what an entity is: the type a switch is shown as ("Door opener"), else its kind.
-pub fn type_word(entity: &EntityView) -> String {
-    shown_type(entity).map_or_else(|| kind_word(entity.kind), str::to_owned)
+pub fn type_word(lang: Lang, entity: &EntityView) -> String {
+    shown_type(entity).map_or_else(
+        || kind_word(lang, entity.kind),
+        |t| states::switch_type_word(lang, t).to_owned(),
+    )
 }
 
-/// The label of the type a switch is shown as, unless it is a plain switch.
-fn shown_type(entity: &EntityView) -> Option<&'static str> {
-    SwitchType::of(entity.protocol_kind, &entity.ui)
-        .filter(|t| *t != SwitchType::Switch)
-        .map(SwitchType::label)
+/// What an entity is in both languages, lower case ("cover", "volet"), for searches that must
+/// find it whatever the UI language.
+pub fn kind_search_words(entity: &EntityView) -> [String; 2] {
+    states::search_words(entity.kind, shown_type(entity))
+}
+
+/// The type a switch is shown as, unless it is a plain switch.
+fn shown_type(entity: &EntityView) -> Option<SwitchType> {
+    SwitchType::of(entity.protocol_kind, &entity.ui).filter(|t| *t != SwitchType::Switch)
 }
 
 /// What tells an entity apart from its same-named siblings: set when the entity is named exactly
 /// like its device (a siren whose four entities are all "door_siren"), then its device class
 /// ("Siren"), else its kind ("Binary sensor"). `None` for an entity with a name of its own, and
 /// when the suffix would repeat the name (a "Water heater" device's water heater).
-pub fn title_suffix(entity: &EntityView) -> Option<String> {
+pub fn title_suffix(lang: Lang, entity: &EntityView) -> Option<String> {
     let device = entity.device_name.as_deref().filter(|d| !d.is_empty())?;
     if !entity.name.eq_ignore_ascii_case(device) {
         return None;
     }
     let suffix = match shown_type(entity) {
-        Some(shown) => shown.to_owned(),
+        Some(shown) => states::switch_type_word(lang, shown).to_owned(),
         None => entity
             .device_class
             .as_deref()
             .filter(|c| !c.is_empty())
-            .map_or_else(|| kind_word(entity.kind), word),
+            .map_or_else(
+                || kind_word(lang, entity.kind),
+                |c| states::device_class_word(lang, c).map_or_else(|| word(c), str::to_owned),
+            ),
     };
     (!suffix.eq_ignore_ascii_case(&entity.name)).then_some(suffix)
 }
 
 /// The card title: [`short_name`] plus the [`title_suffix`] when there is one.
-pub fn entity_title(entity: &EntityView) -> String {
+pub fn entity_title(lang: Lang, entity: &EntityView) -> String {
     let short = short_name(&entity.name, entity.device_name.as_deref());
-    match title_suffix(entity) {
+    match title_suffix(lang, entity) {
         Some(suffix) => format!("{short} · {suffix}"),
         None => short,
     }
@@ -173,9 +203,9 @@ pub fn entity_title(entity: &EntityView) -> String {
 
 /// The label of an entity in a list of links: its title and its kind, where the suffix of a
 /// same-named entity stands in for the kind.
-pub fn list_label(entity: &EntityView) -> String {
+pub fn list_label(lang: Lang, entity: &EntityView) -> String {
     let short = short_name(&entity.name, entity.device_name.as_deref());
-    let tail = title_suffix(entity).unwrap_or_else(|| type_word(entity));
+    let tail = title_suffix(lang, entity).unwrap_or_else(|| type_word(lang, entity));
     if tail.eq_ignore_ascii_case(&short) {
         return short;
     }
@@ -210,13 +240,6 @@ fn date_time(s: &str) -> Option<String> {
     shaped.then(|| format!("{} {}", &s[..10], &s[11..16]))
 }
 
-// Until every caller passes the UI language (Task 3 of the FR/EN plan), values use English.
-fn number(n: f64) -> String {
-    crate::i18n::format::number(crate::i18n::Lang::En, n)
-}
-
-use crate::i18n::format::with_unit;
-
 /// Unix seconds as ISO 8601 UTC ("2026-10-19T09:41:00Z"); "—" when out of range.
 pub fn format_timestamp(seconds: u64) -> String {
     let format =
@@ -238,18 +261,16 @@ pub fn word(s: &str) -> String {
     }
 }
 
-/// A canonical choice value as shown on a card: `not_home` is "Away", `home` "Home", the rest
-/// sentence case.
-pub fn choice_word(s: &str) -> String {
-    match s {
-        "not_home" => "Away".into(),
-        other => word(other),
-    }
+/// A canonical choice value as shown on a card: `not_home` is "Away" / "Absent", lock and cover
+/// words are translated, the rest sentence case.
+pub fn choice_word(lang: Lang, s: &str) -> String {
+    state_word(lang, StateCtx::Choice, s)
 }
 
 /// The value a generic card shows: the type's primary field (a lone or `state` field without a
 /// type), "••••" for a secret, "" for a picture, "—" while nothing is known.
 pub fn generic_value(
+    lang: Lang,
     def: Option<&TypeDef>,
     caps: Option<&GenericCaps>,
     state: &EntityState,
@@ -276,11 +297,10 @@ pub fn generic_value(
         }),
     };
     match value {
-        Some(GenericValue::Bool(true)) => "On".into(),
-        Some(GenericValue::Bool(false)) => "Off".into(),
-        Some(GenericValue::Number(n)) => number(*n),
+        Some(GenericValue::Bool(on)) => on_off(lang, false, *on).into(),
+        Some(GenericValue::Number(n)) => number(lang, *n),
         Some(GenericValue::Text(s)) if is_unusable(s) || s.is_empty() => DASH.into(),
-        Some(GenericValue::Text(s)) => choice_word(s),
+        Some(GenericValue::Text(s)) => choice_word(lang, s),
         None => DASH.into(),
     }
 }
@@ -288,6 +308,7 @@ pub fn generic_value(
 #[cfg(test)]
 mod tests {
     use super::{display_value, entity_title, list_label, wrap_id};
+    use crate::i18n::Lang;
     use oikos_api::EntityView;
     use oikos_core::model::{
         Capabilities, ClimateState, EntityCategory, EntityState, Kind, LightState, StateValue,
@@ -321,26 +342,26 @@ mod tests {
     fn unnamed_relay_titles_follow_the_type() {
         let mut gate = entity("gate", "gate", Kind::Switch, Some("outlet"));
         gate.ui.show_as = Some("door".into());
-        assert_eq!(entity_title(&gate), "gate · Door opener");
-        assert_eq!(list_label(&gate), "gate · Door opener");
+        assert_eq!(entity_title(Lang::En, &gate), "gate · Door opener");
+        assert_eq!(list_label(Lang::En, &gate), "gate · Door opener");
         let mut named = entity("Gate relay", "gate", Kind::Switch, None);
         named.ui.show_as = Some("siren".into());
-        assert_eq!(list_label(&named), "Relay · Siren");
+        assert_eq!(list_label(Lang::En, &named), "Relay · Siren");
         let plain = entity("gate", "gate", Kind::Switch, Some("outlet"));
-        assert_eq!(entity_title(&plain), "gate · Outlet");
+        assert_eq!(entity_title(Lang::En, &plain), "gate · Outlet");
     }
 
     #[test]
     fn type_word_names_the_switch_type() {
         let mut door = entity("gate", "gate", Kind::Switch, None);
         door.ui.show_as = Some("door".into());
-        assert_eq!(super::type_word(&door), "Door opener");
+        assert_eq!(super::type_word(Lang::En, &door), "Door opener");
         assert_eq!(
-            super::type_word(&entity("s", "s", Kind::Switch, None)),
+            super::type_word(Lang::En, &entity("s", "s", Kind::Switch, None)),
             "Switch"
         );
         assert_eq!(
-            super::type_word(&entity("l", "l", Kind::Light, None)),
+            super::type_word(Lang::En, &entity("l", "l", Kind::Light, None)),
             "Light"
         );
     }
@@ -359,17 +380,17 @@ mod tests {
             Kind::BinarySensor,
             Some("tamper"),
         );
-        assert_eq!(entity_title(&siren), "door_siren · Tamper");
-        assert_eq!(list_label(&siren), "door_siren · Tamper");
+        assert_eq!(entity_title(Lang::En, &siren), "door_siren · Tamper");
+        assert_eq!(list_label(Lang::En, &siren), "door_siren · Tamper");
         let plain = entity("door_siren", "Door_Siren", Kind::Switch, None);
-        assert_eq!(entity_title(&plain), "door_siren · Switch");
+        assert_eq!(entity_title(Lang::En, &plain), "door_siren · Switch");
     }
 
     #[test]
     fn suffix_that_repeats_the_name_is_dropped() {
         let heater = entity("Water heater", "Water heater", Kind::WaterHeater, None);
-        assert_eq!(entity_title(&heater), "Water heater");
-        assert_eq!(list_label(&heater), "Water heater");
+        assert_eq!(entity_title(Lang::En, &heater), "Water heater");
+        assert_eq!(list_label(Lang::En, &heater), "Water heater");
     }
 
     #[test]
@@ -380,8 +401,8 @@ mod tests {
             Kind::Sensor,
             Some("energy"),
         );
-        assert_eq!(entity_title(&e), "Energy");
-        assert_eq!(list_label(&e), "Energy · Sensor");
+        assert_eq!(entity_title(Lang::En, &e), "Energy");
+        assert_eq!(list_label(Lang::En, &e), "Energy · Sensor");
     }
 
     #[test]
@@ -390,7 +411,7 @@ mod tests {
             value: StateValue::Text("unknown".into()),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, None), "—");
+        assert_eq!(display_value(Lang::En, &s, None), "—");
     }
     #[test]
     fn unavailable_text_renders_as_dash() {
@@ -398,7 +419,7 @@ mod tests {
             value: StateValue::Text("UnAvAiLaBlE".into()),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, None), "—");
+        assert_eq!(display_value(Lang::En, &s, None), "—");
     }
     #[test]
     fn integer_number_omits_decimal() {
@@ -406,7 +427,7 @@ mod tests {
             value: StateValue::Number(21.0),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("°C")), "21\u{a0}°C");
+        assert_eq!(display_value(Lang::En, &s, Some("°C")), "21\u{a0}°C");
     }
     #[test]
     fn fractional_number_keeps_one_decimal() {
@@ -414,7 +435,7 @@ mod tests {
             value: StateValue::Number(21.47),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("°C")), "21.5\u{a0}°C");
+        assert_eq!(display_value(Lang::En, &s, Some("°C")), "21.5\u{a0}°C");
     }
     #[test]
     fn on_off_renders_on_and_off() {
@@ -426,8 +447,8 @@ mod tests {
             value: StateValue::OnOff(false),
             ..Default::default()
         };
-        assert_eq!(display_value(&s_on, None), "On");
-        assert_eq!(display_value(&s_off, None), "Off");
+        assert_eq!(display_value(Lang::En, &s_on, None), "On");
+        assert_eq!(display_value(Lang::En, &s_off, None), "Off");
     }
     #[test]
     fn unknown_variant_renders_as_dash() {
@@ -435,7 +456,7 @@ mod tests {
             value: StateValue::Unknown,
             ..Default::default()
         };
-        assert_eq!(display_value(&s, None), "—");
+        assert_eq!(display_value(Lang::En, &s, None), "—");
     }
     #[test]
     fn is_on_covers_switches_and_lights() {
@@ -460,7 +481,7 @@ mod tests {
             value: StateValue::Number(80.0),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("%")), "80\u{a0}%");
+        assert_eq!(display_value(Lang::En, &s, Some("%")), "80\u{a0}%");
     }
     #[test]
     fn light_shows_brightness_when_on() {
@@ -473,7 +494,7 @@ mod tests {
             value: StateValue::Light(l),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, None), "On · 50 %");
+        assert_eq!(display_value(Lang::En, &s, None), "On · 50\u{a0}%");
     }
     #[test]
     fn alarm_state_is_capitalised_without_underscores() {
@@ -481,7 +502,7 @@ mod tests {
             value: StateValue::Alarm("armed_away".into()),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, None), "Armed away");
+        assert_eq!(display_value(Lang::En, &s, None), "Armed away");
     }
     #[test]
     fn climate_defaults_to_celsius_when_unit_unknown() {
@@ -494,7 +515,7 @@ mod tests {
             value: StateValue::Climate(c),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, None), "22 → 15\u{a0}°C");
+        assert_eq!(display_value(Lang::En, &s, None), "22 → 15\u{a0}°C");
     }
     #[test]
     fn climate_shows_current_and_target() {
@@ -507,7 +528,7 @@ mod tests {
             value: StateValue::Climate(c),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("°C")), "20.5 → 21\u{a0}°C");
+        assert_eq!(display_value(Lang::En, &s, Some("°C")), "20.5 → 21\u{a0}°C");
     }
 
     #[test]
@@ -516,17 +537,23 @@ mod tests {
             value: StateValue::Number(2199.34),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, Some("kWh")), "2\u{2009}199\u{a0}kWh");
+        assert_eq!(
+            display_value(Lang::En, &s, Some("kWh")),
+            "2\u{2009}199\u{a0}kWh"
+        );
         let big = EntityState {
             value: StateValue::Number(-1234567.0),
             ..Default::default()
         };
-        assert_eq!(display_value(&big, None), "-1\u{2009}234\u{2009}567");
+        assert_eq!(
+            display_value(Lang::En, &big, None),
+            "-1\u{2009}234\u{2009}567"
+        );
         let under = EntityState {
             value: StateValue::Number(999.5),
             ..Default::default()
         };
-        assert_eq!(display_value(&under, None), "999.5");
+        assert_eq!(display_value(Lang::En, &under, None), "999.5");
     }
 
     #[test]
@@ -535,18 +562,21 @@ mod tests {
             value: StateValue::Text("2026-10-19T09:41:12+02:00".into()),
             ..Default::default()
         };
-        assert_eq!(display_value(&s, None), "2026-10-19 09:41");
+        assert_eq!(display_value(Lang::En, &s, None), "2026-10-19 09:41");
         let plain = EntityState {
             value: StateValue::Text("2026-10-19 is a date".into()),
             ..Default::default()
         };
-        assert_eq!(display_value(&plain, None), "2026-10-19 is a date");
+        assert_eq!(
+            display_value(Lang::En, &plain, None),
+            "2026-10-19 is a date"
+        );
     }
 
     #[test]
     fn degrees_defaults_to_celsius() {
-        assert_eq!(super::degrees(Some(21.0), None), "21\u{a0}°C");
-        assert_eq!(super::degrees(None, None), "—");
+        assert_eq!(super::degrees(Lang::En, Some(21.0), None), "21\u{a0}°C");
+        assert_eq!(super::degrees(Lang::En, None, None), "—");
     }
 
     #[test]
@@ -572,7 +602,9 @@ mod tests {
 
 #[cfg(test)]
 mod ts_tests {
-    use super::format_timestamp;
+    use super::{display_value, format_timestamp};
+    use crate::i18n::Lang;
+    use oikos_core::model::LightState;
     use oikos_core::model::{EntityState, GenericValue, StateValue};
 
     #[test]
@@ -601,11 +633,17 @@ mod ts_tests {
         let lock = oikos_core::types::type_def("lock");
         let tracker = oikos_core::types::type_def("device_tracker");
         assert_eq!(
-            generic_value(lock, None, &generic_state("state", Text("locked".into()))),
+            generic_value(
+                Lang::En,
+                lock,
+                None,
+                &generic_state("state", Text("locked".into()))
+            ),
             "Locked"
         );
         assert_eq!(
             generic_value(
+                Lang::En,
                 tracker,
                 None,
                 &generic_state("state", Text("not_home".into()))
@@ -613,7 +651,12 @@ mod ts_tests {
             "Away"
         );
         assert_eq!(
-            generic_value(tracker, None, &generic_state("state", Text("home".into()))),
+            generic_value(
+                Lang::En,
+                tracker,
+                None,
+                &generic_state("state", Text("home".into()))
+            ),
             "Home"
         );
     }
@@ -627,7 +670,12 @@ mod ts_tests {
         };
         let s = generic_state("state", GenericValue::Text("hunter2".into()));
         assert_eq!(
-            generic_value(oikos_core::types::type_def("text"), Some(&caps), &s),
+            generic_value(
+                Lang::En,
+                oikos_core::types::type_def("text"),
+                Some(&caps),
+                &s
+            ),
             "••••"
         );
     }
@@ -649,5 +697,37 @@ mod ts_tests {
         assert_eq!(room_name(&areas, "salon").as_deref(), Some("Living room"));
         assert_eq!(room_name(&areas, "gone").as_deref(), Some("gone"));
         assert_eq!(room_name(&areas, oikos_core::model::UNASSIGNED_AREA), None);
+    }
+    #[test]
+    fn french_card_values() {
+        let state = |value| EntityState {
+            value,
+            ..Default::default()
+        };
+        let light = LightState {
+            on: true,
+            brightness: Some(204),
+            ..Default::default()
+        };
+        let cover = oikos_core::model::CoverState {
+            state: Some("open".into()),
+            position: Some(40),
+        };
+        assert_eq!(
+            display_value(Lang::Fr, &state(StateValue::OnOff(true)), None),
+            "Activé"
+        );
+        assert_eq!(
+            display_value(Lang::Fr, &state(StateValue::Light(light)), None),
+            "Allumé · 80\u{a0}%"
+        );
+        assert_eq!(
+            display_value(Lang::Fr, &state(StateValue::Number(21.46)), Some("°C")),
+            "21,5\u{a0}°C"
+        );
+        assert_eq!(
+            display_value(Lang::Fr, &state(StateValue::Cover(cover)), None),
+            "Ouvert · 40\u{a0}%"
+        );
     }
 }

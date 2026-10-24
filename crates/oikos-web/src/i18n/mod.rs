@@ -7,6 +7,7 @@ mod dashboards;
 pub mod format;
 mod home;
 mod solar;
+pub mod states;
 mod weather;
 
 pub use ambiances::*;
@@ -587,6 +588,12 @@ pub fn flow_started(lang: Lang, name: &str) -> String {
 pub fn use_lang() -> impl Fn() -> Lang + Copy + 'static {
     let lang = use_context::<RwSignal<Lang>>();
     move || lang.map_or(Lang::En, |l| l.get())
+}
+
+/// The language in context right now, without tracking it: for a view built once that does not
+/// follow a later toggle (cards rebuilt from the entity). English when there is none.
+pub fn current_lang() -> Lang {
+    untrack(use_lang())
 }
 
 /// A translator bound to the language signal in context (reactive), or English when there is none.

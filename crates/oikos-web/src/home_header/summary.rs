@@ -6,6 +6,7 @@ use oikos_api::{AreaView, EntityView, HomeSettings};
 use oikos_core::model::{Availability, EntityCategory, Kind, StateValue, UNASSIGNED_AREA};
 
 use crate::format::{entity_title, is_on, room_name};
+use crate::i18n::Lang;
 
 /// The device the hub publishes its weather entities under.
 const WEATHER_DEVICE: &str = "oikos_weather";
@@ -109,7 +110,11 @@ pub fn lights_on(entities: &BTreeMap<String, EntityView>) -> usize {
 }
 
 /// The open doors and windows, sorted by title.
-pub fn openings(entities: &BTreeMap<String, EntityView>, areas: &[AreaView]) -> Vec<Opening> {
+pub fn openings(
+    lang: Lang,
+    entities: &BTreeMap<String, EntityView>,
+    areas: &[AreaView],
+) -> Vec<Opening> {
     let mut list: Vec<Opening> = entities
         .values()
         .filter(|e| {
@@ -123,7 +128,7 @@ pub fn openings(entities: &BTreeMap<String, EntityView>, areas: &[AreaView]) -> 
                 && matches!(e.state.value, StateValue::OnOff(true))
         })
         .map(|e| Opening {
-            title: entity_title(e),
+            title: entity_title(lang, e),
             room: room_name(areas, &e.area),
         })
         .collect();
@@ -194,6 +199,7 @@ pub fn mode_chip(
 
 /// The whole summary in one pass.
 pub fn summarize(
+    lang: Lang,
     entities: &BTreeMap<String, EntityView>,
     areas: &[AreaView],
     settings: &HomeSettings,
@@ -202,7 +208,7 @@ pub fn summarize(
     HouseSummary {
         indoor: indoor_temperature(entities, settings),
         lights_on: lights_on(entities),
-        openings: openings(entities, areas),
+        openings: openings(lang, entities, areas),
         unseen_alerts,
         heating: heating_chip(entities, settings.eco_setpoint),
         mode: mode_chip(entities, settings.mode_entity.as_deref()),
@@ -408,7 +414,7 @@ mod tests {
         let mut gone = opening("gone", "door", true, Kind::BinarySensor);
         gone.state.availability = Availability::Offline;
         let live = opening("live", "door", true, Kind::BinarySensor);
-        assert_eq!(openings(&house(vec![gone, live]), &[]).len(), 1);
+        assert_eq!(openings(Lang::En, &house(vec![gone, live]), &[]).len(), 1);
     }
 
     fn opening(id: &str, class: &str, open: bool, kind: Kind) -> EntityView {
@@ -438,9 +444,9 @@ mod tests {
             opening("motion", "motion", true, Kind::BinarySensor),
         ]);
         assert_eq!(
-            openings(&h, &areas),
+            openings(Lang::En, &h, &areas),
             vec![Opening {
-                title: entity_title(&window),
+                title: entity_title(Lang::En, &window),
                 room: Some("Cuisine".into())
             }]
         );

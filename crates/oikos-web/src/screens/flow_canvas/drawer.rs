@@ -34,6 +34,7 @@ fn RunItem(run: RunView, flow: Flow, replay: RwSignal<Option<String>>) -> impl I
                 entities,
                 areas,
                 flows: &names,
+                lang: crate::i18n::current_lang(),
             };
             run.steps
                 .iter()
