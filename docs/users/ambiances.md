@@ -6,6 +6,8 @@ description: One-tap house states made of actions, the four action types, how ca
 
 An **ambiance** is a named list of actions that the hub runs once, top to bottom, when you apply it. "Bonne nuit" might turn off every light and every plug and close the shutters. Nothing stays set afterwards: the hub does not remember the ambiance, only the report of the last run.
 
+In the web UI, see [Moods](web-ui.md#moods).
+
 An ambiance belongs to the house, not to a room. A room only appears inside an action, for example "every light in the living room".
 
 ```json
