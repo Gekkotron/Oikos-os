@@ -62,15 +62,6 @@ file: src/ws.rs  # not translated yet
 text: FR  # language code on the toggle, the same in both languages
 text: EN  # language code on the toggle, the same in both languages
 text: Escape  # KeyboardEvent.key value, not shown
-text: Enter  # KeyboardEvent.key value, not shown
-text: ArrowUp  # KeyboardEvent.key value, not shown
-text: ArrowRight  # KeyboardEvent.key value, not shown
-text: ArrowDown  # KeyboardEvent.key value, not shown
-text: ArrowLeft  # KeyboardEvent.key value, not shown
-text: PageUp  # KeyboardEvent.key value, not shown
-text: PageDown  # KeyboardEvent.key value, not shown
-text: Home  # KeyboardEvent.key value, not shown
-text: End  # KeyboardEvent.key value, not shown
 text: oikos.  # the brand mark, not translated
 text: (max-width: 719px), (hover: none) and (pointer: coarse)  # media query, not text
 text: run {}  # CSS class list

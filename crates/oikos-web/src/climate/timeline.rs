@@ -14,7 +14,7 @@ use wasm_bindgen::JsCast;
 
 use super::{TempBand, day_short, setpoint_text, temp_band};
 use crate::i18n::climate::{ClimateText, use_climate_text};
-use crate::i18n::format::{number, parse_decimal};
+use crate::i18n::format::{input_number, parse_decimal};
 use crate::i18n::{Key, Lang, use_lang, use_text};
 
 /// The grid blocks snap to, in minutes.
@@ -404,7 +404,7 @@ fn Bar(
                     open.update(|s| *s = if *s == Some(block) { None } else { Some(block) });
                 }
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
-                    if ev.key() == "Enter" || ev.key() == " " {
+                    if ev.key().eq_ignore_ascii_case("enter") || ev.key() == " " {
                         ev.prevent_default();
                         if editable { selected } else { peek }.set(Some(block));
                     }
@@ -485,7 +485,7 @@ fn BlockEditor(
         setpoint() == Some(Setpoint::Off)
     };
     let temp = move || match setpoint() {
-        Some(Setpoint::Temp(v)) => number(lang(), v),
+        Some(Setpoint::Temp(v)) => input_number(lang(), v),
         _ => String::new(),
     };
     let day_chips = Day::ALL
@@ -711,7 +711,7 @@ pub fn WeekTimeline(
             {if editable {
                 let base_temp = move || {
                     rules.with(|r| match r.base {
-                        Setpoint::Temp(v) => number(lang(), v),
+                        Setpoint::Temp(v) => input_number(lang(), v),
                         Setpoint::Off => String::new(),
                     })
                 };

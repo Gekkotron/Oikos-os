@@ -135,10 +135,15 @@ pub fn until_text(lang: Lang, until: u64, now: u64, tz: Tz) -> String {
     match (end.date_naive() - start.date_naive()).num_days() {
         0 => clock,
         1 => format!("{} {clock}", climate_text(lang, ClimateText::Tomorrow)),
-        _ => format!(
-            "{} {clock}",
-            day_short(lang, Day::from_chrono(end.weekday()))
-        ),
+        _ => {
+            let day = day_short(lang, Day::from_chrono(end.weekday()));
+            // Mid-sentence in French ("jusqu'à jeu. 07:00").
+            let day = match lang {
+                Lang::Fr => day.to_lowercase(),
+                Lang::En => day.to_owned(),
+            };
+            format!("{day} {clock}")
+        }
     }
 }
 
@@ -525,7 +530,7 @@ mod tests {
         });
         assert_eq!(
             room_subline(fr, &held),
-            "Chauffage 16,5° · Active · maintenue"
+            "Chauffage 16,5° · Active · dérogation en cours"
         );
         assert_eq!(
             room_subline(fr, &zone_view(ZoneState::Pending)),
@@ -553,7 +558,7 @@ mod tests {
         );
         assert_eq!(
             until_text(Lang::Fr, at(2026, 1, 8, 6, 0), now, paris),
-            "Jeu. 07:00"
+            "jeu. 07:00"
         );
     }
 

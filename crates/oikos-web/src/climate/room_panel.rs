@@ -22,7 +22,7 @@ use crate::components::now::{Now, unix_now};
 use crate::components::toast::Toasts;
 use crate::i18n::Lang;
 use crate::i18n::climate::{ClimateText, climate_text, hold_until, now_with_age, use_climate_text};
-use crate::i18n::format::{number, parse_decimal};
+use crate::i18n::format::{input_number, parse_decimal};
 use crate::i18n::{current_lang, use_lang};
 
 /// How many recent decisions the card lists before the older rows.
@@ -195,7 +195,11 @@ pub fn RoomPanel(
         Some(Setpoint::Temp(t)) => Some(t),
         _ => z.reading.map(f64::round),
     });
-    let setpoint = RwSignal::new(start.map(|v| number(current_lang(), v)).unwrap_or_default());
+    let setpoint = RwSignal::new(
+        start
+            .map(|v| input_number(current_lang(), v))
+            .unwrap_or_default(),
+    );
     let until_change = move || {
         zone.with(|z| {
             let mode = z
@@ -352,10 +356,10 @@ pub fn RoomPanel(
                                         on:input=move |ev| setpoint.set(event_target_value(&ev))
                                     />
                                     <button type="button" class="btn" on:click=move |_| hold_1h(60)>
-                                        "1 h"
+                                        "1 h"
                                     </button>
                                     <button type="button" class="btn" on:click=move |_| hold_2h(120)>
-                                        "2 h"
+                                        "2 h"
                                     </button>
                                     {move || {
                                         until_change()

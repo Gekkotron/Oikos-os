@@ -8,7 +8,7 @@ use crate::api::climate as api;
 use crate::climate::entity_field::{EntityField, EntityListField};
 use crate::components::toast::Toasts;
 use crate::i18n::climate::{ClimateText, could_not_save, use_climate_text};
-use crate::i18n::format::{number, parse_decimal};
+use crate::i18n::format::{input_number, parse_decimal};
 use crate::i18n::states::{StateCtx, state_word};
 use crate::i18n::{Key, use_lang, use_text};
 
@@ -64,7 +64,7 @@ fn NumField(
                 class="field"
                 type="text"
                 inputmode="decimal"
-                prop:value=move || number(lang(), value.get())
+                prop:value=move || input_number(lang(), value.get())
                 on:change=move |ev| {
                     if let Some(v) = parse_decimal(&event_target_value(&ev)) {
                         on_change.run(v);
@@ -106,7 +106,7 @@ pub fn SettingsSheet(
     let save = move |_| {
         let settings = draft.get_untracked();
         if let Err(e) = settings.validate() {
-            toasts.push(e);
+            toasts.push(could_not_save(untrack(lang), &e));
             return;
         }
         saving.set(true);

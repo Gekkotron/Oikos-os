@@ -226,7 +226,7 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
             "Active · no decision yet",
             "Active · pas encore de décision",
         ),
-        T::Held => ("held", "maintenue"),
+        T::Held => ("held", "dérogation en cours"),
         T::LearnOff => ("Learning is off", "L'apprentissage est désactivé"),
         T::LearnHistoryOff => (
             "History is off: rules can't be learned",
@@ -284,19 +284,19 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
         T::SettingsLabel => ("Climate settings", "Réglages du climat"),
         T::Season => ("Season", "Saison"),
         T::OutdoorTemperature => ("Outdoor temperature", "Température extérieure"),
-        T::HeatBelow => ("Heat below", "Chauffer sous"),
+        T::HeatBelow => ("Heat below", "Chauffer en dessous de"),
         T::CoolAbove => ("Cool above", "Refroidir au-dessus de"),
         T::Presence => ("Presence", "Présence"),
         T::AwayGrace => ("Away grace", "Délai d'absence"),
         T::Holiday => ("Holiday", "Vacances"),
         T::Frost => ("Frost", "Hors-gel"),
         T::Overheat => ("Overheat", "Surchauffe"),
-        T::Overcool => ("Overcool", "Surrefroidissement"),
+        T::Overcool => ("Overcool", "Refroidissement excessif"),
         T::StaleAfter => ("Stale after", "Mesure périmée après"),
         T::LearningWindow => ("Learning window", "Fenêtre d'apprentissage"),
         T::MinimumDays => ("Minimum days", "Jours minimum"),
         T::AgreementNeeded => ("Agreement needed", "Accord requis"),
-        T::LearnAt => ("Learn at", "Apprendre à"),
+        T::LearnAt => ("Learn at", "Heure d'apprentissage"),
         T::UnitMin => ("min", "min"),
         T::UnitDays => ("days", "jours"),
         T::UnitZeroToOne => ("0 to 1", "0 à 1"),
@@ -349,11 +349,11 @@ fn pick(lang: Lang, en: String, fr: String) -> String {
 
 /// "Learning: 6 of 10 days so far" / "Apprentissage : 6 jours sur 10 pour l'instant".
 pub fn learning_progress(lang: Lang, days: u32, needed: u32) -> String {
-    let s = if days > 1 { "s" } else { "" };
+    let fr_days = format::count(Lang::Fr, days as usize, ("", "jour"), ("", "jours"));
     pick(
         lang,
         format!("Learning: {days} of {needed} days so far"),
-        format!("Apprentissage{NBSP}: {days} jour{s} sur {needed} pour l'instant"),
+        format!("Apprentissage{NBSP}: {fr_days} sur {needed} pour l'instant"),
     )
 }
 

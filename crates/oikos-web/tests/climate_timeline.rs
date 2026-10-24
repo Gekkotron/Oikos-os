@@ -325,6 +325,8 @@ async fn the_timeline_reads_and_parses_in_french_and_flips_back() {
         .expect("Monday bar")
         .unchecked_into();
     bar.click();
+    // The editor opens in one tick, its `prop:value` effects settle in the next.
+    tick().await;
     tick().await;
     let text = || host.text_content().unwrap_or_default();
 
@@ -366,6 +368,14 @@ async fn the_timeline_reads_and_parses_in_french_and_flips_back() {
         rules.with_untracked(|r| r.blocks[0].setpoint),
         Setpoint::Temp(19.5)
     );
+    // Every typed digit is kept, not rounded to one decimal.
+    change(&temperature, "20,25");
+    tick().await;
+    assert_eq!(
+        rules.with_untracked(|r| r.blocks[0].setpoint),
+        Setpoint::Temp(20.25)
+    );
+    assert_eq!(temperature.value(), "20,25");
     change(&input(&host, ".climate-timeline__base-input"), "16,5");
     tick().await;
     assert_eq!(rules.with_untracked(|r| r.base), Setpoint::Temp(16.5));

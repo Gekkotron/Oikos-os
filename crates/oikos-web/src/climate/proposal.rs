@@ -15,7 +15,7 @@ use oikos_climate::view::ZoneView;
 use super::timeline::{NEW_BASE, WeekTimeline};
 use crate::api::climate as api;
 use crate::components::toast::Toasts;
-use crate::i18n::climate::{ClimateText, use_climate_text};
+use crate::i18n::climate::{ClimateText, could_not_save, use_climate_text};
 use crate::i18n::{Key, use_lang, use_text};
 
 fn present(rules: &Rules) -> Vec<Mode> {
@@ -114,6 +114,7 @@ pub fn ProposalPanel(
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let t = use_climate_text();
+    let lang = use_lang();
     let text = use_text();
     let learned = proposal.rules.clone();
     let edited = RwSignal::new(proposal.rules.clone());
@@ -164,7 +165,7 @@ pub fn ProposalPanel(
         let rules = edited.get_untracked();
         let send_edited = approve_dirty();
         if send_edited && let Err(e) = rules.validate() {
-            toasts.push(e);
+            toasts.push(could_not_save(untrack(lang), &e));
             return;
         }
         busy.set(true);
@@ -264,6 +265,7 @@ pub fn RulesPanel(
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let t = use_climate_text();
+    let lang = use_lang();
     let id = zone.with_untracked(|z| z.zone.clone());
     let editing = RwSignal::new(false);
     let draft = RwSignal::new(Rules::default());
@@ -283,7 +285,7 @@ pub fn RulesPanel(
         }
         let rules = draft.get_untracked();
         if let Err(e) = rules.validate() {
-            toasts.push(e);
+            toasts.push(could_not_save(untrack(lang), &e));
             return;
         }
         let mut settings = zone.with_untracked(|z| z.settings.clone());
