@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use leptos::prelude::*;
 use oikos_api::{
-    AmbianceAction, AreaView, Category, CategoryAction, ClimateAction, DeviceAction, EntityView,
-    FlowAction, FlowDo, Target, category_members,
+    AmbianceAction, Category, CategoryAction, ClimateAction, DeviceAction, EntityView, FlowAction,
+    FlowDo, Target, category_members,
 };
 use oikos_core::model::{Command, Kind};
 use serde_json::{Value, json};
@@ -16,6 +16,7 @@ use crate::flow_edit::fold_accents;
 use crate::format::{entity_title, list_label};
 use crate::house::House;
 use crate::i18n::{self, Key, Lang, use_text};
+use crate::screens::group_wizard::group_by_room;
 
 /// One action of the list under its stable key.
 #[derive(Clone, Debug, PartialEq)]
@@ -346,34 +347,6 @@ fn members(
         .collect()
 }
 
-/// `members` grouped by room, in the hub's room order, unknown rooms last, sorted by label.
-fn by_room(
-    list: Vec<(String, String, String)>,
-    areas: &[AreaView],
-) -> Vec<(String, Vec<(String, String)>)> {
-    let mut by_area: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
-    for (id, label, area) in list {
-        by_area.entry(area).or_default().push((id, label));
-    }
-    let mut rooms = Vec::new();
-    for area in areas {
-        if let Some(mut items) = by_area.remove(&area.id) {
-            items.sort_by_key(|(_, label)| fold_accents(label));
-            rooms.push((area.name.clone(), items));
-        }
-    }
-    for (area, mut items) in by_area {
-        items.sort_by_key(|(_, label)| fold_accents(label));
-        let name = if area.is_empty() {
-            "Unassigned".to_owned()
-        } else {
-            area
-        };
-        rooms.push((name, items));
-    }
-    rooms
-}
-
 fn category_memo(rows: Rows, key: u64) -> Memo<CategoryAction> {
     Memo::new(move |_| {
         rows.with(|list| {
@@ -412,7 +385,7 @@ pub fn CategoryForm(rows: Rows, key: u64) -> impl IntoView {
         let mut c = cat.get();
         c.except.clear();
         let list = house.entities.with(|m| members(&c, m));
-        house.areas.with(|areas| by_room(list, areas))
+        house.areas.with(|areas| group_by_room(list, areas))
     });
 
     view! {
@@ -799,6 +772,11 @@ fn edit_climate(rows: Rows, key: u64, f: impl FnOnce(&mut ClimateAction)) {
     });
 }
 
+/// A held setpoint: 5 to 30 degrees, in steps of 0.5.
+fn clamp_setpoint(v: f64) -> f64 {
+    (v.clamp(5.0, 30.0) * 2.0).round() / 2.0
+}
+
 fn is_off(c: &ClimateAction) -> bool {
     c.setpoint.as_ref().and_then(Value::as_str) == Some("off")
 }
@@ -903,7 +881,7 @@ pub fn HeatingForm(rows: Rows, key: u64, zones: RwSignal<Vec<(String, String)>>)
                             }
                             on:change=move |ev| {
                                 let value = event_target_value(&ev).trim().parse::<f64>().ok();
-                                edit_climate(rows, key, |c| c.setpoint = value.map(|v| json!(v)));
+                                edit_climate(rows, key, |c| c.setpoint = value.map(|v| json!(clamp_setpoint(v))));
                             }
                         />
                     </label>
@@ -1134,6 +1112,15 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, Command::SetPosition { .. }))
         );
+    }
+
+    #[test]
+    fn setpoint_is_clamped_and_stepped() {
+        assert_eq!(clamp_setpoint(2.0), 5.0);
+        assert_eq!(clamp_setpoint(99.0), 30.0);
+        assert_eq!(clamp_setpoint(20.3), 20.5);
+        assert_eq!(clamp_setpoint(20.2), 20.0);
+        assert_eq!(clamp_setpoint(21.0), 21.0);
     }
 
     #[test]

@@ -51,28 +51,43 @@ pub fn members_by_room(
     selected: &BTreeSet<String>,
 ) -> Vec<(String, Vec<(String, String)>)> {
     let needle = fold_accents(query.trim());
-    let mut by_area: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
-    for e in entities.values().filter(|e| e.kind == kind) {
-        let shown = (e.is_primary() && !e.id.starts_with("group_")) || selected.contains(&e.id);
-        let label = list_label(e);
-        if shown && (needle.is_empty() || fold_accents(&label).contains(&needle)) {
-            by_area
-                .entry(e.area.as_str())
-                .or_default()
-                .push((e.id.clone(), label));
-        }
+    let items = entities
+        .values()
+        .filter(|e| e.kind == kind)
+        .filter_map(|e| {
+            let shown = (e.is_primary() && !e.id.starts_with("group_")) || selected.contains(&e.id);
+            let label = list_label(e);
+            (shown && (needle.is_empty() || fold_accents(&label).contains(&needle)))
+                .then(|| (e.id.clone(), label, e.area.clone()))
+        });
+    group_by_room(items, areas)
+}
+
+/// `(id, label, area id)` items grouped by room in the hub's room order, each room sorted by
+/// label (accents folded), unknown rooms last and unassigned ones under "Unassigned".
+pub fn group_by_room(
+    items: impl IntoIterator<Item = (String, String, String)>,
+    areas: &[AreaView],
+) -> Vec<(String, Vec<(String, String)>)> {
+    let mut by_area: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for (id, label, area) in items {
+        by_area.entry(area).or_default().push((id, label));
     }
     let mut rooms = Vec::new();
     for area in areas {
-        if let Some(mut list) = by_area.remove(area.id.as_str()) {
+        if let Some(mut list) = by_area.remove(&area.id) {
             list.sort_by_key(|(_, label)| fold_accents(label));
             rooms.push((area.name.clone(), list));
         }
     }
     for (area, mut list) in by_area {
         list.sort_by_key(|(_, label)| fold_accents(label));
-        let name = if area.is_empty() { "Unassigned" } else { area };
-        rooms.push((name.to_owned(), list));
+        let name = if area.is_empty() {
+            "Unassigned".to_owned()
+        } else {
+            area
+        };
+        rooms.push((name, list));
     }
     rooms
 }
