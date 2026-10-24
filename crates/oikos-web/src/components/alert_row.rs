@@ -7,13 +7,15 @@ use oikos_api::AlertView;
 use crate::alerts::{recent, relative_time};
 use crate::components::now::Now;
 use crate::house::House;
+use crate::i18n::security::{SecurityText, age_resolved, security_text};
+use crate::i18n::{Lang, use_lang};
 use crate::icons::channel_icon;
 
 /// The age of `alert` at `now`, with " · Resolved" after it when the producer cancelled it.
-fn time_line(alert: &AlertView, now: u64) -> String {
-    let age = relative_time(alert.sent_at, now);
+fn time_line(lang: Lang, alert: &AlertView, now: u64) -> String {
+    let age = relative_time(lang, alert.sent_at, now);
     if alert.resolved {
-        format!("{age} · Resolved")
+        age_resolved(lang, &age)
     } else {
         age
     }
@@ -22,6 +24,7 @@ fn time_line(alert: &AlertView, now: u64) -> String {
 #[component]
 pub fn AlertRow(alert: AlertView) -> impl IntoView {
     let now = expect_context::<Now>();
+    let lang = use_lang();
     let href = format!("/alerts/{}", crate::api::encode_id(&alert.id));
     // A picture that fails to load (gone, or refused) falls back to the channel glyph instead
     // of the browser's broken-image icon.
@@ -49,7 +52,7 @@ pub fn AlertRow(alert: AlertView) -> impl IntoView {
     };
     let time = {
         let alert = alert.clone();
-        move || time_line(&alert, now.0.get())
+        move || time_line(lang(), &alert, now.0.get())
     };
     view! {
         <A href=href attr:class="alert-row">
@@ -67,16 +70,27 @@ pub fn AlertRow(alert: AlertView) -> impl IntoView {
 #[component]
 pub fn RecentAlerts() -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     let alerts = Memo::new(move |_| house.alerts.with(|a| recent(a)));
     view! {
         <section class="alerts-recent">
             <header class="alerts-recent__header">
-                <h2 class="alerts-recent__title">"Recent alerts"</h2>
-                <A href="/alerts" attr:class="btn btn--compact">"See all"</A>
+                <h2 class="alerts-recent__title">
+                    {move || security_text(lang(), SecurityText::RecentAlerts)}
+                </h2>
+                <A href="/alerts" attr:class="btn btn--compact">
+                    {move || security_text(lang(), SecurityText::SeeAll)}
+                </A>
             </header>
             <Show
                 when=move || alerts.with(|a| !a.is_empty())
-                fallback=|| view! { <p class="alerts-recent__empty">"No alerts yet"</p> }
+                fallback=move || {
+                    view! {
+                        <p class="alerts-recent__empty">
+                            {move || security_text(lang(), SecurityText::NoAlerts)}
+                        </p>
+                    }
+                }
             >
                 <div class="alerts-recent__list">
                     <For
@@ -95,6 +109,7 @@ mod tests {
     use oikos_api::{AlertChannel, AlertSeverity, AlertView};
 
     use super::time_line;
+    use crate::i18n::Lang;
 
     fn alert(resolved: bool) -> AlertView {
         AlertView {
@@ -116,8 +131,18 @@ mod tests {
 
     #[test]
     fn time_line_adds_resolved_after_the_time() {
-        assert_eq!(time_line(&alert(false), 1_120), "2 min ago");
-        assert_eq!(time_line(&alert(true), 1_120), "2 min ago · Resolved");
-        assert_eq!(time_line(&alert(true), 1_010), "Just now · Resolved");
+        let en = Lang::En;
+        assert_eq!(time_line(en, &alert(false), 1_120), "2\u{A0}min ago");
+        assert_eq!(
+            time_line(en, &alert(true), 1_120),
+            "2\u{A0}min ago · Resolved"
+        );
+        assert_eq!(time_line(en, &alert(true), 1_010), "Just now · Resolved");
+        let fr = Lang::Fr;
+        assert_eq!(
+            time_line(fr, &alert(true), 1_120),
+            "il y a 2\u{A0}min · Résolue"
+        );
+        assert_eq!(time_line(fr, &alert(true), 1_010), "À l'instant · Résolue");
     }
 }

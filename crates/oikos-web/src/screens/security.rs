@@ -15,6 +15,10 @@ use crate::components::alert_row::RecentAlerts;
 use crate::components::history_chart::paris_offset;
 use crate::components::now::Now;
 use crate::house::House;
+use crate::i18n::security::{
+    SecurityText, action_label, section_title, security_text, since_days, since_yesterday,
+};
+use crate::i18n::{Key, Lang, format as fmt, use_lang, use_text};
 use crate::icons::{PLAY, PLUG, sensor_icon};
 use crate::security::{ActionRow, SecurityUi, SensorRow};
 
@@ -31,7 +35,7 @@ fn local_dt(unix: i64) -> OffsetDateTime {
 }
 
 /// Natural-language time since `changed_at`. `""` when the sensor has no row.
-pub fn since_label(now_secs: i64, changed_at: Option<i64>) -> String {
+pub fn since_label(lang: Lang, now_secs: i64, changed_at: Option<i64>) -> String {
     let Some(t) = changed_at else {
         return String::new();
     };
@@ -39,11 +43,8 @@ pub fn since_label(now_secs: i64, changed_at: Option<i64>) -> String {
     if delta < 0 {
         return String::new();
     }
-    if delta < 60 {
-        return "just now".into();
-    }
     if delta < 3600 {
-        return format!("{} min ago", delta / 60);
+        return fmt::ago(lang, delta as u64);
     }
     let now = local_dt(now_secs);
     let then = local_dt(t);
@@ -52,9 +53,9 @@ pub fn since_label(now_secs: i64, changed_at: Option<i64>) -> String {
     if days == 0 {
         hhmm
     } else if days == 1 {
-        format!("yesterday {hhmm}")
+        since_yesterday(lang, &hhmm)
     } else {
-        format!("{days} days ago")
+        since_days(lang, days)
     }
 }
 
@@ -78,7 +79,11 @@ fn SensorTile(row: SensorRow) -> impl IntoView {
         },
         if row.available { "" } else { " tile--off" },
     );
-    let label = row.aria_label();
+    let lang = use_lang();
+    let label = {
+        let row = row.clone();
+        move || row.aria_label(lang())
+    };
     let icon = sensor_icon(row.device_class.as_deref());
     let since_map = use_context::<SinceMap>();
     let now = use_context::<Now>();
@@ -87,7 +92,7 @@ fn SensorTile(row: SensorRow) -> impl IntoView {
         (Some(SinceMap(m)), Some(now)) => {
             let changed_at = m.with(|m| m.get(&id_for_since).copied().flatten());
             let now_secs = now.0.get() / 1000;
-            since_label(now_secs as i64, changed_at)
+            since_label(lang(), now_secs as i64, changed_at)
         }
         _ => String::new(),
     };
@@ -99,9 +104,17 @@ fn SensorTile(row: SensorRow) -> impl IntoView {
             </span>
             <span class="tile__line">
                 <span class="tile__area">
-                    {row.area_name.clone().unwrap_or_else(|| "Unassigned".to_owned())}
+                    {
+                        let area = row.area_name.clone();
+                        move || {
+                            area.clone()
+                                .unwrap_or_else(|| {
+                                    security_text(lang(), SecurityText::Unassigned).to_owned()
+                                })
+                        }
+                    }
                 </span>
-                <span class="tile__state">{row.state_word()}</span>
+                <span class="tile__state">{let row = row.clone(); move || row.state_word(lang())}</span>
             </span>
             <span class="tile__line security-since">{since}</span>
         </A>
@@ -111,16 +124,24 @@ fn SensorTile(row: SensorRow) -> impl IntoView {
 #[component]
 fn ActionTile(row: ActionRow, confirming: RwSignal<Option<String>>) -> impl IntoView {
     let sender = Sender::from_context();
+    let lang = use_lang();
     let id = row.id.clone();
     let tap = row.tap();
     let is_button = row.kind == Kind::Button;
-    let verb = row.verb();
-    let question = row.question();
+    let verb = {
+        let row = row.clone();
+        move || row.verb(lang())
+    };
+    let question = {
+        let row = row.clone();
+        move || row.question(lang())
+    };
     let on = row.available && row.on == Some(true);
-    let word = row.state_word();
-    let tap_label = match word {
-        Some(w) => format!("{}, {}", row.name, w.to_lowercase()),
-        None => row.name.clone(),
+    // Only an available button has no state word, in either language.
+    let has_state = row.state_word(Lang::En).is_some();
+    let tap_label = {
+        let row = row.clone();
+        move || action_label(&row.name, row.state_word(lang()).as_deref())
     };
     let class = format!(
         "tile tile--action{}{}",
@@ -148,10 +169,8 @@ fn ActionTile(row: ActionRow, confirming: RwSignal<Option<String>>) -> impl Into
         let icon = if is_button { PLAY } else { PLUG };
         let name = row.name.clone();
         let href = entity_href(&row.id);
-        let area = row
-            .area_name
-            .clone()
-            .unwrap_or_else(|| "Unassigned".to_owned());
+        let area = row.area_name.clone();
+        let state_row = row.clone();
         view! {
             <div class=normal_class.clone()>
                 <button
@@ -168,8 +187,23 @@ fn ActionTile(row: ActionRow, confirming: RwSignal<Option<String>>) -> impl Into
                     </A>
                 </span>
                 <span class="tile__line">
-                    <span class="tile__area">{area}</span>
-                    {word.map(|w| view! { <span class="tile__state">{w}</span> })}
+                    <span class="tile__area">
+                        {move || {
+                            area.clone()
+                                .unwrap_or_else(|| {
+                                    security_text(lang(), SecurityText::Unassigned).to_owned()
+                                })
+                        }}
+                    </span>
+                    {has_state
+                        .then(|| {
+                            let row = state_row.clone();
+                            view! {
+                                <span class="tile__state">
+                                    {move || row.state_word(lang()).unwrap_or_default()}
+                                </span>
+                            }
+                        })}
                 </span>
             </div>
         }
@@ -189,14 +223,14 @@ fn ActionTile(row: ActionRow, confirming: RwSignal<Option<String>>) -> impl Into
                             sender.send(&id, command.clone(), None);
                         }
                     >
-                        {verb}
+                        {verb.clone()}
                     </button>
                     <button
                         type="button"
                         class="btn btn--compact"
                         on:click=move |_| confirming.set(None)
                     >
-                        "Cancel"
+                        {move || security_text(lang(), SecurityText::Cancel)}
                     </button>
                 </span>
             </div>
@@ -208,6 +242,8 @@ fn ActionTile(row: ActionRow, confirming: RwSignal<Option<String>>) -> impl Into
 #[component]
 pub fn SecurityScreen() -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
+    let t = use_text();
     let ui = Memo::new(move |_| {
         house
             .entities
@@ -276,19 +312,25 @@ pub fn SecurityScreen() -> impl IntoView {
             }
         >
             <section class="security">
-                <h1 class="room__title">"Security"</h1>
+                <h1 class="room__title">{move || t(Key::Security)}</h1>
                 <Show
                     when=move || !empty()
-                    fallback=|| view! { <p class="room__empty">"Nothing on Security yet."</p> }
+                    fallback=move || {
+                        view! {
+                            <p class="room__empty">
+                                {move || security_text(lang(), SecurityText::NothingYet)}
+                            </p>
+                        }
+                    }
                 >
                     <Show
                         when=has_panels
-                        fallback=|| {
+                        fallback=move || {
                             view! {
                                 <p class="card security__note">
-                                    "No alarm panel. Publish an MQTT "
+                                    {move || security_text(lang(), SecurityText::NoPanelBefore)}
                                     <code>"alarm_control_panel"</code>
-                                    " to see it here."
+                                    {move || security_text(lang(), SecurityText::NoPanelAfter)}
                                 </p>
                             }
                         }
@@ -300,7 +342,9 @@ pub fn SecurityScreen() -> impl IntoView {
                         />
                     </Show>
                     <Show when=has_actions>
-                        <h2 class="section-title">"Actions"</h2>
+                        <h2 class="section-title">
+                            {move || security_text(lang(), SecurityText::Actions)}
+                        </h2>
                         <div class="tiles">
                             <For
                                 each=actions
@@ -313,17 +357,25 @@ pub fn SecurityScreen() -> impl IntoView {
                     </Show>
                     <Show
                         when=has_sensors
-                        fallback=|| view! { <p class="security__note">"No security sensors."</p> }
+                        fallback=move || {
+                            view! {
+                                <p class="security__note">
+                                    {move || security_text(lang(), SecurityText::NoSensors)}
+                                </p>
+                            }
+                        }
                     >
                         <p class="summary" aria-live="polite">
-                            {move || ui.with(|u| u.summary_text())}
+                            {move || ui.with(|u| u.summary_text(lang()))}
                         </p>
                         <For
                             each=sections
                             key=|s| format!("{s:?}")
-                            children=|section| {
+                            children=move |section| {
                                 view! {
-                                    <h2 class="section-title">{section.section.title()}</h2>
+                                    <h2 class="section-title">
+                                        {move || section_title(lang(), section.section)}
+                                    </h2>
                                     <div class="tiles">
                                         {section
                                             .rows
@@ -345,27 +397,42 @@ pub fn SecurityScreen() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::since_label;
+    use crate::i18n::Lang;
 
     #[test]
     fn since_label_covers_the_natural_language_scale() {
         let now = 1_792_497_600;
-        assert_eq!(since_label(now, None), "");
-        assert_eq!(since_label(now, Some(now - 30)), "just now");
-        assert_eq!(since_label(now, Some(now - 180)), "3 min ago");
+        let en = Lang::En;
+        assert_eq!(since_label(en, now, None), "");
+        assert_eq!(since_label(en, now, Some(now - 30)), "just now");
+        assert_eq!(since_label(en, now, Some(now - 180)), "3\u{A0}min ago");
         // Same-day: just HH:MM in local time.
-        let same_day = since_label(now, Some(now - 3_600));
+        let same_day = since_label(en, now, Some(now - 3_600));
         assert_eq!(same_day.len(), 5);
         assert!(same_day.chars().nth(2) == Some(':'));
         // Yesterday
         let yesterday = now - 86_400;
-        assert!(since_label(now, Some(yesterday)).starts_with("yesterday"));
+        assert!(since_label(en, now, Some(yesterday)).starts_with("yesterday"));
         // Beyond
-        assert_eq!(since_label(now, Some(now - 3 * 86_400)), "3 days ago");
+        assert_eq!(since_label(en, now, Some(now - 3 * 86_400)), "3 days ago");
+    }
+
+    #[test]
+    fn since_label_in_french() {
+        let now = 1_792_497_600;
+        let fr = Lang::Fr;
+        assert_eq!(since_label(fr, now, Some(now - 30)), "à l'instant");
+        assert_eq!(since_label(fr, now, Some(now - 180)), "il y a 3\u{A0}min");
+        assert!(since_label(fr, now, Some(now - 86_400)).starts_with("hier"));
+        assert_eq!(
+            since_label(fr, now, Some(now - 3 * 86_400)),
+            "il y a 3 jours"
+        );
     }
 
     #[test]
     fn since_label_ignores_future_timestamps() {
         let now = 1_792_497_600;
-        assert_eq!(since_label(now, Some(now + 60)), "");
+        assert_eq!(since_label(Lang::En, now, Some(now + 60)), "");
     }
 }

@@ -10,6 +10,8 @@ use time::{Date, OffsetDateTime};
 
 use crate::components::now::unix_now;
 use crate::house::House;
+use crate::i18n::Lang;
+use crate::i18n::security::alert_age;
 
 /// Storage key for the "last visit to the Alerts tab" marker.
 #[cfg(target_arch = "wasm32")]
@@ -114,14 +116,8 @@ pub fn badge_text(count: usize) -> Option<String> {
 }
 
 /// How long ago `sent_at` was at `now` (both unix seconds). A time in the future is "Just now".
-pub fn relative_time(sent_at: u64, now: u64) -> String {
-    let age = now.saturating_sub(sent_at);
-    match age {
-        0..60 => "Just now".into(),
-        60..3600 => format!("{} min ago", age / 60),
-        3600..86_400 => format!("{} h ago", age / 3600),
-        _ => format!("{} d ago", age / 86_400),
-    }
+pub fn relative_time(lang: Lang, sent_at: u64, now: u64) -> String {
+    alert_age(lang, sent_at, now)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -226,6 +222,8 @@ mod tests {
     use oikos_api::{AlertChannel, AlertSeverity, AlertView, EntityView};
     use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
 
+    use crate::i18n::Lang;
+
     use super::{
         DayLabel, badge_text, day_label, filtered, group_by_day, match_entity, recent,
         relative_time, unseen_count,
@@ -311,15 +309,15 @@ mod tests {
 
     #[test]
     fn relative_time_steps() {
-        assert_eq!(relative_time(NOW - 10, NOW), "Just now");
-        assert_eq!(relative_time(NOW - 120, NOW), "2 min ago");
-        assert_eq!(relative_time(NOW - 7200, NOW), "2 h ago");
-        assert_eq!(relative_time(NOW - 172_800, NOW), "2 d ago");
+        assert_eq!(relative_time(Lang::En, NOW - 10, NOW), "Just now");
+        assert_eq!(relative_time(Lang::En, NOW - 120, NOW), "2\u{A0}min ago");
+        assert_eq!(relative_time(Lang::En, NOW - 7200, NOW), "2\u{A0}h ago");
+        assert_eq!(relative_time(Lang::En, NOW - 172_800, NOW), "2\u{A0}d ago");
     }
 
     #[test]
     fn relative_time_future_is_just_now() {
-        assert_eq!(relative_time(NOW + 600, NOW), "Just now");
+        assert_eq!(relative_time(Lang::En, NOW + 600, NOW), "Just now");
     }
 
     #[test]
