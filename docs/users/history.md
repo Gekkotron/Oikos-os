@@ -16,7 +16,7 @@ Any TimescaleDB 2.17+ on Postgres 17 works, as long as the role can log in and `
 
 ## Querying
 
-Routes under `/api/v1/history/*` (see the [HTTP API](../reference/http-api.md)): `series` for charts, `daily` for kWh per day over 7, 30 or 365 days, `today` for kWh since local midnight, and `last_change` for 1 to 50 entities. Errors are `400 bad_request`, `404 not_recorded` (the entity has no rows) and `503 history_unavailable` (`[history] url` not set, or the database is down). MCP exposes the same through `get_history`.
+Routes under `/api/v1/history/*` (see the [HTTP API](../reference/http-api.md)): `series` for charts, `daily` for kWh per day over 7, 30 or 365 days, `today` for kWh since local midnight, `last_change` for 1 to 50 entities, and `grid_day` for what crossed the grid meter on one day in half hours (bought off-peak and peak, sold). Errors are `400 bad_request`, `404 not_recorded` (the entity has no rows) and `503 history_unavailable` (`[history] url` not set, or the database is down). MCP exposes the same through `get_history` and `get_grid_day`; `grid_day` also answers `404 no_grid_meter` when no entity with the `grid` role has an energy counter.
 
 ## Backup
 

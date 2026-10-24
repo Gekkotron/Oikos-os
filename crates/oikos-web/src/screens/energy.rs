@@ -21,6 +21,7 @@ use crate::energy::{
 };
 use crate::house::House;
 use crate::icons::{consumer_icon, role_icon};
+use crate::screens::energy_day::GridDayCard;
 
 /// Where a node's labels end, below its centre, plus a gap: where solar's edge starts.
 const LABELS_BOTTOM: f64 = NODE_R + 29.0;
@@ -524,6 +525,7 @@ pub fn EnergyScreen() -> impl IntoView {
                             }}
                         </button>
                     </Show>
+                    <GridDayCard />
                     <div class="grid energy-cards">
                         <For
                             each=cards

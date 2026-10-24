@@ -38,7 +38,52 @@ const PRODUCED: &str = "energy_produced";
 
 pub struct EnergyMeters;
 
+/// The lifetime counters of what crosses the grid meter: `bought` from the grid, `sold` to it.
+/// Ids sorted, each counted once; `factors` holds kWh per counter unit (Wh is 0.001).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GridCounters {
+    pub bought: Vec<String>,
+    pub sold: Vec<String>,
+    pub factors: BTreeMap<String, f64>,
+}
+
+impl GridCounters {
+    /// kWh per unit of counter `id`; 1 for an unknown id.
+    pub fn factor(&self, id: &str) -> f64 {
+        self.factors.get(id).copied().unwrap_or(1.0)
+    }
+}
+
 impl EnergyMeters {
+    /// The grid's counters: every `grid` sensor's own counter is bought; its reverse twin and
+    /// every `grid_export` sensor's counter are sold.
+    pub fn grid_counters(all: &[EnergyEntity]) -> GridCounters {
+        let with = |role: EnergyRole| all.iter().filter(move |e| e.role == Some(role));
+        let ids = |it: Vec<&EnergyEntity>| {
+            let mut v: Vec<String> = it.into_iter().map(|e| e.id.clone()).collect();
+            v.sort();
+            v.dedup();
+            v
+        };
+        let bought: Vec<&EnergyEntity> = with(EnergyRole::Grid)
+            .filter_map(|g| Self::meter_for(g, all))
+            .collect();
+        let sold: Vec<&EnergyEntity> = with(EnergyRole::Grid)
+            .filter_map(|g| Self::reverse_for(g, all))
+            .chain(with(EnergyRole::GridExport).filter_map(|x| Self::meter_for(x, all)))
+            .collect();
+        let factors = bought
+            .iter()
+            .chain(&sold)
+            .filter_map(|e| Some((e.id.clone(), EnergyUnits::factor(e.unit.as_deref())?)))
+            .collect();
+        GridCounters {
+            bought: ids(bought),
+            sold: ids(sold),
+            factors,
+        }
+    }
+
     /// Every entity reporting an energy unit.
     pub fn counters(all: &[EnergyEntity]) -> Vec<&EnergyEntity> {
         all.iter().filter(|e| is_counter(e)).collect()
@@ -344,6 +389,53 @@ mod tests {
 
     fn by_id<'a>(all: &'a [EnergyEntity], id: &str) -> &'a EnergyEntity {
         all.iter().find(|e| e.id == id).unwrap()
+    }
+
+    #[test]
+    fn grid_counters_sum_phases_once() {
+        let mut all = clamp("0x1111", "dev_one");
+        all[0].role = Some(EnergyRole::Grid);
+        let mut two = clamp("0x2222", "dev_two");
+        two[0].role = Some(EnergyRole::Grid);
+        // An export sensor pointed at a counter the grid already counts as sold.
+        two[1].role = Some(EnergyRole::GridExport);
+        two[1].meter = Some("0x2222_energy_produced_a_zigbee2mqtt".to_string());
+        all.extend(two);
+        let c = EnergyMeters::grid_counters(&all);
+        assert_eq!(
+            c.bought,
+            vec!["0x1111_energy_a_zigbee2mqtt", "0x2222_energy_a_zigbee2mqtt"]
+        );
+        assert_eq!(
+            c.sold,
+            vec![
+                "0x1111_energy_produced_a_zigbee2mqtt",
+                "0x2222_energy_produced_a_zigbee2mqtt"
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_counters_carry_unit_factor() {
+        let mut all = clamp("0x1111", "dev_one");
+        all[0].role = Some(EnergyRole::Grid);
+        all[2].unit = Some("Wh".to_string()); // energy_a
+        let c = EnergyMeters::grid_counters(&all);
+        assert_eq!(c.factor("0x1111_energy_a_zigbee2mqtt"), 0.001);
+        assert_eq!(c.factor("0x1111_energy_produced_a_zigbee2mqtt"), 1.0);
+    }
+
+    #[test]
+    fn grid_counters_without_export() {
+        let mut all: Vec<EnergyEntity> = clamp("0x1111", "dev_one")
+            .into_iter()
+            .filter(|e| !e.id.contains("produced"))
+            .collect();
+        all[0].role = Some(EnergyRole::Grid);
+        let c = EnergyMeters::grid_counters(&all);
+        assert_eq!(c.bought, vec!["0x1111_energy_a_zigbee2mqtt"]);
+        assert!(c.sold.is_empty());
+        assert_eq!(EnergyMeters::grid_counters(&[]), GridCounters::default());
     }
 
     #[test]

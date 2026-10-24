@@ -58,6 +58,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "delete_ambiance",
     "apply_ambiance",
     "get_history",
+    "get_grid_day",
     "send_notification",
     "list_alerts",
     "climate_status",
@@ -1095,6 +1096,29 @@ async fn get_history_is_listed() {
         tool.annotations.as_ref().and_then(|a| a.read_only_hint),
         Some(true)
     );
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
+async fn get_grid_day_is_listed_read_only() {
+    let server = Server::start().await;
+    let client = server.client().await;
+
+    let tools = client.list_all_tools().await.expect("list tools");
+    let tool = tools
+        .iter()
+        .find(|tool| tool.name == "get_grid_day")
+        .expect("get_grid_day is listed");
+    assert_eq!(
+        tool.annotations.as_ref().and_then(|a| a.read_only_hint),
+        Some(true)
+    );
+
+    let result = call(&client, "get_grid_day", json!({})).await;
+    assert_eq!(result.is_error, Some(true));
+    let text = text_of(&result);
+    assert!(text.contains("history_unavailable"), "{text}");
 
     client.cancel().await.expect("close");
 }

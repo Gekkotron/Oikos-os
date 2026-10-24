@@ -1,4 +1,4 @@
-//! The MCP server: forty-two tools and the `oikos://snapshot` resource over the hub, served at
+//! The MCP server: forty-three tools and the `oikos://snapshot` resource over the hub, served at
 //! `/mcp` over streamable HTTP with stateful sessions, and the stdio proxy in front of it.
 //!
 //! A failed tool call is answered in-band (`isError: true` with the reason as text) rather

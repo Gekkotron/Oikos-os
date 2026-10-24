@@ -14,7 +14,7 @@ use axum::routing::{get, patch, post, put};
 use oikos_api::{
     AlertView, Ambiance, AmbianceView, ApiError, ApplyReport, AreaView, CommandResponse,
     ConnectionStatus, Dashboard, DashboardReorder, DashboardView, EnergyKind, EntityView, FlowView,
-    FlowWriteOutcome, FlowsConfigView, GroupSpec, GroupView, HistoryDaily, HistoryRange,
+    FlowWriteOutcome, FlowsConfigView, GridDay, GroupSpec, GroupView, HistoryDaily, HistoryRange,
     HistorySeries, HistoryToday, HomeSettings, IgnoredView, LastChange, OverridePatch, RunView,
     SchedulePreview, Snapshot, VirtualSpec, WeatherView,
 };
@@ -94,6 +94,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/history/daily", get(history_daily))
         .route("/history/today", get(history_today))
         .route("/history/last_change", get(history_last_change))
+        .route("/history/grid_day", get(history_grid_day))
         .fallback(not_found)
 }
 
@@ -225,6 +226,7 @@ impl From<HistoryError> for HttpError {
             HistoryError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             HistoryError::NotRecorded => StatusCode::NOT_FOUND,
             HistoryError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            HistoryError::NoGridMeter => StatusCode::NOT_FOUND,
         };
         Self {
             status,
@@ -897,6 +899,32 @@ async fn history_today(
     let history = require_history(&hub)?;
     Ok(Json(
         history_query::today(history, entity, kind, now_micros()).await?,
+    ))
+}
+
+/// `GET /history/grid_day?date=YYYY-MM-DD` — what crossed the grid meter that house-local day,
+/// today when `date` is absent.
+async fn history_grid_day(
+    State(hub): HubState,
+    RawQuery(q): RawQuery,
+) -> Result<Json<GridDay>, HttpError> {
+    let params = parse_query(q.as_deref());
+    let date = match get_one(&params, "date") {
+        None => None,
+        Some(d) => {
+            Some(chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").map_err(|_| bad_request())?)
+        }
+    };
+    let history = require_history(&hub)?;
+    Ok(Json(
+        history_query::grid_day(
+            history,
+            &hub.grid_counters(),
+            &hub.off_peak_history(),
+            date,
+            now_micros(),
+        )
+        .await?,
     ))
 }
 

@@ -53,6 +53,7 @@ const EXPECTED_TOOLS: &[&str] = &[
     "delete_ambiance",
     "apply_ambiance",
     "get_history",
+    "get_grid_day",
     "send_notification",
     "list_alerts",
     "climate_status",

@@ -7,6 +7,7 @@
 //! cache.
 
 pub mod buckets;
+pub mod grid_day;
 
 use std::collections::VecDeque;
 

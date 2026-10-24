@@ -1,10 +1,11 @@
-//! The Home panel in Settings: the five home-header settings behind one Save.
+//! The Home panel in Settings: the five home-header settings and the off-peak hours behind one
+//! Save.
 
 use leptos::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use leptos::task::spawn_local;
 
-use oikos_api::HomeSettings;
+use oikos_api::{HomeSettings, OffPeakWindow};
 use oikos_core::model::Kind;
 
 use crate::climate::entity_field::ThermometerField;
@@ -22,9 +23,11 @@ pub enum Field {
     Indoor,
     Cold,
     Hot,
+    OffPeak,
 }
 
-/// The five fields as typed: numbers as text, entity pickers as ids.
+/// The fields as typed: numbers as text, entity pickers as ids, off-peak windows as
+/// `(start, end)` `HH:MM` pairs.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Draft {
     pub eco: String,
@@ -32,6 +35,7 @@ pub struct Draft {
     pub indoor: Option<String>,
     pub cold: String,
     pub hot: String,
+    pub off_peak: Vec<(String, String)>,
 }
 
 fn number_text(v: Option<f64>) -> String {
@@ -46,6 +50,11 @@ impl From<&HomeSettings> for Draft {
             indoor: s.indoor_entity.clone(),
             cold: number_text(s.cold_below),
             hot: number_text(s.hot_above),
+            off_peak: s
+                .off_peak
+                .iter()
+                .map(|w| (w.start.clone(), w.end.clone()))
+                .collect(),
         }
     }
 }
@@ -98,6 +107,12 @@ pub fn merge(base: &Draft, draft: &Draft, latest: &Draft) -> Draft {
             &latest.hot
         }
         .clone(),
+        off_peak: if draft.off_peak != base.off_peak {
+            &draft.off_peak
+        } else {
+            &latest.off_peak
+        }
+        .clone(),
     }
 }
 
@@ -113,6 +128,17 @@ enum Message {
 /// known rules.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // only the wasm save path calls it
 fn message_key(field: Field, message: &str) -> Option<HomeText> {
+    if field == Field::OffPeak {
+        return if message.contains("overlap") {
+            Some(HomeText::WindowsOverlap)
+        } else if message.contains("start equals end") {
+            Some(HomeText::StartEqualsEnd)
+        } else if message.contains("bad time") {
+            Some(HomeText::BadTime)
+        } else {
+            None
+        };
+    }
     if message.contains("must be between") {
         match field {
             Field::Eco => Some(HomeText::EcoRange),
@@ -136,6 +162,16 @@ pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, (Field, &'static
         indoor_entity: draft.indoor.clone(),
         cold_below: parse_number(&draft.cold, Field::Cold)?,
         hot_above: parse_number(&draft.hot, Field::Hot)?,
+        off_peak: draft
+            .off_peak
+            .iter()
+            .filter(|(start, end)| !(start.trim().is_empty() && end.trim().is_empty()))
+            .map(|(start, end)| OffPeakWindow {
+                start: start.trim().to_owned(),
+                end: end.trim().to_owned(),
+            })
+            .collect(),
+        off_peak_history: Vec::new(),
     })
 }
 
@@ -148,6 +184,7 @@ fn field_of_message(message: &str) -> Option<Field> {
         ("indoor_entity", Field::Indoor),
         ("cold_below", Field::Cold),
         ("hot_above", Field::Hot),
+        ("off_peak", Field::OffPeak),
     ]
     .into_iter()
     .find(|(name, _)| message.contains(name))
@@ -344,6 +381,76 @@ pub fn HomeSettingsPanel() -> impl IntoView {
                 |d| d.hot.clone(),
                 |d, v| d.hot = v,
             )}
+            <div class="climate-field home-settings__off-peak">
+                <span class="climate-field__label">{move || t(HomeText::OffPeakHours)}</span>
+                <p class="settings__hint">{move || t(HomeText::OffPeakHint)}</p>
+                {move || {
+                    let rows = draft.with(|d| d.off_peak.len());
+                    (0..rows)
+                        .map(|i| {
+                            let get = move |end: bool| {
+                                move || {
+                                    draft.with(|d| {
+                                        d.off_peak
+                                            .get(i)
+                                            .map(|(a, b)| if end { b.clone() } else { a.clone() })
+                                            .unwrap_or_default()
+                                    })
+                                }
+                            };
+                            let set = move |end: bool| {
+                                move |ev| {
+                                    let v = event_target_value(&ev);
+                                    draft.update(|d| {
+                                        if let Some(row) = d.off_peak.get_mut(i) {
+                                            if end { row.1 = v } else { row.0 = v }
+                                        }
+                                    });
+                                }
+                            };
+                            view! {
+                                <div class="home-settings__window">
+                                    <input
+                                        class="field"
+                                        type="time"
+                                        aria-label=move || format!("{} {}", t(HomeText::OffPeakHours), i + 1)
+                                        prop:value=get(false)
+                                        on:change=set(false)
+                                    />
+                                    <span aria-hidden="true">"–"</span>
+                                    <input
+                                        class="field"
+                                        type="time"
+                                        prop:value=get(true)
+                                        on:change=set(true)
+                                    />
+                                    <button
+                                        type="button"
+                                        class="btn btn--compact"
+                                        on:click=move |_| {
+                                            draft.update(|d| {
+                                                if i < d.off_peak.len() {
+                                                    d.off_peak.remove(i);
+                                                }
+                                            })
+                                        }
+                                    >
+                                        {move || t(HomeText::RemoveWindow)}
+                                    </button>
+                                </div>
+                            }
+                        })
+                        .collect_view()
+                }}
+                <button
+                    type="button"
+                    class="btn btn--compact home-settings__add"
+                    on:click=move |_| draft.update(|d| d.off_peak.push((String::new(), String::new())))
+                >
+                    {move || t(HomeText::AddWindow)}
+                </button>
+                {error_for(Field::OffPeak)}
+            </div>
             <button
                 type="button"
                 class="chip home-settings__save"
@@ -367,6 +474,7 @@ mod tests {
             indoor: None,
             cold: cold.into(),
             hot: hot.into(),
+            off_peak: vec![],
         }
     }
 
@@ -389,6 +497,7 @@ mod tests {
             indoor: None,
             cold: "15".into(),
             hot: "26".into(),
+            off_peak: vec![],
         }
     }
 
@@ -456,5 +565,69 @@ mod tests {
             Some(Field::Indoor)
         );
         assert_eq!(field_of_message("boom"), None);
+    }
+
+    fn window(start: &str, end: &str) -> OffPeakWindow {
+        OffPeakWindow {
+            start: start.into(),
+            end: end.into(),
+        }
+    }
+
+    #[test]
+    fn draft_round_trips_off_peak() {
+        let d = Draft {
+            off_peak: vec![("01:34".into(), "07:04".into())],
+            ..draft("", "", "")
+        };
+        let s = draft_to_settings(&d).unwrap();
+        assert_eq!(s.off_peak, vec![window("01:34", "07:04")]);
+        assert!(s.off_peak_history.is_empty());
+        assert_eq!(Draft::from(&s).off_peak, d.off_peak);
+    }
+
+    #[test]
+    fn draft_drops_blank_windows() {
+        let d = Draft {
+            off_peak: vec![("".into(), "".into()), ("22:00".into(), "06:00".into())],
+            ..draft("", "", "")
+        };
+        assert_eq!(
+            draft_to_settings(&d).unwrap().off_peak,
+            vec![window("22:00", "06:00")]
+        );
+    }
+
+    #[test]
+    fn merge_keeps_edited_windows() {
+        let base = full("15", None);
+        let draft = Draft {
+            off_peak: vec![("12:05".into(), "14:34".into())],
+            ..full("15", None)
+        };
+        let latest = full("17", None);
+        let got = merge(&base, &draft, &latest);
+        assert_eq!(got.off_peak, draft.off_peak);
+        assert_eq!(got.eco, "17");
+        let untouched = merge(&base, &base, &draft);
+        assert_eq!(untouched.off_peak, draft.off_peak);
+    }
+
+    #[test]
+    fn off_peak_messages_map_to_field() {
+        let overlap = "off_peak windows 1 and 2 overlap";
+        assert_eq!(field_of_message(overlap), Some(Field::OffPeak));
+        assert_eq!(
+            message_key(Field::OffPeak, overlap),
+            Some(HomeText::WindowsOverlap)
+        );
+        assert_eq!(
+            message_key(Field::OffPeak, "off_peak window 1: bad time"),
+            Some(HomeText::BadTime)
+        );
+        assert_eq!(
+            message_key(Field::OffPeak, "off_peak window 2: start equals end"),
+            Some(HomeText::StartEqualsEnd)
+        );
     }
 }

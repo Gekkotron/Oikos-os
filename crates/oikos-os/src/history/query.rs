@@ -2,13 +2,16 @@
 //! shared `hours` helper that stitches stored hourly rows together with a live rollup for
 //! the window past `done_until`.
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 
 use oikos_api::{
-    HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange, LastChangeItem,
+    GridDay, GridSlot, GridTotals, HistoryDaily, HistoryRange, HistorySeries, HistoryToday,
+    LastChange, LastChangeItem,
 };
+use oikos_core::energy::{GridCounters, OffPeakEntry, is_off_peak, windows_for};
 use oikos_core::history::buckets::{Bucket, EnergyKind, Sample, fill, kwh, merge, rollup, round3};
+use oikos_core::history::grid_day::{HALF_HOUR, fill_slots, increases, slot_starts};
 use oikos_core::history::{HOUR, Micros};
 
 use super::{History, HistoryError};
@@ -35,19 +38,213 @@ pub fn day_starts(zone: Tz, now: Micros, days: u32) -> Vec<Micros> {
 
     let mut out = Vec::with_capacity(days as usize + 1);
     for i in (0..days as i64).rev() {
-        let date = today - chrono::Duration::days(i);
-        let naive = date
-            .and_hms_opt(0, 0, 0)
-            .expect("00:00:00 is always a valid clock time");
-        let local = zone
-            .from_local_datetime(&naive)
-            .earliest()
-            .or_else(|| zone.from_local_datetime(&naive).latest())
-            .unwrap_or_else(|| Utc.from_utc_datetime(&naive).with_timezone(&zone));
-        out.push(local.timestamp_micros());
+        out.push(local_midnight(zone, today - chrono::Duration::days(i)));
     }
     out.push(now);
     out
+}
+
+/// Local midnight of `date` in `zone`, the earliest instant when midnight is ambiguous.
+fn local_midnight(zone: Tz, date: NaiveDate) -> Micros {
+    let naive = date
+        .and_hms_opt(0, 0, 0)
+        .expect("00:00:00 is always a valid clock time");
+    zone.from_local_datetime(&naive)
+        .earliest()
+        .or_else(|| zone.from_local_datetime(&naive).latest())
+        .unwrap_or_else(|| Utc.from_utc_datetime(&naive).with_timezone(&zone))
+        .timestamp_micros()
+}
+
+/// Local midnight of `date` and of the day after: the day's real-time span.
+pub fn day_bounds(zone: Tz, date: NaiveDate) -> (Micros, Micros) {
+    let next = date.succ_opt().unwrap_or(date);
+    (local_midnight(zone, date), local_midnight(zone, next))
+}
+
+fn local(zone: Tz, at: Micros) -> DateTime<Tz> {
+    DateTime::<Utc>::from_timestamp_micros(at)
+        .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
+        .with_timezone(&zone)
+}
+
+/// The house-local date of `at`.
+pub fn local_date(zone: Tz, at: Micros) -> NaiveDate {
+    local(zone, at).date_naive()
+}
+
+fn local_minute(zone: Tz, at: Micros) -> u16 {
+    let t = local(zone, at);
+    (t.hour() * 60 + t.minute()) as u16
+}
+
+const MINUTE: Micros = 60_000_000;
+
+/// One counter's carry (last reading before the day), its readings within the day and its kWh
+/// per unit.
+#[derive(Clone, Debug)]
+pub struct CounterDay {
+    pub carry: Option<f64>,
+    pub samples: Vec<Sample>,
+    pub factor: f64,
+}
+
+/// The bought and sold counters' readings for the day.
+#[derive(Clone, Debug, Default)]
+pub struct DayReadings {
+    pub bought: Vec<CounterDay>,
+    pub sold: Vec<CounterDay>,
+}
+
+/// Everything [`build_grid_day`] needs, read beforehand.
+pub struct DayInput<'a> {
+    pub zone: Tz,
+    pub date: NaiveDate,
+    pub first_date: Option<NaiveDate>,
+    pub history: &'a [OffPeakEntry],
+    pub readings: &'a DayReadings,
+    pub has_export: bool,
+    pub now: Micros,
+}
+
+/// The grid day from its readings: half-hour slots to now, split by the windows in force on
+/// that day, with the off-peak bands and totals.
+pub fn build_grid_day(input: &DayInput) -> GridDay {
+    let zone = input.zone;
+    let (day_start, day_end) = day_bounds(zone, input.date);
+    let windows = windows_for(input.history, input.date);
+    let off_peak_at = |at: Micros| is_off_peak(windows, local_minute(zone, at));
+
+    let rises = |counters: &[CounterDay]| -> Vec<(Micros, f64)> {
+        counters
+            .iter()
+            .flat_map(|c| {
+                increases(c.carry, &c.samples)
+                    .into_iter()
+                    .map(move |(at, rise)| (at, rise * c.factor))
+            })
+            .collect()
+    };
+    let slots = slot_starts(day_start, day_end, input.now);
+    let filled = fill_slots(
+        &slots,
+        &rises(&input.readings.bought),
+        &rises(&input.readings.sold),
+        off_peak_at,
+    );
+
+    let mut bands: Vec<(i64, i64)> = Vec::new();
+    if !windows.is_empty() {
+        let mut open: Option<Micros> = None;
+        let mut t = day_start;
+        while t < day_end {
+            match (off_peak_at(t), open) {
+                (true, None) => open = Some(t),
+                (false, Some(from)) => {
+                    bands.push((from / 1_000_000, t / 1_000_000));
+                    open = None;
+                }
+                _ => {}
+            }
+            t += MINUTE;
+        }
+        if let Some(from) = open {
+            bands.push((from / 1_000_000, day_end / 1_000_000));
+        }
+    }
+
+    let sum = |f: fn(&GridSlot) -> f64, slots: &[GridSlot]| round3(slots.iter().map(f).sum());
+    let slots: Vec<GridSlot> = filled
+        .into_iter()
+        .map(|s| GridSlot {
+            start: s.start / 1_000_000,
+            local: local(zone, s.start).format("%H:%M").to_string(),
+            off_peak: s.off_peak,
+            peak: s.peak,
+            export: s.export,
+        })
+        .collect();
+    let totals = GridTotals {
+        off_peak: sum(|s| s.off_peak, &slots),
+        peak: sum(|s| s.peak, &slots),
+        export: sum(|s| s.export, &slots),
+    };
+    let ymd = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
+    GridDay {
+        date: ymd(input.date),
+        today: ymd(local_date(zone, input.now)),
+        first_date: input.first_date.map(ymd),
+        day_slots: ((day_end - day_start + HALF_HOUR - 1) / HALF_HOUR) as usize,
+        slots,
+        bands,
+        totals,
+        has_export: input.has_export,
+        tariffs: !windows.is_empty(),
+    }
+}
+
+/// `GET /history/grid_day`: what crossed the grid meter on `date` (today when `None`).
+pub async fn grid_day(
+    h: &History,
+    counters: &GridCounters,
+    history: &[OffPeakEntry],
+    date: Option<NaiveDate>,
+    now: Micros,
+) -> Result<GridDay, HistoryError> {
+    let db = h.db()?;
+    if counters.bought.is_empty() {
+        return Err(HistoryError::NoGridMeter);
+    }
+    let zone = h.zone();
+    let today = local_date(zone, now);
+    let date = date.unwrap_or(today);
+    if date > today {
+        return Err(HistoryError::BadRequest("date is in the future".into()));
+    }
+    let (day_start, day_end) = day_bounds(zone, date);
+    let until = day_end.min(now);
+    let read = |ids: &[String]| {
+        let ids = ids.to_vec();
+        async move {
+            let mut out = Vec::with_capacity(ids.len());
+            for id in &ids {
+                let carry = db.last_before(id, day_start).await?;
+                let samples = if day_start < until {
+                    db.samples(day_start, until, Some(id))
+                        .await?
+                        .into_iter()
+                        .map(|(_, s)| s)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                out.push(CounterDay {
+                    carry,
+                    samples,
+                    factor: counters.factor(id),
+                });
+            }
+            Ok::<_, sqlx::Error>(out)
+        }
+    };
+    let readings = DayReadings {
+        bought: read(&counters.bought).await.map_err(unavailable)?,
+        sold: read(&counters.sold).await.map_err(unavailable)?,
+    };
+    let first_date = db
+        .first_time_of(&counters.bought)
+        .await
+        .map_err(unavailable)?
+        .map(|t| local_date(zone, t));
+    Ok(build_grid_day(&DayInput {
+        zone,
+        date,
+        first_date,
+        history,
+        readings: &readings,
+        has_export: !counters.sold.is_empty(),
+        now,
+    }))
 }
 
 /// Carry at `start` for the 24h series: the last raw sample in `[hour_floor(start), start)`
@@ -263,6 +460,197 @@ mod tests {
 
     fn hours_between(a: Micros, b: Micros) -> i64 {
         (b - a) / HOUR
+    }
+
+    use oikos_core::energy::{OffPeakEntry, OffPeakWindow};
+
+    fn nd(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    fn at(s: &str) -> Micros {
+        micros_of_local(Paris, s)
+    }
+
+    fn sample(s: &str, num: f64) -> Sample {
+        Sample { at: at(s), num }
+    }
+
+    fn history() -> Vec<OffPeakEntry> {
+        let w = |a: &str, b: &str| OffPeakWindow {
+            start: a.to_owned(),
+            end: b.to_owned(),
+        };
+        vec![OffPeakEntry {
+            since: "2026-01-01".to_owned(),
+            windows: vec![w("01:34", "07:04"), w("12:05", "14:34")],
+        }]
+    }
+
+    fn kwh(carry: Option<f64>, samples: Vec<Sample>) -> CounterDay {
+        CounterDay {
+            carry,
+            samples,
+            factor: 1.0,
+        }
+    }
+
+    #[test]
+    fn grid_day_scales_wh_counters() {
+        let h = history();
+        let r = DayReadings {
+            bought: vec![CounterDay {
+                carry: Some(100_000.0),
+                samples: vec![sample("2026-10-23 08:00:00", 100_400.0)],
+                factor: 0.001,
+            }],
+            sold: vec![],
+        };
+        let day = build_grid_day(&input("2026-10-23", &h, &r, at("2026-10-24 09:00:00")));
+        assert_eq!(day.totals.peak, 0.4);
+        assert_eq!(day.slots[16].peak, 0.4);
+    }
+
+    fn readings() -> DayReadings {
+        DayReadings {
+            bought: vec![kwh(
+                Some(100.0),
+                vec![
+                    sample("2026-10-23 01:40:00", 100.4),
+                    sample("2026-10-23 08:00:00", 101.0),
+                    sample("2026-10-23 13:00:00", 101.5),
+                ],
+            )],
+            sold: vec![kwh(Some(5.0), vec![sample("2026-10-23 13:10:00", 5.6)])],
+        }
+    }
+
+    fn input<'a>(
+        date: &str,
+        hist: &'a [OffPeakEntry],
+        readings: &'a DayReadings,
+        now: Micros,
+    ) -> DayInput<'a> {
+        DayInput {
+            zone: Paris,
+            date: nd(date),
+            first_date: Some(nd("2026-01-15")),
+            history: hist,
+            readings,
+            has_export: true,
+            now,
+        }
+    }
+
+    #[test]
+    fn fall_back_day_has_50_slots() {
+        let (a, b) = day_bounds(Paris, nd("2026-10-25"));
+        assert_eq!(hours_between(a, b), 25);
+        assert_eq!(slot_starts(a, b, i64::MAX).len(), 50);
+        let (a, b) = day_bounds(Paris, nd("2026-03-29"));
+        assert_eq!(slot_starts(a, b, i64::MAX).len(), 46);
+        assert_eq!(
+            day_bounds(Paris, nd("2026-10-23")).0,
+            at("2026-10-23 00:00:00")
+        );
+    }
+
+    #[test]
+    fn grid_day_totals_match_counter_increase() {
+        let h = history();
+        let r = readings();
+        let day = build_grid_day(&input("2026-10-23", &h, &r, at("2026-10-24 09:00:00")));
+        assert_eq!(day.date, "2026-10-23");
+        assert_eq!(day.today, "2026-10-24");
+        assert_eq!(day.first_date.as_deref(), Some("2026-01-15"));
+        assert_eq!(day.slots.len(), 48);
+        assert_eq!(day.day_slots, 48);
+        assert_eq!(day.totals.off_peak, 0.9);
+        assert_eq!(day.totals.peak, 0.6);
+        assert_eq!(day.totals.export, 0.6);
+        assert_eq!(day.slots[3].local, "01:30");
+        assert_eq!(day.slots[3].off_peak, 0.4);
+        assert_eq!(day.slots[16].peak, 0.6);
+        assert!(day.tariffs && day.has_export);
+    }
+
+    #[test]
+    fn grid_day_today_is_partial() {
+        let h = history();
+        let r = readings();
+        let day = build_grid_day(&input("2026-10-23", &h, &r, at("2026-10-23 10:15:00")));
+        assert_eq!(day.slots.len(), 21);
+        assert_eq!(day.day_slots, 48);
+        assert_eq!(day.date, day.today);
+        assert_eq!(day.totals.peak, 0.6);
+        assert_eq!(day.totals.export, 0.0);
+    }
+
+    #[test]
+    fn grid_day_uses_windows_of_that_day() {
+        let w = |a: &str, b: &str| OffPeakWindow {
+            start: a.to_owned(),
+            end: b.to_owned(),
+        };
+        let h = vec![
+            OffPeakEntry {
+                since: "2026-10-22".to_owned(),
+                windows: vec![w("07:30", "09:00")],
+            },
+            OffPeakEntry {
+                since: "2026-10-23".to_owned(),
+                windows: vec![],
+            },
+        ];
+        let r = DayReadings {
+            bought: vec![kwh(Some(1.0), vec![sample("2026-10-22 08:00:00", 2.0)])],
+            sold: vec![],
+        };
+        let day = build_grid_day(&input("2026-10-22", &h, &r, at("2026-10-24 09:00:00")));
+        assert_eq!((day.totals.off_peak, day.totals.peak), (1.0, 0.0));
+        let r = DayReadings {
+            bought: vec![kwh(Some(1.0), vec![sample("2026-10-23 08:00:00", 2.0)])],
+            sold: vec![],
+        };
+        let day = build_grid_day(&input("2026-10-23", &h, &r, at("2026-10-24 09:00:00")));
+        assert_eq!((day.totals.off_peak, day.totals.peak), (0.0, 1.0));
+        assert!(!day.tariffs && day.bands.is_empty());
+    }
+
+    #[test]
+    fn grid_day_bands_follow_windows() {
+        let h = history();
+        let r = readings();
+        let day = build_grid_day(&input("2026-10-23", &h, &r, at("2026-10-24 09:00:00")));
+        let secs = |s: &str| at(s) / 1_000_000;
+        assert_eq!(
+            day.bands,
+            vec![
+                (secs("2026-10-23 01:34:00"), secs("2026-10-23 07:04:00")),
+                (secs("2026-10-23 12:05:00"), secs("2026-10-23 14:34:00"))
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_day_band_crossing_midnight_is_clipped_to_the_day() {
+        let h = vec![OffPeakEntry {
+            since: "2026-01-01".to_owned(),
+            windows: vec![OffPeakWindow {
+                start: "22:00".to_owned(),
+                end: "06:00".to_owned(),
+            }],
+        }];
+        let r = DayReadings::default();
+        let day = build_grid_day(&input("2026-10-23", &h, &r, at("2026-10-24 09:00:00")));
+        let secs = |s: &str| at(s) / 1_000_000;
+        assert_eq!(
+            day.bands,
+            vec![
+                (secs("2026-10-23 00:00:00"), secs("2026-10-23 06:00:00")),
+                (secs("2026-10-23 22:00:00"), secs("2026-10-24 00:00:00"))
+            ]
+        );
     }
 
     #[test]
