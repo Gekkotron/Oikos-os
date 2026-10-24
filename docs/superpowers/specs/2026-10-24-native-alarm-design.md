@@ -55,7 +55,7 @@ The entity uses the core alarm states (`oikos-core` `state/kinds/alarm.rs`):
 Supported arm modes are `away`, `home` and `night` (no vacation or custom bypass). After the siren period ends (§5.1), the panel goes back to the state it was in before the trigger, so a new event rings again. The trigger alert stays open until the alarm is disarmed. On that return:
 
 - the motion hits are cleared;
-- a sensor still `on` (the one that triggered, or one opened since) is bypassed until it reports `off`, as in §4.3;
+- a sensor still `on` (the one that triggered, or one opened since) is watched for closing, as in §4.3;
 - an SOS from `disarmed` goes back to `disarmed` with its alert still open. A `DISARM` sent while already disarmed resolves any open alarm alert. *(Claude's call.)*
 
 **No re-ring cap.** As long as nobody disarms, every new detection rings the sirens again for another `siren_s` and sends a new push. *(Decided with the user: "the alarm continues ringing".)*
@@ -90,7 +90,13 @@ Only a change to `on` counts. A replayed retained value after boot or reconnect 
 
 ### 4.3 Arming with something open
 
-The alarm arms anyway. Each watched opening that is `on` when the armed state is entered (the end of the exit delay, not the arm command, so leaving through a door doesn't count) is **bypassed** until it reports `off`, and is watched again from then on. The arm push names the bypassed sensors (§5.2). *(Claude's call. Refusing to arm would leave the house unarmed when the geofence fires and nobody is there to close the window.)*
+The alarm arms anyway, and an open sensor is **never ignored**. Each watched opening that is `on` when the armed state is entered (the end of the exit delay, not the arm command, so leaving through a door doesn't count) is **watched for closing**: its change to `off` is an event, handled like an opening (instant or delayed, per its `entry`). Once closed, it is watched as usual, so reopening is an event too.
+
+Why closing counts: a tilt-and-turn window left tilted reads open. To open it fully, someone has to close it first and then turn it open, so the close is the first sign of tampering. *(Decided with the user.)* The same rule protects any door left ajar: closing it while armed means someone is there.
+
+The limit, stated in the user docs: a window or door that is ajar *and* can be pushed wider without closing (a plain casement or door) shows no change on a single contact. In away mode, motion still covers it. A second contact or a tilt sensor closes the gap.
+
+*(Claude's call:)* Refusing to arm with something open would leave the house unarmed when the geofence fires and nobody is there to close the window.
 
 ### 4.4 Unavailable sensors
 
@@ -114,7 +120,7 @@ Through `Hub::notify`, source `"alarm"`, channel `alarm`:
 | Event | Severity | Text (example) | Actions |
 |---|---|---|---|
 | Triggered | critical | "Alarm: front door opened" / "Alarm: 2 motions (hallway, kitchen)" / "Alarm: SOS" | Disarm |
-| Armed with bypassed sensors | warning | "Armed away. Office window is open and not watched" | Disarm |
+| Armed with open sensors | info (no sound) | "Armed away. Office window is open, watched for closing" | — |
 | Sensor unavailable while armed | warning | "Alarm sensor offline: back door" | — |
 
 The trigger alert gets a new id each time and is resolved (`cancel`) on disarm. Plain arm and disarm send no push: the chirp and the panel state are enough. *(Claude's call.)*
@@ -155,7 +161,7 @@ The hub publishes the entity with discovery, following the virtual-entity conven
 
 A **manual arm** (web, app, MCP, flow, remote) goes through `arming` for `exit_delay_s` (default **60 s**, Claude's call). A presence arm skips it. The arm source is recorded (§9) and shown on the panel as `presence`, `remote`, `sos` or `command`. *(Claude's call: `send_command` carries no caller identity, and web, app, MCP and flows all count as `command`.)*
 
-The entity carries JSON attributes: `source`, `since`, `deadline` (the end of the exit or entry delay, so the card can show a countdown), `cause` (the sensor(s) that set it off) and `bypassed`. Showing the countdown and cause in `AlarmHero` is a small web addition.
+The entity carries JSON attributes: `source`, `since`, `deadline` (the end of the exit or entry delay, so the card can show a countdown), `cause` (the sensor(s) that set it off) and `open_at_arm` (the sensors watched for closing). Showing the countdown and cause in `AlarmHero` is a small web addition.
 
 ## 7. Settings document
 
@@ -217,7 +223,7 @@ The entity id named in a sensor, siren or remote may later disappear from the ho
 
 ## 9. Restarts
 
-The engine persists its runtime at `<prefix>/state` (retained): state, mode, source, since, deadline, the motion hits inside the window, the bypassed sensors, the open trigger alert id and the siren end time. On boot, after the settings and state are ingested and the broker is online:
+The engine persists its runtime at `<prefix>/state` (retained): state, mode, source, since, deadline, the motion hits inside the window, the sensors watched for closing, the open trigger alert id and the siren end time. On boot, after the settings and state are ingested and the broker is online:
 
 - In `pending` or `arming` with the deadline passed: a passed exit delay → armed. A passed entry delay → triggered, if the siren period would still be running. Otherwise go back to armed and keep the alert open. With the deadline not yet passed: resume the countdown.
 - In `triggered` with sirens still due: switch them on again for the remaining time. With the period over: switch them off and go back to armed.
@@ -226,7 +232,7 @@ The engine persists its runtime at `<prefix>/state` (retained): state, mode, sou
 
 ## 10. MCP and HTTP
 
-- **MCP:** `alarm_status` (read-only: enabled, state, mode, source, deadline, cause, bypassed, the settings and any settings warnings) and `set_alarm_settings` (replace the document, validated, returns the fresh status). They follow `mcp/climate_tools.rs`. Arming and disarming go through the existing `send_command` on the alarm entity. The server instructions text gets one paragraph.
+- **MCP:** `alarm_status` (read-only: enabled, state, mode, source, deadline, cause, open_at_arm, the settings and any settings warnings) and `set_alarm_settings` (replace the document, validated, returns the fresh status). They follow `mcp/climate_tools.rs`. Arming and disarming go through the existing `send_command` on the alarm entity. The server instructions text gets one paragraph.
 - **HTTP:** `GET /api/v1/alarm` (status) and `PUT /api/v1/alarm/settings`. WebSocket: a new `AlarmChanged` event (the web refreshes the settings page on it, the way `ClimateChanged` bumps `climate_rev`). The entity's own state already flows through `StateChanged`.
 
 ## 11. Docs
@@ -245,7 +251,7 @@ The engine persists its runtime at `<prefix>/state` (retained): state, mode, sou
 Hub integration tests in the style of `crates/oikos-os/tests/climate_hub.rs`: no broker, fed with `ingest`, `#[tokio::test(start_paused = true)]` for the delays. Each of these gets its own test:
 
 - the rules (instant, delayed, motion count and window, per-mode filtering)
-- bypass at arm
+- an opening that is open at arm and closes while armed (a tilted window), including closing during the exit delay
 - presence arm and disarm, including unknown trackers and the grace period
 - remote signal mapping and SOS from disarmed
 - siren on and off for both siren kinds, including a failing siren
@@ -269,12 +275,12 @@ The pure state machine should live in a small crate or module with no hub depend
 - No alarm codes (§2).
 - home mode defaults to outside doors only, ticked per sensor (§4.1).
 - Motion window 120 s (§4.2).
-- Arm anyway with something open, and bypass it (§4.3).
+- Arm anyway with something open, and watch it for closing (§4.3). Its note is silent (§5.2).
 - An unavailable sensor warns, it doesn't trigger (§4.4).
 - Siren period 180 s, then back to armed (§3, §5.1).
 - No push on plain arm or disarm, only the chirp (§5.2).
 - A new opening defaults to away and night, instant (§4.1).
-- Bypass is checked at the end of the exit delay (§4.3).
+- Open sensors are checked at the end of the exit delay (§4.3).
 - An SOS from disarmed returns to disarmed, with the alert open until a DISARM (§3).
 - The arm source is coarse: `presence`, `remote`, `sos` or `command` (web, app, MCP and flows all go through the command path) (§6.3).
 - Presence arms after 120 s of everyone away. A tracker coming home disarms at once (§6.1).
