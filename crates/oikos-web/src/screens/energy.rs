@@ -305,7 +305,7 @@ fn today_for_card(
     Some(sum)
 }
 
-fn by_role(all: &[EnergyEntity]) -> BTreeMap<EnergyRole, Vec<&EnergyEntity>> {
+pub(crate) fn by_role(all: &[EnergyEntity]) -> BTreeMap<EnergyRole, Vec<&EnergyEntity>> {
     let mut m: BTreeMap<EnergyRole, Vec<&EnergyEntity>> = BTreeMap::new();
     for e in all {
         if let Some(r) = e.role {
