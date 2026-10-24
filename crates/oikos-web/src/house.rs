@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use leptos::prelude::*;
 use oikos_api::{
-    AlertView, AreaView, BridgeView, ConnectionStatus, Dashboard, DashboardView, DeviceView,
-    EntityView, FlowView, FlowsConfigView, GroupView, HomeSettings, IgnoredView, WeatherView,
-    WsEvent,
+    AlertView, AmbianceView, ApplyReport, AreaView, BridgeView, ConnectionStatus, Dashboard,
+    DashboardView, DeviceView, EntityView, FlowView, FlowsConfigView, GroupView, HomeSettings,
+    IgnoredView, WeatherView, WsEvent,
 };
 
 #[derive(Clone, Copy)]
@@ -29,6 +29,12 @@ pub struct House {
     pub weather_loaded: RwSignal<bool>,
     /// The home settings; the default document until the first fetch answers.
     pub home_settings: RwSignal<HomeSettings>,
+    /// The ambiances as the hub lists them, unreadable ones included.
+    pub ambiances: RwSignal<Vec<AmbianceView>>,
+    /// Whether the first ambiance fetch (or push) has landed; the Home row waits for it.
+    pub ambiances_loaded: RwSignal<bool>,
+    /// The last apply report per ambiance id, for this session.
+    pub ambiance_reports: RwSignal<BTreeMap<String, ApplyReport>>,
     /// The hand-made groups by id (without the `group_` prefix), for the member counts on Home.
     pub groups: RwSignal<BTreeMap<String, GroupView>>,
     /// The dashboards, fetched once at start-up: the hub does not push their structure.
@@ -57,6 +63,9 @@ impl House {
             weather: RwSignal::new(None),
             weather_loaded: RwSignal::new(false),
             home_settings: RwSignal::new(HomeSettings::default()),
+            ambiances: RwSignal::new(Vec::new()),
+            ambiances_loaded: RwSignal::new(false),
+            ambiance_reports: RwSignal::new(BTreeMap::new()),
             groups: RwSignal::new(BTreeMap::new()),
             dashboards: RwSignal::new(Vec::new()),
             command_failed: RwSignal::new(None),
@@ -95,6 +104,18 @@ impl House {
         leptos::task::spawn_local(async move {
             weather.set(crate::api::home::get_weather().await.ok().flatten());
             loaded.set(true);
+        });
+    }
+
+    /// Fetches the ambiances into [`House::ambiances`]; a failure leaves the last value.
+    pub fn refresh_ambiances(&self) {
+        let ambiances = self.ambiances;
+        let loaded = self.ambiances_loaded;
+        leptos::task::spawn_local(async move {
+            if let Ok(list) = crate::api::ambiances::list_ambiances().await {
+                ambiances.set(list);
+                loaded.set(true);
+            }
         });
     }
 
@@ -187,7 +208,13 @@ impl House {
             WsEvent::ClimateChanged { .. } => self.climate_rev.update(|r| *r += 1),
             WsEvent::WeatherChanged => self.refresh_weather(),
             WsEvent::HomeSettingsChanged { settings } => self.home_settings.set(settings),
-            WsEvent::AmbiancesChanged { .. } | WsEvent::AmbianceApplied { .. } => {}
+            WsEvent::AmbiancesChanged { ambiances } => {
+                self.ambiances.set(ambiances);
+                self.ambiances_loaded.set(true);
+            }
+            WsEvent::AmbianceApplied { report } => self
+                .ambiance_reports
+                .update(|m| _ = m.insert(report.ambiance.clone(), report)),
         }
     }
 }
@@ -218,6 +245,40 @@ mod tests {
             order: 1,
             widgets: (0..widgets).map(widget).collect(),
         }
+    }
+
+    fn view(id: &str) -> AmbianceView {
+        AmbianceView {
+            id: id.into(),
+            ambiance: None,
+            invalid: Some("unreadable".into()),
+        }
+    }
+
+    #[test]
+    fn ambiances_changed_event_sets_list() {
+        let house = House::new();
+        assert!(!house.ambiances_loaded.get_untracked());
+        house.apply(WsEvent::AmbiancesChanged {
+            ambiances: vec![view("a"), view("b")],
+        });
+        assert_eq!(house.ambiances.get_untracked().len(), 2);
+        assert!(house.ambiances_loaded.get_untracked());
+    }
+
+    #[test]
+    fn ambiance_applied_event_stores_report() {
+        let house = House::new();
+        let report = |at| ApplyReport {
+            ambiance: "a".into(),
+            started_at: at,
+            actions: Vec::new(),
+        };
+        house.apply(WsEvent::AmbianceApplied { report: report(1) });
+        house.apply(WsEvent::AmbianceApplied { report: report(2) });
+        let reports = house.ambiance_reports.get_untracked();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports["a"].started_at, 2);
     }
 
     #[test]
