@@ -6,7 +6,6 @@ use oikos_core::model::{Command, CoverState, EntityState, StateValue};
 
 use super::Sender;
 use crate::components::card_frame::{CardFrame, open_entity};
-use crate::format::display_value;
 use crate::house::House;
 use crate::icons::{CHEVRON_DOWN, CHEVRON_UP, STOP};
 
@@ -42,11 +41,7 @@ fn with_position(state: &EntityState, position: u8) -> Option<EntityState> {
 #[component]
 pub fn CoverCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let label = display_value(
-        crate::i18n::current_lang(),
-        &entity.state,
-        entity.unit.as_deref(),
-    );
+    let label = super::live_value(&entity);
     // The folded "moving" child changes on its own, without rebuilding this card, so the badge
     // follows it through a memo (which only notifies when the answer flips).
     let house = expect_context::<House>();

@@ -26,6 +26,7 @@ use crate::commands::{Pending, fire_command};
 use crate::components::toast::Toasts;
 use crate::format::word;
 use crate::house::House;
+use oikos_api::EntityView;
 
 /// The contexts a card needs to send commands, captured while the card is built so event
 /// handlers can use them later.
@@ -77,6 +78,14 @@ impl Sender {
 }
 
 /// The pill toggle with a sliding knob. The whole row is the tap target.
+/// The value line of `entity` ("21,5 °C", "Ouvert · 40 %"), following the language toggle.
+pub fn live_value(entity: &EntityView) -> Signal<String> {
+    let lang = crate::i18n::use_lang();
+    let state = entity.state.clone();
+    let unit = entity.unit.clone();
+    Signal::derive(move || crate::format::display_value(lang(), &state, unit.as_deref()))
+}
+
 #[component]
 pub fn PowerToggle(
     on: bool,

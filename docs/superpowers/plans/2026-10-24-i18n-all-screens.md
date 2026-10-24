@@ -287,6 +287,7 @@ Each area task applies the same recipe to its files. Each one is its own PR from
 1. **Create `src/i18n/<area>.rs`** with one `#[derive(Clone, Copy, Debug, PartialEq, Eq)] pub enum <Area>Text` for fixed words and a `pub fn <area>_text(lang: Lang, k: <Area>Text) -> &'static str` holding the `(en, fr)` pairs. Use a `pub fn …(lang: Lang, …) -> String` helper for each sentence with values, with counts through `i18n::format::count`. Register it with `pub mod <area>;` in `i18n/mod.rs`. Reuse `Key` entries that already exist (Save, Delete, Edit…) instead of duplicating them.
 2. **Route every flagged literal in the area's files through it**, including `aria-label`, `title`, `placeholder`, toasts, confirmation questions and error leads. Numbers, dates and times go through `i18n::format`, state and kind words through `i18n::states`. A number `<input>` parses with `parse_decimal`.
 3. **Delete the area's `file:` lines** from `tests/bare_text_allow.txt`. Run `cargo test -p oikos-web --test bare_text`. Expected: PASS with no hit in the area's files.
+   The guard cannot tell a lone lower-case word from an id outside `view!` (colour names in `flow_text.rs`, "sunrise"/"sunset", "min", chart "on"/"off"). Also run `grep -n -E '(=>|^\s*)"[a-z]+",?$' <area files>` and translate each hit that people read; leave ids alone.
 4. **Add the browser test** named in the task. It mounts the area's main screen with `Lang::Fr`, asserts the listed French strings are present and the listed English ones absent, then sets the signal to `Lang::En` without remounting and asserts the reverse. Keep existing EN tests as they are.
 5. **Table test**: in `src/i18n/<area>.rs`, a unit test iterates every `<Area>Text` variant (list them in a `const ALL: &[<Area>Text]`) and checks that `en` and `fr` are non-empty, and that `en != fr` unless the variant is in a short `SAME` list.
 6. Run native tests, wasm check, lint and the area's browser test files. Expected: PASS.
@@ -323,7 +324,7 @@ Each area task applies the same recipe to its files. Each one is its own PR from
 ### Task 9: Devices, entity sheet and overrides
 
 **Files:** `override_editor.rs`, `screens/devices.rs`, `screens/entity_sheet.rs`, `screens/generic_panel.rs`, `settings_rules.rs`, `cards/{generic,number,select,button,text,sensor,switch,light,cover,vacuum,chime}.rs`, `components/{card_frame,card_place,robot,hs_wheel,sparkline,room_title}.rs`. Area module: `i18n/devices.rs`, `DeviceText`.
-**Specifics:** the "Show as" choices use `switch_type_word`; card fields use `display_value(lang, …)`. Browser tests: extend `tests/sheet.rs` and `tests/generic_card.rs`: FR shows "Afficher comme", "Prise" and "Entité", not "Show as" or "Plug".
+**Specifics:** the "Show as" choices use `switch_type_word`; card fields use `display_value(lang, …)`. Card texts still read once at build through `i18n::current_lang()` (card titles in `components/card_frame.rs`, light/switch/climate names, siren and generic values, water-heater target/inlet, climate-group target, `dashboards/history_widget.rs` title) become reactive here: `cards::live_value` shows the pattern; a `String` prop of `Stepper`/`PowerToggle`/`ModeSelect` becomes a `Signal<String>`. Browser tests: extend `tests/sheet.rs` and `tests/generic_card.rs`: FR shows "Afficher comme", "Prise" and "Entité", not "Show as" or "Plug".
 
 ### Task 10: Groups
 

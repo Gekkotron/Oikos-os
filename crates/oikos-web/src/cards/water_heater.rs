@@ -10,7 +10,7 @@ use super::climate::stepped;
 use super::{ModeSelect, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::components::card_place::{CardPlace, use_card_place};
-use crate::format::{degrees, display_value, word};
+use crate::format::{degrees, word};
 use crate::i18n::{Key, use_text};
 
 fn with_water_heater(
@@ -77,11 +77,7 @@ impl HeaterView {
 #[component]
 pub fn WaterHeaterCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let label = display_value(
-        crate::i18n::current_lang(),
-        &entity.state,
-        entity.unit.as_deref(),
-    );
+    let label = super::live_value(&entity);
     let target_text = degrees(
         crate::i18n::current_lang(),
         match &entity.state.value {

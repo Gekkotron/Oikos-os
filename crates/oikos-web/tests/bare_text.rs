@@ -55,6 +55,8 @@ fn flagged(source: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut skip_depth: Option<i32> = None;
     let mut pending_cfg_test = false;
+    // Brace depth inside a `view!` block, where a literal alone on its line is view text.
+    let mut view_depth = 0;
     for raw in source.lines() {
         let line = strip_comment(raw);
         if let Some(depth) = skip_depth.as_mut() {
@@ -83,12 +85,24 @@ fn flagged(source: &str) -> Vec<String> {
                 }
             }
         }
+        let in_view = view_depth > 0;
+        if view_depth > 0 {
+            view_depth = (view_depth + braces(&line)).max(0);
+        } else if let Some(at) = line.find("view!") {
+            view_depth = braces(&line[at..]).max(0);
+        }
         if TECH_LINES.iter().any(|t| line.contains(t)) {
             continue;
         }
         for (start, lit) in literals(&line) {
             let before = line[..start].trim_end();
-            let read = READ_ATTRS.iter().any(|a| before.ends_with(a));
+            let after = line[start + lit.len() + 2..].trim();
+            // View text (`>"now"`, or a literal alone on its line) is read even in lower case.
+            let after_tag =
+                before.ends_with('>') && !before.ends_with("=>") && !before.ends_with("->");
+            let in_text =
+                after_tag || (in_view && before.is_empty() && matches!(after, "" | "," | "}"));
+            let read = in_text || READ_ATTRS.iter().any(|a| before.ends_with(a));
             if !read && TECH_ATTRS.iter().any(|a| before.ends_with(a)) {
                 continue;
             }
@@ -105,10 +119,7 @@ fn flagged(source: &str) -> Vec<String> {
 /// markup are not text.
 fn looks_like_text(lit: &str, read_attr: bool) -> bool {
     let bare = strip_placeholders(lit);
-    if lit.starts_with(['<', '/', '.', '#'])
-        || is_svg_path(&bare)
-        || is_css(lit)
-        || is_classes(&bare)
+    if lit.starts_with(['<', '/', '.', '#']) || is_svg_path(lit) || is_css(lit) || is_classes(&bare)
     {
         return false;
     }
@@ -127,9 +138,30 @@ fn looks_like_text(lit: &str, read_attr: bool) -> bool {
             .is_some_and(char::is_uppercase)
 }
 
-/// Path data, placeholders already removed: "M12 4L4 12 Z", "HV".
-fn is_svg_path(s: &str) -> bool {
-    !s.is_empty()
+/// Path data ("M12 4L4 12 Z", "H{x}V{y}"): path commands and numbers only, with a number, and
+/// never two letters in a row (placeholders count as numbers), so "Stats" or "Last 24 h" are words.
+fn is_svg_path(lit: &str) -> bool {
+    let mut s = String::new();
+    let mut depth = 0;
+    for c in lit.chars() {
+        match c {
+            '{' => {
+                if depth == 0 {
+                    s.push('0');
+                }
+                depth += 1;
+            }
+            '}' if depth > 0 => depth -= 1,
+            _ if depth == 0 => s.push(c),
+            _ => {}
+        }
+    }
+    let letters_apart = !s
+        .as_bytes()
+        .windows(2)
+        .any(|w| w[0].is_ascii_alphabetic() && w[1].is_ascii_alphabetic());
+    s.chars().any(|c| c.is_ascii_digit())
+        && letters_apart
         && s.chars()
             .all(|c| "MmLlHhVvCcSsQqTtAaZz0123456789 ,.-".contains(c))
 }
@@ -380,6 +412,25 @@ fn flags_view_text_and_attributes() {
     assert_eq!(flagged(r#"<button>"Save"</button>"#), ["Save"]);
     assert_eq!(flagged(r#"<input placeholder="search"/>"#), ["search"]);
     assert_eq!(flagged(r#"toasts.push("Flow saved");"#), ["Flow saved"]);
+}
+
+#[test]
+fn flags_lowercase_words_people_read() {
+    assert_eq!(
+        flagged("view! {\n<span>\n    \"retry\"\n</span>\n}"),
+        ["retry"]
+    );
+    assert_eq!(flagged(r#"<p>"now"</p>"#), ["now"]);
+    assert!(flagged(r#"Category::Lights => "lights","#).is_empty());
+    // Outside view!, a lone lower-case word reads like an id ("door_out", "on"): not flagged.
+    // The area recipe greps for those by hand.
+    assert!(flagged("const C: [&str; 2] = [\n    \"red\",\n    \"blue\",\n];").is_empty());
+}
+
+#[test]
+fn words_made_of_path_letters_are_still_words() {
+    assert_eq!(flagged(r#"let t = "Last 24 h";"#), ["Last 24 h"]);
+    assert_eq!(flagged(r#"let s = "Stats";"#), ["Stats"]);
 }
 
 #[test]

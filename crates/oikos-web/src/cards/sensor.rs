@@ -163,12 +163,8 @@ fn humidity_body(entity: &EntityView) -> impl IntoView + use<> {
 #[component]
 pub fn SensorCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
-    let text = sensor_text(
-        crate::i18n::current_lang(),
-        &entity.state,
-        entity.unit.as_deref(),
-    );
-    let class = match value_class(&text) {
+    let text = super::live_value(&entity);
+    let class = move || match value_class(&text.get()) {
         "card__value" => "card__value card__value--big",
         long => long,
     };

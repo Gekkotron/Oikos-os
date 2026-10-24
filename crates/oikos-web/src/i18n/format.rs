@@ -53,7 +53,8 @@ pub fn with_unit(value: String, unit: Option<&str>) -> String {
     }
 }
 
-/// A number typed by hand: "21,5" or "21.5", thousands separated by spaces or not.
+/// A number typed by hand: "21,5" or "21.5", thousands separated by spaces or not. Digits, one
+/// separator and a leading minus only: no exponent, no "NaN" or "inf".
 pub fn parse_decimal(s: &str) -> Option<f64> {
     let cleaned: String = s
         .trim()
@@ -61,7 +62,11 @@ pub fn parse_decimal(s: &str) -> Option<f64> {
         .filter(|c| !matches!(c, ' ' | '\u{A0}' | '\u{2009}' | '\u{202F}'))
         .map(|c| if c == ',' { '.' } else { c })
         .collect();
-    cleaned.parse().ok()
+    let digits = cleaned.strip_prefix('-').unwrap_or(&cleaned);
+    if !digits.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return None;
+    }
+    cleaned.parse().ok().filter(|v: &f64| v.is_finite())
 }
 
 /// "14:05" in both languages.
@@ -268,6 +273,10 @@ mod tests {
         assert_eq!(parse_decimal("1\u{202F}250,5"), Some(1250.5));
         assert_eq!(parse_decimal("abc"), None);
         assert_eq!(parse_decimal(""), None);
+        for bad in ["NaN", "inf", "-infinity", "1e3", "2,5e1"] {
+            assert_eq!(parse_decimal(bad), None, "{bad}");
+        }
+        assert_eq!(parse_decimal("-3,5"), Some(-3.5));
     }
 
     #[test]

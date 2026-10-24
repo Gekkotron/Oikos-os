@@ -72,6 +72,7 @@ file: src/screens/flow_canvas/toolbar.rs  # not translated yet
 file: src/screens/flow_canvas/viewport.rs  # not translated yet
 file: src/screens/flow_schedule.rs  # not translated yet
 file: src/screens/flows/bar.rs  # not translated yet
+file: src/screens/flows/card.rs  # not translated yet
 file: src/screens/flows/mod.rs  # not translated yet
 file: src/screens/flows/room_menu.rs  # not translated yet
 file: src/screens/flows/row.rs  # not translated yet
@@ -91,3 +92,4 @@ file: src/ws.rs  # not translated yet
 text: FR  # language code on the toggle, the same in both languages
 text: EN  # language code on the toggle, the same in both languages
 text: Escape  # KeyboardEvent.key value, not shown
+text: oikos.  # the brand mark, not translated
