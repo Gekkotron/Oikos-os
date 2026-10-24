@@ -2231,6 +2231,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oikos-alarm"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "oikos-api"
 version = "0.1.0"
 dependencies = [
