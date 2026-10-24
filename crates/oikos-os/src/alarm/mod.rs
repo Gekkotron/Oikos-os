@@ -1,11 +1,13 @@
 //! The native alarm's hub side: the retained documents, the published panel entity and the
 //! settings API.
 
+pub(crate) mod effects;
 pub(crate) mod engine;
 pub(crate) mod entity;
 pub(crate) mod hub;
 
-use std::sync::atomic::AtomicBool;
+use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Mutex, MutexGuard};
 
 use oikos_alarm::doc::AlarmSettings;
@@ -32,6 +34,10 @@ pub struct AlarmHub {
     /// Unix seconds and the monotonic instant they were read at: the engine's clock is this
     /// anchor plus the time elapsed since, so deadlines never depend on the wall clock moving.
     pub(crate) anchor: (u64, tokio::time::Instant),
+    /// Makes the trigger alert ids unique within one clock second.
+    pub(crate) alert_seq: AtomicU64,
+    /// The watched sensors whose offline warning is open, so it is raised once per outage.
+    pub(crate) offline_raised: Mutex<BTreeSet<String>>,
 }
 
 impl AlarmHub {
@@ -45,6 +51,8 @@ impl AlarmHub {
             pass: tokio::sync::Mutex::new(()),
             engine_started: AtomicBool::new(false),
             anchor: (crate::clock::now(), tokio::time::Instant::now()),
+            alert_seq: AtomicU64::new(0),
+            offline_raised: Mutex::new(BTreeSet::new()),
         }
     }
 }

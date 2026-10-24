@@ -1890,11 +1890,13 @@ mod approval {
     }
 
     #[tokio::test]
-    async fn responses_filter_only_when_enabled() {
+    async fn responses_filter_is_always_subscribed() {
+        // The alarm may be switched on later and filters are fixed at connect, so the
+        // responses topic is subscribed whether or not climate is on.
         let (on, _rx) = hub(true);
         assert!(on.extra_filters().contains(&RESPONSES.to_owned()));
         let (off, _rx) = hub(false);
-        assert!(!off.extra_filters().contains(&RESPONSES.to_owned()));
+        assert!(off.extra_filters().contains(&RESPONSES.to_owned()));
         // Disabled: a response is just a message nobody here cares about.
         assert!(off.ingest_message(RESPONSES, b"{}", false).is_empty());
     }

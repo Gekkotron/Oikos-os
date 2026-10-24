@@ -72,7 +72,7 @@ impl Hub {
         }
         self.sync_alarm_entity()?;
         if was_enabled && !enabled {
-            self.alarm_disable()?;
+            self.alarm_disable().await?;
         }
         self.broadcast(WsEvent::AlarmChanged);
         Ok(())
@@ -209,9 +209,18 @@ impl Hub {
         self.persist_alarm_runtime(&rt)
     }
 
-    /// Switching the alarm off: the runtime goes back to its default. (Sirens and alerts are
-    /// handled by the engine's effects.)
-    pub(crate) fn alarm_disable(&self) -> Result<(), HubError> {
+    /// Switching the alarm off: sirens off if they ring, every alert resolved, and the runtime
+    /// back to its default. Runs under the engine pass so no step is in flight.
+    pub(crate) async fn alarm_disable(self: &Arc<Self>) -> Result<(), HubError> {
+        use oikos_alarm::machine::Effect;
+        let _pass = self.alarm.pass.lock().await;
+        let ringing = lock(&self.alarm.runtime).state_name() == "triggered";
+        let mut effects = Vec::new();
+        if ringing {
+            effects.push(Effect::SirensOff);
+        }
+        effects.push(Effect::ResolveAlerts);
+        self.run_alarm_effects(effects).await;
         self.persist_alarm_runtime(&Runtime {
             since: clock::now(),
             ..Runtime::default()

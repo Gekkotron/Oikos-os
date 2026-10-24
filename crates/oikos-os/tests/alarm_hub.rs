@@ -37,6 +37,7 @@ fn contact(id: &str) -> serde_json::Value {
     json!({
         "name": id, "unique_id": id, "device_class": "door",
         "state_topic": format!("fx/{id}"),
+        "availability_topic": format!("fx/{id}/avail"),
         "payload_on": "open", "payload_off": "closed",
         "device": {"identifiers": [format!("dev_{id}")], "name": id}
     })
@@ -61,7 +62,7 @@ fn house(hub: &Hub) {
         "switch",
         "siren_plug",
         json!({"name": "Siren", "unique_id": "siren_plug", "state_topic": "fx/siren",
-               "command_topic": "fx/siren/set"}),
+               "availability_topic": "fx/siren/avail", "command_topic": "fx/siren/set"}),
     );
     feed(
         hub,
@@ -309,6 +310,8 @@ async fn alarm_documents_are_not_devices() {
 struct Rig {
     hub: Arc<Hub>,
     rx: mpsc::Receiver<Publish>,
+    /// Everything the hub published since the last `clear`.
+    log: Vec<Publish>,
     door: String,
     task: tokio::task::JoinHandle<()>,
 }
@@ -326,10 +329,14 @@ impl Rig {
         let mut settings = enabled_with(&door);
         edit(&hub, &mut settings);
         hub.set_alarm_settings(settings).await.unwrap();
+        // The push service accepts alerts once its token map has settled.
+        hub.on_connected();
+        hub.on_suback();
         let task = hub.start_alarm();
         let mut rig = Rig {
             hub,
             rx,
+            log: Vec::new(),
             door,
             task,
         };
@@ -344,6 +351,12 @@ impl Rig {
             for p in drain(&mut self.rx) {
                 self.hub
                     .ingest_message(&p.topic, p.payload.as_bytes(), p.retain);
+                // The siren switch echoes its command, as a device would.
+                if p.topic == "fx/siren/set" {
+                    self.hub
+                        .ingest_message("fx/siren", p.payload.as_bytes(), false);
+                }
+                self.log.push(p);
             }
         }
     }
@@ -355,6 +368,28 @@ impl Rig {
 
     fn state(&self) -> String {
         self.hub.alarm_view().state
+    }
+
+    /// The payloads published on `topic` since the last `clear`.
+    fn sent(&self, topic: &str) -> Vec<String> {
+        self.log
+            .iter()
+            .filter(|p| p.topic == topic)
+            .map(|p| p.payload.clone())
+            .collect()
+    }
+
+    fn clear(&mut self) {
+        self.log.clear();
+    }
+
+    /// The alarm's alerts, newest first.
+    fn alarm_alerts(&self) -> Vec<oikos_api::AlertView> {
+        self.hub
+            .alerts()
+            .into_iter()
+            .filter(|a| a.id.starts_with("alarm-"))
+            .collect()
     }
 
     fn panel(&self) -> StateValue {
@@ -580,4 +615,359 @@ async fn alarm_changed_during_an_outage_does_not_reseed() {
     rig.hub.ingest_message("fx/front_door", b"open", true);
     rig.pump().await;
     assert_eq!(rig.state(), "armed_away");
+}
+
+const SIREN_SET: &str = "fx/siren/set";
+const MQTT_SIREN: &str = "dev/siren/set";
+
+/// A switch siren and a raw MQTT siren with a chirp.
+fn with_sirens(hub: &Hub, settings: &mut AlarmSettings) {
+    settings.sirens = vec![
+        oikos_alarm::doc::Siren::Entity {
+            entity: entity_id(hub, "siren_plug"),
+            chirp_ms: None,
+        },
+        oikos_alarm::doc::Siren::Mqtt {
+            mqtt: oikos_alarm::doc::MqttSiren {
+                topic: MQTT_SIREN.to_owned(),
+                on: "ON".to_owned(),
+                off: "OFF".to_owned(),
+                chirp: Some("BEEP".to_owned()),
+            },
+        },
+    ];
+}
+
+/// Armed away with both sirens, the door closed.
+async fn armed_rig() -> Rig {
+    let mut rig = Rig::with(with_sirens).await;
+    rig.command(arm(oikos_core::model::AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+    rig.clear();
+    rig
+}
+
+async fn trip(rig: &mut Rig) {
+    rig.hub.ingest_message("fx/front_door", b"open", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "triggered");
+}
+
+fn is_alert(alert: &oikos_api::AlertView, severity: &str) -> bool {
+    serde_json::to_value(alert.severity).unwrap() == severity
+}
+
+#[tokio::test(start_paused = true)]
+async fn trigger_rings_both_siren_kinds_and_pushes() {
+    let mut rig = armed_rig().await;
+    trip(&mut rig).await;
+    assert_eq!(rig.sent(SIREN_SET), ["ON"]);
+    assert_eq!(rig.sent(MQTT_SIREN), ["ON"]);
+    let alerts = rig.alarm_alerts();
+    assert_eq!(alerts.len(), 1, "{alerts:?}");
+    let alert = &alerts[0];
+    assert_eq!(alert.channel, oikos_api::AlertChannel::Alarm);
+    assert!(is_alert(alert, "critical"));
+    assert_eq!(alert.title, "Alarm");
+    assert!(alert.body.ends_with("opened"), "{}", alert.body);
+    let actions: Vec<(&str, &str)> = alert
+        .actions
+        .iter()
+        .map(|a| (a.id.as_str(), a.label.as_str()))
+        .collect();
+    assert_eq!(actions, [("disarm", "Disarm")]);
+    assert!(!alert.resolved);
+}
+
+#[tokio::test(start_paused = true)]
+async fn ring_stops_after_siren_s() {
+    let mut rig = armed_rig().await;
+    trip(&mut rig).await;
+    rig.clear();
+    rig.advance(180).await;
+    assert_eq!(rig.sent(SIREN_SET), ["OFF"]);
+    assert_eq!(rig.sent(MQTT_SIREN), ["OFF"]);
+    assert_eq!(rig.state(), "armed_away");
+    let alerts = rig.alarm_alerts();
+    assert_eq!(alerts.len(), 1);
+    assert!(!alerts[0].resolved, "the alert stays until a disarm");
+}
+
+#[tokio::test(start_paused = true)]
+async fn arming_chirps() {
+    let mut rig = Rig::with(with_sirens).await;
+    rig.clear();
+    rig.command(arm(oikos_core::model::AlarmMode::Away)).await;
+    assert!(rig.sent(MQTT_SIREN).is_empty(), "no chirp at the command");
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+    assert_eq!(rig.sent(MQTT_SIREN), ["BEEP"]);
+    assert!(rig.sent(SIREN_SET).is_empty(), "the switch has no chirp_ms");
+}
+
+#[tokio::test(start_paused = true)]
+async fn push_disarm_reply_disarms() {
+    let mut rig = armed_rig().await;
+    trip(&mut rig).await;
+    rig.clear();
+    let id = rig.alarm_alerts()[0].id.clone();
+    let reply = json!({"id": id, "action": "disarm", "install_id": "x", "ts": 1}).to_string();
+    // A retained reply is a replay, never a press.
+    rig.hub
+        .ingest_message("oikos/push/responses", reply.as_bytes(), true);
+    rig.pump().await;
+    assert_eq!(rig.state(), "triggered");
+    rig.hub
+        .ingest_message("oikos/push/responses", reply.as_bytes(), false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "disarmed");
+    assert_eq!(rig.sent(SIREN_SET), ["OFF"]);
+    assert_eq!(rig.sent(MQTT_SIREN), ["OFF"]);
+    assert!(rig.alarm_alerts().iter().all(|a| a.resolved));
+}
+
+#[tokio::test(start_paused = true)]
+async fn other_replies_are_ignored() {
+    let mut rig = armed_rig().await;
+    trip(&mut rig).await;
+    let id = rig.alarm_alerts()[0].id.clone();
+    for reply in [
+        json!({"id": id, "action": "snooze"}),
+        json!({"id": "frigate-1", "action": "disarm"}),
+    ] {
+        rig.hub
+            .ingest_message("oikos/push/responses", reply.to_string().as_bytes(), false);
+    }
+    rig.pump().await;
+    assert_eq!(rig.state(), "triggered");
+}
+
+#[tokio::test(start_paused = true)]
+async fn failing_siren_does_not_block_others() {
+    let mut rig = Rig::with(|hub, settings| {
+        with_sirens(hub, settings);
+        hub.ingest("fx/siren/avail", b"offline");
+    })
+    .await;
+    rig.command(arm(oikos_core::model::AlarmMode::Away)).await;
+    rig.advance(61).await;
+    rig.clear();
+    trip(&mut rig).await;
+    assert!(rig.sent(SIREN_SET).is_empty());
+    assert_eq!(rig.sent(MQTT_SIREN), ["ON"]);
+    let alerts = rig.alarm_alerts();
+    assert!(
+        alerts[0].body.contains("Siren failed"),
+        "{}",
+        alerts[0].body
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn open_window_at_arm_sends_silent_note() {
+    let mut rig = Rig::with(|hub, settings| {
+        settings.sensors.push(SensorRule {
+            entity: entity_id(hub, "back_door"),
+            kind: SensorKind::Opening,
+            modes: BTreeSet::from([ArmMode::Away]),
+            entry: Entry::Instant,
+        });
+        hub.ingest("fx/back_door", b"open");
+    })
+    .await;
+    rig.command(arm(oikos_core::model::AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+    let alerts = rig.alarm_alerts();
+    assert_eq!(alerts.len(), 1, "{alerts:?}");
+    assert!(is_alert(&alerts[0], "info"));
+    assert!(alerts[0].silent);
+    assert!(alerts[0].body.contains("back_door"), "{}", alerts[0].body);
+    assert!(
+        alerts[0].body.starts_with("Armed away."),
+        "{}",
+        alerts[0].body
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn offline_sensor_warns_once_and_resolves() {
+    let mut rig = armed_rig().await;
+    let offline = format!("alarm-offline-{}", rig.door);
+    for _ in 0..2 {
+        rig.hub
+            .ingest_message("fx/front_door/avail", b"offline", false);
+        rig.pump().await;
+    }
+    let warnings: Vec<_> = rig
+        .alarm_alerts()
+        .into_iter()
+        .filter(|a| a.id == offline)
+        .collect();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(is_alert(&warnings[0], "warning"));
+    assert_eq!(warnings[0].body, "Alarm sensor offline: front_door");
+    assert!(!warnings[0].resolved);
+
+    rig.hub
+        .ingest_message("fx/front_door/avail", b"online", false);
+    rig.pump().await;
+    let warning = rig
+        .alarm_alerts()
+        .into_iter()
+        .find(|a| a.id == offline)
+        .unwrap();
+    assert!(warning.resolved);
+    // A new outage is a new warning.
+    rig.hub
+        .ingest_message("fx/front_door/avail", b"offline", false);
+    rig.pump().await;
+    let warning = rig
+        .alarm_alerts()
+        .into_iter()
+        .find(|a| a.id == offline)
+        .unwrap();
+    assert!(!warning.resolved);
+    // Disarming resolves it.
+    rig.command(oikos_core::model::Command::Disarm { code: None })
+        .await;
+    let warning = rig
+        .alarm_alerts()
+        .into_iter()
+        .find(|a| a.id == offline)
+        .unwrap();
+    assert!(warning.resolved);
+}
+
+/// A hub whose retained settings and runtime are in place before the engine boots.
+fn boot_hub(
+    edit: impl FnOnce(&Hub, &mut AlarmSettings),
+    runtime: impl FnOnce(&Hub) -> oikos_alarm::machine::Runtime,
+) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let (hub, rx) = hub();
+    house(&hub);
+    hub.ingest("fx/front_door", b"closed");
+    let mut settings = enabled_with(&entity_id(&hub, "front_door"));
+    edit(&hub, &mut settings);
+    hub.ingest_message(
+        "oikos/alarm/settings",
+        serde_json::to_string(&settings).unwrap().as_bytes(),
+        true,
+    );
+    hub.ingest_message(
+        "oikos/alarm/state",
+        serde_json::to_string(&runtime(&hub)).unwrap().as_bytes(),
+        true,
+    );
+    hub.on_connected();
+    hub.on_suback();
+    (hub, rx)
+}
+
+#[tokio::test(start_paused = true)]
+async fn tracker_change_while_down_disarms_on_boot() {
+    use oikos_alarm::machine::{Phase, Presence, Runtime};
+    let (hub, mut rx) = boot_hub(
+        |hub, settings| {
+            settings.presence.trackers = vec![entity_id(hub, "phone_a")];
+            hub.ingest("fx/phone_a", b"home");
+        },
+        |hub| Runtime {
+            phase: Phase::Armed {
+                mode: ArmMode::Away,
+            },
+            trackers: [(entity_id(hub, "phone_a"), Presence::Away)].into(),
+            ..Runtime::default()
+        },
+    );
+    let task = hub.start_alarm();
+    for _ in 0..3 {
+        tokio::time::advance(std::time::Duration::from_secs(3)).await;
+        for _ in 0..20 {
+            tokio::task::yield_now().await;
+            drain(&mut rx);
+        }
+    }
+    assert_eq!(hub.alarm_view().state, "disarmed");
+    task.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn restart_resumes_ringing() {
+    use oikos_alarm::machine::{Phase, Runtime};
+    let now = oikos_os::clock::now();
+    let runtime = Runtime {
+        phase: Phase::Triggered {
+            back_to: Some(ArmMode::Away),
+            until: now + 100,
+        },
+        cause: vec!["x".to_owned()],
+        ..Runtime::default()
+    };
+    let (hub, rx) = boot_hub(with_sirens, |_| runtime);
+    let task = hub.start_alarm();
+    let mut rig = Rig {
+        door: entity_id(&hub, "front_door"),
+        hub,
+        rx,
+        log: Vec::new(),
+        task,
+    };
+    // Let the engine reach its boot settle before the clock moves.
+    rig.pump().await;
+    rig.advance(6).await;
+    assert_eq!(rig.state(), "triggered");
+    assert_eq!(rig.sent(SIREN_SET), ["ON"]);
+    assert_eq!(rig.sent(MQTT_SIREN), ["ON"]);
+    rig.clear();
+    rig.advance(100).await;
+    assert_eq!(rig.sent(SIREN_SET), ["OFF"]);
+    assert_eq!(rig.sent(MQTT_SIREN), ["OFF"]);
+    assert_eq!(rig.state(), "armed_away");
+}
+
+#[tokio::test(start_paused = true)]
+async fn disable_while_ringing_silences() {
+    let mut rig = armed_rig().await;
+    trip(&mut rig).await;
+    rig.clear();
+    let mut settings = rig.hub.alarm_settings();
+    settings.enabled = false;
+    // The switch siren has no echo here, so its off command times out; it is still sent.
+    rig.hub.set_alarm_settings(settings).await.unwrap();
+    rig.pump().await;
+    assert_eq!(rig.sent(SIREN_SET), ["OFF"]);
+    assert_eq!(rig.sent(MQTT_SIREN), ["OFF"]);
+    assert!(rig.alarm_alerts().iter().all(|a| a.resolved));
+    let removal = rig.log.iter().find(|p| p.topic == CONFIG_TOPIC).unwrap();
+    assert!(removal.retain && removal.payload.is_empty());
+    assert_eq!(rig.state(), "disarmed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn climate_replies_still_routed() {
+    let mut cfg = Config::default();
+    cfg.topics.discovery_prefixes = vec!["oikos".to_owned()];
+    cfg.climate.enabled = true;
+    let (tx, mut rx) = mpsc::channel(64);
+    let hub = Hub::new(&cfg, tx);
+    hub.set_connection(ConnectionStatus::Online);
+    house(&hub);
+    hub.set_alarm_settings(enabled_with(&entity_id(&hub, "front_door")))
+        .await
+        .unwrap();
+    drain(&mut rx);
+    // Neither an alarm id nor a pending proposal: ignored, and the alarm is untouched.
+    for reply in [
+        br#"{"id":"climate-proposal-p-1","action":"approve"}"#.as_slice(),
+        br#"{"id":"alarm-1-0","action":"disarm"}"#.as_slice(),
+    ] {
+        assert!(
+            hub.ingest_message("oikos/push/responses", reply, false)
+                .is_empty()
+        );
+    }
+    tokio::task::yield_now().await;
+    assert_eq!(hub.alarm_view().state, "disarmed");
 }

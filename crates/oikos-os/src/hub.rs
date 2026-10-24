@@ -546,11 +546,22 @@ impl Hub {
         if self.ingest_alarm(topic, payload, retain) {
             return Vec::new();
         }
-        if !retain && self.climate.is_some() && topic == self.push.responses_topic() {
-            if let Some(hub) = self.me.upgrade() {
-                hub.on_climate_reply(payload);
+        if !retain && topic == self.push.responses_topic() {
+            // Replies to the alarm's alerts go to the alarm, the rest to the climate engine.
+            let alarm_reply = serde_json::from_slice::<serde_json::Value>(payload)
+                .ok()
+                .and_then(|doc| doc.get("id").and_then(|id| id.as_str().map(str::to_owned)))
+                .is_some_and(|id| id.starts_with(crate::alarm::effects::ALERT_PREFIX));
+            if alarm_reply || self.climate.is_some() {
+                if let Some(hub) = self.me.upgrade() {
+                    if alarm_reply {
+                        hub.on_alarm_reply(payload);
+                    } else {
+                        hub.on_climate_reply(payload);
+                    }
+                }
+                return Vec::new();
             }
-            return Vec::new();
         }
         if self.push.wants(topic) {
             // Then on: the history echo still feeds the alert store below.
@@ -839,7 +850,8 @@ impl Hub {
             .climate_prefix()
             .into_iter()
             .flat_map(oikos_climate::topics::filters)
-            .chain(self.climate.is_some().then(|| self.push.responses_topic()));
+            // Always: the filters are fixed at (re)connect, and the alarm can be enabled later.
+            .chain(std::iter::once(self.push.responses_topic()));
         let alarm = oikos_alarm::topics::filters(&self.alarm.prefix);
         self.frigate
             .iter()

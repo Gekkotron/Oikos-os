@@ -7,10 +7,10 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use oikos_alarm::doc::ArmMode;
-use oikos_alarm::machine::{Effect, Event, Presence, Source, World, next_deadline, step};
+use oikos_alarm::machine::{Event, Presence, Source, World, next_deadline, step};
 use oikos_api::{CommandResponse, ConnectionStatus, WsEvent};
 use oikos_core::flow::Scalar;
-use oikos_core::model::{AlarmMode, Command, StateValue};
+use oikos_core::model::{AlarmMode, Availability, Command, EntityState, StateValue};
 use tokio::sync::broadcast::{self, error::RecvError};
 use tokio::task::JoinHandle;
 
@@ -65,13 +65,19 @@ impl Hub {
             return;
         }
         let on = self.alarm_sensors_on(&settings);
-        let (effects, rt, before) = {
+        let (effects, before) = {
             let mut rt = lock(&self.alarm.runtime);
             let before = (rt.state_name(), rt.deadline());
             let effects = step(&mut rt, &settings, &World { on: &on }, ev, now);
-            (effects, rt.clone(), before)
+            (effects, before)
         };
         self.run_alarm_effects(effects).await;
+        // The effects may have recorded alert ids on the runtime: persist what it is now.
+        let rt = lock(&self.alarm.runtime).clone();
+        // Nothing is watched while disarmed, so an open offline warning has no point left.
+        if rt.state_name() == "disarmed" {
+            self.alarm_cancel_offline(None);
+        }
         // The runtime goes out before the panel state, so a restart never reads an older one.
         if let Err(err) = self.persist_alarm_runtime(&rt) {
             tracing::warn!(%err, "alarm runtime could not be persisted");
@@ -81,14 +87,6 @@ impl Hub {
         }
         if before != (rt.state_name(), rt.deadline()) {
             self.broadcast(WsEvent::AlarmChanged);
-        }
-    }
-
-    /// What the machine asked for. Sirens and alerts arrive with the effects task; until then
-    /// they are only logged.
-    pub(crate) async fn run_alarm_effects(self: &Arc<Self>, effects: Vec<Effect>) {
-        for effect in effects {
-            tracing::debug!(?effect, "alarm effect");
         }
     }
 
@@ -161,6 +159,7 @@ impl Hub {
             tracing::warn!(%err, "alarm entity could not be republished");
         }
         self.alarm_event(Event::Resume, self.alarm_now()).await;
+        self.alarm_reconcile_trackers().await;
     }
 
     async fn alarm_loop(
@@ -201,7 +200,7 @@ impl Hub {
                 biased;
                 event = events.recv() => match event {
                     Ok(WsEvent::StateChanged { id, state }) => {
-                        self.alarm_state_changed(&mut known, &id, &state.value).await;
+                        self.alarm_state_changed(&mut known, &id, &state).await;
                     }
                     Ok(WsEvent::SignalReceived { id, signal }) => {
                         let remote = self.alarm_settings().remotes.iter().any(|r| r.entity == id);
@@ -268,10 +267,12 @@ impl Hub {
         self: &Arc<Self>,
         known: &mut Known,
         id: &str,
-        value: &StateValue,
+        state: &EntityState,
     ) {
+        let value = &state.value;
         let settings = self.alarm_settings();
         if settings.sensors.iter().any(|r| r.entity == id) {
+            self.alarm_watch_availability(id, state.availability);
             let next = sensor_on(value);
             let previous = known.sensors.insert(id.to_owned(), next);
             if let Some(Some(previous)) = previous
@@ -292,6 +293,49 @@ impl Hub {
                     entity: id.to_owned(),
                     seen: next,
                 };
+                self.alarm_event(ev, self.alarm_now()).await;
+            }
+        }
+    }
+
+    /// A watched sensor that goes offline while the alarm is on gets one warning; it is
+    /// resolved when the sensor is back (and on disarm, by the effects).
+    fn alarm_watch_availability(&self, id: &str, availability: Availability) {
+        match availability {
+            Availability::Offline => {
+                if lock(&self.alarm.runtime).state_name() != "disarmed" {
+                    self.alarm_sensor_offline(id);
+                }
+            }
+            _ => self.alarm_cancel_offline(Some(id)),
+        }
+    }
+
+    /// After a resume: a tracker whose live presence differs from the persisted one changed
+    /// while the hub was down, so the machine hears about it now.
+    async fn alarm_reconcile_trackers(self: &Arc<Self>) {
+        let settings = self.alarm_settings();
+        if !settings.enabled {
+            return;
+        }
+        let live: Vec<(String, Presence)> = {
+            let reg = self.read();
+            settings
+                .presence
+                .trackers
+                .iter()
+                .map(|id| {
+                    let seen = reg
+                        .state(id)
+                        .map_or(Presence::Unknown, |s| tracker_presence(&s.value));
+                    (id.clone(), seen)
+                })
+                .collect()
+        };
+        for (entity, seen) in live {
+            let stored = lock(&self.alarm.runtime).trackers.get(&entity).copied();
+            if stored != Some(seen) {
+                let ev = Event::Tracker { entity, seen };
                 self.alarm_event(ev, self.alarm_now()).await;
             }
         }
