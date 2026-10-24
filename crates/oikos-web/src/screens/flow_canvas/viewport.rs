@@ -13,6 +13,7 @@ use crate::flow_text::{Role, role};
 use crate::flow_viewport::{
     Mini, View, ZOOM_STEP, centre_on, fit_beside, mini_to_world, minimap, visible_world,
 };
+use crate::i18n::flows::{FlowText, use_flow_text};
 
 /// Minimap size in CSS pixels.
 const MINI_W: f64 = 180.0;
@@ -252,6 +253,7 @@ pub fn Viewport(
 #[component]
 pub fn CanvasControls(view: RwSignal<View>, content: Signal<Rect>) -> impl IntoView {
     let camera = expect_context::<Camera>();
+    let t = use_flow_text();
     let zoom_by = move |factor: f64| {
         if let Some((w, h)) = camera.measured() {
             let centre = Pt {
@@ -272,12 +274,12 @@ pub fn CanvasControls(view: RwSignal<View>, content: Signal<Rect>) -> impl IntoV
         }
     };
     view! {
-        <div class="flow-controls" role="toolbar" aria-label="Zoom">
+        <div class="flow-controls" role="toolbar" aria-label=move || t(FlowText::Zoom)>
             <button
                 type="button"
                 class="flow-controls__btn"
-                aria-label="Zoom in"
-                title="Zoom in"
+                aria-label=move || t(FlowText::ZoomIn)
+                title=move || t(FlowText::ZoomIn)
                 on:click=move |_| zoom_by(ZOOM_STEP)
             >
                 "+"
@@ -285,8 +287,8 @@ pub fn CanvasControls(view: RwSignal<View>, content: Signal<Rect>) -> impl IntoV
             <button
                 type="button"
                 class="flow-controls__btn"
-                aria-label="Zoom out"
-                title="Zoom out"
+                aria-label=move || t(FlowText::ZoomOut)
+                title=move || t(FlowText::ZoomOut)
                 on:click=move |_| zoom_by(1.0 / ZOOM_STEP)
             >
                 "−"
@@ -294,8 +296,8 @@ pub fn CanvasControls(view: RwSignal<View>, content: Signal<Rect>) -> impl IntoV
             <button
                 type="button"
                 class="flow-controls__btn"
-                aria-label="Fit view"
-                title="Fit view"
+                aria-label=move || t(FlowText::FitView)
+                title=move || t(FlowText::FitView)
                 on:click=fit_view
             >
                 "⤢"
@@ -318,6 +320,7 @@ fn role_word(role: Role) -> &'static str {
 #[component]
 pub fn Minimap(view: RwSignal<View>, flow: Signal<Flow>) -> impl IntoView {
     let camera = expect_context::<Camera>();
+    let t = use_flow_text();
     let placed = Memo::new(move |_| flow.with(positions));
     let content = Memo::new(move |_| placed.with(bounds));
     let visible = Memo::new(move |_| {
@@ -401,7 +404,7 @@ pub fn Minimap(view: RwSignal<View>, flow: Signal<Flow>) -> impl IntoView {
             height=MINI_H
             viewBox=format!("0 0 {MINI_W} {MINI_H}")
             role="img"
-            aria-label="Minimap"
+            aria-label=move || t(FlowText::Minimap)
             on:pointerdown=down
             on:pointermove=moved
             on:pointerup=up

@@ -5,14 +5,22 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::i18n::use_lang;
+use crate::i18n::flows::{FlowText, flow_text, next_runs, use_flow_text};
+use crate::i18n::format::{date_time, parse_decimal};
+use crate::i18n::{Lang, use_lang};
 use crate::schedule::{SchedulePick, describe, from_cron, to_cron, week_chips};
 
 /// Set while a schedule editor holds an expression the hub rejects; the Save button reads it.
 #[derive(Clone, Copy)]
 pub struct SaveBlocked(pub RwSignal<bool>);
 
-const CHOICES: [&str; 5] = ["Every N minutes", "Hourly", "Daily", "Weekdays", "Advanced"];
+const CHOICES: [FlowText; 5] = [
+    FlowText::EveryNMinutes,
+    FlowText::Hourly,
+    FlowText::Daily,
+    FlowText::Weekdays,
+    FlowText::Advanced,
+];
 const DEBOUNCE_MS: u32 = 300;
 
 fn choice_index(pick: &SchedulePick) -> usize {
@@ -54,8 +62,17 @@ fn switch_to(index: usize, current: &SchedulePick) -> SchedulePick {
     }
 }
 
+/// A whole number typed by hand ("5", "5,0"), held between `min` and `max`.
 fn clamped(text: &str, min: u8, max: u8) -> Option<u8> {
-    text.trim().parse::<u8>().ok().map(|n| n.clamp(min, max))
+    parse_decimal(text).map(|n| n.clamp(f64::from(min), f64::from(max)) as u8)
+}
+
+/// What is wrong with the schedule being edited: no day picked (our text) or the hub's refusal
+/// (shown as received).
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Problem {
+    NoDay,
+    Hub(String),
 }
 
 /// `HH:MM` of a time input from its two numbers.
@@ -63,13 +80,14 @@ fn time_text(hour: u8, minute: u8) -> String {
     format!("{hour:02}:{minute:02}")
 }
 
-/// A tick as `Mon 21 Oct, 07:30` read off the RFC 3339 text the hub sends (already in the
-/// house zone, so no conversion): the date and time are cut from the string.
-fn tick_text(rfc3339: &str) -> String {
-    match (rfc3339.get(..10), rfc3339.get(11..16)) {
-        (Some(date), Some(time)) => format!("{date} {time}"),
-        _ => rfc3339.to_owned(),
-    }
+/// A tick as `Oct 21 2026, 07:30` / `21 oct. 2026, 07:30` read off the RFC 3339 text the hub
+/// sends (already in the house zone, so no conversion): the date and time are cut from the
+/// string. Text that does not read as a date stays as received.
+fn tick_text(lang: Lang, rfc3339: &str) -> String {
+    rfc3339
+        .get(..16)
+        .and_then(|head| chrono::NaiveDateTime::parse_from_str(head, "%Y-%m-%dT%H:%M").ok())
+        .map_or_else(|| rfc3339.to_owned(), |t| date_time(lang, t))
 }
 
 /// The editor of a schedule starting from the expression `initial`; each change hands the new
@@ -77,11 +95,12 @@ fn tick_text(rfc3339: &str) -> String {
 #[component]
 pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView {
     let lang = use_lang();
+    let t = use_flow_text();
     let blocked = use_context::<SaveBlocked>();
     let pick = RwSignal::new(from_cron(&initial));
     let ticks = RwSignal::new(Vec::<String>::new());
     let zone = RwSignal::new(String::new());
-    let error = RwSignal::new(None::<String>);
+    let error = RwSignal::new(None::<Problem>);
     let generation = RwSignal::new(0_u32);
 
     // Each change writes the cron and asks the hub for the next ticks (after a short pause; a
@@ -91,7 +110,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
         let cron = to_cron(&current);
         let empty_days = matches!(&current, SchedulePick::Weekdays { days, .. } if days.is_empty());
         if empty_days {
-            error.set(Some("Pick at least one day".into()));
+            error.set(Some(Problem::NoDay));
             ticks.set(Vec::new());
             if let Some(b) = blocked {
                 b.0.set(true);
@@ -120,7 +139,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
                     }
                 }
                 Err(e) => {
-                    error.set(Some(e.error));
+                    error.set(Some(Problem::Hub(e.error)));
                     ticks.set(Vec::new());
                     if let Some(b) = blocked {
                         b.0.set(true);
@@ -146,7 +165,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
                         }
                     }
                 >
-                    {*label}
+                    {move || t(*label)}
                 </button>
             }
         })
@@ -158,7 +177,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
         };
         view! {
             <label class="node-editor__field">
-                <span class="node-editor__label">"Every (minutes, 1–59)"</span>
+                <span class="node-editor__label">{move || t(FlowText::EveryMinutesLabel)}</span>
                 <input
                     type="number"
                     class="field"
@@ -183,7 +202,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
         };
         view! {
             <label class="node-editor__field">
-                <span class="node-editor__label">"At minute (:MM, 0–59)"</span>
+                <span class="node-editor__label">{move || t(FlowText::AtMinuteLabel)}</span>
                 <input
                     type="number"
                     class="field"
@@ -213,7 +232,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
         let (hour, minute) = hour_minute(&current);
         view! {
             <label class="node-editor__field">
-                <span class="node-editor__label">"At (HH:MM)"</span>
+                <span class="node-editor__label">{move || t(FlowText::AtTimeLabel)}</span>
                 <input
                     type="time"
                     class="field"
@@ -278,7 +297,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
             .collect_view();
         view! {
             <div class="node-editor__field">
-                <span class="node-editor__label">"On"</span>
+                <span class="node-editor__label">{move || t(FlowText::OnDays)}</span>
                 <div class="sched-chips">{day_chips}</div>
             </div>
         }
@@ -291,7 +310,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
         };
         view! {
             <label class="node-editor__field">
-                <span class="node-editor__label">"Cron (minute hour day month weekday)"</span>
+                <span class="node-editor__label">{move || t(FlowText::CronLabel)}</span>
                 <input
                     type="text"
                     class="field"
@@ -313,7 +332,7 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
     let choice = Memo::new(move |_| pick.with(choice_index));
     view! {
         <div class="sched">
-            <div class="sched-chips" role="group" aria-label="Schedule">{chips}</div>
+            <div class="sched-chips" role="group" aria-label=move || t(FlowText::Schedule)>{chips}</div>
             {move || match choice.get() {
                 0 => minutes_input(),
                 1 => minute_input(),
@@ -325,24 +344,60 @@ pub fn ScheduleField(initial: String, write: Callback<String>) -> impl IntoView 
             {move || {
                 error
                     .get()
-                    .map(|message| view! { <p class="node-editor__error" role="alert">{message}</p> })
+                    .map(|problem| {
+                        view! {
+                            <p class="node-editor__error" role="alert">
+                                {move || match &problem {
+                                    Problem::NoDay => flow_text(lang(), FlowText::PickOneDay).to_owned(),
+                                    Problem::Hub(text) => text.clone(),
+                                }}
+                            </p>
+                        }
+                    })
             }}
             <Show when=move || error.with(Option::is_none) && ticks.with(|t| !t.is_empty())>
                 <div class="sched-next">
                     <span class="node-editor__label">
-                        {move || format!("Next runs ({})", zone.get())}
+                        {move || next_runs(lang(), &zone.get())}
                     </span>
                     <ul>
                         {move || {
                             ticks
                                 .get()
                                 .iter()
-                                .map(|t| view! { <li>{tick_text(t)}</li> })
+                                .map(|t| view! { <li>{tick_text(lang(), t)}</li> })
                                 .collect_view()
                         }}
                     </ul>
                 </div>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ticks_read_in_both_languages() {
+        assert_eq!(
+            tick_text(Lang::En, "2026-10-24T07:30:00+02:00"),
+            "Oct 24 2026, 07:30"
+        );
+        assert_eq!(
+            tick_text(Lang::Fr, "2026-10-24T07:30:00+02:00"),
+            "24 oct. 2026, 07:30"
+        );
+        assert_eq!(tick_text(Lang::Fr, "soon"), "soon");
+    }
+
+    #[test]
+    fn typed_numbers_take_a_comma_and_stay_in_range() {
+        assert_eq!(clamped("5", 1, 59), Some(5));
+        assert_eq!(clamped("12,0", 1, 59), Some(12));
+        assert_eq!(clamped("90", 1, 59), Some(59));
+        assert_eq!(clamped("0", 1, 59), Some(1));
+        assert_eq!(clamped("abc", 1, 59), None);
     }
 }

@@ -9,6 +9,7 @@ use oikos_core::flow::{Flow, Position};
 use oikos_web::components::now::install_now;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
+use oikos_web::i18n::Lang;
 use oikos_web::screens::flow_canvas::{FlowCanvasScreen, NewFlowScreen};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -55,6 +56,16 @@ fn mount_house(
     flows: Vec<FlowView>,
     path: &str,
 ) -> (Box<dyn std::any::Any>, House) {
+    mount_house_lang(host, flows, path, RwSignal::new(Lang::En))
+}
+
+/// [`mount_house`] with the language signal the test flips.
+fn mount_house_lang(
+    host: &web_sys::Element,
+    flows: Vec<FlowView>,
+    path: &str,
+    lang: RwSignal<Lang>,
+) -> (Box<dyn std::any::Any>, House) {
     web_sys::window()
         .unwrap()
         .history()
@@ -70,6 +81,7 @@ fn mount_house(
             provide_context(house);
             provide_context(Toasts::new());
             provide_context(install_now());
+            provide_context(lang);
             oikos_web::nav::install_nav();
             view! {
                 <Router>
@@ -1567,4 +1579,124 @@ async fn canvas_resets_the_scroll_before_measuring() {
     assert!(style.contains("--flow-top:46px"), "{style}");
     spacer.remove();
     chrome.remove();
+}
+
+// ---- French --------------------------------------------------------------------------------
+
+fn headers(host: &web_sys::Element) -> Vec<String> {
+    (0..count(host, ".flow-library__header"))
+        .map(|i| {
+            host.query_selector_all(".flow-library__header")
+                .unwrap()
+                .item(i)
+                .unwrap()
+                .text_content()
+                .unwrap()
+        })
+        .collect()
+}
+
+/// The canvas, its toolbar and the card library read French, then English after the toggle,
+/// on the same mounted screen.
+#[wasm_bindgen_test]
+async fn the_canvas_follows_the_language_without_a_remount() {
+    let lang = RwSignal::new(Lang::Fr);
+    let host = host();
+    let (_mounted, house) = mount_house_lang(
+        &host,
+        vec![reference_view(None, vec![done_run()])],
+        "/flows/living_led_motion",
+        lang,
+    );
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    house
+        .entities
+        .update(|e| drop(e.insert("light.table".into(), table_lamp())));
+    click(&host, ".flow-toolbar__edit");
+    tick().await;
+    search(&host, "table").await;
+    let text = || host.text_content().unwrap_or_default();
+
+    assert_eq!(
+        headers(&host),
+        ["Déclencheurs", "Conditions", "Actions"],
+        "{}",
+        host.inner_html()
+    );
+    assert!(text().contains("Allumer"), "{}", text());
+    for english in ["When", "WHEN", "Turn on"] {
+        assert!(!text().contains(english), "{english}: {}", text());
+    }
+    let back = element(&host, ".flow-toolbar__back");
+    assert_eq!(back.get_attribute("aria-label").as_deref(), Some("Retour"));
+    let html = host.inner_html();
+    assert!(html.contains("aria-label=\"Ajouter une carte\""), "{html}");
+    assert!(html.contains("aria-label=\"Zoom avant\""), "{html}");
+    assert!(html.contains("aria-label=\"Enregistrer\""), "{html}");
+
+    lang.set(Lang::En);
+    tick().await;
+    assert_eq!(
+        headers(&host),
+        ["WHEN · TRIGGER", "AND · CHECK", "THEN · ACTION"],
+        "{}",
+        host.inner_html()
+    );
+    assert!(text().contains("Turn on"), "{}", text());
+    assert!(!text().contains("Allumer"), "{}", text());
+    let back = element(&host, ".flow-toolbar__back");
+    assert_eq!(back.get_attribute("aria-label").as_deref(), Some("Back"));
+    let html = host.inner_html();
+    assert!(html.contains("aria-label=\"Add a card\""), "{html}");
+    assert!(html.contains("aria-label=\"Zoom in\""), "{html}");
+}
+
+/// Run times read "il y a …" with the exact time as the tooltip, and flip with the toggle.
+#[wasm_bindgen_test]
+async fn the_runs_drawer_follows_the_language_without_a_remount() {
+    let lang = RwSignal::new(Lang::Fr);
+    let host = host();
+    let (_mounted, _house) = mount_house_lang(
+        &host,
+        vec![reference_view(None, vec![done_run()])],
+        "/flows/living_led_motion",
+        lang,
+    );
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    click(&host, ".flow-toolbar__runs");
+    tick().await;
+    let text = || text(&host, ".flow-drawer");
+    assert!(text().contains("Lancements récents"), "{}", text());
+    assert!(text().contains("Terminé"), "{}", text());
+    assert!(text().contains("il y a"), "{}", text());
+    assert!(!text().contains("ago"), "{}", text());
+    let title = element(&host, ".run__time").get_attribute("title").unwrap();
+    assert!(title.contains("nov."), "{title}");
+
+    lang.set(Lang::En);
+    tick().await;
+    assert!(text().contains("Recent runs"), "{}", text());
+    assert!(text().contains("Done"), "{}", text());
+    assert!(text().contains("ago"), "{}", text());
+    assert!(!text().contains("il y a"), "{}", text());
+    let title = element(&host, ".run__time").get_attribute("title").unwrap();
+    assert!(title.contains("Nov"), "{title}");
+}
+
+/// A flow created on the French UI gets a French default name, which the toggle leaves alone.
+#[wasm_bindgen_test]
+async fn a_new_flow_is_named_in_the_language_active_at_creation() {
+    let lang = RwSignal::new(Lang::Fr);
+    let host = host();
+    let _mounted = mount_house_lang(&host, vec![], "/flows/new", lang);
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let name = || {
+        element(&host, ".flow-toolbar input.flow-toolbar__name--input")
+            .unchecked_into::<web_sys::HtmlInputElement>()
+            .value()
+    };
+    assert_eq!(name(), "Nouvelle automatisation");
+    lang.set(Lang::En);
+    tick().await;
+    assert_eq!(name(), "Nouvelle automatisation");
 }

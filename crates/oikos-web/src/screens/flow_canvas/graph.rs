@@ -21,6 +21,8 @@ use crate::flow_layout::{NODE_H, Pt, out_anchor, positions, route, routes};
 use crate::flow_text::{Ctx, Role, role, subline, title};
 use crate::flows::{Highlight, orphans};
 use crate::house::House;
+use crate::i18n::flows::{FlowText, flow_text, time_left, use_flow_text};
+use crate::i18n::{Lang, use_lang};
 use crate::icons::{X_MARK, node_icon};
 
 /// Whether the graph is only looked at or edited (cards drag, settings open).
@@ -49,6 +51,21 @@ fn tone(key: &EdgeKey) -> Option<&'static str> {
         Some("false") => Some("no"),
         _ => None,
     }
+}
+
+/// The class every card carries.
+const NODE_CLASS: &str = "flow-node";
+
+/// The word on a yes / no wire.
+fn wire_word(lang: Lang, tone: &str) -> &'static str {
+    flow_text(
+        lang,
+        if tone == "yes" {
+            FlowText::WireYes
+        } else {
+            FlowText::WireNo
+        },
+    )
 }
 
 fn role_class(role: Role) -> &'static str {
@@ -170,6 +187,8 @@ pub fn Graph(
 ) -> impl IntoView {
     let house = expect_context::<House>();
     let now = expect_context::<Now>();
+    let lang = use_lang();
+    let t = use_flow_text();
     let placed = Memo::new(move |_| flow.with(positions));
     let wires = Memo::new(move |_| flow.with(|f| placed.with(|p| routes(f, p))));
     let ids =
@@ -300,8 +319,8 @@ pub fn Graph(
             <button
                 type="button"
                 class="flow-wire-cut"
-                aria-label="Delete wire"
-                title="Delete wire"
+                aria-label=move || t(FlowText::DeleteWire)
+                title=move || t(FlowText::DeleteWire)
                 style=format!("left:{}px;top:{}px", mid.x, mid.y)
                 on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
                 on:click=move |_| {
@@ -326,7 +345,7 @@ pub fn Graph(
                             class:flow-wire-label--dim=faded
                             style=format!("left:{}px;top:{}px", route.label_at.x, route.label_at.y)
                         >
-                            {t}
+                            {move || wire_word(lang(), t)}
                         </span>
                     })
                 })
@@ -390,7 +409,7 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         let is_fresh = fresh.is_some_and(|f| f.0.with(|f| f.as_deref() == Some(fresh_id.as_str())));
         kind.with(|k| {
             k.as_ref().map_or_else(String::new, |k| {
-                let mut class = format!("flow-node {}", role_class(role(k)));
+                let mut class = format!("{NODE_CLASS} {}", role_class(role(k)));
                 if c.mode == Mode::Edit {
                     class.push_str(" flow-node--editing");
                 }
@@ -474,9 +493,9 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
     };
     let step_id = id.clone();
     let step = move || match c.parked.get() {
-        Some((node, deadline)) if node == step_id => format!(
-            "{} left",
-            minutes_seconds(deadline.saturating_sub(c.clock.get()))
+        Some((node, deadline)) if node == step_id => time_left(
+            lang(),
+            &minutes_seconds(deadline.saturating_sub(c.clock.get())),
         ),
         _ => c
             .steps
@@ -602,7 +621,9 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
             </span>
             <span class="flow-node__step">{step}</span>
             <Show when=move || fallback.get()>
-                <span class="flow-node__fallback">"Paris fallback"</span>
+                <span class="flow-node__fallback">
+                    {move || flow_text(lang(), FlowText::ParisFallback)}
+                </span>
             </Show>
             {pins}
         </div>

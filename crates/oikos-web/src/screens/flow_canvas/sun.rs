@@ -1,7 +1,7 @@
 //! The `trigger.sun` settings sheet and the helpers the canvas shares for sun cards: the summary
 //! line, the next fire times and the "Paris fallback" badge.
 
-use chrono::{DateTime, Duration, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, TimeZone, Utc};
 use chrono_tz::Tz;
 use leptos::prelude::*;
 use oikos_api::FlowsConfigView;
@@ -9,6 +9,9 @@ use oikos_core::flow::sun::sun_events;
 use oikos_core::flow::{Node, NodeKind, SunWhich, TriggerSunParams};
 
 use crate::flow_text::sun_summary;
+use crate::i18n::flows::{FlowText, sun_name, use_flow_text};
+use crate::i18n::format::{date_short, parse_decimal, time, weekday_short};
+use crate::i18n::{Lang, use_lang};
 
 /// The house point used when the hub reports no coordinates (matches the hub's fallback).
 const PARIS: (f64, f64) = (48.8566, 2.3522);
@@ -107,13 +110,24 @@ fn now_utc() -> DateTime<Utc> {
 /// The small pill telling that sun flows run against Paris.
 #[component]
 pub fn FallbackBadge(cfg: Signal<Option<FlowsConfigView>>) -> impl IntoView {
+    let t = use_flow_text();
     view! {
         <Show when=move || cfg.with(|c| c.as_ref().is_some_and(fallback_badge_visible))>
-            <span class="badge-fallback" title="No latitude/longitude in [flows]: using Paris">
-                "Paris fallback"
+            <span class="badge-fallback" title=move || t(FlowText::ParisWarning)>
+                {move || t(FlowText::ParisFallback)}
             </span>
         </Show>
     }
+}
+
+/// A next fire as "Mon Oct 24, 07:30" / "lun. 24 oct., 07:30", in the house zone.
+fn fire_text(lang: Lang, at: DateTime<Tz>) -> String {
+    format!(
+        "{} {}, {}",
+        weekday_short(lang, at.weekday()),
+        date_short(lang, at.date_naive()),
+        time(at.time())
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,7 +156,8 @@ fn offset_for(timing: Timing, minutes: i32) -> Option<i32> {
 
 /// The editor of a `trigger.sun` node: event, timing chips, summary and next fire times.
 pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> impl IntoView {
-    let lang = crate::i18n::use_lang();
+    let lang = use_lang();
+    let t = use_flow_text();
     let params = move || {
         node.with(|n| match &n.kind {
             NodeKind::TriggerSun(p) => p.clone(),
@@ -175,10 +190,10 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
         write(None, Some(offset_for(t, m)));
     };
     let on_minutes = move |ev: web_sys::Event| {
-        let Ok(m) = event_target_value(&ev).trim().parse::<i32>() else {
+        let Some(m) = parse_decimal(&event_target_value(&ev)) else {
             return;
         };
-        let m = m.clamp(0, MAX_CHIP_MINUTES);
+        let m = (m as i32).clamp(0, MAX_CHIP_MINUTES);
         let current = timing.get_untracked();
         if current == Timing::At {
             return;
@@ -189,15 +204,15 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
     };
 
     let events = [
-        (SunWhich::Sunrise, "Sunrise"),
-        (SunWhich::Sunset, "Sunset"),
-        (SunWhich::Dawn, "Dawn"),
-        (SunWhich::Dusk, "Dusk"),
+        SunWhich::Sunrise,
+        SunWhich::Sunset,
+        SunWhich::Dawn,
+        SunWhich::Dusk,
     ];
     let timings = [
-        (Timing::At, "At the event"),
-        (Timing::Before, "Before"),
-        (Timing::After, "After"),
+        (Timing::At, FlowText::TimingAt),
+        (Timing::Before, FlowText::TimingBefore),
+        (Timing::After, FlowText::TimingAfter),
     ];
     let fires = Memo::new(move |_| {
         let ((lat, lon), zone) = cfg.with(|c| house_place(c.as_ref()));
@@ -206,11 +221,15 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
 
     view! {
         <div class="node-editor__field">
-            <span class="node-editor__label">"Solar event"</span>
-            <div class="segmented" role="group" aria-label="Solar event">
+            <span class="node-editor__label">{move || t(FlowText::SolarEvent)}</span>
+            <div
+                class="segmented"
+                role="group"
+                aria-label=move || t(FlowText::SolarEvent)
+            >
                 {events
                     .into_iter()
-                    .map(|(w, label)| {
+                    .map(|w| {
                         view! {
                             <button
                                 type="button"
@@ -218,7 +237,7 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
                                 class:chip--selected=move || which.get() == w
                                 on:click=move |_| write(Some(w), None)
                             >
-                                {label}
+                                {move || sun_name(lang(), w)}
                             </button>
                         }
                     })
@@ -226,19 +245,19 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
             </div>
         </div>
         <div class="node-editor__field">
-            <span class="node-editor__label">"Timing"</span>
-            <div class="segmented" role="group" aria-label="Timing">
+            <span class="node-editor__label">{move || t(FlowText::Timing)}</span>
+            <div class="segmented" role="group" aria-label=move || t(FlowText::Timing)>
                 {timings
                     .into_iter()
-                    .map(|(t, label)| {
+                    .map(|(kind, label)| {
                         view! {
                             <button
                                 type="button"
                                 class="chip segmented__option"
-                                class:chip--selected=move || timing.get() == t
-                                on:click=move |_| set_timing(t)
+                                class:chip--selected=move || timing.get() == kind
+                                on:click=move |_| set_timing(kind)
                             >
-                                {label}
+                                {move || t(label)}
                             </button>
                         }
                     })
@@ -247,7 +266,7 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
         </div>
         <Show when=move || timing.get() != Timing::At>
             <label class="node-editor__field">
-                <span class="node-editor__label">"Minutes"</span>
+                <span class="node-editor__label">{move || t(FlowText::Minutes)}</span>
                 <input
                     type="number"
                     class="field"
@@ -261,15 +280,16 @@ pub fn sun_sheet(node: RwSignal<Node>, cfg: Signal<Option<FlowsConfigView>>) -> 
         <p class="node-editor__hint">{move || sun_summary(lang(), which.get(), offset.get())}</p>
         <FallbackBadge cfg=cfg />
         <div class="node-editor__field">
-            <span class="node-editor__label">"Next fires"</span>
+            <span class="node-editor__label">{move || t(FlowText::NextFires)}</span>
             <ul class="node-editor__fires">
                 {move || {
                     let list = fires.get();
                     if list.is_empty() {
-                        return view! { <li>"No event in the next week"</li> }.into_any();
+                        return view! { <li>{move || t(FlowText::NoEventWeek)}</li> }.into_any();
                     }
+                    let lang = lang();
                     list.into_iter()
-                        .map(|at| view! { <li>{at.format("%a %d %b, %H:%M").to_string()}</li> })
+                        .map(|at| view! { <li>{fire_text(lang, at)}</li> })
                         .collect_view()
                         .into_any()
                 }}
@@ -318,6 +338,15 @@ mod tests {
         );
         assert_eq!(times.len(), 3);
         assert!(times[0] < times[1] && times[1] < times[2]);
+    }
+
+    #[test]
+    fn fires_read_in_both_languages() {
+        let at = chrono_tz::Europe::Paris
+            .with_ymd_and_hms(2026, 10, 24, 7, 30, 0)
+            .unwrap();
+        assert_eq!(fire_text(Lang::En, at), "Sat Oct 24, 07:30");
+        assert_eq!(fire_text(Lang::Fr, at), "Sam. 24 oct., 07:30");
     }
 
     #[test]

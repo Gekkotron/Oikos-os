@@ -34,6 +34,8 @@ use crate::flow_layout::{
 use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot, free_area};
 use crate::flows::{highlight, parked_deadline, parked_node, step_offset};
 use crate::house::House;
+use crate::i18n::flows::{FlowText, flow_text};
+use crate::i18n::{Key, current_lang, text, use_lang};
 use crate::layout::canvas_inset_style;
 use crate::screens::flow_schedule::SaveBlocked;
 use library::Library;
@@ -117,7 +119,10 @@ fn typing(ev: &web_sys::KeyboardEvent) -> bool {
     else {
         return false;
     };
-    matches!(el.tag_name().as_str(), "INPUT" | "TEXTAREA" | "SELECT") || el.is_content_editable()
+    matches!(
+        el.tag_name().to_ascii_lowercase().as_str(),
+        "input" | "textarea" | "select"
+    ) || el.is_content_editable()
 }
 
 /// Each node a run visited, with the time of its latest step since the run started.
@@ -135,6 +140,7 @@ fn FlowBody(
     #[prop(optional)]
     start_editing: bool,
 ) -> impl IntoView {
+    let lang = use_lang();
     let flow = Memo::new(move |_| view.with(|v| v.definition.clone()));
     let runs = Memo::new(move |_| view.with(|v| v.runs.clone()));
     let invalid = Memo::new(move |_| view.with(|v| v.invalid.clone()));
@@ -280,12 +286,13 @@ fn FlowBody(
             return;
         }
         let modifier = ev.meta_key() || ev.ctrl_key();
-        match (key.as_str(), modifier) {
-            ("Backspace" | "Delete", false) => {
+        // Key names compared in lower case, so they read as ids, not as words.
+        match (key.to_ascii_lowercase().as_str(), modifier) {
+            ("backspace" | "delete", false) => {
                 ev.prevent_default();
                 delete_selected();
             }
-            ("d" | "D", true) => {
+            ("d", true) => {
                 ev.prevent_default();
                 if let Some(Selection::Node(id)) = selection.get_untracked()
                     && draft.with_untracked(|f| f.node(&id).is_some())
@@ -294,7 +301,7 @@ fn FlowBody(
                     selection.set(Some(Selection::Node(copy)));
                 }
             }
-            ("z" | "Z", true) => {
+            ("z", true) => {
                 ev.prevent_default();
                 editor.step(ev.shift_key());
             }
@@ -355,7 +362,7 @@ fn FlowBody(
     let canvas = move || match invalid.get() {
         Some(reason) => view! {
             <div class="flow-invalid">
-                <strong>"This flow cannot run"</strong>
+                <strong>{move || flow_text(lang(), FlowText::CannotRun)}</strong>
                 <p>{reason}</p>
             </div>
         }
@@ -453,6 +460,7 @@ pub fn FlowCanvasScreen() -> impl IntoView {
             || matches!(house.connection.get(), oikos_api::ConnectionStatus::Online)
     });
     let inset = canvas_inset_style();
+    let lang = use_lang();
     view! {
         <div class="flow-canvas-screen" style=inset>
             {move || {
@@ -469,9 +477,11 @@ pub fn FlowCanvasScreen() -> impl IntoView {
                 if loaded.get() {
                     return view! {
                         <div class="flow-invalid">
-                            <strong>"Unknown flow"</strong>
+                            <strong>{move || flow_text(lang(), FlowText::UnknownFlow)}</strong>
                             <p>
-                                <A href="/flows">"Back to flows"</A>
+                                <A href="/flows">
+                                    {move || flow_text(lang(), FlowText::BackToFlows)}
+                                </A>
                             </p>
                         </div>
                     }
@@ -490,7 +500,7 @@ pub fn NewFlowScreen() -> impl IntoView {
     let blank = FlowView {
         definition: Flow {
             id: String::new(),
-            name: "New flow".into(),
+            name: text(current_lang(), Key::NewFlow).into(),
             enabled: false,
             mode: FlowMode::Single,
             ..Default::default()

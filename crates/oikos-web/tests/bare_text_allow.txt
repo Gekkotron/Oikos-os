@@ -56,20 +56,6 @@ file: src/screens/devices.rs  # not translated yet
 file: src/screens/energy.rs  # not translated yet
 file: src/screens/energy_day.rs  # not translated yet
 file: src/screens/entity_sheet.rs  # not translated yet
-file: src/screens/flow_canvas/drawer.rs  # not translated yet
-file: src/screens/flow_canvas/graph.rs  # not translated yet
-file: src/screens/flow_canvas/library.rs  # not translated yet
-file: src/screens/flow_canvas/mod.rs  # not translated yet
-file: src/screens/flow_canvas/settings.rs  # not translated yet
-file: src/screens/flow_canvas/sun.rs  # not translated yet
-file: src/screens/flow_canvas/toolbar.rs  # not translated yet
-file: src/screens/flow_canvas/viewport.rs  # not translated yet
-file: src/screens/flow_schedule.rs  # not translated yet
-file: src/screens/flows/bar.rs  # not translated yet
-file: src/screens/flows/card.rs  # not translated yet
-file: src/screens/flows/mod.rs  # not translated yet
-file: src/screens/flows/room_menu.rs  # not translated yet
-file: src/screens/flows/row.rs  # not translated yet
 file: src/screens/generic_panel.rs  # not translated yet
 file: src/screens/group_sheet_v2.rs  # not translated yet
 file: src/screens/group_wizard.rs  # not translated yet
@@ -87,3 +73,5 @@ text: FR  # language code on the toggle, the same in both languages
 text: EN  # language code on the toggle, the same in both languages
 text: Escape  # KeyboardEvent.key value, not shown
 text: oikos.  # the brand mark, not translated
+text: (max-width: 719px), (hover: none) and (pointer: coarse)  # media query, not text
+text: run {}  # CSS class list

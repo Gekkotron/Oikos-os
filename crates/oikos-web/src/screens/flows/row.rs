@@ -5,25 +5,30 @@ use leptos_router::components::A;
 use oikos_api::{FlowView, RunStatus};
 use oikos_core::flow::FlowMode;
 
-use crate::alerts::relative_time;
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::now::Now;
 use crate::flow_list::ListRow;
 use crate::flows::status_word;
-use crate::format::format_timestamp;
+use crate::i18n::flows::{FlowText, flow_text};
+use crate::i18n::format::{ago, date_time, local_date_time};
 use crate::i18n::{Lang, use_lang};
 use crate::icons::trigger_icon;
+
+/// The tooltip of a run time: the exact date and time, in the language and the local zone.
+pub(super) fn run_title(lang: Lang, secs: u64) -> String {
+    date_time(lang, local_date_time(secs))
+}
 
 /// The last run as "Done · 2 min ago", or "No runs yet".
 pub(super) fn last_run(lang: Lang, flow: &FlowView, now: u64) -> String {
     flow.runs.first().map_or_else(
-        || "No runs yet".to_owned(),
+        || flow_text(lang, FlowText::NoRunsYet).to_owned(),
         |run| {
             format!(
                 "{} · {}",
                 status_word(lang, run.status),
-                relative_time(run.started_at, now)
+                ago(lang, now.saturating_sub(run.started_at))
             )
         },
     )
@@ -53,8 +58,13 @@ pub(super) fn is_restart(flow: &FlowView) -> bool {
 
 /// The red "Invalid" tag with the reason as tooltip, when the flow is invalid.
 pub(super) fn invalid_badge(flow: &FlowView) -> Option<impl IntoView + use<>> {
+    let lang = use_lang();
     flow.invalid.clone().map(|reason| {
-        view! { <span class="badge badge--invalid" title=reason>"Invalid"</span> }
+        view! {
+            <span class="badge badge--invalid" title=reason>
+                {move || flow_text(lang(), FlowText::Invalid)}
+            </span>
+        }
     })
 }
 
@@ -69,7 +79,7 @@ pub fn FlowRow(row: ListRow, #[prop(optional)] menu: Option<AnyView>) -> impl In
     let name = flow.definition.name.clone();
     let enabled = flow.definition.enabled;
     let invalid = flow.invalid.is_some();
-    let started = flow.runs.first().map(|r| format_timestamp(r.started_at));
+    let started = flow.runs.first().map(|r| r.started_at);
     let failed = last_run_failed(&flow);
     let restart = is_restart(&flow);
     let badge = invalid_badge(&flow);
@@ -82,13 +92,20 @@ pub fn FlowRow(row: ListRow, #[prop(optional)] menu: Option<AnyView>) -> impl In
             {icon}
             <span class="flow-row__name">
                 <A href=href attr:class="flow-row__link">{name}</A>
-                {restart.then(|| view! { <span class="flow-tag">"restart"</span> })}
+                {restart
+                    .then(|| {
+                        view! {
+                            <span class="flow-tag">
+                                {move || flow_text(lang(), FlowText::ModeRestart)}
+                            </span>
+                        }
+                    })}
                 {badge}
             </span>
             <span class="flow-row__sub">
                 <span class="flow-row__trigger">{trigger}</span>
                 <span class="flow-row__dot" aria-hidden="true">" · "</span>
-                <span class="flow-row__run" class:flow-row__run--failed=failed title=started>
+                <span class="flow-row__run" class:flow-row__run--failed=failed title=move || started.map(|s| run_title(lang(), s))>
                     {move || last_run(lang(), &run_flow, now.0.get())}
                 </span>
             </span>

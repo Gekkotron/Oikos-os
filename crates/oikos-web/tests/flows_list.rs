@@ -7,6 +7,7 @@ use oikos_api::FlowView;
 use oikos_core::flow::Flow;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
+use oikos_web::i18n::Lang;
 use oikos_web::screens::flows::FlowsScreen;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -44,6 +45,15 @@ fn host() -> web_sys::Element {
 }
 
 fn mount(host: &web_sys::Element, flows: Vec<FlowView>) -> Box<dyn std::any::Any> {
+    mount_lang(host, flows, RwSignal::new(Lang::En))
+}
+
+/// [`mount`] with the language signal the test flips.
+fn mount_lang(
+    host: &web_sys::Element,
+    flows: Vec<FlowView>,
+    lang: RwSignal<Lang>,
+) -> Box<dyn std::any::Any> {
     let house = House::new();
     house.flows.set(flows);
     Box::new(leptos::mount::mount_to(
@@ -52,6 +62,7 @@ fn mount(host: &web_sys::Element, flows: Vec<FlowView>) -> Box<dyn std::any::Any
             provide_context(house);
             provide_context(Toasts::new());
             provide_context(oikos_web::components::now::install_now());
+            provide_context(lang);
             view! {
                 <Router>
                     <FlowsScreen />
@@ -249,4 +260,119 @@ async fn invalid_flow_can_still_be_deleted() {
         .unwrap()
         .expect("a delete item");
     assert!(!delete.has_attribute("disabled"));
+}
+
+fn now() -> u64 {
+    (js_sys::Date::now() / 1000.0) as u64
+}
+
+/// The list reads French, then English after the toggle, on the same mounted screen.
+#[wasm_bindgen_test]
+async fn the_list_follows_the_language_without_a_remount() {
+    use oikos_api::{RunStatus, RunView};
+    let mut valid = reference();
+    valid.runs = vec![RunView {
+        id: "r1".into(),
+        flow_id: "living_led_motion".into(),
+        status: RunStatus::Done,
+        started_at: now() - 125,
+        ended_at: Some(now() - 120),
+        trigger: None,
+        manual: false,
+        steps: vec![],
+    }];
+    let lang = RwSignal::new(Lang::Fr);
+    let host = host();
+    let _mounted = mount_lang(&host, vec![valid, broken()], lang);
+    tick().await;
+    let text = || host.text_content().unwrap_or_default();
+    let title = || text_of(&host, ".sheet__title");
+    let new_flow = || text_of(&host, ".flows-new");
+
+    assert_eq!(title(), "Automatisations");
+    assert_eq!(new_flow(), "Nouvelle automatisation");
+    assert!(text().contains("Terminé"), "{}", text());
+    assert!(text().contains("il y a"), "{}", text());
+    assert!(text().contains("Invalide"), "{}", text());
+    assert!(text().contains("relance"), "{}", text());
+    for english in ["New flow", "ago", "restart", "No runs yet"] {
+        assert!(!text().contains(english), "{english}: {}", text());
+    }
+    let html = host.inner_html();
+    assert!(
+        html.contains("aria-label=\"Actions de l'automatisation\""),
+        "{html}"
+    );
+    assert!(html.contains("aria-label=\"Statut\""), "{html}");
+    let run_title = host
+        .query_selector(".flow-row__run[title]")
+        .unwrap()
+        .unwrap()
+        .get_attribute("title")
+        .unwrap_or_default();
+    assert!(
+        !run_title.is_empty() && !run_title.contains("T"),
+        "{run_title}"
+    );
+
+    lang.set(Lang::En);
+    tick().await;
+    assert_eq!(title(), "Flows");
+    assert_eq!(new_flow(), "New flow");
+    assert!(text().contains("Done"), "{}", text());
+    assert!(text().contains("ago"), "{}", text());
+    assert!(text().contains("Invalid"), "{}", text());
+    assert!(text().contains("restart"), "{}", text());
+    for french in [
+        "Terminé",
+        "il y a",
+        "Invalide",
+        "relance",
+        "Aucun lancement",
+    ] {
+        assert!(!text().contains(french), "{french}: {}", text());
+    }
+    let html = host.inner_html();
+    assert!(html.contains("aria-label=\"Flow actions\""), "{html}");
+}
+
+fn text_of(host: &web_sys::Element, selector: &str) -> String {
+    host.query_selector(selector)
+        .unwrap()
+        .and_then(|e| e.text_content())
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
+}
+
+/// The delete confirmation names the flow in the active language and flips with the toggle.
+#[wasm_bindgen_test]
+async fn the_delete_confirmation_follows_the_language_without_a_remount() {
+    let lang = RwSignal::new(Lang::Fr);
+    let host = host();
+    let _mounted = mount_lang(&host, vec![reference()], lang);
+    tick().await;
+    click(&host, ".room-menu__button");
+    tick().await;
+    assert_eq!(
+        text_of(&host, ".room-menu__item--danger"),
+        "Supprimer l'automatisation…"
+    );
+    click(&host, ".room-menu__item--danger");
+    tick().await;
+    let confirm = || text_of(&host, ".room-menu__confirm");
+    assert!(
+        confirm().contains("Supprimer «\u{a0}Living LED on motion\u{a0}»\u{a0}?"),
+        "{}",
+        confirm()
+    );
+    assert!(confirm().contains("irréversible"), "{}", confirm());
+    lang.set(Lang::En);
+    tick().await;
+    assert!(
+        confirm().contains("Delete “Living LED on motion”?"),
+        "{}",
+        confirm()
+    );
+    assert!(confirm().contains("This can't be undone."), "{}", confirm());
 }
