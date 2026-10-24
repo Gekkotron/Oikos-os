@@ -56,10 +56,7 @@ fn malformed_range_is_ignored() {
 #[test]
 fn button_group_label_is_press_all() {
     assert_eq!(device_text(Lang::En, DeviceText::PressAll), "Press all");
-    assert_eq!(
-        device_text(Lang::Fr, DeviceText::PressAll),
-        "Tout appuyer"
-    );
+    assert_eq!(device_text(Lang::Fr, DeviceText::PressAll), "Tout appuyer");
     assert_eq!(thermostat_text(Lang::Fr, None, None, None), "Mixte");
 }
 
