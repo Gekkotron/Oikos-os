@@ -15,7 +15,7 @@ use oikos_core::energy::{
 
 use crate::api::history::fetch_today;
 use crate::energy::{
-    CLEARANCE, HouseTodayParts, NODE_R, VIEW_H, VIEW_W, aria_sentence, derived_house_today, edge,
+    CLEARANCE, HouseTodayParts, Layout, NODE_R, VIEW_H, aria_sentence, derived_house_today, edge,
     energy_entities, energy_text, meter_text, node_label, node_value_text, now_ms, plus_minus_ids,
     positions, power_text, should_fire_mount, speed, stroke,
 };
@@ -70,6 +70,22 @@ fn card_total(n: &EnergyNode) -> String {
     } else {
         energy_text(n.total_kwh)
     }
+}
+
+/// The drawing for the window, read once when the screen is built: the wide one from the width
+/// where the day chart widens too.
+fn layout() -> Layout {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let width = web_sys::window()
+            .and_then(|w| w.inner_width().ok())
+            .and_then(|w| w.as_f64())
+            .unwrap_or(1024.0);
+        if width < 600.0 {
+            return Layout::NARROW;
+        }
+    }
+    Layout::WIDE
 }
 
 type Positions = Memo<BTreeMap<String, (f64, f64)>>;
@@ -411,7 +427,8 @@ pub fn EnergyScreen() -> impl IntoView {
         order.set_value(built.order.clone());
         built
     });
-    let pos: Positions = Memo::new(move |_| ui.with(|u| positions(&u.diagram)));
+    let layout = layout();
+    let pos: Positions = Memo::new(move |_| ui.with(|u| positions(&u.diagram, &layout)));
     let names = Memo::new(move |_| {
         house.entities.with(|m| {
             m.values()
@@ -481,10 +498,13 @@ pub fn EnergyScreen() -> impl IntoView {
                     <Show when=hint>
                         <p class="energy__hint">"Check the grid or battery sign"</p>
                     </Show>
-                    <div class="energy-diagram">
+                    <div
+                        class="energy-diagram"
+                        class:energy-diagram--wide=layout == Layout::WIDE
+                    >
                         <svg
                             class="energy-diagram__svg"
-                            viewBox=format!("0 0 {VIEW_W} {VIEW_H}")
+                            viewBox=format!("0 0 {} {VIEW_H}", layout.view_w)
                             role="img"
                             aria-label=description
                         >

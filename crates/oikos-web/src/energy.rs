@@ -11,25 +11,58 @@ use oikos_core::energy::{
 };
 use oikos_core::model::StateValue;
 
-/// The diagram's viewBox, in px.
-pub const VIEW_W: f64 = 260.0;
+/// The diagram's viewBox height, in px; the width comes from the [`Layout`].
 pub const VIEW_H: f64 = 250.0;
 /// A node circle's radius.
 pub const NODE_R: f64 = 22.0;
 /// How far an edge stays from a node's centre.
 pub const CLEARANCE: f64 = 26.0;
 
-const SOLAR: (f64, f64) = (0.5, 0.12);
-const HOUSE: (f64, f64) = (0.5, 0.52);
-const GRID: (f64, f64) = (0.12, 0.52);
-const BOTTOM_LEFT: (f64, f64) = (0.15, 0.86);
+/// Where the diagram's nodes sit, as fractions of the viewBox.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layout {
+    /// The viewBox width, in px.
+    pub view_w: f64,
+    solar: (f64, f64),
+    house: (f64, f64),
+    grid: (f64, f64),
+    bottom_left: (f64, f64),
+    /// The arc slots right of the house, by how many consumer nodes are drawn (1..=3).
+    arc: [&'static [(f64, f64)]; ARC_SLOTS],
+}
 
-/// The arc slots right of the house, by how many consumer nodes are drawn (1..=3).
-fn arc_slots(n: usize) -> &'static [(f64, f64)] {
-    match n.clamp(1, ARC_SLOTS) {
-        1 => &[(0.86, 0.52)],
-        2 => &[(0.86, 0.34), (0.86, 0.72)],
-        _ => &[(0.82, 0.2), (0.88, 0.52), (0.82, 0.84)],
+impl Layout {
+    /// The phone drawing, nearly square: the app's layout.
+    pub const NARROW: Layout = Layout {
+        view_w: 260.0,
+        solar: (0.5, 0.12),
+        house: (0.5, 0.52),
+        grid: (0.12, 0.52),
+        bottom_left: (0.15, 0.86),
+        arc: [
+            &[(0.86, 0.52)],
+            &[(0.86, 0.34), (0.86, 0.72)],
+            &[(0.82, 0.2), (0.88, 0.52), (0.82, 0.84)],
+        ],
+    };
+
+    /// The wide-screen drawing, as wide as the day chart: the same rows, the sources and
+    /// consumers spread away from the house so the card can span the page.
+    pub const WIDE: Layout = Layout {
+        view_w: 720.0,
+        solar: (0.5, 0.12),
+        house: (0.5, 0.52),
+        grid: (0.2, 0.52),
+        bottom_left: (0.2, 0.86),
+        arc: [
+            &[(0.8, 0.52)],
+            &[(0.8, 0.34), (0.8, 0.72)],
+            &[(0.77, 0.2), (0.8, 0.52), (0.77, 0.84)],
+        ],
+    };
+
+    fn arc_slots(&self, n: usize) -> &'static [(f64, f64)] {
+        self.arc[n.clamp(1, ARC_SLOTS) - 1]
     }
 }
 
@@ -56,8 +89,8 @@ pub fn any_solar_active<'a>(entities: impl Iterator<Item = &'a EntityView>) -> b
 }
 
 /// Node centres in viewBox px, by node id.
-pub fn positions(diagram: &[EnergyNode]) -> BTreeMap<String, (f64, f64)> {
-    let px = |(x, y): (f64, f64)| (x * VIEW_W, y * VIEW_H);
+pub fn positions(diagram: &[EnergyNode], layout: &Layout) -> BTreeMap<String, (f64, f64)> {
+    let px = |(x, y): (f64, f64)| (x * layout.view_w, y * VIEW_H);
     let arc: Vec<&EnergyNode> = diagram
         .iter()
         .filter(|n| matches!(n.kind, NodeKind::Consumer | NodeKind::More))
@@ -65,80 +98,51 @@ pub fn positions(diagram: &[EnergyNode]) -> BTreeMap<String, (f64, f64)> {
     let mut out = BTreeMap::new();
     for n in diagram {
         let at = match n.kind {
-            NodeKind::Solar => SOLAR,
-            NodeKind::Grid => GRID,
-            NodeKind::House => HOUSE,
-            NodeKind::Battery | NodeKind::Water => BOTTOM_LEFT,
+            NodeKind::Solar => layout.solar,
+            NodeKind::Grid => layout.grid,
+            NodeKind::House => layout.house,
+            NodeKind::Battery | NodeKind::Water => layout.bottom_left,
             NodeKind::Consumer | NodeKind::More => continue,
         };
         out.insert(n.id.clone(), px(at));
     }
-    let slots = arc_slots(arc.len());
+    let slots = layout.arc_slots(arc.len());
     for (n, slot) in arc.iter().zip(slots) {
         out.insert(n.id.clone(), px(*slot));
     }
     out
 }
 
-/// A cubic edge, node to house.
+/// A straight edge, node to house.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Edge {
     pub start: (f64, f64),
-    pub c1: (f64, f64),
-    pub c2: (f64, f64),
     pub end: (f64, f64),
 }
 
 impl Edge {
-    pub fn reversed(&self) -> Edge {
-        Edge {
-            start: self.end,
-            c1: self.c2,
-            c2: self.c1,
-            end: self.start,
-        }
-    }
-
-    /// The SVG path: `M x y C x1 y1, x2 y2, x y`.
+    /// The SVG path: `M x y L x y`.
     pub fn path(&self) -> String {
         format!(
-            "M {} {} C {} {}, {} {}, {} {}",
-            self.start.0,
-            self.start.1,
-            self.c1.0,
-            self.c1.1,
-            self.c2.0,
-            self.c2.1,
-            self.end.0,
-            self.end.1
+            "M {} {} L {} {}",
+            self.start.0, self.start.1, self.end.0, self.end.1
         )
     }
 }
 
-/// The edge between `node` and the house `hub`, kept `clearance` px from both centres. A side
-/// node joins the house side to side at circle-centre height; a node above (solar) passes
-/// `below`, the bottom of its labels, as its start height instead.
+/// The spoke between `node` and the house `hub`: a straight line along their centres, kept
+/// `clearance` px from both, so every edge leaves the house at its own point on the rim and
+/// meets its node head-on. A node above (solar) passes `below`, the bottom of its labels, as
+/// its start instead.
 pub fn edge(node: (f64, f64), hub: (f64, f64), clearance: f64, below: Option<f64>) -> Edge {
-    if let Some(below) = below {
-        let start = (node.0, below);
-        let end = (hub.0, hub.1 - clearance);
-        let mid_y = (start.1 + end.1) / 2.0;
-        return Edge {
-            start,
-            c1: (start.0, mid_y),
-            c2: (end.0, mid_y),
-            end,
-        };
-    }
-    let side = if node.0 < hub.0 { 1.0 } else { -1.0 };
-    let start = (node.0 + side * clearance, node.1);
-    let end = (hub.0 - side * clearance, hub.1);
-    let mid_x = (start.0 + end.0) / 2.0;
+    let from = below.map_or(node, |y| (node.0, y));
+    let (dx, dy) = (hub.0 - from.0, hub.1 - from.1);
+    let len = dx.hypot(dy).max(f64::EPSILON);
+    let (ux, uy) = (dx / len, dy / len);
+    let lead = if below.is_some() { 0.0 } else { clearance };
     Edge {
-        start,
-        c1: (mid_x, start.1),
-        c2: (mid_x, end.1),
-        end,
+        start: (from.0 + ux * lead, from.1 + uy * lead),
+        end: (hub.0 - ux * clearance, hub.1 - uy * clearance),
     }
 }
 
@@ -446,7 +450,7 @@ mod tests {
         ];
         es.extend((0..5).map(consumer));
         let ui = EnergyFlow::build(&es, 0, None);
-        let p = positions(&ui.diagram);
+        let p = positions(&ui.diagram, &Layout::NARROW);
         assert_eq!(p["solar"], (130.0, 30.0));
         assert_eq!(p["house"], (130.0, 130.0));
         assert_eq!(p["grid"], (31.2, 130.0));
@@ -461,9 +465,32 @@ mod tests {
 
         es.push(ent("b", "B", EnergyRole::Battery, "W", 5.0));
         let ui = EnergyFlow::build(&es, 0, None);
-        let p = positions(&ui.diagram);
+        let p = positions(&ui.diagram, &Layout::NARROW);
         assert_eq!(p["battery"], (39.0, 215.0));
         assert!(!p.contains_key("water"));
+    }
+
+    #[test]
+    fn wide_layout_spreads_the_rows() {
+        let mut es = vec![
+            ent("s", "S", EnergyRole::Solar, "W", 100.0),
+            ent("g", "G", EnergyRole::Grid, "W", 100.0),
+            ent("w", "Water", EnergyRole::Water, "L", 5.0),
+        ];
+        es.extend((0..5).map(consumer));
+        let ui = EnergyFlow::build(&es, 0, None);
+        let p = positions(&ui.diagram, &Layout::WIDE);
+        assert_eq!(p["solar"], (360.0, 30.0));
+        assert_eq!(p["house"], (360.0, 130.0));
+        assert_eq!(p["grid"], (144.0, 130.0));
+        assert_eq!(p["water"], (144.0, 215.0));
+        let arc: Vec<(f64, f64)> = ui
+            .diagram
+            .iter()
+            .filter(|n| matches!(n.kind, NodeKind::Consumer | NodeKind::More))
+            .map(|n| p[&n.id])
+            .collect();
+        assert_eq!(arc, vec![(554.4, 50.0), (576.0, 130.0), (554.4, 210.0)]);
     }
 
     #[test]
@@ -479,12 +506,34 @@ mod tests {
         let solar = edge((130.0, 30.0), hub, CLEARANCE, Some(80.0));
         assert_eq!(solar.start, (130.0, 80.0));
         assert_eq!(solar.end, (130.0, 130.0 - CLEARANCE));
-        assert_eq!(e.reversed().start, e.end);
-        assert_eq!(e.reversed().reversed(), e);
         assert_eq!(
             edge((0.0, 0.0), (100.0, 0.0), 26.0, None).path(),
-            "M 26 0 C 50 0, 50 0, 74 0"
+            "M 26 0 L 74 0"
         );
+    }
+
+    /// A consumer up or down the arc gets its own spoke along the centre line: no shared
+    /// start on the house's side and no hook into the node.
+    #[test]
+    fn arc_edges_are_spokes() {
+        let hub = (130.0, 130.0);
+        let dist = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1);
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let ends: Vec<_> = [(213.2, 50.0), (228.8, 130.0), (213.2, 210.0)]
+            .into_iter()
+            .map(|at| {
+                let e = edge(at, hub, CLEARANCE, None);
+                assert!(close(dist(e.start, at), CLEARANCE));
+                assert!(close(dist(e.end, hub), CLEARANCE));
+                // Start, end and both centres on one line.
+                let cross =
+                    (e.end.0 - e.start.0) * (hub.1 - at.1) - (e.end.1 - e.start.1) * (hub.0 - at.0);
+                assert!(close(cross, 0.0));
+                e.end
+            })
+            .collect();
+        assert!(ends[0].1 < hub.1 && ends[2].1 > hub.1);
+        assert!(close(ends[1].1, hub.1));
     }
 
     #[test]

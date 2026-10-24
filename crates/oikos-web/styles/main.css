@@ -4565,8 +4565,6 @@ html:has(.flow-canvas-screen) {
 .energy-diagram {
   box-sizing: border-box;
   width: 100%;
-  max-width: 520px;
-  margin-inline: auto;
   /* Taller than the 260 × 250 drawing: the bottom-left node's labels hang below the viewBox. */
   aspect-ratio: 260 / 272;
   padding: 8px 8px 28px;
@@ -4576,6 +4574,11 @@ html:has(.flow-canvas-screen) {
   box-shadow: var(--shadow), inset 0 1px 0 rgb(255 255 255 / 8%);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+/* The wide drawing (720 × 250) spans the page, like the day chart under it. */
+.energy-diagram--wide {
+  aspect-ratio: 720 / 272;
 }
 
 .energy-diagram__svg {
