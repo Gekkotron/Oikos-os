@@ -30,10 +30,13 @@ struct CardData {
     stale_at: Option<chrono::NaiveTime>,
     forecast_area: String,
     forecast_line: String,
+    measured_line: String,
     measured_area: String,
-    /// The measured area is the forecast's own estimates, not production.
+    /// The measured line and area are the forecast's own estimates, not production.
     measured_is_forecast: bool,
     now_x: Option<f64>,
+    /// `y` of the highest plotted value, where the now line starts.
+    now_top: f64,
 }
 
 /// The measured points of the curve, `(period end, kW)`, and whether they are the forecast's own
@@ -108,8 +111,10 @@ fn card_data(house: House, now: u64, measured: Option<SolarMeasured>) -> Option<
             let c = day_curve(&day, &points, span, now, W, H);
             data.forecast_area = c.forecast_area;
             data.forecast_line = c.forecast_line;
+            data.measured_line = c.measured_line;
             data.measured_area = c.measured_area;
             data.now_x = c.now_x;
+            data.now_top = c.now_top;
         }
         Some(data)
     })
@@ -148,9 +153,18 @@ pub fn SolarCard() -> impl IntoView {
             "solar-curve__measured"
         }
     };
+    let measured_line_class = move || {
+        if data.get().is_some_and(|d| d.measured_is_forecast) {
+            "solar-curve__measured-line solar-curve__measured-line--forecast"
+        } else {
+            "solar-curve__measured-line"
+        }
+    };
     let now_line = move || {
-        data.get().and_then(|d| d.now_x).map(|x| {
-            view! { <line class="solar-curve__now" x1=x x2=x y1="0" y2=H /> }
+        data.get().and_then(|d| {
+            d.now_x.map(|x| {
+                view! { <line class="solar-curve__now" x1=x x2=x y1=d.now_top y2=H /> }
+            })
         })
     };
 
@@ -162,8 +176,9 @@ pub fn SolarCard() -> impl IntoView {
             </span>
             <svg class="solar-curve" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true">
                 <path class="solar-curve__forecast" d=field(|d| d.forecast_area.clone()) />
-                <path class="solar-curve__line" d=field(|d| d.forecast_line.clone()) />
                 <path class=measured_class d=field(|d| d.measured_area.clone()) />
+                <path class="solar-curve__line" d=field(|d| d.forecast_line.clone()) />
+                <path class=measured_line_class d=field(|d| d.measured_line.clone()) />
                 {now_line}
             </svg>
             {move || bottom().map(|b| view! { <span class="solar-card__line">{b}</span> })}

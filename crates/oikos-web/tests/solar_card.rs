@@ -87,6 +87,16 @@ async fn mount(
     solar: Option<SolarView>,
     measured: Option<(f64, Vec<(u64, f64)>)>,
 ) -> (web_sys::Element, House) {
+    mount_at(weather, solar, measured, None).await
+}
+
+/// Like `mount`, with the clock set to `clock` instead of the real time.
+async fn mount_at(
+    weather: Option<WeatherView>,
+    solar: Option<SolarView>,
+    measured: Option<(f64, Vec<(u64, f64)>)>,
+    clock: Option<u64>,
+) -> (web_sys::Element, House) {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -99,6 +109,9 @@ async fn mount(
             provide_context(house);
             provide_context(Toasts::new());
             provide_context(Pending::new());
+            if let Some(t) = clock {
+                provide_context(oikos_web::components::now::Now(RwSignal::new(t)));
+            }
             if let Some((kwh, periods)) = measured {
                 provide_context(SolarMeasured {
                     today_kwh: RwSignal::new(Some(kwh)),
@@ -112,12 +125,14 @@ async fn mount(
     (host, house)
 }
 
+/// The text of the first match, with no-break spaces turned into plain ones.
 fn text(host: &web_sys::Element, selector: &str) -> String {
     host.query_selector(selector)
         .unwrap()
         .unwrap_or_else(|| panic!("{selector} missing"))
         .text_content()
         .unwrap_or_default()
+        .replace('\u{a0}', " ")
 }
 
 #[wasm_bindgen_test]
@@ -143,8 +158,9 @@ async fn card_beside_weather_links_to_solar_page() {
         card.get_attribute("aria-label").as_deref(),
         Some("Solar forecast")
     );
-    let t = card.text_content().unwrap();
-    assert!(t.contains("12.4 kWh"), "{t}");
+    let t = card.text_content().unwrap().replace('\u{a0}', " ");
+    assert!(t.contains("12.4 kWh forecast"), "{t}");
+    assert!(t.contains("≈ 5.2 kWh more expected"), "{t}");
     assert!(t.contains("Tomorrow 8.1 kWh (5–11)"), "{t}");
 }
 
@@ -178,14 +194,34 @@ async fn card_hidden_without_solar_or_when_a_day_old() {
 
 #[wasm_bindgen_test]
 async fn card_with_measured_shows_measured_title() {
-    let (host, _) = mount(
+    let zone = chrono_tz::Europe::Paris;
+    let noon = at(local_date(zone, now_s()), 12, 0);
+    let (host, _) = mount_at(
         None,
         Some(solar(now_s(), false)),
         Some((6.4, measured_points())),
+        Some(noon),
     )
     .await;
     let title = text(&host, ".solar-card__title");
-    assert_eq!(title.trim(), "6.4 / 12.4 kWh");
+    assert_eq!(title.trim(), "6.4 kWh produced · 12.4 kWh forecast");
+    let line = text(&host, ".solar-card__line");
+    assert!(line.contains("≈ 11.6 kWh by tonight"), "{line}");
+    let line_path = host
+        .query_selector(".solar-curve__measured-line")
+        .unwrap()
+        .expect("measured line");
+    assert!(
+        line_path
+            .get_attribute("d")
+            .unwrap_or_default()
+            .starts_with("M ")
+    );
+    assert!(
+        host.query_selector(".solar-curve__measured-line--forecast")
+            .unwrap()
+            .is_none()
+    );
     let path = host
         .query_selector(".solar-curve__measured")
         .unwrap()
@@ -203,7 +239,7 @@ async fn card_without_measured_shows_forecast_fill() {
     let (host, _) = mount(None, Some(solar(now_s(), false)), None).await;
     let title = text(&host, ".solar-card__title");
     assert!(title.trim().starts_with("≈ "), "{title}");
-    assert!(title.contains("/ 12.4 kWh"), "{title}");
+    assert!(title.contains("so far · 12.4 kWh forecast"), "{title}");
     assert!(
         host.query_selector(".solar-curve__measured--forecast")
             .unwrap()
