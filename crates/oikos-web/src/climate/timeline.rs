@@ -12,7 +12,10 @@ use leptos::prelude::*;
 use oikos_climate::doc::{Day, HhMm, ModeRules, Setpoint};
 use wasm_bindgen::JsCast;
 
-use super::{ShortDay, TempBand, setpoint_text, temp_band};
+use super::{TempBand, day_short, setpoint_text, temp_band};
+use crate::i18n::climate::{ClimateText, use_climate_text};
+use crate::i18n::format::{input_number, parse_decimal};
+use crate::i18n::{Key, Lang, use_lang, use_text};
 
 /// The grid blocks snap to, in minutes.
 const STEP: u16 = 15;
@@ -41,12 +44,12 @@ fn hhmm_text(minutes: u16) -> String {
 }
 
 /// One block as a line: "07:15 – 14:00 · 18.5° · 3/5" (the evidence only on a learned block).
-pub fn peek_text(b: &oikos_climate::doc::Block) -> String {
+pub fn peek_text(lang: Lang, b: &oikos_climate::doc::Block) -> String {
     let mut out = format!(
         "{} – {} · {}",
         hhmm_text(b.from.0),
         hhmm_text(b.to.0),
-        setpoint_text(Some(b.setpoint))
+        setpoint_text(lang, Some(b.setpoint))
     );
     if let Some(e) = &b.evidence {
         out.push_str(&format!(" · {}/{}", e.agree, e.of));
@@ -289,9 +292,12 @@ fn Handle(
 ) -> impl IntoView {
     let dragging = RwSignal::new(false);
     let moved = RwSignal::new(false);
-    let label = match edge {
-        Edge::From => "Drag the start",
-        Edge::To => "Drag the end",
+    let t = use_climate_text();
+    let label = move || {
+        t(match edge {
+            Edge::From => ClimateText::DragStart,
+            Edge::To => ClimateText::DragEnd,
+        })
     };
     view! {
         <span
@@ -345,6 +351,7 @@ fn Bar(
     /// The block whose times show under the calendar while viewing.
     peek: RwSignal<Option<usize>>,
 ) -> impl IntoView {
+    let lang = use_lang();
     let covers = Memo::new(move |_| {
         rules.with(|r| r.blocks.get(block).is_some_and(|b| b.days.contains(&day)))
     });
@@ -360,7 +367,7 @@ fn Bar(
     let text = move || {
         rules.with(|r| {
             r.blocks.get(block).map(|b| {
-                let setpoint = setpoint_text(Some(b.setpoint));
+                let setpoint = setpoint_text(lang(), Some(b.setpoint));
                 match &b.evidence {
                     Some(e) => format!("{setpoint} · {}/{}", e.agree, e.of),
                     None => setpoint,
@@ -376,7 +383,7 @@ fn Bar(
         })
     };
     let band = move || rules.with(|r| r.blocks.get(block).map(|b| temp_band(b.setpoint)));
-    let title = move || rules.with(|r| r.blocks.get(block).map(peek_text));
+    let title = move || rules.with(|r| r.blocks.get(block).map(|b| peek_text(lang(), b)));
     view! {
         <Show when=move || covers.get()>
             <div
@@ -397,7 +404,7 @@ fn Bar(
                     open.update(|s| *s = if *s == Some(block) { None } else { Some(block) });
                 }
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
-                    if ev.key() == "Enter" || ev.key() == " " {
+                    if ev.key().eq_ignore_ascii_case("enter") || ev.key() == " " {
                         ev.prevent_default();
                         if editable { selected } else { peek }.set(Some(block));
                     }
@@ -445,6 +452,9 @@ fn BlockEditor(
     on_change: Callback<ModeRules>,
     selected: RwSignal<Option<usize>>,
 ) -> impl IntoView {
+    let lang = use_lang();
+    let t = use_climate_text();
+    let text = use_text();
     let setpoint = move || rules.with(|r| r.blocks.get(block).map(|b| b.setpoint));
     // Bumped after each pick so the controls show the real value even when the rules did not
     // change (the move was refused).
@@ -475,7 +485,7 @@ fn BlockEditor(
         setpoint() == Some(Setpoint::Off)
     };
     let temp = move || match setpoint() {
-        Some(Setpoint::Temp(t)) => t.to_string(),
+        Some(Setpoint::Temp(v)) => input_number(lang(), v),
         _ => String::new(),
     };
     let day_chips = Day::ALL
@@ -506,40 +516,38 @@ fn BlockEditor(
                         }
                     }
                 >
-                    {day.short()}
+                    {move || day_short(lang(), day)}
                 </button>
             }
         })
         .collect_view();
     view! {
         <div class="climate-timeline__editor card">
-            <div class="climate-timeline__days" role="group" aria-label="Days">
+            <div class="climate-timeline__days" role="group" aria-label=move || t(ClimateText::Days)>
                 {day_chips}
             </div>
             <label class="climate-field">
-                <span class="climate-field__label">"From"</span>
+                <span class="climate-field__label">{move || t(ClimateText::From)}</span>
                 // A block can start up to one step before its end.
                 <select class="field" on:change=pick(Edge::From)>
                     {move || time_options(edge_at(Edge::From), 0)}
                 </select>
             </label>
             <label class="climate-field">
-                <span class="climate-field__label">"To"</span>
+                <span class="climate-field__label">{move || t(ClimateText::To)}</span>
                 <select class="field" on:change=pick(Edge::To)>
                     {move || time_options(edge_at(Edge::To), STEP)}
                 </select>
             </label>
             <label class="climate-field">
-                <span class="climate-field__label">"Temperature"</span>
+                <span class="climate-field__label">{move || t(ClimateText::TemperatureLabel)}</span>
                 <input
                     class="field"
-                    type="number"
-                    step="0.5"
-                    min="0"
-                    max="40"
+                    type="text"
+                    inputmode="decimal"
                     prop:value=temp
                     on:change=move |ev| {
-                        if let Ok(t) = event_target_value(&ev).trim().parse::<f64>() {
+                        if let Some(t) = parse_decimal(&event_target_value(&ev)) {
                             let next = set_setpoint(&rules.get_untracked(), block, Setpoint::Temp(t));
                             on_change.run(next);
                         }
@@ -564,7 +572,7 @@ fn BlockEditor(
                         refresh.update(|n| *n += 1);
                     }
                 />
-                <span>"Off"</span>
+                <span>{move || text(Key::ModeOff)}</span>
             </label>
             <div class="climate-timeline__editor-actions">
                 <button
@@ -575,10 +583,10 @@ fn BlockEditor(
                         on_change.run(delete_block(&rules.get_untracked(), block));
                     }
                 >
-                    "Delete block"
+                    {move || t(ClimateText::DeleteBlock)}
                 </button>
                 <button type="button" class="btn btn--compact" on:click=move |_| selected.set(None)>
-                    "Done"
+                    {move || t(ClimateText::Done)}
                 </button>
             </div>
         </div>
@@ -594,22 +602,30 @@ pub fn WeekTimeline(
     on_change: Callback<ModeRules>,
     #[prop(optional, into)] now: Option<Signal<(Day, u16)>>,
 ) -> impl IntoView {
+    let lang = use_lang();
+    let t = use_climate_text();
+    let text = use_text();
     let selected = RwSignal::new(None::<usize>);
     let peek = RwSignal::new(None::<usize>);
     let count = move || rules.with(|r| r.blocks.len());
-    let base = move || rules.with(|r| setpoint_text(Some(r.base)));
+    let base = move || rules.with(|r| setpoint_text(lang(), Some(r.base)));
     let is_today = move |day: Day| now.is_some_and(|n| n.with(|(d, _)| *d == day));
     let headers = Day::ALL
         .into_iter()
         .map(|day| {
-            let (head, rest) = day.short().split_at(2);
+            // The first two letters stay on a narrow screen, the rest hides.
+            let split = move || {
+                let short = day_short(lang(), day);
+                let at = short.char_indices().nth(2).map_or(short.len(), |(i, _)| i);
+                (&short[..at], &short[at..])
+            };
             view! {
                 <span
                     class="climate-timeline__dh"
                     class:climate-timeline__dh--today=move || is_today(day)
                 >
-                    <span class="climate-timeline__dname">{head}</span>
-                    <span class="climate-timeline__dname-rest">{rest}</span>
+                    <span class="climate-timeline__dname">{move || split().0}</span>
+                    <span class="climate-timeline__dname-rest">{move || split().1}</span>
                 </span>
             }
         })
@@ -688,14 +704,14 @@ pub fn WeekTimeline(
     let peeked = move || {
         peek.get()
             .filter(|_| !editable)
-            .and_then(|i| rules.with(|r| r.blocks.get(i).map(peek_text)))
+            .and_then(|i| rules.with(|r| r.blocks.get(i).map(|b| peek_text(lang(), b))))
     };
     view! {
         <div class="climate-timeline">
             {if editable {
                 let base_temp = move || {
                     rules.with(|r| match r.base {
-                        Setpoint::Temp(t) => t.to_string(),
+                        Setpoint::Temp(v) => input_number(lang(), v),
                         Setpoint::Off => String::new(),
                     })
                 };
@@ -703,19 +719,17 @@ pub fn WeekTimeline(
                 view! {
                     <div class="climate-timeline__base climate-timeline__base--edit">
                         <label class="climate-field climate-field--inline">
-                            <span>"Base"</span>
+                            <span>{move || t(ClimateText::Base)}</span>
                             <input
                                 class="field climate-timeline__base-input"
-                                type="number"
-                                step="0.5"
-                                min="0"
-                                max="40"
-                                aria-label="Base temperature"
+                                type="text"
+                                inputmode="decimal"
+                                aria-label=move || t(ClimateText::BaseTemperature)
                                 prop:value=base_temp
                                 disabled=base_off
                                 on:change=move |ev| {
-                                    if let Ok(t) = event_target_value(&ev).trim().parse::<f64>() {
-                                        on_change.run(set_base(&rules.get_untracked(), Setpoint::Temp(t)));
+                                    if let Some(v) = parse_decimal(&event_target_value(&ev)) {
+                                        on_change.run(set_base(&rules.get_untracked(), Setpoint::Temp(v)));
                                     }
                                 }
                             />
@@ -733,16 +747,17 @@ pub fn WeekTimeline(
                                     on_change.run(set_base(&rules.get_untracked(), sp));
                                 }
                             />
-                            <span>"Off"</span>
+                            <span>{move || text(Key::ModeOff)}</span>
                         </label>
-                        <span>"outside the blocks"</span>
+                        <span>{move || t(ClimateText::OutsideBlocks)}</span>
                     </div>
                 }
                     .into_any()
             } else {
                 view! {
                     <p class="climate-timeline__base">
-                        "Base " <strong>{base}</strong> " outside the blocks"
+                        {move || t(ClimateText::Base)} " " <strong>{base}</strong> " "
+                        {move || t(ClimateText::OutsideBlocks)}
                     </p>
                 }
                     .into_any()
@@ -757,7 +772,7 @@ pub fn WeekTimeline(
             {editable
                 .then(|| {
                     view! {
-                        <p class="climate-timeline__hint">"Tap an empty spot to add a block"</p>
+                        <p class="climate-timeline__hint">{move || t(ClimateText::TapToAdd)}</p>
                     }
                 })}
             {move || {
@@ -827,12 +842,15 @@ mod tests {
     #[test]
     fn peek_text_reads_times_temp_and_evidence() {
         let mut b = block(&[Day::Mon], "07:15", "14:00", 18.5);
-        assert_eq!(peek_text(&b), "07:15 – 14:00 · 18.5°");
+        assert_eq!(peek_text(Lang::En, &b), "07:15 – 14:00 · 18.5°");
         b.evidence = Some(oikos_climate::doc::Evidence { agree: 3, of: 5 });
-        assert_eq!(peek_text(&b), "07:15 – 14:00 · 18.5° · 3/5");
+        assert_eq!(peek_text(Lang::En, &b), "07:15 – 14:00 · 18.5° · 3/5");
         b.evidence = None;
         b.setpoint = Setpoint::Off;
-        assert_eq!(peek_text(&b), "07:15 – 14:00 · Off");
+        assert_eq!(peek_text(Lang::En, &b), "07:15 – 14:00 · Off");
+        assert_eq!(peek_text(Lang::Fr, &b), "07:15 – 14:00 · Arrêt");
+        b.setpoint = Setpoint::Temp(18.5);
+        assert_eq!(peek_text(Lang::Fr, &b), "07:15 – 14:00 · 18,5°");
     }
 
     #[test]

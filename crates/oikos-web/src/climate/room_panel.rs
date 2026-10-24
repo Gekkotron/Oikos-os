@@ -20,37 +20,42 @@ use crate::climate::{
 };
 use crate::components::now::{Now, unix_now};
 use crate::components::toast::Toasts;
+use crate::i18n::Lang;
+use crate::i18n::climate::{ClimateText, climate_text, hold_until, now_with_age, use_climate_text};
+use crate::i18n::format::{input_number, parse_decimal};
+use crate::i18n::{current_lang, use_lang};
 
 /// How many recent decisions the card lists before the older rows.
 const RECENT: usize = 10;
 /// How many decisions the hub is asked for when the list opens.
 const FETCH: u32 = 50;
 
-const STATES: [(ZoneState, &str); 3] = [
-    (ZoneState::Off, "Off"),
-    (ZoneState::Pending, "Pending"),
-    (ZoneState::Active, "Active"),
+const STATES: [(ZoneState, ClimateText); 3] = [
+    (ZoneState::Off, ClimateText::ZoneOff),
+    (ZoneState::Pending, ClimateText::ZonePending),
+    (ZoneState::Active, ClimateText::ZoneActive),
 ];
 
-fn override_text(o: &Override, tz: Tz) -> String {
+fn override_text(lang: Lang, o: &Override, tz: Tz) -> String {
     let what = match (o.setpoint, o.mode) {
-        (Some(sp), Some(m)) => format!("{} {}", mode_word(Some(m)), setpoint_text(Some(sp))),
-        (Some(sp), None) => setpoint_text(Some(sp)),
-        (None, m) => mode_word(m).to_owned(),
+        (Some(sp), Some(m)) => format!(
+            "{} {}",
+            mode_word(lang, Some(m)),
+            setpoint_text(lang, Some(sp))
+        ),
+        (Some(sp), None) => setpoint_text(lang, Some(sp)),
+        (None, m) => mode_word(lang, m),
     };
     let by = match o.origin {
-        OverrideOrigin::Hand => "set on a device",
-        OverrideOrigin::User => "set here",
+        OverrideOrigin::Hand => ClimateText::SetOnDevice,
+        OverrideOrigin::User => ClimateText::SetHere,
     };
-    format!(
-        "{what} until {} · {by}",
-        until_text(o.until, unix_now(), tz)
-    )
+    hold_until(lang, &what, &until_text(lang, o.until, unix_now(), tz), by)
 }
 
-/// A typed temperature, when it is a usable number.
+/// A typed temperature ("19.5" or "19,5"), when it is a usable number.
 fn parse_setpoint(text: &str) -> Option<f64> {
-    text.trim().parse::<f64>().ok().filter(|t| t.is_finite())
+    parse_decimal(text)
 }
 
 /// Runs `work`, then refreshes the screen; a failure becomes a toast.
@@ -74,27 +79,37 @@ pub fn RoomPanel(
     on_changed: Callback<()>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let lang = use_lang();
+    let t = use_climate_text();
     let id = zone.with_untracked(|z| z.zone.clone());
     let clock = expect_context::<Now>().0;
     let now = Signal::derive(move || week_minute(clock.get(), tz.get()));
 
     let reading = move || {
         zone.with(|z| {
-            z.reading
-                .map_or_else(|| "No reading".to_owned(), degrees_text)
+            z.reading.map_or_else(
+                || t(ClimateText::NoReading).to_owned(),
+                |r| degrees_text(lang(), r),
+            )
         })
     };
     let reading_label = move || {
         zone.with(|z| match (z.reading, z.reading_age_s) {
-            (Some(_), Some(age)) => format!("Now · {}", age_text(age)),
-            _ => "Now".to_owned(),
+            (Some(_), Some(age)) => now_with_age(lang(), &age_text(lang(), age)),
+            _ => t(ClimateText::Now).to_owned(),
         })
     };
     let target = move || {
         zone.with(|z| {
             z.decision.as_ref().map_or_else(
-                || "No decision yet".to_owned(),
-                |d| format!("{} {}", mode_word(d.mode), setpoint_text(d.setpoint)),
+                || t(ClimateText::NoDecision).to_owned(),
+                |d| {
+                    format!(
+                        "{} {}",
+                        mode_word(lang(), d.mode),
+                        setpoint_text(lang(), d.setpoint)
+                    )
+                },
             )
         })
     };
@@ -102,14 +117,14 @@ pub fn RoomPanel(
         zone.with(|z| {
             z.decision
                 .as_ref()
-                .map(|d| (source_word(d.source), d.reason.clone()))
+                .map(|d| (source_word(lang(), d.source), d.reason.clone()))
         })
     };
 
     // State switch: a group of toggle buttons, the current one pressed.
     let state_buttons = STATES
         .into_iter()
-        .map(|(state, text)| {
+        .map(|(state, word)| {
             let id = id.clone();
             let selected = move || zone.with(|z| z.settings.state == state);
             view! {
@@ -128,7 +143,7 @@ pub fn RoomPanel(
                         act(toasts, on_changed, async move { api::put_zone(&id, &next).await });
                     }
                 >
-                    {text}
+                    {move || t(word)}
                 </button>
             }
         })
@@ -150,10 +165,11 @@ pub fn RoomPanel(
     let overrides = move || {
         let list = zone.with(|z| z.overrides.clone());
         let tz = tz.get();
+        let lang = lang();
         (!list.is_empty()).then(|| {
             let lines = list
                 .iter()
-                .map(|o| view! { <li>{override_text(o, tz)}</li> })
+                .map(|o| view! { <li>{override_text(lang, o, tz)}</li> })
                 .collect_view();
             let id = clear_id.clone();
             view! {
@@ -167,7 +183,7 @@ pub fn RoomPanel(
                             act(toasts, on_changed, async move { api::clear_override(&id).await });
                         }
                     >
-                        "Clear"
+                        {move || t(ClimateText::Clear)}
                     </button>
                 </div>
             }
@@ -179,7 +195,11 @@ pub fn RoomPanel(
         Some(Setpoint::Temp(t)) => Some(t),
         _ => z.reading.map(f64::round),
     });
-    let setpoint = RwSignal::new(start.map(|t| t.to_string()).unwrap_or_default());
+    let setpoint = RwSignal::new(
+        start
+            .map(|v| input_number(current_lang(), v))
+            .unwrap_or_default(),
+    );
     let until_change = move || {
         zone.with(|z| {
             let mode = z
@@ -195,7 +215,7 @@ pub fn RoomPanel(
         let id = id.clone();
         move |minutes: u32| {
             let Some(t) = parse_setpoint(&setpoint.get_untracked()) else {
-                toasts.push("Enter a target temperature first");
+                toasts.push(climate_text(untrack(lang), ClimateText::EnterTarget));
                 return;
             };
             let id = id.clone();
@@ -216,7 +236,7 @@ pub fn RoomPanel(
     let holdable = Memo::new(move |_| zone.with(|z| can_hold(z.settings.state)));
 
     // Learning.
-    let learn_line = move || zone.with(|z| learn_status_text(&z.learn));
+    let learn_line = move || zone.with(|z| learn_status_text(lang(), &z.learn));
     let can_learn = move || zone.with(|z| z.settings.state != ZoneState::Off);
     let learn_id = id.clone();
 
@@ -241,17 +261,20 @@ pub fn RoomPanel(
     });
     let list = move || {
         let tz = tz.get();
+        let lang = lang();
         log.get().map(|l| {
             let recent = l
                 .recent
                 .iter()
                 .take(RECENT)
-                .map(|d| view! { <li>{decision_line(d, tz)}</li> })
+                .map(|d| view! { <li>{decision_line(lang, d, tz)}</li> })
                 .collect_view();
             let older = l
                 .older
                 .iter()
-                .map(|r| view! { <li class="climate-decisions__older">{row_line(r, tz)}</li> })
+                .map(
+                    |r| view! { <li class="climate-decisions__older">{row_line(lang, r, tz)}</li> },
+                )
                 .collect_view();
             view! { <ul class="climate-decisions__list">{recent}{older}</ul> }
         })
@@ -284,7 +307,7 @@ pub fn RoomPanel(
                     <h2 class="climate-status__name">{move || zone.with(|z| z.name.clone())}</h2>
                     {move || {
                         zone.with(|z| z.orphan)
-                            .then(|| view! { <span class="badge">"No climate device"</span> })
+                            .then(|| view! { <span class="badge">{move || t(ClimateText::NoClimateDevice)}</span> })
                     }}
                 </header>
                 {move || {
@@ -297,7 +320,7 @@ pub fn RoomPanel(
                         <strong class="climate-status__reading">{reading}</strong>
                     </div>
                     <div class="climate-status__figure">
-                        <span class="climate-status__label">"Target"</span>
+                        <span class="climate-status__label">{move || t(ClimateText::Target)}</span>
                         <strong class="climate-status__target">{target}</strong>
                         {move || {
                             source()
@@ -312,7 +335,7 @@ pub fn RoomPanel(
                         }}
                     </div>
                 </div>
-                <div class="segmented climate-status__state" role="group" aria-label="Zone state">
+                <div class="segmented climate-status__state" role="group" aria-label=move || t(ClimateText::ZoneStateLabel)>
                     {state_buttons}
                 </div>
                 {move || {
@@ -326,17 +349,17 @@ pub fn RoomPanel(
                                 <div class="climate-hold">
                                     <input
                                         class="field climate-hold__setpoint"
-                                        type="number"
-                                        step="0.5"
-                                        aria-label="Hold temperature"
+                                        type="text"
+                                        inputmode="decimal"
+                                        aria-label=move || t(ClimateText::HoldTemperature)
                                         prop:value=move || setpoint.get()
                                         on:input=move |ev| setpoint.set(event_target_value(&ev))
                                     />
                                     <button type="button" class="btn" on:click=move |_| hold_1h(60)>
-                                        "1 h"
+                                        "1 h"
                                     </button>
                                     <button type="button" class="btn" on:click=move |_| hold_2h(120)>
-                                        "2 h"
+                                        "2 h"
                                     </button>
                                     {move || {
                                         until_change()
@@ -349,9 +372,11 @@ pub fn RoomPanel(
                                                         on:click=move |_| hold_next(m)
                                                     >
                                                         <span class="climate-hold__long">
-                                                            "Until next change"
+                                                            {move || t(ClimateText::UntilNextChange)}
                                                         </span>
-                                                        <span class="climate-hold__short">"Next change"</span>
+                                                        <span class="climate-hold__short">
+                                                            {move || t(ClimateText::NextChange)}
+                                                        </span>
                                                     </button>
                                                 }
                                             })
@@ -392,7 +417,7 @@ pub fn RoomPanel(
                                                 );
                                             }
                                         >
-                                            "Learn now"
+                                            {move || t(ClimateText::LearnNow)}
                                         </button>
                                     }
                                 })
@@ -413,7 +438,9 @@ pub fn RoomPanel(
                         aria-expanded=move || open.get().to_string()
                         on:click=move |_| open.update(|o| *o = !*o)
                     >
-                        {move || if open.get() { "Hide decisions" } else { "Recent decisions" }}
+                        {move || {
+                            t(if open.get() { ClimateText::HideDecisions } else { ClimateText::RecentDecisions })
+                        }}
                     </button>
                     <Show when=move || open.get()>{list}</Show>
                 </div>

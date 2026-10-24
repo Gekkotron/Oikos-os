@@ -53,6 +53,16 @@ pub fn with_unit(value: String, unit: Option<&str>) -> String {
     }
 }
 
+/// A number as it goes into an input: the shortest text that reads back as `v`, with the
+/// language's decimal separator and no thousands grouping ("0,75", "20.25").
+pub fn input_number(lang: Lang, v: f64) -> String {
+    let s = format!("{v}");
+    match lang {
+        Lang::Fr => s.replace('.', ","),
+        Lang::En => s,
+    }
+}
+
 /// A number typed by hand: "21,5" or "21.5", thousands separated by spaces or not. Digits, one
 /// separator and a leading minus only: no exponent, no "NaN" or "inf".
 pub fn parse_decimal(s: &str) -> Option<f64> {
@@ -248,6 +258,21 @@ pub fn local_date_time(unix: u64) -> NaiveDateTime {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn input_numbers_keep_every_digit() {
+        use super::{Lang, input_number, parse_decimal};
+        assert_eq!(input_number(Lang::En, 0.75), "0.75");
+        assert_eq!(input_number(Lang::Fr, 0.75), "0,75");
+        assert_eq!(input_number(Lang::En, 20.25), "20.25");
+        assert_eq!(input_number(Lang::Fr, 20.25), "20,25");
+        assert_eq!(input_number(Lang::Fr, 1500.0), "1500");
+        for v in [0.04, 20.25, 1234.5] {
+            for lang in [Lang::En, Lang::Fr] {
+                assert_eq!(parse_decimal(&input_number(lang, v)), Some(v));
+            }
+        }
+    }
+
     use chrono::{NaiveDate, NaiveTime, Weekday};
 
     use super::*;

@@ -15,6 +15,8 @@ use oikos_climate::view::ZoneView;
 use super::timeline::{NEW_BASE, WeekTimeline};
 use crate::api::climate as api;
 use crate::components::toast::Toasts;
+use crate::i18n::climate::{ClimateText, could_not_save, use_climate_text};
+use crate::i18n::{Key, use_lang, use_text};
 
 fn present(rules: &Rules) -> Vec<Mode> {
     [Mode::Heat, Mode::Cool]
@@ -41,6 +43,8 @@ fn RulesTimeline(
     on_change: Callback<Rules>,
     now: Signal<(Day, u16)>,
 ) -> impl IntoView {
+    let lang = use_lang();
+    let t = use_text();
     let modes = Memo::new(move |_| rules.with(present));
     let mode = RwSignal::new(modes.with_untracked(|m| m.first().copied().unwrap_or(Mode::Heat)));
     let tabs = move || {
@@ -57,12 +61,12 @@ fn RulesTimeline(
                             aria-pressed=move || (mode.get() == m).to_string()
                             on:click=move |_| mode.set(m)
                         >
-                            {super::mode_word(Some(m))}
+                            {move || super::mode_word(lang(), Some(m))}
                         </button>
                     }
                 })
                 .collect_view();
-            view! { <div class="segmented" role="group" aria-label="Mode">{buttons}</div> }
+            view! { <div class="segmented" role="group" aria-label=move || t(Key::Mode)>{buttons}</div> }
         })
     };
     // Rebuilt only when the mode tab or the edit toggle changes, never while dragging.
@@ -109,13 +113,20 @@ pub fn ProposalPanel(
     now: Signal<(Day, u16)>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let t = use_climate_text();
+    let lang = use_lang();
+    let text = use_text();
     let learned = proposal.rules.clone();
     let edited = RwSignal::new(proposal.rules.clone());
     let editing = RwSignal::new(false);
     let busy = RwSignal::new(false);
-    let title = match proposal.kind {
-        ProposalKind::Initial => "Proposed schedule",
-        ProposalKind::Change => "Proposed changes",
+    let initial = proposal.kind == ProposalKind::Initial;
+    let title = move || {
+        t(if initial {
+            ClimateText::ProposedSchedule
+        } else {
+            ClimateText::ProposedChanges
+        })
     };
     let dirty = {
         let learned = learned.clone();
@@ -134,7 +145,7 @@ pub fn ProposalPanel(
     let changes_view = move || {
         let lines = changes();
         if lines.is_empty() {
-            view! { <p class="climate-proposal__none">"No change from the approved rules"</p> }
+            view! { <p class="climate-proposal__none">{move || t(ClimateText::NoChange)}</p> }
                 .into_any()
         } else {
             let items = lines
@@ -154,7 +165,7 @@ pub fn ProposalPanel(
         let rules = edited.get_untracked();
         let send_edited = approve_dirty();
         if send_edited && let Err(e) = rules.validate() {
-            toasts.push(e);
+            toasts.push(could_not_save(untrack(lang), &e));
             return;
         }
         busy.set(true);
@@ -206,7 +217,7 @@ pub fn ProposalPanel(
                     if editing.get() {
                         view! {
                             <button type="button" class="btn btn--compact" on:click=discard.clone()>
-                                "Discard edits"
+                                {move || t(ClimateText::DiscardEdits)}
                             </button>
                         }
                             .into_any()
@@ -217,7 +228,7 @@ pub fn ProposalPanel(
                                 class="btn btn--compact"
                                 on:click=move |_| editing.set(true)
                             >
-                                "Edit"
+                                {move || text(Key::Edit)}
                             </button>
                         }
                             .into_any()
@@ -231,11 +242,13 @@ pub fn ProposalPanel(
                 >
                     {
                         let dirty = dirty.clone();
-                        move || if dirty() { "Approve edited" } else { "Approve" }
+                        move || {
+                            t(if dirty() { ClimateText::ApproveEdited } else { ClimateText::Approve })
+                        }
                     }
                 </button>
                 <button type="button" class="btn" disabled=move || busy.get() on:click=reject>
-                    "Reject"
+                    {move || t(ClimateText::Reject)}
                 </button>
             </div>
         </section>
@@ -251,6 +264,8 @@ pub fn RulesPanel(
     now: Signal<(Day, u16)>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let t = use_climate_text();
+    let lang = use_lang();
     let id = zone.with_untracked(|z| z.zone.clone());
     let editing = RwSignal::new(false);
     let draft = RwSignal::new(Rules::default());
@@ -270,7 +285,7 @@ pub fn RulesPanel(
         }
         let rules = draft.get_untracked();
         if let Err(e) = rules.validate() {
-            toasts.push(e);
+            toasts.push(could_not_save(untrack(lang), &e));
             return;
         }
         let mut settings = zone.with_untracked(|z| z.settings.clone());
@@ -287,15 +302,15 @@ pub fn RulesPanel(
         });
     });
     view! {
-        <section class="climate-rules" aria-label="Approved rules">
-            <h3 class="climate-proposal__title">"This week"</h3>
+        <section class="climate-rules" aria-label=move || t(ClimateText::ApprovedRules)>
+            <h3 class="climate-proposal__title">{move || t(ClimateText::ThisWeek)}</h3>
             // A room without rules starts an empty heating week here; saving it approves it, and
             // the hub turns a pending room active.
             <Show
                 when=move || !empty() || editing.get()
                 fallback=move || {
                     view! {
-                        <p class="climate-proposal__none">"No approved schedule yet"</p>
+                        <p class="climate-proposal__none">{move || t(ClimateText::NoApprovedSchedule)}</p>
                         <div class="climate-proposal__actions">
                             <button
                                 type="button"
@@ -311,7 +326,7 @@ pub fn RulesPanel(
                                     editing.set(true);
                                 }
                             >
-                                "Create schedule"
+                                {move || t(ClimateText::CreateSchedule)}
                             </button>
                         </div>
                     }
@@ -333,14 +348,14 @@ pub fn RulesPanel(
                                     disabled=move || busy.get()
                                     on:click=move |_| save.run(())
                                 >
-                                    "Save"
+                                    {move || t(ClimateText::Save)}
                                 </button>
                                 <button
                                     type="button"
                                     class="btn"
                                     on:click=move |_| editing.set(false)
                                 >
-                                    "Cancel"
+                                    {move || t(ClimateText::Cancel)}
                                 </button>
                             }
                                 .into_any()
@@ -354,7 +369,7 @@ pub fn RulesPanel(
                                         editing.set(true);
                                     }
                                 >
-                                    "Edit rules"
+                                    {move || t(ClimateText::EditRules)}
                                 </button>
                             }
                                 .into_any()

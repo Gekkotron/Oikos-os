@@ -10,7 +10,6 @@ file: src/cards/alarm.rs  # not translated yet
 file: src/cards/binary_sensor.rs  # not translated yet
 file: src/cards/button.rs  # not translated yet
 file: src/cards/chime.rs  # not translated yet
-file: src/cards/climate.rs  # not translated yet
 file: src/cards/cover.rs  # not translated yet
 file: src/cards/door.rs  # not translated yet
 file: src/cards/generic.rs  # not translated yet
@@ -21,19 +20,10 @@ file: src/cards/number.rs  # not translated yet
 file: src/cards/select.rs  # not translated yet
 file: src/cards/siren.rs  # not translated yet
 file: src/cards/vacuum.rs  # not translated yet
-file: src/cards/water_heater.rs  # not translated yet
-file: src/climate/entity_field.rs  # not translated yet
-file: src/climate/mod.rs  # not translated yet
-file: src/climate/proposal.rs  # not translated yet
-file: src/climate/room_list.rs  # not translated yet
-file: src/climate/room_panel.rs  # not translated yet
-file: src/climate/settings_sheet.rs  # not translated yet
-file: src/climate/timeline.rs  # not translated yet
 file: src/commands.rs  # not translated yet
 file: src/components/alarm_hero.rs  # not translated yet
 file: src/components/alert_row.rs  # not translated yet
 file: src/components/confirm.rs  # not translated yet
-file: src/components/dial.rs  # not translated yet
 file: src/components/history_chart/format.rs  # not translated yet
 file: src/components/history_chart/view.rs  # not translated yet
 file: src/components/hs_wheel.rs  # not translated yet
@@ -51,7 +41,6 @@ file: src/override_editor.rs  # not translated yet
 file: src/rooms.rs  # not translated yet
 file: src/screens/alert_detail.rs  # not translated yet
 file: src/screens/alerts.rs  # not translated yet
-file: src/screens/climate.rs  # not translated yet
 file: src/screens/dashboard.rs  # not translated yet
 file: src/screens/devices.rs  # not translated yet
 file: src/screens/energy.rs  # not translated yet

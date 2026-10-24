@@ -297,13 +297,13 @@ pub fn Dial(
         let Some(current) = draft(&keys_key).or_else(|| shown.get_untracked()) else {
             return;
         };
-        let next = match e.key().as_str() {
-            "ArrowUp" | "ArrowRight" => current + step,
-            "ArrowDown" | "ArrowLeft" => current - step,
-            "PageUp" => current + 1.0,
-            "PageDown" => current - 1.0,
-            "Home" => min,
-            "End" => max,
+        let next = match e.key().to_ascii_lowercase().as_str() {
+            "arrowup" | "arrowright" => current + step,
+            "arrowdown" | "arrowleft" => current - step,
+            "pageup" => current + 1.0,
+            "pagedown" => current - 1.0,
+            "home" => min,
+            "end" => max,
             _ => return,
         };
         e.prevent_default();

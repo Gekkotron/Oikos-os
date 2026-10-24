@@ -9,15 +9,15 @@ use oikos_core::model::Kind;
 
 use crate::format::{list_label, room_name};
 use crate::house::House;
-
-// Labels stay English until the climate area is translated (its text around them is English).
-const LANG: crate::i18n::Lang = crate::i18n::Lang::En;
+use crate::i18n::Lang;
+use crate::i18n::climate::{ClimateText, automatic_with, climate_text};
+use crate::i18n::use_lang;
 
 /// Every entity as `(id, label)`, sorted by label.
-fn options(house: House) -> Vec<(String, String)> {
+fn options(house: House, lang: Lang) -> Vec<(String, String)> {
     let mut list: Vec<(String, String)> = house.entities.with(|m| {
         m.values()
-            .map(|e| (e.id.clone(), list_label(LANG, e)))
+            .map(|e| (e.id.clone(), list_label(lang, e)))
             .collect()
     });
     list.sort_by_key(|(_, label)| label.to_lowercase());
@@ -35,6 +35,7 @@ type RoomGroup = (Option<String>, Vec<(String, String)>);
 /// The thermometers grouped by room: rooms by name, the ones outside any room last, each
 /// group sorted by label.
 fn thermometers_by_room(
+    lang: Lang,
     entities: &BTreeMap<String, EntityView>,
     areas: &[AreaView],
 ) -> Vec<RoomGroup> {
@@ -49,7 +50,7 @@ fn thermometers_by_room(
             .entry(key)
             .or_insert_with(|| (room, Vec::new()))
             .1
-            .push((e.id.clone(), list_label(LANG, e)));
+            .push((e.id.clone(), list_label(lang, e)));
     }
     groups
         .into_values()
@@ -61,35 +62,36 @@ fn thermometers_by_room(
 }
 
 /// The label of `id` followed by its room, or the id itself when the house no longer has it.
-fn label_with_room(house: House, id: &str) -> String {
+fn label_with_room(house: House, lang: Lang, id: &str) -> String {
     house.entities.with(|m| match m.get(id) {
         Some(e) => match house.areas.with(|a| room_name(a, &e.area)) {
-            Some(room) => format!("{} ({room})", list_label(LANG, e)),
-            None => list_label(LANG, e),
+            Some(room) => format!("{} ({room})", list_label(lang, e)),
+            None => list_label(lang, e),
         },
         None => id.to_owned(),
     })
 }
 
 /// The label of `id`, or the id itself when the house no longer has it.
-fn label_of(house: House, id: &str) -> String {
+fn label_of(house: House, lang: Lang, id: &str) -> String {
     house
         .entities
-        .with(|m| m.get(id).map(|e| list_label(LANG, e)))
+        .with(|m| m.get(id).map(|e| list_label(lang, e)))
         .unwrap_or_else(|| id.to_owned())
 }
 
 /// A select over the house's entities with a "None" choice. An id the house lost stays shown.
 #[component]
 pub fn EntityField(
-    label: &'static str,
+    #[prop(into)] label: Signal<String>,
     value: Signal<Option<String>>,
     on_change: Callback<Option<String>>,
 ) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     view! {
         <label class="climate-field">
-            <span class="climate-field__label">{label}</span>
+            <span class="climate-field__label">{move || label.get()}</span>
             <select
                 class="field"
                 on:change=move |ev| {
@@ -97,10 +99,12 @@ pub fn EntityField(
                     on_change.run((!v.is_empty()).then_some(v));
                 }
             >
-                <option value="" selected=move || value.get().is_none()>"None"</option>
+                <option value="" selected=move || value.get().is_none()>
+                    {move || climate_text(lang(), ClimateText::None)}
+                </option>
                 {move || {
                     let current = value.get();
-                    let mut list = options(house);
+                    let mut list = options(house, lang());
                     if let Some(id) = current.as_ref()
                         && !list.iter().any(|(i, _)| i == id)
                     {
@@ -121,28 +125,30 @@ pub fn EntityField(
 /// A list of entities as removable chips, with a select that adds one.
 #[component]
 pub fn EntityListField(
-    label: &'static str,
+    #[prop(into)] label: Signal<String>,
     value: Signal<Vec<String>>,
     on_change: Callback<Vec<String>>,
 ) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     view! {
         <div class="climate-field">
-            <span class="climate-field__label">{label}</span>
+            <span class="climate-field__label">{move || label.get()}</span>
             <Show when=move || value.with(|v| !v.is_empty())>
                 <div class="chips climate-chips">
                 {move || {
+                    let shown = lang();
                     value
                         .get()
                         .into_iter()
                         .map(|id| {
-                            let text = label_of(house, &id);
+                            let text = label_of(house, shown, &id);
                             let gone = id.clone();
                             view! {
                                 <button
                                     type="button"
                                     class="chip"
-                                    title="Remove"
+                                    title=move || climate_text(lang(), ClimateText::Remove)
                                     on:click=move |_| {
                                         let mut list = value.get_untracked();
                                         list.retain(|i| i != &gone);
@@ -160,7 +166,7 @@ pub fn EntityListField(
             </Show>
             <select
                 class="field"
-                aria-label=label
+                aria-label=move || label.get()
                 on:change=move |ev| {
                     let v = event_target_value(&ev);
                     if !v.is_empty() {
@@ -172,10 +178,12 @@ pub fn EntityListField(
                     }
                 }
             >
-                <option value="" selected=true>"Add…"</option>
+                <option value="" selected=true>
+                    {move || climate_text(lang(), ClimateText::AddEllipsis)}
+                </option>
                 {move || {
                     let taken = value.get();
-                    options(house)
+                    options(house, lang())
                         .into_iter()
                         .filter(|(id, _)| !taken.contains(id))
                         .map(|(id, text)| view! { <option value=id>{text}</option> })
@@ -200,14 +208,20 @@ pub fn ThermometerField(
     #[prop(strip_option, into, default = None)] auto_text: Option<Signal<String>>,
 ) -> impl IntoView {
     let house = expect_context::<House>();
-    let label = move || label.map_or_else(|| "Room thermometer".to_owned(), |l| l.get());
+    let lang = use_lang();
+    let label = move || {
+        label.map_or_else(
+            || climate_text(lang(), ClimateText::RoomThermometer).to_owned(),
+            |l| l.get(),
+        )
+    };
     let auto_text = move || {
         if let Some(text) = auto_text {
             return text.get();
         }
         match auto.get() {
-            Some(id) => format!("Automatic · {}", label_with_room(house, &id)),
-            None => "Automatic · climate device".to_owned(),
+            Some(id) => automatic_with(lang(), &label_with_room(house, lang(), &id)),
+            None => climate_text(lang(), ClimateText::AutomaticClimateDevice).to_owned(),
         }
     };
     view! {
@@ -223,12 +237,12 @@ pub fn ThermometerField(
                 <option value="" selected=move || value.get().is_none()>{auto_text}</option>
                 {move || {
                     let current = value.get();
-                    let groups = house.entities.with(|m| house.areas.with(|a| thermometers_by_room(m, a)));
+                    let groups = house.entities.with(|m| house.areas.with(|a| thermometers_by_room(lang(), m, a)));
                     let lost = current
                         .clone()
                         .filter(|id| !groups.iter().any(|(_, list)| list.iter().any(|(i, _)| i == id)))
                         .map(|id| {
-                            let text = label_with_room(house, &id);
+                            let text = label_with_room(house, lang(), &id);
                             view! { <option value=id selected=true>{text}</option> }
                         });
                     let groups = groups
@@ -242,7 +256,9 @@ pub fn ThermometerField(
                                 })
                                 .collect_view();
                             view! {
-                                <optgroup label=room.unwrap_or_else(|| "No room".to_owned())>
+                                <optgroup label=room.unwrap_or_else(|| {
+                                    climate_text(lang(), ClimateText::NoRoom).to_owned()
+                                })>
                                     {options}
                                 </optgroup>
                             }
@@ -258,6 +274,7 @@ pub fn ThermometerField(
 #[cfg(test)]
 mod tests {
     use super::thermometers_by_room;
+    use crate::i18n::Lang;
     use oikos_api::{AreaView, EntityView};
     use oikos_core::model::{
         Capabilities, EntityCategory, EntityState, Kind, UNASSIGNED_AREA, UiOverride,
@@ -313,7 +330,7 @@ mod tests {
         .map(|e| (e.id.clone(), e))
         .collect();
         let areas = [area("office", "Office"), area("bed", "Bedroom")];
-        let groups = thermometers_by_room(&entities, &areas);
+        let groups = thermometers_by_room(Lang::En, &entities, &areas);
         let shape: Vec<(Option<&str>, Vec<&str>)> = groups
             .iter()
             .map(|(room, list)| {

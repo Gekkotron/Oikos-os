@@ -6,6 +6,8 @@ use leptos::prelude::*;
 use oikos_climate::view::ZoneView;
 
 use crate::climate::{TempBand, degrees_text, room_band, room_subline};
+use crate::i18n::climate::{ClimateText, climate_text};
+use crate::i18n::{Lang, use_lang};
 
 #[component]
 pub fn RoomList(
@@ -14,18 +16,19 @@ pub fn RoomList(
     selected: Signal<Option<String>>,
     on_select: Callback<String>,
 ) -> impl IntoView {
+    let lang = use_lang();
     let ids =
         Memo::new(move |_| zones.with(|z| z.iter().map(|z| z.zone.clone()).collect::<Vec<_>>()));
     view! {
-        <nav class="climate-rooms" aria-label="Rooms">
+        <nav class="climate-rooms" aria-label=move || climate_text(lang(), ClimateText::Rooms)>
             <For each=move || ids.get() key=|id| id.clone() let:id>
                 {
                     let row = {
                         let id = id.clone();
                         Memo::new(move |_| zones.with(|z| z.iter().find(|z| z.zone == id).cloned()))
                     };
-                    let field = move |f: fn(&ZoneView) -> String| {
-                        move || row.with(|z| z.as_ref().map(f).unwrap_or_default())
+                    let field = move |f: fn(Lang, &ZoneView) -> String| {
+                        move || row.with(|z| z.as_ref().map(|z| f(lang(), z)).unwrap_or_default())
                     };
                     let band = move || row.with(|z| z.as_ref().and_then(room_band));
                     let is_selected = {
@@ -49,10 +52,10 @@ pub fn RoomList(
                                     class:climate-temp--high=move || band() == Some(TempBand::High)
                                     class:climate-temp--none=move || band().is_none()
                                 ></i>
-                                {field(|z| z.name.clone())}
+                                {field(|_, z| z.name.clone())}
                             </span>
                             <span class="climate-room__temp">
-                                {field(|z| z.reading.map_or_else(|| "—".to_owned(), degrees_text))}
+                                {field(|l, z| z.reading.map_or_else(|| "—".to_owned(), |t| degrees_text(l, t)))}
                             </span>
                             <span class="climate-room__sub">{field(room_subline)}</span>
                         </button>
