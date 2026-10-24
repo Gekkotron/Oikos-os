@@ -2,6 +2,7 @@
 
 use leptos::prelude::*;
 
+mod alarm;
 mod ambiances;
 pub mod climate;
 mod dashboards;
@@ -12,6 +13,7 @@ mod solar;
 pub mod states;
 mod weather;
 
+pub use alarm::*;
 pub use ambiances::*;
 pub use dashboards::*;
 pub use home::*;
@@ -208,6 +210,7 @@ pub enum Key {
     Settings,
     Devices,
     Appearance,
+    Alarm,
     Zigbee2mqtt,
     Broker,
     AiAssistants,
@@ -345,6 +348,7 @@ impl Key {
         Key::Settings,
         Key::Devices,
         Key::Appearance,
+        Key::Alarm,
         Key::Zigbee2mqtt,
         Key::Broker,
         Key::AiAssistants,
@@ -501,6 +505,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Settings => ("Settings", "Réglages"),
         Key::Devices => ("Devices", "Appareils"),
         Key::Appearance => ("Appearance", "Apparence"),
+        Key::Alarm => ("Alarm", "Alarme"),
         Key::Zigbee2mqtt => ("Zigbee2MQTT", "Zigbee2MQTT"),
         Key::Broker => ("Broker", "Broker MQTT"),
         Key::AiAssistants => ("AI assistants (MCP)", "Assistants IA (MCP)"),
@@ -727,6 +732,7 @@ mod tests {
             | Key::Settings
             | Key::Devices
             | Key::Appearance
+            | Key::Alarm
             | Key::Zigbee2mqtt
             | Key::Broker
             | Key::AiAssistants
@@ -790,7 +796,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 132);
+        assert_eq!(Key::ALL.len(), 133);
     }
     #[test]
     fn every_key_differs_between_languages() {

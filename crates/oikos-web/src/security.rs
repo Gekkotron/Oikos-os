@@ -17,6 +17,32 @@ pub struct PanelUi {
     pub available: bool,
     pub capabilities: Capabilities,
     pub order: Option<i32>,
+    /// Unix seconds the exit or entry delay ends (the native alarm's `deadline` attribute).
+    pub deadline: Option<u64>,
+    /// What set the alarm off, as display names (the native alarm's `cause` attribute).
+    pub cause: Vec<String>,
+    /// How the alarm was armed: `presence`, `remote`, `sos` or `command`.
+    pub source: Option<String>,
+}
+
+/// The panel's `cause` attribute with each entity id replaced by its display name. An id the
+/// house lost stays as it is, and `sos:<remote>` stays: the hero words it.
+fn cause_names(
+    attributes: &serde_json::Map<String, serde_json::Value>,
+    entities: &BTreeMap<String, EntityView>,
+) -> Vec<String> {
+    attributes
+        .get("cause")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str())
+        .map(|id| {
+            entities
+                .get(id)
+                .map_or_else(|| id.to_owned(), |e| e.name.clone())
+        })
+        .collect()
 }
 
 /// A security binary sensor. `active` is `None` until a state arrives; `area_name` is `None`
@@ -204,6 +230,14 @@ impl SecurityUi {
                 available: is_available(e),
                 capabilities: e.capabilities.clone(),
                 order: e.ui.order,
+                deadline: e.state.attributes.get("deadline").and_then(|v| v.as_u64()),
+                cause: cause_names(&e.state.attributes, entities),
+                source: e
+                    .state
+                    .attributes
+                    .get("source")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
             })
             .collect();
         panels.sort_by_cached_key(|p| {

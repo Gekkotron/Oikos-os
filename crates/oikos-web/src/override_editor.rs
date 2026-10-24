@@ -16,6 +16,7 @@ use crate::energy::energy_entities;
 use crate::format::word;
 use crate::house::House;
 use crate::icons::consumer_icon;
+use crate::screens::alarm_settings::AlarmRoleLine;
 use crate::settings_rules::{Shown, clear_field, order_valid, other_saved, set_type, shown};
 
 /// The fields of `after` that differ from `before`, as a patch the hub accepts: camelCase keys,
@@ -651,6 +652,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
     let on = move |pick: fn(&Shown) -> bool| Signal::derive(move || shown.with(pick));
 
     view! {
+        <AlarmRoleLine id=id.clone() />
         <form class="override" on:submit=|ev| ev.prevent_default()>
             <fieldset class="override__group">
                 <legend class="override__legend">"General"</legend>

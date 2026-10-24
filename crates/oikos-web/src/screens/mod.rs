@@ -1,3 +1,4 @@
+pub mod alarm_settings;
 pub mod alert_detail;
 pub mod alerts;
 pub mod climate;

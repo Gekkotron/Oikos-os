@@ -71,6 +71,7 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/home/settings", get(home_settings).put(put_home_settings))
         .route("/alarm", get(alarm))
         .route("/alarm/settings", put(put_alarm_settings))
+        .route("/alarm/test-chirp", post(alarm_test_chirp))
         .route("/climate", get(climate))
         .route("/climate/house", put(put_climate_house))
         .route("/climate/zones/{id}", put(put_climate_zone))
@@ -744,6 +745,22 @@ async fn put_alarm_settings(
 ) -> Result<StatusCode, HttpError> {
     let Json(settings) = body?;
     hub.set_alarm_settings(settings).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Which siren of the saved settings to chirp.
+#[derive(serde::Deserialize)]
+struct TestChirp {
+    siren: usize,
+}
+
+/// Sounds one siren's chirp (204); `422` when there is no such siren or it has no chirp.
+async fn alarm_test_chirp(
+    State(hub): HubState,
+    body: Body<TestChirp>,
+) -> Result<StatusCode, HttpError> {
+    let Json(request) = body?;
+    hub.alarm_test_chirp(request.siren)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

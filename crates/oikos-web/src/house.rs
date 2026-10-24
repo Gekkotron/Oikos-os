@@ -50,6 +50,8 @@ pub struct House {
     pub last_alerts_seen: RwSignal<u64>,
     /// Bumped on every `ClimateChanged` event; the Climate screen and the nav refetch on it.
     pub climate_rev: RwSignal<u64>,
+    /// Bumped on every `AlarmChanged` event; the alarm settings page and the device sheet refetch.
+    pub alarm_rev: RwSignal<u64>,
 }
 
 impl House {
@@ -77,6 +79,7 @@ impl House {
             command_failed: RwSignal::new(None),
             last_alerts_seen: RwSignal::new(0),
             climate_rev: RwSignal::new(0),
+            alarm_rev: RwSignal::new(0),
         }
     }
 
@@ -223,8 +226,8 @@ impl House {
             WsEvent::ButtonPressed { .. } | WsEvent::SignalReceived { .. } => {}
             // The Climate screen reads its own view: tell it to refetch.
             WsEvent::ClimateChanged { .. } => self.climate_rev.update(|r| *r += 1),
-            // The alarm screen arrives with the web wave; nothing reads it yet.
-            WsEvent::AlarmChanged => {}
+            // The alarm page reads its own view: tell it to refetch.
+            WsEvent::AlarmChanged => self.alarm_rev.update(|r| *r += 1),
             WsEvent::WeatherChanged => self.refresh_weather(),
             WsEvent::HomeSettingsChanged { settings } => self.home_settings.set(settings),
             WsEvent::AmbiancesChanged { ambiances } => {

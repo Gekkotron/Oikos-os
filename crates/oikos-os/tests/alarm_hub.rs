@@ -706,6 +706,39 @@ async fn arming_chirps() {
     assert!(rig.sent(SIREN_SET).is_empty(), "the switch has no chirp_ms");
 }
 
+#[tokio::test]
+async fn test_chirp_publishes_chirp() {
+    let (hub, mut rx) = hub();
+    house(&hub);
+    let mut settings = AlarmSettings::default();
+    with_sirens(&hub, &mut settings);
+    settings.sirens.push(oikos_alarm::doc::Siren::Mqtt {
+        mqtt: oikos_alarm::doc::MqttSiren {
+            topic: "dev/quiet/set".to_owned(),
+            on: "ON".to_owned(),
+            off: "OFF".to_owned(),
+            chirp: None,
+        },
+    });
+    // The alarm stays disabled: the chirp is a setup aid.
+    hub.set_alarm_settings(settings).await.unwrap();
+    drain(&mut rx);
+
+    hub.alarm_test_chirp(1).unwrap();
+    let sent = drain(&mut rx);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(
+        (sent[0].topic.as_str(), sent[0].payload.as_str()),
+        (MQTT_SIREN, "BEEP")
+    );
+
+    for index in [0, 2, 9] {
+        let err = hub.alarm_test_chirp(index).unwrap_err();
+        assert!(matches!(err, HubError::Rejected(_)), "{index}: {err:?}");
+    }
+    assert!(drain(&mut rx).is_empty());
+}
+
 #[tokio::test(start_paused = true)]
 async fn push_disarm_reply_disarms() {
     let mut rig = armed_rig().await;

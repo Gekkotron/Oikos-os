@@ -13,7 +13,7 @@ use oikos_core::model::Command;
 use serde_json::{Value, json};
 
 use super::{ALARM_ENTITY_ID, lock};
-use crate::hub::Hub;
+use crate::hub::{Hub, HubError};
 
 /// The push source of every alarm alert.
 const SOURCE: &str = "alarm";
@@ -143,34 +143,59 @@ impl Hub {
         .map_err(|err| err.to_string())
     }
 
-    /// Every siren with a chirp sounds once. An entity siren's chirp is on, a pause, off; it
-    /// runs on its own task so the step does not wait for it.
+    /// Every siren with a chirp sounds once.
     fn alarm_chirp(self: &Arc<Self>) {
         for siren in self.alarm_settings().sirens {
-            match siren {
-                Siren::Mqtt { mqtt } => {
-                    if let Some(chirp) = &mqtt.chirp
-                        && let Err(err) = self.alarm_publish(&mqtt.topic, chirp)
-                    {
-                        tracing::warn!(topic = %mqtt.topic, %err, "alarm chirp failed");
-                    }
+            self.alarm_chirp_siren(siren);
+        }
+    }
+
+    /// Sounds one siren's chirp, if it has one; true when there was a chirp to sound. An entity
+    /// siren's chirp is on, a pause, off; it runs on its own task so the step does not wait for it.
+    fn alarm_chirp_siren(self: &Arc<Self>, siren: Siren) -> bool {
+        match siren {
+            Siren::Mqtt { mqtt } => {
+                let Some(chirp) = &mqtt.chirp else {
+                    return false;
+                };
+                if let Err(err) = self.alarm_publish(&mqtt.topic, chirp) {
+                    tracing::warn!(topic = %mqtt.topic, %err, "alarm chirp failed");
                 }
-                Siren::Entity {
-                    entity,
-                    chirp_ms: Some(ms),
-                } if tokio::runtime::Handle::try_current().is_ok() => {
-                    let hub = Arc::clone(self);
-                    tokio::spawn(async move {
-                        let outcome = hub.alarm_entity_siren(&entity, true).await;
-                        tokio::time::sleep(Duration::from_millis(u64::from(ms))).await;
-                        let off = hub.alarm_entity_siren(&entity, false).await;
-                        if let Some(err) = outcome.err().or(off.err()) {
-                            tracing::warn!(%entity, %err, "alarm chirp failed");
-                        }
-                    });
-                }
-                Siren::Entity { .. } => {}
+                true
             }
+            Siren::Entity {
+                entity,
+                chirp_ms: Some(ms),
+            } if tokio::runtime::Handle::try_current().is_ok() => {
+                let hub = Arc::clone(self);
+                tokio::spawn(async move {
+                    let outcome = hub.alarm_entity_siren(&entity, true).await;
+                    tokio::time::sleep(Duration::from_millis(u64::from(ms))).await;
+                    let off = hub.alarm_entity_siren(&entity, false).await;
+                    if let Some(err) = outcome.err().or(off.err()) {
+                        tracing::warn!(%entity, %err, "alarm chirp failed");
+                    }
+                });
+                true
+            }
+            Siren::Entity { .. } => false,
+        }
+    }
+
+    /// Sounds the chirp of the saved settings' siren at `index`, as a setup aid: it works
+    /// whether or not the alarm is enabled. `Rejected` when there is no such siren or it has no
+    /// chirp.
+    pub fn alarm_test_chirp(self: &Arc<Self>, index: usize) -> Result<(), HubError> {
+        let siren = self
+            .alarm_settings()
+            .sirens
+            .get(index)
+            .cloned()
+            .ok_or_else(|| HubError::Rejected(format!("there is no siren {index}")))?;
+        if self.alarm_chirp_siren(siren) {
+            Ok(())
+        } else {
+            Err(HubError::Rejected(format!("siren {index} has no chirp")))
         }
     }
 

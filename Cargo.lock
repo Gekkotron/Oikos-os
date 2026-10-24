@@ -2376,6 +2376,7 @@ dependencies = [
  "js-sys",
  "leptos",
  "leptos_router",
+ "oikos-alarm",
  "oikos-api",
  "oikos-climate",
  "oikos-core",

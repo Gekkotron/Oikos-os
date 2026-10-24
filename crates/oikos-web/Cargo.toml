@@ -23,6 +23,7 @@ gloo-timers.workspace = true
 js-sys.workspace = true
 leptos.workspace = true
 leptos_router.workspace = true
+oikos-alarm = { path = "../oikos-alarm" }
 oikos-api = { path = "../oikos-api" }
 oikos-climate = { path = "../oikos-climate" }
 oikos-core = { path = "../oikos-core" }
