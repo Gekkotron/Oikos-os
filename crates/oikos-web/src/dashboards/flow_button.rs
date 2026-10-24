@@ -5,6 +5,7 @@ use leptos::task::spawn_local;
 
 use crate::api;
 use crate::components::toast::Toasts;
+use crate::i18n::{WidgetText, flow_started, use_lang, widget_text};
 use crate::icons::PLAY;
 
 /// The card's name: the widget's own title when it has one, else the flow's.
@@ -23,6 +24,7 @@ pub fn FlowButtonWidget(
     invalid: Option<String>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let lang = use_lang();
     let name = button_name(title, &flow_name);
     let running = RwSignal::new(false);
     let runnable = invalid.is_none();
@@ -33,7 +35,7 @@ pub fn FlowButtonWidget(
             running.set(true);
             spawn_local(async move {
                 match api::run_flow(&id).await {
-                    Ok(_) => toasts.push(format!("Started {name}")),
+                    Ok(_) => toasts.push(flow_started(lang(), &name)),
                     Err(e) => toasts.push(e.error),
                 }
                 running.set(false);
@@ -54,7 +56,7 @@ pub fn FlowButtonWidget(
                 disabled=move || !runnable || running.get()
                 on:click=on_run
             >
-                "Run"
+                {move || widget_text(lang(), WidgetText::Run)}
             </button>
         </article>
     }

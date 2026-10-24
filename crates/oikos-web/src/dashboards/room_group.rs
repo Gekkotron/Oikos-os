@@ -12,6 +12,7 @@ use crate::cards::{PowerToggle, Sender};
 use crate::components::card_frame::GROUP_PREFIX;
 use crate::groups::{GroupSummary, cover_text, light_text, light_toggle, summary, targets};
 use crate::house::House;
+use crate::i18n::{WidgetText, use_lang, widget_text};
 use crate::icons::HOUSE;
 use crate::rooms::shows_on_home;
 
@@ -63,6 +64,7 @@ fn card_name(title: Option<String>, room: &str) -> String {
 pub fn RoomGroupWidget(area_id: String, room: String, title: Option<String>) -> impl IntoView {
     let house = expect_context::<House>();
     let sender = Sender::from_context();
+    let lang = use_lang();
     let name = card_name(title, &room);
     let state = {
         let area = area_id.clone();
@@ -94,7 +96,7 @@ pub fn RoomGroupWidget(area_id: String, room: String, title: Option<String>) -> 
 
     let lights = move || {
         state.get().lights.map(|s| {
-            let label = light_text(&s);
+            let label = light_text(lang(), &s);
             let (on, disabled) = (s.on > 0, !s.available);
             view! { <PowerToggle on=on label=label on_toggle=on_light disabled=disabled /> }
         })
@@ -104,7 +106,7 @@ pub fn RoomGroupWidget(area_id: String, room: String, title: Option<String>) -> 
             let disabled = !s.available;
             view! {
                 <div class="widget-room__covers">
-                    <span class="widget-room__state">{cover_text(&s)}</span>
+                    <span class="widget-room__state">{cover_text(lang(), &s)}</span>
                     <CoverButtons suffix="" on_command=on_cover disabled=disabled />
                 </div>
             }
@@ -119,7 +121,13 @@ pub fn RoomGroupWidget(area_id: String, room: String, title: Option<String>) -> 
             </div>
             <Show
                 when=move || state.with(|s| s.lights.is_some() || s.covers.is_some())
-                fallback=|| view! { <p class="widget-room__empty">"No lights or covers"</p> }
+                fallback=move || {
+                    view! {
+                        <p class="widget-room__empty">
+                            {widget_text(lang(), WidgetText::NoLightsOrCovers)}
+                        </p>
+                    }
+                }
             >
                 {lights}
                 {covers}

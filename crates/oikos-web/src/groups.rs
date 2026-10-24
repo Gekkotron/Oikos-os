@@ -7,6 +7,7 @@ use oikos_core::model::{Availability, Command, CoverState, StateValue};
 
 use crate::cards::cover::is_moving;
 use crate::format::is_on;
+use crate::i18n::{GroupState, Lang, group_state};
 use crate::rooms::{FAVORITES, shows_on_home};
 use crate::screens::home::without_paired_humidity;
 
@@ -170,34 +171,42 @@ fn is_available(e: &EntityView) -> bool {
     e.state.availability != Availability::Offline
 }
 
-/// The card text of a group with no member online.
-const UNAVAILABLE: &str = "Unavailable";
-
-/// "Unavailable" when no member is online, else "Opening…", "Closing…", "All open", "All closed" or "N open · M closed".
-pub fn cover_text(s: &GroupSummary) -> String {
-    if !s.available {
-        return UNAVAILABLE.into();
-    }
-    match s.moving {
-        Some(Motion::Opening) => "Opening…".into(),
-        Some(Motion::Closing) => "Closing…".into(),
-        None if s.on == s.total => "All open".into(),
-        None if s.on == 0 => "All closed".into(),
-        None => format!("{} open · {} closed", s.on, s.total - s.on),
-    }
+/// What a cover group says: unavailable when no member is online, else moving, all open, all
+/// closed or how many are open and closed.
+pub fn cover_text(lang: Lang, s: &GroupSummary) -> String {
+    let state = if !s.available {
+        GroupState::Unavailable
+    } else {
+        match s.moving {
+            Some(Motion::Opening) => GroupState::Opening,
+            Some(Motion::Closing) => GroupState::Closing,
+            None if s.on == s.total => GroupState::AllOpen,
+            None if s.on == 0 => GroupState::AllClosed,
+            None => GroupState::Covers {
+                open: s.on,
+                closed: s.total - s.on,
+            },
+        }
+    };
+    group_state(lang, state)
 }
 
-/// "Unavailable" when no member is online, else "All on", "All off" or "N of M on".
-pub fn light_text(s: &GroupSummary) -> String {
-    if !s.available {
-        UNAVAILABLE.into()
+/// What a light group says: unavailable when no member is online, else all on, all off or
+/// how many of them are on.
+pub fn light_text(lang: Lang, s: &GroupSummary) -> String {
+    let state = if !s.available {
+        GroupState::Unavailable
     } else if s.on == s.total {
-        "All on".into()
+        GroupState::AllOn
     } else if s.on == 0 {
-        "All off".into()
+        GroupState::AllOff
     } else {
-        format!("{} of {} on", s.on, s.total)
-    }
+        GroupState::SomeOn {
+            on: s.on,
+            total: s.total,
+        }
+    };
+    group_state(lang, state)
 }
 
 /// The members `cmd` goes to: the available ones, and for a position or a brightness only those
@@ -426,34 +435,40 @@ mod tests {
         a.state.availability = Availability::Offline;
         b.state.availability = Availability::Offline;
         let s = summary(&[a, b], &no_children());
-        assert_eq!(cover_text(&s), "Unavailable");
-        assert_eq!(light_text(&s), "Unavailable");
+        assert_eq!(cover_text(Lang::En, &s), "Unavailable");
+        assert_eq!(light_text(Lang::En, &s), "Unavailable");
     }
 
     #[test]
     fn cover_texts() {
         let all = [open("a"), open("b")];
         let s = summary(&all, &no_children());
-        assert_eq!(cover_text(&s), "All open");
+        assert_eq!(cover_text(Lang::En, &s), "All open");
         let all = [open("a"), open("b"), closed("c")];
         assert_eq!(
-            cover_text(&summary(&all, &no_children())),
+            cover_text(Lang::En, &summary(&all, &no_children())),
             "2 open · 1 closed"
         );
         let all = [closed("a"), closed("b")];
-        assert_eq!(cover_text(&summary(&all, &no_children())), "All closed");
+        assert_eq!(
+            cover_text(Lang::En, &summary(&all, &no_children())),
+            "All closed"
+        );
         let all = [
             with_cover(cover("a", "living"), Some("opening"), None),
             with_cover(cover("b", "living"), Some("Closing"), None),
         ];
         let s = summary(&all, &no_children());
         assert_eq!(s.moving, Some(Motion::Opening));
-        assert_eq!(cover_text(&s), "Opening…");
+        assert_eq!(cover_text(Lang::En, &s), "Opening…");
         let all = [
             with_cover(cover("a", "living"), Some("closing"), None),
             open("b"),
         ];
-        assert_eq!(cover_text(&summary(&all, &no_children())), "Closing…");
+        assert_eq!(
+            cover_text(Lang::En, &summary(&all, &no_children())),
+            "Closing…"
+        );
     }
 
     #[test]
@@ -496,9 +511,9 @@ mod tests {
         let on = |id| with_light(light(id, "living"), true, None);
         let off = |id| with_light(light(id, "living"), false, None);
         let s = summary(&[on("a"), on("b")], &no_children());
-        assert_eq!(light_text(&s), "All on");
+        assert_eq!(light_text(Lang::En, &s), "All on");
         let s = summary(&[off("a"), off("b")], &no_children());
-        assert_eq!(light_text(&s), "All off");
+        assert_eq!(light_text(Lang::En, &s), "All off");
         assert_eq!(
             light_toggle(&s),
             Command::TurnOn {
@@ -508,7 +523,7 @@ mod tests {
             }
         );
         let s = summary(&[on("a"), on("b"), off("c")], &no_children());
-        assert_eq!(light_text(&s), "2 of 3 on");
+        assert_eq!(light_text(Lang::En, &s), "2 of 3 on");
         assert_eq!(light_toggle(&s), Command::TurnOff);
     }
 

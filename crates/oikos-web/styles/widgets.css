@@ -50,8 +50,10 @@
   white-space: nowrap;
 }
 
+/* On a 1x1 card the buttons drop under the state line instead of squeezing it. */
 .widget-room__covers {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -61,6 +63,10 @@
 .widget-room__empty {
   color: var(--muted);
   font: var(--type-label);
+}
+
+.widget-room__state {
+  white-space: nowrap;
 }
 
 .widget-room__empty {

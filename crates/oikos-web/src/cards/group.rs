@@ -14,6 +14,7 @@ use crate::components::card_frame::{CardFrame, GROUP_PREFIX, open_entity};
 use crate::format::{degrees, word};
 use crate::groups::{GroupSummary, cover_text, light_text, summary};
 use crate::house::House;
+use crate::i18n::{GroupState, Lang, group_state, use_lang};
 use crate::icons::{CHEVRON_DOWN, CHEVRON_UP, STOP};
 
 /// ▲ ■ ▼ as a row of buttons sending Open, Stop and Close to `on_command`. `suffix` ends their
@@ -52,16 +53,17 @@ pub fn CoverButtons(
 /// The accessible name and label of a group's press button.
 pub const PRESS_ALL: &str = "Press all";
 
-/// What a group of switches says: "All on" / "All off", or "N of M on" when `counts`
+/// What a group of switches says: all on / all off, or how many are on when `counts`
 /// (`on`, `total`) shows the members disagree. Without counts the group's own state decides.
-pub fn switch_text(any_on: bool, counts: Option<(usize, usize)>) -> String {
-    match counts {
-        Some((on, total)) if on > 0 && on < total => format!("{on} of {total} on"),
-        Some((0, _)) => "All off".to_owned(),
-        Some(_) => "All on".to_owned(),
-        None if any_on => "All on".to_owned(),
-        None => "All off".to_owned(),
-    }
+pub fn switch_text(lang: Lang, any_on: bool, counts: Option<(usize, usize)>) -> String {
+    let state = match counts {
+        Some((on, total)) if on > 0 && on < total => GroupState::SomeOn { on, total },
+        Some((0, _)) => GroupState::AllOff,
+        Some(_) => GroupState::AllOn,
+        None if any_on => GroupState::AllOn,
+        None => GroupState::AllOff,
+    };
+    group_state(lang, state)
 }
 
 fn plain(v: f64) -> String {
@@ -113,7 +115,7 @@ pub fn SwitchGroupCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let on = read_on(&entity.state).unwrap_or(false);
     let counts = member_counts(&entity.id, |e| read_on(&e.state).unwrap_or(false));
-    let label = switch_text(on, counts);
+    let lang = use_lang();
     let toggle = {
         let id = entity.id.clone();
         let state = entity.state.clone();
@@ -125,7 +127,9 @@ pub fn SwitchGroupCard(entity: EntityView) -> impl IntoView {
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
-            <PowerToggle on=on label=label on_toggle=toggle />
+            {move || {
+                view! { <PowerToggle on=on label=switch_text(lang(), on, counts) on_toggle=toggle /> }
+            }}
         </CardFrame>
     }
 }
@@ -275,11 +279,12 @@ fn house_summary(entity_id: &str) -> Option<GroupSummary> {
 #[component]
 pub fn CoverGroupEntityCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let lang = use_lang();
     let id = entity.id.clone();
     let text = {
         let id = id.clone();
         let fallback = crate::format::display_value(&entity.state, entity.unit.as_deref());
-        move || house_summary(&id).map_or_else(|| fallback.clone(), |s| cover_text(&s))
+        move || house_summary(&id).map_or_else(|| fallback.clone(), |s| cover_text(lang(), &s))
     };
     let on_command = {
         let id = id.clone();
@@ -300,6 +305,7 @@ pub fn CoverGroupEntityCard(entity: EntityView) -> impl IntoView {
 #[component]
 pub fn LightGroupEntityCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let lang = use_lang();
     let id = entity.id.clone();
     let on_now = read_on(&entity.state).unwrap_or(false);
     let toggle = {
@@ -315,7 +321,7 @@ pub fn LightGroupEntityCard(entity: EntityView) -> impl IntoView {
         move || {
             let (on, label, available) = house_summary(&id).map_or_else(
                 || (on_now, fallback.clone(), true),
-                |s| (s.on > 0, light_text(&s), s.available),
+                |s| (s.on > 0, light_text(lang(), &s), s.available),
             );
             view! { <PowerToggle on=on label=label on_toggle=toggle disabled=!available /> }
         }

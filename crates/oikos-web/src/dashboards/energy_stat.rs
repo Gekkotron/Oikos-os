@@ -15,18 +15,20 @@ use crate::energy::{
     plus_minus_ids,
 };
 use crate::house::House;
+use crate::i18n::{Lang, WidgetText, use_lang, widget_text};
 use crate::icons::BOLT;
 use crate::screens::energy::by_role;
 
 /// Metrics the hub's energy widget understands, with their labels; there is no entity behind
-/// them to list. The library offers these and the widget reads them back.
-pub const ENERGY_METRICS: [(&str, &str); 6] = [
-    ("today_kwh", "Today (kWh)"),
-    ("week_kwh", "This week (kWh)"),
-    ("month_kwh", "This month (kWh)"),
-    ("grid_power_now", "Grid power now"),
-    ("pv_power_now", "Solar power now"),
-    ("self_consumption_pct", "Self-consumption"),
+/// them to list. The library offers these and the widget reads them back. Labels leave the unit
+/// to the value ("12.4 kWh").
+pub const ENERGY_METRICS: [(&str, WidgetText); 6] = [
+    ("today_kwh", WidgetText::Today),
+    ("week_kwh", WidgetText::ThisWeek),
+    ("month_kwh", WidgetText::ThisMonth),
+    ("grid_power_now", WidgetText::GridPowerNow),
+    ("pv_power_now", WidgetText::SolarPowerNow),
+    ("self_consumption_pct", WidgetText::SelfConsumption),
 ];
 
 /// What a metric id reads.
@@ -55,11 +57,11 @@ impl Metric {
 }
 
 /// The label of the metric `id`, `None` for an id the hub does not know.
-pub fn metric_label(id: &str) -> Option<&'static str> {
+pub fn metric_label(lang: Lang, id: &str) -> Option<&'static str> {
     ENERGY_METRICS
         .iter()
         .find(|(m, _)| *m == id)
-        .map(|(_, label)| *label)
+        .map(|(_, label)| widget_text(lang, *label))
 }
 
 /// The live reading of a power or self-consumption metric, "—" while unknown.
@@ -105,13 +107,17 @@ async fn consumption(plus: &[String], minus: &[String], days: u16) -> Option<f64
 #[component]
 pub fn EnergyStatWidget(metric: String, title: Option<String>) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     let Some(parsed) = Metric::parse(&metric) else {
         return view! { <super::widget::Unavailable label=metric /> }.into_any();
     };
-    let label = title
-        .filter(|t| !t.is_empty())
-        .or_else(|| metric_label(&metric).map(str::to_owned))
-        .unwrap_or_default();
+    let title = title.filter(|t| !t.is_empty());
+    let label = move || {
+        title
+            .clone()
+            .or_else(|| metric_label(lang(), &metric).map(str::to_owned))
+            .unwrap_or_default()
+    };
 
     let ui = Memo::new(move |_| {
         let entities = house.entities.with(energy_entities);
@@ -189,10 +195,19 @@ mod tests {
     fn every_library_metric_is_understood_and_labelled() {
         for (id, label) in ENERGY_METRICS {
             assert!(Metric::parse(id).is_some(), "{id}");
-            assert_eq!(metric_label(id), Some(label));
+            assert_eq!(
+                metric_label(Lang::En, id),
+                Some(widget_text(Lang::En, label))
+            );
         }
         assert_eq!(Metric::parse("nope"), None);
-        assert_eq!(metric_label("nope"), None);
+        assert_eq!(metric_label(Lang::En, "nope"), None);
+    }
+
+    #[test]
+    fn labels_leave_the_unit_to_the_value() {
+        assert_eq!(metric_label(Lang::En, "today_kwh"), Some("Today"));
+        assert_eq!(metric_label(Lang::Fr, "today_kwh"), Some("Aujourd'hui"));
     }
 
     #[test]

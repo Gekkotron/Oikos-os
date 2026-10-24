@@ -17,6 +17,7 @@ use super::energy_stat::ENERGY_METRICS;
 use crate::flow_edit::fold_accents;
 use crate::format::{entity_title, room_name};
 use crate::house::House;
+use crate::i18n::{Lang, widget_text};
 use crate::icons::{BOLT, HOUSE, PLAY, entity_icon};
 
 /// A timestamp is unique enough: widgets are added by hand, one click at a time.
@@ -211,7 +212,7 @@ pub fn entries(
             id.to_owned(),
             Entry {
                 section: Section::Energy,
-                title: label.to_owned(),
+                title: widget_text(Lang::En, label).to_owned(),
                 sub: None,
                 icon: BOLT,
                 kind: WidgetKind::EnergyStat,
