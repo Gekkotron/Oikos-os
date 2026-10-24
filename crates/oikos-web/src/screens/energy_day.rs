@@ -198,7 +198,8 @@ fn chart(day: &GridDay, hover: RwSignal<Option<usize>>, view_w: f64) -> impl Int
 /// The grid day card, placed under the live diagram.
 #[component]
 pub fn GridDayCard() -> impl IntoView {
-    let now = expect_context::<Now>();
+    // The app's minute clock; a page mounted without it (a test) just never refreshes.
+    let now = use_context::<Now>();
     // `None` is today, as the hub sees it.
     let day: RwSignal<Option<String>> = RwSignal::new(None);
     let data: RwSignal<Loaded> = RwSignal::new(None);
@@ -213,7 +214,7 @@ pub fn GridDayCard() -> impl IntoView {
     });
     // Today follows the minute clock while the page is visible.
     Effect::new(move |prev: Option<u64>| {
-        let t = now.0.get();
+        let t = now.map_or(0, |n| n.0.get());
         #[cfg(target_arch = "wasm32")]
         if prev.is_some() && day.get_untracked().is_none() && !page_hidden() {
             load(day, data, known);
