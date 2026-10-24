@@ -6318,6 +6318,18 @@ html:has(.flow-canvas-screen) {
   bottom: 0;
 }
 
+.climate-timeline__base--edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  opacity: 1;
+}
+
+.climate-timeline__base-input {
+  width: 90px;
+}
+
 .climate-timeline__peek {
   margin: 0;
   font: var(--type-body);

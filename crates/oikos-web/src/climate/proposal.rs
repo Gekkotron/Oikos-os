@@ -12,7 +12,7 @@ use oikos_climate::doc::{Day, Mode, ModeRules, Proposal, ProposalKind, Rules, Se
 use oikos_climate::learn::diff;
 use oikos_climate::view::ZoneView;
 
-use super::timeline::WeekTimeline;
+use super::timeline::{NEW_BASE, WeekTimeline};
 use crate::api::climate as api;
 use crate::components::toast::Toasts;
 
@@ -289,9 +289,33 @@ pub fn RulesPanel(
     view! {
         <section class="climate-rules" aria-label="Approved rules">
             <h3 class="climate-proposal__title">"This week"</h3>
+            // A room without rules starts an empty heating week here; saving it approves it, and
+            // the hub turns a pending room active.
             <Show
-                when=move || !empty()
-                fallback=|| view! { <p class="climate-proposal__none">"No approved schedule yet"</p> }
+                when=move || !empty() || editing.get()
+                fallback=move || {
+                    view! {
+                        <p class="climate-proposal__none">"No approved schedule yet"</p>
+                        <div class="climate-proposal__actions">
+                            <button
+                                type="button"
+                                class="btn btn--compact"
+                                on:click=move |_| {
+                                    draft.set(Rules {
+                                        heat: Some(ModeRules {
+                                            base: Setpoint::Temp(NEW_BASE),
+                                            blocks: Vec::new(),
+                                        }),
+                                        cool: None,
+                                    });
+                                    editing.set(true);
+                                }
+                            >
+                                "Create schedule"
+                            </button>
+                        </div>
+                    }
+                }
             >
                 <RulesTimeline
                     rules=shown
