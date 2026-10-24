@@ -8,6 +8,8 @@ use oikos_core::model::{AlarmMode, Capabilities, CodeFormat, Command};
 
 use crate::cards::Sender;
 use crate::cards::alarm::mode_label;
+use crate::i18n::security::{SecurityText, security_text};
+use crate::i18n::use_lang;
 use crate::icons::SHIELD;
 use crate::security::{PanelUi, panel_state_text, panel_tone};
 
@@ -77,10 +79,13 @@ fn code_for(required: bool, typed: &str) -> Option<String> {
 #[component]
 pub fn AlarmHero(panel: PanelUi) -> impl IntoView {
     let sender = Sender::from_context();
+    let lang = use_lang();
     let state = panel.state.as_deref();
     let tone = panel_tone(state, panel.available);
     let triggered = tone == "triggered";
-    let text = panel_state_text(state, panel.available);
+    let available = panel.available;
+    let state_owned = panel.state.clone();
+    let text = move || panel_state_text(lang(), state_owned.as_deref(), available);
     let caps: &Capabilities = &panel.capabilities;
     let actions = hero_actions(state, panel.available, &caps.alarm_modes);
     let (arm_required, disarm_required) = (caps.code_arm_required, caps.code_disarm_required);
@@ -112,7 +117,7 @@ pub fn AlarmHero(panel: PanelUi) -> impl IntoView {
                         sender.send(&id, Command::Arm { mode, code }, None);
                     }
                 >
-                    {mode_label(mode)}
+                    {move || mode_label(lang(), mode)}
                 </button>
             }
         })
@@ -133,7 +138,7 @@ pub fn AlarmHero(panel: PanelUi) -> impl IntoView {
                     sender.send(&id, Command::Disarm { code }, None);
                 }
             >
-                "Disarm"
+                {move || security_text(lang(), SecurityText::Disarm)}
             </button>
         }
     });
@@ -145,8 +150,8 @@ pub fn AlarmHero(panel: PanelUi) -> impl IntoView {
                 type=if numeric { "number" } else { "text" }
                 inputmode=if numeric { "numeric" } else { "text" }
                 autocomplete="off"
-                placeholder="Code"
-                aria-label="Code"
+                placeholder=move || security_text(lang(), SecurityText::Code)
+                aria-label=move || security_text(lang(), SecurityText::Code)
                 prop:value=move || typed.get()
                 on:input=move |ev| typed.set(event_target_value(&ev))
             />

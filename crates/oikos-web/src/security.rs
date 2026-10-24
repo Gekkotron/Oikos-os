@@ -8,6 +8,13 @@ use oikos_core::model::{
     SwitchType, UNASSIGNED_AREA,
 };
 
+use crate::i18n::Lang;
+use crate::i18n::security::{
+    SecurityText, action_question, group_count, panel_state, security_text, sensor_label,
+    sensor_state,
+};
+use crate::i18n::states::on_off;
+
 /// An alarm panel. `state` is the raw alarm state string; `None`: nothing received yet.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelUi {
@@ -93,34 +100,38 @@ impl ActionRow {
         }
     }
 
-    /// The word on the confirm button: what a tap does to this kind of device.
-    pub fn verb(&self) -> &'static str {
+    /// What a tap does to this kind of device, as the word on the confirm button.
+    pub fn verb_key(&self) -> SecurityText {
         match (self.kind, self.switch_type) {
-            (Kind::Button, _) => "Press",
-            (_, Some(SwitchType::Door)) => "Open",
-            (_, Some(SwitchType::Siren)) => "Ring",
-            (_, Some(SwitchType::Chime)) => "Play",
-            _ => "Turn on",
+            (Kind::Button, _) => SecurityText::VerbPress,
+            (_, Some(SwitchType::Door)) => SecurityText::VerbOpen,
+            (_, Some(SwitchType::Siren)) => SecurityText::VerbRing,
+            (_, Some(SwitchType::Chime)) => SecurityText::VerbPlay,
+            _ => SecurityText::VerbTurnOn,
         }
     }
 
+    /// The word on the confirm button: what a tap does to this kind of device.
+    pub fn verb(&self, lang: Lang) -> &'static str {
+        security_text(lang, self.verb_key())
+    }
+
     /// "Open Gate?": what the tile asks before acting.
-    pub fn question(&self) -> String {
-        format!("{} {}?", self.verb(), self.name)
+    pub fn question(&self, lang: Lang) -> String {
+        action_question(lang, self.verb_key(), &self.name)
     }
 
     /// "On" / "Off" / "Unavailable" / "—"; `None` for an available button, which has no state.
-    pub fn state_word(&self) -> Option<&'static str> {
+    pub fn state_word(&self, lang: Lang) -> Option<String> {
         if !self.available {
-            return Some("Unavailable");
+            return Some(security_text(lang, SecurityText::Unavailable).to_owned());
         }
         if self.kind == Kind::Button {
             return None;
         }
         Some(match self.on {
-            Some(true) => "On",
-            Some(false) => "Off",
-            None => "—",
+            Some(on) => on_off(lang, false, on).to_owned(),
+            None => "—".to_owned(),
         })
     }
 }
@@ -285,36 +296,27 @@ impl SecurityUi {
     }
 
     /// "1 smoke · 2 open · 1 motion", or "All clear".
-    pub fn summary_text(&self) -> String {
+    pub fn summary_text(&self, lang: Lang) -> String {
         if self.summary.is_empty() {
-            return "All clear".to_owned();
+            return security_text(lang, SecurityText::AllClear).to_owned();
         }
         self.summary
             .iter()
-            .map(|c| format!("{} {}", c.count, c.group.word()))
+            .map(|c| group_count(lang, c.group, c.count))
             .collect::<Vec<_>>()
             .join(" · ")
     }
 }
 
 impl SensorRow {
-    pub fn state_word(&self) -> &'static str {
+    pub fn state_word(&self, lang: Lang) -> String {
         if !self.available {
-            return "Unavailable";
+            return security_text(lang, SecurityText::Unavailable).to_owned();
         }
         let Some(active) = self.active else {
-            return "—";
+            return "—".to_owned();
         };
-        let (on, off) = match self.group {
-            SensorGroup::Opening => ("Open", "Closed"),
-            SensorGroup::Motion => ("Motion", "Clear"),
-            SensorGroup::Smoke | SensorGroup::Co | SensorGroup::Gas => ("Detected", "Clear"),
-            SensorGroup::Leak => ("Leak", "Dry"),
-            SensorGroup::Sos => ("SOS", "OK"),
-            SensorGroup::Vibration => ("Vibration", "Still"),
-            SensorGroup::Tamper => ("Tampered", "OK"),
-        };
-        if active { on } else { off }
+        sensor_state(lang, self.group, self.device_class.as_deref(), active)
     }
 
     fn active_now(&self) -> bool {
@@ -330,35 +332,19 @@ impl SensorRow {
     }
 
     /// "Garage door, garage, open".
-    pub fn aria_label(&self) -> String {
-        let word = self.state_word().to_lowercase();
-        match &self.area_name {
-            Some(area) => format!("{}, {}, {}", self.name, area.to_lowercase(), word),
-            None => format!("{}, {}", self.name, word),
-        }
+    pub fn aria_label(&self, lang: Lang) -> String {
+        sensor_label(
+            &self.name,
+            self.area_name.as_deref(),
+            &self.state_word(lang),
+        )
     }
 }
 
 /// "Disarmed", "Armed · Away", "Exit delay…", "Entry delay…", "Triggered!", "Disarming…",
-/// "Unavailable", "—".
-pub fn panel_state_text(state: Option<&str>, available: bool) -> String {
-    if !available {
-        return "Unavailable".to_owned();
-    }
-    match state {
-        Some("disarmed") => "Disarmed",
-        Some("armed_home") => "Armed · Home",
-        Some("armed_away") => "Armed · Away",
-        Some("armed_night") => "Armed · Night",
-        Some("armed_vacation") => "Armed · Vacation",
-        Some("armed_custom_bypass") => "Armed · Custom",
-        Some("arming") => "Exit delay…",
-        Some("pending") => "Entry delay…",
-        Some("disarming") => "Disarming…",
-        Some("triggered") => "Triggered!",
-        _ => "—",
-    }
-    .to_owned()
+/// "Unavailable", "—" (French in French).
+pub fn panel_state_text(lang: Lang, state: Option<&str>, available: bool) -> &'static str {
+    panel_state(lang, state, available)
 }
 
 /// The hero's modifier class: "disarmed", "armed", "arming", "pending", "triggered",
@@ -389,6 +375,7 @@ mod tests {
     };
 
     use super::{SecurityUi, panel_state_text, panel_tone};
+    use crate::i18n::Lang;
 
     fn entity(
         id: &str,
@@ -534,9 +521,9 @@ mod tests {
             door("d2", "garage", true),
             motion,
         ]);
-        assert_eq!(ui.summary_text(), "1 smoke · 2 open · 1 motion");
+        assert_eq!(ui.summary_text(Lang::En), "1 smoke · 2 open · 1 motion");
         assert_eq!(
-            build(vec![door("d", "garage", false)]).summary_text(),
+            build(vec![door("d", "garage", false)]).summary_text(Lang::En),
             "All clear"
         );
     }
@@ -581,32 +568,35 @@ mod tests {
                 "garage",
                 StateValue::OnOff(on),
             )]);
-            ui.sensors[0].state_word()
+            ui.sensors[0].state_word(Lang::En)
         };
         assert_eq!(
             (word("door", true), word("door", false)),
-            ("Open", "Closed")
+            ("Open".to_owned(), "Closed".to_owned())
         );
         assert_eq!(
             (word("motion", true), word("motion", false)),
-            ("Motion", "Clear")
+            ("Motion".to_owned(), "Clear".to_owned())
         );
         assert_eq!(
             (word("gas", true), word("smoke", false)),
-            ("Detected", "Clear")
+            ("Detected".to_owned(), "Clear".to_owned())
         );
         assert_eq!(
             (word("moisture", true), word("moisture", false)),
-            ("Leak", "Dry")
+            ("Leak".to_owned(), "Dry".to_owned())
         );
-        assert_eq!((word("safety", true), word("safety", false)), ("SOS", "OK"));
+        assert_eq!(
+            (word("safety", true), word("safety", false)),
+            ("SOS".to_owned(), "OK".to_owned())
+        );
         assert_eq!(
             (word("vibration", true), word("vibration", false)),
-            ("Vibration", "Still")
+            ("Vibration".to_owned(), "Still".to_owned())
         );
         assert_eq!(
             (word("tamper", true), word("tamper", false)),
-            ("Tampered", "OK")
+            ("Tampered".to_owned(), "OK".to_owned())
         );
         let unknown = entity(
             "u",
@@ -615,11 +605,11 @@ mod tests {
             "garage",
             StateValue::Unknown,
         );
-        assert_eq!(build(vec![unknown]).sensors[0].state_word(), "—");
+        assert_eq!(build(vec![unknown]).sensors[0].state_word(Lang::En), "—");
         let mut offline = door("o", "garage", true);
         offline.state.availability = oikos_core::model::Availability::Offline;
         let ui = build(vec![offline]);
-        assert_eq!(ui.sensors[0].state_word(), "Unavailable");
+        assert_eq!(ui.sensors[0].state_word(Lang::En), "Unavailable");
         assert!(!ui.sensors[0].danger_active() && !ui.sensors[0].intrusion_active());
     }
 
@@ -628,7 +618,10 @@ mod tests {
         let mut d = door("Garage door", "garage", true);
         d.name = "Garage door".into();
         let ui = build(vec![d]);
-        assert_eq!(ui.sensors[0].aria_label(), "Garage door, garage, open");
+        assert_eq!(
+            ui.sensors[0].aria_label(Lang::En),
+            "Garage door, garage, open"
+        );
         assert!(ui.sensors[0].intrusion_active());
     }
 
@@ -652,15 +645,15 @@ mod tests {
         let tap = row.tap();
         assert!(matches!(tap.command, Command::TurnOn { .. }));
         assert!(tap.confirm);
-        assert_eq!(row.verb(), "Open");
-        assert_eq!(row.question(), "Open Gate?");
+        assert_eq!(row.verb(Lang::En), "Open");
+        assert_eq!(row.question(Lang::En), "Open Gate?");
     }
 
     #[test]
     fn chime_action_always_plays() {
         let row = typed("chime", "Bell", StateValue::OnOff(true));
         assert!(matches!(row.tap().command, Command::TurnOn { .. }));
-        assert_eq!(row.verb(), "Play");
+        assert_eq!(row.verb(Lang::En), "Play");
     }
 
     #[test]
@@ -671,20 +664,23 @@ mod tests {
         let off = typed("siren", "Siren", StateValue::OnOff(false));
         assert!(matches!(off.tap().command, Command::TurnOn { .. }));
         assert!(off.tap().confirm);
-        assert_eq!(off.question(), "Ring Siren?");
+        assert_eq!(off.question(Lang::En), "Ring Siren?");
     }
 
     #[test]
     fn plain_verbs() {
         assert_eq!(
-            action(Kind::Switch, StateValue::OnOff(false)).verb(),
+            action(Kind::Switch, StateValue::OnOff(false)).verb(Lang::En),
             "Turn on"
         );
         assert_eq!(
-            typed("plug", "P", StateValue::OnOff(false)).verb(),
+            typed("plug", "P", StateValue::OnOff(false)).verb(Lang::En),
             "Turn on"
         );
-        assert_eq!(action(Kind::Button, StateValue::Unknown).verb(), "Press");
+        assert_eq!(
+            action(Kind::Button, StateValue::Unknown).verb(Lang::En),
+            "Press"
+        );
     }
 
     #[test]
@@ -701,14 +697,17 @@ mod tests {
 
     #[test]
     fn button_has_no_state_word() {
-        assert_eq!(action(Kind::Button, StateValue::Unknown).state_word(), None);
         assert_eq!(
-            action(Kind::Switch, StateValue::OnOff(false)).state_word(),
-            Some("Off")
+            action(Kind::Button, StateValue::Unknown).state_word(Lang::En),
+            None
         );
         assert_eq!(
-            action(Kind::Switch, StateValue::OnOff(true)).state_word(),
-            Some("On")
+            action(Kind::Switch, StateValue::OnOff(false)).state_word(Lang::En),
+            Some("Off".to_owned())
+        );
+        assert_eq!(
+            action(Kind::Switch, StateValue::OnOff(true)).state_word(Lang::En),
+            Some("On".to_owned())
         );
     }
 
@@ -724,17 +723,35 @@ mod tests {
 
     #[test]
     fn panel_text_and_tone() {
-        assert_eq!(panel_state_text(Some("armed_away"), true), "Armed · Away");
+        assert_eq!(
+            panel_state_text(Lang::En, Some("armed_away"), true),
+            "Armed · Away"
+        );
         assert_eq!(panel_tone(Some("armed_away"), true), "armed");
-        assert_eq!(panel_state_text(Some("triggered"), true), "Triggered!");
+        assert_eq!(
+            panel_state_text(Lang::En, Some("triggered"), true),
+            "Triggered!"
+        );
         assert_eq!(panel_tone(Some("triggered"), true), "triggered");
-        assert_eq!(panel_state_text(None, true), "—");
+        assert_eq!(panel_state_text(Lang::En, None, true), "—");
         assert_eq!(panel_tone(None, true), "off");
-        assert_eq!(panel_state_text(Some("disarmed"), false), "Unavailable");
+        assert_eq!(
+            panel_state_text(Lang::En, Some("disarmed"), false),
+            "Unavailable"
+        );
         assert_eq!(panel_tone(Some("disarmed"), false), "off");
-        assert_eq!(panel_state_text(Some("arming"), true), "Exit delay…");
-        assert_eq!(panel_state_text(Some("pending"), true), "Entry delay…");
-        assert_eq!(panel_state_text(Some("disarming"), true), "Disarming…");
+        assert_eq!(
+            panel_state_text(Lang::En, Some("arming"), true),
+            "Exit delay…"
+        );
+        assert_eq!(
+            panel_state_text(Lang::En, Some("pending"), true),
+            "Entry delay…"
+        );
+        assert_eq!(
+            panel_state_text(Lang::En, Some("disarming"), true),
+            "Disarming…"
+        );
     }
 
     #[test]

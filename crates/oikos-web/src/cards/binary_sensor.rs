@@ -6,27 +6,24 @@ use oikos_core::model::StateValue;
 
 use super::Sender;
 use crate::components::card_frame::{CardFrame, open_entity};
+use crate::i18n::states::{StateCtx, state_word};
+use crate::i18n::{Lang, use_lang};
 
 /// The word for a binary sensor: "Open"/"Closed" for doors and windows, "Motion"/"Clear" for
-/// motion, "Smoke"/"Clear" for smoke, "On"/"Off" otherwise.
-pub fn binary_text(device_class: Option<&str>, on: bool) -> &'static str {
-    match (device_class, on) {
-        (Some("door" | "window" | "garage_door" | "opening"), true) => "Open",
-        (Some("door" | "window" | "garage_door" | "opening"), false) => "Closed",
-        (Some("motion" | "occupancy" | "presence"), true) => "Motion",
-        (Some("smoke"), true) => "Smoke",
-        (Some("motion" | "occupancy" | "presence" | "smoke"), false) => "Clear",
-        (_, true) => "On",
-        (_, false) => "Off",
-    }
+/// motion, "Smoke"/"Clear" for smoke, "On"/"Off" otherwise; French agrees with the device class.
+pub fn binary_text(lang: Lang, device_class: Option<&str>, on: bool) -> String {
+    let ctx = StateCtx::BinarySensor(device_class.map(str::to_owned));
+    state_word(lang, ctx, if on { "on" } else { "off" })
 }
 
 #[component]
 pub fn BinarySensorCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let lang = use_lang();
     let text = match &entity.state.value {
         StateValue::OnOff(on) => {
-            Signal::stored(binary_text(entity.device_class.as_deref(), *on).to_owned())
+            let (class, on) = (entity.device_class.clone(), *on);
+            Signal::derive(move || binary_text(lang(), class.as_deref(), on))
         }
         _ => super::live_value(&entity),
     };
@@ -42,16 +39,27 @@ pub fn BinarySensorCard(entity: EntityView) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::binary_text;
+    use crate::i18n::Lang;
 
     #[test]
     fn words_by_device_class() {
-        assert_eq!(binary_text(Some("door"), true), "Open");
-        assert_eq!(binary_text(Some("window"), false), "Closed");
-        assert_eq!(binary_text(Some("motion"), true), "Motion");
-        assert_eq!(binary_text(Some("motion"), false), "Clear");
-        assert_eq!(binary_text(Some("smoke"), true), "Smoke");
-        assert_eq!(binary_text(Some("smoke"), false), "Clear");
-        assert_eq!(binary_text(None, true), "On");
-        assert_eq!(binary_text(Some("battery"), false), "Off");
+        let en = |class, on| binary_text(Lang::En, class, on);
+        assert_eq!(en(Some("door"), true), "Open");
+        assert_eq!(en(Some("window"), false), "Closed");
+        assert_eq!(en(Some("motion"), true), "Motion");
+        assert_eq!(en(Some("motion"), false), "Clear");
+        assert_eq!(en(Some("smoke"), true), "Smoke");
+        assert_eq!(en(Some("smoke"), false), "Clear");
+        assert_eq!(en(None, true), "On");
+        assert_eq!(en(Some("battery"), false), "Off");
+    }
+
+    #[test]
+    fn french_agrees_with_the_device_class() {
+        let fr = |class, on| binary_text(Lang::Fr, class, on);
+        assert_eq!(fr(Some("door"), true), "Ouverte");
+        assert_eq!(fr(Some("motion"), false), "Aucun mouvement");
+        assert_eq!(fr(Some("smoke"), true), "Fumée");
+        assert_eq!(fr(None, true), "Activé");
     }
 }

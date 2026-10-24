@@ -10,41 +10,23 @@ use crate::alerts::match_entity;
 use crate::api::send_alert_action;
 use crate::components::toast::Toasts;
 use crate::house::House;
+use crate::i18n::format::{date_time, local_date_time};
+use crate::i18n::security::{self, SecurityText, channel_name, security_text, send_failed};
+use crate::i18n::{Lang, use_lang};
 use crate::icons::channel_icon;
 use crate::nav::BackLink;
 
 /// The most action buttons shown.
 const MAX_ACTIONS: usize = 3;
 
-/// The full date and time of `sent_at` in the browser's locale.
-#[cfg(target_arch = "wasm32")]
-pub fn full_date(sent_at: u64) -> String {
-    use js_sys::{Date, Object, Reflect};
-    use wasm_bindgen::JsValue;
-
-    let options = Object::new();
-    for (key, value) in [("dateStyle", "medium"), ("timeStyle", "short")] {
-        let _ = Reflect::set(&options, &JsValue::from_str(key), &JsValue::from_str(value));
-    }
-    Date::new(&JsValue::from_f64(sent_at as f64 * 1000.0))
-        .to_locale_string("default", &options)
-        .into()
-}
-
-/// The full date and time of `sent_at` as ISO 8601 UTC off the browser.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn full_date(sent_at: u64) -> String {
-    crate::format::format_timestamp(sent_at)
-}
-
-/// The toast shown when an action could not be sent.
-fn failure_text(label: &str) -> String {
-    format!("Couldn't send {label}")
+/// The full date and time of `sent_at` on the browser's clock, worded in `lang`.
+pub fn full_date(lang: Lang, sent_at: u64) -> String {
+    date_time(lang, local_date_time(sent_at))
 }
 
 /// The source line under the alert.
-fn source_line(source: &str, sent_at: u64) -> String {
-    format!("From {source} · {}", full_date(sent_at))
+fn source_line(lang: Lang, source: &str, sent_at: u64) -> String {
+    security::source_line(lang, source, &full_date(lang, sent_at))
 }
 
 /// The actions that get a button.
@@ -61,13 +43,16 @@ enum Media {
 
 #[component]
 fn MediaBlock(image_url: Option<String>, video_url: Option<String>) -> impl IntoView {
+    let lang = use_lang();
     let media = RwSignal::new(Media::Image);
     let has_video = video_url.is_some();
     view! {
         <div class="alert-media">
             {move || match media.get() {
                 Media::Failed => {
-                    view! { <p class="alert-media__message">"Media no longer available"</p> }
+                    view! { <p class="alert-media__message">
+                            {move || security_text(lang(), SecurityText::MediaGone)}
+                        </p> }
                         .into_any()
                 }
                 Media::Playing => {
@@ -97,8 +82,8 @@ fn MediaBlock(image_url: Option<String>, video_url: Option<String>) -> impl Into
                                     <button
                                         type="button"
                                         class="btn btn--round alert-media__play"
-                                        aria-label="Play clip"
-                                        title="Play"
+                                        aria-label=move || security_text(lang(), SecurityText::PlayClip)
+                                        title=move || security_text(lang(), SecurityText::Play)
                                         on:click=move |_| media.set(Media::Playing)
                                     >
                                         "▶"
@@ -116,6 +101,7 @@ fn MediaBlock(image_url: Option<String>, video_url: Option<String>) -> impl Into
 #[component]
 fn ActionButton(alert_id: String, action: AlertAction) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let lang = use_lang();
     let label = action.label.clone();
     let on_click = move |_| {
         let id = alert_id.clone();
@@ -123,8 +109,8 @@ fn ActionButton(alert_id: String, action: AlertAction) -> impl IntoView {
         let label = action.label.clone();
         spawn_local(async move {
             match send_alert_action(&id, &action_id).await {
-                Ok(()) => toasts.push("Sent"),
-                Err(_) => toasts.push(failure_text(&label)),
+                Ok(()) => toasts.push(security_text(untrack(lang), SecurityText::Sent)),
+                Err(_) => toasts.push(send_failed(untrack(lang), &label)),
             }
         });
     };
@@ -150,12 +136,10 @@ fn DetailBody(alert: AlertView) -> impl IntoView {
     let device = house
         .entities
         .with_untracked(|entities| match_entity(alert.entity_id.as_deref(), entities));
+    let lang = use_lang();
     let has_media = alert.image_url.is_some() || alert.video_url.is_some();
-    let date = full_date(alert.sent_at);
-    let source = alert
-        .source
-        .as_deref()
-        .map(|s| source_line(s, alert.sent_at));
+    let sent_at = alert.sent_at;
+    let source = alert.source.clone();
     let actions = shown_actions(&alert.actions);
     let id = alert.id.clone();
     view! {
@@ -169,11 +153,19 @@ fn DetailBody(alert: AlertView) -> impl IntoView {
         <div class="alert-detail__badges">
             <span class="badge alert-detail__channel">
                 <span class="alert-detail__glyph" inner_html=channel_icon(alert.channel)></span>
-                {alert.channel.name()}
+                {move || channel_name(lang(), alert.channel)}
             </span>
-            {alert.resolved.then(|| view! { <span class="badge">"Resolved"</span> })}
+            {alert
+                .resolved
+                .then(|| {
+                    view! {
+                        <span class="badge">
+                            {move || security_text(lang(), SecurityText::Resolved)}
+                        </span>
+                    }
+                })}
         </div>
-        <p class="sheet__updated">{date}</p>
+        <p class="sheet__updated">{move || full_date(lang(), sent_at)}</p>
         <div class="alert-detail__actions">
             {actions
                 .into_iter()
@@ -183,17 +175,23 @@ fn DetailBody(alert: AlertView) -> impl IntoView {
                 .map(|unique_id| {
                     view! {
                         <A href=format!("/entity/{}", crate::api::encode_id(&unique_id)) attr:class="btn alert-detail__device">
-                            "Open device"
+                            {move || security_text(lang(), SecurityText::OpenDevice)}
                         </A>
                     }
                 })}
         </div>
-        {source.map(|line| view! { <p class="alert-detail__source">{line}</p> })}
+        {source
+            .map(|s| {
+                view! {
+                    <p class="alert-detail__source">{move || source_line(lang(), &s, sent_at)}</p>
+                }
+            })}
     }
 }
 
 #[component]
 pub fn AlertDetailScreen() -> impl IntoView {
+    let lang = use_lang();
     let house = expect_context::<House>();
     let params = use_params_map();
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
@@ -216,7 +214,9 @@ pub fn AlertDetailScreen() -> impl IntoView {
                 None if loaded.get() => {
                     view! {
                         {back_header(None)}
-                        <p class="alerts__empty">"This alert is no longer available"</p>
+                        <p class="alerts__empty">
+                            {move || security_text(lang(), SecurityText::AlertGone)}
+                        </p>
                     }
                         .into_any()
                 }
@@ -236,24 +236,25 @@ pub fn AlertDetailScreen() -> impl IntoView {
 mod tests {
     use oikos_api::AlertAction;
 
-    use super::{failure_text, full_date, shown_actions, source_line};
+    use super::{full_date, shown_actions, source_line};
+    use crate::i18n::Lang;
 
     #[test]
-    fn full_date_falls_back_to_iso() {
-        assert_eq!(full_date(1_792_402_860), "2026-10-19T09:41:00Z");
+    fn full_date_follows_the_language() {
+        assert_eq!(full_date(Lang::En, 1_792_402_860), "Oct 19 2026, 09:41");
+        assert_eq!(full_date(Lang::Fr, 1_792_402_860), "19 oct. 2026, 09:41");
     }
 
     #[test]
     fn source_line_joins_source_and_date() {
         assert_eq!(
-            source_line("frigate", 1_792_402_860),
-            "From frigate · 2026-10-19T09:41:00Z"
+            source_line(Lang::En, "frigate", 1_792_402_860),
+            "From frigate · Oct 19 2026, 09:41"
         );
-    }
-
-    #[test]
-    fn failure_text_names_the_action() {
-        assert_eq!(failure_text("Disarm"), "Couldn't send Disarm");
+        assert_eq!(
+            source_line(Lang::Fr, "frigate", 1_792_402_860),
+            "Depuis frigate · 19 oct. 2026, 09:41"
+        );
     }
 
     #[test]

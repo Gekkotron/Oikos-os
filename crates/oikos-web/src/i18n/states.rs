@@ -301,7 +301,7 @@ mod tests {
                 let ctx = StateCtx::BinarySensor(class.map(str::to_owned));
                 assert_eq!(
                     state_word(Lang::En, ctx, raw),
-                    binary_text(class, on),
+                    binary_text(Lang::En, class, on),
                     "{class:?} {raw}"
                 );
             }

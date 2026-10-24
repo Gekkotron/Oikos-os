@@ -8,22 +8,20 @@ use super::{PowerToggle, Sender};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::components::confirm::{ConfirmBar, Confirming};
 use crate::format::display_value;
+use crate::i18n::security::{SecurityText, action_question, security_text};
 
 #[component]
 pub fn SirenCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let confirming = expect_context::<Confirming>();
     let on = read_on(&entity.state).unwrap_or(false);
+    let lang = crate::i18n::current_lang();
     let label = if on {
-        "Ringing".to_owned()
+        security_text(lang, SecurityText::Ringing).to_owned()
     } else {
-        display_value(
-            crate::i18n::current_lang(),
-            &entity.state,
-            entity.unit.as_deref(),
-        )
+        display_value(lang, &entity.state, entity.unit.as_deref())
     };
-    let question = format!("Ring {}?", entity.name);
+    let question = action_question(lang, SecurityText::VerbRing, &entity.name);
     let send = {
         let id = entity.id.clone();
         let state = entity.state.clone();
@@ -57,7 +55,7 @@ pub fn SirenCard(entity: EntityView) -> impl IntoView {
             >
                 <ConfirmBar
                     question=question.clone()
-                    yes="Ring"
+                    yes=security_text(lang, SecurityText::VerbRing)
                     on_yes=Callback::new(move |()| send.run(true))
                     on_cancel=Callback::new(move |()| confirming.clear())
                 />
