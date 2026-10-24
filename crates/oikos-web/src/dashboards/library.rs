@@ -15,7 +15,7 @@ use oikos_core::model::Kind;
 
 use super::energy_stat::ENERGY_METRICS;
 use crate::flow_edit::fold_accents;
-use crate::format::{entity_title, room_name};
+use crate::format::{entity_title, kind_search_words, room_name};
 use crate::house::House;
 use crate::i18n::{Lang, widget_text};
 use crate::icons::{BOLT, HOUSE, PLAY, entity_icon};
@@ -124,12 +124,14 @@ fn subline(entity: &EntityView, areas: &[AreaView], title: &str) -> Option<Strin
 /// What `query` offers to put on a dashboard, ordered by section, then title. A row matches
 /// when its title or second line contains the query, ignoring case and accents.
 pub fn entries(
+    lang: Lang,
     query: &str,
     entities: &BTreeMap<String, EntityView>,
     areas: &[AreaView],
     flows: &[(String, String)],
 ) -> Vec<Entry> {
-    let mut rows: Vec<(String, Entry)> = Vec::new();
+    // Each row with the kind words that also find it ("cover", "volet"), for entity rows.
+    let mut rows: Vec<(String, Entry, Option<[String; 2]>)> = Vec::new();
     for e in entities.values().filter(|e| e.is_primary()) {
         let (section, kind) = match e.kind {
             Kind::Light => (Section::Lights, WidgetKind::Light),
@@ -139,9 +141,10 @@ pub fn entries(
             Kind::WaterHeater => (Section::WaterHeaters, WidgetKind::WaterHeater),
             _ => continue,
         };
-        let title = entity_title(e);
+        let title = entity_title(lang, e);
         let sub = subline(e, areas, &title);
         let icon = entity_icon(e);
+        let words = kind_search_words(e);
         let entity_id = e.id.clone();
         let config = WidgetConfig::Entity {
             entity_id: entity_id.clone(),
@@ -157,6 +160,7 @@ pub fn entries(
                 kind,
                 config,
             },
+            Some(words.clone()),
         ));
         if e.kind == Kind::Sensor {
             rows.push((
@@ -172,6 +176,7 @@ pub fn entries(
                         range: DashboardHistoryRange::H24,
                     },
                 },
+                Some(words),
             ));
         }
     }
@@ -189,6 +194,7 @@ pub fn entries(
                     title: None,
                 },
             },
+            None,
         ));
     }
     for (id, name) in flows {
@@ -205,6 +211,7 @@ pub fn entries(
                     title: None,
                 },
             },
+            None,
         ));
     }
     for (id, label) in ENERGY_METRICS {
@@ -221,19 +228,24 @@ pub fn entries(
                     title: None,
                 },
             },
+            None,
         ));
     }
 
     let needle = fold_accents(query.trim());
-    rows.retain(|(_, e)| {
+    rows.retain(|(_, e, words)| {
         needle.is_empty()
             || fold_accents(&e.title).contains(&needle)
+            || words
+                .iter()
+                .flatten()
+                .any(|w| fold_accents(w).contains(&needle))
             || e.sub
                 .as_deref()
                 .is_some_and(|s| fold_accents(s).contains(&needle))
     });
-    rows.sort_by_cached_key(|(id, e)| (e.section, e.title.to_lowercase(), id.clone()));
-    rows.into_iter().map(|(_, e)| e).collect()
+    rows.sort_by_cached_key(|(id, e, _)| (e.section, e.title.to_lowercase(), id.clone()));
+    rows.into_iter().map(|(_, e, _)| e).collect()
 }
 
 /// The library. Clicking a row, or Enter on the highlighted one while the search box has the
@@ -242,6 +254,7 @@ pub fn entries(
 #[component]
 pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = crate::i18n::use_lang();
     let query = RwSignal::new(String::new());
     let highlight = RwSignal::new(0_usize);
 
@@ -256,7 +269,7 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
         house.entities.with(|entities| {
             house
                 .areas
-                .with(|areas| entries(&query, entities, areas, &flows))
+                .with(|areas| entries(lang(), &query, entities, areas, &flows))
         })
     });
 
@@ -399,7 +412,7 @@ mod tests {
     }
 
     fn run(query: &str, entities: &BTreeMap<String, EntityView>) -> Vec<Entry> {
-        entries(query, entities, &[area("salon", "Salon")], &[])
+        entries(Lang::En, query, entities, &[area("salon", "Salon")], &[])
     }
 
     fn of(entries: &[Entry], section: Section) -> Vec<&Entry> {
@@ -435,13 +448,26 @@ mod tests {
     #[test]
     fn search_ignores_accents_and_matches_the_room() {
         let entities = house(vec![
-            ent("l1", "Lumière table", Kind::Light),
+            ent("l1", "Lampe évier", Kind::Light),
             ent("l2", "Other", Kind::Light),
         ]);
-        let got = run("lumiere", &entities);
+        let got = run("EVIER", &entities);
         assert_eq!(of(&got, Section::Lights).len(), 1);
         let got = run("  salon ", &entities);
         assert_eq!(of(&got, Section::Lights).len(), 2);
+    }
+
+    #[test]
+    fn the_kind_word_finds_entities_in_either_language() {
+        let entities = house(vec![
+            ent("c1", "Shutter", Kind::Cover),
+            ent("l1", "Lamp", Kind::Light),
+        ]);
+        for query in ["volet", "cover"] {
+            let got = run(query, &entities);
+            assert_eq!(of(&got, Section::Covers).len(), 1, "{query}");
+            assert!(of(&got, Section::Lights).is_empty(), "{query}");
+        }
     }
 
     #[test]
@@ -452,6 +478,7 @@ mod tests {
             ent("l1", "Lamp", Kind::Light),
         ]);
         let got = entries(
+            Lang::En,
             "",
             &entities,
             &[area("salon", "Salon")],
@@ -499,7 +526,7 @@ mod tests {
 
     #[test]
     fn empty_sections_have_no_rows() {
-        let got = entries("", &BTreeMap::new(), &[], &[]);
+        let got = entries(Lang::En, "", &BTreeMap::new(), &[], &[]);
         assert!(got.iter().all(|e| e.section == Section::Energy));
         assert_eq!(got.len(), ENERGY_METRICS.len());
     }

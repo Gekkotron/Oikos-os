@@ -151,7 +151,7 @@ async fn solar_page_shows_top_curve_tiles_days_footer() {
     assert!(text.contains("Range 9.8–14.1 kWh"), "{text}");
     assert!(text.contains("Forecast peak"), "{text}");
     assert!(text.contains("Best hours"), "{text}");
-    assert!(text.contains("10:00 am–2:00 pm"), "{text}");
+    assert!(text.contains("10:00–14:00"), "{text}");
     assert!(text.contains("Solcast calls 3 / 10 today"), "{text}");
 }
 

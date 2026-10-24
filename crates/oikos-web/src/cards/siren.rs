@@ -17,7 +17,11 @@ pub fn SirenCard(entity: EntityView) -> impl IntoView {
     let label = if on {
         "Ringing".to_owned()
     } else {
-        display_value(&entity.state, entity.unit.as_deref())
+        display_value(
+            crate::i18n::current_lang(),
+            &entity.state,
+            entity.unit.as_deref(),
+        )
     };
     let question = format!("Ring {}?", entity.name);
     let send = {

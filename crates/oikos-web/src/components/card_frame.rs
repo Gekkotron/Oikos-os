@@ -74,7 +74,7 @@ pub fn CardFrame(
     let availability = entity.state.availability;
     let is_on = crate::format::is_on(&entity.state);
     let title = if title.is_empty() {
-        crate::format::entity_title(&entity)
+        crate::format::entity_title(crate::i18n::current_lang(), &entity)
     } else {
         title
     };

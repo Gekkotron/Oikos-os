@@ -56,7 +56,7 @@ pub fn members_by_room(
         .filter(|e| e.kind == kind)
         .filter_map(|e| {
             let shown = (e.is_primary() && !e.id.starts_with("group_")) || selected.contains(&e.id);
-            let label = list_label(e);
+            let label = list_label(crate::i18n::Lang::En, e);
             (shown && (needle.is_empty() || fold_accents(&label).contains(&needle)))
                 .then(|| (e.id.clone(), label, e.area.clone()))
         });

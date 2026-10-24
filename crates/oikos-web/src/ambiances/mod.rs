@@ -239,11 +239,12 @@ fn device_sentence(
         entities: house.entities,
         areas: house.areas,
         flows: house.flows,
+        lang,
     };
     let full = sentence(&node, &ctx);
     let (title, label) = match house.entities.get(entity) {
         Some(e) => {
-            let t = crate::format::entity_title(e);
+            let t = crate::format::entity_title(lang, e);
             (t.clone(), t)
         }
         None => (entity.to_owned(), or_missing(lang, None, entity)),

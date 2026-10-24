@@ -59,6 +59,7 @@ fn role_suffix(role: Role) -> &'static str {
 #[component]
 pub fn Library(on_add: Callback<NodeKind>, query: RwSignal<String>) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = crate::i18n::use_lang();
     let Dragging(dragging) = expect_context::<Dragging>();
     let editor = expect_context::<Editor>();
     let highlight = RwSignal::new(0_usize);
@@ -81,6 +82,7 @@ pub fn Library(on_add: Callback<NodeKind>, query: RwSignal<String>) -> impl Into
                         entities,
                         areas,
                         flows: &names,
+                        lang: lang(),
                     },
                 )
             })

@@ -59,12 +59,14 @@ pub struct Ctx<'a> {
     pub areas: &'a [AreaView],
     /// `(id, name)` of every flow.
     pub flows: &'a [(String, String)],
+    /// The UI language of the sentences.
+    pub lang: crate::i18n::Lang,
 }
 
 fn entity_text(id: &str, ctx: &Ctx) -> String {
     ctx.entities
         .get(id)
-        .map_or_else(|| id.to_owned(), entity_title)
+        .map_or_else(|| id.to_owned(), |e| entity_title(ctx.lang, e))
 }
 
 /// A number without a trailing `.0`.
@@ -389,6 +391,7 @@ mod tests {
                 entities: &entities,
                 areas: &areas,
                 flows: &flows,
+                lang: crate::i18n::Lang::En,
             },
         )
     }
@@ -494,6 +497,7 @@ mod tests {
             entities: &entities,
             areas: &areas,
             flows: &[],
+            lang: crate::i18n::Lang::En,
         };
         let n = node(
             r#"{"id":"a","name":"LED is on","type":"if","params":{"entity":"led","op":"eq","value":true}}"#,
@@ -509,6 +513,7 @@ mod tests {
             entities: &entities,
             areas: &[],
             flows: &[],
+            lang: crate::i18n::Lang::En,
         };
         let n = node(r#"{"id":"a","type":"delay","params":{"for":"5m"}}"#);
         assert_eq!(subline(&n, &ctx), None);
@@ -555,6 +560,7 @@ mod generic_tests {
             entities,
             areas: &[],
             flows: &[],
+            lang: crate::i18n::Lang::En,
         }
     }
 
