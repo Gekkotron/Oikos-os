@@ -33,6 +33,13 @@ fn name_of(house: House, lang: Lang, lookup: Lookup) -> Option<String> {
         Lookup::Group(id) => house
             .groups
             .with(|groups| groups.get(id).map(|g| g.name.clone())),
+        Lookup::Ambiance(id) => house.ambiances.with(|list| {
+            list.iter().find(|v| v.id == id).map(|v| {
+                v.ambiance
+                    .as_ref()
+                    .map_or_else(|| v.id.clone(), |a| a.name.clone())
+            })
+        }),
         Lookup::Entity(id) => house
             .entities
             .with(|entities| entities.get(id).map(|e| e.name.clone())),

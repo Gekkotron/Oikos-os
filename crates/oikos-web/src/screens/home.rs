@@ -6,6 +6,7 @@ use oikos_core::model::{Kind, SwitchType};
 use oikos_core::types::Placement as TypePlacement;
 use std::collections::HashSet;
 
+use crate::ambiances::row::HomeAmbiances;
 use crate::cards::alarm::AlarmPanelCard;
 use crate::cards::binary_sensor::BinarySensorCard;
 use crate::cards::button::ButtonCard;
@@ -115,6 +116,7 @@ pub fn HomeScreen() -> impl IntoView {
     view! {
         <Show when=move || loaded.get() fallback=|| view! { <RoomsSkeleton /> }>
             <HomeHeader />
+            <HomeAmbiances />
             <For
                 each=move || chips.get()
                 key=|c| c.id.clone()

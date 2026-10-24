@@ -9,6 +9,7 @@ pub enum Section {
     Room(String),
     Automations,
     Groups,
+    Ambiances,
     Energy,
     Security,
     Climate,
@@ -23,6 +24,7 @@ pub enum Lookup<'a> {
     Room(&'a str),
     Flow(&'a str),
     Group(&'a str),
+    Ambiance(&'a str),
     Entity(&'a str),
     Alert(&'a str),
 }
@@ -87,6 +89,7 @@ pub fn section_for(path: &str, back: &[String]) -> Section {
         ["rooms", id, ..] => Section::Room((*id).to_string()),
         ["flows", ..] => Section::Automations,
         ["groups", ..] | ["group", ..] => Section::Groups,
+        ["ambiances", ..] => Section::Ambiances,
         ["energy", ..] => Section::Energy,
         ["security", ..] => Section::Security,
         ["climate", ..] => Section::Climate,
@@ -141,6 +144,20 @@ pub fn crumbs(path: &str, lang: Lang, name_of: impl Fn(Lookup) -> Option<String>
             push(t(Key::Groups), "/groups".into());
             push(named(Lookup::Group(id), id), String::new());
         }
+        ["ambiances"] => push(t(Key::Ambiances), String::new()),
+        ["ambiances", rest @ ..] => {
+            push(t(Key::Ambiances), "/ambiances".into());
+            match rest {
+                ["new"] => push(t(Key::NewAmbiance), String::new()),
+                ["about"] => push(t(Key::AmbiancesHowItWorks), String::new()),
+                [id, "report", ..] => {
+                    push(named(Lookup::Ambiance(id), id), format!("/ambiances/{id}"));
+                    push(t(Key::AmbianceLastRun), String::new());
+                }
+                [id, ..] => push(named(Lookup::Ambiance(id), id), String::new()),
+                [] => {}
+            }
+        }
         ["energy", ..] => push(t(Key::Energy), String::new()),
         ["security", ..] => push(t(Key::Security), String::new()),
         ["climate", ..] => push(t(Key::Climate), String::new()),
@@ -183,6 +200,7 @@ mod tests {
             Lookup::Dashboard("d1") => Some("Wall tablet".into()),
             Lookup::Room("r1") => Some("Kitchen".into()),
             Lookup::Flow("f1") => Some("Night lights".into()),
+            Lookup::Ambiance("good_night") => Some("Good night".into()),
             Lookup::Entity("light.a") => Some("Lamp".into()),
             Lookup::Room("Séjour") => Some("Séjour".into()),
             Lookup::Room("Salle de bain") => Some("Salle de bain".into()),
@@ -241,6 +259,44 @@ mod tests {
         assert_eq!(c[0].href.as_deref(), Some("/"));
         assert_eq!(c[1].href.as_deref(), Some("/flows"));
         assert_eq!(c[2].href, None);
+    }
+
+    #[test]
+    fn crumbs_for_ambiance_routes() {
+        assert_eq!(section_for("/ambiances", &[]), Section::Ambiances);
+        assert_eq!(section_for("/ambiances/about", &[]), Section::Ambiances);
+        assert_eq!(
+            section_for("/ambiances/good_night/report", &[]),
+            Section::Ambiances
+        );
+        assert_eq!(
+            labels(&crumbs("/ambiances", Lang::En, names)),
+            ["My home", "My moods"]
+        );
+        assert_eq!(
+            labels(&crumbs("/ambiances/new", Lang::En, names)),
+            ["My home", "My moods", "New mood"]
+        );
+        assert_eq!(
+            labels(&crumbs("/ambiances/about", Lang::Fr, names)),
+            ["Ma maison", "Mes ambiances", "Comment ça marche"]
+        );
+        let c = crumbs("/ambiances/good_night", Lang::En, names);
+        assert_eq!(labels(&c), ["My home", "My moods", "Good night"]);
+        assert_eq!(c[1].href.as_deref(), Some("/ambiances"));
+        assert_eq!(c[2].href, None);
+        let c = crumbs("/ambiances/good_night/report", Lang::En, names);
+        assert_eq!(
+            labels(&c),
+            ["My home", "My moods", "Good night", "Last run"]
+        );
+        assert_eq!(c[2].href.as_deref(), Some("/ambiances/good_night"));
+        assert_eq!(c[3].href, None);
+        // An unknown id reads as the id itself.
+        assert_eq!(
+            labels(&crumbs("/ambiances/zz", Lang::En, names)),
+            ["My home", "My moods", "zz"]
+        );
     }
 
     #[test]
