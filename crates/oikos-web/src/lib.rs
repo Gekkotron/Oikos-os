@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 pub mod alerts;
+pub mod ambiances;
 pub mod api;
 pub mod app;
 pub mod cards;

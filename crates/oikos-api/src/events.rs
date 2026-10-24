@@ -5,6 +5,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::alerts::AlertView;
+use crate::ambiances::{AmbianceView, ApplyReport};
 use crate::flows::{FlowView, RunView};
 use crate::home::HomeSettings;
 use crate::snapshot::Snapshot;
@@ -83,6 +84,14 @@ pub enum WsEvent {
     /// The home settings document changed.
     HomeSettingsChanged {
         settings: HomeSettings,
+    },
+    /// The ambiances list changed.
+    AmbiancesChanged {
+        ambiances: Vec<AmbianceView>,
+    },
+    /// An ambiance was applied; the report says what each action did.
+    AmbianceApplied {
+        report: ApplyReport,
     },
 }
 

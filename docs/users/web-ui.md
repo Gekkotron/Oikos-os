@@ -121,11 +121,56 @@ When weather is off or not fetched yet, the page says that the weather is unavai
 
 *This screenshot predates the sidebar: the rooms are now listed in the sidebar instead of as chips.*
 
-Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview. House is always the first entry: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
+Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview. House is always the first entry, and the page the web UI opens on: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
 
 On a user-authored dashboard the header's pencil enters edit mode: click a widget to open its config sheet (title, size, delete), use move left/right to reorder, cycle the span with the resize button, Save or Discard. In edit mode a panel on the right (at the bottom on a phone) lists what can be added, grouped by kind, each row with its room and device; search narrows it, and clicking a row adds the widget at the end of the grid. The gear opens the dashboard settings sheet (name, a Show header switch that puts the House greeting, chips and weather card above the widgets, move up/down in the sidebar, delete), and `＋ New dashboard` in the sidebar creates a new one at `max(order) + 1`.
 
 Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>`. The Home section's placement rule still applies on House: an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before. A room's section shows only when the room has at least one card under that rule, so a room whose entities are all hidden or all elsewhere drops off House and disappears from the sidebar too. Its `/rooms/<id>` page still opens and says "Nothing here yet.", the room pickers still offer it, and it comes back once something visible lands in it.
+
+## Moods
+
+A mood (in the sidebar, **My moods**) is a named list of actions that runs once, top to bottom, when you apply it. See [Ambiances](ambiances.md) for what an action does and how the hub runs it.
+
+### Home
+
+Home shows a row titled **One mood, one tap**, under the header. It holds up to four pinned moods, four across on a wide window and two by two on a phone. A tap applies the mood. While it runs, its tile is pressed, and a toast says **Good night: done**, or how many devices did not respond (**Good night: 2 devices did not respond**). The toast is the only report you get on Home; the full report is on the mood's page.
+
+- A mood with no actions shows **Add a lamp** under its name. Tapping it opens the editor instead of applying it.
+- When no mood is pinned, the row shows **Choose your moods**, which opens the page. When there are no moods at all, it shows **Create a mood** and **Add the four examples**.
+- **How it works** at the end of the row opens a short explanation.
+- The row stays hidden until the list of moods has loaded once.
+
+### My moods
+
+The page (`/ambiances`) lists every mood as a card, in order.
+
+- **Show on Home**: pins the mood to the row. Only the first four pinned moods, by order, show on Home. The page says so when you pin more.
+- **↑** and **↓** change the order.
+- **Apply** runs the saved mood. **Edit** opens the editor. **Delete** removes it after a confirmation.
+- **Last run** opens the report of the last run, if the mood ran since this page was opened.
+- When the page is empty, it says **No mood yet.** and offers **New mood** or **Add the four examples**. The examples are *Good night*, *I'm heading out*, *Quiet evening* and *A little reading*; you can edit them like any other mood.
+- A mood the hub cannot read shows its reason on its card. It cannot be applied, so only **Delete** is offered.
+
+### Editor
+
+The editor (`/ambiances/new`, or **Edit** on a card) has:
+
+- **Name** (required), **Subtitle** and an **Icon**.
+- **Actions**, in the order they run. Each one can be moved up or down, edited or deleted. **Add an action** offers four types:
+  - **Every light, plug or shutter**: pick the kind, then **on** or **off** (lights can also get a brightness; shutters open or close). **Where** is the whole house or one room. Categories include devices you add later, so you do not have to edit the mood when you add a lamp. **See which** lists the devices in the category, grouped by room, with a checkbox on each; untick a device to leave it out.
+  - **One device**: search for a device, then pick one of its commands. A command that takes a value shows a number field.
+  - **Heating**: only shown when the climate engine is on. Pick a zone, or every zone. **Hold** sets a temperature and/or a mode for some **Hours**; **Back to the schedule** removes the hold.
+  - **Automation**: pick a flow, then **Switch on**, **Switch off** or **Run**.
+- **Save** stores the mood. It stays disabled until the name is filled in.
+- **Try it** applies the saved version, so it is disabled while the form has unsaved changes. Its tooltip says **Save first**.
+
+### Report
+
+After a run, **Last run** opens the report (`/ambiances/<id>/report`), with the time of the run. Each action has an outcome: **Done**, **Failed** or **Skipped**. Failed and skipped actions list the devices concerned and the reason, such as offline. If the mood has not run since the page was opened, the report says **Not run since this page was opened.**
+
+### How it works
+
+**How it works** (`/ambiances/about`) explains the same rules as this page. A mood runs its actions once, in order. "Every light", "every plug" and "every shutter" include devices you add later. Only switches shown as a plug count as plugs, so set a switch to show as a plug to include it.
 
 ## Energy
 
@@ -170,7 +215,7 @@ Every device card has the same frame: an icon tile, the room (left out under a r
 
 Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor. The controls are the device's card with all its controls (see [Cards](#cards)).
 
-Back, on every sheet and detail page, returns to the page it was opened from, one step at a time: dashboard → group → member → history unwinds in that order. A form you saved (new or edited group, new flow) is skipped. A page opened directly, from a link or after a reload, goes back to its parent: Alerts for an alert, Flows for a flow, Groups for the group wizard, the entity for its history, the first dashboard for the rest.
+Back, on every sheet and detail page, returns to the page it was opened from, one step at a time: dashboard → group → member → history unwinds in that order. A form you saved (new or edited group, new flow) is skipped. A page opened directly, from a link or after a reload, goes back to its parent: Alerts for an alert, Flows for a flow, Groups for the group wizard, the entity for its history, the House dashboard for the rest.
 
 ## Devices
 

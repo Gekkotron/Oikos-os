@@ -2,9 +2,9 @@
 //! Results are objects (the MCP `structuredContent` must be one), so lists are wrapped.
 
 use oikos_api::{
-    AreaView, BridgeView, ConnectionStatus, DeviceView, EnergyKind, EntityView, GroupSpec,
-    GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, IgnoredView,
-    LastChangeItem, OverridePatch, RunStatus, VirtualSpec,
+    Ambiance, AmbianceView, AreaView, BridgeView, ConnectionStatus, DeviceView, EnergyKind,
+    EntityView, GroupSpec, GroupView, HistoryDaily, HistoryRange, HistorySeries, HistoryToday,
+    IgnoredView, LastChangeItem, OverridePatch, RunStatus, VirtualSpec,
 };
 use oikos_core::flow::Flow;
 use oikos_core::model::{Area, Command, Kind, UiOverride};
@@ -422,6 +422,27 @@ pub struct DeleteGroupParams {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct GroupList {
     pub groups: Vec<GroupView>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetAmbianceParams {
+    /// The ambiance: `id` (1 to 48 characters of `a-z`, `0-9` and `_`), `name`, optional
+    /// `subtitle`, `icon`, `pinned` and `order`, and `actions`.
+    pub ambiance: Ambiance,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AmbianceIdParams {
+    /// The ambiance id.
+    pub id: String,
+}
+
+/// The ambiances, each valid or with the reason it is not.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AmbianceList {
+    pub ambiances: Vec<AmbianceView>,
 }
 
 /// Which history slice to return.

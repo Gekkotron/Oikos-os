@@ -4,9 +4,12 @@ use leptos::prelude::*;
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::hooks::use_navigate;
 use leptos_router::path;
-use oikos_api::DashboardView;
 use oikos_core::model::{Kind, StateValue};
 
+use crate::ambiances::about::AmbiancesAboutScreen;
+use crate::ambiances::editor::AmbianceEditorScreen;
+use crate::ambiances::page::AmbiancesScreen;
+use crate::ambiances::report::AmbianceReportScreen;
 use crate::commands::Pending;
 use crate::components::confirm::Confirming;
 use crate::components::now::install_now;
@@ -35,37 +38,25 @@ use crate::screens::weather::WeatherScreen;
 use crate::shell::Shell;
 use crate::theme::install_theme;
 
-/// Where landing goes: the first authored dashboard if there is one, else House; `None` while the
-/// list is still empty (not fetched yet).
-pub(crate) fn landing_dashboard(list: &[DashboardView]) -> Option<String> {
-    if list.is_empty() {
-        return None;
-    }
-    Some(
-        list.iter()
-            .find(|d| d.dashboard.id != oikos_api::HOUSE_ID)
-            .map(|d| d.dashboard.id.clone())
-            .unwrap_or_else(|| oikos_api::HOUSE_ID.to_owned()),
-    )
+/// Where landing goes: always the house, which the hub always lists. Authored dashboards are one
+/// click away in the sidebar; making one never moves the start page.
+pub(crate) fn landing_path() -> String {
+    format!("/dashboards/{}", oikos_api::HOUSE_ID)
 }
 
-/// Landing and unknown paths go to [`landing_dashboard`]. Waits for the dashboards fetch to
-/// resolve before deciding, so an authored dashboard is honoured even when the user opens the app
-/// directly on `/`. `replace` keeps Back from bouncing off the redirect.
+/// Landing and unknown paths go to [`landing_path`]. The house renders without the dashboards
+/// list, so there is nothing to wait for. `replace` keeps Back from bouncing off the redirect.
 #[component]
 fn HouseRedirect() -> impl IntoView {
-    let house = expect_context::<House>();
     let navigate = use_navigate();
     Effect::new(move |_| {
-        if let Some(id) = house.dashboards.with(|list| landing_dashboard(list)) {
-            navigate(
-                &format!("/dashboards/{id}"),
-                leptos_router::NavigateOptions {
-                    replace: true,
-                    ..Default::default()
-                },
-            );
-        }
+        navigate(
+            &landing_path(),
+            leptos_router::NavigateOptions {
+                replace: true,
+                ..Default::default()
+            },
+        );
     });
 }
 
@@ -154,6 +145,7 @@ pub fn App() -> impl IntoView {
         house.refresh_flows_config();
         house.refresh_weather();
         house.refresh_solar();
+        house.refresh_ambiances();
         house.refresh_home_settings();
     }
     view! {
@@ -175,6 +167,11 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/solar") view=SolarScreen />
                     <Route path=path!("/alerts") view=AlertsScreen />
                     <Route path=path!("/alerts/:id") view=AlertDetailScreen />
+                    <Route path=path!("/ambiances") view=AmbiancesScreen />
+                    <Route path=path!("/ambiances/about") view=AmbiancesAboutScreen />
+                    <Route path=path!("/ambiances/new") view=AmbianceEditorScreen />
+                    <Route path=path!("/ambiances/:id") view=AmbianceEditorScreen />
+                    <Route path=path!("/ambiances/:id/report") view=AmbianceReportScreen />
                     <Route path=path!("/flows") view=FlowsScreen />
                     <Route path=path!("/flows/new") view=NewFlowScreen />
                     <Route path=path!("/flows/:id") view=FlowCanvasScreen />

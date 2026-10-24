@@ -197,10 +197,10 @@ async fn dashboards_unfold_from_two() {
             .length(),
         1
     );
-    // Overview now lands on the first authored dashboard, as `/` does.
+    // Overview still lands on the house, as `/` does: an authored dashboard never takes over.
     assert!(
         m.host
-            .query_selector(".sidebar__link[href=\"/dashboards/d1\"]")
+            .query_selector(".sidebar__link[href=\"/dashboards/house\"]")
             .unwrap()
             .is_some()
     );
@@ -225,11 +225,11 @@ async fn overview_targets_the_open_dashboard() {
     assert_eq!(overview().as_deref(), Some("/dashboards/d2"));
     go("/dashboards/house").await;
     assert_eq!(overview().as_deref(), Some("/dashboards/house"));
-    // Away from the dashboards, or on one that does not exist, it goes where "/" lands.
+    // Away from the dashboards, or on one that does not exist, it goes where "/" lands: the house.
     go("/flows").await;
-    assert_eq!(overview().as_deref(), Some("/dashboards/d1"));
+    assert_eq!(overview().as_deref(), Some("/dashboards/house"));
     go("/dashboards/gone").await;
-    assert_eq!(overview().as_deref(), Some("/dashboards/d1"));
+    assert_eq!(overview().as_deref(), Some("/dashboards/house"));
     go("/").await;
 }
 

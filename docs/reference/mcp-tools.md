@@ -1,10 +1,10 @@
 ---
 title: MCP tools
 sidebar_position: 3
-description: The 37 tools and the one resource of the hub's MCP server, with their arguments.
+description: The 43 tools and the one resource of the hub's MCP server, with their arguments.
 ---
 
-The MCP server is at `http://<host>:8081/mcp` (streamable HTTP, stateful sessions) and offers **thirty-seven tools** and **one resource**. It has the same trust model as the REST API on the same port: LAN-only, no authentication in v1. The tools are defined in [`crates/oikos-os/src/mcp`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/mcp). For setup in Claude Code, Codex and Claude Desktop, see [Talking to the house (MCP)](../users/assistants-mcp.md).
+The MCP server is at `http://<host>:8081/mcp` (streamable HTTP, stateful sessions) and offers **forty-three tools** and **one resource**. It has the same trust model as the REST API on the same port: LAN-only, no authentication in v1. The tools are defined in [`crates/oikos-os/src/mcp`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/mcp). For setup in Claude Code, Codex and Claude Desktop, see [Talking to the house (MCP)](../users/assistants-mcp.md).
 
 A failed tool call answers in-band (`isError: true` with the reason as text) so the assistant can retry with better arguments. A refused publish (broker link down) is the same in-band error.
 
@@ -127,6 +127,17 @@ The climate engine is in beta. These nine tools answer `climate disabled` while 
 | `clear_climate_override` | Removes every override of a zone. Args: `zone`. |
 | `learn_climate_zone` | Learns a zone's rules from its history now and returns where the learner stands. Args: `zone`. |
 
+## Ambiances
+
+See [Ambiances](../users/ambiances.md) for the action types, the category rules and the report. The tools are the same as the REST routes, and the server instructions describe the action types.
+
+| Tool | What it does |
+| --- | --- |
+| `list_ambiances` | Every stored ambiance with its actions, or the reason it cannot be read (`invalid`). |
+| `set_ambiance` | Creates or replaces an ambiance, validated against the house and retained on `oikos/ui/ambiances/<id>`. Args: `ambiance` (the whole document: `id`, `name`, optional `subtitle` and `icon`, `pinned`, `order` and `actions`). A refusal names the action by its index so you can fix it and retry. |
+| `delete_ambiance` | Removes an ambiance, valid or not. Args: `id`. |
+| `apply_ambiance` | Runs the actions once, in order, and returns one report line per action (`ok`, `failed` or `skipped`, with the entities and reasons). Args: `id`. Refused while the same ambiance is already running. |
+
 ## Count
 
-Twenty-three tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs` and nine in `climate_tools.rs`: 23 + 6 + 9 = 38.
+Twenty-three tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs`, nine in `climate_tools.rs` and four in `ambiance_tools.rs`: 23 + 6 + 9 + 4 = 42.

@@ -432,9 +432,56 @@ fn device_class_icon(device_class: &str) -> Option<&'static str> {
     })
 }
 
+// Ambiance glyphs. Moon, sun and house reuse the shared constants.
+pub const SPARKLE: &str = svg!(
+    r#"<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15v4"/><path d="M17 17h4"/>"#
+);
+const SOFA: &str = svg!(
+    r#"<path d="M5 11V8a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M3 13a2 2 0 0 1 4 0v2h10v-2a2 2 0 0 1 4 0v4H3z"/><path d="M5 17v2"/><path d="M19 17v2"/>"#
+);
+const DOOR_OUT: &str = svg!(
+    r#"<path d="M10 21H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h4"/><path d="M14 8l4 4-4 4"/><path d="M18 12H9"/>"#
+);
+const BOOK: &str = svg!(
+    r#"<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H19v13H5.5A1.5 1.5 0 0 0 4 18.5z"/><path d="M4 18.5A1.5 1.5 0 0 0 5.5 20H19v-3"/><path d="M9 8h6"/>"#
+);
+const FILM: &str = svg!(
+    r#"<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16"/><path d="M17 4v16"/><path d="M3 9h4"/><path d="M3 15h4"/><path d="M17 9h4"/><path d="M17 15h4"/>"#
+);
+const PLATE: &str = svg!(r#"<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/>"#);
+const BATH: &str = svg!(
+    r#"<path d="M3 12h18v2a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5z"/><path d="M6 12V6a2 2 0 0 1 3.5-1.3"/><path d="M7 19l-1 2"/><path d="M17 19l1 2"/>"#
+);
+const LEAF: &str =
+    svg!(r#"<path d="M5 19C5 10 10 5 20 4c0 10-4 15-13 15"/><path d="M5 19 14 10"/>"#);
+const FLAME: &str = svg!(
+    r#"<path d="M12 3c1 3.5 5.5 5.5 5.5 11a5.5 5.5 0 0 1-11 0c0-2.2 1-3.6 2-4.5.2 1.6 1 2.4 1.8 2.6C10 9 10.8 5.5 12 3z"/>"#
+);
+
+/// The glyph for an ambiance icon name; unknown or missing names fall back to the sparkle.
+pub fn ambiance_icon(name: Option<&str>) -> &'static str {
+    match name {
+        Some("sofa") => SOFA,
+        Some("moon") => MOON,
+        Some("door_out") => DOOR_OUT,
+        Some("book") => BOOK,
+        Some("sun") => SUN,
+        Some("film") => FILM,
+        Some("plate") => PLATE,
+        Some("bath") => BATH,
+        Some("leaf") => LEAF,
+        Some("flame") => FLAME,
+        Some("house") => HOUSE,
+        _ => SPARKLE,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{BINARY_SENSOR, PLUG, channel_icon, consumer_glyph, kind_icon, sensor_icon};
+    use super::{
+        BINARY_SENSOR, PLUG, SPARKLE, ambiance_icon, channel_icon, consumer_glyph, kind_icon,
+        sensor_icon,
+    };
     use oikos_api::AlertChannel;
     use oikos_core::model::Kind;
 
@@ -592,5 +639,31 @@ mod tests {
             kind_icon(Kind::BinarySensor, Some("no-such-class")),
             kind_icon(Kind::BinarySensor, None)
         );
+    }
+
+    #[test]
+    fn every_ambiance_icon_has_a_glyph() {
+        let glyphs: Vec<&str> = oikos_api::AMBIANCE_ICONS
+            .iter()
+            .map(|n| ambiance_icon(Some(n)))
+            .collect();
+        for (i, g) in glyphs.iter().enumerate() {
+            assert!(
+                !g.is_empty(),
+                "{} has no glyph",
+                oikos_api::AMBIANCE_ICONS[i]
+            );
+            for (j, other) in glyphs.iter().enumerate().skip(i + 1) {
+                assert_ne!(
+                    g,
+                    other,
+                    "{} and {} share a glyph",
+                    oikos_api::AMBIANCE_ICONS[i],
+                    oikos_api::AMBIANCE_ICONS[j]
+                );
+            }
+        }
+        assert_eq!(ambiance_icon(None), SPARKLE);
+        assert_eq!(ambiance_icon(Some("no-such-icon")), SPARKLE);
     }
 }

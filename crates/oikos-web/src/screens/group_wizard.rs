@@ -30,42 +30,14 @@ pub const GROUP_KINDS: &[Kind] = &[
     Kind::WaterHeater,
 ];
 
-const ID_MAX: usize = 48;
-
 /// "water heater" for `Kind::WaterHeater`.
 pub fn kind_word(kind: Kind) -> String {
     kind.component().replace('_', " ")
 }
 
-/// A group id from its name: lowercase, accents folded, `-`, `.` and whitespace as `_`, anything
-/// else outside `[a-z0-9_]` dropped, at most 48 characters, `_2`, `_3`, … appended on collision.
+/// A group id from its name; see [`crate::ambiances::slug_id`] for the rules.
 pub fn slug_group_id(name: &str, taken: &BTreeSet<String>) -> String {
-    let mut slug: String = fold_accents(name)
-        .chars()
-        .filter_map(|c| match c {
-            '-' | '.' => Some('_'),
-            c if c.is_whitespace() => Some('_'),
-            c if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' => Some(c),
-            _ => None,
-        })
-        .collect();
-    slug.truncate(ID_MAX);
-    if slug.is_empty() {
-        slug = "group".to_owned();
-    }
-    if !taken.contains(&slug) {
-        return slug;
-    }
-    for n in 2.. {
-        let suffix = format!("_{n}");
-        let mut base = slug.clone();
-        base.truncate(ID_MAX - suffix.len());
-        let candidate = format!("{base}{suffix}");
-        if !taken.contains(&candidate) {
-            return candidate;
-        }
-    }
-    unreachable!("an unbounded range always yields a free id")
+    crate::ambiances::slug_id(name, taken, "group")
 }
 
 /// The entities of `kind` (their effective kind, so `showAs` counts) matching `query`, grouped by
@@ -79,28 +51,43 @@ pub fn members_by_room(
     selected: &BTreeSet<String>,
 ) -> Vec<(String, Vec<(String, String)>)> {
     let needle = fold_accents(query.trim());
-    let mut by_area: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
-    for e in entities.values().filter(|e| e.kind == kind) {
-        let shown = (e.is_primary() && !e.id.starts_with("group_")) || selected.contains(&e.id);
-        let label = list_label(e);
-        if shown && (needle.is_empty() || fold_accents(&label).contains(&needle)) {
-            by_area
-                .entry(e.area.as_str())
-                .or_default()
-                .push((e.id.clone(), label));
-        }
+    let items = entities
+        .values()
+        .filter(|e| e.kind == kind)
+        .filter_map(|e| {
+            let shown = (e.is_primary() && !e.id.starts_with("group_")) || selected.contains(&e.id);
+            let label = list_label(e);
+            (shown && (needle.is_empty() || fold_accents(&label).contains(&needle)))
+                .then(|| (e.id.clone(), label, e.area.clone()))
+        });
+    group_by_room(items, areas)
+}
+
+/// `(id, label, area id)` items grouped by room in the hub's room order, each room sorted by
+/// label (accents folded), unknown rooms last and unassigned ones under "Unassigned".
+pub fn group_by_room(
+    items: impl IntoIterator<Item = (String, String, String)>,
+    areas: &[AreaView],
+) -> Vec<(String, Vec<(String, String)>)> {
+    let mut by_area: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for (id, label, area) in items {
+        by_area.entry(area).or_default().push((id, label));
     }
     let mut rooms = Vec::new();
     for area in areas {
-        if let Some(mut list) = by_area.remove(area.id.as_str()) {
+        if let Some(mut list) = by_area.remove(&area.id) {
             list.sort_by_key(|(_, label)| fold_accents(label));
             rooms.push((area.name.clone(), list));
         }
     }
     for (area, mut list) in by_area {
         list.sort_by_key(|(_, label)| fold_accents(label));
-        let name = if area.is_empty() { "Unassigned" } else { area };
-        rooms.push((name.to_owned(), list));
+        let name = if area.is_empty() {
+            "Unassigned".to_owned()
+        } else {
+            area
+        };
+        rooms.push((name, list));
     }
     rooms
 }
