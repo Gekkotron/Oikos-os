@@ -33,10 +33,11 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
     view! {
         <aside class="widget-config-sheet">
             <h3>{move || format!("Widget: {:?}", kind.get().unwrap_or(WidgetKind::Light))}</h3>
-            <label>
-                "Title"
+            <label class="sheet-form__field">
+                <span class="sheet-form__label">"Title"</span>
                 <input
                     type="text"
+                    class="field"
                     value=initial_title
                     on:input=move |ev| {
                         let v = event_target_value(&ev);
@@ -48,9 +49,10 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
                     }
                 />
             </label>
-            <label>
-                "Size"
+            <label class="sheet-form__field">
+                <span class="sheet-form__label">"Size"</span>
                 <select
+                    class="select"
                     on:change=move |ev| {
                         let v = event_target_value(&ev);
                         state.draft.update(|d| {
@@ -75,7 +77,7 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
             </label>
             <button
                 type="button"
-                class="widget-config-sheet__delete"
+                class="btn btn--danger"
                 on:click=move |_| {
                     state.draft.update(|d| remove_widget(d, index));
                     on_close.run(());
@@ -83,7 +85,7 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
             >
                 "Delete widget"
             </button>
-            <button type="button" on:click=move |_| on_close.run(())>"Close"</button>
+            <button type="button" class="btn" on:click=move |_| on_close.run(())>"Close"</button>
         </aside>
     }
 }
@@ -161,20 +163,22 @@ fn move_dashboard(house: House, id: String, delta: isize) {
     });
 }
 
-/// Per-dashboard sheet: name, delete and move up/down in the sidebar list.
+/// Per-dashboard sheet: name, header, delete and move up/down in the sidebar list.
 #[component]
 pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl IntoView {
     let house = expect_context::<House>();
     let navigate = use_navigate();
     let initial_name = state.draft.with_untracked(|d| d.name.clone());
+    let show_header = move || state.draft.with(|d| d.show_header);
 
     view! {
         <aside class="dashboard-settings-sheet">
             <h3>"Dashboard settings"</h3>
-            <label>
-                "Name"
+            <label class="sheet-form__field">
+                <span class="sheet-form__label">"Name"</span>
                 <input
                     type="text"
+                    class="field"
                     value=initial_name
                     on:input=move |ev| {
                         let v = event_target_value(&ev);
@@ -182,8 +186,42 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                     }
                 />
             </label>
+            <label class="sheet-form__flag">
+                <span class="sheet-form__label">"Show header"</span>
+                <button
+                    type="button"
+                    role="switch"
+                    class="switch"
+                    class:switch--on=show_header
+                    aria-checked=move || show_header().to_string()
+                    on:click=move |_| state.draft.update(|d| d.show_header = !d.show_header)
+                >
+                    <span class="switch__knob"></span>
+                </button>
+            </label>
+            <div class="dashboard-settings-sheet__reorder">
+                <button
+                    type="button"
+                    class="btn"
+                    on:click=move |_| {
+                        move_dashboard(house, state.draft.get_untracked().id, -1)
+                    }
+                >
+                    "Move up"
+                </button>
+                <button
+                    type="button"
+                    class="btn"
+                    on:click=move |_| {
+                        move_dashboard(house, state.draft.get_untracked().id, 1)
+                    }
+                >
+                    "Move down"
+                </button>
+            </div>
             <button
                 type="button"
+                class="btn btn--danger"
                 on:click=move |_| {
                     let id = state.draft.get_untracked().id;
                     let navigate = navigate.clone();
@@ -197,25 +235,7 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
             >
                 "Delete dashboard"
             </button>
-            <div class="dashboard-settings-sheet__reorder">
-                <button
-                    type="button"
-                    on:click=move |_| {
-                        move_dashboard(house, state.draft.get_untracked().id, -1)
-                    }
-                >
-                    "Move up"
-                </button>
-                <button
-                    type="button"
-                    on:click=move |_| {
-                        move_dashboard(house, state.draft.get_untracked().id, 1)
-                    }
-                >
-                    "Move down"
-                </button>
-            </div>
-            <button type="button" on:click=move |_| on_close.run(())>"Close"</button>
+            <button type="button" class="btn" on:click=move |_| on_close.run(())>"Close"</button>
         </aside>
     }
 }
@@ -244,6 +264,7 @@ mod tests {
                 name: "D".into(),
                 order: 0,
                 widgets: vec![widget("a"), widget("b")],
+                show_header: false,
             },
             true,
         );

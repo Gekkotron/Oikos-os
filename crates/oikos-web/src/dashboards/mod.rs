@@ -22,6 +22,7 @@ pub(crate) async fn create_dashboard(house: House) -> Option<String> {
         name: "New dashboard".to_owned(),
         order,
         widgets: Vec::new(),
+        show_header: false,
     };
     let saved = api::put_dashboard(&d).await.ok()?;
     let id = saved.id.clone();

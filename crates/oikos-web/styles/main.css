@@ -5436,20 +5436,38 @@ html:has(.flow-canvas-screen) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: var(--surface, #fff);
-  color: inherit;
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+  border-left: 1px solid var(--card-border);
+  background: var(--menu-bg);
+  color: var(--ink);
+  box-shadow: var(--menu-shadow);
   /* Above the phone widget library (40), under the phone drawer (46/47) and the toasts (50).
      Menus opened inside a sheet sit in its stacking context, so they stay above it. */
   z-index: 45;
 }
-.widget-config-sheet label,
-.dashboard-settings-sheet label { display: flex; flex-direction: column; gap: 4px; }
-.widget-config-sheet button,
-.dashboard-settings-sheet button { min-height: var(--touch-min); }
-.widget-config-sheet__delete { color: #c0392b; }
+.widget-config-sheet h3,
+.dashboard-settings-sheet h3 {
+  margin: 0 0 4px;
+  font: var(--type-card-value);
+}
+/* `.btn` grows to fill a row; in the sheet's column it keeps its own height. */
+.widget-config-sheet .btn,
+.dashboard-settings-sheet .btn { flex: none; }
+.sheet-form__field { display: flex; flex-direction: column; gap: 6px; }
+/* `.field` also carries the wizard wrapper's vertical margin and the row's flex growth. */
+.sheet-form__field .field,
+.sheet-form__field .select { flex: none; box-sizing: border-box; margin: 0; }
+.sheet-form__flag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: var(--touch-min);
+}
+.sheet-form__label { font: var(--type-label); color: var(--muted); }
+.sheet-form__flag .sheet-form__label { font: var(--type-body); color: inherit; }
 .dashboard-settings-sheet__reorder { display: flex; gap: 8px; }
-.dashboard-settings-sheet__reorder button { flex: 1; }
+.dashboard-settings-sheet__reorder .btn { flex: 1; }
 .widget__edit-overlay { position: absolute; inset: 0; z-index: 1; cursor: pointer; pointer-events: auto; }
 
 /* ⋯ menu on a flow row or card */

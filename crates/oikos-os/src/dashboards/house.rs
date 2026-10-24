@@ -13,6 +13,7 @@ pub fn synthesize_house(_areas: &[AreaView], _entities: &[EntityView]) -> Dashbo
         name: HOUSE_NAME.to_owned(),
         order: 0,
         widgets: Vec::new(),
+        show_header: true,
     }
 }
 

@@ -218,6 +218,7 @@ mod tests {
             name: id.into(),
             order: 1,
             widgets: (0..widgets).map(widget).collect(),
+            show_header: false,
         }
     }
 

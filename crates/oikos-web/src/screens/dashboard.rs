@@ -9,6 +9,7 @@ use crate::dashboards::config_sheet::{DashboardSettingsSheet, WidgetConfigSheet}
 use crate::dashboards::edit::{EditState, EditToolbar, add_widget_handler};
 use crate::dashboards::grid::Grid;
 use crate::dashboards::library::WidgetLibrary;
+use crate::home_header::view::HomeHeader;
 use crate::house::House;
 use crate::screens::home::HomeScreen;
 
@@ -42,7 +43,11 @@ pub fn DashboardScreen() -> impl IntoView {
                         let initial_edit = query.read_untracked().get("edit").as_deref() == Some("1");
                         let edit = EditState::new(view.dashboard.clone(), initial_edit);
                         let widgets = Signal::derive(move || edit.draft.get().widgets);
+                        let show_header = move || edit.draft.with(|d| d.show_header);
                         view! {
+                            <Show when=show_header>
+                                <HomeHeader />
+                            </Show>
                             <EditToolbar state=edit />
                             // The library sits beside the grid while editing; the layout wraps
                             // both only then so the plain grid keeps its full width.
