@@ -12,17 +12,7 @@ const NBSP: char = '\u{A0}';
 /// Fixed words of the security and alerts area. Sentences with values are the helpers below.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SecurityText {
-    // The alarm panel's state, as the hero reads it.
-    PanelDisarmed,
-    PanelArmedHome,
-    PanelArmedAway,
-    PanelArmedNight,
-    PanelArmedVacation,
-    PanelArmedCustom,
-    PanelExitDelay,
-    PanelEntryDelay,
-    PanelDisarming,
-    PanelTriggered,
+    // The alarm panel's state words come from `states::state_word`; only this one is local.
     Unavailable,
     // Arming modes and the alarm's controls.
     ModeHome,
@@ -92,16 +82,6 @@ pub enum SecurityText {
 
 impl SecurityText {
     pub const ALL: &'static [SecurityText] = &[
-        SecurityText::PanelDisarmed,
-        SecurityText::PanelArmedHome,
-        SecurityText::PanelArmedAway,
-        SecurityText::PanelArmedNight,
-        SecurityText::PanelArmedVacation,
-        SecurityText::PanelArmedCustom,
-        SecurityText::PanelExitDelay,
-        SecurityText::PanelEntryDelay,
-        SecurityText::PanelDisarming,
-        SecurityText::PanelTriggered,
         SecurityText::Unavailable,
         SecurityText::ModeHome,
         SecurityText::ModeAway,
@@ -168,16 +148,6 @@ impl SecurityText {
 pub fn security_text(lang: Lang, k: SecurityText) -> &'static str {
     use SecurityText as T;
     let (en, fr) = match k {
-        T::PanelDisarmed => ("Disarmed", "Désactivée"),
-        T::PanelArmedHome => ("Armed · Home", "Activée (présent)"),
-        T::PanelArmedAway => ("Armed · Away", "Activée (absent)"),
-        T::PanelArmedNight => ("Armed · Night", "Activée (nuit)"),
-        T::PanelArmedVacation => ("Armed · Vacation", "Activée (vacances)"),
-        T::PanelArmedCustom => ("Armed · Custom", "Activée (personnalisée)"),
-        T::PanelExitDelay => ("Exit delay…", "Délai de sortie…"),
-        T::PanelEntryDelay => ("Entry delay…", "Délai d'entrée…"),
-        T::PanelDisarming => ("Disarming…", "Désactivation…"),
-        T::PanelTriggered => ("Triggered!", "Déclenchée\u{A0}!"),
         T::Unavailable => ("Unavailable", "Indisponible"),
         T::ModeHome => ("Home", "Présent"),
         T::ModeAway => ("Away", "Absent"),
@@ -219,7 +189,7 @@ pub fn security_text(lang: Lang, k: SecurityText) -> &'static str {
         T::VerbRing => ("Ring", "Faire sonner"),
         T::VerbPlay => ("Play", "Jouer"),
         T::VerbTurnOn => ("Turn on", "Activer"),
-        T::Ringing => ("Ringing", "Sonne"),
+        T::Ringing => ("Ringing", "Sonnerie en cours"),
         T::JustNow => ("Just now", "À l'instant"),
         T::Resolved => ("Resolved", "Résolue"),
         T::All => ("All", "Tous"),
@@ -263,27 +233,26 @@ fn pick(lang: Lang, en: String, fr: String) -> String {
     }
 }
 
-/// The alarm panel's state line; the raw state is the hub's (`disarmed`, `armed_away`, …).
-pub fn panel_state(lang: Lang, state: Option<&str>, available: bool) -> &'static str {
-    use SecurityText as T;
-    let key = if !available {
-        T::Unavailable
-    } else {
-        match state {
-            Some("disarmed") => T::PanelDisarmed,
-            Some("armed_home") => T::PanelArmedHome,
-            Some("armed_away") => T::PanelArmedAway,
-            Some("armed_night") => T::PanelArmedNight,
-            Some("armed_vacation") => T::PanelArmedVacation,
-            Some("armed_custom_bypass") => T::PanelArmedCustom,
-            Some("arming") => T::PanelExitDelay,
-            Some("pending") => T::PanelEntryDelay,
-            Some("disarming") => T::PanelDisarming,
-            Some("triggered") => T::PanelTriggered,
-            _ => return "—",
-        }
+/// The alarm panel's state line, built on the shared alarm words (`states::state_word`), with
+/// the hero's own emphasis on the transitional states: "Exit delay…", "Triggered!".
+pub fn panel_state(lang: Lang, state: Option<&str>, available: bool) -> String {
+    if !available {
+        return security_text(lang, SecurityText::Unavailable).to_owned();
+    }
+    let Some(raw) = state.filter(|s| {
+        *s == "disarmed"
+            || s.starts_with("armed_")
+            || matches!(*s, "arming" | "pending" | "disarming" | "triggered")
+    }) else {
+        return "—".to_owned();
     };
-    security_text(lang, key)
+    let word = state_word(lang, StateCtx::Alarm, raw);
+    match (raw, lang) {
+        ("arming" | "pending" | "disarming", _) if !word.ends_with('…') => format!("{word}…"),
+        ("triggered", Lang::En) => format!("{word}!"),
+        ("triggered", Lang::Fr) => format!("{word}{NBSP}!"),
+        _ => word,
+    }
 }
 
 /// A security sensor's state word. Openings and motion follow the device class
@@ -401,11 +370,17 @@ pub fn age_resolved(lang: Lang, age: &str) -> String {
     format!("{age} · {}", security_text(lang, SecurityText::Resolved))
 }
 
-/// The heading of a day group: "Today", "Aujourd'hui", or the date.
-pub fn day_heading(lang: Lang, year: i32, month: u8, day: u8) -> String {
-    NaiveDate::from_ymd_opt(year, u32::from(month), u32::from(day))
-        .map(|d| format::date_short(lang, d))
-        .unwrap_or_default()
+/// The heading of a day group: the date, with the year when it is not `current_year`.
+pub fn day_heading(lang: Lang, year: i32, month: u8, day: u8, current_year: i32) -> String {
+    let Some(d) = NaiveDate::from_ymd_opt(year, u32::from(month), u32::from(day)) else {
+        return String::new();
+    };
+    let short = format::date_short(lang, d);
+    if year == current_year {
+        short
+    } else {
+        format!("{short} {year}")
+    }
 }
 
 /// The channel's name.
@@ -434,12 +409,12 @@ pub fn send_failed(lang: Lang, label: &str) -> String {
     )
 }
 
-/// "From frigate · Oct 19, 09:41" / "Depuis frigate · 19 oct. 2026, 09:41".
+/// "From frigate · Oct 19 2026, 09:41" / "Via frigate · 19 oct. 2026, 09:41".
 pub fn source_line(lang: Lang, source: &str, date: &str) -> String {
     pick(
         lang,
         format!("From {source} · {date}"),
-        format!("Depuis {source} · {date}"),
+        format!("Via {source} · {date}"),
     )
 }
 
@@ -458,16 +433,19 @@ mod tests {
 
     #[test]
     fn panel_states_in_both_languages() {
-        assert_eq!(panel_state(Lang::En, Some("disarmed"), true), "Disarmed");
-        assert_eq!(panel_state(Lang::Fr, Some("disarmed"), true), "Désactivée");
-        assert_eq!(
-            panel_state(Lang::Fr, Some("armed_away"), true),
-            "Activée (absent)"
-        );
-        assert_eq!(
-            panel_state(Lang::Fr, Some("triggered"), true),
-            "Déclenchée\u{A0}!"
-        );
+        let state = |lang, raw| panel_state(lang, Some(raw), true);
+        assert_eq!(state(Lang::En, "disarmed"), "Disarmed");
+        assert_eq!(state(Lang::Fr, "disarmed"), "Désactivée");
+        assert_eq!(state(Lang::En, "armed_away"), "Armed away");
+        assert_eq!(state(Lang::Fr, "armed_away"), "Activée (absent)");
+        assert_eq!(state(Lang::En, "arming"), "Exit delay…");
+        assert_eq!(state(Lang::Fr, "arming"), "Délai de sortie…");
+        assert_eq!(state(Lang::En, "pending"), "Entry delay…");
+        assert_eq!(state(Lang::Fr, "pending"), "Délai d'entrée…");
+        assert_eq!(state(Lang::En, "triggered"), "Triggered!");
+        assert_eq!(state(Lang::Fr, "triggered"), "Déclenchée\u{A0}!");
+        assert_eq!(state(Lang::En, "disarming"), "Disarming…");
+        assert_eq!(state(Lang::Fr, "disarming"), "Désactivation…");
         assert_eq!(
             panel_state(Lang::Fr, Some("disarmed"), false),
             "Indisponible"
@@ -544,8 +522,10 @@ mod tests {
 
     #[test]
     fn day_headings_use_the_language_date() {
-        assert_eq!(day_heading(Lang::En, 2026, 10, 5), "Oct 5");
-        assert_eq!(day_heading(Lang::Fr, 2026, 10, 5), "5 oct.");
+        assert_eq!(day_heading(Lang::En, 2026, 10, 5, 2026), "Oct 5");
+        assert_eq!(day_heading(Lang::Fr, 2026, 10, 5, 2026), "5 oct.");
+        assert_eq!(day_heading(Lang::En, 2025, 10, 5, 2026), "Oct 5 2025");
+        assert_eq!(day_heading(Lang::Fr, 2025, 10, 5, 2026), "5 oct. 2025");
     }
 
     #[test]
@@ -553,8 +533,8 @@ mod tests {
         assert_eq!(channel_name(Lang::Fr, AlertChannel::Camera), "Caméra");
         assert_eq!(channel_name(Lang::En, AlertChannel::Misc), "Misc");
         assert_eq!(
-            send_failed(Lang::Fr, "Désarmer"),
-            "Impossible d'envoyer Désarmer"
+            send_failed(Lang::Fr, "Désactiver"),
+            "Impossible d'envoyer Désactiver"
         );
     }
 }

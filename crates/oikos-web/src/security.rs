@@ -341,9 +341,9 @@ impl SensorRow {
     }
 }
 
-/// "Disarmed", "Armed · Away", "Exit delay…", "Entry delay…", "Triggered!", "Disarming…",
+/// "Disarmed", "Armed away", "Exit delay…", "Entry delay…", "Triggered!", "Disarming…",
 /// "Unavailable", "—" (French in French).
-pub fn panel_state_text(lang: Lang, state: Option<&str>, available: bool) -> &'static str {
+pub fn panel_state_text(lang: Lang, state: Option<&str>, available: bool) -> String {
     panel_state(lang, state, available)
 }
 
@@ -725,7 +725,7 @@ mod tests {
     fn panel_text_and_tone() {
         assert_eq!(
             panel_state_text(Lang::En, Some("armed_away"), true),
-            "Armed · Away"
+            "Armed away"
         );
         assert_eq!(panel_tone(Some("armed_away"), true), "armed");
         assert_eq!(

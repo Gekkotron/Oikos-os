@@ -153,7 +153,7 @@ async fn shows_panel_summary_and_tiles() {
     tick().await;
     let text = host.text_content().unwrap_or_default();
     for expected in [
-        "Armed · Away",
+        "Armed away",
         "1 open",
         "Garage",
         "Open",
@@ -414,9 +414,5 @@ async fn armed_panel_controls_follow_the_language_toggle() {
     );
     lang.set(Lang::En);
     tick().await;
-    present(
-        &host,
-        &["Armed · Away", "Disarm"],
-        &["Activée", "Désactiver"],
-    );
+    present(&host, &["Armed away", "Disarm"], &["Activée", "Désactiver"]);
 }

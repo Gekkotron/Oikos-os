@@ -253,7 +253,7 @@ mod tests {
         );
         assert_eq!(
             source_line(Lang::Fr, "frigate", 1_792_402_860),
-            "Depuis frigate · 19 oct. 2026, 09:41"
+            "Via frigate · 19 oct. 2026, 09:41"
         );
     }
 

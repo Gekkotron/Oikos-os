@@ -90,10 +90,10 @@ fn alarm(raw: &str) -> Option<Words> {
         "armed_night" => (None, "Activée (nuit)"),
         "armed_vacation" => (None, "Activée (vacances)"),
         "armed_custom_bypass" => (None, "Activée (personnalisée)"),
-        "arming" => (None, "Activation…"),
+        "arming" => (Some("Exit delay"), "Délai de sortie"),
         "disarming" => (None, "Désactivation…"),
-        "pending" => (None, "En attente"),
-        "triggered" => (None, "Déclenchée"),
+        "pending" => (Some("Entry delay"), "Délai d'entrée"),
+        "triggered" => (Some("Triggered"), "Déclenchée"),
         _ => return None,
     })
 }
@@ -139,7 +139,7 @@ fn presence(raw: &str) -> Option<Words> {
 
 /// A binary sensor's state, agreed with what it watches ("Porte ouverte", "Volet ouvert").
 fn binary(class: Option<&str>, on: bool) -> Words {
-    // English is the card's wording today (`cards::binary_sensor::binary_text`).
+    // English keeps the wording the binary-sensor card has always had.
     let (en_on, en_off, fr_on, fr_off) = match class.unwrap_or("") {
         "door" | "window" | "garage_door" => ("Open", "Closed", "Ouverte", "Fermée"),
         "opening" => ("Open", "Closed", "Ouvert", "Fermé"),
@@ -279,33 +279,24 @@ mod tests {
     }
 
     #[test]
-    fn binary_sensor_english_matches_the_card() {
-        use crate::cards::binary_sensor::binary_text;
-        for class in [
-            None,
-            Some("door"),
-            Some("window"),
-            Some("garage_door"),
-            Some("opening"),
-            Some("motion"),
-            Some("occupancy"),
-            Some("presence"),
-            Some("smoke"),
-            Some("gas"),
-            Some("carbon_monoxide"),
-            Some("moisture"),
-            Some("battery"),
-            Some("plug"),
-        ] {
-            for (raw, on) in [("on", true), ("off", false)] {
-                let ctx = StateCtx::BinarySensor(class.map(str::to_owned));
-                assert_eq!(
-                    state_word(Lang::En, ctx, raw),
-                    binary_text(Lang::En, class, on),
-                    "{class:?} {raw}"
-                );
-            }
-        }
+    fn binary_sensor_english_words() {
+        let en = |class: &str, raw| {
+            state_word(
+                Lang::En,
+                StateCtx::BinarySensor(Some(class.to_owned())),
+                raw,
+            )
+        };
+        assert_eq!(
+            (en("door", "on"), en("door", "off")),
+            ("Open".into(), "Closed".into())
+        );
+        assert_eq!(
+            (en("motion", "on"), en("motion", "off")),
+            ("Motion".into(), "Clear".into())
+        );
+        assert_eq!(en("moisture", "on"), "On");
+        assert_eq!(en("smoke", "on"), "Smoke");
     }
 
     #[test]
