@@ -754,7 +754,7 @@ struct TestChirp {
     siren: usize,
 }
 
-/// Sounds one siren's chirp (204); `422` when there is no such siren or it has no chirp.
+/// Sounds one siren's chirp (204); `422` when there is no such siren, it has no chirp or the alarm rings.
 async fn alarm_test_chirp(
     State(hub): HubState,
     body: Body<TestChirp>,
