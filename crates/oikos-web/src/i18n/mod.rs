@@ -14,6 +14,7 @@ pub mod format;
 pub mod groups;
 pub mod history;
 mod home;
+pub mod picker;
 pub mod security;
 pub mod settings;
 mod solar;

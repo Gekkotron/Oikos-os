@@ -17,6 +17,7 @@ use oikos_core::model::Kind;
 
 use crate::api::alarm as api;
 use crate::components::toast::Toasts;
+use crate::entity_picker::needs::{is_remote, is_siren, is_tracker};
 use crate::format::list_label;
 use crate::house::House;
 use crate::i18n::{AlarmText, Lang, alarm_text, use_lang};
@@ -41,30 +42,6 @@ pub fn sensor_candidates(
         .filter(|e| e.kind == Kind::BinarySensor && !listed.iter().any(|r| r.entity == e.id))
         .filter_map(|e| Some((e.id.clone(), sensor_kind_of(e.device_class.as_deref())?)))
         .collect()
-}
-
-/// Whether `e` can be a siren: a switch, or a generic entity with a `power` control.
-fn is_siren(e: &EntityView) -> bool {
-    e.kind == Kind::Switch
-        || (e.kind == Kind::Generic
-            && e.capabilities
-                .generic
-                .as_ref()
-                .is_some_and(|g| g.controls.iter().any(|c| c == "power")))
-}
-
-/// Whether `e` emits signals a remote can use: a device trigger or an event entity.
-fn is_remote(e: &EntityView) -> bool {
-    matches!(e.component.as_str(), "device_automation" | "event")
-}
-
-/// Whether `e` reports `home` / `not_home`.
-fn is_tracker(e: &EntityView) -> bool {
-    e.capabilities
-        .generic
-        .as_ref()
-        .and_then(|g| g.options.get("state"))
-        .is_some_and(|o| o.iter().any(|v| v == "home") && o.iter().any(|v| v == "not_home"))
 }
 
 fn mode_text(mode: ArmMode) -> AlarmText {

@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 use leptos::prelude::*;
 
 use oikos_api::{AreaView, EntityView};
-use oikos_core::model::Kind;
 
+use crate::entity_picker::needs::is_thermometer;
 use crate::format::{list_label, room_name};
 use crate::house::House;
 use crate::i18n::Lang;
@@ -22,11 +22,6 @@ fn options(house: House, lang: Lang) -> Vec<(String, String)> {
     });
     list.sort_by_key(|(_, label)| label.to_lowercase());
     list
-}
-
-/// Whether `entity` reads a temperature.
-fn is_thermometer(entity: &EntityView) -> bool {
-    entity.kind == Kind::Sensor && entity.device_class.as_deref() == Some("temperature")
 }
 
 /// Options as `(id, label)` under the name of their room, `None` outside any room.
