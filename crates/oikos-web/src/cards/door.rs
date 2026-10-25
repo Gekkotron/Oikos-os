@@ -8,6 +8,9 @@ use super::Sender;
 use super::light::read_on;
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::components::confirm::{ConfirmBar, Confirming};
+use crate::i18n::security::{SecurityText, action_question, security_text};
+use crate::i18n::states::on_off;
+use crate::i18n::use_lang;
 
 /// What a tap on "Open" does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -34,7 +37,11 @@ pub fn DoorCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let confirming = expect_context::<Confirming>();
     let on = read_on(&entity.state) == Some(true);
-    let question = format!("Open {}?", entity.name);
+    let lang = use_lang();
+    let question = {
+        let name = entity.name.clone();
+        move || action_question(lang(), SecurityText::VerbOpen, &name)
+    };
     let send = {
         let id = entity.id.clone();
         Callback::new(move |()| {
@@ -62,16 +69,21 @@ pub fn DoorCard(entity: EntityView) -> impl IntoView {
                     view! {
                         <div class="card__controls">
                             <button type="button" class="btn" on:click=move |_| on_open.run(())>
-                                "Open"
+                                {move || security_text(lang(), SecurityText::VerbOpen)}
                             </button>
                         </div>
-                        {on.then(|| view! { <span class="card__note">"On"</span> })}
+                        {on
+                            .then(|| {
+                                view! {
+                                    <span class="card__note">{move || on_off(lang(), false, true)}</span>
+                                }
+                            })}
                     }
                 }
             >
                 <ConfirmBar
-                    question=question.clone()
-                    yes="Open"
+                    question=question()
+                    yes=security_text(lang(), SecurityText::VerbOpen)
                     on_yes=send
                     on_cancel=Callback::new(move |()| confirming.clear())
                 />

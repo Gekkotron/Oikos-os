@@ -11,6 +11,9 @@ use crate::energy_day::{
     GridDay, aria_summary, day_label, has_data, scale, shift_day, shown_day, tick_hours, tooltip,
     totals_text, x_of,
 };
+use crate::i18n::energy::{EnergyText, energy_text as word, history_error};
+use crate::i18n::format::time;
+use crate::i18n::{Key, Lang, text, use_lang};
 
 /// Drawing width on a wide screen, and on a phone, where a narrower drawing keeps the chart
 /// tall and its labels legible.
@@ -72,7 +75,12 @@ fn load(day: RwSignal<Option<String>>, data: RwSignal<Loaded>, known: RwSignal<K
 fn load(_day: RwSignal<Option<String>>, _data: RwSignal<Loaded>, _known: RwSignal<Known>) {}
 
 /// The bars, gridlines, bands and labels of one day, as SVG children.
-fn chart(day: &GridDay, hover: RwSignal<Option<usize>>, view_w: f64) -> impl IntoView + use<> {
+fn chart(
+    lang: Lang,
+    day: &GridDay,
+    hover: RwSignal<Option<usize>>,
+    view_w: f64,
+) -> impl IntoView + use<> {
     let s = scale(day);
     let plot_w = view_w - LEFT - RIGHT;
     let plot_h = VIEW_H - TOP - BOTTOM;
@@ -127,7 +135,7 @@ fn chart(day: &GridDay, hover: RwSignal<Option<usize>>, view_w: f64) -> impl Int
             let off_h = slot.off_peak * per_kwh;
             let peak_h = slot.peak * per_kwh;
             let exp_h = slot.export * per_kwh;
-            let label = tooltip(slot, tariffs);
+            let label = tooltip(lang, slot, tariffs);
             let title = label.clone();
             let (off_class, peak_class) = if tariffs {
                 ("energy-day__bar energy-day__bar--off-peak", "energy-day__bar energy-day__bar--peak")
@@ -172,15 +180,14 @@ fn chart(day: &GridDay, hover: RwSignal<Option<usize>>, view_w: f64) -> impl Int
         .map(|i| {
             let x = LEFT + i as f64 * slot_w;
             let text = local_at(i);
-            let hour = text.split(':').next().unwrap_or("").trim_start_matches('0').to_string();
-            let hour = if hour.is_empty() { "0".to_string() } else { hour };
+            let shown = chrono::NaiveTime::parse_from_str(&text, "%H:%M").map_or(text, time);
             let class = if narrow.contains(&i) {
                 "energy-day__axis"
             } else {
                 "energy-day__axis energy-day__axis--wide"
             };
             view! {
-                <text class=class x=x y=VIEW_H - 6.0 text-anchor="middle">{format!("{hour}h")}</text>
+                <text class=class x=x y=VIEW_H - 6.0 text-anchor="middle">{shown}</text>
             }
         })
         .collect_view();
@@ -206,6 +213,7 @@ pub fn GridDayCard() -> impl IntoView {
     let known: RwSignal<Known> = RwSignal::new(None);
     let hover: RwSignal<Option<usize>> = RwSignal::new(None);
     let view_w = view_width();
+    let lang = use_lang();
 
     Effect::new(move |_| {
         day.track();
@@ -234,8 +242,8 @@ pub fn GridDayCard() -> impl IntoView {
     };
     let label = move || {
         shown_date()
-            .map(|(date, today, _)| day_label(&date, &today))
-            .unwrap_or_else(|| "Today".to_string())
+            .map(|(date, today, _)| day_label(lang(), &date, &today))
+            .unwrap_or_else(|| word(lang(), EnergyText::Today).to_string())
     };
     let step = move |by: i64| {
         shown_date().and_then(|(date, today, first)| {
@@ -252,31 +260,36 @@ pub fn GridDayCard() -> impl IntoView {
         None => view! { <div class="energy-day__skeleton" aria-busy="true"></div> }.into_any(),
         Some(Err(HistoryApiError::Unavailable)) => view! {
             <p class="energy-day__empty">
-                "History is off or unreachable. "
-                <a href="https://gekkotron.github.io/Oikos-os/docs/users/history">"Set it up"</a>
+                {word(lang(), EnergyText::HistoryOff)} " "
+                <a href="https://gekkotron.github.io/Oikos-os/docs/users/history">
+                    {word(lang(), EnergyText::SetItUp)}
+                </a>
             </p>
         }
         .into_any(),
         Some(Err(HistoryApiError::NoGridMeter)) => view! {
             <p class="energy-day__empty">
-                "Give your grid meter the Grid role on its device page. "
-                <a href="/devices">"Devices"</a>
+                {word(lang(), EnergyText::GiveGridRole)} " "
+                <a href="/devices">{text(lang(), Key::Devices)}</a>
             </p>
         }
         .into_any(),
-        Some(Err(err)) => view! { <p class="energy-day__empty">{err.to_string()}</p> }.into_any(),
+        Some(Err(err)) => {
+            view! { <p class="energy-day__empty">{history_error(lang(), &err)}</p> }.into_any()
+        }
         Some(Ok(d)) if !has_data(&d) => {
-            view! { <p class="energy-day__empty">"No data for this day"</p> }.into_any()
+            view! { <p class="energy-day__empty">{word(lang(), EnergyText::NoData)}</p> }.into_any()
         }
         Some(Ok(d)) => {
-            let (bought, split, sold) = totals_text(&d);
-            let summary = aria_summary(&d);
+            let lang_now = lang();
+            let (bought, split, sold) = totals_text(lang_now, &d);
+            let summary = aria_summary(lang_now, &d);
             let detail = move || {
                 hover.get().and_then(|i| {
                     data.with(|r| {
                         r.as_ref()
                             .and_then(|r| r.as_ref().ok())
-                            .and_then(|d| d.slots.get(i).map(|s| tooltip(s, d.tariffs)))
+                            .and_then(|d| d.slots.get(i).map(|s| tooltip(lang(), s, d.tariffs)))
                     })
                 })
             };
@@ -297,7 +310,7 @@ pub fn GridDayCard() -> impl IntoView {
                     aria-label=summary
                     on:mouseleave=move |_| hover.set(None)
                 >
-                    {chart(&d, hover, view_w)}
+                    {chart(lang_now, &d, hover, view_w)}
                 </svg>
                 <p class="energy-day__detail" aria-live="polite">
                     {move || detail().unwrap_or_default()}
@@ -305,18 +318,18 @@ pub fn GridDayCard() -> impl IntoView {
                 <ul class="energy-day__legend">
                     {if tariffs {
                         view! {
-                            <li><span class="energy-day__key energy-day__key--off-peak"></span>"Off-peak"</li>
-                            <li><span class="energy-day__key energy-day__key--peak"></span>"Peak"</li>
+                            <li><span class="energy-day__key energy-day__key--off-peak"></span>{word(lang_now, EnergyText::OffPeak)}</li>
+                            <li><span class="energy-day__key energy-day__key--peak"></span>{word(lang_now, EnergyText::Peak)}</li>
                         }
                         .into_any()
                     } else {
                         view! {
-                            <li><span class="energy-day__key energy-day__key--bought"></span>"Bought"</li>
+                            <li><span class="energy-day__key energy-day__key--bought"></span>{word(lang_now, EnergyText::Bought)}</li>
                         }
                         .into_any()
                     }}
                     {has_export.then(|| view! {
-                        <li><span class="energy-day__key energy-day__key--export"></span>"Solar export"</li>
+                        <li><span class="energy-day__key energy-day__key--export"></span>{word(lang_now, EnergyText::SolarExport)}</li>
                     })}
                 </ul>
             }
@@ -325,12 +338,15 @@ pub fn GridDayCard() -> impl IntoView {
     };
 
     view! {
-        <section class="card energy-day" aria-label="Grid exchange by half hour">
+        <section
+            class="card energy-day"
+            aria-label=move || word(lang(), EnergyText::DayCard)
+        >
             <header class="energy-day__header">
                 <button
                     type="button"
                     class="btn btn--compact energy-day__nav"
-                    aria-label="Previous day"
+                    aria-label=move || word(lang(), EnergyText::PrevDay)
                     disabled=move || step(-1).is_none()
                     on:click=move |_| go(-1)
                 >
@@ -340,7 +356,7 @@ pub fn GridDayCard() -> impl IntoView {
                 <button
                     type="button"
                     class="btn btn--compact energy-day__nav"
-                    aria-label="Next day"
+                    aria-label=move || word(lang(), EnergyText::NextDay)
                     disabled=move || step(1).is_none()
                     on:click=move |_| go(1)
                 >
