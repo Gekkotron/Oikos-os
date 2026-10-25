@@ -104,6 +104,10 @@ impl Hub {
         if !self.alarm_settings().enabled {
             return refuse("alarm disabled");
         }
+        // Until the boot settle is over the runtime may not be loaded and the clock not anchored.
+        if !self.alarm.engine_started.load(Ordering::SeqCst) {
+            return refuse("alarm starting");
+        }
         let ev = match cmd {
             Command::Arm { mode, .. } => {
                 let mode = match mode {
@@ -238,15 +242,18 @@ impl Hub {
                     // Events were lost, perhaps the link drop and its return among them: what
                     // is known may be older than the registry. Forget it like a reconnect
                     // does, and seed again once things have settled.
+                    // While the link is down the epoch is left alone, so the `Online` still to
+                    // come is seen as a reconnect and schedules the resume.
                     Err(RecvError::Lagged(_)) => {
                         known = Known::default();
                         synced = false;
-                        let reconnected = self.link_epoch() != resumed_epoch;
-                        resumed_epoch = self.link_epoch();
-                        resume_at = matches!(*link.borrow(), ConnectionStatus::Online).then(|| {
-                            let resume = reconnected || resume_at.is_some_and(|(_, r)| r);
-                            (tokio::time::Instant::now() + ALARM_BOOT_SETTLE, resume)
-                        });
+                        let pending = resume_at.take().is_some_and(|(_, r)| r);
+                        if matches!(*link.borrow(), ConnectionStatus::Online) {
+                            let reconnected = self.link_epoch() != resumed_epoch;
+                            resumed_epoch = self.link_epoch();
+                            let at = tokio::time::Instant::now() + ALARM_BOOT_SETTLE;
+                            resume_at = Some((at, reconnected || pending));
+                        }
                     }
                     // A newly watched entity has no known value yet: its first change would be
                     // taken for a first sighting. (Not while a reconnect is settling: the
@@ -276,6 +283,9 @@ impl Hub {
                     self.alarm_seed_all(&mut known);
                     if resume {
                         self.alarm_resume().await;
+                    } else {
+                        // A lag alone may have swallowed a tracker change.
+                        self.alarm_reconcile_trackers().await;
                     }
                     synced = true;
                 }
