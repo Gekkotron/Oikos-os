@@ -21,7 +21,7 @@ use oikos_api::{
     SchedulePreview, Snapshot, VirtualSpec, WeatherView,
 };
 use oikos_climate::doc::{HouseSettings, Rules, ZoneSettings};
-use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus, OverrideRequest};
+use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus, OverrideRequest, RoomEcoRequest};
 use oikos_core::flow::{Flow, Schedule};
 use oikos_core::model::{AreasDocument, Command};
 use serde::Serialize;
@@ -78,6 +78,10 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route(
             "/climate/zones/{id}/override",
             post(set_climate_override).delete(clear_climate_override),
+        )
+        .route(
+            "/climate/zones/{id}/eco",
+            put(set_climate_eco).delete(clear_climate_eco),
         )
         .route(
             "/climate/zones/{id}/proposal/approve",
@@ -813,6 +817,29 @@ async fn clear_climate_override(
     Path(id): Path<String>,
 ) -> Result<StatusCode, HttpError> {
     hub.clear_climate_override(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Holds the zone in eco until `until` (Unix seconds, 204); a past `until` is `422`.
+async fn set_climate_eco(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    body: Body<RoomEcoRequest>,
+) -> Result<StatusCode, HttpError> {
+    let Json(request) = body?;
+    let eco = request
+        .into_room_eco(crate::clock::now())
+        .map_err(HubError::Rejected)?;
+    hub.set_climate_eco(&id, eco).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Ends the zone's eco (204).
+async fn clear_climate_eco(
+    State(hub): HubState,
+    Path(id): Path<String>,
+) -> Result<StatusCode, HttpError> {
+    hub.clear_climate_eco(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

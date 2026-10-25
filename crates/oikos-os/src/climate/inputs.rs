@@ -292,13 +292,14 @@ pub(crate) fn outdoor_reading(hub: &Hub, house: &HouseSettings, now: u64) -> Opt
 /// Everything `decide` needs for `zone`, or `None` while the engine is off.
 pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<OwnedZoneInputs> {
     hub.climate.as_ref()?;
-    let (house, settings, overrides) = {
+    let (house, settings, overrides, room_eco) = {
         let store = hub.climate_store();
         let docs = store.zones.get(zone);
         (
             store.house.clone(),
             docs.map(|d| d.settings.clone()).unwrap_or_default(),
             docs.map(|d| d.overrides.clone()).unwrap_or_default(),
+            docs.and_then(|d| d.eco.clone()),
         )
     };
     let entity_ids = zone_entity_ids(hub, zone, &settings);
@@ -371,6 +372,6 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         now,
         safety_memory,
         previous_cause: None,
-        room_eco: None,
+        room_eco,
     })
 }

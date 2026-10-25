@@ -1377,6 +1377,83 @@ mod engine {
         assert_eq!(rig.zone().decision.unwrap().source, Source::Away);
     }
 
+    fn eco_for(rig: &Rig, secs: u64) -> oikos_climate::doc::RoomEco {
+        oikos_climate::doc::RoomEco {
+            until: rig.t0 + secs,
+            set_at: rig.t0,
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn room_eco_lowers_then_ends() {
+        let mut rig = Rig::new(None).await;
+        rig.settings(heat_rules(19.0));
+        assert_eq!(temperature_commands(&rig.pass(0).await), vec![19.0]);
+        let eco = eco_for(&rig, 600);
+        rig.hub
+            .set_climate_eco("living", eco.clone())
+            .await
+            .unwrap();
+        drain(&mut rig.rx);
+        assert_eq!(rig.zone().eco, Some(eco));
+        assert_eq!(temperature_commands(&rig.pass(60).await), vec![16.0]);
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Eco);
+
+        // Past its end: back on the schedule, and the document is gone.
+        let out = rig.pass(700).await;
+        assert_eq!(temperature_commands(&out), vec![19.0]);
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Schedule);
+        assert_eq!(rig.zone().eco, None, "expired_room_eco_is_deleted");
+        assert!(
+            out.iter()
+                .any(|p| p.topic == "oikos/climate/zone/living/eco"
+                    && p.payload.is_empty()
+                    && p.retain),
+            "{out:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn room_eco_refused_on_off_zone_and_in_the_past() {
+        let mut rig = Rig::new(None).await;
+        rig.settings(heat_rules(19.0));
+        let past = oikos_climate::doc::RoomEco {
+            until: oikos_os::clock::now().saturating_sub(10),
+            set_at: 0,
+        };
+        assert!(matches!(
+            rig.hub.set_climate_eco("living", past).await,
+            Err(HubError::Rejected(_))
+        ));
+        rig.settings(ZoneSettings {
+            state: ZoneState::Off,
+            ..heat_rules(19.0)
+        });
+        let eco = eco_for(&rig, 3600);
+        assert!(matches!(
+            rig.hub.set_climate_eco("living", eco.clone()).await,
+            Err(HubError::Rejected(_))
+        ));
+        assert!(matches!(
+            rig.hub.set_climate_eco("nowhere", eco).await,
+            Err(HubError::UnknownArea(_))
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn clear_room_eco_returns_to_schedule() {
+        let mut rig = Rig::new(None).await;
+        rig.settings(heat_rules(19.0));
+        rig.hub
+            .set_climate_eco("living", eco_for(&rig, 3600))
+            .await
+            .unwrap();
+        assert_eq!(temperature_commands(&rig.pass(0).await), vec![16.0]);
+        rig.hub.clear_climate_eco("living").await.unwrap();
+        assert_eq!(rig.zone().eco, None);
+        assert_eq!(temperature_commands(&rig.pass(60).await), vec![19.0]);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn the_loop_waits_for_the_broker_to_settle_then_commands() {
         let mut rig = Rig::new(None).await;

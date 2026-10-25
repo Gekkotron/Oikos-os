@@ -1,13 +1,13 @@
-//! The nine climate tools, in a third router combined in [`OikosMcp::new`]. While
+//! The eleven climate tools, in a third router combined in [`OikosMcp::new`]. While
 //! `[climate] enabled` is false every one answers `climate disabled` in-band.
 
-use oikos_climate::view::{ClimateView, LearnStatus};
+use oikos_climate::view::{ClimateView, LearnStatus, RoomEcoRequest};
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::{tool, tool_router};
 
 use super::params::{
     ApproveClimateProposalParams, ClimateAck, ClimateZoneDetail, ClimateZoneParams,
-    SetClimateOverrideParams, SetClimateSettingsParams, SetClimateZoneParams,
+    SetClimateEcoParams, SetClimateOverrideParams, SetClimateSettingsParams, SetClimateZoneParams,
 };
 use super::tools::{ToolResult, log_write};
 use super::{OikosMcp, ToolError};
@@ -122,6 +122,34 @@ impl OikosMcp {
     ) -> ToolResult<ClimateAck> {
         log_write("clear_climate_override", &params);
         self.hub.clear_climate_override(&params.zone).await?;
+        Ok(Json(ClimateAck { zone: params.zone }))
+    }
+
+    /// Puts a zone in eco until a Unix time: it holds the house eco setpoint (never above its
+    /// schedule) and the eco actions, then goes back to its schedule by itself.
+    #[tool(name = "set_climate_eco")]
+    async fn set_climate_eco(
+        &self,
+        Parameters(params): Parameters<SetClimateEcoParams>,
+    ) -> ToolResult<ClimateAck> {
+        log_write("set_climate_eco", &params);
+        let eco = RoomEcoRequest {
+            until: params.until,
+        }
+        .into_room_eco(clock::now())
+        .map_err(|reason| ToolError(format!("rejected: {reason}")))?;
+        self.hub.set_climate_eco(&params.zone, eco).await?;
+        Ok(Json(ClimateAck { zone: params.zone }))
+    }
+
+    /// Ends a zone's eco, so its schedule applies again.
+    #[tool(name = "clear_climate_eco", annotations(idempotent_hint = true))]
+    async fn clear_climate_eco(
+        &self,
+        Parameters(params): Parameters<ClimateZoneParams>,
+    ) -> ToolResult<ClimateAck> {
+        log_write("clear_climate_eco", &params);
+        self.hub.clear_climate_eco(&params.zone).await?;
         Ok(Json(ClimateAck { zone: params.zone }))
     }
 

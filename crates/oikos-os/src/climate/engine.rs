@@ -10,7 +10,8 @@ use chrono_tz::Tz;
 use oikos_api::{ConnectionStatus, WsEvent};
 use oikos_climate::decide::{Device, SafetyMemory, decide};
 use oikos_climate::doc::{
-    Decision, DeviceTarget, Mode, ModeRules, Override, OverrideOrigin, Setpoint, Source, ZoneState,
+    Decision, DeviceTarget, Mode, ModeRules, Override, OverrideOrigin, RoomEco, Setpoint, Source,
+    ZoneState,
 };
 use oikos_climate::ledger::{Ledger, Observed, hold_until};
 use oikos_climate::topics::{self, ZoneDoc};
@@ -490,8 +491,8 @@ impl Hub {
         self.publish_decision(zone, decision, now);
     }
 
-    /// Forgets entities that left the registry, and drops the zone's expired overrides and the
-    /// ones for entities it no longer holds.
+    /// Forgets entities that left the registry, drops the zone's expired overrides and the ones
+    /// for entities it no longer holds, and deletes an eco that has ended.
     fn tidy_zone(&self, inp: &mut OwnedZoneInputs) {
         let previous: Vec<String> = self
             .last_decision(&inp.zone)
@@ -515,6 +516,10 @@ impl Hub {
             alerts::resolve(self, &alerts::command_id(id));
         }
         let now = inp.now;
+        if inp.room_eco.as_ref().is_some_and(|eco| eco.until <= now) {
+            self.write_zone_doc(&inp.zone, ZoneDoc::Eco, None::<&RoomEco>);
+            inp.room_eco = None;
+        }
         let ids = inp.entity_ids.clone();
         inp.overrides = self.update_overrides(&inp.zone, |list| {
             list.retain(|o| {

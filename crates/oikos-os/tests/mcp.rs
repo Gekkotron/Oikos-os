@@ -69,6 +69,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "reject_climate_proposal",
     "set_climate_override",
     "clear_climate_override",
+    "set_climate_eco",
+    "clear_climate_eco",
     "learn_climate_zone",
     "get_weather",
     "get_solar",
@@ -1343,6 +1345,38 @@ async fn climate_status_enabled_returns_zones() {
         "clear_climate_override",
         &call(&client, "clear_climate_override", json!({"zone": "living"})).await,
     );
+    json_of(
+        "set_climate_eco",
+        &call(
+            &client,
+            "set_climate_eco",
+            json!({"zone": "living", "until": 4_000_000_000u64}),
+        )
+        .await,
+    );
+    let eco_of = |server: &Server| {
+        server
+            .hub
+            .climate_view()
+            .unwrap()
+            .zones
+            .into_iter()
+            .find(|z| z.zone == "living")
+            .and_then(|z| z.eco)
+    };
+    assert_eq!(eco_of(&server).map(|e| e.until), Some(4_000_000_000));
+    let past = call(
+        &client,
+        "set_climate_eco",
+        json!({"zone": "living", "until": 1}),
+    )
+    .await;
+    assert_eq!(past.is_error, Some(true));
+    json_of(
+        "clear_climate_eco",
+        &call(&client, "clear_climate_eco", json!({"zone": "living"})).await,
+    );
+    assert_eq!(eco_of(&server), None);
     let nothing = call(
         &client,
         "approve_climate_proposal",
