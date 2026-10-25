@@ -1,13 +1,4 @@
 # Ratchet for tests/bare_text.rs: delete a file line once that file is translated.
-file: src/api/climate.rs  # not translated yet
-file: src/api/core.rs  # not translated yet
-file: src/api/history.rs  # not translated yet
-file: src/api/home.rs  # not translated yet
-file: src/app.rs  # not translated yet
-file: src/commands.rs  # not translated yet
-file: src/components/toast.rs  # not translated yet
-file: src/nav.rs  # not translated yet
-file: src/ws.rs  # not translated yet
 text: FR  # language code on the toggle, the same in both languages
 text: EN  # language code on the toggle, the same in both languages
 text: Escape  # KeyboardEvent.key value, not shown
