@@ -4,6 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use leptos::prelude::*;
 
+use crate::i18n::errors::{ErrorText, error_text};
+use crate::i18n::use_lang;
+
 /// How long a toast stays on screen.
 #[cfg(target_arch = "wasm32")]
 const TOAST_MS: u32 = 4_000;
@@ -55,6 +58,7 @@ impl Default for Toasts {
 #[component]
 pub fn ToastQueue() -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let lang = use_lang();
     view! {
         <div class="toasts" role="status" aria-live="polite">
             <For
@@ -66,7 +70,7 @@ pub fn ToastQueue() -> impl IntoView {
                         <button
                             type="button"
                             class="toast"
-                            title="Dismiss"
+                            title=move || error_text(lang(), ErrorText::Dismiss)
                             on:click=move |_| toasts.dismiss(id)
                         >
                             {crate::format::wrap_id(&t.text)}

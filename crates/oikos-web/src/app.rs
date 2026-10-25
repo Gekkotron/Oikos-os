@@ -15,6 +15,7 @@ use crate::components::confirm::Confirming;
 use crate::components::now::install_now;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
+use crate::i18n::errors::{dashboards_load_failed, named_failure};
 use crate::i18n::install_lang;
 use crate::nav::{TrackBackStack, install_nav};
 use crate::screens::alert_detail::AlertDetailScreen;
@@ -75,6 +76,8 @@ pub(crate) fn any_alarm_armed<'a>(
 pub fn App() -> impl IntoView {
     let house = House::new();
     provide_context(house);
+    let lang = install_lang();
+    provide_context(lang);
     let toasts = Toasts::new();
     provide_context(toasts);
     provide_context(Pending::new());
@@ -84,7 +87,7 @@ pub fn App() -> impl IntoView {
     leptos::task::spawn_local(async move {
         match crate::api::fetch_dashboards().await {
             Ok(list) => house.dashboards.set(list),
-            Err(err) => toasts.push(format!("Could not load dashboards: {}", err.error)),
+            Err(err) => toasts.push(dashboards_load_failed(lang.get_untracked(), &err.error)),
         }
     });
     install_nav();
@@ -98,7 +101,7 @@ pub fn App() -> impl IntoView {
                 .entities
                 .with_untracked(|m| m.get(&id).map(|e| e.name.clone()));
             toasts.push(match name {
-                Some(name) => format!("{name}: {reason}"),
+                Some(name) => named_failure(lang.get_untracked(), &name, &reason),
                 None => reason,
             });
             house.command_failed.set(None);
@@ -114,7 +117,7 @@ pub fn App() -> impl IntoView {
                 Ok(_) => {
                     climate_on.try_set(true);
                 }
-                Err(e) if e.error == crate::api::climate::CLIMATE_DISABLED => {
+                Err(e) if crate::api::climate::is_climate_disabled(&e) => {
                     climate_on.try_set(false);
                 }
                 Err(_) => {}
@@ -123,7 +126,6 @@ pub fn App() -> impl IntoView {
     });
     let theme = install_theme();
     provide_context(theme);
-    provide_context(install_lang());
     let alarm_armed = Memo::new(move |_| house.entities.with(|m| any_alarm_armed(m.values())));
     let solar_active = Memo::new(move |_| {
         house

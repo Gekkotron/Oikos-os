@@ -2,6 +2,8 @@
 //! whose variant pins the hub's status for the UI to render.
 
 use super::encode_id;
+use crate::i18n::current_lang;
+use crate::i18n::errors::{WebError, web_error_text};
 use gloo_net::http::Request;
 use oikos_api::{
     EnergyKind, GridDay, HistoryDaily, HistoryRange, HistorySeries, HistoryToday, LastChange,
@@ -98,9 +100,10 @@ pub(crate) fn classify_status(status: u16, body: &str) -> HistoryApiError {
         }
         404 => HistoryApiError::NotRecorded,
         503 => HistoryApiError::Unavailable,
-        _ => {
-            HistoryApiError::Other(error_message(body).unwrap_or_else(|| format!("HTTP {status}")))
-        }
+        _ => HistoryApiError::Other(
+            error_message(body)
+                .unwrap_or_else(|| web_error_text(current_lang(), &WebError::Http(status))),
+        ),
     }
 }
 
@@ -114,19 +117,23 @@ fn error_message(body: &str) -> Option<String> {
 }
 
 async fn fetch<T: serde::de::DeserializeOwned>(url: &str) -> Result<T, HistoryApiError> {
-    let response = Request::get(url)
-        .send()
-        .await
-        .map_err(|e| HistoryApiError::Other(format!("network error: {e}")))?;
+    let response = Request::get(url).send().await.map_err(|e| {
+        HistoryApiError::Other(web_error_text(
+            current_lang(),
+            &WebError::Network(e.to_string()),
+        ))
+    })?;
     let status = response.status();
     if status >= 400 {
         let body = response.text().await.unwrap_or_default();
         return Err(classify_status(status, &body));
     }
-    response
-        .json::<T>()
-        .await
-        .map_err(|e| HistoryApiError::Other(format!("decode error: {e}")))
+    response.json::<T>().await.map_err(|e| {
+        HistoryApiError::Other(web_error_text(
+            current_lang(),
+            &WebError::Decode(e.to_string()),
+        ))
+    })
 }
 
 pub async fn fetch_series(

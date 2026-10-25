@@ -9,6 +9,8 @@ use oikos_core::model::{Command, EntityState};
 use crate::api::send_command;
 use crate::components::toast::Toasts;
 use crate::house::House;
+use crate::i18n::current_lang;
+use crate::i18n::errors::{ErrorText, error_text, named_failure};
 
 /// The ids of the entities with a command in flight, provided as a context by the shell. Cards
 /// derive their `pending` flag from it.
@@ -85,7 +87,9 @@ pub fn fire_command(
                 }
                 return;
             }
-            Ok(reply) => reply.reason.unwrap_or_else(|| "Command refused".into()),
+            Ok(reply) => reply
+                .reason
+                .unwrap_or_else(|| error_text(current_lang(), ErrorText::CommandRefused).into()),
             Err(e) => e.error,
         };
         // Only undo our own guess: a state that moved on since belongs to someone else.
@@ -101,7 +105,7 @@ pub fn fire_command(
             .entities
             .with_untracked(|m| m.get(&id).map(|e| e.name.clone()));
         toasts.push(match name {
-            Some(name) => format!("{name}: {failure}"),
+            Some(name) => named_failure(current_lang(), &name, &failure),
             None => failure,
         });
     });
