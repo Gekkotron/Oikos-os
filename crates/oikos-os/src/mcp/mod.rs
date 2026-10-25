@@ -1,9 +1,10 @@
-//! The MCP server: forty-three tools and the `oikos://snapshot` resource over the hub, served at
+//! The MCP server: forty-five tools and the `oikos://snapshot` resource over the hub, served at
 //! `/mcp` over streamable HTTP with stateful sessions, and the stdio proxy in front of it.
 //!
 //! A failed tool call is answered in-band (`isError: true` with the reason as text) rather
 //! than as a JSON-RPC error, so the assistant reads why and retries with better arguments.
 
+mod alarm_tools;
 mod ambiance_tools;
 mod climate_tools;
 mod flow_tools;
@@ -46,7 +47,8 @@ impl OikosMcp {
             tool_router: Self::tool_router()
                 + Self::flow_tool_router()
                 + Self::ambiance_tool_router()
-                + Self::climate_tool_router(),
+                + Self::climate_tool_router()
+                + Self::alarm_tool_router(),
         }
     }
 }
@@ -173,7 +175,10 @@ next days, the request budget) when `[solcast] enabled`; its `solar_…` entitie
 numbers. `get_home_settings` and `set_home_settings` read and replace the whole \
 home settings document: `eco_setpoint` (°C), `mode_entity` (a select), `indoor_entity` (a \
 temperature sensor), `cold_below` and `hot_above` (°C, the web reads cold below 15 and warm \
-above 26 when unset).",
+above 26 when unset). The native alarm is optional (`enabled` in its settings): \
+`alarm_status` reads the settings and the panel state, `set_alarm_settings` replaces the \
+whole document (read it first). Arm and disarm with `send_command` on `oikos_alarm_house`, \
+`{{\"type\":\"arm\",\"mode\":\"away\"}}` or `{{\"type\":\"disarm\"}}`; there are no codes.",
         fields = UiOverride::FIELDS.join(", ")
     )
 }

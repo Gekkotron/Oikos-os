@@ -2231,6 +2231,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oikos-alarm"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "oikos-api"
 version = "0.1.0"
 dependencies = [
@@ -2287,6 +2296,7 @@ dependencies = [
  "futures-util",
  "iana-time-zone",
  "mime_guess",
+ "oikos-alarm",
  "oikos-api",
  "oikos-climate",
  "oikos-core",
@@ -2366,6 +2376,7 @@ dependencies = [
  "js-sys",
  "leptos",
  "leptos_router",
+ "oikos-alarm",
  "oikos-api",
  "oikos-climate",
  "oikos-core",

@@ -14,6 +14,9 @@ use crate::components::toast::Toasts;
 use crate::flow_edit::fold_accents;
 use crate::format::list_label;
 use crate::house::House;
+use crate::i18n::devices::{DeviceText, device_text};
+use crate::i18n::groups::{GroupText, group_text, group_text_signal, kind_name, step_of};
+use crate::i18n::{Key, Lang, text, use_lang};
 use crate::icons::{CHECK, MAGNIFIER};
 use crate::nav::{BackLink, use_back};
 
@@ -30,11 +33,6 @@ pub const GROUP_KINDS: &[Kind] = &[
     Kind::WaterHeater,
 ];
 
-/// "water heater" for `Kind::WaterHeater`.
-pub fn kind_word(kind: Kind) -> String {
-    kind.component().replace('_', " ")
-}
-
 /// A group id from its name; see [`crate::ambiances::slug_id`] for the rules.
 pub fn slug_group_id(name: &str, taken: &BTreeSet<String>) -> String {
     crate::ambiances::slug_id(name, taken, "group")
@@ -44,6 +42,7 @@ pub fn slug_group_id(name: &str, taken: &BTreeSet<String>) -> String {
 /// room in the hub's room order, unknown rooms last. Entities that are not shown by default, or
 /// are groups themselves, appear only when already `selected`.
 pub fn members_by_room(
+    lang: Lang,
     entities: &BTreeMap<String, EntityView>,
     areas: &[AreaView],
     kind: Kind,
@@ -56,16 +55,17 @@ pub fn members_by_room(
         .filter(|e| e.kind == kind)
         .filter_map(|e| {
             let shown = (e.is_primary() && !e.id.starts_with("group_")) || selected.contains(&e.id);
-            let label = list_label(crate::i18n::Lang::En, e);
+            let label = list_label(lang, e);
             (shown && (needle.is_empty() || fold_accents(&label).contains(&needle)))
                 .then(|| (e.id.clone(), label, e.area.clone()))
         });
-    group_by_room(items, areas)
+    group_by_room(lang, items, areas)
 }
 
 /// `(id, label, area id)` items grouped by room in the hub's room order, each room sorted by
-/// label (accents folded), unknown rooms last and unassigned ones under "Unassigned".
+/// label (accents folded), unknown rooms last and unassigned ones under "No room".
 pub fn group_by_room(
+    lang: Lang,
     items: impl IntoIterator<Item = (String, String, String)>,
     areas: &[AreaView],
 ) -> Vec<(String, Vec<(String, String)>)> {
@@ -83,7 +83,7 @@ pub fn group_by_room(
     for (area, mut list) in by_area {
         list.sort_by_key(|(_, label)| fold_accents(label));
         let name = if area.is_empty() {
-            "Unassigned".to_owned()
+            device_text(lang, DeviceText::NoRoom).to_owned()
         } else {
             area
         };
@@ -96,6 +96,7 @@ pub fn group_by_room(
 pub fn GroupWizardScreen() -> impl IntoView {
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
+    let lang = use_lang();
     let navigate = use_navigate();
     let back = use_back();
     let params = use_params_map();
@@ -126,7 +127,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                         loading.set(false);
                     }
                     None => {
-                        toasts.push("Group not found");
+                        toasts.push(group_text(untrack(lang), GroupText::GroupNotFound));
                         navigate(&back.get_untracked(), Default::default());
                     }
                 },
@@ -141,10 +142,11 @@ pub fn GroupWizardScreen() -> impl IntoView {
         };
         let query = filter.get();
         let selected = selected.get();
+        let lang = lang();
         house.entities.with(|entities| {
             house
                 .areas
-                .with(|areas| members_by_room(entities, areas, kind, &query, &selected))
+                .with(|areas| members_by_room(lang, entities, areas, kind, &query, &selected))
         })
     });
 
@@ -216,21 +218,26 @@ pub fn GroupWizardScreen() -> impl IntoView {
         <div class="devices">
             <BackLink />
             <h1 class="devices__title">
-                {if editing { "Edit group" } else { "New group" }}
+                {move || text(lang(), if editing { Key::EditGroup } else { Key::NewGroup })}
             </h1>
-            <Show when=move || !loading.get() fallback=|| view! { <p>"Loading…"</p> }>
+            <Show when=move || !loading.get() fallback=move || view! { <p>{move || group_text(lang(), GroupText::Loading)}</p> }>
                 <section class="sheet__panel wizard">
                     <div class="wizard__head">
                         <h2 class="sheet__heading">
-                            {move || match step.get() {
-                                1 => "Type",
-                                2 => "Members",
-                                _ => "Name and room",
+                            {move || {
+                                group_text(
+                                    lang(),
+                                    match step.get() {
+                                        1 => GroupText::StepType,
+                                        2 => GroupText::StepMembers,
+                                        _ => GroupText::StepNameRoom,
+                                    },
+                                )
                             }}
                         </h2>
-                        <div class="wizard__step" aria-label="Progress">
+                        <div class="wizard__step" aria-label=move || group_text(lang(), GroupText::Progress)>
                             <span class="wizard__step-count">
-                                {move || format!("Step {} of 3", step.get())}
+                                {move || step_of(lang(), step.get(), 3)}
                             </span>
                             <span class="wizard__pips" aria-hidden="true">
                                 <span class:lit=move || { step.get() >= 1 }></span>
@@ -260,7 +267,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                                         kind.set(Some(k));
                                                     }
                                                 >
-                                                    <span class="card__name">{kind_word(k)}</span>
+                                                    <span class="card__name">{move || kind_name(lang(), k)}</span>
                                                 </button>
                                             }
                                         })
@@ -276,8 +283,8 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                     <input
                                         class="devices__search-input"
                                         type="search"
-                                        placeholder="Filter members"
-                                        aria-label="Filter members"
+                                        placeholder=move || group_text(lang(), GroupText::FilterMembers)
+                                        aria-label=move || group_text(lang(), GroupText::FilterMembers)
                                         prop:value=move || filter.get()
                                         on:input=move |ev| filter.set(event_target_value(&ev))
                                     />
@@ -330,29 +337,33 @@ pub fn GroupWizardScreen() -> impl IntoView {
                         _ => {
                             view! {
                                 <label class="field">
-                                    <span class="field__caption">"Name"</span>
+                                    <span class="field__caption">
+                                        {move || device_text(lang(), DeviceText::Name)}
+                                    </span>
                                     <input
                                         class="field__input"
                                         type="text"
-                                        aria-label="Group name"
+                                        aria-label=move || group_text(lang(), GroupText::GroupName)
                                         prop:value=move || name.get()
                                         on:input=move |ev| name.set(event_target_value(&ev))
                                     />
                                 </label>
                                 <label class="field">
-                                    <span class="field__caption">"Room"</span>
+                                    <span class="field__caption">
+                                        {move || device_text(lang(), DeviceText::Room)}
+                                    </span>
                                     <select
                                         class="field__input field__select"
                                         prop:value=move || area.get()
                                         on:change=move |ev| area.set(event_target_value(&ev))
                                     >
-                                        <option value="">"Unassigned"</option>
+                                        <option value="">{move || device_text(lang(), DeviceText::NoRoom)}</option>
                                         {area_options()}
                                     </select>
                                 </label>
                                 <PowerToggle
                                     on=hide_members.get()
-                                    label="Hide members on Home"
+                                    label=group_text_signal(GroupText::HideMembers)
                                     on_toggle=Callback::new(move |()| hide_members.update(|v| *v = !*v))
                                 />
                             }
@@ -366,7 +377,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                             disabled=move || step.get() == if editing { 2 } else { 1 }
                             on:click=move |_| step.update(|s| *s = s.saturating_sub(1).max(1))
                         >
-                            "Back"
+                            {move || group_text(lang(), GroupText::Back)}
                         </button>
                         <button
                             type="button"
@@ -381,13 +392,16 @@ pub fn GroupWizardScreen() -> impl IntoView {
                             }
                         >
                             {move || {
-                                if step.get() < 3 {
-                                    "Next"
-                                } else if editing {
-                                    "Save group"
-                                } else {
-                                    "Create group"
-                                }
+                                group_text(
+                                    lang(),
+                                    if step.get() < 3 {
+                                        GroupText::Next
+                                    } else if editing {
+                                        GroupText::SaveGroup
+                                    } else {
+                                        GroupText::CreateGroup
+                                    },
+                                )
                             }}
                         </button>
                     </div>
@@ -448,7 +462,6 @@ mod tests {
             assert!(!GROUP_KINDS.contains(&k));
         }
         assert_eq!(GROUP_KINDS.len(), Kind::ALL.len() - 4);
-        assert_eq!(kind_word(Kind::WaterHeater), "water heater");
     }
 
     fn entity(id: &str, kind: Kind, protocol: Kind, area: &str) -> EntityView {
@@ -499,11 +512,25 @@ mod tests {
             entities.insert(e.id.clone(), e);
         }
         let areas = [area("salon", "Salon"), area("cuisine", "Cuisine")];
-        let rooms = members_by_room(&entities, &areas, Kind::Light, "", &BTreeSet::new());
+        let rooms = members_by_room(
+            Lang::En,
+            &entities,
+            &areas,
+            Kind::Light,
+            "",
+            &BTreeSet::new(),
+        );
         let names: Vec<&str> = rooms.iter().map(|(r, _)| r.as_str()).collect();
         assert_eq!(names, ["Salon", "Cuisine", "ghost"]);
         assert_eq!(rooms[1].1[0].0, "plug");
-        let filtered = members_by_room(&entities, &areas, Kind::Light, "LAM", &BTreeSet::new());
+        let filtered = members_by_room(
+            Lang::En,
+            &entities,
+            &areas,
+            Kind::Light,
+            "LAM",
+            &BTreeSet::new(),
+        );
         assert_eq!(filtered.len(), 1);
     }
 }

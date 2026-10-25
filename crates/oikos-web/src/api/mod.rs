@@ -1,5 +1,6 @@
 //! The hub's REST API, grouped by surface.
 
+pub mod alarm;
 pub mod ambiances;
 pub mod climate;
 mod core;

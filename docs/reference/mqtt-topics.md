@@ -36,11 +36,17 @@ The table lists every topic the hub reads or writes, with its default prefix. "I
 | `<first discovery prefix>/group/_migrated` | in, out | yes | `1`, the marker that the one-time room-group migration ran | `[groups] enabled` |
 | `oikos/push/notification/<source>` | in | no | An alert, v1 or legacy payload | `[push] prefix` |
 | `oikos/push/tokens/<installId>` | in; out to clear | yes | `{token, device_name, lang, updated_at}`; empty unregisters. The hub publishes an empty payload to clear a dead token | `[push] prefix` |
-| `oikos/push/responses` | in (climate), out | no | `{id, action, install_id, ts}`, a tapped alert button | `[push] prefix` |
+| `oikos/push/responses` | in (climate and alarm), out | no | `{id, action, install_id, ts}`, a tapped alert button | `[push] prefix` |
 | `oikos/push/history` | in, out | yes | JSON array of the normalised alerts, newest first | `[push] prefix` |
 | `oikos-push/notification/+`, `oikos-push/tokens/+`, `oikos-push/history` | in; out to clear tokens | as above | OikosPush's topics, read during the switch-over. The hub only ever publishes an empty retained payload on `oikos-push/tokens/<id>` to clear a dead token | `[push] legacy_prefix` (empty turns them off) |
 | `oikos/climate/house` | in, out | yes | The house settings document | `[climate] prefix` |
 | `oikos/climate/zone/<zone>/<doc>`, `<doc>` being `settings`, `proposal`, `override` or `decision` | in, out | yes | A zone document | `[climate] prefix` |
+| `<prefix>/settings` (alarm) | in, out | yes | The alarm settings document; `enabled` defaults to false. Default prefix `oikos/alarm` | `[alarm] prefix` |
+| `<prefix>/state` (alarm) | in, out | yes | The alarm's runtime: state, mode, source, timers, motion hits, open sensors and the open alert | `[alarm] prefix` |
+| `<prefix>/panel` (alarm) | out | yes | The panel entity's state: `disarmed`, `arming`, `armed_away`, `armed_home`, `armed_night`, `pending` or `triggered` | `[alarm] prefix` |
+| `<prefix>/panel/attributes` (alarm) | out | yes | The panel's JSON attributes: `source`, `since`, `deadline`, `cause`, `open_at_arm` | `[alarm] prefix` |
+| `<prefix>/panel/set` (alarm) | in | no | The panel's commands: `ARM_AWAY`, `ARM_HOME`, `ARM_NIGHT` or `DISARM`. A retained replay is never acted on | `[alarm] prefix` |
+| `<first discovery prefix>/alarm_control_panel/alarm/house/config` | out | yes | Discovery of the alarm panel, entity `oikos_alarm_house`. Published while the alarm is on; an empty payload removes it | `[topics] discovery_prefixes` (first entry), `[alarm] prefix` |
 | `<topic_prefix>/events`, default `frigate/events` | in | no | Frigate event JSON; subscribed only with the bridge on | `[frigate] bridge`, `[frigate] topic_prefix` |
 | `<prefix>/+`, default `encryption-gateway/health/+` | in | yes (by the gateway) | `{"status": "ok" \| "fail" \| "config_error", …}` per component | `[watchdog.gateway] enabled`, `prefix` |
 | `$SYS/broker/log/#` | in | no | Mosquitto log lines | `[watchdog.acl] source = "topic"`, `log_topic` |
@@ -48,7 +54,7 @@ The table lists every topic the hub reads or writes, with its default prefix. "I
 ## Notes
 
 - **Reserved sub-trees.** Under a discovery prefix, the segments `ui`, `automation`, `virtual`, `push`, `weather` and `solar` are reserved: never publish discovery there. A topic in them is never read as discovery and never shows under `GET /api/v1/ignored`.
-- **Climate documents never end in `/config`.** They cannot be read as discovery. The hub subscribes to `<prefix>/house` and `<prefix>/zone/+/+`, never `<prefix>/#`. `oikos/push/responses` is subscribed only while the climate engine is on, so a tapped proposal button reaches it.
+- **Climate documents never end in `/config`.** They cannot be read as discovery. The hub subscribes to `<prefix>/house` and `<prefix>/zone/+/+`, never `<prefix>/#`. `oikos/push/responses` is always subscribed: a reply whose id starts with `alarm-` goes to the alarm, and the others (a tapped proposal button, for example) go to the climate engine when it is on.
 - **Overlapping subscriptions.** The hub subscribes to `<discovery prefix>/#`, `<z2m_base>/bridge/#`, `<ui_prefix>/#` and `<automation_prefix>/#`. A push filter that falls inside one of those wildcards (the default `oikos/push/…` under `oikos/#`) is left out, so the broker does not deliver a notification twice.
 - **Alerts raised inside the hub** (the Frigate bridge, watchdogs, flows, MCP) go to the push service in process, without the broker.
 - **Retained history.** `oikos/push/history` is the history itself: the hub adopts it at its first sync, and only when that topic holds no list yet does it seed it once from `oikos-push/history`.

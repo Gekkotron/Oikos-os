@@ -20,6 +20,7 @@ use crate::i18n::devices::{
 use crate::i18n::states::switch_type_word;
 use crate::i18n::{Key, Lang, current_lang, text, use_lang, use_text};
 use crate::icons::consumer_icon;
+use crate::screens::alarm_settings::AlarmRoleLine;
 use crate::settings_rules::{Shown, clear_field, order_valid, other_saved, set_type, shown};
 
 /// The fields of `after` that differ from `before`, as a patch the hub accepts: camelCase keys,
@@ -725,6 +726,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
     let on = move |pick: fn(&Shown) -> bool| Signal::derive(move || shown.with(pick));
 
     view! {
+        <AlarmRoleLine id=id.clone() />
         <form class="override" on:submit=|ev| ev.prevent_default()>
             <fieldset class="override__group">
                 <legend class="override__legend">{move || t(DeviceText::General)}</legend>

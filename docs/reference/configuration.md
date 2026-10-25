@@ -245,6 +245,19 @@ enabled = true
 prefix = "oikos/climate"
 ```
 
+## `[alarm]`
+
+The native alarm's topic prefix. The alarm itself is switched on in its settings document (**Settings → Alarm**, [MCP](mcp-tools.md#alarm), [HTTP](http-api.md#alarm)), so there is no `enabled` key here. See [Alarm](../users/alarm.md).
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `prefix` | `"oikos/alarm"` | Topic prefix of the alarm's retained documents (`<prefix>/settings`, `<prefix>/state`) and of its panel topics. Must not be empty or only `/`, and must not contain `+` or `#`. |
+
+```toml
+[alarm]
+prefix = "oikos/alarm"
+```
+
 ## `[weather]`
 
 Outdoor weather from [Open-Meteo](https://open-meteo.com), a free service with no API key. Off by default: while `enabled` is `false` the hub makes no request at all. See [Weather](../users/weather.md).

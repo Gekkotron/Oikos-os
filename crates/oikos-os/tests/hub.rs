@@ -1874,10 +1874,19 @@ async fn frigate_hub(bridge: bool) -> (Arc<Hub>, mpsc::Receiver<Publish>) {
     (hub, rx)
 }
 
+/// The extra subscriptions of the bridges and watchdogs: without the alarm's documents and the
+/// push responses topic, which are always subscribed.
+fn bridge_filters(hub: &Hub) -> Vec<String> {
+    hub.extra_filters()
+        .into_iter()
+        .filter(|f| !f.starts_with("oikos/alarm/") && f != "oikos/push/responses")
+        .collect()
+}
+
 #[tokio::test(start_paused = true)]
 async fn frigate_event_becomes_history_alert_when_bridge_on() {
     let (hub, mut publisher) = frigate_hub(true).await;
-    assert_eq!(hub.extra_filters(), vec!["frigate/events".to_owned()]);
+    assert_eq!(bridge_filters(&hub), vec!["frigate/events".to_owned()]);
 
     hub.ingest_message("frigate/events", FRIGATE_EVENT.as_bytes(), false);
 
@@ -1900,7 +1909,7 @@ async fn frigate_event_becomes_history_alert_when_bridge_on() {
 #[tokio::test(start_paused = true)]
 async fn frigate_events_ignored_when_bridge_off() {
     let (hub, mut publisher) = frigate_hub(false).await;
-    assert!(hub.extra_filters().is_empty());
+    assert!(bridge_filters(&hub).is_empty());
 
     hub.ingest_message("frigate/events", FRIGATE_EVENT.as_bytes(), false);
 
@@ -1958,7 +1967,7 @@ async fn watchdog_filters_follow_the_enabled_watchdogs() {
     use oikos_os::config::AclSource;
     let (hub, _rx) = watchdog_hub(AclSource::Topic).await;
     assert_eq!(
-        hub.extra_filters(),
+        bridge_filters(&hub),
         vec![
             "encryption-gateway/health/+".to_owned(),
             "$SYS/broker/log/#".to_owned()
@@ -1966,11 +1975,11 @@ async fn watchdog_filters_follow_the_enabled_watchdogs() {
     );
     let (hub, _rx) = watchdog_hub(AclSource::File).await;
     assert_eq!(
-        hub.extra_filters(),
+        bridge_filters(&hub),
         vec!["encryption-gateway/health/+".to_owned()]
     );
     let (hub, _rx) = frigate_hub(false).await;
-    assert!(hub.extra_filters().is_empty());
+    assert!(bridge_filters(&hub).is_empty());
 }
 
 #[tokio::test(start_paused = true)]

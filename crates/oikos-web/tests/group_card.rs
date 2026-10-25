@@ -1,6 +1,7 @@
 use oikos_web::cards::group::{range_of, switch_text, thermostat_text};
 use oikos_web::i18n::Lang;
 use oikos_web::i18n::devices::{DeviceText, device_text};
+use oikos_web::i18n::groups::{members_count, subtitle};
 use serde_json::{Map, Value, json};
 
 #[test]
@@ -177,4 +178,16 @@ mod summaries {
         .unwrap();
         assert_eq!(light_text(Lang::En, &s), "1 of 2 on");
     }
+}
+
+#[test]
+fn group_member_counts_agree_in_french() {
+    assert_eq!(members_count(Lang::Fr, 0), "0 appareil");
+    assert_eq!(members_count(Lang::Fr, 1), "1 appareil");
+    assert_eq!(members_count(Lang::Fr, 3), "3 appareils");
+    assert_eq!(members_count(Lang::En, 1), "1 device");
+    assert_eq!(
+        subtitle(Lang::Fr, "salon", oikos_core::model::Kind::Light, 3),
+        "salon · 3 lumières"
+    );
 }

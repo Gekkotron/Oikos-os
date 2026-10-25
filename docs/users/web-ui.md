@@ -226,6 +226,7 @@ Devices: the administration view of the Zigbee devices. Each row shows the devic
 Settings (`/settings`): a short list, one row per page, with a status on the right. A row opens its page at `/settings/<page>`, which has a Back link and its own breadcrumb (Settings › page):
 
 - **Home** (**Maison**, `/settings/home`): the home header settings and the off-peak hours, described below.
+- **Alarm** (`/settings/alarm`), status Off, Disarmed, or the armed mode: the optional native alarm. An Enable switch turns it on and off. The page lists the sensors (with their kind, the three mode ticks and instant or delayed), the sirens (an entity, or an MQTT topic with its payloads and a **Test chirp** button), the remotes with their signal names, presence (the trackers and the arm and disarm switches) and the timing (the delays and the motion rule). See [Alarm](alarm.md).
 - **Appearance** (`/settings/appearance`), status the current theme: the theme switch (Auto, Night Glass, Ivoire), the same choice as the header's theme button.
 - **Zigbee2MQTT** (`/settings/zigbee2mqtt`), status the number of firmware updates waiting, or the bridge state when there are none: the bridge (version, coordinator, permit join, state), the updates waiting, the counts (devices, entities, primary entities, areas, ignored topics) and the way to the [devices](#devices) list.
 - **Broker** (`/settings/broker`), status Online, Connecting… or Offline: the MQTT connection, with the reason when it is down.
