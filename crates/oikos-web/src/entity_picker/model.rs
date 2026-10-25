@@ -8,7 +8,9 @@ use oikos_core::model::UNASSIGNED_AREA;
 
 use super::Keep;
 use crate::flow_edit::fold_accents;
-use crate::format::{area_name, entity_title, kind_search_words, list_label, room_name};
+use crate::format::{
+    area_name, entity_title, kind_search_words, list_label, room_name, title_suffix,
+};
 use crate::i18n::Lang;
 use crate::i18n::picker::{PickerText, picker_text};
 use crate::icons::entity_icon;
@@ -113,10 +115,11 @@ fn area_key(area: &str) -> &str {
 /// The row for `e`: its title, the device when that adds something, its room and icon.
 pub fn row_of(lang: Lang, e: &EntityView, room: Option<String>) -> Row {
     let title = entity_title(lang, e);
+    // A title with a suffix is "device · kind": it already names the device.
     let device = e
         .device_name
         .clone()
-        .filter(|d| !d.is_empty() && *d != title);
+        .filter(|d| !d.is_empty() && *d != title && title_suffix(lang, e).is_none());
     Row {
         id: e.id.clone(),
         title,
@@ -363,6 +366,27 @@ mod tests {
             .collect();
         assert_eq!(devices, [Some("Plug A".into()), Some("Plug B".into())]);
         assert_eq!(l.sections[0].rows[0].room.as_deref(), Some("Room A"));
+    }
+
+    #[test]
+    fn device_line_skips_a_device_already_in_the_title() {
+        // Named like its device: the title ("Plug A · Temperature") already leads with it.
+        let named = ent(
+            "t",
+            "Plug A",
+            "Plug A",
+            "a",
+            Kind::Sensor,
+            Some("temperature"),
+        );
+        let own = ent("b", "Backlight mode", "Plug A", "a", Kind::Switch, None);
+        let row = row_of(Lang::En, &named, Some("Room A".into()));
+        assert!(row.title.starts_with("Plug A"), "{}", row.title);
+        assert_eq!(row.device, None);
+        assert_eq!(
+            row_of(Lang::En, &own, None).device.as_deref(),
+            Some("Plug A")
+        );
     }
 
     #[test]
