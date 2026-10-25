@@ -13,6 +13,10 @@ use crate::components::toast::Toasts;
 use crate::format::list_label;
 use crate::home_header::mood::{COLD_DEFAULT, HOT_DEFAULT};
 use crate::house::House;
+use crate::i18n::format::{input_number, parse_decimal};
+use crate::i18n::settings::{
+    RULE_BAD_TIME, RULE_BETWEEN, RULE_LOWER_THAN, RULE_NOT_A, RULE_OVERLAP, RULE_START_EQUALS_END,
+};
 use crate::i18n::{HomeText, Lang, home_text};
 
 /// A setting the panel edits, for pointing an error at its field.
@@ -38,18 +42,20 @@ pub struct Draft {
     pub off_peak: Vec<(String, String)>,
 }
 
-fn number_text(v: Option<f64>) -> String {
-    v.map(|v| v.to_string()).unwrap_or_default()
+/// A number as the field shows it, with the language's decimal mark.
+fn number_text(lang: Lang, v: Option<f64>) -> String {
+    v.map(|v| input_number(lang, v)).unwrap_or_default()
 }
 
-impl From<&HomeSettings> for Draft {
-    fn from(s: &HomeSettings) -> Self {
+impl Draft {
+    /// The fields for `s`, numbers written the way `lang` writes them.
+    pub fn new(lang: Lang, s: &HomeSettings) -> Self {
         Draft {
-            eco: number_text(s.eco_setpoint),
+            eco: number_text(lang, s.eco_setpoint),
             mode: s.mode_entity.clone(),
             indoor: s.indoor_entity.clone(),
-            cold: number_text(s.cold_below),
-            hot: number_text(s.hot_above),
+            cold: number_text(lang, s.cold_below),
+            hot: number_text(lang, s.hot_above),
             off_peak: s
                 .off_peak
                 .iter()
@@ -59,18 +65,12 @@ impl From<&HomeSettings> for Draft {
     }
 }
 
-/// `,` or `.` as the decimal mark; empty is `None`.
-fn parse_number(text: &str, field: Field) -> Result<Option<f64>, (Field, &'static str)> {
-    let text = text.trim();
-    if text.is_empty() {
+/// `,` or `.` as the decimal mark; empty is `None`. A text that is no number names its field.
+fn parse_number(text: &str, field: Field) -> Result<Option<f64>, Field> {
+    if text.trim().is_empty() {
         return Ok(None);
     }
-    text.replace(',', ".")
-        .parse::<f64>()
-        .ok()
-        .filter(|v| v.is_finite())
-        .map(Some)
-        .ok_or((field, "not a number"))
+    parse_decimal(text).map(Some).ok_or(field)
 }
 
 /// The draft to save: each field from `draft` when it was edited (differs from `base`, the copy the
@@ -129,25 +129,25 @@ enum Message {
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // only the wasm save path calls it
 fn message_key(field: Field, message: &str) -> Option<HomeText> {
     if field == Field::OffPeak {
-        return if message.contains("overlap") {
+        return if message.contains(RULE_OVERLAP) {
             Some(HomeText::WindowsOverlap)
-        } else if message.contains("start equals end") {
+        } else if message.contains(RULE_START_EQUALS_END) {
             Some(HomeText::StartEqualsEnd)
-        } else if message.contains("bad time") {
+        } else if message.contains(RULE_BAD_TIME) {
             Some(HomeText::BadTime)
         } else {
             None
         };
     }
-    if message.contains("must be between") {
+    if message.contains(RULE_BETWEEN) {
         match field {
             Field::Eco => Some(HomeText::EcoRange),
             Field::Cold | Field::Hot => Some(HomeText::ThresholdRange),
             _ => None,
         }
-    } else if message.contains("must be lower than") {
+    } else if message.contains(RULE_LOWER_THAN) {
         Some(HomeText::OrderRule)
-    } else if message.contains(" is not a") {
+    } else if message.contains(RULE_NOT_A) {
         matches!(field, Field::Mode | Field::Indoor).then_some(HomeText::EntityRule)
     } else {
         None
@@ -155,7 +155,7 @@ fn message_key(field: Field, message: &str) -> Option<HomeText> {
 }
 
 /// The settings document the draft stands for, or the first number that does not parse.
-pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, (Field, &'static str)> {
+pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, Field> {
     Ok(HomeSettings {
         eco_setpoint: parse_number(&draft.eco, Field::Eco)?,
         mode_entity: draft.mode.clone(),
@@ -210,7 +210,10 @@ pub fn HomeSettingsPanel() -> impl IntoView {
     let lang = use_context::<RwSignal<Lang>>();
     let t = move |k: HomeText| home_text(lang.map_or(Lang::En, |l| l.get()), k);
 
-    let fresh_draft = house.home_settings.with_untracked(|s| Draft::from(s));
+    let current = move || lang.map_or(Lang::En, |l| l.get());
+    let fresh_draft = house
+        .home_settings
+        .with_untracked(|s| Draft::new(untrack(current), s));
     let draft = RwSignal::new(fresh_draft.clone());
     // The copy the edits started from, to tell edited fields from untouched ones on Save.
     let base = RwSignal::new(fresh_draft);
@@ -220,7 +223,9 @@ pub fn HomeSettingsPanel() -> impl IntoView {
     // A change from elsewhere (another tab, the MCP, our own save) refills the form, unless
     // there are edits in progress.
     Effect::new(move |_| {
-        let fresh = house.home_settings.with(|s| Draft::from(s));
+        // Reads the language too, so an untouched form rewrites its numbers on a toggle.
+        let l = current();
+        let fresh = house.home_settings.with(|s| Draft::new(l, s));
         if draft.get_untracked() == base.get_untracked() {
             draft.set(fresh.clone());
             base.set(fresh);
@@ -228,11 +233,13 @@ pub fn HomeSettingsPanel() -> impl IntoView {
     });
 
     let save = move |_| {
-        let latest = house.home_settings.with_untracked(|s| Draft::from(s));
+        let latest = house
+            .home_settings
+            .with_untracked(|s| Draft::new(untrack(current), s));
         let merged = merge(&base.get_untracked(), &draft.get_untracked(), &latest);
         let settings = match draft_to_settings(&merged) {
             Ok(s) => s,
-            Err((field, _)) => {
+            Err(field) => {
                 error.set(Some((field, Message::Key(HomeText::NotANumber))));
                 return;
             }
@@ -245,7 +252,7 @@ pub fn HomeSettingsPanel() -> impl IntoView {
             spawn_local(async move {
                 match crate::api::home::put_home_settings(&settings).await {
                     Ok(stored) => {
-                        let fresh = Draft::from(&stored);
+                        let fresh = Draft::new(untrack(current), &stored);
                         draft.try_set(fresh.clone());
                         base.try_set(fresh);
                         house.home_settings.set(stored);
@@ -485,9 +492,9 @@ mod tests {
         assert_eq!(s.eco_setpoint, Some(15.5));
         assert_eq!(s.cold_below, None);
         assert_eq!(s.hot_above, Some(27.5));
-        let (field, _) = draft_to_settings(&draft("abc", "", "")).unwrap_err();
+        let field = draft_to_settings(&draft("abc", "", "")).unwrap_err();
         assert_eq!(field, Field::Eco);
-        let (field, _) = draft_to_settings(&draft("", "", "x")).unwrap_err();
+        let field = draft_to_settings(&draft("", "", "x")).unwrap_err();
         assert_eq!(field, Field::Hot);
     }
 
@@ -576,6 +583,19 @@ mod tests {
     }
 
     #[test]
+    fn refilled_numbers_use_the_language_decimal_mark() {
+        let s = draft_to_settings(&draft("15,5", "16", "27.25")).unwrap();
+        let fr = Draft::new(Lang::Fr, &s);
+        assert_eq!((fr.eco.as_str(), fr.cold.as_str()), ("15,5", "16"));
+        assert_eq!(fr.hot, "27,25");
+        let en = Draft::new(Lang::En, &s);
+        assert_eq!((en.eco.as_str(), en.hot.as_str()), ("15.5", "27.25"));
+        // What was refilled reads back as the same numbers in either language.
+        assert_eq!(draft_to_settings(&fr).unwrap().eco_setpoint, Some(15.5));
+        assert_eq!(draft_to_settings(&en).unwrap().hot_above, Some(27.25));
+    }
+
+    #[test]
     fn draft_round_trips_off_peak() {
         let d = Draft {
             off_peak: vec![("01:34".into(), "07:04".into())],
@@ -584,7 +604,7 @@ mod tests {
         let s = draft_to_settings(&d).unwrap();
         assert_eq!(s.off_peak, vec![window("01:34", "07:04")]);
         assert!(s.off_peak_history.is_empty());
-        assert_eq!(Draft::from(&s).off_peak, d.off_peak);
+        assert_eq!(Draft::new(Lang::En, &s).off_peak, d.off_peak);
     }
 
     #[test]
