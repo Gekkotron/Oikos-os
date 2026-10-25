@@ -1299,54 +1299,6 @@ a.chip {
   background: var(--accent-amber);
 }
 
-/* Member picker: outline-selection, with a small check in the top-right of a chosen card.
-   Overrides the global .card--on warm gradient only inside the wizard. */
-.wizard__members {
-  min-width: 0;
-}
-
-.member-card {
-  position: relative;
-  padding-right: 36px;
-}
-
-.member-card__check {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  border: 1px solid var(--chip-border);
-  background: transparent;
-  color: transparent;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition:
-    background var(--motion-short) var(--ease),
-    border-color var(--motion-short) var(--ease),
-    color var(--motion-short) var(--ease);
-}
-
-.member-card__check svg {
-  width: 12px;
-  height: 12px;
-}
-
-.wizard .member-card.card--on {
-  background: linear-gradient(180deg, var(--select-soft), transparent 70%),
-    color-mix(in srgb, var(--select) 6%, var(--card-bg));
-  border-color: var(--select);
-  color: var(--ink);
-}
-
-.wizard .member-card.card--on .member-card__check {
-  background: var(--select);
-  border-color: var(--select);
-  color: var(--bg);
-}
-
 /* Labeled form field used by the wizard's Name and Room step. The label floats above an
    input shaped like the search pill, consistent with the rest of the design. */
 .field {

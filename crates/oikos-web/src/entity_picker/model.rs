@@ -423,6 +423,25 @@ mod tests {
     }
 
     #[test]
+    fn a_chosen_group_stays_listed_though_the_pool_refuses_it() {
+        let h = house(vec![
+            ent("lamp", "Lamp", "", "a", Kind::Light, None),
+            ent("group_all", "All", "", "a", Kind::Light, None),
+        ]);
+        let pool: Keep = Arc::new(|e: &EntityView| !e.id.starts_with("group_"));
+        let cur = ["group_all".to_owned()];
+        let areas = [area("a", "A")];
+        let mut f = filter("");
+        f.pool = Some(&pool);
+        assert_eq!(ids(&listing(Lang::En, &h, &areas, &f)), ["lamp"]);
+        f.current = &cur;
+        assert_eq!(
+            ids(&listing(Lang::En, &h, &areas, &f)),
+            ["group_all", "lamp"]
+        );
+    }
+
+    #[test]
     fn missing_ids_lead() {
         let h = house(vec![ent("a", "Plug", "", "a", Kind::Switch, None)]);
         let cur = ["gone".to_owned(), "a".to_owned()];
