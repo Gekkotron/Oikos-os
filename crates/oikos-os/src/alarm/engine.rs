@@ -346,12 +346,10 @@ impl Hub {
         let settings = self.alarm_settings();
         let reg = self.read();
         for rule in &settings.sensors {
-            if let Some(state) = reg.state(&rule.entity) {
-                known
-                    .sensors
-                    .entry(rule.entity.clone())
-                    .or_insert_with(|| sensor_on(&state.value));
-            }
+            known
+                .sensors
+                .entry(rule.entity.clone())
+                .or_insert_with(|| seed_sensor(reg.state(&rule.entity)));
         }
         for id in &settings.presence.trackers {
             if let Some(state) = reg.state(id) {
@@ -372,15 +370,14 @@ impl Hub {
         let id = report.id.as_str();
         let settings = self.alarm_settings();
         let reg = self.read();
-        let Some(state) = reg.state(id) else {
-            return;
-        };
         if settings.sensors.iter().any(|r| r.entity == id) {
             known
                 .sensors
                 .entry(id.to_owned())
-                .or_insert_with(|| sensor_on(&state.value));
-        } else if settings.presence.trackers.iter().any(|t| t == id) {
+                .or_insert_with(|| seed_sensor(reg.state(id)));
+        } else if settings.presence.trackers.iter().any(|t| t == id)
+            && let Some(state) = reg.state(id)
+        {
             known
                 .trackers
                 .entry(id.to_owned())
@@ -399,6 +396,19 @@ fn drain(events: &mut broadcast::Receiver<WsEvent>, seen: &mut broadcast::Receiv
         seen.try_recv(),
         Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed)
     ) {}
+}
+
+/// The value a watched sensor is seeded with. A sensor the registry has no state (or only `Unknown`) for yet
+/// counts as off, so its first report (`open`) is a change and not a seed. That is replay-safe: seeding
+/// only runs while synced, after the settle drain, so a retained replay of an existing state is
+/// already in the registry by then, and every link drop clears the known values and the synced
+/// flag.
+fn seed_sensor(state: Option<&EntityState>) -> Option<bool> {
+    match state {
+        None => Some(false),
+        Some(s) if matches!(s.value, StateValue::Unknown) => Some(false),
+        Some(s) => sensor_on(&s.value),
+    }
 }
 
 /// Whether a binary sensor reads on; `None` while its state is unknown.

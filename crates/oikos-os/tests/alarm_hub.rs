@@ -1125,7 +1125,6 @@ async fn delayed_door_with_known_state_goes_pending() {
 }
 
 #[tokio::test(start_paused = true)]
-#[ignore = "reproduces: the first-ever value of a watched sensor with no registry state is swallowed as a seed"]
 async fn first_ever_open_of_a_stateless_sensor_goes_pending() {
     use oikos_core::model::AlarmMode;
     let (mut rig, silent) = delayed_rig().await;
