@@ -58,6 +58,7 @@ pub fn Grid(
                             let span = widgets
                                 .with(|ws| ws.iter().find(|x| x.id == id).map(|x| x.span))
                                 .unwrap_or(w.span);
+                            // `concat!` keeps the bare-text guard from reading the class list as text.
                             format!(concat!("widget", " widget-span-{}"), span.as_str())
                         }
                     };

@@ -20,7 +20,7 @@ pub enum HistoryText {
     Last7d,
     Last30d,
     LastYear,
-    /// Y-axis of a chart that shows a cover position.
+    /// Legend words of `min_max`; the same in both languages.
     Min,
     Max,
 }
@@ -46,7 +46,7 @@ pub fn history_text(lang: Lang, k: HistoryText) -> &'static str {
         T::Last24h => ("Last 24 hours", "24 dernières heures"),
         T::Last7d => ("Last 7 days", "7 derniers jours"),
         T::Last30d => ("Last 30 days", "30 derniers jours"),
-        T::LastYear => ("Last year", "Dernière année"),
+        T::LastYear => ("Last year", "12 derniers mois"),
         T::Min => ("min", "min"),
         T::Max => ("max", "max"),
     };
@@ -95,7 +95,7 @@ pub fn load_error(lang: Lang, reason: &str) -> String {
 
 /// The legend's right side: "min 3.0 °C · max 21.5 °C" (French decimals and spacing).
 pub fn min_max(lang: Lang, min: f64, max: f64, unit: Option<&str>) -> String {
-    let cell = |v: f64| format::with_unit(format::decimal(lang, v, 1), unit);
+    let cell = |v: f64| format::with_unit(format::decimal_grouped(lang, v, 1), unit);
     format!(
         "{} {} · {} {}",
         history_text(lang, HistoryText::Min),
@@ -107,7 +107,7 @@ pub fn min_max(lang: Lang, min: f64, max: f64, unit: Option<&str>) -> String {
 
 /// "Last 24 hours total: 4.2 kWh" / "24 dernières heures, total : 4,2 kWh".
 pub fn total_line(lang: Lang, r: HistoryRange, total: f64) -> String {
-    let value = format::with_unit(format::decimal(lang, total, 1), Some("kWh"));
+    let value = format::with_unit(format::decimal_grouped(lang, total, 1), Some("kWh"));
     match lang {
         Lang::En => format!("{} total: {value}", range_name(lang, r)),
         Lang::Fr => format!("{}, total{NBSP}: {value}", range_name(lang, r)),
@@ -155,6 +155,15 @@ mod tests {
         assert_eq!(
             min_max(Lang::En, 3.0, 21.5, Some("°C")),
             "min 3.0\u{A0}°C · max 21.5\u{A0}°C"
+        );
+        assert_eq!(
+            min_max(Lang::Fr, 0.0, 3450.0, Some("W")),
+            "min 0,0\u{A0}W · max 3\u{202F}450,0\u{A0}W"
+        );
+        assert_eq!(range_name(Lang::Fr, HistoryRange::Year), "12 derniers mois");
+        assert_eq!(
+            total_line(Lang::Fr, HistoryRange::Day, 4321.7),
+            "24 dernières heures, total\u{A0}: 4\u{202F}321,7\u{A0}kWh"
         );
         assert_eq!(
             total_line(Lang::En, HistoryRange::Day, 4.25),

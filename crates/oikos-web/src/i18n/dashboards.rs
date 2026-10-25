@@ -85,7 +85,6 @@ pub enum DashText {
     Name,
     ShowHeader,
     DeleteDashboard,
-    Delete,
     // Library.
     WidgetLibrary,
     AddWidget,
@@ -128,7 +127,6 @@ pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
         T::Name => ("Name", "Nom"),
         T::ShowHeader => ("Show header", "Afficher l'en-tête"),
         T::DeleteDashboard => ("Delete dashboard", "Supprimer le tableau de bord"),
-        T::Delete => ("Delete", "Supprimer"),
         T::WidgetLibrary => ("Widget library", "Bibliothèque de widgets"),
         T::AddWidget => ("Add a widget", "Ajouter un widget"),
         T::SearchPlaceholder => (
@@ -147,7 +145,7 @@ pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
         T::SectionClimate => ("CLIMATE", "CLIMAT"),
         T::SectionSensors => ("SENSORS", "CAPTEURS"),
         T::SectionWaterHeaters => ("WATER HEATERS", "CHAUFFE-EAU"),
-        T::SectionRoomGroups => ("ROOM GROUPS", "GROUPES DE PIÈCES"),
+        T::SectionRoomGroups => ("ROOM GROUPS", "PIÈCES"),
         T::SectionFlowButtons => ("FLOW BUTTONS", "BOUTONS D'AUTOMATISATION"),
         T::SectionEnergy => ("ENERGY", "ÉNERGIE"),
         T::SectionHistory => ("HISTORY CHARTS", "GRAPHIQUES D'HISTORIQUE"),
@@ -158,16 +156,16 @@ pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
     }
 }
 
-/// The title of a widget's config sheet: "Widget: Light" / "Widget : Éclairage".
-pub fn widget_sheet_title(lang: Lang, kind: oikos_core::dashboard::WidgetKind) -> String {
+/// What a widget is: "Light" / "Lumière". Read by the config sheet title and the placeholder.
+pub fn widget_kind_word(lang: Lang, kind: oikos_core::dashboard::WidgetKind) -> &'static str {
     use oikos_core::dashboard::WidgetKind as K;
     let (en, fr) = match kind {
-        K::Light => ("Light", "Éclairage"),
+        K::Light => ("Light", "Lumière"),
         K::Cover => ("Cover", "Volet"),
-        K::Climate => ("Climate", "Climat"),
-        K::Lock => ("Lock", "Serrure"),
+        K::Climate => ("Climate", "Thermostat"),
+        K::Lock => ("Lock", "Verrou"),
         K::Sensor => ("Sensor", "Capteur"),
-        K::RoomGroup => ("Room group", "Groupe de pièces"),
+        K::RoomGroup => ("Room group", "Groupe de la pièce"),
         K::FlowButton => ("Flow button", "Bouton d'automatisation"),
         K::EnergyStat => ("Energy stat", "Statistique d'énergie"),
         K::HistoryChart => ("History chart", "Graphique d'historique"),
@@ -175,8 +173,26 @@ pub fn widget_sheet_title(lang: Lang, kind: oikos_core::dashboard::WidgetKind) -
         K::WaterHeater => ("Water heater", "Chauffe-eau"),
     };
     match lang {
-        Lang::En => format!("Widget: {en}"),
-        Lang::Fr => format!("Widget\u{A0}: {fr}"),
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// The title of a widget's config sheet: "Widget: Light" / "Widget : Lumière".
+pub fn widget_sheet_title(lang: Lang, kind: oikos_core::dashboard::WidgetKind) -> String {
+    let word = widget_kind_word(lang, kind);
+    match lang {
+        Lang::En => format!("Widget: {word}"),
+        Lang::Fr => format!("Widget\u{A0}: {word}"),
+    }
+}
+
+/// The placeholder of a widget with nothing to show: "Lock: lock.door" / "Verrou : lock.door".
+pub fn widget_placeholder(lang: Lang, kind: oikos_core::dashboard::WidgetKind, id: &str) -> String {
+    let word = widget_kind_word(lang, kind);
+    match lang {
+        Lang::En => format!("{word}: {id}"),
+        Lang::Fr => format!("{word}\u{A0}: {id}"),
     }
 }
 
@@ -261,7 +277,6 @@ mod tests {
             T::Name,
             T::ShowHeader,
             T::DeleteDashboard,
-            T::Delete,
             T::WidgetLibrary,
             T::AddWidget,
             T::SearchPlaceholder,
@@ -293,6 +308,15 @@ mod tests {
             widget_sheet_title(Lang::Fr, WidgetKind::Cover),
             "Widget\u{A0}: Volet"
         );
+        assert_eq!(
+            widget_sheet_title(Lang::Fr, WidgetKind::Light),
+            "Widget\u{A0}: Lumière"
+        );
+        assert_eq!(
+            widget_sheet_title(Lang::Fr, WidgetKind::RoomGroup),
+            "Widget\u{A0}: Groupe de la pièce"
+        );
+        assert_eq!(widget_kind_word(Lang::Fr, WidgetKind::Lock), "Verrou");
         assert_eq!(delete_question(Lang::En, "Den"), "Delete Den?");
         assert_eq!(delete_question(Lang::Fr, "Den"), "Supprimer Den\u{A0}?");
     }

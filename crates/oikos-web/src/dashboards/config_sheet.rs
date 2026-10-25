@@ -247,7 +247,7 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                     question=Signal::derive(move || {
                         delete_question(lang(), &state.draft.with(|d| d.name.clone()))
                     })
-                    yes=Signal::derive(move || dash_text(lang(), DashText::Delete).to_owned())
+                    yes=Signal::derive(move || text(lang(), Key::Delete).to_owned())
                     on_yes=Callback::new({
                         let navigate = navigate.clone();
                         move |()| {

@@ -135,6 +135,13 @@ pub fn entries(
 ) -> Vec<Entry> {
     // Each row with the kind words that also find it ("cover", "volet"), for entity rows.
     let mut rows: Vec<(String, Entry, Option<[String; 2]>)> = Vec::new();
+    // A row's fixed text in both languages, so "lights" finds a room group on the French UI too.
+    let both = |k: DashText| {
+        [
+            dash_text(Lang::En, k).to_owned(),
+            dash_text(Lang::Fr, k).to_owned(),
+        ]
+    };
     for e in entities.values().filter(|e| e.is_primary()) {
         let (section, kind) = match e.kind {
             Kind::Light => (Section::Lights, WidgetKind::Light),
@@ -197,7 +204,7 @@ pub fn entries(
                     title: None,
                 },
             },
-            None,
+            Some(both(DashText::RoomGroupSub)),
         ));
     }
     for (id, name) in flows {
@@ -214,7 +221,7 @@ pub fn entries(
                     title: None,
                 },
             },
-            None,
+            Some(both(DashText::FlowButtonSub)),
         ));
     }
     for (id, label) in ENERGY_METRICS {
@@ -231,7 +238,10 @@ pub fn entries(
                     title: None,
                 },
             },
-            None,
+            Some([
+                widget_text(Lang::En, label).to_owned(),
+                widget_text(Lang::Fr, label).to_owned(),
+            ]),
         ));
     }
 
@@ -471,6 +481,24 @@ mod tests {
             let got = run(query, &entities);
             assert_eq!(of(&got, Section::Covers).len(), 1, "{query}");
             assert!(of(&got, Section::Lights).is_empty(), "{query}");
+        }
+    }
+
+    #[test]
+    fn english_words_still_find_the_rows_on_the_french_ui() {
+        let flows = [("f1".to_string(), "Night".to_string())];
+        let areas = [area("salon", "Salon")];
+        let entities = BTreeMap::new();
+        let find = |q: &str| entries(Lang::Fr, q, &entities, &areas, &flows);
+        for (query, section) in [
+            ("lights", Section::Rooms),
+            ("runs the flow", Section::FlowButtons),
+            ("today", Section::Energy),
+            ("éclairages", Section::Rooms),
+            ("lance", Section::FlowButtons),
+            ("aujourd", Section::Energy),
+        ] {
+            assert!(find(query).iter().any(|e| e.section == section), "{query}");
         }
     }
 

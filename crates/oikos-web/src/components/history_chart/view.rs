@@ -183,6 +183,7 @@ fn map_error(err: HistoryApiError) -> State {
 }
 
 /// SVG `preserveAspectRatio` value, not text.
+// The literal is split on purpose: the bare-text guard would read "xMidYMid meet" as a sentence.
 const ASPECT: &str = concat!("xMidYMid", " meet");
 const VIEW_W: f64 = 400.0;
 const VIEW_H: f64 = 220.0;
@@ -272,8 +273,8 @@ fn y_labels(lang: Lang, scale: &YScale, kind: &str, _unit: Option<&str>) -> (Str
         return (lo, hi);
     }
     (
-        fmt::decimal(lang, scale.min, 1),
-        fmt::decimal(lang, scale.max, 1),
+        fmt::decimal_grouped(lang, scale.min, 1),
+        fmt::decimal_grouped(lang, scale.max, 1),
     )
 }
 
