@@ -331,6 +331,16 @@ pub enum EcoAction {
     FanMode(String),
 }
 
+/// The fan mode among `actions`, if any.
+pub fn fan_mode_of(actions: &[EcoAction]) -> Option<&str> {
+    actions
+        .iter()
+        .map(|a| match a {
+            EcoAction::FanMode(m) => m.as_str(),
+        })
+        .next()
+}
+
 /// The house-wide eco: a setpoint per mode and the extra actions for the climate units.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -354,9 +364,7 @@ impl Default for EcoSettings {
 impl EcoSettings {
     /// The fan mode eco sets, if any.
     pub fn fan_mode(&self) -> Option<&str> {
-        self.actions.iter().find_map(|a| match a {
-            EcoAction::FanMode(m) => Some(m.as_str()),
-        })
+        fan_mode_of(&self.actions)
     }
 
     /// The eco setpoint of `mode`.

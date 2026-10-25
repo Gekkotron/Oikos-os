@@ -4,6 +4,7 @@
 
 pub mod decide;
 pub mod doc;
+pub mod eco;
 pub mod learn;
 pub mod ledger;
 pub mod schedule;
