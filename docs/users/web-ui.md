@@ -190,7 +190,7 @@ Security (`/security`): the alarm panel as a hero card (arm modes, Disarm, inlin
 
 ## Climate
 
-Climate (`/climate`, beta) spans the page. The rooms are listed on the left (a row of chips on a phone), each with its reading, a dot in the colour of its target and where it stands. The selected room shows its status (reading, target, state, a quick hold of a setpoint for a while, and any hold with Clear), then its week as a calendar: seven day columns with the hours going down, each block coloured by its temperature (yellow below 17 °C, orange to 20 °C, red from 20 °C) and a line at the current time on today. Tapping a block shows its times. Below come the pending proposal, learning, the room thermometer picker (temperature sensors grouped by room) and the recent decisions; Settings opens the house settings sheet, and the engine's banners sit under the title. While editing the rules or a proposal, a block's ends drag up and down, tapping an empty spot on a day adds a two-hour block there (base + 2 °C), and a block's editor has day chips to add it to, or remove it from, other days. A room without rules offers **Create schedule**: an empty heating week (base 16 °C) to fill in; saving it approves it and a pending room becomes active. While editing, the base (the temperature outside the blocks) can be changed or set to Off. Switching rooms keeps an edit in progress. See [Climate](climate.md).
+Climate (`/climate`, beta) spans the page. The rooms are listed on the left (a row of chips on a phone), each with its reading, a dot in the colour of its target and where it stands. The selected room shows its status (reading, target, state, a quick hold of a setpoint for a while, and any hold with Clear), then its week as a calendar: seven day columns with the hours going down, each block coloured by its temperature (yellow below 17 °C, orange to 20 °C, red from 20 °C) and a line at the current time on today. Tapping a block shows its times. Below come the pending proposal, learning, the room thermometer field (the [entity picker](#picking-an-entity), opened on the thermometers) and the recent decisions; Settings opens the house settings sheet, and the engine's banners sit under the title. While editing the rules or a proposal, a block's ends drag up and down, tapping an empty spot on a day adds a two-hour block there (base + 2 °C), and a block's editor has day chips to add it to, or remove it from, other days. A room without rules offers **Create schedule**: an empty heating week (base 16 °C) to fill in; saving it approves it and a pending room becomes active. While editing, the base (the temperature outside the blocks) can be changed or set to Off. Switching rooms keeps an edit in progress. See [Climate](climate.md).
 
 ## History
 
@@ -238,8 +238,21 @@ The **Home** page (**Maison** in French, `/settings/home`) holds the settings of
 - **Eco setpoint (°C)**: from 5 to 30. Leave it empty to turn off the "Heating in eco" case.
 - **Cold below (°C)** and **Hot above (°C)**: the thresholds of the sentence, from 5 to 35. Each one shows its default (15 and 26) as a placeholder when empty. The cold threshold must stay below the hot one; an invalid value shows its error next to the field.
 - **Mode selector**: the select entity behind the house mode pill. Choose "None" to hide the pill.
-- **Indoor sensor**: the temperature sensor for the indoor value, picked from a list grouped by room. "Automatic (median of rooms)" uses the median of the room values.
+- **Indoor sensor**: the temperature sensor for the indoor value, chosen with the [entity picker](#picking-an-entity), which opens on the thermometers. "Automatic (median of rooms)" uses the median of the room values.
 - **Off-peak hours**: the off-peak periods of your electricity contract, as start–end times (**Add a period**, **Remove**). A period may cross midnight (22:00–06:00); periods must not overlap. The same hours apply every day. A change applies from the start of the day you save it; earlier days keep the hours they had, and the first hours you set also cover the days recorded before them.
+
+## Picking an entity
+
+Every field that asks for an entity (the climate and home settings, the alarm's sensors, sirens, remotes and trackers, a flow card's entity, a mood's device action, a power sensor's energy counter, a group's members) opens the same picker. The closed field shows the chosen entity with its device, its room and its current value.
+
+- **Search**: type part of a name, a device, a room or a type (`temperature`, `interrupteur`), in either language and without accents; the id works too.
+- **Chips**: a field that needs one kind of entity opens on it (thermometers for the outdoor temperature, for example); **All** lists everything the field accepts, and **+ Diagnostic** adds the diagnostic, configuration and hidden entities.
+- **Rows**: each row shows the entity, its device on the second line, and on the right its value and how long ago it changed, so two "Backlight mode" switches from two plugs are told apart.
+- **On a computer** it is a window with the rooms on the left, each with its number of matches, and the entities on the right. **On a phone** it fills the screen and groups the entities under room headings.
+- **Keys**: ↑ ↓ move, Enter picks, Esc closes. The browser's Back button also closes it.
+- Fields that take several entities keep the picker open: tick each one, then **Done**. The chosen ones stay as chips under the field; tap a chip to remove it.
+- With **All** and no search, the first 200 entities are shown; type or pick a room to see the rest.
+- An entity the house no longer has stays in the field, marked "missing", until you replace or remove it.
 
 ## Alerts
 
