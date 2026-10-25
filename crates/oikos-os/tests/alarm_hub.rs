@@ -396,6 +396,14 @@ impl Rig {
             .collect()
     }
 
+    /// The critical trigger alerts, newest first (no armed/disarmed note, no offline warning).
+    fn trigger_alerts(&self) -> Vec<oikos_api::AlertView> {
+        self.alarm_alerts()
+            .into_iter()
+            .filter(|a| is_alert(a, "critical"))
+            .collect()
+    }
+
     fn panel(&self) -> StateValue {
         self.hub
             .entity_view("oikos_alarm_house")
@@ -666,7 +674,7 @@ async fn trigger_rings_both_siren_kinds_and_pushes() {
     trip(&mut rig).await;
     assert_eq!(rig.sent(SIREN_SET), ["ON"]);
     assert_eq!(rig.sent(MQTT_SIREN), ["ON"]);
-    let alerts = rig.alarm_alerts();
+    let alerts = rig.trigger_alerts();
     assert_eq!(alerts.len(), 1, "{alerts:?}");
     let alert = &alerts[0];
     assert_eq!(alert.channel, oikos_api::AlertChannel::Alarm);
@@ -691,7 +699,7 @@ async fn ring_stops_after_siren_s() {
     assert_eq!(rig.sent(SIREN_SET), ["OFF"]);
     assert_eq!(rig.sent(MQTT_SIREN), ["OFF"]);
     assert_eq!(rig.state(), "armed_away");
-    let alerts = rig.alarm_alerts();
+    let alerts = rig.trigger_alerts();
     assert_eq!(alerts.len(), 1);
     assert!(!alerts[0].resolved, "the alert stays until a disarm");
 }
@@ -773,7 +781,7 @@ async fn push_disarm_reply_disarms() {
     let mut rig = armed_rig().await;
     trip(&mut rig).await;
     rig.clear();
-    let id = rig.alarm_alerts()[0].id.clone();
+    let id = rig.trigger_alerts()[0].id.clone();
     let reply = json!({"id": id, "action": "disarm", "install_id": "x", "ts": 1}).to_string();
     // A retained reply is a replay, never a press.
     rig.hub
@@ -786,14 +794,14 @@ async fn push_disarm_reply_disarms() {
     assert_eq!(rig.state(), "disarmed");
     assert_eq!(rig.sent(SIREN_SET), ["OFF"]);
     assert_eq!(rig.sent(MQTT_SIREN), ["OFF"]);
-    assert!(rig.alarm_alerts().iter().all(|a| a.resolved));
+    assert!(rig.trigger_alerts().iter().all(|a| a.resolved));
 }
 
 #[tokio::test(start_paused = true)]
 async fn other_replies_are_ignored() {
     let mut rig = armed_rig().await;
     trip(&mut rig).await;
-    let id = rig.alarm_alerts()[0].id.clone();
+    let id = rig.trigger_alerts()[0].id.clone();
     for reply in [
         json!({"id": id, "action": "snooze"}),
         json!({"id": "frigate-1", "action": "disarm"}),
@@ -818,7 +826,7 @@ async fn failing_siren_does_not_block_others() {
     trip(&mut rig).await;
     assert!(rig.sent(SIREN_SET).is_empty());
     assert_eq!(rig.sent(MQTT_SIREN), ["ON"]);
-    let alerts = rig.alarm_alerts();
+    let alerts = rig.trigger_alerts();
     assert!(
         alerts[0].body.contains("Siren failed"),
         "{}",
@@ -827,7 +835,7 @@ async fn failing_siren_does_not_block_others() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn open_window_at_arm_sends_silent_note() {
+async fn open_window_at_arm_is_in_the_armed_push() {
     let mut rig = Rig::with(|hub, settings| {
         settings.sensors.push(SensorRule {
             entity: entity_id(hub, "back_door"),
@@ -842,15 +850,57 @@ async fn open_window_at_arm_sends_silent_note() {
     rig.advance(61).await;
     assert_eq!(rig.state(), "armed_away");
     let alerts = rig.alarm_alerts();
+    assert_eq!(
+        alerts.len(),
+        1,
+        "one push, not an armed one and a note: {alerts:?}"
+    );
+    assert!(is_alert(&alerts[0], "info"));
+    assert_eq!(
+        alerts[0].body,
+        "Armed away. back_door open, watched for closing"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn arming_and_disarming_push_with_sound() {
+    use oikos_core::model::{AlarmMode, Command};
+    let mut rig = Rig::new().await;
+    rig.command(arm(AlarmMode::Night)).await;
+    assert!(
+        rig.alarm_alerts().is_empty(),
+        "no push while the exit delay runs"
+    );
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_night");
+    let alerts = rig.alarm_alerts();
     assert_eq!(alerts.len(), 1, "{alerts:?}");
     assert!(is_alert(&alerts[0], "info"));
-    assert!(alerts[0].silent);
-    assert!(alerts[0].body.contains("back_door"), "{}", alerts[0].body);
-    assert!(
-        alerts[0].body.starts_with("Armed away."),
-        "{}",
-        alerts[0].body
-    );
+    assert!(!alerts[0].silent);
+    assert_eq!(alerts[0].channel, oikos_api::AlertChannel::Alarm);
+    assert_eq!(alerts[0].body, "Armed night");
+    assert!(alerts[0].actions.is_empty());
+
+    rig.command(Command::Disarm { code: None }).await;
+    let alerts = rig.alarm_alerts();
+    assert_eq!(alerts.len(), 2, "{alerts:?}");
+    assert_eq!(alerts[0].body, "Disarmed");
+    assert!(!alerts[0].silent);
+    assert_ne!(alerts[0].id, alerts[1].id, "a log, not a replaced alert");
+
+    // Disarming an alarm that is already disarmed says nothing.
+    rig.command(Command::Disarm { code: None }).await;
+    assert_eq!(rig.alarm_alerts().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancelled_exit_delay_pushes_disarmed_only() {
+    use oikos_core::model::{AlarmMode, Command};
+    let mut rig = Rig::new().await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.command(Command::Disarm { code: None }).await;
+    let bodies: Vec<String> = rig.alarm_alerts().into_iter().map(|a| a.body).collect();
+    assert_eq!(bodies, ["Disarmed"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1001,7 +1051,7 @@ async fn disable_while_ringing_silences() {
     rig.pump().await;
     assert_eq!(rig.sent(SIREN_SET), ["OFF"]);
     assert_eq!(rig.sent(MQTT_SIREN), ["OFF"]);
-    assert!(rig.alarm_alerts().iter().all(|a| a.resolved));
+    assert!(rig.trigger_alerts().iter().all(|a| a.resolved));
     let removal = rig.log.iter().find(|p| p.topic == CONFIG_TOPIC).unwrap();
     assert!(removal.retain && removal.payload.is_empty());
     assert_eq!(rig.state(), "disarmed");
@@ -1065,7 +1115,7 @@ async fn unresponsive_siren_delays_neither_alert_nor_disarm() {
         pump(&mut rig);
     }
     assert_eq!(rig.state(), "triggered");
-    let alerts = rig.alarm_alerts();
+    let alerts = rig.trigger_alerts();
     assert_eq!(alerts.len(), 1, "{alerts:?}");
     assert!(
         alerts[0].body.contains("(no confirmation)"),

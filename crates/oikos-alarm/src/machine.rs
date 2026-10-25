@@ -178,9 +178,21 @@ pub enum Effect {
     SirensOn,
     SirensOff,
     Chirp,
-    Alert { cause: Vec<String> },
+    Alert {
+        cause: Vec<String>,
+    },
     ResolveAlerts,
-    OpenAtArm(Vec<String>),
+    /// The alarm is now armed in `mode`, at the command of `source`; `open` lists the watched
+    /// openings that were open at that moment (watched for closing, §4.3).
+    Armed {
+        mode: ArmMode,
+        source: Option<Source>,
+        open: Vec<String>,
+    },
+    /// The alarm went from an armed, arming, pending or ringing state to disarmed.
+    Disarmed {
+        source: Source,
+    },
 }
 
 /// The action a remote's signal is mapped to.
@@ -204,7 +216,8 @@ fn open_openings(s: &AlarmSettings, world: &World, mode: ArmMode) -> BTreeSet<St
         .collect()
 }
 
-/// Enters `Armed`: what is open now is watched for closing (§4.3), and the panel chirps.
+/// Enters `Armed`: what is open now is watched for closing (§4.3), the panel chirps and the
+/// phones get an "armed" push.
 fn enter_armed(
     rt: &mut Runtime,
     s: &AlarmSettings,
@@ -216,11 +229,14 @@ fn enter_armed(
     rt.enter(Phase::Armed { mode }, source, now);
     rt.motion_hits.clear();
     rt.open_at_arm = open_openings(s, world, mode);
-    let mut fx = vec![Effect::Chirp];
-    if !rt.open_at_arm.is_empty() {
-        fx.push(Effect::OpenAtArm(rt.open_at_arm.iter().cloned().collect()));
-    }
-    fx
+    vec![
+        Effect::Chirp,
+        Effect::Armed {
+            mode,
+            source: rt.source,
+            open: rt.open_at_arm.iter().cloned().collect(),
+        },
+    ]
 }
 
 fn trigger(
@@ -304,6 +320,9 @@ fn disarm(rt: &mut Runtime, source: Source, now: u64) -> Vec<Effect> {
     }
     if !rt.alert_ids.is_empty() {
         fx.push(Effect::ResolveAlerts);
+    }
+    if rt.phase != Phase::Disarmed {
+        fx.push(Effect::Disarmed { source });
     }
     rt.enter(Phase::Disarmed, Some(source), now);
     rt.motion_hits.clear();
@@ -697,7 +716,17 @@ mod tests {
             mode: ArmMode::Home,
             source: Source::Command,
         };
-        assert_eq!(go(&mut rt, &s, ev, 5), vec![Effect::Chirp]);
+        assert_eq!(
+            go(&mut rt, &s, ev, 5),
+            vec![
+                Effect::Chirp,
+                Effect::Armed {
+                    mode: ArmMode::Home,
+                    source: Some(Source::Command),
+                    open: vec![],
+                }
+            ]
+        );
         assert_eq!(
             rt.phase,
             Phase::Armed {
@@ -906,7 +935,14 @@ mod tests {
         assert_eq!(rt.open_at_arm, BTreeSet::from(["window".to_string()]));
         assert_eq!(
             fx,
-            vec![Effect::Chirp, Effect::OpenAtArm(vec!["window".into()])]
+            vec![
+                Effect::Chirp,
+                Effect::Armed {
+                    mode: ArmMode::Away,
+                    source: Some(Source::Presence),
+                    open: vec!["window".into()],
+                }
+            ]
         );
         let fx = go(&mut rt, &s, sensor_ev("window", false), 50);
         assert!(rt.open_at_arm.is_empty());
@@ -937,7 +973,17 @@ mod tests {
             }
         );
         assert!(rt.open_at_arm.is_empty());
-        assert_eq!(fx, vec![Effect::Chirp]);
+        assert_eq!(
+            fx,
+            vec![
+                Effect::Chirp,
+                Effect::Armed {
+                    mode: ArmMode::Away,
+                    source: Some(Source::Command),
+                    open: vec![],
+                }
+            ]
+        );
     }
 
     #[test]
@@ -1048,7 +1094,13 @@ mod tests {
         };
         assert_eq!(
             go(&mut rt, &s, ev.clone(), 20),
-            vec![Effect::SirensOff, Effect::ResolveAlerts]
+            vec![
+                Effect::SirensOff,
+                Effect::ResolveAlerts,
+                Effect::Disarmed {
+                    source: Source::Command
+                }
+            ]
         );
         assert_eq!(rt.phase, Phase::Disarmed);
         assert!(rt.cause.is_empty());
@@ -1223,7 +1275,17 @@ mod tests {
             }
         );
         assert_eq!(rt.source, Some(Source::Presence));
-        assert_eq!(fx, vec![Effect::Chirp]);
+        assert_eq!(
+            fx,
+            vec![
+                Effect::Chirp,
+                Effect::Armed {
+                    mode: ArmMode::Away,
+                    source: Some(Source::Presence),
+                    open: vec![],
+                }
+            ]
+        );
         assert!(!rt.auto_arm_ready);
         assert_eq!(next_deadline(&rt, &s), None);
     }
@@ -1293,7 +1355,16 @@ mod tests {
         go(&mut rt, &s, sensor_ev("window", true), 10);
         rt.alert_ids = vec!["alarm-1".into()];
         let fx = go(&mut rt, &s, seen("tracker.a", Presence::Home), 20);
-        assert_eq!(fx, vec![Effect::SirensOff, Effect::ResolveAlerts]);
+        assert_eq!(
+            fx,
+            vec![
+                Effect::SirensOff,
+                Effect::ResolveAlerts,
+                Effect::Disarmed {
+                    source: Source::Presence
+                }
+            ]
+        );
         assert_eq!(rt.phase, Phase::Disarmed);
         assert_eq!(rt.source, Some(Source::Presence));
         assert!(rt.auto_arm_ready);
@@ -1440,7 +1511,17 @@ mod tests {
             mode: away,
             until: 100,
         });
-        assert_eq!(go(&mut rt, &s, Event::Resume, 150), vec![Effect::Chirp]);
+        assert_eq!(
+            go(&mut rt, &s, Event::Resume, 150),
+            vec![
+                Effect::Chirp,
+                Effect::Armed {
+                    mode: ArmMode::Away,
+                    source: None,
+                    open: vec![],
+                }
+            ]
+        );
         assert_eq!(rt.phase, Phase::Armed { mode: away });
         // Arming / Pending not yet due: the hub resumes the countdown.
         let mut rt = with(Phase::Arming {
