@@ -6,10 +6,12 @@ use oikos_core::model::{Command, EntityState, StateValue};
 
 use super::{ModeSelect, Sender};
 use crate::components::card_frame::{CardFrame, open_entity};
+use crate::i18n::devices::{DeviceText, use_device_text};
 
 #[component]
 pub fn SelectCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let t = use_device_text();
     let current = match &entity.state.value {
         StateValue::Text(s) => Some(s.clone()),
         _ => None,
@@ -31,7 +33,7 @@ pub fn SelectCard(entity: EntityView) -> impl IntoView {
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
             <div class="card__controls card__controls--stack">
-                <ModeSelect label="Option" options=options selected=current on_select=on_select />
+                <ModeSelect label=Signal::derive(move || t(DeviceText::Option).to_owned()) options=options selected=current on_select=on_select />
             </div>
         </CardFrame>
     }

@@ -8,6 +8,8 @@ use oikos_core::types::{self, ControlDef, GenericCaps, Shape, TypeDef};
 use super::{ModeSelect, PowerToggle, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::format::{generic_value, value_class, word};
+use crate::i18n::states::on_off;
+use crate::i18n::{Key, use_text};
 
 /// A control name as button text: `activate` becomes "Activate".
 pub fn control_label(name: &str) -> String {
@@ -81,6 +83,8 @@ pub(crate) fn control_view(
         StateValue::Generic(g) => g.clone(),
         _ => GenericState::default(),
     };
+    let lang = crate::i18n::use_lang();
+    let t = use_text();
     let id = entity.id.clone();
     let control = name.to_owned();
     let send = move |value: Option<serde_json::Value>| {
@@ -118,7 +122,7 @@ pub(crate) fn control_view(
                 None => view! {
                     <PowerToggle
                         on=on
-                        label=if on { "On" } else { "Off" }
+                        label=Signal::derive(move || on_off(lang(), false, on))
                         on_toggle=toggle
                         aria_label=control_label(name)
                     />
@@ -134,7 +138,12 @@ pub(crate) fn control_view(
                 Some(GenericValue::Number(n)) => Some(*n),
                 _ => None,
             };
-            let label = current.map_or_else(|| "—".to_owned(), |n| format!("{n}"));
+            let label = Signal::derive(move || {
+                current.map_or_else(
+                    || "—".to_owned(),
+                    |n| crate::i18n::format::number(lang(), n),
+                )
+            });
             let on_step = Callback::new(move |dir: f64| {
                 if let Some(n) = current {
                     let next = (n + dir * step).clamp(range.min, range.max.max(range.min));
@@ -166,7 +175,7 @@ pub(crate) fn control_view(
             let open = open_entity(&entity.id);
             view! {
                 <button type="button" class="btn" on:click=move |_| open.run(())>
-                    "Edit"
+                    {move || t(Key::Edit)}
                 </button>
             }
             .into_any()
@@ -180,12 +189,12 @@ pub fn GenericCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let def = types::type_def(&entity.component);
     let caps = entity.capabilities.generic.clone();
-    let value = generic_value(
-        crate::i18n::current_lang(),
-        def,
-        caps.as_ref(),
-        &entity.state,
-    );
+    let lang = crate::i18n::use_lang();
+    let value = {
+        let caps = caps.clone();
+        let state = entity.state.clone();
+        Signal::derive(move || generic_value(lang(), def, caps.as_ref(), &state))
+    };
     let is_alert = match (def, &entity.state.value) {
         (Some(d), StateValue::Generic(g)) => types::alerting(d, g),
         _ => false,
@@ -202,13 +211,16 @@ pub fn GenericCard(entity: EntityView) -> impl IntoView {
         _ => None,
     };
     let media = primary_is_picture.then(|| picture(&entity));
-    let class = value_class(&value);
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending alert=is_alert>
             {media}
-            {(!value.is_empty()).then(|| view! { <span class=class>{value.clone()}</span> })}
+            {move || {
+                let text = value.get();
+                (!text.is_empty())
+                    .then(|| view! { <span class=value_class(&text)>{text.clone()}</span> })
+            }}
             {control.map(|c| view! { <div class="card__controls">{c}</div> })}
         </CardFrame>
     }

@@ -11,8 +11,13 @@ use oikos_api::{AreaView, DeviceView, EntityView};
 
 use crate::format::{list_label, room_name, wrap_id};
 use crate::house::House;
+use crate::i18n::devices::{
+    DeviceText, availability_text, devices_count, ignored_topics, link_quality_badge,
+    use_device_text,
+};
+use crate::i18n::{Lang, use_lang};
 use crate::icons::MAGNIFIER;
-use crate::screens::entity_sheet::{availability_class, availability_word};
+use crate::screens::entity_sheet::availability_class;
 
 /// True when the device's name, model, vendor, IEEE address or one of its `rooms` contains
 /// `query`, ignoring case. A blank query matches everything.
@@ -47,9 +52,9 @@ fn device_rooms(
 }
 
 /// The rooms as one line, "No room" when the device has none.
-fn room_line(rooms: &[String]) -> String {
+fn room_line(lang: Lang, rooms: &[String]) -> String {
     if rooms.is_empty() {
-        "No room".to_owned()
+        crate::i18n::devices::device_text(lang, DeviceText::NoRoom).to_owned()
     } else {
         rooms.join(", ")
     }
@@ -71,6 +76,8 @@ fn model_line(device: &DeviceView) -> String {
 #[component]
 fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
+    let t = use_device_text();
     let id = device.id.clone();
     let open = {
         let id = id.clone();
@@ -92,7 +99,7 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
             house.entities.with(|m| {
                 house
                     .areas
-                    .with(|a| room_line(&device_rooms(&device, m, a)))
+                    .with(|a| room_line(lang(), &device_rooms(&device, m, a)))
             })
         }
     };
@@ -100,10 +107,7 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
     let links = move || {
         house.entities.with(|m| {
             ids.iter()
-                .filter_map(|id| {
-                    m.get(id)
-                        .map(|e| (e.id.clone(), list_label(crate::i18n::Lang::En, e)))
-                })
+                .filter_map(|id| m.get(id).cloned())
                 .collect::<Vec<_>>()
         })
     };
@@ -118,7 +122,7 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
             >
                 <span
                     class=availability_class(device.availability)
-                    title=availability_word(device.availability)
+                    title=move || availability_text(lang(), device.availability)
                 ></span>
                 <span class="device__titles">
                     <span class="device__name">{wrap_id(&device.friendly_name)}</span>
@@ -132,18 +136,18 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
                         .filter(|u| u.available)
                         .map(|u| {
                             view! {
-                                <span class="chip-badge device__update-badge" title="Firmware update available">
+                                <span class="chip-badge device__update-badge" title=move || t(DeviceText::FirmwareUpdate)>
                                     {format!("v{}", u.latest.unwrap_or_default())}
                                 </span>
                             }
                         })}
                     {device
                         .battery
-                        .map(|b| view! { <span class="chip-badge">{format!("{b} %")}</span> })}
+                        .map(|b| view! { <span class="chip-badge">{format!("{b}\u{a0}%")}</span> })}
                     {device
                         .linkquality
-                        .map(|q| view! { <span class="chip-badge">{format!("LQ {q}")}</span> })}
-                    <span class="chip-badge" title="Entities">
+                        .map(|q| view! { <span class="chip-badge">{move || link_quality_badge(q)}</span> })}
+                    <span class="chip-badge" title=move || t(DeviceText::Entities)>
                         {entity_count}
                     </span>
                 </span>
@@ -153,10 +157,11 @@ fn DeviceRow(device: DeviceView, expanded: RwSignal<Option<String>>) -> impl Int
                     <ul class="sheet__links">
                         {links()
                             .into_iter()
-                            .map(|(id, name)| {
+                            .map(|e| {
+                                let href = format!("/entity/{}", crate::api::encode_id(&e.id));
                                 view! {
                                     <li>
-                                        <A href=format!("/entity/{}", crate::api::encode_id(&id))>{wrap_id(&name)}</A>
+                                        <A href=href>{move || wrap_id(&list_label(lang(), &e))}</A>
                                     </li>
                                 }
                             })
@@ -189,23 +194,25 @@ pub fn DevicesScreen() -> impl IntoView {
         devices
     });
     let total = Memo::new(move |_| house.devices.with(Vec::len));
+    let lang = use_lang();
+    let t = use_device_text();
 
     view! {
         <div class="devices">
-            <h1 class="devices__title">"Zigbee2MQTT devices"</h1>
+            <h1 class="devices__title">{move || t(DeviceText::Zigbee2mqttDevices)}</h1>
             <label class="devices__search">
                 <span class="devices__search-icon" inner_html=MAGNIFIER></span>
                 <input
                     class="devices__search-input"
                     type="search"
-                    placeholder="Search name, room, model, vendor or IEEE"
-                    aria-label="Search devices"
+                    placeholder=move || t(DeviceText::SearchPlaceholder)
+                    aria-label=move || t(DeviceText::SearchDevices)
                     prop:value=move || query.get()
                     on:input=move |ev| query.set(event_target_value(&ev))
                 />
             </label>
             <p class="devices__count">
-                {move || filtered.with(Vec::len)} " of " {move || total.get()} " devices"
+                {move || devices_count(lang(), filtered.with(Vec::len), total.get())}
             </p>
             <ul class="device-list">
                 <For
@@ -216,7 +223,7 @@ pub fn DevicesScreen() -> impl IntoView {
             </ul>
             <section class="sheet__panel">
                 <h2 class="sheet__heading">
-                    "Ignored discovery topics (" {move || house.ignored.with(Vec::len)} ")"
+                    {move || ignored_topics(lang(), house.ignored.with(Vec::len))}
                 </h2>
                 <ul class="ignored-list">
                     <For
@@ -240,6 +247,7 @@ pub fn DevicesScreen() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::{matches, room_line};
+    use crate::i18n::Lang;
     use oikos_api::DeviceView;
     use oikos_core::model::Availability;
 
@@ -295,9 +303,10 @@ mod tests {
 
     #[test]
     fn room_line_joins_rooms_or_says_no_room() {
-        assert_eq!(room_line(&[]), "No room");
+        assert_eq!(room_line(Lang::En, &[]), "No room");
+        assert_eq!(room_line(Lang::Fr, &[]), "Sans pièce");
         assert_eq!(
-            room_line(&["Bedroom".to_owned(), "Office".to_owned()]),
+            room_line(Lang::En, &["Bedroom".to_owned(), "Office".to_owned()]),
             "Bedroom, Office"
         );
     }

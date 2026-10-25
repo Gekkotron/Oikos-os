@@ -73,12 +73,17 @@ pub fn CardFrame(
     let icon = entity_icon(&entity);
     let availability = entity.state.availability;
     let is_on = crate::format::is_on(&entity.state);
-    let title = if title.is_empty() {
-        crate::format::entity_title(crate::i18n::current_lang(), &entity)
-    } else {
-        title
+    let lang = crate::i18n::use_lang();
+    let short = {
+        let entity = entity.clone();
+        move || {
+            if title.is_empty() {
+                crate::format::wrap_id(&crate::format::entity_title(lang(), &entity))
+            } else {
+                crate::format::wrap_id(&title)
+            }
+        }
     };
-    let short = crate::format::wrap_id(&title);
     let full_name = entity.name.clone();
     let offline = availability == Availability::Offline;
     // A group's entity spans like the derived group card and carries its `×N` badge.

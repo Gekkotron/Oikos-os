@@ -6,6 +6,9 @@
 
 use leptos::prelude::*;
 use oikos_core::model::Hs;
+
+use crate::i18n::devices::{DeviceText, colour_readout, use_device_text};
+use crate::i18n::use_lang;
 use wasm_bindgen::JsCast;
 
 /// The colour under the point `(dx, dy)` of a disc of radius `radius`, measured from its centre
@@ -79,11 +82,11 @@ pub fn HsWheel(#[prop(into)] value: Signal<Option<Hs>>, on_pick: Callback<Hs>) -
     let cancel = move |_| preview.set(None);
     let key = move |ev: web_sys::KeyboardEvent| {
         let step = if ev.shift_key() { 15.0 } else { 5.0 };
-        let (dh, ds) = match ev.key().as_str() {
-            "ArrowRight" => (step, 0.0),
-            "ArrowLeft" => (-step, 0.0),
-            "ArrowUp" => (0.0, step),
-            "ArrowDown" => (0.0, -step),
+        let (dh, ds) = match ev.key().to_ascii_lowercase().as_str() {
+            "arrowright" => (step, 0.0),
+            "arrowleft" => (-step, 0.0),
+            "arrowup" => (0.0, step),
+            "arrowdown" => (0.0, -step),
             _ => return,
         };
         ev.prevent_default();
@@ -104,10 +107,12 @@ pub fn HsWheel(#[prop(into)] value: Signal<Option<Hs>>, on_pick: Callback<Hs>) -
             },
         )
     };
+    let lang = use_lang();
+    let t = use_device_text();
     let readout = move || {
         shown().map_or_else(
-            || "No colour set".to_owned(),
-            |hs| format!("Hue {}° · Saturation {} %", hs.h.round(), hs.s.round()),
+            || t(DeviceText::NoColour).to_owned(),
+            |hs| colour_readout(lang(), hs.h, hs.s),
         )
     };
 
@@ -117,7 +122,7 @@ pub fn HsWheel(#[prop(into)] value: Signal<Option<Hs>>, on_pick: Callback<Hs>) -
                 class="hs__wheel"
                 role="slider"
                 tabindex="0"
-                aria-label="Colour"
+                aria-label=move || t(DeviceText::Colour)
                 aria-valuemin="0"
                 aria-valuemax="360"
                 aria-valuenow=move || shown().map_or(0.0, |hs| hs.h.round()).to_string()

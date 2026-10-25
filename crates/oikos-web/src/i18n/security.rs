@@ -187,7 +187,7 @@ pub fn security_text(lang: Lang, k: SecurityText) -> &'static str {
         T::VerbPress => ("Press", "Appuyer"),
         T::VerbOpen => ("Open", "Ouvrir"),
         T::VerbRing => ("Ring", "Faire sonner"),
-        T::VerbPlay => ("Play", "Jouer"),
+        T::VerbPlay => ("Play", "Sonner"),
         T::VerbTurnOn => ("Turn on", "Activer"),
         T::Ringing => ("Ringing", "Sonnerie en cours"),
         T::JustNow => ("Just now", "À l'instant"),

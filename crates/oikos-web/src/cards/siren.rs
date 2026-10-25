@@ -7,7 +7,7 @@ use super::light::{power_command, read_on, with_on};
 use super::{PowerToggle, Sender};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::components::confirm::{ConfirmBar, Confirming};
-use crate::format::display_value;
+use crate::format::entity_value;
 use crate::i18n::security::{SecurityText, action_question, security_text};
 
 #[component]
@@ -15,13 +15,21 @@ pub fn SirenCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
     let confirming = expect_context::<Confirming>();
     let on = read_on(&entity.state).unwrap_or(false);
-    let lang = crate::i18n::current_lang();
-    let label = if on {
-        security_text(lang, SecurityText::Ringing).to_owned()
-    } else {
-        display_value(lang, &entity.state, entity.unit.as_deref())
+    let lang = crate::i18n::use_lang();
+    let label = {
+        let entity = entity.clone();
+        Signal::derive(move || {
+            if on {
+                security_text(lang(), SecurityText::Ringing).to_owned()
+            } else {
+                entity_value(lang(), &entity)
+            }
+        })
     };
-    let question = action_question(lang, SecurityText::VerbRing, &entity.name);
+    let question = {
+        let name = entity.name.clone();
+        Signal::derive(move || action_question(lang(), SecurityText::VerbRing, &name))
+    };
     let send = {
         let id = entity.id.clone();
         let state = entity.state.clone();
@@ -50,12 +58,12 @@ pub fn SirenCard(entity: EntityView) -> impl IntoView {
             <Show
                 when=asking
                 fallback=move || {
-                    view! { <PowerToggle on=on label=label.clone() on_toggle=toggle /> }
+                    view! { <PowerToggle on=on label=label on_toggle=toggle /> }
                 }
             >
                 <ConfirmBar
-                    question=question.clone()
-                    yes=security_text(lang, SecurityText::VerbRing)
+                    question=question
+                    yes=Signal::derive(move || security_text(lang(), SecurityText::VerbRing))
                     on_yes=Callback::new(move |()| send.run(true))
                     on_cancel=Callback::new(move |()| confirming.clear())
                 />

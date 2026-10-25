@@ -11,10 +11,11 @@ use super::climate::stepped;
 use super::light::{power_command, read_on, with_on};
 use super::{ModeSelect, PowerToggle, Sender, Stepper};
 use crate::components::card_frame::{CardFrame, GROUP_PREFIX, open_entity};
-use crate::format::{degrees, word};
+use crate::format::degrees;
 use crate::groups::{GroupSummary, cover_text, light_text, summary};
 use crate::house::House;
-use crate::i18n::{GroupState, Lang, group_state, use_lang};
+use crate::i18n::devices::{DeviceText, device_text, use_device_text};
+use crate::i18n::{GroupState, Key, Lang, group_state, use_lang, use_text};
 use crate::icons::{CHEVRON_DOWN, CHEVRON_UP, STOP};
 
 /// ▲ ■ ▼ as a row of buttons sending Open, Stop and Close to `on_command`. `suffix` ends their
@@ -27,8 +28,10 @@ pub fn CoverButtons(
     #[prop(optional, into)]
     disabled: Signal<bool>,
 ) -> impl IntoView {
-    let button = move |text: &'static str, icon: &'static str, cmd: Command| {
-        let label = format!("{text}{suffix}");
+    let t = use_device_text();
+    let button = move |word: DeviceText, icon: &'static str, cmd: Command| {
+        let suffix = suffix.clone();
+        let label = move || format!("{}{suffix}", t(word));
         view! {
             <button
                 type="button"
@@ -43,15 +46,12 @@ pub fn CoverButtons(
     };
     view! {
         <div class="card__controls">
-            {button("Open", CHEVRON_UP, Command::Open)}
-            {button("Stop", STOP, Command::Stop)}
-            {button("Close", CHEVRON_DOWN, Command::Close)}
+            {button(DeviceText::Open, CHEVRON_UP, Command::Open)}
+            {button(DeviceText::Stop, STOP, Command::Stop)}
+            {button(DeviceText::Close, CHEVRON_DOWN, Command::Close)}
         </div>
     }
 }
-
-/// The accessible name and label of a group's press button.
-pub const PRESS_ALL: &str = "Press all";
 
 /// What a group of switches says: all on / all off, or how many are on when `counts`
 /// (`on`, `total`) shows the members disagree. Without counts the group's own state decides.
@@ -86,12 +86,20 @@ pub fn range_of(attributes: &Map<String, Value>) -> Option<[f64; 2]> {
 
 /// The current-value line of a thermostat group: the members' target range ("19–21 °C") when
 /// they differ, else the shared mode, else "Mixed".
-pub fn thermostat_text(range: Option<[f64; 2]>, mode: Option<&str>, unit: Option<&str>) -> String {
+pub fn thermostat_text(
+    lang: Lang,
+    range: Option<[f64; 2]>,
+    mode: Option<&str>,
+    unit: Option<&str>,
+) -> String {
     if let Some([low, high]) = range {
         let unit = unit.filter(|u| !u.is_empty()).unwrap_or("°C");
-        return format!("{}–{} {unit}", plain(low), plain(high));
+        return format!("{}–{}\u{a0}{unit}", plain(low), plain(high));
     }
-    mode.map_or_else(|| "Mixed".to_owned(), word)
+    mode.map_or_else(
+        || device_text(lang, DeviceText::Mixed).to_owned(),
+        |m| super::option_word(lang, m),
+    )
 }
 
 /// How many of the group `entity_id`'s present members satisfy `pred`, with how many there
@@ -127,9 +135,11 @@ pub fn SwitchGroupCard(entity: EntityView) -> impl IntoView {
     let on_click = open_entity(&entity.id);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
-            {move || {
-                view! { <PowerToggle on=on label=switch_text(lang(), on, counts) on_toggle=toggle /> }
-            }}
+            <PowerToggle
+                on=on
+                label=Signal::derive(move || switch_text(lang(), on, counts))
+                on_toggle=toggle
+            />
         </CardFrame>
     }
 }
@@ -139,13 +149,24 @@ pub fn SwitchGroupCard(entity: EntityView) -> impl IntoView {
 #[component]
 pub fn ClimateGroupCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let tk = use_text();
     let (target, mode) = match &entity.state.value {
         StateValue::Climate(c) => (c.target, c.mode.clone()),
         _ => (None, None),
     };
     let unit = entity.unit.as_deref();
-    let now_text = thermostat_text(range_of(&entity.state.attributes), mode.as_deref(), unit);
-    let target_text = degrees(crate::i18n::current_lang(), target, unit);
+    let lang = use_lang();
+    let t = use_device_text();
+    let range = range_of(&entity.state.attributes);
+    let now_text = {
+        let mode = mode.clone();
+        let unit = unit.map(str::to_owned);
+        move || thermostat_text(lang(), range, mode.as_deref(), unit.as_deref())
+    };
+    let target_text = {
+        let unit = unit.map(str::to_owned);
+        Signal::derive(move || degrees(lang(), target, unit.as_deref()))
+    };
     let caps = &entity.capabilities;
 
     let on_step = {
@@ -163,7 +184,7 @@ pub fn ClimateGroupCard(entity: EntityView) -> impl IntoView {
         let on_select = Callback::new(move |picked: String| {
             sender.send(&id, Command::SetHvacMode { mode: picked }, None);
         });
-        view! { <ModeSelect label="Mode" options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true /> }
+        view! { <ModeSelect label=Signal::derive(move || tk(Key::Mode).to_owned()) options=caps.hvac_modes.clone() selected=mode on_select=on_select captioned=true modes=true /> }
     });
 
     let pending = sender.pending(&entity.id);
@@ -172,7 +193,7 @@ pub fn ClimateGroupCard(entity: EntityView) -> impl IntoView {
         <CardFrame entity=entity on_click=on_click pending=pending>
             <div class="thermo">
                 <span class="thermo__now">{now_text}</span>
-                <Stepper label=target_text caption="Target" can_step=target.is_some() on_step=on_step />
+                <Stepper label=target_text caption=Signal::derive(move || t(DeviceText::Target).to_owned()) can_step=target.is_some() on_step=on_step />
                 <div class="thermo__picks">{mode_select}</div>
             </div>
         </CardFrame>
@@ -202,6 +223,7 @@ pub fn VacuumGroupCard(entity: EntityView) -> impl IntoView {
 #[component]
 pub fn SelectGroupCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let t = use_device_text();
     let options = entity.capabilities.options.clone();
     let current = match &entity.state.value {
         StateValue::Text(s) if options.contains(s) => Some(s.clone()),
@@ -209,7 +231,7 @@ pub fn SelectGroupCard(entity: EntityView) -> impl IntoView {
     };
     let mixed = current
         .is_none()
-        .then(|| view! { <span class="card__value">"Mixed"</span> });
+        .then(|| view! { <span class="card__value">{move || t(DeviceText::Mixed)}</span> });
     let on_select = {
         let id = entity.id.clone();
         Callback::new(move |option: String| {
@@ -222,7 +244,12 @@ pub fn SelectGroupCard(entity: EntityView) -> impl IntoView {
         <CardFrame entity=entity on_click=on_click pending=pending>
             {mixed}
             <div class="card__controls card__controls--stack">
-                <ModeSelect label="Option" options=options selected=current on_select=on_select />
+                <ModeSelect
+                    label=Signal::derive(move || t(DeviceText::Option).to_owned())
+                    options=options
+                    selected=current
+                    on_select=on_select
+                />
             </div>
         </CardFrame>
     }
@@ -232,6 +259,7 @@ pub fn SelectGroupCard(entity: EntityView) -> impl IntoView {
 #[component]
 pub fn ButtonGroupCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let t = use_device_text();
     let on_press = {
         let id = entity.id.clone();
         move |_| sender.send(&id, Command::Press, None)
@@ -242,7 +270,7 @@ pub fn ButtonGroupCard(entity: EntityView) -> impl IntoView {
         <CardFrame entity=entity on_click=on_click pending=pending>
             <div class="card__controls">
                 <button type="button" class="btn" on:click=on_press>
-                    {PRESS_ALL}
+                    {move || t(DeviceText::PressAll)}
                 </button>
             </div>
         </CardFrame>
@@ -305,6 +333,7 @@ pub fn CoverGroupEntityCard(entity: EntityView) -> impl IntoView {
 #[component]
 pub fn LightGroupEntityCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let tk = use_text();
     let lang = use_lang();
     let id = entity.id.clone();
     let on_now = read_on(&entity.state).unwrap_or(false);
@@ -350,7 +379,7 @@ pub fn LightGroupEntityCard(entity: EntityView) -> impl IntoView {
                 min="1"
                 max="255"
                 step="1"
-                aria-label="Brightness"
+                aria-label=move || tk(Key::Brightness)
                 prop:value=level.to_string()
                 on:change=on_change
             />

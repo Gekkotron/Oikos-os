@@ -7,6 +7,7 @@ use oikos_core::model::{Command, CoverState, EntityState, StateValue};
 use super::Sender;
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::house::House;
+use crate::i18n::devices::{DeviceText, use_device_text};
 use crate::icons::{CHEVRON_DOWN, CHEVRON_UP, STOP};
 
 /// True when a folded child named "moving" says the cover is moving: an on/off state that is
@@ -41,6 +42,7 @@ fn with_position(state: &EntityState, position: u8) -> Option<EntityState> {
 #[component]
 pub fn CoverCard(entity: EntityView) -> impl IntoView {
     let sender = Sender::from_context();
+    let t = use_device_text();
     let label = super::live_value(&entity);
     // The folded "moving" child changes on its own, without rebuilding this card, so the badge
     // follows it through a memo (which only notifies when the answer flips).
@@ -61,14 +63,14 @@ pub fn CoverCard(entity: EntityView) -> impl IntoView {
         _ => 0,
     };
 
-    let button = |text: &'static str, icon: &'static str, cmd: Command| {
+    let button = |text: DeviceText, icon: &'static str, cmd: Command| {
         let id = entity.id.clone();
         view! {
             <button
                 type="button"
                 class="btn btn--icon"
-                aria-label=text
-                title=text
+                aria-label=move || t(text)
+                title=move || t(text)
                 inner_html=icon
                 on:click=move |_| sender.send(&id, cmd.clone(), None)
             ></button>
@@ -76,9 +78,9 @@ pub fn CoverCard(entity: EntityView) -> impl IntoView {
     };
     let buttons = view! {
         <div class="card__controls">
-            {button("Open", CHEVRON_UP, Command::Open)}
-            {button("Stop", STOP, Command::Stop)}
-            {button("Close", CHEVRON_DOWN, Command::Close)}
+            {button(DeviceText::Open, CHEVRON_UP, Command::Open)}
+            {button(DeviceText::Stop, STOP, Command::Stop)}
+            {button(DeviceText::Close, CHEVRON_DOWN, Command::Close)}
         </div>
     };
 
@@ -103,7 +105,7 @@ pub fn CoverCard(entity: EntityView) -> impl IntoView {
                     min="0"
                     max="100"
                     step="1"
-                    aria-label="Position"
+                    aria-label=move || t(DeviceText::Position)
                     prop:value=position.to_string()
                     on:change=on_change
                 />
@@ -116,7 +118,7 @@ pub fn CoverCard(entity: EntityView) -> impl IntoView {
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
             <span class="card__value">{label}</span>
-            {move || moving.get().then(|| view! { <span class="badge">"Moving"</span> })}
+            {move || moving.get().then(|| view! { <span class="badge">{move || t(DeviceText::Moving)}</span> })}
             {slider}
             {buttons}
         </CardFrame>

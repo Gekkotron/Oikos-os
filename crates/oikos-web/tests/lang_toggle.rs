@@ -90,7 +90,7 @@ async fn card_values_follow_the_language_without_a_remount() {
     use oikos_core::model::{CoverState, Kind, StateValue};
     let mut sensor = entity("sensor.t", Kind::Sensor, StateValue::Number(21.46));
     sensor.unit = Some("W".into());
-    let cover = entity(
+    let mut cover = entity(
         "cover.c",
         Kind::Cover,
         StateValue::Cover(CoverState {
@@ -98,6 +98,18 @@ async fn card_values_follow_the_language_without_a_remount() {
             position: Some(40),
         }),
     );
+    cover.device_name = Some("Thing".into());
+    let mut heater = entity(
+        "water_heater.w",
+        Kind::WaterHeater,
+        StateValue::WaterHeater(oikos_core::model::WaterHeaterState {
+            mode: Some("heat".into()),
+            current: Some(48.0),
+            target: Some(55.5),
+        }),
+    );
+    heater.name = "Tank".into();
+    heater.capabilities.hvac_modes = vec!["heat".into(), "off".into()];
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -111,6 +123,9 @@ async fn card_values_follow_the_language_without_a_remount() {
             <Router>
                 {oikos_web::screens::home::card_for(sensor.clone())}
                 {oikos_web::screens::home::card_for(cover.clone())}
+                <oikos_web::components::card_place::InSheet>
+                    {oikos_web::screens::home::card_for(heater.clone())}
+                </oikos_web::components::card_place::InSheet>
             </Router>
         }
     });
@@ -118,9 +133,26 @@ async fn card_values_follow_the_language_without_a_remount() {
     let text = || host.text_content().unwrap_or_default();
     assert!(text().contains("21.5\u{a0}W"), "{}", text());
     assert!(text().contains("Open · 40\u{a0}%"), "{}", text());
+    // A card title, a stepper label and aria-labels, a select option.
+    assert!(text().contains("Thing · Cover"), "{}", text());
+    assert!(text().contains("55.5\u{a0}°C"), "{}", text());
+    assert!(text().contains("Heat"), "{}", text());
+    let labels = || host.inner_html();
+    assert!(labels().contains("aria-label=\"Decrease\""), "{}", labels());
 
     lang.set(Lang::Fr);
     tick().await;
     assert!(text().contains("21,5\u{a0}W"), "{}", text());
     assert!(text().contains("Ouvert · 40\u{a0}%"), "{}", text());
+    assert!(text().contains("Thing · Volet"), "{}", text());
+    assert!(!text().contains("Thing · Cover"), "{}", text());
+    assert!(text().contains("55,5\u{a0}°C"), "{}", text());
+    assert!(text().contains("Chauffage"), "{}", text());
+    assert!(!text().contains("Heat"), "{}", text());
+    assert!(labels().contains("aria-label=\"Baisser\""), "{}", labels());
+    assert!(
+        !labels().contains("aria-label=\"Decrease\""),
+        "{}",
+        labels()
+    );
 }

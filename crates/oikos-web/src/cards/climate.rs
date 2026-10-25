@@ -127,7 +127,7 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
             let guess = with_climate(&state, |c| c.fan_mode = Some(picked.clone()));
             sender.send(&id, Command::SetFanMode { mode: picked }, guess);
         });
-        view! { <ModeSelect label=t(Key::ModeFan) options=caps.fan_modes.clone() selected=fan on_select=on_select captioned=true /> }
+        view! { <ModeSelect label=Signal::derive(move || t(Key::ModeFan)) options=caps.fan_modes.clone() selected=fan on_select=on_select captioned=true modes=true /> }
     });
 
     // "It's 22°", or the mode when the unit reports no room temperature.
@@ -138,13 +138,18 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
         (None, None) => "—".to_owned(),
     };
     let value_text = Callback::new(move |v: f64| format!("{}°", decimal(lang(), v)));
-    let placeholder = if is_off {
-        mode_label(lang(), "off")
-    } else {
-        "—".to_owned()
-    };
+    let placeholder = Signal::derive(move || {
+        if is_off {
+            mode_label(lang(), "off")
+        } else {
+            "—".to_owned()
+        }
+    });
     let disabled = is_off || target.is_none();
-    let name = entity_title(crate::i18n::current_lang(), &entity);
+    let name = {
+        let entity = entity.clone();
+        Signal::derive(move || entity_title(lang(), &entity))
+    };
 
     let pending = sender.pending(&entity.id);
     let on_click = open_entity(&entity.id);
@@ -169,7 +174,7 @@ pub fn ClimateCard(entity: EntityView) -> impl IntoView {
                     aria_label=name
                     value_text=value_text
                     placeholder=placeholder
-                    caption=t(Key::TargetTemperature)
+                    caption=Signal::derive(move || t(Key::TargetTemperature))
                     tone=tone(mode.as_deref())
                     on_commit=on_commit
                 />
