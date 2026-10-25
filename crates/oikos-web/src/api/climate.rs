@@ -6,10 +6,18 @@ use oikos_climate::doc::{HouseSettings, Rules, ZoneSettings};
 pub use oikos_climate::view::OverrideRequest as OverrideBody;
 use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus};
 
-use super::core::{check, encode_id, read_json};
+use super::core::{WebError, check, encode_id, read_json};
 
 /// What a 503 means here: `[climate] enabled` is off on the hub. The nav hides its link on it.
-pub const CLIMATE_DISABLED: &str = "Climate is disabled";
+pub const CLIMATE_DISABLED: WebError = WebError::ClimateDisabled;
+
+/// True when `e` is the 503 above, whichever language its text was built in.
+pub fn is_climate_disabled(e: &ApiError) -> bool {
+    use crate::i18n::{Lang, errors::web_error_text};
+    [Lang::En, Lang::Fr]
+        .iter()
+        .any(|&l| e.error == web_error_text(l, &CLIMATE_DISABLED))
+}
 
 fn zone_url(zone: &str, tail: &str) -> String {
     format!("/api/v1/climate/zones/{}{tail}", encode_id(zone))
