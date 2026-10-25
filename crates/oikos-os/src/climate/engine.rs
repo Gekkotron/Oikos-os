@@ -1,7 +1,7 @@
 //! The evaluation loop: decide per zone, command the devices, tell a hand change from the
 //! engine's own echo, and raise the safety alerts (spec §5.5, §7, §9).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,9 +10,10 @@ use chrono_tz::Tz;
 use oikos_api::{ConnectionStatus, WsEvent};
 use oikos_climate::decide::{Device, SafetyMemory, decide};
 use oikos_climate::doc::{
-    Decision, DeviceTarget, Mode, ModeRules, Override, OverrideOrigin, RoomEco, Setpoint, Source,
-    ZoneState,
+    Decision, DeviceTarget, FanRestore, Mode, ModeRules, Override, OverrideOrigin, RoomEco,
+    Setpoint, Source, ZoneState,
 };
+use oikos_climate::eco::fan_plan;
 use oikos_climate::ledger::{Ledger, Observed, hold_until};
 use oikos_climate::topics::{self, ZoneDoc};
 use oikos_core::history::Micros;
@@ -487,6 +488,12 @@ impl Hub {
                 }
             }
         }
+        let previous_restore = self
+            .last_decision(zone)
+            .map(|d| d.eco_restore)
+            .unwrap_or_default();
+        self.command_fans(&inp, &mut decision, &previous_restore, now)
+            .await;
         alerts::sync_safety(self, zone, || self.zone_display_name(zone), &decision, now);
         self.publish_decision(zone, decision, now);
     }
@@ -653,36 +660,49 @@ impl Hub {
             id: &device.id,
         };
         let result = self.send_target(device, target, now).await;
-        let alert = alerts::command_id(&device.id);
+        if result.is_ok() {
+            self.climate_runtime().unconfirmed.remove(&device.id);
+        }
+        self.note_command_result(&device.id, result, now)
+    }
+
+    /// Whether `id` is paused after repeated failures.
+    fn command_paused(&self, id: &str, now: u64) -> bool {
+        self.climate_runtime()
+            .failures
+            .get(id)
+            .and_then(|(_, until)| *until)
+            .is_some_and(|until| now < until)
+    }
+
+    /// Counts a command's outcome for `id`: a success clears its failures and alert; the
+    /// `MAX_FAILURES`th failure in a row pauses it and raises the alert. True on success.
+    fn note_command_result(&self, id: &str, result: Result<(), String>, now: u64) -> bool {
+        let alert = alerts::command_id(id);
         match result {
             Ok(()) => {
-                {
-                    let mut rt = self.climate_runtime();
-                    rt.failures.remove(&device.id);
-                    rt.unconfirmed.remove(&device.id);
-                }
+                self.climate_runtime().failures.remove(id);
                 alerts::resolve(self, &alert);
                 true
             }
             Err(reason) => {
                 let failures = {
                     let mut rt = self.climate_runtime();
-                    let entry = rt.failures.entry(device.id.clone()).or_insert((0, None));
+                    let entry = rt.failures.entry(id.to_owned()).or_insert((0, None));
                     entry.0 += 1;
                     if entry.0 >= MAX_FAILURES {
                         entry.1 = Some(now + PAUSE_S);
                     }
                     entry.0
                 };
-                tracing::warn!(entity = %device.id, %reason, failures, "climate command failed");
+                tracing::warn!(entity = %id, %reason, failures, "climate command failed");
                 if failures >= MAX_FAILURES {
                     alerts::raise(
                         self,
                         &alert,
                         "Climate command failing",
                         &format!(
-                            "{} did not accept {MAX_FAILURES} commands in a row; paused for {} minutes. Last error: {reason}",
-                            device.id,
+                            "{id} did not accept {MAX_FAILURES} commands in a row; paused for {} minutes. Last error: {reason}",
                             PAUSE_S / 60
                         ),
                         "warning",
@@ -691,6 +711,67 @@ impl Hub {
                 false
             }
         }
+    }
+
+    /// Sets the fan mode of `id` for eco (spec §7). Shares the failure count and pause of the
+    /// target commands, but not their resend spacing, so it can follow one in the same pass.
+    async fn command_fan(&self, id: &str, fan_mode: &str, now: u64) -> bool {
+        if !matches!(*self.connection().borrow(), ConnectionStatus::Online)
+            || self.command_paused(id, now)
+        {
+            return false;
+        }
+        let command = Command::SetFanMode {
+            mode: fan_mode.to_owned(),
+        };
+        let result = match self.send_command(id, command).await {
+            Ok(response) if response.accepted => Ok(()),
+            Ok(response) => Err(response
+                .reason
+                .unwrap_or_else(|| "not confirmed".to_owned())),
+            Err(err) => Err(err.to_string()),
+        };
+        self.note_command_result(id, result, now)
+    }
+
+    /// Sends the fan commands of eco for `decision` and keeps what to put back in it. Only an
+    /// active zone sets fans; a zone switched off still puts back what eco changed, once.
+    async fn command_fans(
+        &self,
+        inp: &OwnedZoneInputs,
+        decision: &mut Decision,
+        previous: &BTreeMap<String, FanRestore>,
+        now: u64,
+    ) {
+        let state = inp.settings.state;
+        if state == ZoneState::Pending {
+            return;
+        }
+        let (mut memory, commands) = fan_plan(
+            previous,
+            decision,
+            &inp.devices,
+            &inp.house.eco.actions,
+            state == ZoneState::Off,
+        );
+        for command in commands {
+            if self
+                .command_fan(&command.entity, &command.fan_mode, now)
+                .await
+            {
+                continue;
+            }
+            // Not landed: an eco setting is tried again from scratch, a restore is kept.
+            match previous.get(&command.entity) {
+                Some(restore) if restore.was == command.fan_mode => {
+                    memory.insert(command.entity, restore.clone());
+                }
+                _ => {
+                    memory.remove(&command.entity);
+                }
+            }
+        }
+        decision.eco_restore = memory;
     }
 
     /// The mode first when it differs, then the temperature; the ledger follows each step the
