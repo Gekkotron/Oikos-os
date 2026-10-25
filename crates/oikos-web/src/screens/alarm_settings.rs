@@ -17,8 +17,9 @@ use oikos_core::model::Kind;
 
 use crate::api::alarm as api;
 use crate::components::toast::Toasts;
-use crate::entity_picker::needs::{is_remote, is_siren, is_tracker};
-use crate::format::list_label;
+use crate::entity_picker::EntityAddButton;
+use crate::entity_picker::needs::{is_remote, is_siren, is_tracker, keep};
+use crate::format::entity_title;
 use crate::house::House;
 use crate::i18n::{AlarmText, Lang, alarm_text, use_lang};
 
@@ -42,6 +43,11 @@ pub fn sensor_candidates(
         .filter(|e| e.kind == Kind::BinarySensor && !listed.iter().any(|r| r.entity == e.id))
         .filter_map(|e| Some((e.id.clone(), sensor_kind_of(e.device_class.as_deref())?)))
         .collect()
+}
+
+/// Whether the alarm can watch `e`: a binary sensor whose `device_class` is an opening or motion.
+fn is_alarm_sensor(e: &EntityView) -> bool {
+    e.kind == Kind::BinarySensor && sensor_kind_of(e.device_class.as_deref()).is_some()
 }
 
 fn mode_text(mode: ArmMode) -> AlarmText {
@@ -216,64 +222,33 @@ pub fn merge(base: &AlarmSettings, draft: &AlarmSettings, latest: &AlarmSettings
 }
 
 type Draft = RwSignal<AlarmSettings>;
-type Options = Memo<Vec<(String, String)>>;
-
-/// The label of `id`, or the id itself when the house no longer has it.
+/// The title of `id`, or the id itself when the house no longer has it.
 fn label_of(house: House, lang: Lang, id: &str) -> String {
     house
         .entities
-        .with(|m| m.get(id).map(|e| list_label(lang, e)))
+        .with(|m| m.get(id).map(|e| entity_title(lang, e)))
         .unwrap_or_else(|| id.to_owned())
 }
 
-/// The house's entities that pass `keep`, as `(id, label)` sorted by label. A memo, so a state
-/// echo that changes no option does not redraw an open select.
-fn options_where(house: House, keep: fn(&EntityView) -> bool) -> Options {
-    let lang = use_lang();
-    Memo::new(move |_| {
-        let lang = lang();
-        let mut list: Vec<(String, String)> = house.entities.with(|m| {
-            m.values()
-                .filter(|e| keep(e))
-                .map(|e| (e.id.clone(), list_label(lang, e)))
-                .collect()
-        });
-        list.sort_by_key(|(_, label)| label.to_lowercase());
-        list
-    })
-}
-
-/// A select that offers `options` and reports the one picked.
+/// The name of a chosen entity: its title, and the device it belongs to on a second line.
 #[component]
-fn AddPicker(
-    #[prop(into)] label: Signal<String>,
-    #[prop(into)] options: Signal<Vec<(String, String)>>,
-    on_pick: Callback<String>,
-) -> impl IntoView {
+fn EntityName(house: House, id: String) -> impl IntoView {
+    let lang = use_lang();
+    let device = {
+        let id = id.clone();
+        move || {
+            house
+                .entities
+                .with(|m| m.get(&id).and_then(|e| e.device_name.clone()))
+        }
+    };
     view! {
-        <Show when=move || options.with(|o| !o.is_empty())>
-            <select
-                class="field alarm__add"
-                aria-label=move || label.get()
-                on:change=move |ev| {
-                    let v = event_target_value(&ev);
-                    if !v.is_empty() {
-                        on_pick.run(v);
-                    }
-                }
-            >
-                <option value="" selected=true>
-                    {move || label.get()}
-                </option>
-                {move || {
-                    options
-                        .get()
-                        .into_iter()
-                        .map(|(id, text)| view! { <option value=id>{text}</option> })
-                        .collect_view()
-                }}
-            </select>
-        </Show>
+        <span class="alarm-row__name">
+            {move || label_of(house, lang(), &id)}
+            {move || {
+                device().map(|d| view! { <span class="alarm-row__device">{d}</span> })
+            }}
+        </span>
     }
 }
 
@@ -372,29 +347,21 @@ fn MqttField(
 fn SensorsSection(draft: Draft, house: House) -> impl IntoView {
     let lang = use_lang();
     let t = move |k: AlarmText| alarm_text(lang(), k);
-    let candidates = Memo::new(move |_| {
-        let listed = draft.with(|d| d.sensors.clone());
-        let lang = lang();
-        let mut list: Vec<(String, String)> = house.entities.with(|m| {
-            let all: Vec<EntityView> = m
-                .values()
-                .filter(|e| e.kind == Kind::BinarySensor)
-                .cloned()
-                .collect();
-            sensor_candidates(&all, &listed)
-                .into_iter()
-                .map(|(id, _)| {
-                    let label = m.get(&id).map(|e| list_label(lang, e)).unwrap_or_default();
-                    (id, label)
-                })
-                .collect()
-        });
-        list.sort_by_key(|(_, label)| label.to_lowercase());
-        list
+    let taken = Signal::derive(move || {
+        draft.with(|d| {
+            d.sensors
+                .iter()
+                .map(|r| r.entity.clone())
+                .collect::<Vec<_>>()
+        })
     });
     let count = Memo::new(move |_| draft.with(|d| d.sensors.len()));
-    let add = Callback::new(move |id: String| {
-        let kind = house.entities.with(|m| {
+    let toggle = Callback::new(move |id: String| {
+        if draft.with_untracked(|d| d.sensors.iter().any(|r| r.entity == id)) {
+            draft.update(|d| d.sensors.retain(|r| r.entity != id));
+            return;
+        }
+        let kind = house.entities.with_untracked(|m| {
             m.get(&id)
                 .and_then(|e| sensor_kind_of(e.device_class.as_deref()))
         });
@@ -414,10 +381,7 @@ fn SensorsSection(draft: Draft, house: House) -> impl IntoView {
                     (0..count.get())
                         .map(|i| {
                             let rule = draft.with_untracked(|d| d.sensors[i].clone());
-                            let name = {
-                                let id = rule.entity.clone();
-                                move || label_of(house, lang(), &id)
-                            };
+                            let name = view! { <EntityName house=house id=rule.entity.clone() /> };
                             let kind_word = match rule.kind {
                                 SensorKind::Opening => AlarmText::Opening,
                                 SensorKind::Motion => AlarmText::Motion,
@@ -491,7 +455,7 @@ fn SensorsSection(draft: Draft, house: House) -> impl IntoView {
                             view! {
                                 <li class="alarm-row">
                                     <div class="alarm-row__head">
-                                        <span class="alarm-row__name">{name}</span>
+                                        {name}
                                         <span class="alarm-row__kind">{move || t(kind_word)}</span>
                                         <button
                                             type="button"
@@ -518,10 +482,11 @@ fn SensorsSection(draft: Draft, house: House) -> impl IntoView {
                         .collect_view()
                 }}
             </ul>
-            <AddPicker
+            <EntityAddButton
                 label=Signal::derive(move || t(AlarmText::AddSensor).to_owned())
-                options=candidates
-                on_pick=add
+                taken=taken
+                on_toggle=toggle
+                pool=Some(keep(is_alarm_sensor))
             />
         </section>
     }
@@ -531,21 +496,16 @@ fn SensorsSection(draft: Draft, house: House) -> impl IntoView {
 fn SirensSection(draft: Draft, house: House, saved: Signal<Vec<Siren>>) -> impl IntoView {
     let lang = use_lang();
     let t = move |k: AlarmText| alarm_text(lang(), k);
-    let all = options_where(house, is_siren);
-    let options = Signal::derive(move || {
-        let taken: Vec<String> = draft.with(|d| {
+    let taken = Signal::derive(move || {
+        draft.with(|d| {
             d.sirens
                 .iter()
                 .filter_map(|s| match s {
                     Siren::Entity { entity, .. } => Some(entity.clone()),
                     Siren::Mqtt { .. } => None,
                 })
-                .collect()
-        });
-        all.get()
-            .into_iter()
-            .filter(|(id, _)| !taken.contains(id))
-            .collect::<Vec<_>>()
+                .collect::<Vec<_>>()
+        })
     });
     let count = Memo::new(move |_| draft.with(|d| d.sirens.len()));
     let unsaved = Memo::new(move |_| draft.with(|d| saved.with(|s| d.sirens != *s)));
@@ -606,9 +566,7 @@ fn SirensSection(draft: Draft, house: House, saved: Signal<Vec<Siren>>) -> impl 
                                     view! {
                                         <li class="alarm-row">
                                             <div class="alarm-row__head">
-                                                <span class="alarm-row__name">
-                                                    {move || label_of(house, lang(), &entity)}
-                                                </span>
+                                                <EntityName house=house id=entity />
                                                 {remove}
                                             </div>
                                             <div class="alarm-row__body">
@@ -711,13 +669,25 @@ fn SirensSection(draft: Draft, house: House, saved: Signal<Vec<Siren>>) -> impl 
                 <p class="settings__hint">{move || t(AlarmText::TestChirpUnsaved)}</p>
             </Show>
             <div class="alarm-section__actions">
-                <AddPicker
+                <EntityAddButton
                     label=Signal::derive(move || t(AlarmText::AddSiren).to_owned())
-                    options=options
-                    on_pick=Callback::new(move |id: String| {
+                    taken=taken
+                    on_toggle=Callback::new(move |id: String| {
                         draft
-                            .update(|d| d.sirens.push(Siren::Entity { entity: id, chirp_ms: None }));
+                            .update(|d| {
+                                let at = d
+                                    .sirens
+                                    .iter()
+                                    .position(|s| matches!(s, Siren::Entity { entity, .. } if *entity == id));
+                                match at {
+                                    Some(at) => {
+                                        d.sirens.remove(at);
+                                    }
+                                    None => d.sirens.push(Siren::Entity { entity: id, chirp_ms: None }),
+                                }
+                            });
                     })
+                    pool=Some(keep(is_siren))
                 />
                 <button
                     type="button"
@@ -748,15 +718,15 @@ fn SirensSection(draft: Draft, house: House, saved: Signal<Vec<Siren>>) -> impl 
 fn RemotesSection(draft: Draft, house: House) -> impl IntoView {
     let lang = use_lang();
     let t = move |k: AlarmText| alarm_text(lang(), k);
-    let all = options_where(house, is_remote);
-    let options = Signal::derive(move || {
-        let taken: Vec<String> =
-            draft.with(|d| d.remotes.iter().map(|r| r.entity.clone()).collect());
-        all.get()
-            .into_iter()
-            .filter(|(id, _)| !taken.contains(id))
-            .collect::<Vec<_>>()
+    let taken = Signal::derive(move || {
+        draft.with(|d| {
+            d.remotes
+                .iter()
+                .map(|r| r.entity.clone())
+                .collect::<Vec<_>>()
+        })
     });
+    let any_remote = Memo::new(move |_| house.entities.with(|m| m.values().any(is_remote)));
     let count = Memo::new(move |_| draft.with(|d| d.remotes.len()));
     let announced = move |id: &str| -> Vec<String> {
         house.entities.with(|m| {
@@ -769,7 +739,7 @@ fn RemotesSection(draft: Draft, house: House) -> impl IntoView {
     view! {
         <section class="sheet__panel alarm-section">
             <h2 class="sheet__heading">{move || t(AlarmText::RemotesTitle)}</h2>
-            <Show when=move || all.with(|a| a.is_empty())>
+            <Show when=move || !any_remote.get()>
                 <p class="settings__hint">{move || t(AlarmText::RemotesEmpty)}</p>
             </Show>
             <ul class="alarm-rows">
@@ -883,9 +853,7 @@ fn RemotesSection(draft: Draft, house: House) -> impl IntoView {
                             view! {
                                 <li class="alarm-row">
                                     <div class="alarm-row__head">
-                                        <span class="alarm-row__name">
-                                            {move || label_of(house, lang(), &entity)}
-                                        </span>
+                                        <EntityName house=house id=entity />
                                         <button
                                             type="button"
                                             class="btn btn--compact"
@@ -926,13 +894,20 @@ fn RemotesSection(draft: Draft, house: House) -> impl IntoView {
                         .collect_view()
                 }}
             </ul>
-            <AddPicker
+            <EntityAddButton
                 label=Signal::derive(move || t(AlarmText::AddRemote).to_owned())
-                options=options
-                on_pick=Callback::new(move |id: String| {
+                taken=taken
+                on_toggle=Callback::new(move |id: String| {
                     draft
-                        .update(|d| d.remotes.push(Remote { entity: id, signals: default_signals() }));
+                        .update(|d| {
+                            if d.remotes.iter().any(|r| r.entity == id) {
+                                d.remotes.retain(|r| r.entity != id);
+                            } else {
+                                d.remotes.push(Remote { entity: id, signals: default_signals() });
+                            }
+                        });
                 })
+                pool=Some(keep(is_remote))
             />
         </section>
     }
@@ -942,14 +917,7 @@ fn RemotesSection(draft: Draft, house: House) -> impl IntoView {
 fn PresenceSection(draft: Draft, house: House) -> impl IntoView {
     let lang = use_lang();
     let t = move |k: AlarmText| alarm_text(lang(), k);
-    let all = options_where(house, is_tracker);
-    let options = Signal::derive(move || {
-        let taken = draft.with(|d| d.presence.trackers.clone());
-        all.get()
-            .into_iter()
-            .filter(|(id, _)| !taken.contains(id))
-            .collect::<Vec<_>>()
-    });
+    let taken = Signal::derive(move || draft.with(|d| d.presence.trackers.clone()));
     view! {
         <section class="sheet__panel alarm-section">
             <h2 class="sheet__heading">{move || t(AlarmText::PresenceTitle)}</h2>
@@ -979,12 +947,20 @@ fn PresenceSection(draft: Draft, house: House) -> impl IntoView {
                             .collect_view()
                     }}
                 </div>
-                <AddPicker
+                <EntityAddButton
                     label=Signal::derive(move || t(AlarmText::Trackers).to_owned())
-                    options=options
-                    on_pick=Callback::new(move |id: String| {
-                        draft.update(|d| d.presence.trackers.push(id));
+                    taken=taken
+                    on_toggle=Callback::new(move |id: String| {
+                        draft
+                            .update(|d| {
+                                if d.presence.trackers.contains(&id) {
+                                    d.presence.trackers.retain(|i| i != &id);
+                                } else {
+                                    d.presence.trackers.push(id);
+                                }
+                            });
                     })
+                    pool=Some(keep(is_tracker))
                 />
             </div>
             <SwitchRow

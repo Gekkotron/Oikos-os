@@ -7552,6 +7552,13 @@ html:has(.flow-canvas-screen) {
   font-weight: 600;
 }
 
+.alarm-row__device {
+  display: block;
+  font: var(--type-label);
+  font-weight: 400;
+  opacity: 0.7;
+}
+
 .alarm-row__kind {
   flex: none;
   font: var(--type-label);

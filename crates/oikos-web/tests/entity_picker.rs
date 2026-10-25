@@ -15,10 +15,15 @@ use oikos_web::entity_picker::{EntityPickField, EntityPickListField, Suggest};
 use oikos_web::house::House;
 use oikos_web::i18n::Lang;
 use oikos_web::i18n::picker::PickerText;
+use oikos_web::screens::alarm_settings::AlarmSettingsPage;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::*;
 wasm_bindgen_test_configure!(run_in_browser);
+
+#[path = "support/fetch_stub.rs"]
+mod fetch_stub;
+use fetch_stub::FetchStub;
 
 fn entity(id: &str, name: &str, device: &str, kind: Kind, area: &str) -> EntityView {
     EntityView {
@@ -537,7 +542,6 @@ async fn list_field_ticks_add_and_remove() {
         .unchecked_into();
     add.click();
     tick().await;
-    tick().await;
     let row = |id: &str| -> web_sys::HtmlElement {
         host.query_selector(&format!("[id$='-opt-{id}']"))
             .unwrap()
@@ -557,4 +561,91 @@ async fn list_field_ticks_add_and_remove() {
         .query_selector_all(".picker-chips .picker-chip")
         .unwrap();
     assert_eq!(chips.length(), 1, "one chip left");
+}
+
+fn alarm_body() -> String {
+    serde_json::json!({
+        "enabled": true,
+        "entity_id": "alarm_panel",
+        "state": "disarmed",
+        "mode": null,
+        "source": null,
+        "since": 0,
+        "deadline": null,
+        "cause": [],
+        "open_at_arm": [],
+        "settings": serde_json::to_value(oikos_alarm::doc::AlarmSettings::default()).unwrap(),
+        "settings_invalid": null,
+        "warnings": [],
+    })
+    .to_string()
+}
+
+#[wasm_bindgen_test]
+async fn alarm_adds_siren() {
+    let stub = FetchStub::install();
+    stub.reply("GET", "/api/v1/alarm", 200, &alarm_body());
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let house = House::new();
+    house.apply(WsEvent::EntityUpserted(entity(
+        "s1",
+        "Siren",
+        "Hall siren",
+        Kind::Switch,
+        "hall",
+    )));
+    leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(Now(RwSignal::new(1_700_000_060)));
+        view! { <AlarmSettingsPage /> }
+    })
+    .forget();
+    for _ in 0..40 {
+        tick().await;
+        if host.query_selector(".alarm-section").unwrap().is_some() {
+            break;
+        }
+        TimeoutFuture::new(25).await;
+    }
+    let add: web_sys::HtmlElement = (0..host
+        .query_selector_all("button.chip--add")
+        .unwrap()
+        .length())
+        .map(|i| {
+            host.query_selector_all("button.chip--add")
+                .unwrap()
+                .item(i)
+                .unwrap()
+                .unchecked_into::<web_sys::HtmlElement>()
+        })
+        .find(|b| b.text_content().unwrap().contains("siren"))
+        .expect("Add siren button");
+    add.click();
+    tick().await;
+    tick().await;
+    let row = || {
+        host.query_selector("[id$='-opt-s1']")
+            .unwrap()
+            .expect("siren row")
+            .unchecked_into::<web_sys::HtmlElement>()
+    };
+    let rows = || host.query_selector_all(".alarm-row").unwrap().length();
+    assert_eq!(rows(), 0);
+    row().click();
+    tick().await;
+    assert_eq!(rows(), 1, "ticked siren is in the draft");
+    assert!(host.text_content().unwrap().contains("Hall siren"));
+    let dialog: web_sys::HtmlDialogElement = row()
+        .closest("dialog")
+        .unwrap()
+        .expect("the siren picker's dialog")
+        .unchecked_into();
+    assert!(dialog.open(), "picker stays open");
+    row().click();
+    tick().await;
+    assert_eq!(rows(), 0, "ticked again removes it");
+    drop(stub);
 }
