@@ -145,21 +145,48 @@ fn home_of(state: &EntityState) -> Option<bool> {
             other => Some(other == "home"),
         },
         StateValue::OnOff(on) => Some(*on),
+        StateValue::Alarm(state) => alarm_home(state),
+        _ => None,
+    }
+}
+
+/// What an alarm panel's state says about who is home: armed away (or vacation) is nobody,
+/// disarmed or armed while inside is someone, and a passing state (arming, pending,
+/// triggered, …) says nothing.
+fn alarm_home(state: &str) -> Option<bool> {
+    match state.trim() {
+        "armed_away" | "armed_vacation" => Some(false),
+        "disarmed" | "armed_home" | "armed_night" | "armed_custom_bypass" => Some(true),
         _ => None,
     }
 }
 
 /// Whether the house is home right now: some presence entity says so, or none says anything
 /// definite (an unknown tracker never sends the house away). No presence entity means home.
+/// An entity that says nothing now keeps its last definite answer, so a triggered alarm or an
+/// entry delay does not bring the heating back.
 pub(crate) fn presence_home_now(hub: &Hub, house: &HouseSettings) -> bool {
     if house.presence.is_empty() {
         return true;
     }
-    let reg = hub.read();
-    let known: Vec<bool> = house
-        .presence
-        .iter()
-        .filter_map(|id| reg.state(id).and_then(home_of))
+    let now: Vec<(String, Option<bool>)> = {
+        let reg = hub.read();
+        house
+            .presence
+            .iter()
+            .map(|id| (id.clone(), reg.state(id).and_then(home_of)))
+            .collect()
+    };
+    let mut rt = hub.climate_runtime();
+    let known: Vec<bool> = now
+        .into_iter()
+        .filter_map(|(id, answer)| match answer {
+            Some(home) => {
+                rt.presence_last.insert(id, home);
+                Some(home)
+            }
+            None => rt.presence_last.get(&id).copied(),
+        })
         .collect();
     known.is_empty() || known.contains(&true)
 }
@@ -374,4 +401,27 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         previous_cause: None,
         room_eco,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alarm_states_say_who_is_home() {
+        for away in ["armed_away", "armed_vacation"] {
+            assert_eq!(alarm_home(away), Some(false), "{away}");
+        }
+        for home in [
+            "disarmed",
+            "armed_home",
+            "armed_night",
+            "armed_custom_bypass",
+        ] {
+            assert_eq!(alarm_home(home), Some(true), "{home}");
+        }
+        for unsure in ["arming", "disarming", "pending", "triggered", "unknown", ""] {
+            assert_eq!(alarm_home(unsure), None, "{unsure}");
+        }
+    }
 }

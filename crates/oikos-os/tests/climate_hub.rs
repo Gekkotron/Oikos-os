@@ -1454,6 +1454,83 @@ mod engine {
         assert_eq!(temperature_commands(&rig.pass(60).await), vec![19.0]);
     }
 
+    /// A test alarm panel in the house presence list; returns its state topic.
+    fn alarm_presence(rig: &Rig) -> &'static str {
+        rig.hub.ingest(
+            "oikos/alarm_control_panel/test/panel/config",
+            br#"{"name":"Panel","unique_id":"panel_test","state_topic":"t/panel","command_topic":"t/panel/set"}"#,
+        );
+        let panel = rig
+            .hub
+            .snapshot()
+            .entities
+            .into_iter()
+            .find(|e| e.id.contains("panel_test"))
+            .expect("alarm panel")
+            .id;
+        rig.hub
+            .set_climate_house(HouseSettings {
+                presence: vec![panel],
+                ..HouseSettings::default()
+            })
+            .unwrap();
+        "t/panel"
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn armed_away_puts_the_house_in_eco() {
+        let mut rig = Rig::new(None).await;
+        let topic = alarm_presence(&rig);
+        rig.hub.ingest(topic, b"disarmed");
+        rig.settings(heat_rules(19.0));
+        assert_eq!(temperature_commands(&rig.pass(0).await), vec![19.0]);
+        rig.hub.ingest(topic, b"armed_away");
+        assert!(
+            temperature_commands(&rig.pass(600).await).is_empty(),
+            "grace"
+        );
+        assert_eq!(temperature_commands(&rig.pass(960).await), vec![16.0]);
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Away);
+        rig.hub.ingest(topic, b"disarmed");
+        assert_eq!(temperature_commands(&rig.pass(1020).await), vec![19.0]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn armed_home_and_night_are_home() {
+        let mut rig = Rig::new(None).await;
+        let topic = alarm_presence(&rig);
+        rig.settings(heat_rules(19.0));
+        for (i, state) in ["armed_home", "armed_night"].into_iter().enumerate() {
+            rig.hub.ingest(topic, state.as_bytes());
+            rig.pass(1000 * (i as u64 + 1)).await;
+            assert_eq!(
+                rig.zone().decision.unwrap().source,
+                Source::Schedule,
+                "{state}"
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn alarm_transient_states_keep_last_answer() {
+        let mut rig = Rig::new(None).await;
+        let topic = alarm_presence(&rig);
+        rig.hub.ingest(topic, b"disarmed");
+        rig.settings(heat_rules(19.0));
+        rig.pass(0).await;
+        rig.hub.ingest(topic, b"armed_away");
+        rig.pass(960).await;
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Away);
+        for (i, state) in ["triggered", "pending"].into_iter().enumerate() {
+            rig.hub.ingest(topic, state.as_bytes());
+            rig.pass(1000 + 60 * i as u64).await;
+            assert_eq!(rig.zone().decision.unwrap().source, Source::Away, "{state}");
+        }
+        rig.hub.ingest(topic, b"disarmed");
+        rig.pass(1200).await;
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Schedule);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn the_loop_waits_for_the_broker_to_settle_then_commands() {
         let mut rig = Rig::new(None).await;
