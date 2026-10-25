@@ -1,6 +1,8 @@
 //! The settings form of the device sheet: only the controls that apply to the entity (see
 //! [`crate::settings_rules`]), saved as a partial patch of the hub's `UiOverride`.
 
+use std::sync::Arc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use oikos_api::{EntityView, OverridePatch};
@@ -11,6 +13,7 @@ use serde_json::json;
 use crate::api::{clear_override, set_override};
 use crate::components::toast::Toasts;
 use crate::energy::energy_entities;
+use crate::entity_picker::{EntityPickField, Keep};
 use crate::format::word;
 use crate::house::House;
 use crate::i18n::devices::{
@@ -385,38 +388,16 @@ fn CounterField(draft: Draft) -> impl IntoView {
         list.sort_by_cached_key(|(id, name)| (name.to_lowercase(), id.clone()));
         list
     });
-    let current = move || draft.with(|d| d.energy_meter.clone());
-    let unknown =
-        move || current().filter(|id| counters.with(|c| !c.iter().any(|(known, _)| known == id)));
+    let pool: Keep = Arc::new(move |e| counters.with(|c| c.iter().any(|(id, _)| *id == e.id)));
     view! {
-        <label class="override__field">
-            <span class="override__label">{move || t(DeviceText::EnergyCounter)}</span>
-            <select
-                class="select"
-                on:change=move |ev| {
-                    let value = non_blank(event_target_value(&ev));
-                    draft.update(|d| d.energy_meter = value);
-                }
-            >
-                <option value="" prop:selected=move || current().is_none()>{move || t(DeviceText::Automatic)}</option>
-                <For
-                    each=move || counters.get()
-                    key=|(id, name)| (id.clone(), name.clone())
-                    children=move |(id, name)| {
-                        let value = id.clone();
-                        view! {
-                            <option
-                                value=value
-                                prop:selected=move || current().as_deref() == Some(id.as_str())
-                            >
-                                {name}
-                            </option>
-                        }
-                    }
-                />
-                {move || unknown().map(|v| view! { <option value=v.clone() selected>{v.clone()}</option> })}
-            </select>
-        </label>
+        <EntityPickField
+            label=Signal::derive(move || t(DeviceText::EnergyCounter).to_owned())
+            value=Signal::derive(move || draft.with(|d| d.energy_meter.clone()))
+            on_change=Callback::new(move |v| draft.update(|d| d.energy_meter = v))
+            pool=Some(pool)
+            pinned=Some(Signal::derive(move || t(DeviceText::Automatic).to_owned()))
+            class=Some("override__field".to_owned())
+        />
     }
 }
 

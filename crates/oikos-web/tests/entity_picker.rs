@@ -649,3 +649,70 @@ async fn alarm_adds_siren() {
     assert_eq!(rows(), 0, "ticked again removes it");
     drop(stub);
 }
+
+fn counter_entity(id: &str, name: &str) -> EntityView {
+    let mut e = entity(id, name, "", Kind::Sensor, "");
+    e.unit = Some("kWh".into());
+    e
+}
+
+#[wasm_bindgen_test]
+async fn counter_automatic_and_pick() {
+    use oikos_web::components::toast::Toasts;
+    use oikos_web::override_editor::OverrideEditor;
+
+    let house = House::new();
+    let mut power = entity("mains", "Mains power", "", Kind::Sensor, "");
+    power.unit = Some("W".into());
+    power.ui.energy_role = Some("grid".into());
+    power.ui.energy_meter = Some("meter_b".into());
+    for e in [
+        power.clone(),
+        counter_entity("meter_a", "Meter A"),
+        counter_entity("meter_b", "Meter B"),
+        entity("lamp", "Lamp", "", Kind::Light, ""),
+    ] {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_view(house, move || {
+        provide_context(Toasts::new());
+        view! { <OverrideEditor entity=power /> }
+    });
+    tick().await;
+    let field = || {
+        host.query_selector("button.picker-field")
+            .unwrap()
+            .expect("counter field")
+            .unchecked_into::<web_sys::HtmlElement>()
+    };
+    assert!(field().text_content().unwrap().contains("Meter B"));
+    field().click();
+    tick().await;
+    let has = |id: &str| {
+        host.query_selector(&format!("[id$='-opt-{id}']"))
+            .unwrap()
+            .is_some()
+    };
+    assert!(has("meter_a") && has("meter_b"), "counters are offered");
+    assert!(!has("lamp") && !has("mains"), "only counters are offered");
+    let pin: web_sys::HtmlElement = host
+        .query_selector("[id$=-pin]")
+        .unwrap()
+        .expect("Automatic row")
+        .unchecked_into();
+    pin.click();
+    tick().await;
+    assert!(field().text_content().unwrap().contains("Automatic"));
+    TimeoutFuture::new(100).await;
+    field().click();
+    tick().await;
+    let a: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-meter_a']")
+        .unwrap()
+        .expect("meter row")
+        .unchecked_into();
+    a.click();
+    tick().await;
+    assert!(field().text_content().unwrap().contains("Meter A"));
+    TimeoutFuture::new(100).await;
+}
