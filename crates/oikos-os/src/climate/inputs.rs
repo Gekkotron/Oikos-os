@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::NaiveDateTime;
 use chrono_tz::Tz;
 use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
-use oikos_climate::doc::{HouseSettings, Mode, Override, SafetyCause, ZoneSettings};
+use oikos_climate::doc::{HouseSettings, Mode, Override, RoomEco, SafetyCause, ZoneSettings};
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
 use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind, StateValue};
 
@@ -41,6 +41,8 @@ pub(crate) struct OwnedZoneInputs {
     pub safety_memory: Option<SafetyMemory>,
     /// The cause of the zone's previous safety decision, set by the caller.
     pub previous_cause: Option<SafetyCause>,
+    /// The zone's own eco, if set.
+    pub room_eco: Option<RoomEco>,
 }
 
 impl OwnedZoneInputs {
@@ -60,6 +62,7 @@ impl OwnedZoneInputs {
             now: self.now,
             safety_memory: self.safety_memory.as_ref(),
             previous_cause: self.previous_cause,
+            room_eco: self.room_eco.as_ref(),
         }
     }
 }
@@ -368,5 +371,6 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         now,
         safety_memory,
         previous_cause: None,
+        room_eco: None,
     })
 }
