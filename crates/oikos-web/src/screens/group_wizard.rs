@@ -92,6 +92,16 @@ pub fn group_by_room(
     rooms
 }
 
+/// The room select's value for a group's area: the hub's catch-all has no option of its own, so
+/// it opens as the blank "No room" choice (saving a blank room writes no override, as before).
+fn room_choice(area: &str) -> String {
+    if area == UNASSIGNED_AREA {
+        String::new()
+    } else {
+        area.to_owned()
+    }
+}
+
 #[component]
 pub fn GroupWizardScreen() -> impl IntoView {
     let house = expect_context::<House>();
@@ -122,7 +132,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                         kind.set(Some(group.kind));
                         selected.set(group.members.iter().map(|m| m.id.clone()).collect());
                         name.set(group.name);
-                        area.set(group.entity.area);
+                        area.set(room_choice(&group.entity.area));
                         hide_members.set(group.hide_members);
                         loading.set(false);
                     }
@@ -540,6 +550,12 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn a_group_in_the_catch_all_room_opens_with_no_room() {
+        assert_eq!(room_choice(UNASSIGNED_AREA), "");
+        assert_eq!(room_choice("salon"), "salon");
     }
 
     #[test]
