@@ -538,6 +538,12 @@ fn tech_attrs_need_a_word_boundary() {
         flagged(r#"<input valid="Some words here"/>"#),
         ["Some words here"]
     );
+    // `attr:class=` is its own entry; a colon before any other name is not a boundary.
+    assert!(flagged(r#"<div attr:class="Some words here">"#).is_empty());
+    assert_eq!(
+        flagged(r#"<input data:id="Some words here"/>"#),
+        ["Some words here"]
+    );
 }
 
 /// "error: {e}" reads like a sentence; "left: {}%" is CSS.

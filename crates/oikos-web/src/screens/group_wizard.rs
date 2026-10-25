@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use leptos::prelude::*;
 use leptos_router::hooks::{use_navigate, use_params_map};
 use oikos_api::{AreaView, EntityView, GroupSpec};
-use oikos_core::model::Kind;
+use oikos_core::model::{Kind, UNASSIGNED_AREA};
 
 use crate::api::{encode_id, list_groups, set_group, set_override};
 use crate::cards::PowerToggle;
@@ -77,7 +77,7 @@ pub fn group_by_room(
     for area in areas {
         if let Some(mut list) = by_area.remove(&area.id) {
             list.sort_by_key(|(_, label)| fold_accents(label));
-            rooms.push((area.name.clone(), list));
+            rooms.push((crate::format::area_name(lang, &area.id, &area.name), list));
         }
     }
     for (area, mut list) in by_area {
@@ -210,6 +210,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
             .areas
             .get()
             .into_iter()
+            .filter(|a| a.id != UNASSIGNED_AREA)
             .map(|a| {
                 let value = a.id.clone();
                 view! {
@@ -539,5 +540,27 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn the_catch_all_room_reads_in_french() {
+        let mut entities = BTreeMap::new();
+        for e in [
+            entity("lamp", Kind::Light, Kind::Light, "salon"),
+            entity("orphan", Kind::Light, Kind::Light, "Unassigned"),
+        ] {
+            entities.insert(e.id.clone(), e);
+        }
+        let areas = [area("salon", "Salon"), area("Unassigned", "Unassigned")];
+        let rooms = members_by_room(
+            Lang::Fr,
+            &entities,
+            &areas,
+            Kind::Light,
+            "",
+            &BTreeSet::new(),
+        );
+        let names: Vec<&str> = rooms.iter().map(|(r, _)| r.as_str()).collect();
+        assert_eq!(names, ["Salon", "Sans pièce"]);
     }
 }

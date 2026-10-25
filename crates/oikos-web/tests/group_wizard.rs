@@ -73,7 +73,11 @@ fn mount_lang(lang: RwSignal<Lang>) -> web_sys::Element {
         house.apply(WsEvent::EntityUpserted(e));
     }
     house.apply(WsEvent::AreasChanged {
-        areas: vec![area("salon", "Salon"), area("cuisine", "Cuisine")],
+        areas: vec![
+            area("salon", "Salon"),
+            area("cuisine", "Cuisine"),
+            area("Unassigned", "Unassigned"),
+        ],
     });
     let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         provide_context(house);
@@ -213,6 +217,16 @@ async fn the_wizard_follows_the_language_without_a_remount() {
     assert!(text.contains("Masquer les membres sur l'accueil"), "{text}");
     assert!(text.contains("Créer le groupe"), "{text}");
     assert!(!text.contains("Unassigned"), "{text}");
+    let options = host.query_selector_all("option").unwrap();
+    let no_room = (0..options.length())
+        .filter(|i| {
+            options
+                .item(*i)
+                .and_then(|o| o.text_content())
+                .is_some_and(|t| t == "Sans pièce")
+        })
+        .count();
+    assert_eq!(no_room, 1, "one empty-room option only: {text}");
 
     lang.set(Lang::En);
     tick().await;

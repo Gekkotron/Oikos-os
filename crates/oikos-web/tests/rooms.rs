@@ -187,7 +187,7 @@ async fn overview_shows_every_room() {
     let m = mount("/dashboards/house").await;
     assert_eq!(
         texts(&m.host, ".room .room__title"),
-        ["Room a", "Room b", "Unassigned"]
+        ["Room a", "Room b", "Room Unassigned"]
     );
     assert!(m.host.query_selector("nav.chips").unwrap().is_none());
 }

@@ -6449,7 +6449,7 @@ html:has(.flow-canvas-screen) {
   }
 
   /* "Prochain changement" does not fit beside the other three: it takes its own row. */
-  .climate-hold > .btn:last-child:not(:nth-child(3)) {
+  .climate-hold > .climate-hold__next {
     flex: 1 1 100%;
   }
 

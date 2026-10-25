@@ -140,6 +140,8 @@ async fn wait_for(host: &web_sys::Element, selector: &str, n: usize) {
         }
         gloo_timers::future::TimeoutFuture::new(25).await;
     }
+    let found = all(host, selector).len();
+    assert!(found >= n, "waited for {n} x {selector:?}, found {found}");
     settle().await;
 }
 

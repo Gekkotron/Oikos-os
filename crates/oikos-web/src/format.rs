@@ -237,12 +237,12 @@ pub fn room_name(areas: &[AreaView], area: &str) -> Option<String> {
     })
 }
 
-/// The name of a room as shown: the hub's catch-all area ("Unassigned") reads in the language on
-/// screen, every other name is the one the user gave.
+/// The name of a room as shown: the hub's catch-all area under its default name ("Unassigned")
+/// reads in the language on screen; every other name, a renamed catch-all included, is the one
+/// the user gave.
 pub fn area_name(lang: Lang, id: &str, name: &str) -> String {
-    if id == UNASSIGNED_AREA {
-        crate::i18n::security::security_text(lang, crate::i18n::security::SecurityText::Unassigned)
-            .to_owned()
+    if id == UNASSIGNED_AREA && name == UNASSIGNED_AREA {
+        crate::i18n::text(lang, crate::i18n::Key::Unassigned).to_owned()
     } else {
         name.to_owned()
     }
@@ -710,6 +710,8 @@ mod ts_tests {
             "Unassigned"
         );
         assert_eq!(area_name(Lang::Fr, "salon", "Living room"), "Living room");
+        // A catch-all the user named keeps the name they typed.
+        assert_eq!(area_name(Lang::Fr, "Unassigned", "Garage"), "Garage");
     }
 
     #[test]

@@ -40,7 +40,6 @@ pub enum SecurityText {
     SectionOther,
     AllClear,
     // The screen.
-    Unassigned,
     NothingYet,
     NoPanelBefore,
     NoPanelAfter,
@@ -105,7 +104,6 @@ impl SecurityText {
         SecurityText::SectionWater,
         SecurityText::SectionOther,
         SecurityText::AllClear,
-        SecurityText::Unassigned,
         SecurityText::NothingYet,
         SecurityText::NoPanelBefore,
         SecurityText::NoPanelAfter,
@@ -171,7 +169,6 @@ pub fn security_text(lang: Lang, k: SecurityText) -> &'static str {
         T::SectionWater => ("Water", "Eau"),
         T::SectionOther => ("Other", "Autres"),
         T::AllClear => ("All clear", "Tout est calme"),
-        T::Unassigned => ("Unassigned", "Sans pièce"),
         T::NothingYet => (
             "Nothing on Security yet.",
             "Rien dans Sécurité pour l'instant.",
