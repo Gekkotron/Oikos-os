@@ -13,6 +13,10 @@ use crate::components::toast::Toasts;
 use crate::format::list_label;
 use crate::home_header::mood::{COLD_DEFAULT, HOT_DEFAULT};
 use crate::house::House;
+use crate::i18n::format::parse_decimal;
+use crate::i18n::settings::{
+    RULE_BAD_TIME, RULE_BETWEEN, RULE_LOWER_THAN, RULE_NOT_A, RULE_START_EQUALS_END,
+};
 use crate::i18n::{HomeText, Lang, home_text};
 
 /// A setting the panel edits, for pointing an error at its field.
@@ -59,18 +63,12 @@ impl From<&HomeSettings> for Draft {
     }
 }
 
-/// `,` or `.` as the decimal mark; empty is `None`.
-fn parse_number(text: &str, field: Field) -> Result<Option<f64>, (Field, &'static str)> {
-    let text = text.trim();
-    if text.is_empty() {
+/// `,` or `.` as the decimal mark; empty is `None`. A text that is no number names its field.
+fn parse_number(text: &str, field: Field) -> Result<Option<f64>, Field> {
+    if text.trim().is_empty() {
         return Ok(None);
     }
-    text.replace(',', ".")
-        .parse::<f64>()
-        .ok()
-        .filter(|v| v.is_finite())
-        .map(Some)
-        .ok_or((field, "not a number"))
+    parse_decimal(text).map(Some).ok_or(field)
 }
 
 /// The draft to save: each field from `draft` when it was edited (differs from `base`, the copy the
@@ -131,23 +129,23 @@ fn message_key(field: Field, message: &str) -> Option<HomeText> {
     if field == Field::OffPeak {
         return if message.contains("overlap") {
             Some(HomeText::WindowsOverlap)
-        } else if message.contains("start equals end") {
+        } else if message.contains(RULE_START_EQUALS_END) {
             Some(HomeText::StartEqualsEnd)
-        } else if message.contains("bad time") {
+        } else if message.contains(RULE_BAD_TIME) {
             Some(HomeText::BadTime)
         } else {
             None
         };
     }
-    if message.contains("must be between") {
+    if message.contains(RULE_BETWEEN) {
         match field {
             Field::Eco => Some(HomeText::EcoRange),
             Field::Cold | Field::Hot => Some(HomeText::ThresholdRange),
             _ => None,
         }
-    } else if message.contains("must be lower than") {
+    } else if message.contains(RULE_LOWER_THAN) {
         Some(HomeText::OrderRule)
-    } else if message.contains(" is not a") {
+    } else if message.contains(RULE_NOT_A) {
         matches!(field, Field::Mode | Field::Indoor).then_some(HomeText::EntityRule)
     } else {
         None
@@ -155,7 +153,7 @@ fn message_key(field: Field, message: &str) -> Option<HomeText> {
 }
 
 /// The settings document the draft stands for, or the first number that does not parse.
-pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, (Field, &'static str)> {
+pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, Field> {
     Ok(HomeSettings {
         eco_setpoint: parse_number(&draft.eco, Field::Eco)?,
         mode_entity: draft.mode.clone(),
@@ -232,7 +230,7 @@ pub fn HomeSettingsPanel() -> impl IntoView {
         let merged = merge(&base.get_untracked(), &draft.get_untracked(), &latest);
         let settings = match draft_to_settings(&merged) {
             Ok(s) => s,
-            Err((field, _)) => {
+            Err(field) => {
                 error.set(Some((field, Message::Key(HomeText::NotANumber))));
                 return;
             }
@@ -485,9 +483,9 @@ mod tests {
         assert_eq!(s.eco_setpoint, Some(15.5));
         assert_eq!(s.cold_below, None);
         assert_eq!(s.hot_above, Some(27.5));
-        let (field, _) = draft_to_settings(&draft("abc", "", "")).unwrap_err();
+        let field = draft_to_settings(&draft("abc", "", "")).unwrap_err();
         assert_eq!(field, Field::Eco);
-        let (field, _) = draft_to_settings(&draft("", "", "x")).unwrap_err();
+        let field = draft_to_settings(&draft("", "", "x")).unwrap_err();
         assert_eq!(field, Field::Hot);
     }
 

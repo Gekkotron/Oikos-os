@@ -4,6 +4,11 @@ use leptos::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
+use crate::i18n::Lang;
+#[cfg(target_arch = "wasm32")]
+use crate::i18n::settings::LIGHT_SCHEME_QUERY;
+use crate::i18n::settings::{SettingsText, settings_text};
+
 /// Storage key for the persisted choice.
 #[cfg(target_arch = "wasm32")]
 const STORAGE_KEY: &str = "oikos.theme";
@@ -38,11 +43,14 @@ impl Theme {
 
     /// The theme's name; names are not translated.
     pub fn label(self) -> &'static str {
-        match self {
-            Theme::Auto => "Auto",
-            Theme::Night => "Night Glass",
-            Theme::Ivoire => "Ivoire",
-        }
+        settings_text(
+            Lang::En,
+            match self {
+                Theme::Auto => SettingsText::ThemeAuto,
+                Theme::Night => SettingsText::ThemeNight,
+                Theme::Ivoire => SettingsText::ThemeIvoire,
+            },
+        )
     }
 }
 
@@ -82,7 +90,7 @@ fn storage() -> Option<web_sys::Storage> {
 #[cfg(target_arch = "wasm32")]
 fn system_light_query() -> Option<web_sys::MediaQueryList> {
     web_sys::window()?
-        .match_media("(prefers-color-scheme: light)")
+        .match_media(LIGHT_SCHEME_QUERY)
         .ok()
         .flatten()
 }

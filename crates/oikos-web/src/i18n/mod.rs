@@ -13,6 +13,7 @@ pub mod format;
 pub mod groups;
 mod home;
 pub mod security;
+pub mod settings;
 mod solar;
 pub mod states;
 mod weather;

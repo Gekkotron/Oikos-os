@@ -9,7 +9,8 @@ use crate::components::card_place::{CardPlace, provide_card_place};
 use crate::components::room_title::RoomTitle;
 use crate::groups::{HomeItem, home_items};
 use crate::house::House;
-use crate::i18n::{Key, use_text};
+use crate::i18n::settings::{SettingsText, settings_text};
+use crate::i18n::{Key, use_lang, use_text};
 use crate::nav::use_back_anchor;
 use crate::rooms::{FAVORITES, use_group_refresh, use_room_chips};
 use crate::screens::home::card_for;
@@ -48,6 +49,7 @@ pub(crate) fn RoomSection(id: String, #[prop(optional)] anchored: bool) -> impl 
     if id != FAVORITES {
         provide_card_place(CardPlace::Room);
     }
+    let lang = use_lang();
     let chip = id.clone();
     let items = Memo::new(move |_| {
         house.areas.with(|a| {
@@ -60,7 +62,7 @@ pub(crate) fn RoomSection(id: String, #[prop(optional)] anchored: bool) -> impl 
         let id = id.clone();
         Signal::derive(move || {
             if id == FAVORITES {
-                return "Favorites".to_owned();
+                return settings_text(lang(), SettingsText::Favorites).to_owned();
             }
             house.areas.with(|a| {
                 a.iter()
@@ -78,7 +80,13 @@ pub(crate) fn RoomSection(id: String, #[prop(optional)] anchored: bool) -> impl 
             <RoomTitle id=renamable name=title />
             <Show
                 when=move || items.with(|v| !v.is_empty())
-                fallback=|| view! { <p class="room__empty">"Nothing here yet."</p> }
+                fallback=move || {
+                    view! {
+                        <p class="room__empty">
+                            {move || settings_text(lang(), SettingsText::NothingHere)}
+                        </p>
+                    }
+                }
             >
                 <div class="grid grid--home">
                     <For

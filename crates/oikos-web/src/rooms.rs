@@ -51,7 +51,8 @@ pub(crate) fn chips(
     if favorites > 0 {
         chips.push(AreaView {
             id: FAVORITES.into(),
-            name: "Favorites".into(),
+            // The room page titles it in the language on screen; no chip shows this name.
+            name: String::new(),
             icon: None,
             order: None,
             entity_count: favorites,
