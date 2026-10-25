@@ -57,7 +57,7 @@ While the entry delay runs, other delayed openings and motion are ignored, becau
 
 Motion is always counted, never instant or delayed. The alarm trips when **two motion detections** (the default) fall within **120 seconds**. Any two motion sensors count, or the same sensor twice. A single stray detection never trips it. The count and the window are both editable on the settings page.
 
-Only a change to *open* counts. A sensor that the hub reads again after a restart or a reconnect is not a new event.
+Only a change to *open* counts. A sensor that the hub reads again after a restart or a reconnect is not a new event, and neither is the first report of a sensor that was open before the hub started (see [Restarts](#restarts)).
 
 ## Windows and doors left open
 
@@ -102,7 +102,7 @@ A remote is a `device_automation.*` or `event.*` entity that sends button presse
 
 You can add or change the names in the builder.
 
-**SOS** trips the alarm from any state, including disarmed, so a panic button works even when the alarm is off. Disarming stops it.
+**SOS** trips the alarm from any state, including disarmed, so a panic button works even when the alarm is disarmed. It does nothing while the alarm is switched off in the settings. Disarming stops it.
 
 A remote only shows up in the picker once Zigbee2MQTT has seen it press a button. If the picker is empty, press a button on the remote first.
 
@@ -118,8 +118,8 @@ A remote only shows up in the picker once Zigbee2MQTT has seen it press a button
 
 The alarm can follow your phones. List the trackers (the `device_tracker` entities of your phones, for example the one the Oikos Android app publishes), then choose what presence may do:
 
-- **Arm away** when **every** tracker has read *away* for 120 s (the default). The 120 s absorbs a geofence flapping at the edge. An unknown or unavailable tracker blocks the auto-arm, so a phone with a dead battery never arms the house by accident.
-- **Disarm** when **any** tracker changes to *home*. Only the change counts: a phone that is already home when someone arms the house by hand does not disarm it.
+- **Arm away** when **every** tracker has read *away* for 120 s (the default). The 120 s absorbs a geofence flapping at the edge. An unknown tracker blocks the auto-arm, and so does an offline one: a phone that is switched off or out of battery counts as unknown, whatever it last said, so it never arms the house by accident.
+- **Disarm** when **any** tracker changes to *home*. Only a real homecoming counts: the phone must have read *away* before. A phone that is already home when someone arms the house by hand does not disarm it, and neither does one that drops offline and comes back while still at home.
 
 Presence works on edges, not levels. It arms once for each time the house empties. After any disarm, from anywhere (the panel, a remote, the push button, or turning the alarm on), presence won't arm again until a tracker reads home and the house empties again (or one is already home when you disarm, in which case it arms as soon as the house empties). So if you disarm to let someone in while you are out, the alarm stays disarmed until you come back and leave again.
 
@@ -142,6 +142,8 @@ See [Push notifications](push-notifications.md) for the channels and the Disarm 
 The alarm keeps its place across a restart of the hub. It stores its state, mode, source, timers, motion hits, the sensors watched for closing and the open alert, so a running entry delay keeps counting down, and a ringing siren rings for the time left.
 
 After a restart the hub does not count sensor states that the broker replays as events. A door that is open on the broker when the hub starts does not trip the alarm by itself. The open-at-arm rule still applies to it.
+
+A sensor that has not reported since the restart is the same case: Zigbee2MQTT does not retain device states by default, so a window that was already open reports *open* for the first time only after the restart. That first report is not an opening. If the alarm is armed, the window is watched for closing, quietly and without a push, exactly as if it had been open at arm.
 
 ## Moving off another controller
 

@@ -157,7 +157,7 @@ The native alarm is off until its settings have `enabled` true; the routes answe
 | --- | --- |
 | `GET /api/v1/alarm` | The alarm as one document (`200`): the settings, the panel state, mode, source, `deadline`, `cause`, `open_at_arm`, any refused settings and the run-time warnings. |
 | `PUT /api/v1/alarm/settings` | Replaces the settings document (`204`); `422` when it does not validate or names an entity the house does not have, `503` while the broker link is down. |
-| `POST /api/v1/alarm/test-chirp` | `{"siren": <index>}`, the index into `settings.sirens`: sounds that siren's chirp (`204`). `422` when the index is out of range or that siren has no chirp. |
+| `POST /api/v1/alarm/test-chirp` | `{"siren": <index>}`, the index into `settings.sirens`: sounds that siren's chirp (`204`). `422` when the index is out of range, that siren has no chirp, or the alarm is ringing; `503` while the broker link is down. |
 
 ## Weather
 

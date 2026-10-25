@@ -12,7 +12,7 @@ use super::tools::{ToolResult, log_write};
 #[tool_router(router = alarm_tool_router, vis = "pub(super)")]
 impl OikosMcp {
     /// The native alarm: its settings (`enabled`, delays, sensors, sirens, remotes, presence),
-    /// the panel state (`disarmed`, `arming`, `armed`, `pending`, `triggered`), why, and the
+    /// the panel state (`disarmed`, `arming`, `armed_away`, `armed_home`, `armed_night`, `pending`, `triggered`), why, and the
     /// run-time warnings.
     #[tool(name = "alarm_status", annotations(read_only_hint = true))]
     async fn alarm_status(&self) -> ToolResult<AlarmView> {

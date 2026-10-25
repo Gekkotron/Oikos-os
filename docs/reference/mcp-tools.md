@@ -149,4 +149,4 @@ The native alarm (optional, off by default). Its settings are a whole document a
 
 ## Count
 
-Twenty-three tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs`, nine in `climate_tools.rs` and four in `ambiance_tools.rs`: 23 + 6 + 9 + 4 = 42.
+Twenty-four tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs`, nine in `climate_tools.rs`, four in `ambiance_tools.rs` and two in `alarm_tools.rs`: 24 + 6 + 9 + 4 + 2 = 45.
