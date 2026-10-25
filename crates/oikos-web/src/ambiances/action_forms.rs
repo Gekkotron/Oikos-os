@@ -3,6 +3,7 @@
 //! their focus) while the list around it changes.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use leptos::prelude::*;
 use oikos_api::{
@@ -12,9 +13,10 @@ use oikos_api::{
 use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
 use serde_json::{Value, json};
 
-use crate::flow_edit::fold_accents;
-use crate::format::{entity_title, kind_search_words, list_label};
+use crate::entity_picker::{EntityPickField, Keep};
+use crate::format::list_label;
 use crate::house::House;
+use crate::i18n::devices::{DeviceText, device_text};
 use crate::i18n::flows::{FlowText, flow_text};
 use crate::i18n::format::parse_decimal;
 use crate::i18n::settings::{SettingsText, select_option, set_mode, settings_text};
@@ -647,16 +649,12 @@ fn edit_device(rows: Rows, key: u64, f: impl FnOnce(&mut DeviceAction)) {
     });
 }
 
-/// At most this many search results show.
-const SEARCH_MAX: usize = 8;
-
 #[component]
 pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
     let t = use_text();
     let lang = lang();
     let house = expect_context::<House>();
     let dev = device_memo(rows, key);
-    let query = RwSignal::new(String::new());
     let entity = Memo::new(move |_| {
         let id = dev.with(|d| d.entity.clone());
         house.entities.with(|m| m.get(&id).cloned())
@@ -671,33 +669,6 @@ pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
         }
         list
     });
-    let results = Memo::new(move |_| {
-        let needle = fold_accents(query.get().trim());
-        if needle.is_empty() {
-            return Vec::new();
-        }
-        house.entities.with(|m| {
-            m.values()
-                .filter(|e| e.is_primary() && !e.id.starts_with("group_"))
-                .filter(|e| {
-                    fold_accents(&list_label(lang.get(), e)).contains(&needle)
-                        || fold_accents(&e.name).contains(&needle)
-                        || kind_search_words(e)
-                            .iter()
-                            .any(|w| fold_accents(w).contains(&needle))
-                })
-                .take(SEARCH_MAX)
-                .map(|e| (e.id.clone(), list_label(lang.get(), e)))
-                .collect::<Vec<_>>()
-        })
-    });
-    let title = move || {
-        let id = dev.with(|d| d.entity.clone());
-        match entity.get() {
-            Some(e) => entity_title(lang.get(), &e),
-            None => format!("{id} {}", t(Key::AmbianceMissing)),
-        }
-    };
     let pick = move |id: String| {
         let commands = house
             .entities
@@ -713,42 +684,21 @@ pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
                 d.command = first.clone();
             }
         });
-        query.set(String::new());
     };
+    let pool: Keep = Arc::new(|e| e.is_primary() && !e.id.starts_with("group_"));
 
     view! {
         <div class="ambiance-form">
-            <p class="ambiance-device__current">{title}</p>
-            <label class="field">
-                <span class="field__caption">{move || t(Key::AmbSearchDevice)}</span>
-                <input
-                    class="field__input ambiance-device__search"
-                    type="search"
-                    prop:value=move || query.get()
-                    on:input=move |ev| query.set(event_target_value(&ev))
-                />
-            </label>
-            <ul class="ambiance-device__results">
-                {move || {
-                    results
-                        .get()
-                        .into_iter()
-                        .map(|(id, label)| {
-                            view! {
-                                <li>
-                                    <button
-                                        type="button"
-                                        class="btn ambiance-device__result"
-                                        on:click=move |_| pick(id.clone())
-                                    >
-                                        {label}
-                                    </button>
-                                </li>
-                            }
-                        })
-                        .collect_view()
-                }}
-            </ul>
+            <EntityPickField
+                label=Signal::derive(move || device_text(i18n::use_lang()(), DeviceText::Device).to_owned())
+                value=Signal::derive(move || dev.with(|d| Some(d.entity.clone()).filter(|e| !e.is_empty())))
+                on_change=Callback::new(move |v: Option<String>| {
+                    if let Some(id) = v {
+                        pick(id);
+                    }
+                })
+                pool=Some(pool)
+            />
             <label class="field">
                 <span class="field__caption">{move || t(Key::AmbCommand)}</span>
                 <select

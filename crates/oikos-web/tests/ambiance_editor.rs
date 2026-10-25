@@ -606,3 +606,49 @@ async fn try_it_keeps_the_report_for_last_run() {
             .contains_key("mood_a")
     );
 }
+
+fn light_with_commands(id: &str) -> EntityView {
+    let mut l = light(id, "a");
+    l.capabilities.brightness = true;
+    l
+}
+
+#[wasm_bindgen_test]
+async fn the_device_action_picks_its_entity_through_the_picker() {
+    let mut button = light("btn", "a");
+    button.kind = Kind::Button;
+    button.component = Kind::Button.component().to_string();
+    button.protocol_kind = Kind::Button;
+    let saved = mood(
+        "mood_b",
+        1,
+        vec![AmbianceAction::Device(DeviceAction {
+            entity: "btn".into(),
+            command: Command::Press,
+        })],
+    );
+    let m = mount("/ambiances/mood_b", |h| {
+        seed(h, vec![view(saved.clone())]);
+        h.entities.set(
+            [
+                ("btn".to_owned(), button),
+                ("lamp".to_owned(), light_with_commands("lamp")),
+            ]
+            .into_iter()
+            .collect(),
+        );
+    });
+    settle().await;
+    assert_eq!(all(&m.host, ".ambiance-device__search").len(), 0);
+    one(&m.host, "button.picker-field").click();
+    settle().await;
+    one(&m.host, "[id$='-opt-lamp']").click();
+    settle().await;
+    let field = text(&m.host, "button.picker-field");
+    assert!(field.contains("Lamp lamp"), "{field}");
+    let command = text(&m.host, ".ambiance-device__command");
+    assert!(!command.contains("Press"), "{command}");
+    assert!(!command.is_empty(), "the light's first command is selected");
+    settle().await;
+    gloo_timers::future::TimeoutFuture::new(100).await;
+}

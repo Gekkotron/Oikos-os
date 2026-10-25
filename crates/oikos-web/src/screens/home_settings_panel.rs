@@ -10,7 +10,8 @@ use oikos_core::model::Kind;
 
 use crate::climate::entity_field::ThermometerField;
 use crate::components::toast::Toasts;
-use crate::format::list_label;
+use crate::entity_picker::EntityPickField;
+use crate::entity_picker::needs::keep;
 use crate::home_header::mood::{COLD_DEFAULT, HOT_DEFAULT};
 use crate::house::House;
 use crate::i18n::format::{input_number, parse_decimal};
@@ -191,19 +192,6 @@ fn field_of_message(message: &str) -> Option<Field> {
     .map(|(_, field)| field)
 }
 
-/// The primary `select` entities as `(id, label)`, plus `keep` (the chosen one) even when it is
-/// not primary: the hub's virtual ones first, then by label.
-fn mode_options(house: House, lang: Lang, keep: Option<&str>) -> Vec<(String, String)> {
-    let mut list: Vec<(String, String)> = house.entities.with(|m| {
-        m.values()
-            .filter(|e| e.kind == Kind::Select && (e.is_primary() || keep == Some(e.id.as_str())))
-            .map(|e| (e.id.clone(), list_label(lang, e)))
-            .collect()
-    });
-    list.sort_by_key(|(id, label)| (!id.starts_with("virtual_"), label.to_lowercase()));
-    list
-}
-
 #[component]
 pub fn HomeSettingsPanel() -> impl IntoView {
     let house = expect_context::<House>();
@@ -332,37 +320,13 @@ pub fn HomeSettingsPanel() -> impl IntoView {
                 |d, v| d.eco = v,
             )}
             <div class="climate-field">
-                <label class="climate-field__label" for="home-Mode">
-                    {move || t(HomeText::ModeSelector)}
-                </label>
-                <select
-                    id="home-Mode"
-                    class="field"
-                    on:change=move |ev| {
-                        let v = event_target_value(&ev);
-                        draft.update(|d| d.mode = (!v.is_empty()).then_some(v));
-                    }
-                >
-                    <option value="" selected=move || mode_value.get().is_none()>
-                        {move || t(HomeText::NoneChoice)}
-                    </option>
-                    {move || {
-                        let current = mode_value.get();
-                        let mut list =
-                            mode_options(house, lang.map_or(Lang::En, |l| l.get()), current.as_deref());
-                        if let Some(id) = current.as_ref()
-                            && !list.iter().any(|(i, _)| i == id)
-                        {
-                            list.insert(0, (id.clone(), id.clone()));
-                        }
-                        list.into_iter()
-                            .map(|(id, text)| {
-                                let selected = current.as_deref() == Some(id.as_str());
-                                view! { <option value=id selected=selected>{text}</option> }
-                            })
-                            .collect_view()
-                    }}
-                </select>
+                <EntityPickField
+                    label=Signal::derive(move || t(HomeText::ModeSelector).to_owned())
+                    value=mode_value
+                    on_change=Callback::new(move |v| draft.update(|d| d.mode = v))
+                    pool=Some(keep(|e| e.kind == Kind::Select))
+                    pinned=Some(Signal::derive(move || t(HomeText::NoneChoice).to_owned()))
+                />
                 {error_for(Field::Mode)}
             </div>
             <div class="home-settings__field">

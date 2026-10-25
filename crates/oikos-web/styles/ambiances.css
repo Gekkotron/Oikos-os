@@ -395,27 +395,6 @@
   cursor: pointer;
 }
 
-.ambiance-device__current {
-  margin: 0 0 4px;
-  font: var(--type-body);
-  overflow-wrap: anywhere;
-}
-
-.ambiance-device__results {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ambiance-device__result {
-  width: 100%;
-  justify-content: flex-start;
-  text-align: left;
-}
-
 .ambiance-add {
   display: flex;
   flex-direction: column;

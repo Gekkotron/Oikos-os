@@ -73,6 +73,8 @@ A sensor that goes unavailable while the alarm is armed sends one warning push (
 
 ## Sirens
 
+In Settings › Alarm, each **Add** button (sensors, sirens, remotes, trackers) opens the [entity picker](web-ui.md#picking-an-entity) on the entities that list accepts. Tick several in one go, then **Done**; ticking a chosen one again takes it out.
+
 A siren is one of two kinds:
 
 - **Entity**: a `switch`, or a siren with a `power` control, that the hub already has. On means ring, off means stop. You can add an optional chirp length for it.

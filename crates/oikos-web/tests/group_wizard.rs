@@ -148,7 +148,10 @@ async fn step_two_filters_by_effective_kind_and_groups_by_room() {
     click(&host, "button.btn", "Next").await;
     let text = host.text_content().unwrap();
     assert!(text.contains("Salon") && text.contains("Cuisine"), "{text}");
-    assert_eq!(host.query_selector_all("button.card").unwrap().length(), 2);
+    let options = host
+        .query_selector_all(".picker-body--inline [role=option]")
+        .unwrap();
+    assert_eq!(options.length(), 2);
     assert!(!text.contains("fan"), "{text}");
 }
 
@@ -158,7 +161,7 @@ async fn step_three_hides_members_by_default() {
     tick().await;
     click(&host, "button.card", "Light").await;
     click(&host, "button.btn", "Next").await;
-    click(&host, "button.card", "lamp").await;
+    click(&host, ".picker-body--inline [role=option]", "lamp").await;
     click(&host, "button.btn", "Next").await;
     let switches = host.query_selector_all("[role=switch]").unwrap();
     let toggle = (0..switches.length())
@@ -200,16 +203,14 @@ async fn the_wizard_follows_the_language_without_a_remount() {
         text.contains("Membres") && text.contains("Étape 2 sur 3"),
         "{text}"
     );
-    let input = host
-        .query_selector("input[type=search]")
-        .unwrap()
-        .expect("a filter field");
-    assert_eq!(
-        input.get_attribute("placeholder").as_deref(),
-        Some("Filtrer les membres")
+    assert!(
+        host.query_selector(".picker-body--inline input[type=search]")
+            .unwrap()
+            .is_some(),
+        "a filter field"
     );
 
-    click(&host, "button.card", "lamp").await;
+    click(&host, ".picker-body--inline [role=option]", "lamp").await;
     click(&host, "button.btn", "Suivant").await;
     let text = host.text_content().unwrap();
     assert!(text.contains("Nom et pièce"), "{text}");

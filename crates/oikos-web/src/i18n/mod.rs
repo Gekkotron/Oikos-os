@@ -14,6 +14,7 @@ pub mod format;
 pub mod groups;
 pub mod history;
 mod home;
+pub mod picker;
 pub mod security;
 pub mod settings;
 mod solar;
@@ -212,7 +213,6 @@ pub enum Key {
     AmbClose,
     AmbTemperature,
     AmbZone,
-    AmbSearchDevice,
     AmbCommand,
     AmbValue,
     Alerts,
@@ -351,7 +351,6 @@ impl Key {
         Key::AmbClose,
         Key::AmbTemperature,
         Key::AmbZone,
-        Key::AmbSearchDevice,
         Key::AmbCommand,
         Key::AmbValue,
         Key::Alerts,
@@ -509,7 +508,6 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::AmbClose => ("Close", "Fermer"),
         Key::AmbTemperature => ("Temperature", "Température"),
         Key::AmbZone => ("Zone", "Zone"),
-        Key::AmbSearchDevice => ("Search a device", "Chercher un appareil"),
         Key::AmbCommand => ("Command", "Commande"),
         Key::AmbValue => ("Value", "Valeur"),
         Key::Alerts => ("Alerts", "Alertes"),
@@ -763,7 +761,6 @@ mod tests {
             | Key::AmbClose
             | Key::AmbTemperature
             | Key::AmbZone
-            | Key::AmbSearchDevice
             | Key::AmbCommand
             | Key::AmbValue
             | Key::Alerts
@@ -834,7 +831,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 134);
+        assert_eq!(Key::ALL.len(), 133);
     }
     #[test]
     fn every_key_differs_between_languages() {

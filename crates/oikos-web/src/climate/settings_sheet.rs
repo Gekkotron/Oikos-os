@@ -6,12 +6,14 @@ use leptos::task::spawn_local;
 use oikos_climate::doc::{EcoAction, HhMm, HouseSettings, Season};
 
 use crate::api::climate as api;
-use crate::climate::entity_field::{EntityField, EntityListField};
 use crate::climate::fan_mode_choices;
 use crate::components::toast::Toasts;
+use crate::entity_picker::needs::{is_on_off, is_presence, is_thermometer, keep};
+use crate::entity_picker::{EntityPickField, EntityPickListField, Suggest};
 use crate::house::House;
 use crate::i18n::climate::{ClimateText, could_not_save, fan_choice, use_climate_text};
 use crate::i18n::format::{input_number, parse_decimal};
+use crate::i18n::picker::PickerText;
 use crate::i18n::states::{StateCtx, state_word};
 use crate::i18n::{Key, use_lang, use_text};
 
@@ -141,6 +143,7 @@ pub fn SettingsSheet(
     let t = use_climate_text();
     let text = use_text();
     let draft = RwSignal::new(house);
+    let none_text = Signal::derive(move || t(ClimateText::None).to_owned());
     let saving = RwSignal::new(false);
 
     let num = move |label: ClimateText,
@@ -198,17 +201,28 @@ pub fn SettingsSheet(
                         .collect_view()}
                 </select>
             </label>
-            <EntityField
+            <EntityPickField
                 label=Signal::derive(move || t(ClimateText::OutdoorTemperature).to_owned())
                 value=Signal::derive(move || draft.with(|d| d.outdoor_entity.clone()))
                 on_change=Callback::new(move |v| draft.update(|d| d.outdoor_entity = v))
+                suggest=Some(Suggest {
+                    text: PickerText::Thermometers,
+                    keep: keep(is_thermometer),
+                })
+                pinned=Some(none_text)
+                class=Some("climate-field".to_owned())
             />
             {num(ClimateText::HeatBelow, Unit::Celsius, |d| d.heat_below, |d, v| d.heat_below = v)}
             {num(ClimateText::CoolAbove, Unit::Celsius, |d| d.cool_above, |d, v| d.cool_above = v)}
-            <EntityListField
+            <EntityPickListField
                 label=Signal::derive(move || t(ClimateText::Presence).to_owned())
                 value=Signal::derive(move || draft.with(|d| d.presence.clone()))
                 on_change=Callback::new(move |v| draft.update(|d| d.presence = v))
+                suggest=Some(Suggest {
+                    text: PickerText::Presence,
+                    keep: keep(is_presence),
+                })
+                class=Some("climate-field".to_owned())
             />
             <p class="climate-field__hint">{move || t(ClimateText::PresenceAlarmHint)}</p>
             {num(ClimateText::AwayGrace, Unit::Word(ClimateText::UnitMin), |d| f64::from(d.away_grace_min), |d, v| {
@@ -218,10 +232,16 @@ pub fn SettingsSheet(
             {num(ClimateText::EcoHeat, Unit::Celsius, |d| d.eco.heat, |d, v| d.eco.heat = v)}
             {num(ClimateText::EcoCool, Unit::Celsius, |d| d.eco.cool, |d, v| d.eco.cool = v)}
             <EcoFanField draft=draft />
-            <EntityField
+            <EntityPickField
                 label=Signal::derive(move || t(ClimateText::Holiday).to_owned())
                 value=Signal::derive(move || draft.with(|d| d.holiday_entity.clone()))
                 on_change=Callback::new(move |v| draft.update(|d| d.holiday_entity = v))
+                suggest=Some(Suggest {
+                    text: PickerText::OnOff,
+                    keep: keep(is_on_off),
+                })
+                pinned=Some(none_text)
+                class=Some("climate-field".to_owned())
             />
             {num(ClimateText::Frost, Unit::Celsius, |d| d.frost, |d, v| d.frost = v)}
             {num(ClimateText::Overheat, Unit::Celsius, |d| d.overheat, |d, v| d.overheat = v)}

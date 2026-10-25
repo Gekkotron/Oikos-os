@@ -51,7 +51,7 @@ Eco saves energy while a room, or the whole house, is empty. It is set once for 
 Eco starts two ways, and a zone is in eco while either one applies:
 
 - **One room until a date** (`source: eco`). On the Climate screen, open the room and choose **Eco until…**, pick the end date and time, and start it. It ends by itself at that time, or with **Cancel eco**. Over REST it is `PUT /api/v1/climate/zones/{id}/eco` with `{"until": <unix seconds>}`; over MCP, `set_climate_eco`. Not available on a zone that is `off`.
-- **The whole house while nobody is home** (`source: away`). Add an alarm panel to **Presence** in the climate settings: armed away (or vacation) means nobody home, disarmed or armed home or night means someone is. While the panel is arming, in its entry delay or triggered, it keeps its last answer. Phones and presence sensors can sit in the same list. `away_grace_min` (15 min) applies before the house goes to eco.
+- **The whole house while nobody is home** (`source: away`). Add an alarm panel to **Presence** in the climate settings: armed away (or vacation) means nobody home, disarmed or armed home or night means someone is. While the panel is arming, in its entry delay or triggered, it keeps its last answer. Phones and presence sensors can sit in the same list. The Presence field opens the [entity picker](web-ui.md#picking-an-entity) on the alarm panels, phones and presence sensors; tick each one, then Done. `away_grace_min` (15 min) applies before the house goes to eco.
 
 The two are independent: a bedroom in eco until Sunday stays in eco when the house is disarmed on Saturday. Holiday and overrides still come first, and a temperature set by hand during eco holds as usual.
 

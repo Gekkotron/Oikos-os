@@ -2,6 +2,7 @@
 //! `/groups/new` creates a group; `/groups/:id/edit` reopens it with the type locked.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use leptos::prelude::*;
 use leptos_router::hooks::{use_navigate, use_params_map};
@@ -11,13 +12,12 @@ use oikos_core::model::{Kind, UNASSIGNED_AREA};
 use crate::api::{encode_id, list_groups, set_group, set_override};
 use crate::cards::PowerToggle;
 use crate::components::toast::Toasts;
+use crate::entity_picker::{Keep, Mode, PickerBody};
 use crate::flow_edit::fold_accents;
-use crate::format::list_label;
 use crate::house::House;
 use crate::i18n::devices::{DeviceText, device_text};
 use crate::i18n::groups::{GroupText, group_text, group_text_signal, kind_label, step_of};
 use crate::i18n::{Key, Lang, text, use_lang};
-use crate::icons::{CHECK, MAGNIFIER};
 use crate::nav::{BackLink, use_back};
 
 /// The kinds a group can be made of: every controllable kind.
@@ -33,33 +33,14 @@ pub const GROUP_KINDS: &[Kind] = &[
     Kind::WaterHeater,
 ];
 
+/// What a group of `kind` can hold: entities of that (effective) kind, never another group.
+fn member_pool(kind: Option<Kind>) -> Keep {
+    Arc::new(move |e: &EntityView| Some(e.kind) == kind && !e.id.starts_with("group_"))
+}
+
 /// A group id from its name; see [`crate::ambiances::slug_id`] for the rules.
 pub fn slug_group_id(name: &str, taken: &BTreeSet<String>) -> String {
     crate::ambiances::slug_id(name, taken, "group")
-}
-
-/// The entities of `kind` (their effective kind, so `showAs` counts) matching `query`, grouped by
-/// room in the hub's room order, unknown rooms last. Entities that are not shown by default, or
-/// are groups themselves, appear only when already `selected`.
-pub fn members_by_room(
-    lang: Lang,
-    entities: &BTreeMap<String, EntityView>,
-    areas: &[AreaView],
-    kind: Kind,
-    query: &str,
-    selected: &BTreeSet<String>,
-) -> Vec<(String, Vec<(String, String)>)> {
-    let needle = fold_accents(query.trim());
-    let items = entities
-        .values()
-        .filter(|e| e.kind == kind)
-        .filter_map(|e| {
-            let shown = (e.is_primary() && !e.id.starts_with("group_")) || selected.contains(&e.id);
-            let label = list_label(lang, e);
-            (shown && (needle.is_empty() || fold_accents(&label).contains(&needle)))
-                .then(|| (e.id.clone(), label, e.area.clone()))
-        });
-    group_by_room(lang, items, areas)
 }
 
 /// `(id, label, area id)` items grouped by room in the hub's room order, each room sorted by
@@ -116,7 +97,6 @@ pub fn GroupWizardScreen() -> impl IntoView {
     let step = RwSignal::new(if editing { 2u8 } else { 1u8 });
     let kind = RwSignal::new(None::<Kind>);
     let selected = RwSignal::new(BTreeSet::<String>::new());
-    let filter = RwSignal::new(String::new());
     let name = RwSignal::new(String::new());
     let area = RwSignal::new(String::new());
     let hide_members = RwSignal::new(true);
@@ -146,18 +126,15 @@ pub fn GroupWizardScreen() -> impl IntoView {
         });
     }
 
-    let rooms = Memo::new(move |_| {
-        let Some(kind) = kind.get() else {
-            return Vec::new();
-        };
-        let query = filter.get();
-        let selected = selected.get();
-        let lang = lang();
-        house.entities.with(|entities| {
-            house
-                .areas
-                .with(|areas| members_by_room(lang, entities, areas, kind, &query, &selected))
-        })
+    let members = Signal::derive(move || selected.with(|s| s.iter().cloned().collect::<Vec<_>>()));
+    let toggle = Callback::new(move |id: Option<String>| {
+        if let Some(id) = id {
+            selected.update(|s| {
+                if !s.remove(&id) {
+                    s.insert(id);
+                }
+            });
+        }
     });
 
     let can_next = move || match step.get() {
@@ -296,59 +273,13 @@ pub fn GroupWizardScreen() -> impl IntoView {
                         }
                         2 => {
                             view! {
-                                <label class="devices__search">
-                                    <span class="devices__search-icon" inner_html=MAGNIFIER></span>
-                                    <input
-                                        class="devices__search-input"
-                                        type="search"
-                                        placeholder=move || group_text(lang(), GroupText::FilterMembers)
-                                        aria-label=move || group_text(lang(), GroupText::FilterMembers)
-                                        prop:value=move || filter.get()
-                                        on:input=move |ev| filter.set(event_target_value(&ev))
-                                    />
-                                </label>
-                                {move || {
-                                    rooms
-                                        .get()
-                                        .into_iter()
-                                        .map(|(room, list)| {
-                                            view! {
-                                                <h3 class="sheet__subheading">{room}</h3>
-                                                <div class="card__controls card__controls--grid wizard__members">
-                                                    {list
-                                                        .into_iter()
-                                                        .map(|(id, label)| {
-                                                            let on = {
-                                                                let id = id.clone();
-                                                                move || selected.with(|s| s.contains(&id))
-                                                            };
-                                                            let pressed = on.clone();
-                                                            view! {
-                                                                <button
-                                                                    type="button"
-                                                                    class="card member-card"
-                                                                    class:card--on=on
-                                                                    aria-pressed=move || pressed().to_string()
-                                                                    on:click=move |_| {
-                                                                        selected
-                                                                            .update(|s| {
-                                                                                if !s.remove(&id) {
-                                                                                    s.insert(id.clone());
-                                                                                }
-                                                                            })
-                                                                    }
-                                                                >
-                                                                    <span class="card__name">{label}</span>
-                                                                    <span class="member-card__check" aria-hidden="true" inner_html=CHECK></span>
-                                                                </button>
-                                                            }
-                                                        })
-                                                        .collect_view()}
-                                                </div>
-                                            }
-                                        })
-                                        .collect_view()
-                                }}
+                                <PickerBody
+                                    mode=Mode::Multi
+                                    inline=true
+                                    current=members
+                                    pool=Some(member_pool(kind.get_untracked()))
+                                    on_pick=toggle
+                                />
                             }
                                 .into_any()
                         }
@@ -505,78 +436,24 @@ mod tests {
         }
     }
 
-    fn area(id: &str, name: &str) -> AreaView {
-        AreaView {
-            id: id.into(),
-            name: name.into(),
-            icon: None,
-            order: None,
-            entity_count: 0,
-            primary_count: 0,
-            group_names: BTreeMap::new(),
-            group_favorites: BTreeSet::new(),
-        }
-    }
-
     #[test]
-    fn members_filter_by_effective_kind_and_group_by_room() {
-        let mut entities = BTreeMap::new();
-        for e in [
-            entity("lamp", Kind::Light, Kind::Light, "salon"),
-            entity("plug", Kind::Light, Kind::Switch, "cuisine"),
-            entity("fan", Kind::Switch, Kind::Switch, "salon"),
-            entity("lost", Kind::Light, Kind::Light, "ghost"),
-        ] {
-            entities.insert(e.id.clone(), e);
-        }
-        let areas = [area("salon", "Salon"), area("cuisine", "Cuisine")];
-        let rooms = members_by_room(
-            Lang::En,
-            &entities,
-            &areas,
+    fn the_pool_is_the_effective_kind_and_never_a_group() {
+        let pool = member_pool(Some(Kind::Light));
+        assert!(pool(&entity("lamp", Kind::Light, Kind::Light, "a")));
+        assert!(pool(&entity("plug", Kind::Light, Kind::Switch, "a")));
+        assert!(!pool(&entity("fan", Kind::Switch, Kind::Switch, "a")));
+        assert!(!pool(&entity("group_all", Kind::Light, Kind::Light, "a")));
+        assert!(!member_pool(None)(&entity(
+            "lamp",
             Kind::Light,
-            "",
-            &BTreeSet::new(),
-        );
-        let names: Vec<&str> = rooms.iter().map(|(r, _)| r.as_str()).collect();
-        assert_eq!(names, ["Salon", "Cuisine", "ghost"]);
-        assert_eq!(rooms[1].1[0].0, "plug");
-        let filtered = members_by_room(
-            Lang::En,
-            &entities,
-            &areas,
             Kind::Light,
-            "LAM",
-            &BTreeSet::new(),
-        );
-        assert_eq!(filtered.len(), 1);
+            "a"
+        )));
     }
 
     #[test]
     fn a_group_in_the_catch_all_room_opens_with_no_room() {
         assert_eq!(room_choice(UNASSIGNED_AREA), "");
         assert_eq!(room_choice("salon"), "salon");
-    }
-
-    #[test]
-    fn the_catch_all_room_reads_in_french() {
-        let mut entities = BTreeMap::new();
-        for e in [
-            entity("lamp", Kind::Light, Kind::Light, "salon"),
-            entity("orphan", Kind::Light, Kind::Light, "Unassigned"),
-        ] {
-            entities.insert(e.id.clone(), e);
-        }
-        let areas = [area("salon", "Salon"), area("Unassigned", "Unassigned")];
-        let rooms = members_by_room(
-            Lang::Fr,
-            &entities,
-            &areas,
-            Kind::Light,
-            "",
-            &BTreeSet::new(),
-        );
-        let names: Vec<&str> = rooms.iter().map(|(r, _)| r.as_str()).collect();
-        assert_eq!(names, ["Salon", "Sans pièce"]);
     }
 }

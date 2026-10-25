@@ -8,10 +8,13 @@ use oikos_core::flow::{IfParams, Missing, Node, NodeKind, Op};
 use super::Editor;
 use super::graph::Selection;
 use super::sun::{FallbackBadge, sun_sheet};
+use crate::entity_picker::needs::{is_commandable, is_signal, keep};
+use crate::entity_picker::{EntityPickField, Suggest};
 use crate::flow_edit::remove_node;
 use crate::house::House;
 use crate::i18n::flows::{FlowText, flow_text, invalid_json, use_flow_text};
 use crate::i18n::format::parse_decimal;
+use crate::i18n::picker::PickerText;
 use crate::i18n::{Lang, use_lang};
 use crate::screens::flow_schedule::ScheduleField;
 
@@ -561,11 +564,31 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
     }
 }
 
+/// The entity a node's settings point at, read from the draft so it follows edits; an empty
+/// id is `None`.
+fn node_entity(
+    form: Form,
+    id: String,
+    read: fn(&NodeKind) -> Option<String>,
+) -> Signal<Option<String>> {
+    Signal::derive(move || {
+        form.editor.draft.with(|f| {
+            f.node(&id)
+                .and_then(|n| read(&n.kind))
+                .filter(|e| !e.is_empty())
+        })
+    })
+}
+
 fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
     let t = use_flow_text();
     let lang = use_lang();
     match kind {
         NodeKind::TriggerState(p) => {
+            let entity_value = node_entity(form, id.clone(), |k| match k {
+                NodeKind::TriggerState(t) => Some(t.entity.clone()),
+                _ => None,
+            });
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
                 form.update(&entity_id, |n| {
@@ -591,12 +614,13 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 });
             });
             view! {
-                <TextField
+                <EntityPickField
                     label=word(FlowText::Entity)
-                    initial=p.entity
-                    placeholder=plain("entity.id")
-                    optional=false
-                    write=entity_write
+                    value=entity_value
+                    on_change=entity_write
+                    pool=Some(keep(|e| !is_signal(e)))
+                    compact=true
+                    class=Some("node-editor__field".to_owned())
                 />
                 <JsonField
                     label=word(FlowText::FiresWhen)
@@ -613,7 +637,11 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             }
             .into_any()
         }
-        NodeKind::TriggerSignal(p) => {
+        NodeKind::TriggerSignal(_) => {
+            let entity_value = node_entity(form, id.clone(), |k| match k {
+                NodeKind::TriggerSignal(t) => Some(t.entity.clone()),
+                _ => None,
+            });
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
                 form.update(&entity_id, |n| {
@@ -678,12 +706,13 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     .collect_view()
             };
             view! {
-                <TextField
+                <EntityPickField
                     label=word(FlowText::Entity)
-                    initial=p.entity
-                    placeholder=plain("device_automation.id")
-                    optional=false
-                    write=entity_write
+                    value=entity_value
+                    on_change=entity_write
+                    pool=Some(keep(is_signal))
+                    compact=true
+                    class=Some("node-editor__field".to_owned())
                 />
                 <div
                     class="override__field"
@@ -741,6 +770,17 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         _ => None,
                     })
             });
+            let entity_value = Signal::derive({
+                let id = id.clone();
+                move || {
+                    form.editor
+                        .draft
+                        .with(|f| match f.node(&id).map(|n| &n.kind) {
+                            Some(NodeKind::If(i)) => i.entity.clone().filter(|e| !e.is_empty()),
+                            _ => None,
+                        })
+                }
+            });
             let entity_id = id;
             let entity_write = Callback::new(move |value: Option<String>| {
                 form.update(&entity_id, |n| {
@@ -780,12 +820,13 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         optional=false
                         write=value_write
                     />
-                    <TextField
+                    <EntityPickField
                         label=word(FlowText::EntityDefaults)
-                        initial=live.run(()).and_then(|i| i.entity).unwrap_or_default()
-                        placeholder=plain("entity.id")
-                        optional=true
-                        write=entity_write
+                        value=entity_value
+                        on_change=entity_write
+                        pinned=Some(word(FlowText::TriggerValue))
+                        compact=true
+                        class=Some("node-editor__field".to_owned())
                     />
                     <label class="node-editor__field">
                         <span class="node-editor__label">{move || t(FlowText::WhenUnknown)}</span>
@@ -877,6 +918,10 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             .into_any()
         }
         NodeKind::Command(p) => {
+            let entity_value = node_entity(form, id.clone(), |k| match k {
+                NodeKind::Command(t) => Some(t.entity.clone()),
+                _ => None,
+            });
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
                 form.update(&entity_id, |n| {
@@ -899,12 +944,16 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 }
             });
             view! {
-                <TextField
+                <EntityPickField
                     label=word(FlowText::Entity)
-                    initial=p.entity
-                    placeholder=plain("entity.id")
-                    optional=false
-                    write=entity_write
+                    value=entity_value
+                    on_change=entity_write
+                    suggest=Some(Suggest {
+                        text: PickerText::Commandable,
+                        keep: keep(is_commandable),
+                    })
+                    compact=true
+                    class=Some("node-editor__field".to_owned())
                 />
                 <JsonField
                     label=word(FlowText::CommandJson)

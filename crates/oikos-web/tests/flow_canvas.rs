@@ -147,7 +147,7 @@ fn text(host: &web_sys::Element, selector: &str) -> String {
 fn click(host: &web_sys::Element, selector: &str) {
     host.query_selector(selector)
         .unwrap()
-        .unwrap_or_else(|| panic!("no {selector}"))
+        .unwrap_or_else(|| panic!("no {selector}: {}", host.inner_html()))
         .unchecked_into::<web_sys::HtmlElement>()
         .click();
 }
@@ -492,7 +492,7 @@ async fn save_leaves_edit_mode() {
 fn element(host: &web_sys::Element, selector: &str) -> web_sys::Element {
     host.query_selector(selector)
         .unwrap()
-        .unwrap_or_else(|| panic!("no {selector}"))
+        .unwrap_or_else(|| panic!("no {selector}: {}", host.inner_html()))
 }
 
 /// The centre of `el` on screen, scrolled into view first so a hit test can find it.
@@ -665,6 +665,26 @@ async fn backspace_in_input_keeps_card() {
     tick().await;
     let html = host.inner_html();
     assert_eq!(count(&host, "[data-node=wait]"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-wire"), 4, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn keys_in_an_open_picker_do_not_delete_the_card() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    select_card(&host, "on").await;
+    click_any(&host, ".flow-drawer button.picker-field");
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(30).await;
+    let chip = element(&host, ".picker__chips .chip");
+    chip.clone()
+        .unchecked_into::<web_sys::HtmlElement>()
+        .focus()
+        .unwrap();
+    press(&chip, "Backspace", false, false);
+    press(&chip, "z", true, false);
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=on]"), 1, "{html}");
     assert_eq!(count(&host, ".flow-wire"), 4, "{html}");
 }
 
@@ -1484,6 +1504,93 @@ async fn signal_trigger_editor_lists_signals() {
     }
     assert_eq!(count(&host, ".signal-chips .chip"), 4);
     assert_eq!(count(&host, ".signal-chips .chip--selected"), 1);
+}
+
+/// Opens the entity picker of the open card's settings.
+async fn open_entity_picker(host: &web_sys::Element) {
+    let button: web_sys::HtmlElement = host
+        .query_selector(".flow-drawer button.picker-field")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no picker field: {}", host.inner_html()))
+        .unchecked_into();
+    button.click();
+    tick().await;
+}
+
+/// Closing the picker pops the history entry it pushed; let that land before the next test
+/// mounts at its own path.
+async fn settle_history() {
+    gloo_timers::future::TimeoutFuture::new(100).await;
+}
+
+#[wasm_bindgen_test]
+async fn command_entity_picked_from_picker() {
+    let (host, _mounted, house) = editing(reference_view(None, vec![])).await;
+    let lamp = table_lamp();
+    house.entities.update(|m| {
+        m.insert(lamp.id.clone(), lamp);
+    });
+    select_card(&host, "on").await;
+    assert_eq!(
+        count(&host, ".flow-drawer input[placeholder='entity.id']"),
+        0
+    );
+    open_entity_picker(&host).await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-light.table']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no light row: {}", host.inner_html()))
+        .unchecked_into();
+    row.click();
+    tick().await;
+    let field = text(&host, ".flow-drawer button.picker-field");
+    assert!(field.contains("Lumière table"), "{field}");
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn signal_picker_lists_only_signals() {
+    use oikos_core::model::Kind;
+    const SIGNAL_FLOW: &str = r#"{
+      "id": "remote_flow", "name": "Remote", "enabled": true, "mode": "single",
+      "nodes": [ { "id": "press", "type": "trigger.signal", "params": { "entity": "remote_1" } } ],
+      "edges": []
+    }"#;
+    let view = FlowView {
+        definition: Flow::decode(SIGNAL_FLOW.as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let host = host();
+    let (_mounted, house) = mount_house(&host, vec![view], "/flows/remote_flow");
+    let mut remote = table_lamp();
+    remote.id = "remote_1".into();
+    remote.name = "Remote".into();
+    remote.kind = Kind::Generic;
+    remote.protocol_kind = Kind::Generic;
+    remote.component = "device_automation".into();
+    let mut sensor = table_lamp();
+    sensor.id = "sensor.temp".into();
+    sensor.name = "Temperature".into();
+    sensor.kind = Kind::Sensor;
+    sensor.protocol_kind = Kind::Sensor;
+    sensor.component = "sensor".into();
+    house.entities.update(|m| {
+        m.insert(remote.id.clone(), remote);
+        m.insert(sensor.id.clone(), sensor);
+    });
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    click(&host, ".flow-toolbar__edit");
+    tick().await;
+    select_card(&host, "press").await;
+    open_entity_picker(&host).await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[id$='-opt-remote_1']"), 1, "{html}");
+    assert_eq!(count(&host, "[id$='-opt-sensor.temp']"), 0, "{html}");
+    click(&host, "[id$='-opt-remote_1']");
+    tick().await;
+    settle_history().await;
 }
 
 /// Stands in for the shell chrome the canvas sits beside.
