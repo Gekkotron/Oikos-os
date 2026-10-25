@@ -62,6 +62,10 @@ pub struct Runtime {
     pub cause: Vec<String>,
     pub alert_ids: Vec<String>,
     pub trackers: BTreeMap<String, Presence>,
+    /// The trackers whose last definite state was away: only these can come home (an
+    /// unknown reading in between does not forget it, nor count as a departure).
+    #[serde(default)]
+    pub was_away: BTreeSet<String>,
     pub auto_arm_ready: bool,
     pub everyone_away_since: Option<u64>,
 }
@@ -77,6 +81,7 @@ impl Default for Runtime {
             cause: Vec::new(),
             alert_ids: Vec::new(),
             trackers: BTreeMap::new(),
+            was_away: BTreeSet::new(),
             auto_arm_ready: false,
             everyone_away_since: None,
         }
@@ -137,11 +142,32 @@ pub struct World<'a> {
 /// Something that happened.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
-    Arm { mode: ArmMode, source: Source },
-    Disarm { source: Source },
-    Sensor { entity: String, on: bool },
-    Signal { entity: String, signal: String },
-    Tracker { entity: String, seen: Presence },
+    Arm {
+        mode: ArmMode,
+        source: Source,
+    },
+    Disarm {
+        source: Source,
+    },
+    Sensor {
+        entity: String,
+        on: bool,
+    },
+    /// A watched sensor reported a definite value for the first time since it was unknown or
+    /// absent (a restart, a reconnect, a newly watched entity): not a change, so an opening
+    /// found open is only watched for closing and nothing else happens.
+    SensorFound {
+        entity: String,
+        on: bool,
+    },
+    Signal {
+        entity: String,
+        signal: String,
+    },
+    Tracker {
+        entity: String,
+        seen: Presence,
+    },
     Tick,
     Resume,
 }
@@ -358,6 +384,25 @@ fn sensor(rt: &mut Runtime, s: &AlarmSettings, entity: &str, on: bool, now: u64)
     }
 }
 
+/// A sensor first seen with a value while armed (or pending): an opening found open is watched
+/// for closing (§4.3), quietly. Anything else is only recorded by the engine.
+fn sensor_found(rt: &mut Runtime, s: &AlarmSettings, entity: &str, on: bool) -> Vec<Effect> {
+    let Some(mode) = rt
+        .mode()
+        .filter(|_| matches!(rt.phase, Phase::Armed { .. } | Phase::Pending { .. }))
+    else {
+        return vec![];
+    };
+    if let Some(rule) = s.sensor(entity)
+        && on
+        && rule.kind == SensorKind::Opening
+        && rule.modes.contains(&mode)
+    {
+        rt.open_at_arm.insert(entity.to_string());
+    }
+    vec![]
+}
+
 fn sos(rt: &mut Runtime, s: &AlarmSettings, remote: &str, now: u64) -> Vec<Effect> {
     let back_to = match rt.phase {
         // Already ringing: no second ring until it has returned to armed.
@@ -392,13 +437,30 @@ fn tracker(
         return vec![];
     }
     let previous = rt.trackers.insert(entity.to_string(), seen);
-    let came_home = seen == Presence::Home && previous != Some(Presence::Home);
-    let mut fx = vec![];
-    if came_home {
-        rt.auto_arm_ready = true;
-        if s.presence.disarm && !matches!(rt.phase, Phase::Disarmed) {
-            fx = disarm(rt, Source::Presence, now);
+    // A homecoming needs a definite away before it; Home after Unknown after Home is a flap.
+    // A tracker never seen that reads home is initial knowledge: it makes presence ready to
+    // arm but does not disarm anything.
+    let was_away = rt.was_away.contains(entity) || previous == Some(Presence::Away);
+    let came_home = seen == Presence::Home && was_away;
+    let first_home = seen == Presence::Home && previous.is_none();
+    match seen {
+        Presence::Away => {
+            rt.was_away.insert(entity.to_string());
         }
+        Presence::Home => {
+            rt.was_away.remove(entity);
+        }
+        Presence::Unknown if was_away => {
+            rt.was_away.insert(entity.to_string());
+        }
+        Presence::Unknown => {}
+    }
+    let mut fx = vec![];
+    if came_home || first_home {
+        rt.auto_arm_ready = true;
+    }
+    if came_home && s.presence.disarm && !matches!(rt.phase, Phase::Disarmed) {
+        fx = disarm(rt, Source::Presence, now);
     }
     let all_away = s
         .presence
@@ -486,10 +548,12 @@ pub fn step(
     rt.open_at_arm.retain(|e| s.sensor(e).is_some());
     rt.motion_hits.retain(|(_, e)| s.sensor(e).is_some());
     rt.trackers.retain(|e, _| s.presence.trackers.contains(e));
+    rt.was_away.retain(|e| s.presence.trackers.contains(e));
     match ev {
         Event::Arm { mode, source } => arm(rt, s, world, mode, source, now),
         Event::Disarm { source } => disarm(rt, source, now),
         Event::Sensor { entity, on } => sensor(rt, s, &entity, on, now),
+        Event::SensorFound { entity, on } => sensor_found(rt, s, &entity, on),
         Event::Signal { entity, signal } => match remote_action(s, &entity, &signal) {
             Some(RemoteAction::Sos) => sos(rt, s, &entity, now),
             Some(RemoteAction::Disarm) => disarm(rt, Source::Remote, now),
@@ -1225,6 +1289,7 @@ mod tests {
     fn tracker_home_disarms() {
         let s = trackers_settings();
         let mut rt = armed(&s, ArmMode::Away);
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), 5);
         go(&mut rt, &s, sensor_ev("window", true), 10);
         rt.alert_ids = vec!["alarm-1".into()];
         let fx = go(&mut rt, &s, seen("tracker.a", Presence::Home), 20);
@@ -1443,11 +1508,112 @@ mod tests {
             cause: vec!["window".into()],
             alert_ids: vec!["alarm-1".into()],
             trackers: BTreeMap::from([("tracker.a".to_string(), Presence::Away)]),
+            was_away: BTreeSet::from(["tracker.a".to_string()]),
             auto_arm_ready: true,
             everyone_away_since: Some(5),
         };
         let json = serde_json::to_string(&rt).unwrap();
         assert!(json.contains(r#""phase":"triggered""#));
         assert_eq!(serde_json::from_str::<Runtime>(&json).unwrap(), rt);
+    }
+
+    fn found_ev(entity: &str, on: bool) -> Event {
+        Event::SensorFound {
+            entity: entity.into(),
+            on,
+        }
+    }
+
+    #[test]
+    fn found_open_opening_is_watched_for_closing_without_trigger() {
+        let s = settings();
+        let mut rt = armed(&s, ArmMode::Away);
+        let fx = go(&mut rt, &s, found_ev("door", true), 10);
+        assert!(fx.is_empty());
+        assert_eq!(
+            rt.phase,
+            Phase::Armed {
+                mode: ArmMode::Away
+            }
+        );
+        assert_eq!(rt.open_at_arm, BTreeSet::from(["door".to_string()]));
+        // Closing it later triggers per its entry (delayed: pending).
+        go(&mut rt, &s, sensor_ev("door", false), 20);
+        assert!(matches!(rt.phase, Phase::Pending { .. }));
+    }
+
+    #[test]
+    fn found_open_instant_opening_triggers_on_closing() {
+        let s = settings();
+        let mut rt = armed(&s, ArmMode::Away);
+        assert!(go(&mut rt, &s, found_ev("window", true), 10).is_empty());
+        assert!(matches!(rt.phase, Phase::Armed { .. }));
+        let fx = go(&mut rt, &s, sensor_ev("window", false), 20);
+        assert!(matches!(rt.phase, Phase::Triggered { .. }));
+        assert!(fx.contains(&Effect::SirensOn));
+    }
+
+    #[test]
+    fn found_off_and_found_motion_and_unwatched_modes_do_nothing() {
+        let s = settings();
+        let mut rt = armed(&s, ArmMode::Home);
+        let before = rt.clone();
+        go(&mut rt, &s, found_ev("door", false), 10);
+        go(&mut rt, &s, found_ev("hall", true), 10);
+        // The window is not watched in home mode.
+        go(&mut rt, &s, found_ev("window", true), 10);
+        go(&mut rt, &s, found_ev("unknown", true), 10);
+        assert_eq!(rt, before);
+        let mut away = armed(&s, ArmMode::Away);
+        go(&mut away, &s, found_ev("hall", true), 10);
+        assert!(away.motion_hits.is_empty());
+        let mut off = Runtime::default();
+        go(&mut off, &s, found_ev("door", true), 10);
+        assert!(off.open_at_arm.is_empty());
+    }
+
+    #[test]
+    fn home_unknown_home_is_not_a_homecoming() {
+        let s = trackers_settings();
+        let mut rt = Runtime::default();
+        go(&mut rt, &s, seen("tracker.a", Presence::Home), 0);
+        let ev = Event::Arm {
+            mode: ArmMode::Night,
+            source: Source::Command,
+        };
+        go(&mut rt, &s, ev, 1);
+        go(&mut rt, &s, Event::Tick, 61);
+        go(&mut rt, &s, seen("tracker.a", Presence::Unknown), 70);
+        assert!(go(&mut rt, &s, seen("tracker.a", Presence::Home), 80).is_empty());
+        assert_eq!(
+            rt.phase,
+            Phase::Armed {
+                mode: ArmMode::Night
+            }
+        );
+    }
+
+    #[test]
+    fn away_unknown_home_disarms() {
+        let s = trackers_settings();
+        let mut rt = Runtime::default();
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), 0);
+        go(&mut rt, &s, seen("tracker.a", Presence::Unknown), 5);
+        let mut armed_rt = armed(&s, ArmMode::Away);
+        armed_rt.trackers = rt.trackers.clone();
+        armed_rt.was_away = rt.was_away.clone();
+        go(&mut armed_rt, &s, seen("tracker.a", Presence::Home), 10);
+        assert_eq!(armed_rt.phase, Phase::Disarmed);
+        assert!(armed_rt.auto_arm_ready);
+    }
+
+    #[test]
+    fn never_seen_home_sets_ready_without_disarming() {
+        let s = trackers_settings();
+        let mut rt = armed(&s, ArmMode::Away);
+        assert!(!rt.auto_arm_ready);
+        assert!(go(&mut rt, &s, seen("tracker.a", Presence::Home), 10).is_empty());
+        assert!(matches!(rt.phase, Phase::Armed { .. }));
+        assert!(rt.auto_arm_ready);
     }
 }
