@@ -86,6 +86,7 @@ pub fn source_word(lang: Lang, source: Source) -> &'static str {
             Source::Override => ClimateText::SrcOverride,
             Source::Holiday => ClimateText::SrcHoliday,
             Source::Away => ClimateText::SrcAway,
+            Source::Eco => ClimateText::SrcEco,
             Source::Schedule => ClimateText::SrcSchedule,
             Source::Idle => ClimateText::Idle,
         },
@@ -99,6 +100,7 @@ pub fn history_source(lang: Lang, raw: &str) -> String {
         "override" => Some(Source::Override),
         "holiday" => Some(Source::Holiday),
         "away" => Some(Source::Away),
+        "eco" => Some(Source::Eco),
         "schedule" => Some(Source::Schedule),
         "idle" => Some(Source::Idle),
         _ => None,
@@ -299,6 +301,7 @@ mod tests {
 
     fn zone_view(state: ZoneState) -> ZoneView {
         ZoneView {
+            eco: None,
             zone: "z".into(),
             name: "Z".into(),
             orphan: false,
@@ -320,6 +323,7 @@ mod tests {
 
     fn decided(mut z: ZoneView, setpoint: Setpoint) -> ZoneView {
         z.decision = Some(Decision {
+            eco_restore: Default::default(),
             zone: z.zone.clone(),
             mode: Some(Mode::Heat),
             setpoint: Some(setpoint),
@@ -567,6 +571,8 @@ mod tests {
         assert_eq!(history_source(Lang::Fr, "schedule"), "Programmation");
         assert_eq!(history_source(Lang::Fr, "override"), "Dérogation");
         assert_eq!(history_source(Lang::En, "away"), "Away");
+        assert_eq!(history_source(Lang::En, "eco"), "Eco");
+        assert_eq!(history_source(Lang::Fr, "eco"), "Éco");
         assert_eq!(history_source(Lang::Fr, "mystery_source"), "Mystery source");
     }
 

@@ -901,6 +901,7 @@ fn no_safety(zone: &str) -> Decision {
         applied: false,
         at: 0,
         entities: Default::default(),
+        eco_restore: Default::default(),
     }
 }
 
@@ -990,12 +991,14 @@ mod tests {
             id: "climate.a".into(),
             caps: DeviceCaps {
                 hvac_modes: vec!["heat".into(), "off".into()],
+                fan_modes: vec![],
                 min_temp: None,
                 max_temp: None,
                 temp_step: Some(0.5),
             },
             target,
             mode: Some(mode.into()),
+            fan_mode: None,
         }
     }
 

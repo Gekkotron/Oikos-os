@@ -127,6 +127,7 @@ pub(crate) fn merge_caps(caps: &[DeviceCaps]) -> DeviceCaps {
     hvac_modes.dedup();
     DeviceCaps {
         hvac_modes,
+        fan_modes: Vec::new(),
         min_temp: caps.iter().filter_map(|c| c.min_temp).reduce(f64::max),
         max_temp: caps.iter().filter_map(|c| c.max_temp).reduce(f64::min),
         temp_step: caps.iter().filter_map(|c| c.temp_step).reduce(f64::max),
@@ -281,6 +282,7 @@ pub(crate) async fn learn_zone(hub: &Arc<Hub>, zone: &str, now: u64) -> LearnSta
                 let c = &reg.entity(&id)?.capabilities;
                 let caps = DeviceCaps {
                     hvac_modes: c.hvac_modes.clone(),
+                    fan_modes: c.fan_modes.clone(),
                     min_temp: c.min_temp,
                     max_temp: c.max_temp,
                     temp_step: c.temp_step,
@@ -564,6 +566,7 @@ mod tests {
     fn caps_merge_to_the_tightest() {
         let caps = |min, max, step: Option<f64>| DeviceCaps {
             hvac_modes: vec!["heat".into()],
+            fan_modes: vec![],
             min_temp: min,
             max_temp: max,
             temp_step: step,

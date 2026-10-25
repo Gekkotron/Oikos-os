@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use oikos_climate::doc::{Decision, HouseSettings, Override, Proposal, ZoneSettings};
+use oikos_climate::doc::{Decision, HouseSettings, Override, Proposal, RoomEco, ZoneSettings};
 use oikos_climate::topics::{ClimateTopic, ZoneDoc};
 use serde::de::DeserializeOwned;
 
@@ -34,6 +34,7 @@ pub struct ZoneDocs {
     pub proposal: Option<Proposal>,
     pub overrides: Vec<Override>,
     pub decision: Option<Decision>,
+    pub eco: Option<RoomEco>,
 }
 
 impl ZoneDocs {
@@ -43,6 +44,7 @@ impl ZoneDocs {
             && self.proposal.is_none()
             && self.overrides.is_empty()
             && self.decision.is_none()
+            && self.eco.is_none()
     }
 }
 
@@ -78,6 +80,7 @@ fn apply_zone(docs: &mut ZoneDocs, doc: ZoneDoc, zone: &str, payload: &[u8]) -> 
         ),
         ZoneDoc::Proposal => replace(&mut docs.proposal, optional(payload, zone, "proposal")),
         ZoneDoc::Decision => replace(&mut docs.decision, optional(payload, zone, "decision")),
+        ZoneDoc::Eco => replace(&mut docs.eco, optional(payload, zone, "eco")),
         ZoneDoc::Override => {
             let value = if payload.is_empty() {
                 Some(Vec::new())

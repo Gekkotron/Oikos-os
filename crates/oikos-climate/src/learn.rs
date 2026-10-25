@@ -215,7 +215,7 @@ fn device_slot(
                 (Some(a), Some(b)) if (a - b).abs() <= ENGINE_TOL))
         && matches!(
             c.source,
-            Source::Safety | Source::Away | Source::Holiday | Source::Override
+            Source::Safety | Source::Away | Source::Eco | Source::Holiday | Source::Override
         )
     {
         return None;
@@ -763,6 +763,7 @@ mod tests {
     fn caps() -> DeviceCaps {
         DeviceCaps {
             hvac_modes: vec![],
+            fan_modes: vec![],
             min_temp: None,
             max_temp: None,
             temp_step: None,
@@ -855,6 +856,7 @@ mod tests {
         for source in [
             Source::Safety,
             Source::Away,
+            Source::Eco,
             Source::Holiday,
             Source::Override,
         ] {

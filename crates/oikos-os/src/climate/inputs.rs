@@ -314,12 +314,14 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
                     id: id.clone(),
                     caps: DeviceCaps {
                         hvac_modes: entity.capabilities.hvac_modes.clone(),
+                        fan_modes: entity.capabilities.fan_modes.clone(),
                         min_temp: entity.capabilities.min_temp,
                         max_temp: entity.capabilities.max_temp,
                         temp_step: entity.capabilities.temp_step,
                     },
                     target: climate.target,
                     mode: climate.mode.clone(),
+                    fan_mode: climate.fan_mode.clone(),
                 })
             })
             .collect()

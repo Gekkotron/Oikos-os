@@ -769,6 +769,7 @@ mod engine {
         );
         // The decision the engine retained before the restart: 20 °C, applied.
         let decision = Decision {
+            eco_restore: BTreeMap::new(),
             zone: "living".into(),
             mode: Some(Mode::Heat),
             setpoint: Some(Setpoint::Temp(20.0)),
@@ -829,6 +830,7 @@ mod engine {
         let publish = |zone: &str, first: f64, at: u64| {
             let (entities, at) = both(first, at);
             let decision = Decision {
+                eco_restore: BTreeMap::new(),
                 zone: zone.into(),
                 mode: Some(Mode::Heat),
                 setpoint: None,
@@ -960,6 +962,7 @@ mod engine {
             true,
         );
         let decision = Decision {
+            eco_restore: BTreeMap::new(),
             zone: "living".into(),
             mode: Some(Mode::Heat),
             setpoint: Some(Setpoint::Temp(20.0)),
@@ -1453,6 +1456,7 @@ mod engine {
         let mut rig = Rig::new(None).await;
         rig.sim.set(&rig.hub, 0, "heat", 22.0, 19.0);
         let decision = Decision {
+            eco_restore: BTreeMap::new(),
             zone: "living".into(),
             mode: Some(Mode::Heat),
             setpoint: None,

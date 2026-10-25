@@ -423,6 +423,7 @@ fn zone_view(
         room_sensor: None,
         decision: docs.decision.clone(),
         overrides: docs.overrides.clone(),
+        eco: docs.eco.clone(),
         proposal: docs.proposal.clone(),
         learn,
     }

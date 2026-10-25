@@ -263,6 +263,8 @@ pub struct HouseSettings {
     pub presence: Vec<String>,
     pub away_grace_min: u32,
     pub holiday_entity: Option<String>,
+    /// What eco holds: a room set to eco until a date, or every room while nobody is home.
+    pub eco: EcoSettings,
     pub frost: f64,
     pub overheat: f64,
     pub overcool: f64,
@@ -283,6 +285,7 @@ impl Default for HouseSettings {
             presence: Vec::new(),
             away_grace_min: 15,
             holiday_entity: None,
+            eco: EcoSettings::default(),
             frost: 7.0,
             overheat: 30.0,
             overcool: 16.0,
@@ -315,26 +318,94 @@ impl HouseSettings {
         if self.stale_after_min == 0 {
             return Err("stale_after_min must be above 0".into());
         }
-        Ok(())
+        self.eco.validate(self)
     }
 }
 
-/// Setpoints held while nobody is home.
+/// One extra setting eco gives a room's climate units, as `{ "fan_mode": "<mode>" }`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub enum EcoAction {
+    /// A fan mode, sent only to units that list it in their `fan_modes`.
+    FanMode(String),
+}
+
+/// The house-wide eco: a setpoint per mode and the extra actions for the climate units.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
-pub struct AwaySetpoints {
+pub struct EcoSettings {
     pub heat: f64,
     pub cool: f64,
+    pub actions: Vec<EcoAction>,
 }
 
-impl Default for AwaySetpoints {
+impl Default for EcoSettings {
     fn default() -> Self {
         Self {
             heat: 16.0,
             cool: 28.0,
+            actions: Vec::new(),
         }
     }
+}
+
+impl EcoSettings {
+    /// The fan mode eco sets, if any.
+    pub fn fan_mode(&self) -> Option<&str> {
+        self.actions.iter().find_map(|a| match a {
+            EcoAction::FanMode(m) => Some(m.as_str()),
+        })
+    }
+
+    /// The eco setpoint of `mode`.
+    pub fn setpoint(&self, mode: Mode) -> f64 {
+        match mode {
+            Mode::Heat => self.heat,
+            Mode::Cool => self.cool,
+        }
+    }
+
+    fn validate(&self, house: &HouseSettings) -> Result<(), String> {
+        if self.heat < house.frost {
+            return Err("eco heat must not be below frost".into());
+        }
+        if self.cool > house.overheat {
+            return Err("eco cool must not be above overheat".into());
+        }
+        let fans: Vec<&String> = self
+            .actions
+            .iter()
+            .map(|a| match a {
+                EcoAction::FanMode(m) => m,
+            })
+            .collect();
+        if fans.len() > 1 {
+            return Err("eco has more than one fan_mode action".into());
+        }
+        if fans.iter().any(|m| m.trim().is_empty()) {
+            return Err("eco fan_mode must not be empty".into());
+        }
+        Ok(())
+    }
+}
+
+/// A zone held in eco until `until` (`<prefix>/zone/<zone>/eco`), set at `set_at` (Unix
+/// seconds).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct RoomEco {
+    pub until: u64,
+    pub set_at: u64,
+}
+
+/// A fan mode eco changed on a unit: what it had, and what eco set.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct FanRestore {
+    pub was: String,
+    pub set: String,
 }
 
 /// A rejected proposal, remembered until `until` (Unix seconds).
@@ -353,7 +424,6 @@ pub struct ZoneSettings {
     pub state: ZoneState,
     pub entities: Option<Vec<String>>,
     pub sensor: Option<String>,
-    pub away_setpoint: AwaySetpoints,
     pub manual_hold_max_min: u32,
     pub rules: Rules,
     pub approved_at: Option<u64>,
@@ -367,7 +437,6 @@ impl Default for ZoneSettings {
             state: ZoneState::Pending,
             entities: None,
             sensor: None,
-            away_setpoint: AwaySetpoints::default(),
             manual_hold_max_min: 240,
             rules: Rules::default(),
             approved_at: None,
@@ -415,6 +484,9 @@ pub enum Source {
     Safety,
     Override,
     Holiday,
+    /// The zone's own eco until a date.
+    Eco,
+    /// Nobody home: eco for the whole house.
     Away,
     Schedule,
     Idle,
@@ -459,6 +531,9 @@ pub struct Decision {
     pub applied: bool,
     pub at: u64,
     pub entities: BTreeMap<String, DeviceTarget>,
+    /// Entity -> the fan mode eco changed and what it was, to put back when eco ends.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub eco_restore: BTreeMap<String, FanRestore>,
 }
 
 impl Decision {
@@ -474,6 +549,7 @@ impl Decision {
             && self.home == other.home
             && self.applied == other.applied
             && self.entities == other.entities
+            && self.eco_restore == other.eco_restore
     }
 }
 
@@ -576,14 +652,7 @@ mod tests {
     fn zone_defaults_match_spec() {
         let z: ZoneSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(z.state, ZoneState::Pending);
-        assert_eq!(
-            (
-                z.away_setpoint.heat,
-                z.away_setpoint.cool,
-                z.manual_hold_max_min
-            ),
-            (16.0, 28.0, 240)
-        );
+        assert_eq!(z.manual_hold_max_min, 240);
         assert!(z.rules.is_empty());
         assert!(z.validate().is_ok());
     }
@@ -727,6 +796,7 @@ mod tests {
             applied: true,
             at,
             entities: BTreeMap::new(),
+            eco_restore: BTreeMap::new(),
         }
     }
 
@@ -787,5 +857,99 @@ mod tests {
                 .unwrap()
                 .contains("evidence")
         );
+    }
+
+    #[test]
+    fn eco_defaults_and_shape() {
+        let h: HouseSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!((h.eco.heat, h.eco.cool), (16.0, 28.0));
+        assert!(h.eco.actions.is_empty());
+        let e: EcoSettings =
+            serde_json::from_str(r#"{"heat":15,"actions":[{"fan_mode":"low"}]}"#).unwrap();
+        assert_eq!(e.fan_mode(), Some("low"));
+        assert_eq!(e.setpoint(Mode::Heat), 15.0);
+        assert_eq!(e.setpoint(Mode::Cool), 28.0);
+        assert_eq!(
+            serde_json::to_value(&e.actions).unwrap(),
+            serde_json::json!([{ "fan_mode": "low" }])
+        );
+        assert!(
+            serde_json::from_str::<EcoSettings>(r#"{"actions":[{"swing_mode":"off"}]}"#).is_err()
+        );
+    }
+
+    #[test]
+    fn eco_validation() {
+        let mut h = HouseSettings::default();
+        h.eco.heat = 6.0;
+        assert!(h.validate().unwrap_err().contains("eco"));
+        let mut h = HouseSettings::default();
+        h.eco.cool = 31.0;
+        assert!(h.validate().unwrap_err().contains("eco"));
+        let mut h = HouseSettings::default();
+        h.eco.actions = vec![
+            EcoAction::FanMode("low".into()),
+            EcoAction::FanMode("high".into()),
+        ];
+        assert!(h.validate().is_err());
+        let mut h = HouseSettings::default();
+        h.eco.actions = vec![EcoAction::FanMode(String::new())];
+        assert!(h.validate().is_err());
+        let mut h = HouseSettings::default();
+        h.eco.actions = vec![EcoAction::FanMode("low".into())];
+        assert!(h.validate().is_ok());
+    }
+
+    #[test]
+    fn old_zone_settings_with_away_setpoint_still_load() {
+        let z: ZoneSettings =
+            serde_json::from_str(r#"{"state":"active","away_setpoint":{"heat":16,"cool":28}}"#)
+                .unwrap();
+        assert_eq!(z.state, ZoneState::Active);
+    }
+
+    #[test]
+    fn decision_eco_restore_is_optional() {
+        let d = Decision {
+            zone: "z".into(),
+            mode: Some(Mode::Heat),
+            setpoint: None,
+            source: Source::Eco,
+            cause: None,
+            reason: "r".into(),
+            reading: None,
+            reading_age_s: None,
+            outdoor_mean: None,
+            home: true,
+            applied: false,
+            at: 1,
+            entities: BTreeMap::new(),
+            eco_restore: BTreeMap::new(),
+        };
+        let s = serde_json::to_string(&d).unwrap();
+        assert!(!s.contains("eco_restore"), "{s}");
+        assert!(s.contains(r#""source":"eco""#), "{s}");
+        assert_eq!(serde_json::from_str::<Decision>(&s).unwrap(), d);
+        let mut with = d.clone();
+        with.eco_restore.insert(
+            "a".into(),
+            FanRestore {
+                was: "auto".into(),
+                set: "low".into(),
+            },
+        );
+        assert!(!with.same_outcome(&d));
+        let s = serde_json::to_string(&with).unwrap();
+        assert_eq!(serde_json::from_str::<Decision>(&s).unwrap(), with);
+    }
+
+    #[test]
+    fn room_eco_round_trips() {
+        let e = RoomEco {
+            until: 10,
+            set_at: 5,
+        };
+        let s = serde_json::to_string(&e).unwrap();
+        assert_eq!(serde_json::from_str::<RoomEco>(&s).unwrap(), e);
     }
 }

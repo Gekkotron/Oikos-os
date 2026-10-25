@@ -19,6 +19,8 @@ const DEFAULT_STEP: f64 = 0.5;
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceCaps {
     pub hvac_modes: Vec<String>,
+    /// The fan modes the device lists, empty without fan control.
+    pub fan_modes: Vec<String>,
     pub min_temp: Option<f64>,
     pub max_temp: Option<f64>,
     pub temp_step: Option<f64>,
@@ -31,6 +33,7 @@ pub struct Device {
     pub caps: DeviceCaps,
     pub target: Option<f64>,
     pub mode: Option<String>,
+    pub fan_mode: Option<String>,
 }
 
 /// What the engine found on the devices before a safety action, to put back when it clears.
@@ -178,6 +181,7 @@ fn base_decision(inp: &ZoneInputs, source: Source, reason: String) -> Decision {
         applied: false,
         at: inp.now,
         entities: BTreeMap::new(),
+        eco_restore: BTreeMap::new(),
     }
 }
 
@@ -506,15 +510,11 @@ fn choose(inp: &ZoneInputs, mode: Option<Mode>) -> Choice {
         };
     }
     if !inp.home {
-        let away = &inp.settings.away_setpoint;
-        let sp = Setpoint::Temp(match mode {
-            Mode::Heat => away.heat,
-            Mode::Cool => away.cool,
-        });
+        let sp = Setpoint::Temp(inp.house.eco.setpoint(mode));
         return Choice {
             source: Source::Away,
             setpoint: Some(sp),
-            reason: format!("Nobody home: away setpoint {}", setpoint_text(sp)),
+            reason: format!("Nobody home: eco {}", setpoint_text(sp)),
         };
     }
     match inp.settings.rules.get(mode) {
@@ -572,15 +572,14 @@ fn hold_devices(inp: &ZoneInputs, d: &mut Decision, fallback: Option<Setpoint>) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::doc::{
-        AwaySetpoints, Block, Day, HhMm, ModeRules, OverrideOrigin, Rules, ZoneSettings,
-    };
+    use crate::doc::{Block, Day, HhMm, ModeRules, OverrideOrigin, Rules, ZoneSettings};
 
     const NOW: u64 = 1_000_000;
 
     fn caps(modes: &[&str]) -> DeviceCaps {
         DeviceCaps {
             hvac_modes: modes.iter().map(|m| m.to_string()).collect(),
+            fan_modes: vec![],
             min_temp: Some(5.0),
             max_temp: Some(30.0),
             temp_step: Some(0.5),
@@ -593,6 +592,7 @@ mod tests {
             caps: caps(modes),
             target,
             mode: Some("heat".into()),
+            fan_mode: None,
         }
     }
 
@@ -646,7 +646,6 @@ mod tests {
                 heat: Some(mode_rules(base)),
                 cool: Some(mode_rules(Setpoint::Temp(26.0))),
             },
-            away_setpoint: AwaySetpoints::default(),
             ..Default::default()
         }
     }
@@ -1217,7 +1216,7 @@ mod tests {
     }
 
     #[test]
-    fn away_uses_away_setpoint() {
+    fn away_uses_eco_setpoint() {
         let mut c = Case::new();
         c.home = false;
         let d = c.run();
