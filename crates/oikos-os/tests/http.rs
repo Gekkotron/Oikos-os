@@ -185,6 +185,26 @@ async fn health_and_snapshot() {
 }
 
 #[tokio::test]
+async fn alarm_test_chirp_without_that_siren_is_422() {
+    let server = Server::start().await;
+
+    let response = server
+        .client
+        .post(server.url("/api/v1/alarm/test-chirp"))
+        .json(&json!({"siren": 0}))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: Value = response.json().await.expect("json");
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("no siren"))
+    );
+}
+
+#[tokio::test]
 async fn command_unknown_entity_404() {
     let server = Server::start().await;
 
@@ -1867,4 +1887,37 @@ async fn climate_approve_without_proposal_is_rejected() {
             .expect("POST");
         assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "{action}");
     }
+}
+
+#[tokio::test]
+async fn get_alarm_returns_view() {
+    let server = Server::start().await;
+    let res = server.get("/api/v1/alarm").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.expect("json");
+    assert_eq!(body["enabled"], false);
+    assert_eq!(body["entity_id"], "oikos_alarm_house");
+}
+
+#[tokio::test]
+async fn put_alarm_settings_validates() {
+    let server = Server::start().await;
+    server.online();
+    let url = server.url("/api/v1/alarm/settings");
+    let bad = server
+        .client
+        .put(&url)
+        .json(&json!({"siren_s": 5}))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(bad.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let ok = server
+        .client
+        .put(&url)
+        .json(&json!({"enabled": false, "siren_s": 120}))
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(ok.status(), StatusCode::NO_CONTENT);
 }

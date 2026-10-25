@@ -22,6 +22,7 @@ pub struct Config {
     pub flows: FlowsConfig,
     pub groups: GroupsConfig,
     pub climate: ClimateConfig,
+    pub alarm: AlarmConfig,
     pub history: HistoryConfig,
     pub weather: WeatherConfig,
     pub solcast: SolcastConfig,
@@ -638,6 +639,37 @@ impl ClimateConfig {
     }
 }
 
+/// The topic prefix of the alarm's retained documents. The alarm itself is switched on in its
+/// settings document (web or MCP), so there is no `enabled` here.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AlarmConfig {
+    pub prefix: String,
+}
+
+impl Default for AlarmConfig {
+    fn default() -> Self {
+        Self {
+            prefix: "oikos/alarm".to_owned(),
+        }
+    }
+}
+
+impl AlarmConfig {
+    /// The engine always listens on its prefix, so it is always checked: not empty, not only `/`,
+    /// and free of the MQTT wildcards `+` and `#`.
+    pub fn validate(&self) -> Result<(), String> {
+        let prefix = self.prefix.trim();
+        if prefix.chars().all(|c| c == '/') {
+            return Err("[alarm] prefix is empty".to_owned());
+        }
+        if prefix.contains(['+', '#']) {
+            return Err("[alarm] prefix must not contain the MQTT wildcards + or #".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// TimescaleDB connection and the writer's queue size. An empty `url` turns history off
 /// (the house keeps running, the `/api/v1/history/*` routes answer 503).
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -713,6 +745,7 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "watchdog.acl.log_file",
     "history.url",
     "climate.prefix",
+    "alarm.prefix",
     "weather.city",
     "weather.country",
     "solcast.api_key_file",
@@ -832,6 +865,46 @@ mod climate_config_tests {
         for good in ["oikos/climate", "climate/", "home"] {
             let cfg = ClimateConfig {
                 enabled: true,
+                prefix: good.to_owned(),
+            };
+            assert_eq!(cfg.validate(), Ok(()), "{good:?}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod alarm_config_tests {
+    use super::*;
+
+    #[test]
+    fn alarm_prefix_defaults() {
+        let cfg = Config::default();
+        assert_eq!(cfg.alarm.prefix, "oikos/alarm");
+        assert_eq!(cfg.alarm.validate(), Ok(()));
+    }
+
+    #[test]
+    fn alarm_prefix_from_toml() {
+        let cfg: Config = Figment::from(Serialized::defaults(Config::default()))
+            .merge(Toml::string("[alarm]\nprefix = \"home/alarm\"\n"))
+            .extract()
+            .unwrap();
+        assert_eq!(cfg.alarm.prefix, "home/alarm");
+    }
+
+    #[test]
+    fn alarm_prefix_rejects_slashes_only_and_wildcards() {
+        for bad in ["", "/", " // ", "oikos/+/alarm", "oikos/#", "a+b"] {
+            let cfg = AlarmConfig {
+                prefix: bad.to_owned(),
+            };
+            assert!(
+                cfg.validate().unwrap_err().contains("prefix"),
+                "{bad:?} accepted"
+            );
+        }
+        for good in ["oikos/alarm", "alarm/", "home"] {
+            let cfg = AlarmConfig {
                 prefix: good.to_owned(),
             };
             assert_eq!(cfg.validate(), Ok(()), "{good:?}");

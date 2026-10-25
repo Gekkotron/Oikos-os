@@ -77,6 +77,8 @@ pub enum WsEvent {
     ClimateChanged {
         zone: Option<String>,
     },
+    /// The alarm's settings, state or warnings changed: refetch `GET /api/v1/alarm`.
+    AlarmChanged,
     /// The outdoor weather was refreshed: refetch `GET /api/v1/weather`.
     WeatherChanged,
     /// The solar forecast was refreshed: refetch `GET /api/v1/solar`.

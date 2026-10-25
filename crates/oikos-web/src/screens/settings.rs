@@ -2,7 +2,6 @@
 //! connect an AI assistant over MCP, about), each opened at `/settings/<slug>`.
 
 use leptos::prelude::*;
-#[cfg(target_arch = "wasm32")]
 use leptos::task::spawn_local;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
@@ -10,8 +9,9 @@ use oikos_api::{ConnectionStatus, DeviceView, UpdateView};
 use oikos_core::model::Availability;
 
 use crate::house::House;
-use crate::i18n::{Key, Lang, text};
+use crate::i18n::{Key, Lang, text, use_lang};
 use crate::nav::BackLink;
+use crate::screens::alarm_settings::{AlarmSettingsPage, settings_status};
 use crate::screens::entity_sheet::{availability_class, availability_word};
 use crate::screens::home_settings_panel::HomeSettingsPanel;
 use crate::theme::Theme;
@@ -150,6 +150,7 @@ fn ThemeSwitch() -> impl IntoView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsPage {
     Home,
+    Alarm,
     Appearance,
     Zigbee2mqtt,
     Broker,
@@ -159,8 +160,9 @@ pub enum SettingsPage {
 
 impl SettingsPage {
     /// In the order the Settings list shows them.
-    pub const ALL: [SettingsPage; 6] = [
+    pub const ALL: [SettingsPage; 7] = [
         SettingsPage::Home,
+        SettingsPage::Alarm,
         SettingsPage::Appearance,
         SettingsPage::Zigbee2mqtt,
         SettingsPage::Broker,
@@ -171,6 +173,7 @@ impl SettingsPage {
     pub fn slug(self) -> &'static str {
         match self {
             SettingsPage::Home => "home",
+            SettingsPage::Alarm => "alarm",
             SettingsPage::Appearance => "appearance",
             SettingsPage::Zigbee2mqtt => "zigbee2mqtt",
             SettingsPage::Broker => "broker",
@@ -187,6 +190,7 @@ impl SettingsPage {
     pub fn key(self) -> Key {
         match self {
             SettingsPage::Home => Key::HomeSection,
+            SettingsPage::Alarm => Key::Alarm,
             SettingsPage::Appearance => Key::Appearance,
             SettingsPage::Zigbee2mqtt => Key::Zigbee2mqtt,
             SettingsPage::Broker => Key::Broker,
@@ -202,6 +206,7 @@ impl SettingsPage {
     fn hint(self) -> &'static str {
         match self {
             SettingsPage::Home => "Eco setpoint, house mode, indoor temperature, off-peak hours",
+            SettingsPage::Alarm => "Sensors, sirens, remotes and presence",
             SettingsPage::Appearance => "Theme",
             SettingsPage::Zigbee2mqtt => "Bridge, firmware updates and devices",
             SettingsPage::Broker => "MQTT connection",
@@ -251,8 +256,22 @@ fn zigbee_status(updates: usize, state: Availability) -> String {
 pub fn SettingsScreen() -> impl IntoView {
     let house = expect_context::<House>();
     let theme = expect_context::<RwSignal<Theme>>();
+    let lang = use_lang();
+    let alarm = RwSignal::new(None::<oikos_alarm::view::AlarmView>);
+    Effect::new(move |_| {
+        house.alarm_rev.track();
+        spawn_local(async move {
+            if let Ok(v) = crate::api::alarm::get_alarm().await {
+                alarm.try_set(Some(v));
+            }
+        });
+    });
     let status = move |page: SettingsPage| match page {
         SettingsPage::Home => String::new(),
+        SettingsPage::Alarm => alarm
+            .get()
+            .map(|v| settings_status(&v, lang()))
+            .unwrap_or_default(),
         SettingsPage::Appearance => theme.get().label().to_owned(),
         SettingsPage::Zigbee2mqtt => zigbee_status(
             house.devices.with(|ds| pending_updates(ds).len()),
@@ -314,6 +333,7 @@ pub fn SettingsPageScreen() -> impl IntoView {
             </header>
             {move || match page.get() {
                 Some(SettingsPage::Home) => view! { <HomeSettingsPanel /> }.into_any(),
+                Some(SettingsPage::Alarm) => view! { <AlarmSettingsPage /> }.into_any(),
                 Some(SettingsPage::Appearance) => view! { <AppearancePage /> }.into_any(),
                 Some(SettingsPage::Zigbee2mqtt) => view! { <ZigbeePage /> }.into_any(),
                 Some(SettingsPage::Broker) => view! { <BrokerPage /> }.into_any(),

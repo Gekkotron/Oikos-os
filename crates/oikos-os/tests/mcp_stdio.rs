@@ -67,6 +67,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "learn_climate_zone",
     "get_weather",
     "get_solar",
+    "alarm_status",
+    "set_alarm_settings",
 ];
 
 fn fixtures() -> PathBuf {

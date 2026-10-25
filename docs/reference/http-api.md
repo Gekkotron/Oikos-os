@@ -149,6 +149,16 @@ Available when `[climate] enabled = true`; otherwise these routes answer `503`. 
 | `POST /api/v1/climate/zones/{id}/learn` | Learns the zone now; `200` with the learner state. |
 | `GET /api/v1/climate/zones/{id}/decisions?limit=` | `{recent, older}`: the latest decisions from memory, then older rows from history when it is on (`limit` 50 by default, 500 at most; `400` for a `limit` that is not a number). |
 
+## Alarm
+
+The native alarm is off until its settings have `enabled` true; the routes answer as usual meanwhile. See [Alarm](../users/alarm.md).
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/alarm` | The alarm as one document (`200`): the settings, the panel state, mode, source, `deadline`, `cause`, `open_at_arm`, any refused settings and the run-time warnings. |
+| `PUT /api/v1/alarm/settings` | Replaces the settings document (`204`); `422` when it does not validate or names an entity the house does not have, `503` while the broker link is down. |
+| `POST /api/v1/alarm/test-chirp` | `{"siren": <index>}`, the index into `settings.sirens`: sounds that siren's chirp (`204`). `422` when the index is out of range, that siren has no chirp, or the alarm is ringing; `503` while the broker link is down. |
+
 ## Weather
 
 Available when `[weather] enabled = true`. See [Weather](../users/weather.md).
@@ -237,6 +247,7 @@ Energies are kWh (the day figures), powers kW (the period values, the means over
 | `solar_changed` | No payload: the solar forecast was refreshed or its current figures moved, refetch `GET /api/v1/solar`. |
 | `home_settings_changed` | `{settings}`: the home settings document changed. |
 | `climate_changed` | `{zone}`: one zone's document changed, or the house settings when `zone` is `null`. |
+| `alarm_changed` | No payload: the alarm's settings, state or warnings changed, refetch `GET /api/v1/alarm`. The entity's own state arrives as `state_changed`. |
 | `ambiances_changed` | `{ambiances}`: the stored ambiances (the same list as `GET /api/v1/ambiances`) after one was saved, deleted or arrived from the broker. |
 | `ambiance_applied` | `{report}`: the [apply report](../users/ambiances.md#reading-the-report) of a run, whichever client started it. |
 

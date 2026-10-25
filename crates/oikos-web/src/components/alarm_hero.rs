@@ -8,9 +8,11 @@ use oikos_core::model::{AlarmMode, Capabilities, CodeFormat, Command};
 
 use crate::cards::Sender;
 use crate::cards::alarm::mode_label;
+use crate::components::now::unix_now;
 use crate::i18n::security::{SecurityText, security_text};
-use crate::i18n::use_lang;
+use crate::i18n::{AlarmText, Lang, alarm_text, use_lang};
 use crate::icons::SHIELD;
+use crate::screens::alarm_settings::countdown_text;
 use crate::security::{PanelUi, panel_state_text, panel_tone};
 
 /// Which buttons the hero draws for a state. `current` is marked, not re-sent.
@@ -76,6 +78,28 @@ fn code_for(required: bool, typed: &str) -> Option<String> {
     (required && !typed.is_empty()).then(|| typed.to_owned())
 }
 
+/// "Triggered by Front door, Hall": what set the alarm off. A `sos:<remote>` entry reads "SOS".
+fn cause_line(lang: Lang, cause: &[String]) -> Option<String> {
+    let mut names: Vec<String> = Vec::new();
+    for c in cause {
+        let name = if c.starts_with("sos:") {
+            alarm_text(lang, AlarmText::Sos).to_owned()
+        } else {
+            c.clone()
+        };
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    (!names.is_empty()).then(|| {
+        format!(
+            "{} {}",
+            alarm_text(lang, AlarmText::TriggeredBy),
+            names.join(", ")
+        )
+    })
+}
+
 #[component]
 pub fn AlarmHero(panel: PanelUi) -> impl IntoView {
     let sender = Sender::from_context();
@@ -93,6 +117,37 @@ pub fn AlarmHero(panel: PanelUi) -> impl IntoView {
     let typed = RwSignal::new(String::new());
     let blank = move || typed.with(|t| t.trim().is_empty());
     let enabled = actions.enabled;
+
+    // The exit or entry delay counts down to the hub's deadline, once a second while it lasts.
+    let countdown = match (state, panel.deadline) {
+        (Some(s @ ("arming" | "pending")), Some(deadline)) => {
+            let now = RwSignal::new(unix_now());
+            #[cfg(target_arch = "wasm32")]
+            leptos::task::spawn_local(async move {
+                // `try_set` hands the value back once the hero is gone: stop then.
+                while now.try_set(unix_now()).is_none() {
+                    gloo_timers::future::TimeoutFuture::new(1000).await;
+                }
+            });
+            let word = if s == "arming" {
+                AlarmText::ArmsIn
+            } else {
+                AlarmText::SirenIn
+            };
+            Some(view! {
+                <span class="hero__detail">
+                    {move || format!("{} {}", alarm_text(lang(), word), countdown_text(deadline, now.get()))}
+                </span>
+            })
+        }
+        _ => None,
+    };
+    let cause = triggered
+        .then(|| {
+            let cause = panel.cause.clone();
+            move || cause_line(lang(), &cause)
+        })
+        .map(|line| view! { <span class="hero__detail">{line}</span> });
 
     let arm_buttons = actions
         .arm
@@ -169,6 +224,8 @@ pub fn AlarmHero(panel: PanelUi) -> impl IntoView {
                 <span class="hero__text">
                     <span class="hero__name">{panel.name.clone()}</span>
                     <span class="hero__state">{text}</span>
+                    {countdown}
+                    {cause}
                 </span>
                 <span class="dot dot--pending" class:dot--active=move || pending.get()></span>
             </div>
@@ -185,7 +242,8 @@ mod tests {
 
     use oikos_core::model::AlarmMode;
 
-    use super::{code_for, hero_actions};
+    use super::{cause_line, code_for, hero_actions};
+    use crate::i18n::Lang;
 
     fn modes() -> BTreeSet<AlarmMode> {
         [AlarmMode::Away, AlarmMode::Home, AlarmMode::Night]
@@ -228,5 +286,19 @@ mod tests {
         assert_eq!(code_for(true, " 1234 "), Some("1234".into()));
         assert_eq!(code_for(true, "  "), None);
         assert_eq!(code_for(false, "1234"), None);
+    }
+
+    #[test]
+    fn cause_line_names_the_sensors_and_words_sos() {
+        let c = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            cause_line(Lang::En, &c(&["Front door", "Hall"])).as_deref(),
+            Some("Triggered by Front door, Hall")
+        );
+        assert_eq!(
+            cause_line(Lang::Fr, &c(&["sos:remote.x"])).as_deref(),
+            Some("Déclenchée par SOS")
+        );
+        assert_eq!(cause_line(Lang::En, &[]), None);
     }
 }

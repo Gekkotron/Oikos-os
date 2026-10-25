@@ -34,6 +34,7 @@ use oikos_push::fcm::{FcmError, FcmTransport, HttpFcm, ServiceAccount};
 use oikos_push::{PushService, Rejected};
 use tokio::sync::{broadcast, mpsc, watch};
 
+use crate::alarm::{ALARM_ENTITY_ID, AlarmHub};
 use crate::climate::ClimateHub;
 use crate::clock;
 use crate::config::{AclSource, Config};
@@ -201,6 +202,8 @@ pub struct Hub {
     groups_enabled: bool,
     /// The climate engine's documents, present only while `[climate] enabled`.
     pub(crate) climate: Option<ClimateHub>,
+    /// The alarm's documents; the engine always listens and idles while the alarm is off.
+    pub(crate) alarm: AlarmHub,
     /// `[weather] enabled` and `refresh_minutes`.
     pub(crate) weather_enabled: bool,
     pub(crate) weather_refresh_minutes: u64,
@@ -339,6 +342,7 @@ impl Hub {
                 .climate
                 .enabled
                 .then(|| ClimateHub::new(&cfg.climate.prefix)),
+            alarm: AlarmHub::new(&cfg.alarm.prefix),
             weather_enabled: cfg.weather.enabled,
             weather_refresh_minutes: cfg.weather.refresh_minutes,
             weather_city: cfg.weather.city.trim().to_owned(),
@@ -538,11 +542,26 @@ impl Hub {
         if self.ingest_climate(topic, payload) {
             return Vec::new();
         }
-        if !retain && self.climate.is_some() && topic == self.push.responses_topic() {
-            if let Some(hub) = self.me.upgrade() {
-                hub.on_climate_reply(payload);
-            }
+        // The same for the alarm's documents.
+        if self.ingest_alarm(topic, payload, retain) {
             return Vec::new();
+        }
+        if !retain && topic == self.push.responses_topic() {
+            // Replies to the alarm's alerts go to the alarm, the rest to the climate engine.
+            let alarm_reply = serde_json::from_slice::<serde_json::Value>(payload)
+                .ok()
+                .and_then(|doc| doc.get("id").and_then(|id| id.as_str().map(str::to_owned)))
+                .is_some_and(|id| id.starts_with(crate::alarm::effects::ALERT_PREFIX));
+            if alarm_reply || self.climate.is_some() {
+                if let Some(hub) = self.me.upgrade() {
+                    if alarm_reply {
+                        hub.on_alarm_reply(payload);
+                    } else {
+                        hub.on_climate_reply(payload);
+                    }
+                }
+                return Vec::new();
+            }
         }
         if self.push.wants(topic) {
             // Then on: the history echo still feeds the alert store below.
@@ -831,13 +850,16 @@ impl Hub {
             .climate_prefix()
             .into_iter()
             .flat_map(oikos_climate::topics::filters)
-            .chain(self.climate.is_some().then(|| self.push.responses_topic()));
+            // Always: the filters are fixed at (re)connect, and the alarm can be enabled later.
+            .chain(std::iter::once(self.push.responses_topic()));
+        let alarm = oikos_alarm::topics::filters(&self.alarm.prefix);
         self.frigate
             .iter()
             .map(|(topic, _)| topic.clone())
             .chain(gateway)
             .chain(acl)
             .chain(climate)
+            .chain(alarm)
             .collect()
     }
 
@@ -1007,6 +1029,12 @@ impl Hub {
     /// entity is rejected before anything is published, and a broker link that is down is
     /// [`HubError::Publish`] right away rather than a wait for an echo that cannot come.
     pub async fn send_command(&self, id: &str, cmd: Command) -> Result<CommandResponse, HubError> {
+        if id == ALARM_ENTITY_ID {
+            let Some(hub) = self.me.upgrade() else {
+                return Err(HubError::Rejected("hub is shutting down".to_owned()));
+            };
+            return Ok(hub.alarm_command(cmd).await);
+        }
         if let Some(group_id) = id.strip_prefix("group_") {
             if !self.groups_enabled {
                 return Ok(CommandResponse {
