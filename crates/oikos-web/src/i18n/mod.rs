@@ -14,6 +14,7 @@ pub mod groups;
 pub mod history;
 mod home;
 pub mod security;
+pub mod settings;
 mod solar;
 pub mod states;
 mod weather;

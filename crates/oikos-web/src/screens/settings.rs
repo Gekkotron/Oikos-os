@@ -9,37 +9,44 @@ use oikos_api::{ConnectionStatus, DeviceView, UpdateView};
 use oikos_core::model::Availability;
 
 use crate::house::House;
+use crate::i18n::devices::availability_text;
+use crate::i18n::settings::{
+    CLAUDE_CODE_SNIPPET, CLAUDE_DESKTOP_SNIPPET, CODEX_SNIPPET, SettingsText as T, settings_text,
+    updates_waiting,
+};
 use crate::i18n::{Key, Lang, text, use_lang};
 use crate::nav::BackLink;
 use crate::screens::alarm_settings::{AlarmSettingsPage, settings_status};
-use crate::screens::entity_sheet::{availability_class, availability_word};
+use crate::screens::entity_sheet::availability_class;
 use crate::screens::home_settings_panel::HomeSettingsPanel;
 use crate::theme::Theme;
 
 const DASH: &str = "—";
 
 #[component]
-fn Panel(title: &'static str, children: Children) -> impl IntoView {
+fn Panel(title: T, children: Children) -> impl IntoView {
+    let lang = use_lang();
     view! {
         <section class="sheet__panel">
-            <h2 class="sheet__heading">{title}</h2>
+            <h2 class="sheet__heading">{move || settings_text(lang(), title)}</h2>
             {children()}
         </section>
     }
 }
 
 #[component]
-fn Row(label: &'static str, #[prop(into)] value: Signal<String>) -> impl IntoView {
+fn Row(label: T, #[prop(into)] value: Signal<String>) -> impl IntoView {
+    let lang = use_lang();
     view! {
         <div class="sheet__row">
-            <dt>{label}</dt>
+            <dt>{move || settings_text(lang(), label)}</dt>
             <dd>{value}</dd>
         </div>
     }
 }
 
-fn yes_no(value: bool) -> String {
-    if value { "Yes" } else { "No" }.to_owned()
+fn yes_no(lang: Lang, value: bool) -> String {
+    settings_text(lang, if value { T::Yes } else { T::No }).to_owned()
 }
 
 /// This page's origin, where the hub lives.
@@ -52,23 +59,23 @@ fn origin() -> String {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        "unavailable outside the browser".to_owned()
+        crate::i18n::settings::NO_ORIGIN.to_owned()
     }
 }
 
 fn claude_code_snippet(origin: &str) -> String {
-    format!("claude mcp add --transport http oikos {origin}/mcp")
+    CLAUDE_CODE_SNIPPET.replace("{origin}", origin)
 }
 
 fn codex_snippet(origin: &str) -> String {
-    format!("[mcp_servers.oikos]\nurl = \"{origin}/mcp\"")
+    CODEX_SNIPPET.replace("{origin}", origin)
 }
 
 fn claude_desktop_snippet(origin: &str) -> String {
     // Written by hand so the keys keep the order of docs/users/assistants-mcp.md (`command` before `args`).
-    format!(
-        "{{\n  \"mcpServers\": {{\n    \"oikos\": {{\n      \"command\": \"<path>/oikos-os\",\n      \"args\": [\"mcp-stdio\", \"--server\", {}]\n    }}\n  }}\n}}",
-        serde_json::Value::String(origin.to_owned())
+    CLAUDE_DESKTOP_SNIPPET.replace(
+        "{origin}",
+        &serde_json::Value::String(origin.to_owned()).to_string(),
     )
 }
 
@@ -91,16 +98,17 @@ async fn write_clipboard(text: &str) -> bool {
 
 #[component]
 fn CopyButton(text: String) -> impl IntoView {
-    let label = RwSignal::new("Copy");
+    let lang = use_lang();
+    let copied = RwSignal::new(false);
     let on_click = move |_| {
         #[cfg(target_arch = "wasm32")]
         {
             let text = text.clone();
             spawn_local(async move {
                 if write_clipboard(&text).await {
-                    label.set("Copied");
+                    copied.set(true);
                     gloo_timers::future::TimeoutFuture::new(1500).await;
-                    label.set("Copy");
+                    copied.set(false);
                 }
             });
         }
@@ -109,15 +117,16 @@ fn CopyButton(text: String) -> impl IntoView {
     };
     view! {
         <button type="button" class="chip sheet__copy" on:click=on_click>
-            {move || label.get()}
+            {move || settings_text(lang(), if copied.get() { T::Copied } else { T::Copy })}
         </button>
     }
 }
 
 #[component]
-fn Snippet(title: &'static str, text: String) -> impl IntoView {
+fn Snippet(title: T, text: String) -> impl IntoView {
+    let lang = use_lang();
     view! {
-        <h3 class="sheet__subheading">{title}</h3>
+        <h3 class="sheet__subheading">{move || settings_text(lang(), title)}</h3>
         <pre class="sheet__json">{text.clone()}</pre>
         <CopyButton text=text />
     }
@@ -126,6 +135,7 @@ fn Snippet(title: &'static str, text: String) -> impl IntoView {
 #[component]
 fn ThemeSwitch() -> impl IntoView {
     let theme = expect_context::<RwSignal<Theme>>();
+    let lang = use_lang();
     let segment = move |value: Theme| {
         view! {
             <button
@@ -140,7 +150,7 @@ fn ThemeSwitch() -> impl IntoView {
         }
     };
     view! {
-        <div class="segmented" role="group" aria-label="Theme">
+        <div class="segmented" role="group" aria-label=move || settings_text(lang(), T::Theme)>
             {segment(Theme::Auto)} {segment(Theme::Night)} {segment(Theme::Ivoire)}
         </div>
     }
@@ -186,7 +196,7 @@ impl SettingsPage {
         Self::ALL.into_iter().find(|p| p.slug() == slug)
     }
 
-    /// The page's name, translated in the breadcrumb; the screen itself shows the English one.
+    /// The page's name key, shared by the breadcrumb and the screen.
     pub fn key(self) -> Key {
         match self {
             SettingsPage::Home => Key::HomeSection,
@@ -199,20 +209,23 @@ impl SettingsPage {
         }
     }
 
-    fn title(self) -> &'static str {
-        text(Lang::En, self.key())
+    fn title(self, lang: Lang) -> &'static str {
+        text(lang, self.key())
     }
 
-    fn hint(self) -> &'static str {
-        match self {
-            SettingsPage::Home => "Eco setpoint, house mode, indoor temperature, off-peak hours",
-            SettingsPage::Alarm => "Sensors, sirens, remotes and presence",
-            SettingsPage::Appearance => "Theme",
-            SettingsPage::Zigbee2mqtt => "Bridge, firmware updates and devices",
-            SettingsPage::Broker => "MQTT connection",
-            SettingsPage::Mcp => "Connect Claude, Codex and other assistants",
-            SettingsPage::About => "Version and hub address",
-        }
+    fn hint(self, lang: Lang) -> &'static str {
+        settings_text(
+            lang,
+            match self {
+                SettingsPage::Home => T::HintHome,
+                SettingsPage::Alarm => T::HintAlarm,
+                SettingsPage::Appearance => T::HintAppearance,
+                SettingsPage::Zigbee2mqtt => T::HintZigbee,
+                SettingsPage::Broker => T::HintBroker,
+                SettingsPage::Mcp => T::HintMcp,
+                SettingsPage::About => T::HintAbout,
+            },
+        )
     }
 
     fn href(self) -> String {
@@ -222,12 +235,15 @@ impl SettingsPage {
 
 const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
-fn connection_word(status: &ConnectionStatus) -> String {
-    match status {
-        ConnectionStatus::Connecting => "Connecting…",
-        ConnectionStatus::Online => "Online",
-        ConnectionStatus::Offline { .. } => "Offline",
-    }
+fn connection_word(lang: Lang, status: &ConnectionStatus) -> String {
+    settings_text(
+        lang,
+        match status {
+            ConnectionStatus::Connecting => T::Connecting,
+            ConnectionStatus::Online => T::Online,
+            ConnectionStatus::Offline { .. } => T::Offline,
+        },
+    )
     .to_owned()
 }
 
@@ -243,11 +259,10 @@ fn pending_updates(devices: &[DeviceView]) -> Vec<(DeviceView, UpdateView)> {
 }
 
 /// The Zigbee2MQTT row's status: the waiting updates when there are any, else the bridge state.
-fn zigbee_status(updates: usize, state: Availability) -> String {
+fn zigbee_status(lang: Lang, updates: usize, state: Availability) -> String {
     match updates {
-        0 => availability_word(state).to_owned(),
-        1 => "1 update".to_owned(),
-        n => format!("{n} updates"),
+        0 => availability_text(lang, state).to_owned(),
+        n => updates_waiting(lang, n),
     }
 }
 
@@ -274,17 +289,18 @@ pub fn SettingsScreen() -> impl IntoView {
             .unwrap_or_default(),
         SettingsPage::Appearance => theme.get().label().to_owned(),
         SettingsPage::Zigbee2mqtt => zigbee_status(
+            lang(),
             house.devices.with(|ds| pending_updates(ds).len()),
             house.bridge.with(|b| b.state),
         ),
-        SettingsPage::Broker => house.connection.with(connection_word),
+        SettingsPage::Broker => house.connection.with(|c| connection_word(lang(), c)),
         SettingsPage::Mcp => String::new(),
         SettingsPage::About => VERSION.to_owned(),
     };
 
     view! {
         <div class="sheet">
-            <h1 class="settings__title">"Settings"</h1>
+            <h1 class="settings__title">{move || text(lang(), Key::Settings)}</h1>
             <ul class="settings__list">
                 {SettingsPage::ALL
                     .into_iter()
@@ -293,8 +309,12 @@ pub fn SettingsScreen() -> impl IntoView {
                             <li>
                                 <A href=page.href() attr:class="settings__item">
                                     <span class="settings__item-text">
-                                        <span class="settings__item-title">{page.title()}</span>
-                                        <span class="settings__item-hint">{page.hint()}</span>
+                                        <span class="settings__item-title">
+                                            {move || page.title(lang())}
+                                        </span>
+                                        <span class="settings__item-hint">
+                                            {move || page.hint(lang())}
+                                        </span>
                                     </span>
                                     <span class="settings__item-status">{move || status(page)}</span>
                                     <span class="settings__item-chevron" aria-hidden="true">
@@ -313,6 +333,7 @@ pub fn SettingsScreen() -> impl IntoView {
 /// A Settings sub-page (`/settings/:page`), with a Back link to where it was opened from.
 #[component]
 pub fn SettingsPageScreen() -> impl IntoView {
+    let lang = use_lang();
     let params = use_params_map();
     let page = Memo::new(move |_| {
         params
@@ -327,7 +348,13 @@ pub fn SettingsPageScreen() -> impl IntoView {
                 <BackLink />
                 <div class="sheet__titles">
                     <h1 class="sheet__title">
-                        {move || page.get().map_or("Settings", SettingsPage::title)}
+                        {move || {
+                            page.get()
+                                .map_or_else(
+                                    || text(lang(), Key::Settings),
+                                    |p| p.title(lang()),
+                                )
+                        }}
                     </h1>
                 </div>
             </header>
@@ -341,9 +368,9 @@ pub fn SettingsPageScreen() -> impl IntoView {
                 Some(SettingsPage::About) => view! { <AboutPage /> }.into_any(),
                 None => {
                     view! {
-                        <p class="settings__empty">"There is no such settings page."</p>
+                        <p class="settings__empty">{move || settings_text(lang(), T::NoSuchPage)}</p>
                         <A href="/settings" attr:class="chip settings__all">
-                            "All settings"
+                            {move || settings_text(lang(), T::AllSettings)}
                         </A>
                     }
                         .into_any()
@@ -355,10 +382,11 @@ pub fn SettingsPageScreen() -> impl IntoView {
 
 #[component]
 fn AppearancePage() -> impl IntoView {
+    let lang = use_lang();
     view! {
-        <Panel title="Theme">
+        <Panel title=T::Theme>
             <ThemeSwitch />
-            <p class="settings__hint">"The theme button in the header switches it too."</p>
+            <p class="settings__hint">{move || settings_text(lang(), T::ThemeHint)}</p>
         </Panel>
     }
 }
@@ -368,6 +396,7 @@ fn AppearancePage() -> impl IntoView {
 #[component]
 pub fn ZigbeePage() -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     let bridge = house.bridge;
     let primary = move || {
         house
@@ -375,35 +404,40 @@ pub fn ZigbeePage() -> impl IntoView {
             .with(|areas| areas.iter().map(|a| a.primary_count).sum::<usize>())
     };
     view! {
-        <Panel title="Bridge">
+        <Panel title=T::Bridge>
             <dl class="sheet__rows">
                 <Row
-                    label="Version"
+                    label=T::Version
                     value=move || bridge.with(|b| b.version.clone().unwrap_or_else(|| DASH.to_owned()))
                 />
                 <Row
-                    label="Coordinator"
+                    label=T::Coordinator
                     value=move || {
                         bridge.with(|b| b.coordinator.clone().unwrap_or_else(|| DASH.to_owned()))
                     }
                 />
-                <Row label="Permit join" value=move || yes_no(bridge.with(|b| b.permit_join)) />
+                <Row
+                    label=T::PermitJoin
+                    value=move || yes_no(lang(), bridge.with(|b| b.permit_join))
+                />
                 <div class="sheet__row">
-                    <dt>"State"</dt>
+                    <dt>{move || settings_text(lang(), T::State)}</dt>
                     <dd>
                         <span class="settings__state">
                             <span class=move || availability_class(bridge.with(|b| b.state))></span>
-                            {move || availability_word(bridge.with(|b| b.state))}
+                            {move || availability_text(lang(), bridge.with(|b| b.state))}
                         </span>
                     </dd>
                 </div>
             </dl>
         </Panel>
-        <Panel title="Updates available">
+        <Panel title=T::UpdatesAvailable>
             {move || {
                 let pending = house.devices.with(|ds| pending_updates(ds));
                 if pending.is_empty() {
-                    view! { <p class="settings__empty">"All devices are up to date"</p> }
+                    view! {
+                        <p class="settings__empty">{move || settings_text(lang(), T::AllUpToDate)}</p>
+                    }
                         .into_any()
                 } else {
                     view! {
@@ -431,21 +465,19 @@ pub fn ZigbeePage() -> impl IntoView {
                 }
             }}
         </Panel>
-        <Panel title="Counts">
+        <Panel title=T::Counts>
             <dl class="sheet__rows">
-                <Row label="Devices" value=move || house.devices.with(Vec::len).to_string() />
-                <Row label="Entities" value=move || house.entities.with(|m| m.len()).to_string() />
-                <Row label="Primary entities" value=move || primary().to_string() />
-                <Row label="Areas" value=move || house.areas.with(Vec::len).to_string() />
-                <Row label="Ignored topics" value=move || house.ignored.with(Vec::len).to_string() />
+                <Row label=T::Devices value=move || house.devices.with(Vec::len).to_string() />
+                <Row label=T::Entities value=move || house.entities.with(|m| m.len()).to_string() />
+                <Row label=T::PrimaryEntities value=move || primary().to_string() />
+                <Row label=T::Areas value=move || house.areas.with(Vec::len).to_string() />
+                <Row label=T::IgnoredTopics value=move || house.ignored.with(Vec::len).to_string() />
             </dl>
         </Panel>
-        <Panel title="Devices">
-            <p class="settings__hint">
-                "Zigbee2MQTT devices, firmware updates and ignored discovery topics."
-            </p>
+        <Panel title=T::Devices>
+            <p class="settings__hint">{move || settings_text(lang(), T::DevicesHint)}</p>
             <A href="/devices" attr:class="chip">
-                "Open Z2M devices"
+                {move || settings_text(lang(), T::OpenZ2mDevices)}
             </A>
         </Panel>
     }
@@ -454,18 +486,22 @@ pub fn ZigbeePage() -> impl IntoView {
 #[component]
 fn BrokerPage() -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     let reason = move || match house.connection.get() {
         ConnectionStatus::Offline { reason } => Some(reason),
         _ => None,
     };
     view! {
-        <Panel title="Connection">
+        <Panel title=T::Connection>
             <dl class="sheet__rows">
-                <Row label="Status" value=move || house.connection.with(connection_word) />
+                <Row
+                    label=T::Status
+                    value=move || house.connection.with(|c| connection_word(lang(), c))
+                />
                 {move || {
                     reason()
                         .map(|r| {
-                            view! { <Row label="Reason" value=r /> }
+                            view! { <Row label=T::Reason value=r /> }
                         })
                 }}
             </dl>
@@ -475,19 +511,23 @@ fn BrokerPage() -> impl IntoView {
 
 #[component]
 fn McpPage() -> impl IntoView {
+    let lang = use_lang();
     let origin = origin();
     let endpoint = format!("{origin}/mcp");
     view! {
-        <Panel title="Endpoint">
+        <Panel title=T::Endpoint>
             <dl class="sheet__rows">
-                <Row label="Endpoint" value=endpoint />
-                <Row label="Transport" value="Streamable HTTP, no auth (LAN only)" />
+                <Row label=T::Endpoint value=endpoint />
+                <Row
+                    label=T::Transport
+                    value=move || settings_text(lang(), T::TransportValue).to_owned()
+                />
             </dl>
         </Panel>
-        <Panel title="Set up an assistant">
-            <Snippet title="Claude Code" text=claude_code_snippet(&origin) />
-            <Snippet title="Codex CLI (~/.codex/config.toml)" text=codex_snippet(&origin) />
-            <Snippet title="Claude Desktop (stdio proxy)" text=claude_desktop_snippet(&origin) />
+        <Panel title=T::SetUpAssistant>
+            <Snippet title=T::ClaudeCode text=claude_code_snippet(&origin) />
+            <Snippet title=T::CodexCli text=codex_snippet(&origin) />
+            <Snippet title=T::ClaudeDesktop text=claude_desktop_snippet(&origin) />
         </Panel>
     }
 }
@@ -495,11 +535,11 @@ fn McpPage() -> impl IntoView {
 #[component]
 fn AboutPage() -> impl IntoView {
     view! {
-        <Panel title="Hub">
+        <Panel title=T::Hub>
             <dl class="sheet__rows">
-                <Row label="Product" value="Oikos-os" />
-                <Row label="Version" value=VERSION />
-                <Row label="Hub: this page's origin" value=origin() />
+                <Row label=T::Product value=settings_text(Lang::En, T::ProductName) />
+                <Row label=T::Version value=VERSION />
+                <Row label=T::HubOrigin value=origin() />
             </dl>
         </Panel>
     }
@@ -543,14 +583,25 @@ mod tests {
             assert_eq!(page.href(), format!("/settings/{}", page.slug()));
         }
         assert_eq!(SettingsPage::from_slug("nope"), None);
-        assert_eq!(SettingsPage::Zigbee2mqtt.title(), "Zigbee2MQTT");
+        assert_eq!(SettingsPage::Zigbee2mqtt.title(Lang::En), "Zigbee2MQTT");
+        assert_eq!(SettingsPage::About.title(Lang::Fr), "À propos");
     }
 
     #[test]
     fn zigbee_status_prefers_updates_over_the_bridge_state() {
-        assert_eq!(zigbee_status(0, Availability::Online), "Online");
-        assert_eq!(zigbee_status(0, Availability::Offline), "Offline");
-        assert_eq!(zigbee_status(1, Availability::Online), "1 update");
-        assert_eq!(zigbee_status(3, Availability::Offline), "3 updates");
+        let en = |n, state| zigbee_status(Lang::En, n, state);
+        assert_eq!(en(0, Availability::Online), "Online");
+        assert_eq!(en(0, Availability::Offline), "Offline");
+        assert_eq!(en(1, Availability::Online), "1 update");
+        assert_eq!(en(3, Availability::Offline), "3 updates");
+        assert_eq!(zigbee_status(Lang::Fr, 0, Availability::Online), "En ligne");
+        assert_eq!(
+            zigbee_status(Lang::Fr, 1, Availability::Online),
+            "1 mise à jour"
+        );
+        assert_eq!(
+            zigbee_status(Lang::Fr, 3, Availability::Offline),
+            "3 mises à jour"
+        );
     }
 }
