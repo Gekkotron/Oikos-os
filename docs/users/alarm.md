@@ -121,7 +121,7 @@ The alarm can follow your phones. List the trackers (the `device_tracker` entiti
 - **Arm away** when **every** tracker has read *away* for 120 s (the default). The 120 s absorbs a geofence flapping at the edge. An unknown tracker blocks the auto-arm, and so does an offline one: a phone that is switched off or out of battery counts as unknown, whatever it last said, so it never arms the house by accident.
 - **Disarm** when **any** tracker changes to *home*. Only a real homecoming counts: the phone must have read *away* before. A phone that is already home when someone arms the house by hand does not disarm it, and neither does one that drops offline and comes back while still at home.
 
-Presence works on edges, not levels. It arms once for each time the house empties. After any disarm, from anywhere (the panel, a remote, the push button, or turning the alarm on), presence won't arm again until a tracker reads home and the house empties again (or one is already home when you disarm, in which case it arms as soon as the house empties). So if you disarm to let someone in while you are out, the alarm stays disarmed until you come back and leave again.
+Presence works on edges, not levels. It arms once for each time the house empties. After any disarm, from anywhere (the panel, a remote, the push button, or turning the alarm on), presence won't arm again until a tracker reads home (a phone back online at home counts) and the house empties again (or one is already home when you disarm, in which case it arms as soon as the house empties). So if you disarm to let someone in while you are out, the alarm stays disarmed until you come back and leave again.
 
 A presence arm skips the exit delay, because you have already left. A manual arm waits out the exit delay (60 s by default).
 
@@ -143,7 +143,7 @@ The alarm keeps its place across a restart of the hub. It stores its state, mode
 
 After a restart the hub does not count sensor states that the broker replays as events. A door that is open on the broker when the hub starts does not trip the alarm by itself. The open-at-arm rule still applies to it.
 
-A sensor that has not reported since the restart is the same case: Zigbee2MQTT does not retain device states by default, so a window that was already open reports *open* for the first time only after the restart. That first report is not an opening. If the alarm is armed, the window is watched for closing, quietly and without a push, exactly as if it had been open at arm.
+A sensor that has not reported since the restart is the same case: Zigbee2MQTT does not retain device states by default, so a window that was already open reports *open* for the first time only after the restart. That first report is not an opening. If the alarm is armed, the window is watched for closing, as if it had been open at arm, but quietly: there is no open-sensors push.
 
 ## Moving off another controller
 

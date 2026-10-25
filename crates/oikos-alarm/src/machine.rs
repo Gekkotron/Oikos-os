@@ -438,11 +438,11 @@ fn tracker(
     }
     let previous = rt.trackers.insert(entity.to_string(), seen);
     // A homecoming needs a definite away before it; Home after Unknown after Home is a flap.
-    // A tracker never seen that reads home is initial knowledge: it makes presence ready to
-    // arm but does not disarm anything.
+    // Any new reading of home (a tracker never seen, or one back from unknown) still means
+    // someone is home: it makes presence ready to arm but does not disarm anything.
     let was_away = rt.was_away.contains(entity) || previous == Some(Presence::Away);
     let came_home = seen == Presence::Home && was_away;
-    let first_home = seen == Presence::Home && previous.is_none();
+    let reads_home = seen == Presence::Home && previous != Some(Presence::Home);
     match seen {
         Presence::Away => {
             rt.was_away.insert(entity.to_string());
@@ -456,7 +456,7 @@ fn tracker(
         Presence::Unknown => {}
     }
     let mut fx = vec![];
-    if came_home || first_home {
+    if reads_home {
         rt.auto_arm_ready = true;
     }
     if came_home && s.presence.disarm && !matches!(rt.phase, Phase::Disarmed) {
@@ -1323,6 +1323,26 @@ mod tests {
                 mode: ArmMode::Night
             }
         );
+    }
+
+    #[test]
+    fn home_after_unknown_makes_presence_ready_without_disarming() {
+        let s = trackers_settings();
+        let mut rt = Runtime::default();
+        go(&mut rt, &s, seen("tracker.a", Presence::Home), 0);
+        go(&mut rt, &s, seen("tracker.b", Presence::Away), 0);
+        go(&mut rt, &s, seen("tracker.a", Presence::Unknown), 10);
+        let ev = Event::Disarm {
+            source: Source::Command,
+        };
+        go(&mut rt, &s, ev, 20);
+        assert!(!rt.auto_arm_ready, "nobody reads home at the disarm");
+        // The phone comes back online at home: not a homecoming, but someone is home.
+        assert!(go(&mut rt, &s, seen("tracker.a", Presence::Home), 30).is_empty());
+        assert!(rt.auto_arm_ready);
+        go(&mut rt, &s, seen("tracker.a", Presence::Away), 100);
+        go(&mut rt, &s, Event::Tick, 220);
+        assert!(matches!(rt.phase, Phase::Armed { .. }));
     }
 
     #[test]

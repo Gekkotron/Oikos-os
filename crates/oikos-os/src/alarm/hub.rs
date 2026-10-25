@@ -57,7 +57,6 @@ impl Hub {
         // Taken before the new document is in force: a siren this save drops may be ringing.
         let before = self.alarm_settings();
         let was_enabled = before.enabled;
-        let ringing = lock(&self.alarm.runtime).state_name() == "triggered";
         let payload = serde_json::to_string(&settings)
             .map_err(|err| HubError::Rejected(format!("serialize: {err}")))?;
         let topic = topics::settings_topic(&self.alarm.prefix);
@@ -75,14 +74,16 @@ impl Hub {
         self.sync_alarm_entity()?;
         if was_enabled && !enabled {
             self.alarm_disable(&before.sirens).await?;
-        } else if ringing && enabled {
+        } else if enabled {
             let dropped: Vec<Siren> = before
                 .sirens
                 .into_iter()
                 .filter(|siren| !settings.sirens.contains(siren))
                 .collect();
-            if !dropped.is_empty() {
-                let _pass = self.alarm.pass.lock().await;
+            // Read under the pass lock: a pass in flight may be the one that starts the ring.
+            let _pass = self.alarm.pass.lock().await;
+            let ringing = lock(&self.alarm.runtime).state_name() == "triggered";
+            if ringing && !dropped.is_empty() {
                 for failure in self.alarm_sirens_of(&dropped, false).await {
                     tracing::warn!(%failure, "alarm siren could not be switched off");
                 }

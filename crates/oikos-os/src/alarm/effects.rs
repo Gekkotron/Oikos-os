@@ -346,7 +346,10 @@ impl Hub {
         let Ok(reply) = serde_json::from_slice::<Reply>(payload) else {
             return;
         };
-        if reply.action != "disarm" || !self.alarm_settings().enabled {
+        if reply.action != "disarm"
+            || !self.alarm_settings().enabled
+            || !self.alarm.engine_started.load(Ordering::SeqCst)
+        {
             return;
         }
         let known = lock(&self.alarm.runtime).alert_ids.contains(&reply.id);

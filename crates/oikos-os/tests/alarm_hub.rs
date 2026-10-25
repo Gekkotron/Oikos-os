@@ -1394,3 +1394,61 @@ async fn test_chirp_is_refused_while_ringing() {
     rig.pump().await;
     assert!(rig.sent(MQTT_SIREN).is_empty(), "nothing was published");
 }
+
+#[tokio::test(start_paused = true)]
+async fn lag_read_while_offline_still_resyncs_on_reconnect() {
+    use oikos_core::model::AlarmMode;
+    let mut rig = Rig::new().await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+    // The link drops and the flood pushes the drop out of the engine's receiver: the engine
+    // reads the lag while the link is still down.
+    rig.hub.set_connection(ConnectionStatus::Offline {
+        reason: "test".to_owned(),
+    });
+    flood(&rig.hub);
+    rig.pump().await;
+    rig.hub.set_connection(ConnectionStatus::Online);
+    rig.pump().await;
+    rig.advance(6).await;
+    rig.hub.ingest_message("fx/front_door", b"open", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "triggered", "the engine is synced again");
+}
+
+#[tokio::test(start_paused = true)]
+async fn tracker_change_lost_to_a_lag_is_reconciled() {
+    use oikos_core::model::AlarmMode;
+    let mut rig = Rig::with(|hub, settings| {
+        settings.presence.trackers = vec![entity_id(hub, "phone_a")];
+        hub.ingest("fx/phone_a", b"not_home");
+    })
+    .await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+    // The homecoming is the oldest event, so the flood drops it before the engine reads it.
+    rig.hub.ingest_message("fx/phone_a", b"home", false);
+    flood(&rig.hub);
+    rig.pump().await;
+    rig.advance(6).await;
+    assert_eq!(rig.state(), "disarmed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn commands_are_refused_until_the_engine_has_started() {
+    use oikos_core::model::AlarmMode;
+    let (hub, _rx) = hub();
+    house(&hub);
+    hub.set_alarm_settings(enabled_with(&entity_id(&hub, "front_door")))
+        .await
+        .unwrap();
+    let reply = hub
+        .send_command("oikos_alarm_house", arm(AlarmMode::Away))
+        .await
+        .unwrap();
+    assert!(!reply.accepted);
+    assert_eq!(reply.reason.as_deref(), Some("alarm starting"));
+    assert_eq!(hub.alarm_view().state, "disarmed");
+}
