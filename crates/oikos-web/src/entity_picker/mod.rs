@@ -3,6 +3,7 @@
 
 pub mod model;
 pub mod needs;
+pub mod view;
 
 use std::sync::Arc;
 
@@ -19,3 +20,5 @@ pub struct Suggest {
     pub text: PickerText,
     pub keep: Keep,
 }
+
+pub use view::{EntityPicker, Mode, PickerBody, Pinned};

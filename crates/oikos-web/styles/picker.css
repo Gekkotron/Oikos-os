@@ -1,0 +1,295 @@
+/* The entity picker: a modal dialog on computers, full screen on phones. */
+dialog.picker {
+  box-sizing: border-box;
+  width: min(760px, 100vw - 32px);
+  max-height: min(640px, 100vh - 64px);
+  padding: 0;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--menu-bg);
+  color: var(--ink);
+  box-shadow: var(--menu-shadow);
+  overflow: hidden;
+}
+
+dialog.picker[open] {
+  display: flex;
+  height: min(640px, 100vh - 64px);
+}
+
+dialog.picker::backdrop {
+  background: var(--scrim);
+}
+
+.picker__panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.picker__head {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding: 14px 16px 8px;
+}
+
+.picker__title {
+  flex: 1;
+  margin: 0;
+  font: var(--type-card-value);
+}
+
+.picker__close {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: var(--type-body);
+  cursor: pointer;
+}
+
+.picker__close:hover {
+  background: var(--raised);
+}
+
+.picker__close:focus-visible,
+.picker__room:focus-visible,
+.picker__search:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 0;
+}
+
+.picker-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 16px 16px;
+}
+
+.picker__search {
+  box-sizing: border-box;
+  flex: none;
+  width: 100%;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--radius-nav);
+  background: var(--raised);
+  color: inherit;
+  font: var(--type-body);
+}
+
+.picker__chips {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0;
+}
+
+.picker__cols {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.picker__rooms {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.picker__room {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: var(--type-label);
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker__room:hover {
+  background: var(--raised);
+}
+
+.picker__room--on {
+  background: var(--accent-soft);
+}
+
+.picker__count {
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+.picker__list {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.picker__section-title {
+  padding: 10px 8px 4px;
+  color: var(--muted);
+  font: var(--type-label);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.picker-body--room .picker__section-title {
+  display: none;
+}
+
+.picker__row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.picker__row:hover {
+  background: var(--raised);
+}
+
+.picker__row[aria-selected="true"],
+.picker__row--active {
+  background: var(--accent-soft);
+}
+
+.picker__row--active {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: -2px;
+}
+
+.picker__row--off .picker__row-title,
+.picker__row--off .picker__row-value {
+  opacity: 0.55;
+}
+
+.picker__check {
+  flex: none;
+  pointer-events: none;
+}
+
+.picker__icon {
+  display: inline-flex;
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
+.picker__icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.picker__row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.picker__row-title {
+  overflow: hidden;
+  font: var(--type-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__row-sub {
+  overflow: hidden;
+  color: var(--muted);
+  font: var(--type-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.picker__row-room::before {
+  content: "\00b7\00a0";
+}
+
+.picker__row-device + .picker__row-room {
+  margin-left: 4px;
+}
+
+.picker__row-off {
+  margin-left: 4px;
+  color: var(--offline);
+}
+
+.picker__row-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.picker__row-value {
+  font: var(--type-label);
+}
+
+.picker__row-time {
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+.picker__capped,
+.picker__empty {
+  padding: 12px 8px;
+  color: var(--muted);
+  font: var(--type-label);
+  text-align: center;
+}
+
+.picker-body--inline .picker__cols {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.picker-body--inline .picker__rooms {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  dialog.picker {
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+
+  dialog.picker[open] {
+    height: 100%;
+  }
+
+  .picker__cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .picker__rooms,
+  .picker__row-room {
+    display: none;
+  }
+
+  .picker-body--room .picker__section-title {
+    display: block;
+  }
+}
