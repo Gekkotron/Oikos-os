@@ -95,7 +95,7 @@ fn command_label(lang: Lang, c: &Command) -> String {
         Command::Open => flow(FlowText::Open),
         Command::Close => flow(FlowText::Close),
         Command::Stop => flow(FlowText::Stop),
-        Command::Press => flow(FlowText::Press),
+        Command::Press => word(SettingsText::Press),
         Command::SetPosition { .. } => word(SettingsText::SetPosition),
         Command::SetTemperature { .. } => word(SettingsText::SetTemperature),
         Command::SetNumber { .. } => word(SettingsText::SetValue),
@@ -1106,6 +1106,7 @@ mod tests {
         assert_eq!(command_label(Lang::En, &on), "Turn on");
         assert_eq!(command_label(Lang::Fr, &on), "Allumer");
         assert_eq!(command_label(Lang::Fr, &Command::Stop), "Arrêter");
+        assert_eq!(command_label(Lang::Fr, &Command::Press), "Appuyer");
         let pos = Command::SetPosition { position: 50 };
         assert_eq!(command_label(Lang::Fr, &pos), "Régler la position");
         let pick = Command::SelectOption {

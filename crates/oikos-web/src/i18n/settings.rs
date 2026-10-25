@@ -60,6 +60,7 @@ pub enum SettingsText {
     HubOrigin,
     Favorites,
     NothingHere,
+    Press,
     SetPosition,
     SetTemperature,
     SetValue,
@@ -119,6 +120,7 @@ impl SettingsText {
         SettingsText::HubOrigin,
         SettingsText::Favorites,
         SettingsText::NothingHere,
+        SettingsText::Press,
         SettingsText::SetPosition,
         SettingsText::SetTemperature,
         SettingsText::SetValue,
@@ -183,7 +185,7 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
         T::Entities => ("Entities", "Entités"),
         T::PrimaryEntities => ("Primary entities", "Entités principales"),
         T::Areas => ("Areas", "Pièces"),
-        T::IgnoredTopics => ("Ignored topics", "Sujets ignorés"),
+        T::IgnoredTopics => ("Ignored topics", "Sujets de découverte ignorés"),
         T::DevicesHint => (
             "Zigbee2MQTT devices, firmware updates and ignored discovery topics.",
             "Appareils Zigbee2MQTT, mises à jour du micrologiciel et sujets de découverte ignorés.",
@@ -217,6 +219,7 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
         ),
         T::Favorites => ("Favorites", "Favoris"),
         T::NothingHere => ("Nothing here yet.", "Rien ici pour l'instant."),
+        T::Press => ("Press", "Appuyer"),
         T::SetPosition => ("Set position", "Régler la position"),
         T::SetTemperature => ("Set temperature", "Régler la température"),
         T::SetValue => ("Set value", "Régler la valeur"),
@@ -255,6 +258,7 @@ pub fn set_mode(lang: Lang, mode: &str) -> String {
 /// The phrases of the hub's Home-settings validation messages, matched to pick our own text.
 pub const RULE_START_EQUALS_END: &str = "start equals end";
 pub const RULE_BAD_TIME: &str = "bad time";
+pub const RULE_OVERLAP: &str = "overlap";
 pub const RULE_BETWEEN: &str = "must be between";
 pub const RULE_LOWER_THAN: &str = "must be lower than";
 pub const RULE_NOT_A: &str = " is not a";
@@ -297,7 +301,7 @@ mod tests {
     #[test]
     fn all_lists_every_variant() {
         // The match in `settings_text` is exhaustive, so a new variant only needs listing here.
-        assert_eq!(SettingsText::ALL.len(), 55);
+        assert_eq!(SettingsText::ALL.len(), 56);
     }
 
     #[test]

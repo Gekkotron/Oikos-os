@@ -5,6 +5,7 @@ use leptos::task::tick;
 use leptos_router::components::Router;
 use oikos_api::WeatherView;
 use oikos_web::house::House;
+use oikos_web::i18n::Lang;
 use oikos_web::screens::weather::WeatherScreen;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -37,6 +38,14 @@ fn full_weather() -> WeatherView {
 }
 
 async fn mount(weather: Option<WeatherView>, loaded: bool) -> web_sys::Element {
+    mount_in(RwSignal::new(Lang::En), weather, loaded).await
+}
+
+async fn mount_in(
+    lang: RwSignal<Lang>,
+    weather: Option<WeatherView>,
+    loaded: bool,
+) -> web_sys::Element {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -48,6 +57,7 @@ async fn mount(weather: Option<WeatherView>, loaded: bool) -> web_sys::Element {
         move || {
             oikos_web::nav::install_nav();
             provide_context(house);
+            provide_context(lang);
             view! { <Router><WeatherScreen /></Router> }
         },
     ));
@@ -94,4 +104,28 @@ async fn weather_page_back_link_is_compact() {
     let back = host.query_selector(".sheet__back").unwrap().unwrap();
     let page = host.query_selector(".weather-page").unwrap().unwrap();
     assert!(back.get_bounding_client_rect().width() < page.get_bounding_client_rect().width());
+}
+
+/// Units follow a no-break space in both languages, and the page flips language in place.
+#[wasm_bindgen_test]
+async fn the_tiles_use_no_break_units_and_follow_the_language() {
+    let lang = RwSignal::new(Lang::Fr);
+    let host = mount_in(lang, Some(full_weather()), true).await;
+    let fr = host.text_content().unwrap_or_default();
+    for unit in ["19\u{A0}km/h", "70\u{A0}%", "1015\u{A0}hPa", "6,0\u{A0}mm"] {
+        assert!(fr.contains(unit), "{unit} in {fr}");
+    }
+    for ascii in ["19 km/h", "70 %", "6,0 mm"] {
+        assert!(!fr.contains(ascii), "{ascii} in {fr}");
+    }
+    assert!(fr.contains("Vent"), "{fr}");
+    assert!(fr.contains("risque 93\u{A0}%"), "{fr}");
+
+    lang.set(Lang::En);
+    tick().await;
+    let en = host.text_content().unwrap_or_default();
+    assert!(en.contains("Wind"), "{en}");
+    assert!(en.contains("6.0\u{A0}mm"), "{en}");
+    assert!(en.contains("93\u{A0}% chance"), "{en}");
+    assert!(!en.contains("Vent"), "{en}");
 }

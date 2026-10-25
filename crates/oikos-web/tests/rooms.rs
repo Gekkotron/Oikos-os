@@ -79,6 +79,11 @@ async fn mount(path: &str) -> Mounted {
 
 /// As [`mount`]; without `with_entities` the areas are there but no entity has arrived yet.
 async fn mount_with(path: &str, with_entities: bool) -> (Mounted, House) {
+    mount_lang(path, with_entities, RwSignal::new(Lang::En)).await
+}
+
+/// As [`mount_with`], with the language signal the test can flip.
+async fn mount_lang(path: &str, with_entities: bool, lang: RwSignal<Lang>) -> (Mounted, House) {
     let window = web_sys::window().unwrap();
     window
         .history()
@@ -101,7 +106,7 @@ async fn mount_with(path: &str, with_entities: bool) -> (Mounted, House) {
     let app = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         provide_context(house);
         provide_context(RwSignal::new(Theme::Auto));
-        provide_context(RwSignal::new(Lang::En));
+        provide_context(lang);
         provide_context(oikos_web::components::toast::Toasts::new());
         provide_context(oikos_web::commands::Pending::new());
         provide_context(oikos_web::components::confirm::Confirming::new());
@@ -140,6 +145,41 @@ fn texts(host: &web_sys::Element, selector: &str) -> Vec<String> {
     (0..list.length())
         .map(|i| list.item(i).unwrap().text_content().unwrap_or_default())
         .collect()
+}
+
+/// The Favorites title follows the language with no remount.
+#[wasm_bindgen_test]
+async fn the_favorites_title_follows_the_language() {
+    let lang = RwSignal::new(Lang::Fr);
+    let (m, house) = mount_lang("/dashboards/house", true, lang).await;
+    house.entities.update(|map| {
+        map.get_mut("light.a").unwrap().ui.favorite = true;
+    });
+    tick().await;
+    let titles = || texts(&m.host, ".room .room__title");
+    assert!(titles().contains(&"Favoris".to_owned()), "{:?}", titles());
+    assert!(!titles().contains(&"Favorites".to_owned()));
+
+    lang.set(Lang::En);
+    tick().await;
+    assert!(titles().contains(&"Favorites".to_owned()), "{:?}", titles());
+    assert!(!titles().contains(&"Favoris".to_owned()));
+}
+
+/// A room with nothing on Home says so in the active language, and follows a toggle.
+#[wasm_bindgen_test]
+async fn the_empty_room_note_follows_the_language() {
+    let lang = RwSignal::new(Lang::Fr);
+    let (m, _) = mount_lang("/rooms/c", true, lang).await;
+    let fr = m.host.text_content().unwrap_or_default();
+    assert!(fr.contains("Rien ici pour l'instant."), "{fr}");
+    assert!(!fr.contains("Nothing here yet."), "{fr}");
+
+    lang.set(Lang::En);
+    tick().await;
+    let en = m.host.text_content().unwrap_or_default();
+    assert!(en.contains("Nothing here yet."), "{en}");
+    assert!(!en.contains("Rien ici pour l'instant."), "{en}");
 }
 
 #[wasm_bindgen_test]
