@@ -431,7 +431,7 @@ body {
   box-sizing: border-box;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 16px 8px 8px;
+  padding: 16px var(--screen-pad) 8px;
 }
 
 .breadcrumb {
@@ -632,15 +632,21 @@ body {
   min-width: 0;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 8px;
+  padding: 8px var(--screen-pad) var(--screen-pad);
+}
+
+@media (max-width: 600px) {
+  :root {
+    --screen-pad: 16px;
+  }
 }
 
 /* Home */
 .chips {
   display: flex;
   gap: 8px;
-  margin: 0 -8px;
-  padding: 4px 8px 12px;
+  margin: 0 calc(-1 * var(--screen-pad));
+  padding: 4px var(--screen-pad) 12px;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -6365,8 +6371,8 @@ html:has(.flow-canvas-screen) {
   .climate-rooms {
     flex-direction: row;
     gap: 6px;
-    margin: 0 -8px;
-    padding: 0 8px 4px;
+    margin: 0 calc(-1 * var(--screen-pad));
+    padding: 0 var(--screen-pad) 4px;
     overflow-x: auto;
     scrollbar-width: none;
     border: 0;
