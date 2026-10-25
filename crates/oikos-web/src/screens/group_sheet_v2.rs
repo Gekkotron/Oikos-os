@@ -17,40 +17,14 @@ use crate::components::card_place::InSheet;
 use crate::components::toast::Toasts;
 use crate::format::{display_value, is_on};
 use crate::house::House;
+use crate::i18n::devices::{DeviceText, device_text, key_value};
+use crate::i18n::groups::{
+    GroupText, delete_message, delete_question, group_text, group_text_signal, subtitle,
+};
+use crate::i18n::{Key, text, use_lang};
 use crate::icons::{PENCIL, TRASH, kind_icon};
 use crate::nav::{BackLink, use_back};
-use crate::screens::group_wizard::kind_word;
 use crate::screens::home::card_for;
-
-const SAVE_FAILED: &str = "Couldn't save the group";
-const DELETE_FAILED: &str = "Couldn't delete the group";
-
-/// "3 lights", "1 light".
-fn count_text(kind: Kind, n: usize) -> String {
-    let word = kind_word(kind);
-    if n == 1 {
-        format!("1 {word}")
-    } else {
-        format!("{n} {word}s")
-    }
-}
-
-/// "living · 3 lights", the line under the group's name.
-fn subtitle_text(room: &str, kind: Kind, n: usize) -> String {
-    format!("{room} · {}", count_text(kind, n))
-}
-
-/// The paragraph of the delete confirmation: the flows that would be left with an unknown entity.
-fn delete_message(flows: &[String]) -> String {
-    if flows.is_empty() {
-        "This group is used by no flows.".to_owned()
-    } else {
-        format!(
-            "This group is used by the following flows: {}. Deleting it will leave them with an unknown entity.",
-            flows.join(", ")
-        )
-    }
-}
 
 /// Whether a member row offers its own toggle: only a member of the group's kind that the
 /// registry knows, and only a kind with an on/off command.
@@ -72,6 +46,7 @@ fn spec_with_hide(group: &GroupView, hide_members: bool) -> GroupSpec {
 #[component]
 pub fn GroupSheetV2Screen() -> impl IntoView {
     let toasts = expect_context::<Toasts>();
+    let lang = use_lang();
     let params = use_params_map();
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
     // `None` while loading, `Some(None)` when the hub has no such group.
@@ -82,8 +57,9 @@ pub fn GroupSheetV2Screen() -> impl IntoView {
         leptos::task::spawn_local(async move {
             match list_groups().await {
                 Ok(list) => group.set(Some(list.into_iter().find(|g| g.id == id))),
-                Err(_) => {
-                    toasts.push("Couldn't load the group");
+                Err(e) => {
+                    let lead = group_text(untrack(lang), GroupText::CouldntLoad);
+                    toasts.push(key_value(untrack(lang), lead, &e.error));
                     group.set(Some(None));
                 }
             }
@@ -99,7 +75,9 @@ pub fn GroupSheetV2Screen() -> impl IntoView {
                         <header class="sheet__header">
                             <BackLink />
                             <div class="sheet__titles">
-                                <h1 class="sheet__title">"This group is gone."</h1>
+                                <h1 class="sheet__title">
+                                    {move || group_text(lang(), GroupText::GroupGone)}
+                                </h1>
                             </div>
                         </header>
                     }
@@ -114,6 +92,7 @@ pub fn GroupSheetV2Screen() -> impl IntoView {
 #[component]
 fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     let current = move || {
         group
             .get()
@@ -160,18 +139,18 @@ fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
             <div class="sheet__titles">
                 <h1 class="sheet__title">{move || current().name}</h1>
                 <p class="sheet__subtitle">
-                    {move || subtitle_text(&room.get(), kind, current().members.len())}
+                    {move || subtitle(lang(), &room.get(), kind, current().members.len())}
                 </p>
             </div>
         </header>
         <section class="sheet__panel">
-            <h2 class="sheet__heading">"Controls"</h2>
+            <h2 class="sheet__heading">{move || device_text(lang(), DeviceText::Controls)}</h2>
             <div class="sheet__controls">
                 <InSheet>{move || card_for(entity.get())}</InSheet>
             </div>
         </section>
         <section class="sheet__panel">
-            <h2 class="sheet__heading">"Members"</h2>
+            <h2 class="sheet__heading">{move || group_text(lang(), GroupText::Members)}</h2>
             <ul class="group__members">{rows}</ul>
         </section>
         <Settings group=group entity=entity />
@@ -181,26 +160,32 @@ fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
 /// One member: its name (opens its sheet), "room · state" and, when it makes sense, its own toggle.
 fn member_row(house: House, kind: Kind, member: GroupMemberView) -> impl IntoView {
     let sender = Sender::from_context();
+    let lang = use_lang();
     let live = house
         .entities
         .with_untracked(|m| m.get(&member.id).cloned());
     let offline = live
         .as_ref()
         .is_some_and(|e| e.state.availability == Availability::Offline);
-    let detail = match &live {
-        Some(e) => {
-            let room = house.areas.with_untracked(|areas| {
-                areas
-                    .iter()
-                    .find(|a| a.id == e.area)
-                    .map_or_else(|| e.area.clone(), |a| a.name.clone())
-            });
-            format!(
-                "{room} · {}",
-                display_value(crate::i18n::Lang::En, &e.state, e.unit.as_deref())
-            )
+    // "room · state", or "Not found": the state word follows the language.
+    let detail = {
+        let live = live.clone();
+        let areas = house.areas;
+        move || match &live {
+            Some(e) => {
+                let room = areas.with(|areas| {
+                    areas
+                        .iter()
+                        .find(|a| a.id == e.area)
+                        .map_or_else(|| e.area.clone(), |a| a.name.clone())
+                });
+                format!(
+                    "{room} · {}",
+                    display_value(lang(), &e.state, e.unit.as_deref())
+                )
+            }
+            None => group_text(lang(), GroupText::MemberNotFound).to_owned(),
         }
-        None => "Not found".to_owned(),
     };
     let open = open_entity(&member.id);
     let toggle = row_has_toggle(&member, kind).then(|| {
@@ -223,9 +208,9 @@ fn member_row(house: House, kind: Kind, member: GroupMemberView) -> impl IntoVie
             }}
         }
     });
-    let chip = member
-        .mismatch
-        .then(|| view! { <span class="chip">"Mismatch"</span> });
+    let chip = member.mismatch.then(
+        || view! { <span class="chip">{move || group_text(lang(), GroupText::Mismatch)}</span> },
+    );
     view! {
         <li class="group__member" style:opacity=if offline { "0.5" } else { "1" }>
             <button type="button" class="group__member-name" on:click=move |_| open.run(())>
@@ -246,6 +231,7 @@ fn Settings(
 ) -> impl IntoView {
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
+    let lang = use_lang();
     let navigate = use_navigate();
     let back = use_back();
     let confirming = RwSignal::new(false);
@@ -264,7 +250,7 @@ fn Settings(
                 Ok(view) => house.entities.update(|m| {
                     m.insert(view.id.clone(), view);
                 }),
-                Err(_) => toasts.push(SAVE_FAILED),
+                Err(_) => toasts.push(group_text(untrack(lang), GroupText::SaveFailed)),
             }
         });
     });
@@ -277,7 +263,7 @@ fn Settings(
             leptos::task::spawn_local(async move {
                 match set_group(&id, &spec).await {
                     Ok(view) => group.set(Some(Some(view))),
-                    Err(_) => toasts.push(SAVE_FAILED),
+                    Err(_) => toasts.push(group_text(untrack(lang), GroupText::SaveFailed)),
                 }
             });
         })
@@ -300,7 +286,7 @@ fn Settings(
                         },
                     ),
                     Err(_) => {
-                        toasts.push(DELETE_FAILED);
+                        toasts.push(group_text(untrack(lang), GroupText::DeleteFailed));
                         deleting.set(false);
                         confirming.set(false);
                     }
@@ -312,17 +298,17 @@ fn Settings(
     let edit_href = format!("/groups/{}/edit", encode_id(&id));
     view! {
         <section class="sheet__panel">
-            <h2 class="sheet__heading">"Settings"</h2>
+            <h2 class="sheet__heading">{move || text(lang(), Key::Settings)}</h2>
             {move || {
                 view! {
                     <PowerToggle
                         on=entity.with(|e| e.ui.favorite)
-                        label="Show in Favorites"
+                        label=group_text_signal(GroupText::ShowInFavorites)
                         on_toggle=toggle_favorite
                     />
                     <PowerToggle
                         on=current().hide_members
-                        label="Hide members on Home"
+                        label=group_text_signal(GroupText::HideMembers)
                         on_toggle=toggle_hide
                     />
                 }
@@ -330,7 +316,7 @@ fn Settings(
             <div class="sheet__actions">
                 <A href=edit_href attr:class="btn btn--with-icon">
                     <span class="btn__glyph" inner_html=PENCIL></span>
-                    "Edit group"
+                    {move || text(lang(), Key::EditGroup)}
                 </A>
                 <button
                     type="button"
@@ -338,25 +324,29 @@ fn Settings(
                     on:click=move |_| confirming.set(true)
                 >
                     <span class="btn__glyph" inner_html=TRASH></span>
-                    "Delete group"
+                    {move || group_text(lang(), GroupText::DeleteGroup)}
                 </button>
             </div>
             <Show when=move || confirming.get()>
-                <section class="sheet__panel" role="alertdialog" aria-label="Delete group">
+                <section
+                    class="sheet__panel"
+                    role="alertdialog"
+                    aria-label=move || group_text(lang(), GroupText::DeleteGroup)
+                >
                     <h3 class="sheet__subheading">
-                        {move || format!("Delete {}?", current().name)}
+                        {move || delete_question(lang(), &current().name)}
                     </h3>
-                    <p>{move || delete_message(&current().used_by_flows)}</p>
+                    <p>{move || delete_message(lang(), &current().used_by_flows)}</p>
                     <button
                         type="button"
                         class="btn"
                         disabled=move || deleting.get()
                         on:click=delete.clone()
                     >
-                        "Delete"
+                        {move || text(lang(), Key::Delete)}
                     </button>
                     <button type="button" class="btn" on:click=move |_| confirming.set(false)>
-                        "Cancel"
+                        {move || device_text(lang(), DeviceText::Cancel)}
                     </button>
                 </section>
             </Show>
@@ -375,21 +365,6 @@ mod tests {
             present,
             mismatch,
         }
-    }
-
-    #[test]
-    fn subtitle_names_room_and_count() {
-        assert_eq!(subtitle_text("living", Kind::Light, 3), "living · 3 lights");
-        assert_eq!(subtitle_text("living", Kind::Light, 1), "living · 1 light");
-        assert_eq!(count_text(Kind::WaterHeater, 2), "2 water heaters");
-    }
-
-    #[test]
-    fn delete_message_names_the_flows() {
-        let msg = delete_message(&["kitchen-lights-at-dusk".to_owned(), "b".to_owned()]);
-        assert!(msg.contains("kitchen-lights-at-dusk, b"));
-        assert!(msg.contains("unknown entity"));
-        assert_eq!(delete_message(&[]), "This group is used by no flows.");
     }
 
     #[test]

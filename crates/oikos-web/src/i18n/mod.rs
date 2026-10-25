@@ -9,6 +9,7 @@ pub mod devices;
 pub mod energy;
 pub mod flows;
 pub mod format;
+pub mod groups;
 mod home;
 pub mod security;
 mod solar;

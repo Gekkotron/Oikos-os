@@ -8,6 +8,7 @@ use oikos_api::{AreaView, EntityView, WsEvent};
 use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
+use oikos_web::i18n::Lang;
 use oikos_web::screens::group_wizard::GroupWizardScreen;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -50,6 +51,10 @@ fn area(id: &str, name: &str) -> AreaView {
 }
 
 fn mount() -> web_sys::Element {
+    mount_lang(RwSignal::new(Lang::En))
+}
+
+fn mount_lang(lang: RwSignal<Lang>) -> web_sys::Element {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -73,6 +78,7 @@ fn mount() -> web_sys::Element {
     let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         provide_context(house);
         provide_context(Toasts::new());
+        provide_context(lang);
         oikos_web::nav::install_nav();
         view! {
             <Router>
@@ -160,5 +166,62 @@ async fn step_three_hides_members_by_default() {
     assert_eq!(
         toggle.get_attribute("aria-checked").as_deref(),
         Some("true")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn the_wizard_follows_the_language_without_a_remount() {
+    let lang = RwSignal::new(Lang::Fr);
+    let host = mount_lang(lang);
+    tick().await;
+    let text = host.text_content().unwrap();
+    assert!(text.contains("Nouveau groupe"), "{text}");
+    assert!(text.contains("Étape 1 sur 3"), "{text}");
+    assert!(
+        text.contains("lumière") && text.contains("chauffe-eau"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("New group") && !text.contains("Step 1"),
+        "{text}"
+    );
+
+    click(&host, "button.card", "lumière").await;
+    click(&host, "button.btn", "Suivant").await;
+    let text = host.text_content().unwrap();
+    assert!(
+        text.contains("Membres") && text.contains("Étape 2 sur 3"),
+        "{text}"
+    );
+    let input = host
+        .query_selector("input[type=search]")
+        .unwrap()
+        .expect("a filter field");
+    assert_eq!(
+        input.get_attribute("placeholder").as_deref(),
+        Some("Filtrer les membres")
+    );
+
+    click(&host, "button.card", "lamp").await;
+    click(&host, "button.btn", "Suivant").await;
+    let text = host.text_content().unwrap();
+    assert!(text.contains("Nom et pièce"), "{text}");
+    assert!(text.contains("Sans pièce"), "{text}");
+    assert!(text.contains("Masquer les membres sur l'accueil"), "{text}");
+    assert!(text.contains("Créer le groupe"), "{text}");
+    assert!(!text.contains("Unassigned"), "{text}");
+
+    lang.set(Lang::En);
+    tick().await;
+    let text = host.text_content().unwrap();
+    assert!(
+        text.contains("New group") && text.contains("Step 3 of 3"),
+        "{text}"
+    );
+    assert!(text.contains("Hide members on Home"), "{text}");
+    assert!(text.contains("Create group"), "{text}");
+    assert!(
+        !text.contains("Nouveau groupe") && !text.contains("Créer le groupe"),
+        "{text}"
     );
 }
