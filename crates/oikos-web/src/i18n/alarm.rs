@@ -22,6 +22,7 @@ pub enum AlarmText {
     ModeHome,
     ModeNight,
     Delayed,
+    DelayedHint,
     Instant,
     Remove,
     SirensTitle,
@@ -109,6 +110,10 @@ pub fn alarm_text(lang: Lang, k: AlarmText) -> &'static str {
         ModeHome => ("home", "présent"),
         ModeNight => ("night", "nuit"),
         Delayed => ("delayed", "temporisée"),
+        DelayedHint => (
+            "Waits the entry delay (Timing) before the sirens ring.",
+            "Attend le délai d'entrée (Délais) avant de faire sonner les sirènes.",
+        ),
         Instant => ("instant", "immédiate"),
         Remove => ("Remove", "Retirer"),
         SirensTitle => ("Sirens", "Sirènes"),
@@ -187,6 +192,11 @@ pub fn alarm_text(lang: Lang, k: AlarmText) -> &'static str {
     if lang == Lang::Fr { fr } else { en }
 }
 
+/// The "delayed" entry button with the entry delay it waits: "delayed (30 s)".
+pub fn delayed_with(lang: Lang, secs: u32) -> String {
+    format!("{} ({secs}\u{A0}s)", alarm_text(lang, AlarmText::Delayed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,16 +207,16 @@ mod tests {
         match k {
             Title | Hint | Loading | CouldNotLoad | EnableLabel | EnableHint | SensorsTitle
             | SensorsHint | SensorsEmpty | AddSensor | Opening | Motion | ModeAway | ModeHome
-            | ModeNight | Delayed | Instant | Remove | SirensTitle | SirensHint | AddSiren
-            | AddMqttSiren | MqttSiren | Topic | PayloadOn | PayloadOff | PayloadChirp
-            | ChirpMs | TestChirp | TestChirpUnsaved | TestChirpSent | NoSirens | RemotesTitle
-            | RemotesEmpty | AddRemote | Signal | AddSignal | ActionAway | ActionHome
-            | ActionNight | ActionDisarm | ActionSos | PresenceTitle | Trackers | PresenceArm
-            | PresenceDisarm | ArmAfter | TimingTitle | EntryDelay | ExitDelay | SirenDuration
-            | MotionCount | MotionWindow | Save | Saved | CouldNotSave | LastRefused | Warnings
-            | StatusOff | StateDisarmed | StateArming | StatePending | StateTriggered
-            | StateArmed | InAlarm | RoleSiren | RoleRemote | RolePresence | ArmsIn | SirenIn
-            | TriggeredBy | Sos => true,
+            | ModeNight | Delayed | DelayedHint | Instant | Remove | SirensTitle | SirensHint
+            | AddSiren | AddMqttSiren | MqttSiren | Topic | PayloadOn | PayloadOff
+            | PayloadChirp | ChirpMs | TestChirp | TestChirpUnsaved | TestChirpSent | NoSirens
+            | RemotesTitle | RemotesEmpty | AddRemote | Signal | AddSignal | ActionAway
+            | ActionHome | ActionNight | ActionDisarm | ActionSos | PresenceTitle | Trackers
+            | PresenceArm | PresenceDisarm | ArmAfter | TimingTitle | EntryDelay | ExitDelay
+            | SirenDuration | MotionCount | MotionWindow | Save | Saved | CouldNotSave
+            | LastRefused | Warnings | StatusOff | StateDisarmed | StateArming | StatePending
+            | StateTriggered | StateArmed | InAlarm | RoleSiren | RoleRemote | RolePresence
+            | ArmsIn | SirenIn | TriggeredBy | Sos => true,
         }
     }
 
@@ -229,6 +239,7 @@ mod tests {
             ModeHome,
             ModeNight,
             Delayed,
+            DelayedHint,
             Instant,
             Remove,
             SirensTitle,
@@ -301,5 +312,11 @@ mod tests {
                 AlarmText::Sos,
             ],
         );
+    }
+
+    #[test]
+    fn delayed_button_names_the_entry_delay() {
+        assert_eq!(delayed_with(Lang::En, 30), "delayed (30\u{A0}s)");
+        assert_eq!(delayed_with(Lang::Fr, 45), "temporisée (45\u{A0}s)");
     }
 }
