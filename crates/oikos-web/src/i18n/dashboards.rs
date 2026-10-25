@@ -61,6 +61,149 @@ pub fn group_state(lang: Lang, s: GroupState) -> String {
     }
 }
 
+/// Words of the dashboard screen, its edit mode, its sheets and the widget library.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DashText {
+    UnknownDashboard,
+    BackToHome,
+    // Edit toolbar.
+    ToggleEdit,
+    ToggleEditUnsaved,
+    DashboardSettings,
+    Discard,
+    Save,
+    // Tile tools.
+    MoveEarlier,
+    MoveLater,
+    Resize,
+    // Widget sheet.
+    Title,
+    Size,
+    DeleteWidget,
+    Close,
+    // Dashboard sheet.
+    Name,
+    ShowHeader,
+    DeleteDashboard,
+    // Library.
+    WidgetLibrary,
+    AddWidget,
+    SearchPlaceholder,
+    SearchWidgets,
+    NothingMatches,
+    RoomGroupSub,
+    FlowButtonSub,
+    SectionLights,
+    SectionCovers,
+    SectionClimate,
+    SectionSensors,
+    SectionWaterHeaters,
+    SectionRoomGroups,
+    SectionFlowButtons,
+    SectionEnergy,
+    SectionHistory,
+}
+
+pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
+    use DashText as T;
+    let (en, fr) = match k {
+        T::UnknownDashboard => ("Unknown dashboard.", "Tableau de bord inconnu."),
+        T::BackToHome => ("Back to House", "Retour à l'accueil"),
+        T::ToggleEdit => ("Toggle edit mode", "Activer ou désactiver le mode édition"),
+        T::ToggleEditUnsaved => (
+            "Toggle edit mode (unsaved changes)",
+            "Activer ou désactiver le mode édition (modifications non enregistrées)",
+        ),
+        T::DashboardSettings => ("Dashboard settings", "Réglages du tableau de bord"),
+        T::Discard => ("Discard", "Annuler"),
+        T::Save => ("Save", "Enregistrer"),
+        T::MoveEarlier => ("Move earlier", "Déplacer avant"),
+        T::MoveLater => ("Move later", "Déplacer après"),
+        T::Resize => ("Resize", "Redimensionner"),
+        T::Title => ("Title", "Titre"),
+        T::Size => ("Size", "Taille"),
+        T::DeleteWidget => ("Delete widget", "Supprimer le widget"),
+        T::Close => ("Close", "Fermer"),
+        T::Name => ("Name", "Nom"),
+        T::ShowHeader => ("Show header", "Afficher l'en-tête"),
+        T::DeleteDashboard => ("Delete dashboard", "Supprimer le tableau de bord"),
+        T::WidgetLibrary => ("Widget library", "Bibliothèque de widgets"),
+        T::AddWidget => ("Add a widget", "Ajouter un widget"),
+        T::SearchPlaceholder => (
+            "Search a widget, a device or a room",
+            "Rechercher un widget, un appareil ou une pièce",
+        ),
+        T::SearchWidgets => ("Search widgets", "Rechercher des widgets"),
+        T::NothingMatches => ("Nothing matches", "Aucun résultat"),
+        T::RoomGroupSub => (
+            "Lights and covers of the room",
+            "Éclairages et volets de la pièce",
+        ),
+        T::FlowButtonSub => ("Runs the flow", "Lance l'automatisation"),
+        T::SectionLights => ("LIGHTS", "ÉCLAIRAGES"),
+        T::SectionCovers => ("COVERS", "VOLETS"),
+        T::SectionClimate => ("CLIMATE", "CLIMAT"),
+        T::SectionSensors => ("SENSORS", "CAPTEURS"),
+        T::SectionWaterHeaters => ("WATER HEATERS", "CHAUFFE-EAU"),
+        T::SectionRoomGroups => ("ROOM GROUPS", "PIÈCES"),
+        T::SectionFlowButtons => ("FLOW BUTTONS", "BOUTONS D'AUTOMATISATION"),
+        T::SectionEnergy => ("ENERGY", "ÉNERGIE"),
+        T::SectionHistory => ("HISTORY CHARTS", "GRAPHIQUES D'HISTORIQUE"),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// What a widget is: "Light" / "Lumière". Read by the config sheet title and the placeholder.
+pub fn widget_kind_word(lang: Lang, kind: oikos_core::dashboard::WidgetKind) -> &'static str {
+    use oikos_core::dashboard::WidgetKind as K;
+    let (en, fr) = match kind {
+        K::Light => ("Light", "Lumière"),
+        K::Cover => ("Cover", "Volet"),
+        K::Climate => ("Climate", "Thermostat"),
+        K::Lock => ("Lock", "Verrou"),
+        K::Sensor => ("Sensor", "Capteur"),
+        K::RoomGroup => ("Room group", "Groupe de la pièce"),
+        K::FlowButton => ("Flow button", "Bouton d'automatisation"),
+        K::EnergyStat => ("Energy stat", "Statistique d'énergie"),
+        K::HistoryChart => ("History chart", "Graphique d'historique"),
+        K::Camera => ("Camera", "Caméra"),
+        K::WaterHeater => ("Water heater", "Chauffe-eau"),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// The title of a widget's config sheet: "Widget: Light" / "Widget : Lumière".
+pub fn widget_sheet_title(lang: Lang, kind: oikos_core::dashboard::WidgetKind) -> String {
+    let word = widget_kind_word(lang, kind);
+    match lang {
+        Lang::En => format!("Widget: {word}"),
+        Lang::Fr => format!("Widget\u{A0}: {word}"),
+    }
+}
+
+/// The placeholder of a widget with nothing to show: "Lock: lock.door" / "Verrou : lock.door".
+pub fn widget_placeholder(lang: Lang, kind: oikos_core::dashboard::WidgetKind, id: &str) -> String {
+    let word = widget_kind_word(lang, kind);
+    match lang {
+        Lang::En => format!("{word}: {id}"),
+        Lang::Fr => format!("{word}\u{A0}: {id}"),
+    }
+}
+
+/// "Delete Kitchen?" / "Supprimer Kitchen ?"; the name is the user's.
+pub fn delete_question(lang: Lang, name: &str) -> String {
+    match lang {
+        Lang::En => format!("Delete {name}?"),
+        Lang::Fr => format!("Supprimer {name}\u{A0}?"),
+    }
+}
+
 /// Text of the dashboard widgets that have their own card.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WidgetText {
@@ -113,6 +256,71 @@ mod tests {
             "Indisponible"
         );
     }
+    #[test]
+    fn every_dash_text_has_two_languages() {
+        use DashText as T;
+        const ALL: &[DashText] = &[
+            T::UnknownDashboard,
+            T::BackToHome,
+            T::ToggleEdit,
+            T::ToggleEditUnsaved,
+            T::DashboardSettings,
+            T::Discard,
+            T::Save,
+            T::MoveEarlier,
+            T::MoveLater,
+            T::Resize,
+            T::Title,
+            T::Size,
+            T::DeleteWidget,
+            T::Close,
+            T::Name,
+            T::ShowHeader,
+            T::DeleteDashboard,
+            T::WidgetLibrary,
+            T::AddWidget,
+            T::SearchPlaceholder,
+            T::SearchWidgets,
+            T::NothingMatches,
+            T::RoomGroupSub,
+            T::FlowButtonSub,
+            T::SectionLights,
+            T::SectionCovers,
+            T::SectionClimate,
+            T::SectionSensors,
+            T::SectionWaterHeaters,
+            T::SectionRoomGroups,
+            T::SectionFlowButtons,
+            T::SectionEnergy,
+            T::SectionHistory,
+        ];
+        crate::i18n::assert_table(ALL, dash_text, &[]);
+    }
+
+    #[test]
+    fn sentences_follow_the_language() {
+        use oikos_core::dashboard::WidgetKind;
+        assert_eq!(
+            widget_sheet_title(Lang::En, WidgetKind::Light),
+            "Widget: Light"
+        );
+        assert_eq!(
+            widget_sheet_title(Lang::Fr, WidgetKind::Cover),
+            "Widget\u{A0}: Volet"
+        );
+        assert_eq!(
+            widget_sheet_title(Lang::Fr, WidgetKind::Light),
+            "Widget\u{A0}: Lumière"
+        );
+        assert_eq!(
+            widget_sheet_title(Lang::Fr, WidgetKind::RoomGroup),
+            "Widget\u{A0}: Groupe de la pièce"
+        );
+        assert_eq!(widget_kind_word(Lang::Fr, WidgetKind::Lock), "Verrou");
+        assert_eq!(delete_question(Lang::En, "Den"), "Delete Den?");
+        assert_eq!(delete_question(Lang::Fr, "Den"), "Supprimer Den\u{A0}?");
+    }
+
     #[test]
     fn every_dashboards_text_has_two_languages() {
         const ALL: &[WidgetText] = &[

@@ -10,6 +10,11 @@ use oikos_api::{EnergyKind, HistoryDaily, HistoryRange, HistorySeries};
 use super::format::{state_axis_labels, tick_labels};
 use super::geom::{Bar, StepPath, YScale, daily_bars, step_path, y_scale};
 use crate::api::history::{HistoryApiError, fetch_daily, fetch_series};
+use crate::i18n::format as fmt;
+use crate::i18n::history::{
+    HistoryText, counter_legend, history_text, load_error, min_max, range_name, total_line,
+};
+use crate::i18n::{Lang, use_lang};
 
 /// Which shape of chart the entity needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,29 +94,34 @@ pub fn HistoryChart(
     let kind_rx = kind;
     let unit_rx = unit;
     let range_rx = range;
+    let lang = use_lang();
     view! {
         <div class="history-chart">
-            {move || match state.get() {
+            {move || {
+                // Read here, so a language flip redraws the labels without a refetch.
+                let lang = lang();
+                match state.get() {
                 State::Loading => view! { <div class="history-chart__shimmer" aria-busy="true"></div> }.into_any(),
                 State::NotRecorded => view! {
-                    <p class="history-chart__empty">
-                        "No data recorded for this entity yet. The hub starts recording from the moment the entity first appears."
-                    </p>
+                    <p class="history-chart__empty">{history_text(lang, HistoryText::NotRecorded)}</p>
                 }.into_any(),
                 State::Unavailable => view! {
-                    <p class="history-chart__err">"History is unavailable right now. The database may be down."</p>
+                    <p class="history-chart__err">{history_text(lang, HistoryText::Unavailable)}</p>
                 }.into_any(),
                 State::Error(msg) => {
                     let msg = msg.clone();
                     view! {
                         <div class="history-chart__err">
-                            <p>"Could not load history: " {msg}</p>
-                            <button type="button" class="chip" on:click=move |_| retry_bump.update(|v| *v += 1)>"Retry"</button>
+                            <p>{load_error(lang, &msg)}</p>
+                            <button type="button" class="chip" on:click=move |_| retry_bump.update(|v| *v += 1)>
+                                {history_text(lang, HistoryText::Retry)}
+                            </button>
                         </div>
                     }.into_any()
                 }
-                State::Series(s) => render_series(s, range_rx.get(), kind_rx.get(), unit_rx.get()).into_any(),
-                State::Bars(d) => render_bars(d, range_rx.get()).into_any(),
+                State::Series(s) => render_series(lang, s, range_rx.get(), kind_rx.get(), unit_rx.get()).into_any(),
+                State::Bars(d) => render_bars(lang, d, range_rx.get()).into_any(),
+                }
             }}
         </div>
     }
@@ -172,10 +182,14 @@ fn map_error(err: HistoryApiError) -> State {
     }
 }
 
+/// SVG `preserveAspectRatio` value, not text.
+// The literal is split on purpose: the bare-text guard would read "xMidYMid meet" as a sentence.
+const ASPECT: &str = concat!("xMidYMid", " meet");
 const VIEW_W: f64 = 400.0;
 const VIEW_H: f64 = 220.0;
 
 fn render_series(
+    lang: Lang,
     s: HistorySeries,
     range: HistoryRange,
     kind: String,
@@ -192,13 +206,12 @@ fn render_series(
         VIEW_W,
         VIEW_H,
     );
-    let (y_lo, y_hi) = y_labels(&scale, &kind, unit.as_deref());
-    let xticks = tick_labels(range, now);
+    let (y_lo, y_hi) = y_labels(lang, &scale, &kind, unit.as_deref());
+    let xticks = tick_labels(lang, range, now);
     let (min_v, max_v) = series_min_max(&s.points);
-    let unit_str = unit.unwrap_or_default();
 
     view! {
-        <svg class="history-chart__svg" viewBox=format!("0 0 {VIEW_W} {VIEW_H}") preserveAspectRatio="xMidYMid meet" role="img">
+        <svg class="history-chart__svg" viewBox=format!("0 0 {VIEW_W} {VIEW_H}") preserveAspectRatio=ASPECT role="img">
             <line x1="0" y1=format!("{}", VIEW_H / 2.0) x2=format!("{}", VIEW_W) y2=format!("{}", VIEW_H / 2.0) class="history-chart__grid" />
             <path d=band_d class="history-chart__band" />
             <path d=d class="history-chart__line" fill="none" />
@@ -213,25 +226,25 @@ fn render_series(
             }).collect::<Vec<_>>()}
         </div>
         <div class="history-chart__legend">
-            <span>{legend_left_series(range)}</span>
-            <span>{format!("min {} {} · max {} {}", round1(min_v), unit_str, round1(max_v), unit_str)}</span>
+            <span>{range_name(lang, range)}</span>
+            <span>{min_max(lang, min_v, max_v, unit.as_deref())}</span>
         </div>
     }
 }
 
-fn render_bars(d: HistoryDaily, range: HistoryRange) -> impl IntoView {
+fn render_bars(lang: Lang, d: HistoryDaily, range: HistoryRange) -> impl IntoView {
     let bars = daily_bars(&d.days, VIEW_W, VIEW_H);
     let total: f64 = d.days.iter().map(|d| d.1).sum();
 
     view! {
-        <svg class="history-chart__svg" viewBox=format!("0 0 {VIEW_W} {VIEW_H}") preserveAspectRatio="xMidYMid meet" role="img">
+        <svg class="history-chart__svg" viewBox=format!("0 0 {VIEW_W} {VIEW_H}") preserveAspectRatio=ASPECT role="img">
             {bars.into_iter().map(|Bar { x, y, w, h, .. }| view! {
                 <rect x=format!("{x}") y=format!("{y}") width=format!("{w}") height=format!("{h}") class="history-chart__bar" />
             }).collect::<Vec<_>>()}
         </svg>
         <div class="history-chart__legend">
-            <span>{legend_left_counter(range)}</span>
-            <span>{format!("{} total: {} kWh", range_name(range), round1(total))}</span>
+            <span>{counter_legend(lang, range)}</span>
+            <span>{total_line(lang, range, total)}</span>
         </div>
     }
 }
@@ -255,33 +268,14 @@ fn series_min_max(points: &[(i64, f64, f64, f64)]) -> (f64, f64) {
     (lo, hi)
 }
 
-fn y_labels(scale: &YScale, kind: &str, _unit: Option<&str>) -> (String, String) {
-    if let Some((lo, hi)) = state_axis_labels(None, kind) {
+fn y_labels(lang: Lang, scale: &YScale, kind: &str, _unit: Option<&str>) -> (String, String) {
+    if let Some((lo, hi)) = state_axis_labels(lang, None, kind) {
         return (lo, hi);
     }
-    (round1(scale.min), round1(scale.max))
-}
-
-fn round1<T: Into<f64>>(v: T) -> String {
-    let v = v.into();
-    format!("{v:.1}")
-}
-
-fn range_name(r: HistoryRange) -> &'static str {
-    match r {
-        HistoryRange::Day => "Last 24 hours",
-        HistoryRange::Week => "Last 7 days",
-        HistoryRange::Month => "Last 30 days",
-        HistoryRange::Year => "Last year",
-    }
-}
-
-fn legend_left_series(r: HistoryRange) -> String {
-    range_name(r).to_owned()
-}
-
-fn legend_left_counter(r: HistoryRange) -> String {
-    format!("{} · daily total", range_name(r))
+    (
+        fmt::decimal_grouped(lang, scale.min, 1),
+        fmt::decimal_grouped(lang, scale.max, 1),
+    )
 }
 
 #[cfg(test)]

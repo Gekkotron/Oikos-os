@@ -11,11 +11,13 @@ use crate::components::confirm::{ConfirmBar, Confirming};
 use crate::components::toast::Toasts;
 use crate::dashboards::edit::EditState;
 use crate::house::House;
+use crate::i18n::{DashText, Key, dash_text, delete_question, text, use_lang, widget_sheet_title};
 
 /// Per-widget sheet: title override, size and delete. Swapping the widget's target
 /// entity is deferred; delete + re-add covers it for v1.
 #[component]
 pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>) -> impl IntoView {
+    let lang = use_lang();
     // Kind and span are tracked separately so typing in the title does not rebuild the
     // inputs (which would drop focus on every keystroke).
     let kind = Memo::new(move |_| state.draft.with(|d| d.widgets.get(index).map(|w| w.kind)));
@@ -34,9 +36,9 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
 
     view! {
         <aside class="widget-config-sheet">
-            <h3>{move || format!("Widget: {:?}", kind.get().unwrap_or(WidgetKind::Light))}</h3>
+            <h3>{move || widget_sheet_title(lang(), kind.get().unwrap_or(WidgetKind::Light))}</h3>
             <label class="sheet-form__field">
-                <span class="sheet-form__label">"Title"</span>
+                <span class="sheet-form__label">{move || dash_text(lang(), DashText::Title)}</span>
                 <input
                     type="text"
                     class="field"
@@ -52,7 +54,7 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
                 />
             </label>
             <label class="sheet-form__field">
-                <span class="sheet-form__label">"Size"</span>
+                <span class="sheet-form__label">{move || dash_text(lang(), DashText::Size)}</span>
                 <select
                     class="select"
                     on:change=move |ev| {
@@ -85,9 +87,11 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
                     on_close.run(());
                 }
             >
-                "Delete widget"
+                {move || dash_text(lang(), DashText::DeleteWidget)}
             </button>
-            <button type="button" class="btn" on:click=move |_| on_close.run(())>"Close"</button>
+            <button type="button" class="btn" on:click=move |_| on_close.run(())>
+                {move || dash_text(lang(), DashText::Close)}
+            </button>
         </aside>
     }
 }
@@ -172,15 +176,16 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
     let house = expect_context::<House>();
     let toasts = expect_context::<Toasts>();
     let confirming = expect_context::<Confirming>();
+    let lang = use_lang();
     let navigate = use_navigate();
     let initial_name = state.draft.with_untracked(|d| d.name.clone());
     let show_header = move || state.draft.with(|d| d.show_header);
 
     view! {
         <aside class="dashboard-settings-sheet">
-            <h3>"Dashboard settings"</h3>
+            <h3>{move || dash_text(lang(), DashText::DashboardSettings)}</h3>
             <label class="sheet-form__field">
-                <span class="sheet-form__label">"Name"</span>
+                <span class="sheet-form__label">{move || dash_text(lang(), DashText::Name)}</span>
                 <input
                     type="text"
                     class="field"
@@ -192,7 +197,7 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                 />
             </label>
             <label class="sheet-form__flag">
-                <span class="sheet-form__label">"Show header"</span>
+                <span class="sheet-form__label">{move || dash_text(lang(), DashText::ShowHeader)}</span>
                 <button
                     type="button"
                     role="switch"
@@ -212,7 +217,7 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                         move_dashboard(house, toasts, state.draft.get_untracked().id, -1)
                     }
                 >
-                    "Move up"
+                    {move || text(lang(), Key::MoveUp)}
                 </button>
                 <button
                     type="button"
@@ -221,7 +226,7 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                         move_dashboard(house, toasts, state.draft.get_untracked().id, 1)
                     }
                 >
-                    "Move down"
+                    {move || text(lang(), Key::MoveDown)}
                 </button>
             </div>
             <Show
@@ -233,14 +238,16 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                             class="btn btn--danger"
                             on:click=move |_| confirming.ask(&state.draft.get_untracked().id)
                         >
-                            "Delete dashboard"
+                            {move || dash_text(lang(), DashText::DeleteDashboard)}
                         </button>
                     }
                 }
             >
                 <ConfirmBar
-                    question=format!("Delete {}?", state.draft.with_untracked(|d| d.name.clone()))
-                    yes="Delete"
+                    question=Signal::derive(move || {
+                        delete_question(lang(), &state.draft.with(|d| d.name.clone()))
+                    })
+                    yes=Signal::derive(move || text(lang(), Key::Delete).to_owned())
                     on_yes=Callback::new({
                         let navigate = navigate.clone();
                         move |()| {
@@ -266,7 +273,9 @@ pub fn DashboardSettingsSheet(state: EditState, on_close: Callback<()>) -> impl 
                     on_cancel=Callback::new(move |()| confirming.clear())
                 />
             </Show>
-            <button type="button" class="btn" on:click=move |_| on_close.run(())>"Close"</button>
+            <button type="button" class="btn" on:click=move |_| on_close.run(())>
+                {move || dash_text(lang(), DashText::Close)}
+            </button>
         </aside>
     }
 }

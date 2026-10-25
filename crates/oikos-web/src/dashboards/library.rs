@@ -17,7 +17,7 @@ use super::energy_stat::ENERGY_METRICS;
 use crate::flow_edit::fold_accents;
 use crate::format::{entity_title, kind_search_words, room_name};
 use crate::house::House;
-use crate::i18n::{Lang, widget_text};
+use crate::i18n::{DashText, Lang, dash_text, widget_text};
 use crate::icons::{BOLT, HOUSE, PLAY, entity_icon};
 
 /// A timestamp is unique enough: widgets are added by hand, one click at a time.
@@ -64,18 +64,21 @@ pub enum Section {
 }
 
 impl Section {
-    fn header(self) -> &'static str {
-        match self {
-            Self::Lights => "LIGHTS",
-            Self::Covers => "COVERS",
-            Self::Climates => "CLIMATE",
-            Self::Sensors => "SENSORS",
-            Self::WaterHeaters => "WATER HEATERS",
-            Self::Rooms => "ROOM GROUPS",
-            Self::FlowButtons => "FLOW BUTTONS",
-            Self::Energy => "ENERGY",
-            Self::HistoryCharts => "HISTORY CHARTS",
-        }
+    fn header(self, lang: Lang) -> &'static str {
+        dash_text(
+            lang,
+            match self {
+                Self::Lights => DashText::SectionLights,
+                Self::Covers => DashText::SectionCovers,
+                Self::Climates => DashText::SectionClimate,
+                Self::Sensors => DashText::SectionSensors,
+                Self::WaterHeaters => DashText::SectionWaterHeaters,
+                Self::Rooms => DashText::SectionRoomGroups,
+                Self::FlowButtons => DashText::SectionFlowButtons,
+                Self::Energy => DashText::SectionEnergy,
+                Self::HistoryCharts => DashText::SectionHistory,
+            },
+        )
     }
 
     /// The suffix of the section's colour modifier classes.
@@ -132,6 +135,13 @@ pub fn entries(
 ) -> Vec<Entry> {
     // Each row with the kind words that also find it ("cover", "volet"), for entity rows.
     let mut rows: Vec<(String, Entry, Option<[String; 2]>)> = Vec::new();
+    // A row's fixed text in both languages, so "lights" finds a room group on the French UI too.
+    let both = |k: DashText| {
+        [
+            dash_text(Lang::En, k).to_owned(),
+            dash_text(Lang::Fr, k).to_owned(),
+        ]
+    };
     for e in entities.values().filter(|e| e.is_primary()) {
         let (section, kind) = match e.kind {
             Kind::Light => (Section::Lights, WidgetKind::Light),
@@ -186,7 +196,7 @@ pub fn entries(
             Entry {
                 section: Section::Rooms,
                 title: area.name.clone(),
-                sub: Some("Lights and covers of the room".into()),
+                sub: Some(dash_text(lang, DashText::RoomGroupSub).into()),
                 icon: HOUSE,
                 kind: WidgetKind::RoomGroup,
                 config: WidgetConfig::Area {
@@ -194,7 +204,7 @@ pub fn entries(
                     title: None,
                 },
             },
-            None,
+            Some(both(DashText::RoomGroupSub)),
         ));
     }
     for (id, name) in flows {
@@ -203,7 +213,7 @@ pub fn entries(
             Entry {
                 section: Section::FlowButtons,
                 title: name.clone(),
-                sub: Some("Runs the flow".into()),
+                sub: Some(dash_text(lang, DashText::FlowButtonSub).into()),
                 icon: PLAY,
                 kind: WidgetKind::FlowButton,
                 config: WidgetConfig::Flow {
@@ -211,7 +221,7 @@ pub fn entries(
                     title: None,
                 },
             },
-            None,
+            Some(both(DashText::FlowButtonSub)),
         ));
     }
     for (id, label) in ENERGY_METRICS {
@@ -219,7 +229,7 @@ pub fn entries(
             id.to_owned(),
             Entry {
                 section: Section::Energy,
-                title: widget_text(Lang::En, label).to_owned(),
+                title: widget_text(lang, label).to_owned(),
                 sub: None,
                 icon: BOLT,
                 kind: WidgetKind::EnergyStat,
@@ -228,7 +238,10 @@ pub fn entries(
                     title: None,
                 },
             },
-            None,
+            Some([
+                widget_text(Lang::En, label).to_owned(),
+                widget_text(Lang::Fr, label).to_owned(),
+            ]),
         ));
     }
 
@@ -279,16 +292,16 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
     let add = move |entry: Entry| on_add.run(make_widget(entry.kind, entry.config));
     let on_key = move |ev: ev::KeyboardEvent| {
         let last = results.with_untracked(Vec::len).saturating_sub(1);
-        match ev.key().as_str() {
-            "ArrowDown" => {
+        match ev.key().to_ascii_lowercase().as_str() {
+            "arrowdown" => {
                 ev.prevent_default();
                 highlight.update(|i| *i = (*i + 1).min(last));
             }
-            "ArrowUp" => {
+            "arrowup" => {
                 ev.prevent_default();
                 highlight.update(|i| *i = i.saturating_sub(1));
             }
-            "Enter" => {
+            "enter" => {
                 ev.prevent_default();
                 if let Some(entry) =
                     results.with_untracked(|r| r.get(highlight.get_untracked()).cloned())
@@ -296,13 +309,14 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
                     add(entry);
                 }
             }
-            "Escape" => query.set(String::new()),
+            "escape" => query.set(String::new()),
             _ => {}
         }
     };
 
     let list = move || {
         let mut last = None;
+        let lang = lang();
         results
             .get()
             .into_iter()
@@ -311,7 +325,7 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
                 let suffix = entry.section.suffix();
                 let head = (last != Some(entry.section)).then(|| {
                     let class = format!("flow-library__header dashboard-library__header--{suffix}");
-                    view! { <li class=class role="presentation">{entry.section.header()}</li> }
+                    view! { <li class=class role="presentation">{entry.section.header(lang)}</li> }
                 });
                 last = Some(entry.section);
                 let class = format!(
@@ -342,15 +356,15 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
     };
 
     view! {
-        <section class="flow-library dashboard-library" aria-label="Add a widget">
+        <section class="flow-library dashboard-library" aria-label=move || dash_text(lang(), DashText::AddWidget)>
             <header class="flow-drawer__header">
-                <h2 class="flow-drawer__title">"Add a widget"</h2>
+                <h2 class="flow-drawer__title">{move || dash_text(lang(), DashText::AddWidget)}</h2>
             </header>
             <input
                 class="field flow-library__search"
                 type="search"
-                placeholder="Search a widget, a device or a room"
-                aria-label="Search widgets"
+                placeholder=move || dash_text(lang(), DashText::SearchPlaceholder)
+                aria-label=move || dash_text(lang(), DashText::SearchWidgets)
                 prop:value=move || query.get()
                 on:input=move |ev| query.set(event_target_value(&ev))
                 on:keydown=on_key
@@ -358,7 +372,7 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
             <ul class="flow-library__list" role="listbox">
                 {list}
                 <Show when=move || results.with(Vec::is_empty)>
-                    <li class="flow-library__empty">"Nothing matches"</li>
+                    <li class="flow-library__empty">{move || dash_text(lang(), DashText::NothingMatches)}</li>
                 </Show>
             </ul>
         </section>
@@ -467,6 +481,24 @@ mod tests {
             let got = run(query, &entities);
             assert_eq!(of(&got, Section::Covers).len(), 1, "{query}");
             assert!(of(&got, Section::Lights).is_empty(), "{query}");
+        }
+    }
+
+    #[test]
+    fn english_words_still_find_the_rows_on_the_french_ui() {
+        let flows = [("f1".to_string(), "Night".to_string())];
+        let areas = [area("salon", "Salon")];
+        let entities = BTreeMap::new();
+        let find = |q: &str| entries(Lang::Fr, q, &entities, &areas, &flows);
+        for (query, section) in [
+            ("lights", Section::Rooms),
+            ("runs the flow", Section::FlowButtons),
+            ("today", Section::Energy),
+            ("éclairages", Section::Rooms),
+            ("lance", Section::FlowButtons),
+            ("aujourd", Section::Energy),
+        ] {
+            assert!(find(query).iter().any(|e| e.section == section), "{query}");
         }
     }
 

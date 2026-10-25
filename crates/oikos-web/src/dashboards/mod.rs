@@ -14,16 +14,18 @@ use oikos_core::dashboard::Dashboard;
 
 use crate::api;
 use crate::house::House;
+use crate::i18n::{Key, Lang, text};
 
 /// Saves an empty "New dashboard" after the last one and adds it to `house`; returns its id.
+/// The name is written in `lang`, the language active at the click, and is never re-translated.
 /// `None` when the save fails: the list stays as it was and the edit-mode task owns error display.
-pub(crate) async fn create_dashboard(house: House) -> Option<String> {
+pub(crate) async fn create_dashboard(house: House, lang: Lang) -> Option<String> {
     let order = house
         .dashboards
         .with_untracked(|list| list.iter().map(|d| d.dashboard.order).max().unwrap_or(0) + 1);
     let d = Dashboard {
         id: format!("d_{}", gen_id()),
-        name: "New dashboard".to_owned(),
+        name: text(lang, Key::NewDashboard).to_owned(),
         order,
         widgets: Vec::new(),
         show_header: false,

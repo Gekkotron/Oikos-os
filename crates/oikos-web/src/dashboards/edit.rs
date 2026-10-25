@@ -6,6 +6,7 @@ use oikos_core::dashboard::{Dashboard, Widget, allowed_spans};
 
 use crate::api;
 use crate::house::House;
+use crate::i18n::{DashText, Lang, dash_text, use_lang};
 use crate::icons::{CHECK, GEAR, PENCIL, X_MARK};
 
 /// Reactive state for the edit mode: active flag, the editable draft, and the saved baseline
@@ -80,12 +81,15 @@ fn kept_selection(selected: Option<usize>, before: &Dashboard, after: &Dashboard
 }
 
 /// The pencil's accessible name; it says so when switching edit mode off left an unsaved draft.
-fn pencil_label(active: bool, dirty: bool) -> &'static str {
-    if dirty && !active {
-        "Toggle edit mode (unsaved changes)"
-    } else {
-        "Toggle edit mode"
-    }
+fn pencil_label(lang: Lang, active: bool, dirty: bool) -> &'static str {
+    dash_text(
+        lang,
+        if dirty && !active {
+            DashText::ToggleEditUnsaved
+        } else {
+            DashText::ToggleEdit
+        },
+    )
 }
 
 /// How long a widget added from the library glows.
@@ -123,6 +127,7 @@ pub fn add_widget_handler(state: EditState) -> Callback<Widget> {
 #[component]
 pub fn EditToolbar(state: EditState) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     let dirty = state.dirty();
     // True while a Save request is in flight; blocks a second PUT and a Discard mid-save.
     let saving = RwSignal::new(false);
@@ -135,7 +140,7 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                 class:dashboard-edit-toolbar__pencil--dirty=move || {
                     !state.active.get() && dirty.get()
                 }
-                aria-label=move || pencil_label(state.active.get(), dirty.get())
+                aria-label=move || pencil_label(lang(), state.active.get(), dirty.get())
                 aria-pressed=move || state.active.get().to_string()
                 on:click=move |_| {
                     let now_active = !state.active.get_untracked();
@@ -152,7 +157,7 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                 <button
                     type="button"
                     class="btn btn--round dashboard-edit-toolbar__gear"
-                    aria-label="Dashboard settings"
+                    aria-label=move || dash_text(lang(), DashText::DashboardSettings)
                     on:click=move |_| state.settings_open.update(|o| *o = !*o)
                 >
                     <span class="btn__glyph" inner_html=GEAR></span>
@@ -164,7 +169,7 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                     disabled=move || !dirty.get() || saving.get()
                 >
                     <span class="btn__glyph" inner_html=X_MARK></span>
-                    "Discard"
+                    {move || dash_text(lang(), DashText::Discard)}
                 </button>
                 <button
                     type="button"
@@ -195,7 +200,7 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                     disabled=move || !dirty.get() || saving.get()
                 >
                     <span class="btn__glyph" inner_html=CHECK></span>
-                    "Save"
+                    {move || dash_text(lang(), DashText::Save)}
                 </button>
             </Show>
         </div>
@@ -271,11 +276,11 @@ mod tests {
     #[test]
     fn pencil_label_flags_unsaved_changes_only_when_inactive() {
         assert_eq!(
-            pencil_label(false, true),
+            pencil_label(Lang::En, false, true),
             "Toggle edit mode (unsaved changes)"
         );
-        assert_eq!(pencil_label(true, true), "Toggle edit mode");
-        assert_eq!(pencil_label(false, false), "Toggle edit mode");
+        assert_eq!(pencil_label(Lang::En, true, true), "Toggle edit mode");
+        assert_eq!(pencil_label(Lang::En, false, false), "Toggle edit mode");
     }
 
     #[test]

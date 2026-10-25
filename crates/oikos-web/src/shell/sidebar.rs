@@ -94,8 +94,10 @@ pub fn Sidebar(
         }
         creating.set(true);
         let navigate = navigate.clone();
+        // Read now: the async block has no owner to find the language in.
+        let language = lang.map_or(Lang::En, |l| l.get_untracked());
         spawn_local(async move {
-            let created = create_dashboard(house).await;
+            let created = create_dashboard(house, language).await;
             creating.try_set(false);
             if let Some(id) = created {
                 navigate(&format!("/dashboards/{id}?edit=1"), Default::default());
