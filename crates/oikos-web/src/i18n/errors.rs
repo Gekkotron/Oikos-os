@@ -51,8 +51,8 @@ pub enum ErrorText {
     Back,
     /// The connection pill's tooltip when the socket closed.
     ConnectionClosed,
-    /// The connection pill's tooltip when the page has no window to open a socket from.
-    NoWindow,
+    /// The connection pill's tooltip when the page has no address to open a socket against.
+    NoAddress,
 }
 
 /// The text of a fixed word.
@@ -68,18 +68,15 @@ pub fn error_text(lang: Lang, k: ErrorText) -> &'static str {
         T::Dismiss => ("Dismiss", "Fermer"),
         T::Back => ("Back", "Retour"),
         T::ConnectionClosed => ("Connection closed", "Connexion fermée"),
-        T::NoWindow => ("No browser window", "Aucune fenêtre de navigateur"),
+        T::NoAddress => (
+            "Page address unavailable",
+            "Adresse de la page indisponible",
+        ),
     };
     match lang {
         Lang::En => en,
         Lang::Fr => fr,
     }
-}
-
-/// `k` as a signal that follows the language (for props that take a `Signal<String>`).
-pub fn error_text_signal(k: ErrorText) -> Signal<String> {
-    let lang = use_lang();
-    Signal::derive(move || error_text(lang(), k).to_owned())
 }
 
 /// "Could not load dashboards: …": the lead is translated, the hub's text follows as received.
@@ -110,7 +107,7 @@ mod tests {
         ErrorText::Dismiss,
         ErrorText::Back,
         ErrorText::ConnectionClosed,
-        ErrorText::NoWindow,
+        ErrorText::NoAddress,
     ];
 
     #[test]

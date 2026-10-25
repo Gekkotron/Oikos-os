@@ -141,3 +141,75 @@ async fn http_errors_lead_in_french_and_hub_text_is_kept() {
     assert!(text.contains("light does not support color"), "{text}");
     drop(stub);
 }
+
+fn lampe() -> oikos_api::EntityView {
+    use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
+    oikos_api::EntityView {
+        id: "lamp".into(),
+        device_id: None,
+        name: "Lampe".into(),
+        device_name: None,
+        label: None,
+        kind: Kind::Light,
+        component: "light".into(),
+        protocol_kind: Kind::Light,
+        device_class: None,
+        unit: None,
+        icon: None,
+        category: EntityCategory::Primary,
+        enabled_by_default: true,
+        area: "salon".into(),
+        part_of: None,
+        capabilities: Capabilities::default(),
+        ui: UiOverride::default(),
+        state: EntityState::default(),
+    }
+}
+
+/// `fire` here runs with no reactive owner, as the thermostat dial's pointer and timer callbacks do.
+#[wasm_bindgen_test]
+async fn a_named_failure_toast_reads_french_with_no_owner() {
+    let stub = FetchStub::install();
+    stub.reply("POST", "/api/v1/entities/lamp/command", 503, "{}");
+    let m = mount(Lang::Fr);
+    m.house.entities.update(|e| {
+        e.insert("lamp".into(), lampe());
+    });
+    settle().await;
+    fire(&m);
+    settle().await;
+    let text = toast_text(&m);
+    assert!(
+        text.contains("Lampe\u{a0}: Broker hors ligne — commande refusée"),
+        "{text}"
+    );
+
+    let stub = FetchStub::install();
+    stub.reply(
+        "POST",
+        "/api/v1/entities/lamp/command",
+        200,
+        r#"{"accepted":false}"#,
+    );
+    let m = mount(Lang::Fr);
+    m.house.entities.update(|e| {
+        e.insert("lamp".into(), lampe());
+    });
+    settle().await;
+    fire(&m);
+    settle().await;
+    let text = toast_text(&m);
+    assert!(text.contains("Lampe\u{a0}: Commande refusée"), "{text}");
+    drop(stub);
+}
+
+/// With an owner but no language context the answer is English; with no owner at all it is the
+/// language last rendered.
+#[wasm_bindgen_test]
+async fn current_lang_fallback_is_for_ownerless_callers_only() {
+    let _m = mount(Lang::Fr);
+    settle().await;
+    assert_eq!(oikos_web::i18n::current_lang(), Lang::Fr);
+    let owned = Owner::new().with(oikos_web::i18n::current_lang);
+    assert_eq!(owned, Lang::En);
+}

@@ -123,6 +123,7 @@ pub fn install_lang() -> RwSignal<Lang> {
     #[cfg(target_arch = "wasm32")]
     Effect::new(move |_| {
         let current = lang.get();
+        remember(current);
         if let Some(root) = web_sys::window()
             .and_then(|w| w.document())
             .and_then(|d| d.document_element())
@@ -609,8 +610,8 @@ pub fn use_lang() -> impl Fn() -> Lang + Copy + 'static {
 }
 
 thread_local! {
-    /// The language last read from the context signal: what `current_lang` falls back on in an
-    /// async task, where there is no reactive owner to find the context through.
+    /// The language last read from the context signal: what `current_lang` returns where there
+    /// is no reactive owner to find the context through.
     static LAST_SEEN: std::cell::Cell<Lang> = const { std::cell::Cell::new(Lang::En) };
 }
 
@@ -619,7 +620,9 @@ fn remember(lang: Lang) {
 }
 
 /// The language in context right now, without tracking it: for a view built once that does not
-/// follow a later toggle (cards rebuilt from the entity). English when there is none.
+/// follow a later toggle (cards rebuilt from the entity). With an owner but no language context
+/// it is English; with no owner at all (an async task, a timer or a window listener) it is the
+/// language last rendered, since the context cannot be reached from there.
 pub fn current_lang() -> Lang {
     match use_context::<RwSignal<Lang>>() {
         Some(l) => {
@@ -627,9 +630,8 @@ pub fn current_lang() -> Lang {
             remember(current);
             current
         }
-        // After an `.await` in a `spawn_local` task there is no owner, so no context: the
-        // language the views last rendered is the one the person is reading.
-        None => LAST_SEEN.with(|c| c.get()),
+        None if Owner::current().is_none() => LAST_SEEN.with(|c| c.get()),
+        None => Lang::En,
     }
 }
 

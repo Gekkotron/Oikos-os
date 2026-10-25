@@ -26,8 +26,7 @@ pub fn connect(path: &str, house: House) {
                 .and_then(|u| WebSocket::open(&u).map_err(|e| e.to_string()))
             {
                 Ok(mut socket) => {
-                    let mut closed =
-                        error_text(current_lang(), ErrorText::ConnectionClosed).to_owned();
+                    let mut closed = None;
                     while let Some(frame) = socket.next().await {
                         match frame {
                             Ok(Message::Text(text)) => match serde_json::from_str::<WsEvent>(&text)
@@ -53,12 +52,15 @@ pub fn connect(path: &str, house: House) {
                             },
                             Ok(Message::Bytes(_)) => {}
                             Err(e) => {
-                                closed = e.to_string();
+                                closed = Some(e.to_string());
                                 break;
                             }
                         }
                     }
-                    closed
+                    // Built now, so it follows a toggle made while the socket was open.
+                    closed.unwrap_or_else(|| {
+                        error_text(current_lang(), ErrorText::ConnectionClosed).to_owned()
+                    })
                 }
                 Err(e) => e,
             };
@@ -71,10 +73,10 @@ pub fn connect(path: &str, house: House) {
 
 /// `ws://host/path` or `wss://host/path`, following the page's protocol.
 fn absolute_url(path: &str) -> Result<String, String> {
-    let no_window = || error_text(current_lang(), ErrorText::NoWindow).to_owned();
-    let location = web_sys::window().ok_or_else(no_window)?.location();
-    let protocol = location.protocol().map_err(|_| no_window())?;
-    let host = location.host().map_err(|_| no_window())?;
+    let no_address = || error_text(current_lang(), ErrorText::NoAddress).to_owned();
+    let location = web_sys::window().ok_or_else(no_address)?.location();
+    let protocol = location.protocol().map_err(|_| no_address())?;
+    let host = location.host().map_err(|_| no_address())?;
     let scheme = if protocol == "https:" { "wss" } else { "ws" };
     Ok(format!("{scheme}://{host}{path}"))
 }
