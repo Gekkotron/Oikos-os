@@ -9,7 +9,7 @@ pub enum PickerText {
     Search,
     /// The chip that widens the list to everything the field accepts.
     All,
-    /// The switch that lists diagnostic entities too.
+    /// The chip that lists diagnostic entities too.
     Diagnostic,
     /// The room column's first entry.
     AllRooms,
@@ -21,7 +21,7 @@ pub enum PickerText {
     SearchAll,
     /// Chip on a chosen entity the house no longer lists.
     Unavailable,
-    /// Heading of the chosen ids the house lacks.
+    /// Marks a chosen id the house lacks, after the raw id.
     Missing,
     Close,
     /// The trigger's text when nothing is chosen.
@@ -36,18 +36,18 @@ pub enum PickerText {
 pub fn picker_text(lang: Lang, k: PickerText) -> &'static str {
     use PickerText as T;
     let (en, fr) = match k {
-        T::Search => ("Search entities", "Rechercher une entité"),
-        T::All => ("All", "Toutes"),
-        T::Diagnostic => (
-            "Show diagnostic entities",
-            "Afficher les entités de diagnostic",
+        T::Search => (
+            "Search a device, a room, a type…",
+            "Rechercher un appareil, une pièce, un type…",
         ),
+        T::All => ("All", "Tout"),
+        T::Diagnostic => ("+ Diagnostic", "+ Diagnostic"),
         T::AllRooms => ("All rooms", "Toutes les pièces"),
         T::NoRoom => ("No room", "Sans pièce"),
         T::NoMatch => ("Nothing matches.", "Aucun résultat."),
-        T::SearchAll => ("Search everywhere", "Chercher partout"),
+        T::SearchAll => ("Search all entities", "Chercher dans toutes les entités"),
         T::Unavailable => ("Unavailable", "Indisponible"),
-        T::Missing => ("No longer in the house", "Absentes de la maison"),
+        T::Missing => ("missing", "introuvable"),
         T::Close => ("Close", "Fermer"),
         T::Choose => ("Choose an entity", "Choisir une entité"),
         T::Thermometers => ("Thermometers", "Thermomètres"),
@@ -105,7 +105,7 @@ mod tests {
             T::Presence,
             T::OnOff,
         ];
-        assert_table(&all, picker_text, &[]);
+        assert_table(&all, picker_text, &[T::Diagnostic]);
     }
 
     #[test]
