@@ -15,6 +15,9 @@ use serde_json::{Value, json};
 use crate::flow_edit::fold_accents;
 use crate::format::{entity_title, kind_search_words, list_label};
 use crate::house::House;
+use crate::i18n::flows::{FlowText, flow_text};
+use crate::i18n::format::parse_decimal;
+use crate::i18n::settings::{SettingsText, select_option, set_mode, settings_text};
 use crate::i18n::{self, Key, Lang, use_text};
 use crate::screens::group_wizard::group_by_room;
 
@@ -81,21 +84,23 @@ fn command_key(c: &Command) -> String {
     }
 }
 
-/// The label of a command in the select. English only, like the flow cards.
-fn command_label(c: &Command) -> String {
+/// The label of a command in the select, in `lang`. The option or mode named is the device's own.
+fn command_label(lang: Lang, c: &Command) -> String {
+    let flow = |k| flow_text(lang, k).to_owned();
+    let word = |k| settings_text(lang, k).to_owned();
     match c {
-        Command::TurnOn { .. } => "Turn on".into(),
-        Command::TurnOff => "Turn off".into(),
-        Command::Toggle => "Toggle".into(),
-        Command::Open => "Open".into(),
-        Command::Close => "Close".into(),
-        Command::Stop => "Stop".into(),
-        Command::Press => "Press".into(),
-        Command::SetPosition { .. } => "Set position".into(),
-        Command::SetTemperature { .. } => "Set temperature".into(),
-        Command::SetNumber { .. } => "Set value".into(),
-        Command::SelectOption { option } => format!("Select {option}"),
-        Command::SetHvacMode { mode } => format!("Set mode {mode}"),
+        Command::TurnOn { .. } => flow(FlowText::TurnOn),
+        Command::TurnOff => flow(FlowText::TurnOff),
+        Command::Toggle => flow(FlowText::Toggle),
+        Command::Open => flow(FlowText::Open),
+        Command::Close => flow(FlowText::Close),
+        Command::Stop => flow(FlowText::Stop),
+        Command::Press => word(SettingsText::Press),
+        Command::SetPosition { .. } => word(SettingsText::SetPosition),
+        Command::SetTemperature { .. } => word(SettingsText::SetTemperature),
+        Command::SetNumber { .. } => word(SettingsText::SetValue),
+        Command::SelectOption { option } => select_option(lang, option),
+        Command::SetHvacMode { mode } => set_mode(lang, mode),
         Command::Control { control, .. } => control.clone(),
         other => command_key(other),
     }
@@ -146,7 +151,7 @@ fn value_spec(c: &Command, e: Option<&EntityView>) -> Option<ValueSpec> {
 
 /// `c` carrying `text` as its value; an empty text only clears a light's brightness.
 fn with_value(c: &Command, text: &str) -> Command {
-    let parsed = text.trim().parse::<f64>().ok();
+    let parsed = parse_decimal(text);
     match (c, parsed) {
         (Command::TurnOn { color, effect, .. }, v) => Command::TurnOn {
             brightness: v.map(|v| (v.clamp(1.0, 100.0) * 255.0 / 100.0).round() as u8),
@@ -763,7 +768,7 @@ pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
                             .enumerate()
                             .map(|(i, c)| {
                                 let selected = command_key(&c) == current;
-                                view! { <option value=i.to_string() selected=selected>{command_label(&c)}</option> }
+                                view! { <option value=i.to_string() selected=selected>{command_label(lang.get(), &c)}</option> }
                             })
                             .collect_view()
                     }}
@@ -926,7 +931,7 @@ pub fn HeatingForm(rows: Rows, key: u64, zones: RwSignal<Vec<(String, String)>>)
                                 })
                             }
                             on:change=move |ev| {
-                                let value = event_target_value(&ev).trim().parse::<f64>().ok();
+                                let value = parse_decimal(&event_target_value(&ev));
                                 edit_climate(rows, key, |c| c.setpoint = value.map(|v| json!(clamp_setpoint(v))));
                             }
                         />
@@ -1089,6 +1094,30 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn command_labels_follow_the_language() {
+        let on = Command::TurnOn {
+            brightness: None,
+            color: None,
+            effect: None,
+        };
+        assert_eq!(command_label(Lang::En, &on), "Turn on");
+        assert_eq!(command_label(Lang::Fr, &on), "Allumer");
+        assert_eq!(command_label(Lang::Fr, &Command::Stop), "Arrêter");
+        assert_eq!(command_label(Lang::Fr, &Command::Press), "Appuyer");
+        let pos = Command::SetPosition { position: 50 };
+        assert_eq!(command_label(Lang::Fr, &pos), "Régler la position");
+        let pick = Command::SelectOption {
+            option: "low".into(),
+        };
+        assert_eq!(command_label(Lang::En, &pick), "Select low");
+        assert_eq!(command_label(Lang::Fr, &pick), "Choisir low");
+        let mode = Command::SetHvacMode {
+            mode: "heat".into(),
+        };
+        assert_eq!(command_label(Lang::Fr, &mode), "Régler le mode heat");
     }
 
     #[test]

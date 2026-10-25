@@ -9,18 +9,19 @@ use crate::home_header::mood::{Detail, RAIN_MIN_MM, sun_today};
 use crate::home_header::view::degrees;
 use crate::home_header::weather_fmt::{compass_index, condition_icon, uv_level};
 use crate::house::House;
-use crate::i18n::{self, Lang, WeatherText as T, weather_text};
+use crate::i18n::{self, Lang, WeatherText as T, format, weather_text};
 use crate::icons;
 use crate::nav::BackLink;
 use crate::screens::flow_canvas::sun::house_place;
 
 const DASH: &str = "–";
 
-/// A number with `decimals` places and a unit, or a dash when the value is unknown.
-fn measure(lang: Lang, v: Option<f64>, decimals: usize, unit: &str) -> String {
+/// A number with `decimals` places and a unit after a no-break space, or a dash when the value is
+/// unknown.
+fn measure(lang: Lang, v: Option<f64>, decimals: usize, unit: Option<&str>) -> String {
     v.map_or_else(
         || DASH.to_owned(),
-        |v| format!("{}{unit}", i18n::home_number(lang, v + 0.0, decimals)),
+        |v| format::with_unit(i18n::home_number(lang, v + 0.0, decimals), unit),
     )
 }
 
@@ -43,7 +44,7 @@ fn day_card(lang: Lang, d: &WeatherDay) -> impl IntoView {
     let min = d.min.map_or_else(|| DASH.to_owned(), |t| degrees(lang, t));
     let chance = d
         .precipitation_probability
-        .map(|p| format!("{} %", i18n::home_number(lang, p, 0)));
+        .map(|p| format::with_unit(i18n::home_number(lang, p, 0), Some("%")));
     view! {
         <div class="weather-day">
             <div class="weather-day__name">{title}</div>
@@ -79,7 +80,10 @@ fn content(
         .condition
         .map(|c| condition_icon(c, cur.daylight.unwrap_or(true)))
         .unwrap_or_default();
-    let temp = measure(lang, cur.temperature, 1, "°");
+    let temp = cur.temperature.map_or_else(
+        || DASH.to_owned(),
+        |t| format!("{}°", i18n::home_number(lang, t + 0.0, 1)),
+    );
     let label = cur.condition.map(|c| i18n::condition_label(lang, c));
     let feels = cur
         .apparent_temperature
@@ -118,7 +122,7 @@ fn content(
                     ></span>
                 }
             });
-            view! { {arrow} {measure(lang, Some(speed), 0, " km/h")} }.into_any()
+            view! { {arrow} {measure(lang, Some(speed), 0, Some("km/h"))} }.into_any()
         }
         None => DASH.into_any(),
     };
@@ -175,12 +179,12 @@ fn content(
         <h3 class="weather-page__label">{weather_text(lang, T::Now)}</h3>
         <div class="weather-tiles">
             {tile(weather_text(lang, T::Wind), wind_value, i18n::wind_sub(lang, compass, gusts.as_deref()))}
-            {tile(weather_text(lang, T::Humidity), measure(lang, cur.humidity, 0, " %").into_any(), String::new())}
-            {tile(weather_text(lang, T::Pressure), measure(lang, cur.pressure, 0, " hPa").into_any(), String::new())}
-            {tile(weather_text(lang, T::Clouds), measure(lang, cur.cloud_cover, 0, " %").into_any(), String::new())}
-            {tile(weather_text(lang, T::Rain), measure(lang, w.today.precipitation, 1, " mm").into_any(), i18n::rain_sub(lang, chance.as_deref()))}
-            {tile(weather_text(lang, T::MaxGusts), measure(lang, w.today.wind_gusts_max, 0, " km/h").into_any(), weather_text(lang, T::Today).to_lowercase())}
-            {tile(weather_text(lang, T::UvIndex), measure(lang, cur.uv_index, 0, "").into_any(), uv_sub)}
+            {tile(weather_text(lang, T::Humidity), measure(lang, cur.humidity, 0, Some("%")).into_any(), String::new())}
+            {tile(weather_text(lang, T::Pressure), measure(lang, cur.pressure, 0, Some("hPa")).into_any(), String::new())}
+            {tile(weather_text(lang, T::Clouds), measure(lang, cur.cloud_cover, 0, Some("%")).into_any(), String::new())}
+            {tile(weather_text(lang, T::Rain), measure(lang, w.today.precipitation, 1, Some("mm")).into_any(), i18n::rain_sub(lang, chance.as_deref()))}
+            {tile(weather_text(lang, T::MaxGusts), measure(lang, w.today.wind_gusts_max, 0, Some("km/h")).into_any(), weather_text(lang, T::Today).to_lowercase())}
+            {tile(weather_text(lang, T::UvIndex), measure(lang, cur.uv_index, 0, None).into_any(), uv_sub)}
             {tile(weather_text(lang, T::Sun), sun_value.into_any(), sun_sub)}
         </div>
 

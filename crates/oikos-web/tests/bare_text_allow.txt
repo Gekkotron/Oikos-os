@@ -1,20 +1,4 @@
 # Ratchet for tests/bare_text.rs: delete a file line once that file is translated.
-file: src/ambiances/action_forms.rs  # not translated yet
-file: src/components/history_chart/format.rs  # not translated yet
-file: src/components/history_chart/view.rs  # not translated yet
-file: src/dashboards/config_sheet.rs  # not translated yet
-file: src/dashboards/edit.rs  # not translated yet
-file: src/dashboards/grid.rs  # not translated yet
-file: src/dashboards/library.rs  # not translated yet
-file: src/dashboards/mod.rs  # not translated yet
-file: src/rooms.rs  # not translated yet
-file: src/screens/dashboard.rs  # not translated yet
-file: src/screens/history_detail.rs  # not translated yet
-file: src/screens/home_settings_panel.rs  # not translated yet
-file: src/screens/room.rs  # not translated yet
-file: src/screens/settings.rs  # not translated yet
-file: src/screens/weather.rs  # not translated yet
-file: src/theme.rs  # not translated yet
 text: FR  # language code on the toggle, the same in both languages
 text: EN  # language code on the toggle, the same in both languages
 text: Escape  # KeyboardEvent.key value, not shown

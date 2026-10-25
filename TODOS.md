@@ -6,7 +6,6 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ### P1 — correctness / forward-compat
 
-- **History chart is English only on the FR UI** (widget and history page): "Last 24 hours", "now", weekday names, "min/max". Route `components/history_chart/{format,view}.rs` through `i18n.rs`.
 - **HistoryChart widget ranges.** The chart only knows Day/Week/Month, so the widget's 1h, 6h and 24h ranges all show a day. Either add short ranges to the chart or limit the widget's range choice to what it can draw.
 - **EnergyStat kWh never refreshes.** Today/week/month are fetched once (when the counter set changes); a dashboard left open overnight keeps yesterday's "Today". Refetch on a timer or at midnight.
 - `Camera` / `Lock` widgets: not offered by the library yet; add them with their cards.

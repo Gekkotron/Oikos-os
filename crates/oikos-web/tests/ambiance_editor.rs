@@ -102,6 +102,11 @@ struct Mounted {
 
 /// The editor at `path_`, with a house the test seeds.
 fn mount(path_: &str, seed_house: impl FnOnce(House)) -> Mounted {
+    mount_in(RwSignal::new(Lang::En), path_, seed_house)
+}
+
+/// As [`mount`], with the language signal the test can flip.
+fn mount_in(lang: RwSignal<Lang>, path_: &str, seed_house: impl FnOnce(House)) -> Mounted {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -116,7 +121,7 @@ fn mount(path_: &str, seed_house: impl FnOnce(House)) -> Mounted {
     let app = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         provide_context(house);
         provide_context(Toasts::new());
-        provide_context(RwSignal::new(Lang::En));
+        provide_context(lang);
         oikos_web::nav::install_nav();
         view! {
             <Router>
@@ -348,6 +353,40 @@ fn gone_device() -> AmbianceAction {
         entity: "gone".into(),
         command: Command::TurnOff,
     })
+}
+
+/// The command select names its commands in the active language, and "Press" is a bare verb.
+#[wasm_bindgen_test]
+async fn the_command_select_follows_the_language() {
+    let mut button = light("btn", "a");
+    button.kind = Kind::Button;
+    button.component = Kind::Button.component().to_string();
+    button.protocol_kind = Kind::Button;
+    let saved = mood(
+        "mood_b",
+        1,
+        vec![AmbianceAction::Device(DeviceAction {
+            entity: "btn".into(),
+            command: Command::Press,
+        })],
+    );
+    let lang = RwSignal::new(Lang::Fr);
+    let m = mount_in(lang, "/ambiances/mood_b", |h| {
+        seed(h, vec![view(saved.clone())]);
+        h.entities
+            .set([("btn".to_owned(), button)].into_iter().collect());
+    });
+    settle().await;
+    let fr = text(&m.host, ".ambiance-device__command");
+    assert!(fr.contains("Appuyer"), "{fr}");
+    assert!(!fr.contains("Appuyer sur"), "{fr}");
+    assert!(!fr.contains("Press"), "{fr}");
+
+    lang.set(Lang::En);
+    settle().await;
+    let en = text(&m.host, ".ambiance-device__command");
+    assert!(en.contains("Press"), "{en}");
+    assert!(!en.contains("Appuyer"), "{en}");
 }
 
 #[wasm_bindgen_test]

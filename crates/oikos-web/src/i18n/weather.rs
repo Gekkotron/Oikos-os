@@ -149,19 +149,21 @@ pub fn weather_text(lang: Lang, k: WeatherText) -> &'static str {
     if lang == Lang::Fr { fr } else { en }
 }
 
+const NBSP: char = '\u{A0}';
+
 /// Rain in the next hour: "Rain within the hour: 1.2 mm".
 pub fn rain_next_hour(lang: Lang, mm: &str) -> String {
     match lang {
-        Lang::Fr => format!("Pluie dans l'heure : {mm} mm"),
-        Lang::En => format!("Rain within the hour: {mm} mm"),
+        Lang::Fr => format!("Pluie dans l'heure{NBSP}: {mm}{NBSP}mm"),
+        Lang::En => format!("Rain within the hour: {mm}{NBSP}mm"),
     }
 }
 
 /// The sub-line of the rain tile: "today · 93 % chance".
 pub fn rain_sub(lang: Lang, chance: Option<&str>) -> String {
     match (lang, chance) {
-        (Lang::Fr, Some(c)) => format!("aujourd'hui · risque {c} %"),
-        (Lang::En, Some(c)) => format!("today · {c} % chance"),
+        (Lang::Fr, Some(c)) => format!("aujourd'hui · risque {c}{NBSP}%"),
+        (Lang::En, Some(c)) => format!("today · {c}{NBSP}% chance"),
         (Lang::Fr, None) => "aujourd'hui".to_owned(),
         (Lang::En, None) => "today".to_owned(),
     }
@@ -219,6 +221,22 @@ mod tests {
         for lang in [Lang::En, Lang::Fr] {
             assert!(!weather_text(lang, WeatherText::Credit).is_empty());
         }
+    }
+    #[test]
+    fn units_and_colons_take_a_no_break_space() {
+        assert_eq!(
+            rain_next_hour(Lang::Fr, "1,2"),
+            "Pluie dans l'heure\u{A0}: 1,2\u{A0}mm"
+        );
+        assert_eq!(
+            rain_next_hour(Lang::En, "1.2"),
+            "Rain within the hour: 1.2\u{A0}mm"
+        );
+        assert_eq!(
+            rain_sub(Lang::Fr, Some("93")),
+            "aujourd'hui · risque 93\u{A0}%"
+        );
+        assert_eq!(rain_sub(Lang::En, Some("93")), "today · 93\u{A0}% chance");
     }
     #[test]
     fn every_weather_text_has_two_languages() {

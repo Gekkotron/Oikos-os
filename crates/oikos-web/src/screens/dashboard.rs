@@ -11,11 +11,13 @@ use crate::dashboards::grid::Grid;
 use crate::dashboards::library::WidgetLibrary;
 use crate::home_header::view::HomeHeader;
 use crate::house::House;
+use crate::i18n::{DashText, dash_text, use_lang};
 use crate::screens::home::HomeScreen;
 
 #[component]
 pub fn DashboardScreen() -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     let params = use_params_map();
     // A Memo so a nav change updates the id without remounting the component.
     let query = use_query_map();
@@ -55,7 +57,7 @@ pub fn DashboardScreen() -> impl IntoView {
                             <div class:dashboard-edit-layout=move || edit.active.get()>
                                 <Grid widgets=widgets edit=edit />
                                 <Show when=move || edit.active.get()>
-                                    <aside class="dashboard-library-panel" aria-label="Widget library">
+                                    <aside class="dashboard-library-panel" aria-label=move || dash_text(lang(), DashText::WidgetLibrary)>
                                         <WidgetLibrary on_add=add_widget_handler(edit) />
                                     </aside>
                                 </Show>
@@ -82,8 +84,8 @@ pub fn DashboardScreen() -> impl IntoView {
                     None => {
                         view! {
                             <div class="dashboard-unknown">
-                                <p>"Unknown dashboard."</p>
-                                <a href="/">"Back to House"</a>
+                                <p>{move || dash_text(lang(), DashText::UnknownDashboard)}</p>
+                                <a href="/">{move || dash_text(lang(), DashText::BackToHome)}</a>
                             </div>
                         }
                             .into_any()

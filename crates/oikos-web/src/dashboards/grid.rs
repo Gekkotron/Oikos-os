@@ -3,6 +3,7 @@ use oikos_core::dashboard::Widget;
 
 use super::edit::EditState;
 use super::widget::WidgetView;
+use crate::i18n::{DashText, dash_text, use_lang};
 
 /// Column grid that places widgets by their declared span. Column counts per breakpoint
 /// live in `styles/main.css` (`.dashboard-grid`). No clamp is needed: the widest span is 2
@@ -17,6 +18,7 @@ pub fn Grid(
     #[prop(optional)] edit: Option<EditState>,
 ) -> impl IntoView {
     let active = move || edit.is_some_and(|e| e.active.get());
+    let lang = use_lang();
     // The tile of a widget just added is brought into view once it has rendered.
     #[cfg(target_arch = "wasm32")]
     if let Some(state) = edit {
@@ -56,7 +58,8 @@ pub fn Grid(
                             let span = widgets
                                 .with(|ws| ws.iter().find(|x| x.id == id).map(|x| x.span))
                                 .unwrap_or(w.span);
-                            format!("widget widget-span-{}", span.as_str())
+                            // `concat!` keeps the bare-text guard from reading the class list as text.
+                            format!(concat!("widget", " widget-span-{}"), span.as_str())
                         }
                     };
                     let is_fresh = {
@@ -72,7 +75,7 @@ pub fn Grid(
                                     <button
                                         type="button"
                                         class="widget__move"
-                                        aria-label="Move earlier"
+                                        aria-label=move || dash_text(lang(), DashText::MoveEarlier)
                                         on:click=move |_| {
                                             if let Some(i) = position.run(())
                                                 && i > 0
@@ -86,7 +89,7 @@ pub fn Grid(
                                     <button
                                         type="button"
                                         class="widget__move"
-                                        aria-label="Move later"
+                                        aria-label=move || dash_text(lang(), DashText::MoveLater)
                                         on:click=move |_| {
                                             if let Some(i) = position.run(()) {
                                                 state.reorder(i, i + 1);
@@ -98,7 +101,7 @@ pub fn Grid(
                                     <button
                                         type="button"
                                         class="widget__resize"
-                                        aria-label="Resize"
+                                        aria-label=move || dash_text(lang(), DashText::Resize)
                                         on:click=move |_| {
                                             if let Some(i) = position.run(()) {
                                                 state.cycle_span(i);
