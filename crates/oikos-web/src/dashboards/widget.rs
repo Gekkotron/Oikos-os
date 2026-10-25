@@ -12,6 +12,7 @@ use crate::cards::light::LightCard;
 use crate::cards::sensor::SensorCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::house::House;
+use crate::i18n::{use_lang, widget_kind_word, widget_placeholder};
 
 /// Picks the card for a widget. Only the presence of what the widget points at is tracked, so
 /// the card mounts once the state snapshot lands (a dashboard opened by its address paints
@@ -29,7 +30,10 @@ pub fn WidgetView(widget: Widget) -> impl IntoView {
                 WidgetKind::WaterHeater => view! { <WaterHeaterCard entity=entity /> }.into_any(),
                 // Lock and Camera are not offered by the library: a labelled placeholder.
                 _ => {
-                    view! { <Unavailable label=format!("{:?}: {}", kind, entity_id) /> }.into_any()
+                    let lang = use_lang();
+                    let id = entity_id.clone();
+                    let label = Signal::derive(move || widget_placeholder(lang(), kind, &id));
+                    view! { <Unavailable label=label /> }.into_any()
                 }
             })
         }
@@ -85,7 +89,11 @@ pub fn WidgetView(widget: Widget) -> impl IntoView {
         (WidgetKind::EnergyStat, WidgetConfig::Energy { metric, title }) => {
             view! { <EnergyStatWidget metric=metric title=title /> }.into_any()
         }
-        (kind, _) => view! { <Unavailable label=format!("{:?}", kind) /> }.into_any(),
+        (kind, _) => {
+            let lang = use_lang();
+            let label = Signal::derive(move || widget_kind_word(lang(), kind).to_owned());
+            view! { <Unavailable label=label /> }.into_any()
+        }
     }
 }
 
@@ -117,11 +125,11 @@ fn entity_widget(
 }
 
 #[component]
-pub fn Unavailable(label: String) -> impl IntoView {
+pub fn Unavailable(#[prop(into)] label: Signal<String>) -> impl IntoView {
     view! {
         <div class="widget-unavailable">
             <span class="widget-unavailable-icon">"⚠"</span>
-            <span class="widget-unavailable-label">{label}</span>
+            <span class="widget-unavailable-label">{move || label.get()}</span>
         </div>
     }
 }

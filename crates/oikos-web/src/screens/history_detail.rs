@@ -12,8 +12,11 @@ use crate::components::history_chart::{Flavor, HistoryChart};
 use crate::energy::{energy_entities, energy_entity};
 use crate::format::{title_suffix, type_word, wrap_id};
 use crate::house::House;
+use crate::i18n::devices::availability_text;
+use crate::i18n::history::{HistoryText, history_text, range_chip};
+use crate::i18n::use_lang;
 use crate::nav::BackLink;
-use crate::screens::entity_sheet::{availability_class, availability_word};
+use crate::screens::entity_sheet::availability_class;
 
 /// Classify a unit as the counter flavour (energy totals: Wh/kWh/MWh) or the series flavour.
 pub fn flavor_for_unit(unit: Option<&str>) -> Flavor {
@@ -61,6 +64,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
     let params = use_params_map();
     let query = use_query_map();
     let navigate = use_navigate();
+    let lang = use_lang();
 
     let id = Memo::new(move |_| params.read().get("id").unwrap_or_default());
     let range = Memo::new(move |_| parse_range(query.read().get("range")));
@@ -95,7 +99,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
                     .map_or_else(|| e.area.clone(), |a| a.name.clone())
             });
             let availability = e.state.availability;
-            let title = match title_suffix(crate::i18n::Lang::En, &e) {
+            let title = match title_suffix(lang(), &e) {
                 Some(suffix) => format!("{} · {suffix}", e.name),
                 None => e.name.clone(),
             };
@@ -103,10 +107,10 @@ pub fn HistoryDetailScreen() -> impl IntoView {
                 <div class="sheet__titles">
                     <h1 class="sheet__title">{wrap_id(&title)}</h1>
                     <p class="sheet__subtitle">
-                        {area} " · " {type_word(crate::i18n::Lang::En, &e)} " · "
+                        {area} " · " {type_word(lang(), &e)} " · "
                         <span class=availability_class(availability)></span>
                         " "
-                        {availability_word(availability)}
+                        {availability_text(lang(), availability)}
                     </p>
                 </div>
             }
@@ -163,7 +167,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
                                             aria-pressed=move || (range.get() == r).to_string()
                                             on:click=move |_| on_range(r)
                                         >
-                                            {range_slug(r)}
+                                            {move || range_chip(lang(), r)}
                                         </button>
                                     }
                                 }).collect_view()}
@@ -181,7 +185,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
                 } else if loaded.get() {
                     view! {
                         <section class="sheet__panel history-detail__unknown">
-                            <p>"Unknown entity"</p>
+                            <p>{move || history_text(lang(), HistoryText::UnknownEntity)}</p>
                             <p class="sheet__subtitle">{move || wrap_id(&id.get())}</p>
                         </section>
                     }.into_any()

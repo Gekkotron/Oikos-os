@@ -4,6 +4,9 @@
 //! of March at 01:00 UTC → +02:00; last Sunday of October at 01:00 UTC → +01:00), so no new
 //! dependency is pulled into the wasm bundle.
 
+use crate::i18n::format as fmt;
+use crate::i18n::history::{HistoryText, history_text};
+use crate::i18n::{Lang, states};
 use oikos_api::HistoryRange;
 use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset, Weekday};
 
@@ -46,12 +49,12 @@ fn local(unix: i64) -> OffsetDateTime {
 /// `now` is always the final label at position `1.0`. On the day and month axes, whose ticks
 /// are instants, a tick closer to `now` than [`NOW_GAP`] is dropped so the two labels do not run
 /// into each other; week and year labels name whole slots and are kept.
-pub fn tick_labels(range: HistoryRange, now_secs: i64) -> Vec<(f64, String)> {
+pub fn tick_labels(lang: Lang, range: HistoryRange, now_secs: i64) -> Vec<(f64, String)> {
     let mut out = match range {
-        HistoryRange::Day => day_ticks(now_secs),
-        HistoryRange::Week => return week_ticks(now_secs),
-        HistoryRange::Month => month_ticks(now_secs),
-        HistoryRange::Year => return year_ticks(now_secs),
+        HistoryRange::Day => day_ticks(lang, now_secs),
+        HistoryRange::Week => return week_ticks(lang, now_secs),
+        HistoryRange::Month => month_ticks(lang, now_secs),
+        HistoryRange::Year => return year_ticks(lang, now_secs),
     };
     let last = out.len().saturating_sub(1);
     let mut i = 0;
@@ -66,7 +69,7 @@ pub fn tick_labels(range: HistoryRange, now_secs: i64) -> Vec<(f64, String)> {
 /// The smallest gap, as a fraction of the axis, between a tick and the final `now` label.
 const NOW_GAP: f64 = 0.12;
 
-fn day_ticks(now_secs: i64) -> Vec<(f64, String)> {
+fn day_ticks(lang: Lang, now_secs: i64) -> Vec<(f64, String)> {
     let start = now_secs - 86_400;
     let mut out: Vec<(f64, String)> = Vec::new();
     // Each candidate wall-clock hour at 00/06/12/18 in the window. Compute the offset at each
@@ -91,20 +94,20 @@ fn day_ticks(now_secs: i64) -> Vec<(f64, String)> {
         }
     }
     out.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-    out.push((1.0, "now".into()));
+    out.push((1.0, history_text(lang, HistoryText::Now).into()));
     out
 }
 
-fn week_ticks(now_secs: i64) -> Vec<(f64, String)> {
+fn week_ticks(lang: Lang, now_secs: i64) -> Vec<(f64, String)> {
     // One label per day in the 7-day window. The last tick is "now".
     let mut out = Vec::new();
     for i in 0..7 {
         let t = now_secs - (6 - i) as i64 * 86_400;
         let pos = i as f64 / 6.0;
         let dt = local(t);
-        let name = short_weekday(dt.weekday());
+        let name = fmt::weekday_short(lang, chrono_weekday(dt.weekday()));
         if i == 6 {
-            out.push((1.0, "now".into()));
+            out.push((1.0, history_text(lang, HistoryText::Now).into()));
         } else {
             out.push((pos, name.to_owned()));
         }
@@ -112,7 +115,7 @@ fn week_ticks(now_secs: i64) -> Vec<(f64, String)> {
     out
 }
 
-fn month_ticks(now_secs: i64) -> Vec<(f64, String)> {
+fn month_ticks(lang: Lang, now_secs: i64) -> Vec<(f64, String)> {
     // Fixed day-of-month labels within the 30-day window.
     let start = now_secs - 30 * 86_400;
     let mut out = Vec::new();
@@ -135,11 +138,11 @@ fn month_ticks(now_secs: i64) -> Vec<(f64, String)> {
             }
         }
     }
-    out.push((1.0, "now".into()));
+    out.push((1.0, history_text(lang, HistoryText::Now).into()));
     out
 }
 
-fn year_ticks(now_secs: i64) -> Vec<(f64, String)> {
+fn year_ticks(lang: Lang, now_secs: i64) -> Vec<(f64, String)> {
     // Twelve month labels ending at the month that contains `now`, walking back one month per
     // slot. Earlier code labelled every slot Jan..Dec regardless of the window, so October's
     // data was read as if it were January (reviewer finding #7).
@@ -149,56 +152,36 @@ fn year_ticks(now_secs: i64) -> Vec<(f64, String)> {
         let m_num = ((end_month - 12 + i).rem_euclid(12) + 1) as u8;
         let month = Month::try_from(m_num).unwrap_or(Month::January);
         let pos = (i as f64 + 0.5) / 12.0;
-        out.push((pos, short_month(month).to_owned()));
+        out.push((pos, fmt::month_short(lang, month as u32).to_owned()));
     }
-    out.push((1.0, "now".into()));
+    out.push((1.0, history_text(lang, HistoryText::Now).into()));
     out
 }
 
-fn short_weekday(w: Weekday) -> &'static str {
-    match w {
-        Weekday::Monday => "Mon",
-        Weekday::Tuesday => "Tue",
-        Weekday::Wednesday => "Wed",
-        Weekday::Thursday => "Thu",
-        Weekday::Friday => "Fri",
-        Weekday::Saturday => "Sat",
-        Weekday::Sunday => "Sun",
-    }
+/// The same weekday for `i18n::format`.
+fn chrono_weekday(w: Weekday) -> chrono::Weekday {
+    chrono::Weekday::try_from(w.number_days_from_monday()).unwrap_or(chrono::Weekday::Mon)
 }
 
-fn short_month(m: Month) -> &'static str {
-    match m {
-        Month::January => "Jan",
-        Month::February => "Feb",
-        Month::March => "Mar",
-        Month::April => "Apr",
-        Month::May => "May",
-        Month::June => "Jun",
-        Month::July => "Jul",
-        Month::August => "Aug",
-        Month::September => "Sep",
-        Month::October => "Oct",
-        Month::November => "Nov",
-        Month::December => "Dec",
-    }
-}
-
-/// Local time for a tooltip. Relative on 24h ("14:20"), absolute from 7d up ("Tue 06 Oct 14:20"
-/// through 30d, "Oct 2026" for 1y).
-pub fn tooltip_time(range: HistoryRange, t_secs: i64, _now_secs: i64) -> String {
+/// Local time for a tooltip. Relative on 24h ("14:20"), absolute from 7d up ("Tue 06 Oct 14:20" /
+/// "Mar. 06 oct. 14:20" through 30d, "Oct 2026" / "oct. 2026" for 1y). 24-hour clock in both.
+pub fn tooltip_time(lang: Lang, range: HistoryRange, t_secs: i64, _now_secs: i64) -> String {
     let dt = local(t_secs);
     match range {
         HistoryRange::Day => format!("{:02}:{:02}", dt.hour(), dt.minute()),
         HistoryRange::Week | HistoryRange::Month => format!(
             "{} {:02} {} {:02}:{:02}",
-            short_weekday(dt.weekday()),
+            fmt::weekday_short(lang, chrono_weekday(dt.weekday())),
             dt.day(),
-            short_month(dt.month()),
+            fmt::month_short(lang, dt.month() as u32),
             dt.hour(),
             dt.minute(),
         ),
-        HistoryRange::Year => format!("{} {}", short_month(dt.month()), dt.year()),
+        HistoryRange::Year => format!(
+            "{} {}",
+            fmt::month_short(lang, dt.month() as u32),
+            dt.year()
+        ),
     }
 }
 
@@ -206,11 +189,20 @@ pub fn tooltip_time(range: HistoryRange, t_secs: i64, _now_secs: i64) -> String 
 /// when the entity is a numeric sensor and should keep its numeric labels.
 ///
 /// `kind` is the debug-rendered variant of `oikos_core::model::Kind` (e.g. `"OnOff"`,
-/// `"Light"`, `"BinarySensor"`, `"Cover"`). Case-sensitive.
-pub fn state_axis_labels(_unit: Option<&str>, kind: &str) -> Option<(String, String)> {
-    match kind {
-        "OnOff" | "Light" | "Switch" | "BinarySensor" => Some(("off".into(), "on".into())),
-        "Cover" => Some(("0".into(), "100".into())),
+/// `"Light"`, `"BinarySensor"`, `"Cover"`). Case-insensitive.
+pub fn state_axis_labels(lang: Lang, _unit: Option<&str>, kind: &str) -> Option<(String, String)> {
+    // Lower-case keys: the kind is a Debug name, not text.
+    match kind.to_ascii_lowercase().as_str() {
+        // Lower case, as the axis always was: "off" / "on", "éteint" / "allumé".
+        "light" => Some((
+            states::on_off(lang, true, false).to_lowercase(),
+            states::on_off(lang, true, true).to_lowercase(),
+        )),
+        "onoff" | "switch" | "binarysensor" => Some((
+            states::on_off(lang, false, false).to_lowercase(),
+            states::on_off(lang, false, true).to_lowercase(),
+        )),
+        "cover" => Some(("0".into(), "100".into())),
         _ => None,
     }
 }
@@ -218,6 +210,7 @@ pub fn state_axis_labels(_unit: Option<&str>, kind: &str) -> Option<(String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::Lang;
     use oikos_api::HistoryRange;
 
     #[test]
@@ -235,7 +228,7 @@ mod tests {
         // Every quarter hour of a day, so some "now" falls just after a 6-hourly tick.
         for step in 0..96 {
             let now = 1_792_497_600 + step * 900;
-            let out = tick_labels(HistoryRange::Day, now);
+            let out = tick_labels(Lang::En, HistoryRange::Day, now);
             let (last, rest) = out.split_last().unwrap();
             assert_eq!(last.1, "now");
             assert!(rest.iter().all(|(p, _)| *p <= 1.0 - NOW_GAP), "{out:?}");
@@ -245,10 +238,11 @@ mod tests {
     #[test]
     fn tick_labels_for_24h_uses_6h_steps() {
         // 17:00 on 2026-10-20 Europe/Paris: every 6-hourly tick is clear of "now".
-        let labels: Vec<String> = tick_labels(HistoryRange::Day, 1_792_497_600 + 3 * 3_600)
-            .into_iter()
-            .map(|(_, s)| s)
-            .collect();
+        let labels: Vec<String> =
+            tick_labels(Lang::En, HistoryRange::Day, 1_792_497_600 + 3 * 3_600)
+                .into_iter()
+                .map(|(_, s)| s)
+                .collect();
         assert!(labels.iter().any(|l| l == "00:00"));
         assert!(labels.iter().any(|l| l == "06:00"));
         assert!(labels.iter().any(|l| l == "12:00"));
@@ -258,7 +252,7 @@ mod tests {
 
     #[test]
     fn tick_labels_for_7d_has_7_entries_ending_with_now() {
-        let out = tick_labels(HistoryRange::Week, 1_792_497_600);
+        let out = tick_labels(Lang::En, HistoryRange::Week, 1_792_497_600);
         assert_eq!(out.len(), 7);
         assert_eq!(out.last().unwrap().1, "now");
     }
@@ -266,7 +260,7 @@ mod tests {
     #[test]
     fn tick_labels_for_1y_end_at_current_month_not_december() {
         // 2026-10-20 12:00 UTC → October in Europe/Paris. Reviewer finding #7.
-        let out = tick_labels(HistoryRange::Year, 1_792_497_600);
+        let out = tick_labels(Lang::En, HistoryRange::Year, 1_792_497_600);
         // Last entry is "now", penultimate is the current month.
         assert_eq!(out.last().unwrap().1, "now");
         assert_eq!(out[out.len() - 2].1, "Oct");
@@ -278,7 +272,7 @@ mod tests {
     fn day_ticks_still_produce_four_hour_labels_on_a_dst_day() {
         // 2026-10-26 10:00 UTC — the day after the autumn DST transition (Oct 25).
         let now = 1_792_015_200 + 86_400;
-        let out = tick_labels(HistoryRange::Day, now);
+        let out = tick_labels(Lang::En, HistoryRange::Day, now);
         let hour_labels: Vec<&String> = out
             .iter()
             .map(|(_, s)| s)
@@ -296,11 +290,11 @@ mod tests {
     fn tooltip_time_is_relative_on_24h_and_absolute_from_7d() {
         let now = 1_792_497_600;
         let t = now - 3_600;
-        let d = tooltip_time(HistoryRange::Day, t, now);
+        let d = tooltip_time(Lang::En, HistoryRange::Day, t, now);
         assert!(d.len() == 5 && d.chars().nth(2) == Some(':'));
-        let w = tooltip_time(HistoryRange::Week, t, now);
+        let w = tooltip_time(Lang::En, HistoryRange::Week, t, now);
         assert!(w.len() > 10 && w.contains(':'));
-        let y = tooltip_time(HistoryRange::Year, t, now);
+        let y = tooltip_time(Lang::En, HistoryRange::Year, t, now);
         // Year tooltip looks like "Oct 2026"
         assert!(y.contains("20"));
         assert!(!y.contains(':'));
@@ -309,21 +303,68 @@ mod tests {
     #[test]
     fn state_axis_labels_pair_each_kind() {
         assert_eq!(
-            state_axis_labels(None, "OnOff"),
+            state_axis_labels(Lang::En, None, "OnOff"),
             Some(("off".into(), "on".into()))
         );
         assert_eq!(
-            state_axis_labels(None, "Light"),
+            state_axis_labels(Lang::En, None, "Light"),
             Some(("off".into(), "on".into()))
         );
         assert_eq!(
-            state_axis_labels(None, "BinarySensor"),
+            state_axis_labels(Lang::En, None, "BinarySensor"),
             Some(("off".into(), "on".into()))
         );
         assert_eq!(
-            state_axis_labels(None, "Cover"),
+            state_axis_labels(Lang::En, None, "Cover"),
             Some(("0".into(), "100".into()))
         );
-        assert_eq!(state_axis_labels(Some("°C"), "Sensor"), None);
+        assert_eq!(state_axis_labels(Lang::En, Some("°C"), "Sensor"), None);
+    }
+
+    #[test]
+    fn the_axis_speaks_french() {
+        let now = 1_792_497_600;
+        let day = tick_labels(Lang::Fr, HistoryRange::Day, now);
+        assert_eq!(day.last().unwrap().1, "maintenant");
+        let week = tick_labels(Lang::Fr, HistoryRange::Week, now);
+        assert_eq!(week.last().unwrap().1, "maintenant");
+        // 2026-10-20 is a Tuesday, six days before the last tick sits a Wednesday.
+        assert_eq!(week[0].1, "Mer.");
+        let month = tick_labels(Lang::Fr, HistoryRange::Month, now);
+        assert_eq!(month.last().unwrap().1, "maintenant");
+        let year = tick_labels(Lang::Fr, HistoryRange::Year, now);
+        assert_eq!(year[year.len() - 2].1, "oct.");
+        assert_eq!(year[0].1, "nov.");
+    }
+
+    #[test]
+    fn the_tooltip_speaks_french() {
+        let now = 1_792_497_600;
+        let t = now - 3_600;
+        assert_eq!(tooltip_time(Lang::Fr, HistoryRange::Day, t, now).len(), 5);
+        assert_eq!(
+            tooltip_time(Lang::Fr, HistoryRange::Week, t, now),
+            "Mar. 20 oct. 13:00"
+        );
+        assert_eq!(
+            tooltip_time(Lang::En, HistoryRange::Week, t, now),
+            "Tue 20 Oct 13:00"
+        );
+        assert_eq!(
+            tooltip_time(Lang::Fr, HistoryRange::Year, t, now),
+            "oct. 2026"
+        );
+    }
+
+    #[test]
+    fn the_state_axis_speaks_french() {
+        assert_eq!(
+            state_axis_labels(Lang::Fr, None, "Light"),
+            Some(("éteint".into(), "allumé".into()))
+        );
+        assert_eq!(
+            state_axis_labels(Lang::Fr, None, "Switch"),
+            Some(("désactivé".into(), "activé".into()))
+        );
     }
 }

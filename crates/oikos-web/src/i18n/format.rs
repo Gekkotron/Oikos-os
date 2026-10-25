@@ -45,6 +45,32 @@ pub fn decimal(lang: Lang, v: f64, decimals: usize) -> String {
     }
 }
 
+/// Like [`decimal`], with thousands grouped from 1000 up: "1 234,5" (U+202F) / "1 234.5" (U+2009).
+pub fn decimal_grouped(lang: Lang, v: f64, decimals: usize) -> String {
+    let plain = decimal(lang, v, decimals);
+    let sep = match lang {
+        Lang::Fr => '\u{202F}',
+        Lang::En => '\u{2009}',
+    };
+    let (sign, rest) = match plain.strip_prefix('-') {
+        Some(r) => ("-", r),
+        None => ("", plain.as_str()),
+    };
+    let (int, frac) = rest.split_at(rest.find(['.', ',']).unwrap_or(rest.len()));
+    if int.len() <= 3 || !int.bytes().all(|b| b.is_ascii_digit()) {
+        return plain;
+    }
+    let mut out = String::from(sign);
+    for (i, c) in int.chars().enumerate() {
+        if i > 0 && (int.len() - i) % 3 == 0 {
+            out.push(sep);
+        }
+        out.push(c);
+    }
+    out.push_str(frac);
+    out
+}
+
 /// `value` then a no-break space and `unit`; `value` alone without a unit or when it is "—".
 pub fn with_unit(value: String, unit: Option<&str>) -> String {
     match unit {
@@ -258,6 +284,16 @@ pub fn local_date_time(unix: u64) -> NaiveDateTime {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn grouped_decimals_group_thousands_in_both_languages() {
+        use super::*;
+        assert_eq!(decimal_grouped(Lang::Fr, 1234.5, 1), "1\u{202F}234,5");
+        assert_eq!(decimal_grouped(Lang::En, 1234.5, 1), "1\u{2009}234.5");
+        assert_eq!(decimal_grouped(Lang::Fr, -4321.74, 1), "-4\u{202F}321,7");
+        assert_eq!(decimal_grouped(Lang::Fr, 999.9, 1), "999,9");
+        assert_eq!(decimal_grouped(Lang::Fr, 3.0, 1), "3,0");
+    }
+
     #[test]
     fn input_numbers_keep_every_digit() {
         use super::{Lang, input_number, parse_decimal};

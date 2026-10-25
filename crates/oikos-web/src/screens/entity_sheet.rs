@@ -20,7 +20,7 @@ use crate::i18n::devices::{
     DeviceText, availability_text, key_signal, text_signal, use_device_text,
 };
 use crate::i18n::format::{date_time, local_date_time};
-use crate::i18n::{Key, Lang, use_lang};
+use crate::i18n::{Key, use_lang};
 use crate::icons::entity_icon;
 use crate::nav::BackLink;
 use crate::override_editor::OverrideEditor;
@@ -33,11 +33,6 @@ pub(crate) fn availability_class(availability: Availability) -> &'static str {
         Availability::Offline => "dot dot--offline",
         Availability::Unknown => "dot dot--unknown",
     }
-}
-
-/// The availability in English, for the screens that are not translated yet (Settings, history).
-pub(crate) fn availability_word(availability: Availability) -> &'static str {
-    availability_text(Lang::En, availability)
 }
 
 fn pretty<T: serde::Serialize>(value: &T) -> String {
