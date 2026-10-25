@@ -93,30 +93,9 @@ fn PickerRow(
     on_pick: Callback<Option<String>>,
 ) -> impl IntoView {
     let house = expect_context::<House>();
-    let lang = use_lang();
     let t = use_picker_text();
-    let now = use_context::<Now>();
     let id = row.id.clone();
     let dom = dom_id(&prefix, Some(&id));
-    let value = Memo::new({
-        let id = id.clone();
-        move |_| {
-            let lang = lang();
-            house.entities.with(|m| {
-                m.get(&id)
-                    .map(|e| display_value(lang, &e.state, e.unit.as_deref()))
-                    .unwrap_or_default()
-            })
-        }
-    });
-    let stamp = Memo::new({
-        let id = id.clone();
-        move |_| {
-            house
-                .entities
-                .with(|m| m.get(&id).and_then(|e| e.state.last_update))
-        }
-    });
     let off = Memo::new({
         let id = id.clone();
         move |_| {
@@ -130,12 +109,6 @@ fn PickerRow(
         let id = id.clone();
         move |_| current.with(|c| c.contains(&id))
     });
-    let age = move || {
-        stamp.get().map(|at| {
-            let n = now.map_or(at, |n| n.0.get());
-            relative_time(lang(), at, n)
-        })
-    };
     let is_active = {
         let dom = dom.clone();
         move || active.with(|a| a.as_deref() == Some(dom.as_str()))
@@ -182,11 +155,44 @@ fn PickerRow(
                     }}
                 </span>
             </span>
-            <span class="picker__row-side">
-                <span class="picker__row-value">{move || value.get()}</span>
-                <span class="picker__row-time">{age}</span>
-            </span>
+            <RowSide id=id />
         </div>
+    }
+}
+
+/// The value and age of entity `id`, read by id so a state echo touches only these two spans.
+#[component]
+pub(super) fn RowSide(id: String) -> impl IntoView {
+    let house = expect_context::<House>();
+    let lang = use_lang();
+    let now = use_context::<Now>();
+    let value = Memo::new({
+        let id = id.clone();
+        move |_| {
+            let lang = lang();
+            house.entities.with(|m| {
+                m.get(&id)
+                    .map(|e| display_value(lang, &e.state, e.unit.as_deref()))
+                    .unwrap_or_default()
+            })
+        }
+    });
+    let stamp = Memo::new(move |_| {
+        house
+            .entities
+            .with(|m| m.get(&id).and_then(|e| e.state.last_update))
+    });
+    let age = move || {
+        stamp.get().map(|at| {
+            let n = now.map_or(at, |n| n.0.get());
+            relative_time(lang(), at, n)
+        })
+    };
+    view! {
+        <span class="picker__row-side">
+            <span class="picker__row-value">{move || value.get()}</span>
+            <span class="picker__row-time">{age}</span>
+        </span>
     }
 }
 

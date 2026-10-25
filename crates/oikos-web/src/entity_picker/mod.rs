@@ -1,6 +1,7 @@
 //! The searchable entity picker: a pure model (what is listed, grouped and capped), the
 //! predicates fields use to say what they accept, and the texts.
 
+pub mod fields;
 pub mod model;
 pub mod needs;
 pub mod view;
@@ -21,4 +22,5 @@ pub struct Suggest {
     pub keep: Keep,
 }
 
+pub use fields::{EntityAddButton, EntityPickField, EntityPickListField};
 pub use view::{EntityPicker, Mode, PickerBody, Pinned};

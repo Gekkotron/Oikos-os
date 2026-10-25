@@ -24,6 +24,8 @@ pub enum PickerText {
     /// Marks a chosen id the house lacks, after the raw id.
     Missing,
     Close,
+    /// A list chip's remove label.
+    Remove,
     /// The trigger's text when nothing is chosen.
     Choose,
     /// Suggested-chip labels.
@@ -49,6 +51,7 @@ pub fn picker_text(lang: Lang, k: PickerText) -> &'static str {
         T::Unavailable => ("Unavailable", "Indisponible"),
         T::Missing => ("missing", "introuvable"),
         T::Close => ("Close", "Fermer"),
+        T::Remove => ("Remove", "Retirer"),
         T::Choose => ("Choose an entity", "Choisir une entité"),
         T::Thermometers => ("Thermometers", "Thermomètres"),
         T::Presence => ("Presence", "Présence"),
@@ -100,6 +103,7 @@ mod tests {
             T::Unavailable,
             T::Missing,
             T::Close,
+            T::Remove,
             T::Choose,
             T::Thermometers,
             T::Presence,

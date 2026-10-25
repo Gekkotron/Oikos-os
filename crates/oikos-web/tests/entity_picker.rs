@@ -9,9 +9,9 @@ use leptos::task::tick;
 use oikos_api::{AreaView, EntityView, WsEvent};
 use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride};
 use oikos_web::components::now::Now;
-use oikos_web::entity_picker::Suggest;
 use oikos_web::entity_picker::needs::{is_thermometer, keep};
 use oikos_web::entity_picker::view::{EntityPicker, Mode, Pinned};
+use oikos_web::entity_picker::{EntityPickField, EntityPickListField, Suggest};
 use oikos_web::house::House;
 use oikos_web::i18n::Lang;
 use oikos_web::i18n::picker::PickerText;
@@ -439,4 +439,122 @@ async fn two_pickers_have_distinct_ids() {
     assert_eq!(controls, list(&one));
     one.finish().await;
     two.finish().await;
+}
+
+fn fixture_house() -> House {
+    let house = House::new();
+    for e in [
+        entity("a", "Mode", "Plug A", Kind::Switch, "kitchen"),
+        entity("b", "Mode", "Plug B", Kind::Switch, "kitchen"),
+    ] {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    house.apply(WsEvent::AreasChanged {
+        areas: vec![area("kitchen", "Kitchen")],
+    });
+    house
+}
+
+fn mount_view<V: IntoView + 'static>(
+    house: House,
+    f: impl FnOnce() -> V + 'static,
+) -> web_sys::Element {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(Now(RwSignal::new(1_700_000_060)));
+        f()
+    });
+    mounted.forget();
+    host
+}
+
+fn field_text(value: Option<&'static str>, pinned: bool) -> String {
+    let host = mount_view(fixture_house(), move || {
+        let pinned = pinned.then(|| Signal::derive(|| "Nothing".to_string()));
+        view! {
+            <EntityPickField
+                label="Plug"
+                value=Signal::derive(move || value.map(str::to_owned))
+                on_change=Callback::new(|_| {})
+                pinned=pinned
+            />
+        }
+    });
+    host.query_selector("button.picker-field")
+        .unwrap()
+        .expect("field button")
+        .text_content()
+        .unwrap()
+}
+
+#[wasm_bindgen_test]
+async fn closed_field_shows_row_with_device_and_room() {
+    let text = field_text(Some("a"), false);
+    tick().await;
+    for want in ["Mode", "Plug A", "Kitchen"] {
+        assert!(text.contains(want), "{want} missing from {text:?}");
+    }
+}
+
+#[wasm_bindgen_test]
+async fn missing_value_shows_raw_id() {
+    let text = field_text(Some("gone"), false);
+    assert!(text.contains("gone"), "{text:?}");
+    assert!(text.contains("missing"), "{text:?}");
+}
+
+#[wasm_bindgen_test]
+async fn pinned_text_when_none() {
+    assert!(field_text(None, true).contains("Nothing"));
+    assert!(field_text(None, false).contains("Choose an entity"));
+}
+
+#[wasm_bindgen_test]
+async fn list_field_ticks_add_and_remove() {
+    let value = RwSignal::new(Vec::<String>::new());
+    let seen = RwSignal::new(Vec::<Vec<String>>::new());
+    let host = mount_view(fixture_house(), move || {
+        view! {
+            <EntityPickListField
+                label="Plugs"
+                value=value
+                on_change=Callback::new(move |v: Vec<String>| {
+                    seen.update(|s| s.push(v.clone()));
+                    value.set(v);
+                })
+            />
+        }
+    });
+    tick().await;
+    let add: web_sys::HtmlElement = host
+        .query_selector("button.chip--add")
+        .unwrap()
+        .expect("add button")
+        .unchecked_into();
+    add.click();
+    tick().await;
+    tick().await;
+    let row = |id: &str| -> web_sys::HtmlElement {
+        host.query_selector(&format!("[id$='-opt-{id}']"))
+            .unwrap()
+            .unwrap_or_else(|| panic!("no row {id}"))
+            .unchecked_into()
+    };
+    for id in ["a", "b", "a"] {
+        row(id).click();
+        tick().await;
+    }
+    let s = |ids: &[&str]| ids.iter().map(|i| i.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        seen.get_untracked(),
+        vec![s(&["a"]), s(&["a", "b"]), s(&["b"])]
+    );
+    let chips = host
+        .query_selector_all(".picker-chips .picker-chip")
+        .unwrap();
+    assert_eq!(chips.length(), 1, "one chip left");
 }

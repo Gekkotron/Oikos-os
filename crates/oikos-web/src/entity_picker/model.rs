@@ -110,6 +110,22 @@ fn area_key(area: &str) -> &str {
     }
 }
 
+/// The row for `e`: its title, the device when that adds something, its room and icon.
+pub fn row_of(lang: Lang, e: &EntityView, room: Option<String>) -> Row {
+    let title = entity_title(lang, e);
+    let device = e
+        .device_name
+        .clone()
+        .filter(|d| !d.is_empty() && *d != title);
+    Row {
+        id: e.id.clone(),
+        title,
+        device,
+        room,
+        icon: entity_icon(e),
+    }
+}
+
 /// The picker's list for `f`: sections in the hub's room order, each sorted by title, unknown
 /// rooms next and "No room" last.
 pub fn listing(
@@ -139,24 +155,11 @@ pub fn listing(
         if !(candidate || chosen) || !matches(lang, e, room.as_deref(), &needle) {
             continue;
         }
-        let title = entity_title(lang, e);
-        let device = e
-            .device_name
-            .clone()
-            .filter(|d| !d.is_empty() && *d != title);
+        let row = row_of(lang, e, room);
         by_area
             .entry(area_key(&e.area).to_owned())
             .or_default()
-            .push((
-                fold_accents(&title),
-                Row {
-                    id: e.id.clone(),
-                    title,
-                    device,
-                    room,
-                    icon: entity_icon(e),
-                },
-            ));
+            .push((fold_accents(&row.title), row));
     }
     for rows in by_area.values_mut() {
         rows.sort_by(|a, b| (&a.0, &a.1.id).cmp(&(&b.0, &b.1.id)));

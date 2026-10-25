@@ -293,3 +293,61 @@ dialog.picker::backdrop {
     display: block;
   }
 }
+
+.picker-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid var(--chip-border);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: var(--type-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-field:hover {
+  background: var(--raised);
+}
+
+.picker-field:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 0;
+}
+
+.picker-field--compact {
+  min-height: 36px;
+}
+
+.picker-field__label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+.picker-field__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-field__chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.picker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.picker-chip .picker__row-sub {
+  overflow: visible;
+  margin-left: 2px;
+}
