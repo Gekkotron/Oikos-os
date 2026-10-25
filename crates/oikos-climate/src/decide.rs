@@ -347,7 +347,7 @@ fn latched(inp: &ZoneInputs, cause: SafetyCause) -> bool {
     inp.previous_cause == Some(cause)
 }
 
-/// The stale-reading row: no usable reading, so never let a schedule, override or away setpoint
+/// The stale-reading row: no usable reading, so never let a schedule, override or eco setpoint
 /// through in an active zone.
 fn stale(inp: &ZoneInputs) -> Option<Decision> {
     let what = match inp.reading {

@@ -125,6 +125,8 @@ The climate engine is in beta. These nine tools answer `climate disabled` while 
 | `reject_climate_proposal` | Rejects the pending proposal; the same proposal is not made again for a week. Args: `zone`. |
 | `set_climate_override` | Holds a temperature and/or a mode on a zone. Args: `zone`, `setpoint` and/or `mode`, and exactly one of `minutes` and `until` (unix seconds). Safety still acts. |
 | `clear_climate_override` | Removes every override of a zone. Args: `zone`. |
+| `set_climate_eco` | Puts a zone in eco until a time: the house eco setpoint (never above its schedule) and eco actions. Args: `zone`, `until` (unix seconds). Refused on an `off` zone or a past `until`. |
+| `clear_climate_eco` | Ends a zone's eco. Args: `zone`. |
 | `learn_climate_zone` | Learns a zone's rules from its history now and returns where the learner stands. Args: `zone`. |
 
 ## Ambiances
@@ -149,4 +151,4 @@ The native alarm (optional, off by default). Its settings are a whole document a
 
 ## Count
 
-Twenty-four tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs`, nine in `climate_tools.rs`, four in `ambiance_tools.rs` and two in `alarm_tools.rs`: 24 + 6 + 9 + 4 + 2 = 45.
+Twenty-four tools live in `tools.rs` (house, overrides, command, groups, virtual, history, notifications, weather, solar, home settings), six in `flow_tools.rs`, eleven in `climate_tools.rs`, four in `ambiance_tools.rs` and two in `alarm_tools.rs`: 24 + 6 + 11 + 4 + 2 = 47.
