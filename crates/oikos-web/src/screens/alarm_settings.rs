@@ -21,7 +21,7 @@ use crate::entity_picker::EntityAddButton;
 use crate::entity_picker::needs::{is_remote, is_siren, is_tracker, keep};
 use crate::format::entity_title;
 use crate::house::House;
-use crate::i18n::{AlarmText, Lang, alarm_text, use_lang};
+use crate::i18n::{AlarmText, Lang, alarm_text, delayed_with, use_lang};
 
 /// What `device_class` says about a binary sensor the alarm can watch.
 fn sensor_kind_of(device_class: Option<&str>) -> Option<SensorKind> {
@@ -432,6 +432,10 @@ fn SensorsSection(draft: Draft, house: House) -> impl IntoView {
                                                 class="chip segmented__option"
                                                 class:chip--selected=on
                                                 aria-pressed=move || on().to_string()
+                                                title=move || {
+                                                    (value == Entry::Delayed)
+                                                        .then(|| t(AlarmText::DelayedHint))
+                                                }
                                                 on:click=move |_| {
                                                     draft
                                                         .update(|d| {
@@ -441,7 +445,15 @@ fn SensorsSection(draft: Draft, house: House) -> impl IntoView {
                                                         });
                                                 }
                                             >
-                                                {move || t(word)}
+                                                {move || match value {
+                                                    Entry::Delayed => {
+                                                        delayed_with(
+                                                            lang(),
+                                                            draft.with(|d| d.entry_delay_s),
+                                                        )
+                                                    }
+                                                    _ => t(word).to_owned(),
+                                                }}
                                             </button>
                                         }
                                     };

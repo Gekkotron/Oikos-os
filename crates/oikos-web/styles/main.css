@@ -1907,9 +1907,7 @@ a.chip {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 720px;
   min-width: 0;
-  margin: 0 auto;
 }
 
 .sheet__header {
@@ -1934,19 +1932,28 @@ a.chip {
   text-decoration: none;
 }
 
+/* A quiet text link: the hit area stays touch-sized, only the hover shows a pill. */
 .sheet__back {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  min-width: var(--touch-min);
-  min-height: var(--touch-min);
-  padding: 0 12px;
-  border: 1px solid var(--chip-border);
+  min-width: 40px;
+  min-height: 40px;
+  margin-left: -10px;
+  padding: 0 10px;
   border-radius: var(--radius-nav);
-  color: inherit;
+  color: var(--muted);
   font: var(--type-label);
   text-decoration: none;
+  transition:
+    background var(--motion-short) var(--ease),
+    color var(--motion-short) var(--ease);
+}
+
+.sheet__back:hover {
+  background: color-mix(in srgb, currentcolor 10%, transparent);
+  color: var(--ink);
 }
 
 .sheet__back:focus-visible {
@@ -2298,7 +2305,6 @@ p.override__hint {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 960px;
   min-width: 0;
   margin: 0 auto;
 }
@@ -7547,6 +7553,17 @@ html:has(.flow-canvas-screen) {
   width: auto;
   padding: 0 16px;
   align-self: flex-end;
+}
+
+/* The entry choice is a small inline toggle, not two full-height pills. */
+.alarm-row .segmented {
+  gap: 4px;
+}
+
+.alarm-row .segmented__option {
+  flex: none;
+  min-height: 32px;
+  padding: 0 12px;
 }
 
 .alarm-row__modes {
