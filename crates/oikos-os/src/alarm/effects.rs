@@ -1,5 +1,6 @@
 //! What the machine asks the hub to do: ring and silence the sirens, chirp, raise and resolve
-//! the push alerts, and warn about a watched sensor that went offline.
+//! the push alerts, tell the phones it armed or disarmed, and warn about a watched sensor that
+//! went offline.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -7,7 +8,7 @@ use std::time::Duration;
 
 use futures_util::future::join_all;
 use oikos_alarm::doc::{ArmMode, MqttSiren, SensorKind, Siren};
-use oikos_alarm::machine::Effect;
+use oikos_alarm::machine::{Effect, Source};
 use oikos_core::command::Publish;
 use oikos_core::model::Command;
 use serde_json::{Value, json};
@@ -45,6 +46,32 @@ fn mode_word(mode: ArmMode) -> &'static str {
     }
 }
 
+/// The "armed" push text: the mode, who armed it, then any opening left open (`open` is their
+/// names, or empty).
+fn armed_body(mode: ArmMode, source: Option<Source>, open: &str) -> String {
+    let by = match source {
+        Some(Source::Presence) => " (everyone left)",
+        Some(Source::Remote) => " by remote",
+        Some(Source::Command | Source::Sos) | None => "",
+    };
+    let armed = format!("Armed {}{by}", mode_word(mode));
+    if open.is_empty() {
+        armed
+    } else {
+        format!("{armed}. {open} open, watched for closing")
+    }
+}
+
+/// The "disarmed" push text, with who disarmed it.
+fn disarmed_body(source: Source) -> String {
+    let by = match source {
+        Source::Presence => " (someone came home)",
+        Source::Remote => " by remote",
+        Source::Command | Source::Sos => "",
+    };
+    format!("Disarmed{by}")
+}
+
 impl Hub {
     /// What the machine asked for, in order. A failing siren is collected, never fatal: the
     /// others still ring and the failure goes into the trigger alert of the same batch.
@@ -64,7 +91,13 @@ impl Hub {
                     self.alarm_raise(&body);
                 }
                 Effect::ResolveAlerts => self.alarm_resolve_alerts(),
-                Effect::OpenAtArm(open) => self.alarm_open_at_arm(&open),
+                Effect::Armed { mode, source, open } => {
+                    let body = armed_body(mode, source, &self.alarm_names(&open));
+                    self.alarm_state_push("armed", &body);
+                }
+                Effect::Disarmed { source } => {
+                    self.alarm_state_push("disarmed", &disarmed_body(source));
+                }
             }
         }
     }
@@ -301,22 +334,22 @@ impl Hub {
         }
     }
 
-    /// A quiet note that the alarm armed with sensors open.
-    fn alarm_open_at_arm(&self, open: &[String]) {
-        let mode = lock(&self.alarm.runtime).mode().map_or("", mode_word);
+    /// An info push, with sound, that the alarm armed or disarmed. Each one gets its own id, so
+    /// the alerts list keeps them as a log.
+    fn alarm_state_push(&self, kind: &str, body: &str) {
         let now = self.alarm_now();
+        let n = self.alarm.alert_seq.fetch_add(1, Ordering::SeqCst);
         let payload = json!({
             "v": 1,
-            "id": format!("{ALERT_PREFIX}open-{now}"),
+            "id": format!("{ALERT_PREFIX}{kind}-{now}-{n}"),
             "title": "Alarm",
-            "body": format!("Armed {mode}. {} open, watched for closing", self.alarm_names(open)),
+            "body": body,
             "channel": "alarm",
             "severity": "info",
-            "silent": true,
             "entity_id": ALARM_ENTITY_ID,
         });
         if let Err(rejected) = self.notify(SOURCE, &payload) {
-            tracing::warn!(reason = %rejected.reason, "alarm note refused");
+            tracing::warn!(reason = %rejected.reason, "alarm {kind} push refused");
         }
     }
 
@@ -366,5 +399,37 @@ impl Hub {
             };
             hub.alarm_event(ev, hub.alarm_now()).await;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn armed_push_names_mode_source_and_open_openings() {
+        assert_eq!(
+            armed_body(ArmMode::Night, Some(Source::Command), ""),
+            "Armed night"
+        );
+        assert_eq!(
+            armed_body(ArmMode::Away, Some(Source::Presence), ""),
+            "Armed away (everyone left)"
+        );
+        assert_eq!(
+            armed_body(ArmMode::Home, Some(Source::Remote), "Office window"),
+            "Armed home by remote. Office window open, watched for closing"
+        );
+        assert_eq!(armed_body(ArmMode::Away, None, ""), "Armed away");
+    }
+
+    #[test]
+    fn disarmed_push_names_the_source() {
+        assert_eq!(disarmed_body(Source::Command), "Disarmed");
+        assert_eq!(
+            disarmed_body(Source::Presence),
+            "Disarmed (someone came home)"
+        );
+        assert_eq!(disarmed_body(Source::Remote), "Disarmed by remote");
     }
 }

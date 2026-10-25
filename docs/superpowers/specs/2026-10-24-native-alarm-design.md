@@ -120,10 +120,11 @@ Through `Hub::notify`, source `"alarm"`, channel `alarm`:
 | Event | Severity | Text (example) | Actions |
 |---|---|---|---|
 | Triggered | critical | "Alarm: front door opened" / "Alarm: 2 motions (hallway, kitchen)" / "Alarm: SOS" | Disarm |
-| Armed with open sensors | info (no sound) | "Armed away. Office window is open, watched for closing" | — |
+| Armed (end of the exit delay) | info | "Armed night" / "Armed away (everyone left)" / "Armed home by remote", plus ". Office window open, watched for closing" when something is open | — |
+| Disarmed (from any other state) | info | "Disarmed" / "Disarmed (someone came home)" / "Disarmed by remote" | — |
 | Sensor unavailable while armed | warning | "Alarm sensor offline: back door" | — |
 
-The trigger alert gets a new id each time and is resolved (`cancel`) on disarm. Plain arm and disarm send no push: the chirp and the panel state are enough. *(Claude's call.)*
+The trigger alert gets a new id each time and is resolved (`cancel`) on disarm. The armed and disarmed pushes also get a new id each time, so the alerts list keeps them as a log. *(Changed with the user on 2026-10-25: at first plain arm and disarm sent no push.)*
 
 A **Disarm** action reply that arrives on `<push>/responses` disarms the alarm. That topic is currently subscribed only while climate is on (`hub.rs` `extra_filters`), so it must also be subscribed while the alarm is enabled. Replies are routed by alert id to the engine that raised the alert.
 
@@ -275,10 +276,10 @@ The pure state machine should live in a small crate or module with no hub depend
 - No alarm codes (§2).
 - home mode defaults to outside doors only, ticked per sensor (§4.1).
 - Motion window 120 s (§4.2).
-- Arm anyway with something open, and watch it for closing (§4.3). Its note is silent (§5.2).
+- Arm anyway with something open, and watch it for closing (§4.3). The armed push names it (§5.2).
 - An unavailable sensor warns, it doesn't trigger (§4.4).
 - Siren period 180 s, then back to armed (§3, §5.1).
-- No push on plain arm or disarm, only the chirp (§5.2).
+- A push, with sound, on arm and on disarm, naming the mode and source (§5.2; changed 2026-10-25).
 - A new opening defaults to away and night, instant (§4.1).
 - Open sensors are checked at the end of the exit delay (§4.3).
 - An SOS from disarmed returns to disarmed, with the alert open until a DISARM (§3).

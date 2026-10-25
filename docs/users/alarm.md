@@ -88,7 +88,7 @@ A siren that does not confirm within about 2 seconds is listed as failed in the 
 
 ## Chirp on arm
 
-When the alarm enters an armed state, each siren that has a chirp sounds it once. This is the confirmation that the house is armed. Sirens without a chirp stay silent. Plain arm and disarm do not send a push: the chirp and the panel state are enough.
+When the alarm enters an armed state, each siren that has a chirp sounds it once. This is the confirmation that the house is armed. Sirens without a chirp stay silent. The phones also get an *armed* push (see [Phone push](#phone-push)).
 
 ## Remotes
 
@@ -131,10 +131,10 @@ The hub reads the trackers' state at start-up too. A phone that came home while 
 
 ## Phone push
 
-The alarm sends its pushes on the `alarm` channel. Three kinds of push can arrive:
+The alarm sends its pushes on the `alarm` channel. Four kinds of push can arrive:
 
 - **Triggered**: a critical alert, titled *Alarm*, that names what tripped it: the door or window, the motions and their rooms, or an SOS. It has a **Disarm** button. Tapping it disarms the alarm and stops the sirens. Each new trip sends a new alert, and the earlier one is cleared when the alarm is disarmed.
-- **Armed with open sensors**: a quiet note that names the sensors watched for closing.
+- **Armed and disarmed**: a plain alert with the normal sound, sent when the alarm becomes armed (at the end of the exit delay) and when it is disarmed. It names the mode and who did it: *Armed night*, *Armed away (everyone left)*, *Armed home by remote*, *Disarmed (someone came home)*. When something is open at arm, the same push names the sensors watched for closing: *Armed away. Office window open, watched for closing*. Disarming an alarm that is already disarmed sends nothing.
 - **Sensor offline**: a warning when a watched sensor goes unavailable while armed.
 
 See [Push notifications](push-notifications.md) for the channels and the Disarm action.
