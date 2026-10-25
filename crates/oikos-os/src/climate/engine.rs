@@ -10,8 +10,8 @@ use chrono_tz::Tz;
 use oikos_api::{ConnectionStatus, WsEvent};
 use oikos_climate::decide::{Device, SafetyMemory, decide};
 use oikos_climate::doc::{
-    Decision, DeviceTarget, FanRestore, Mode, ModeRules, Override, OverrideOrigin, RoomEco,
-    Setpoint, Source, ZoneState,
+    Decision, DeviceTarget, FanRestore, FanState, Mode, ModeRules, Override, OverrideOrigin,
+    RoomEco, Setpoint, Source, ZoneState,
 };
 use oikos_climate::eco::fan_plan;
 use oikos_climate::ledger::{Ledger, Observed, hold_until};
@@ -735,7 +735,8 @@ impl Hub {
     }
 
     /// Sends the fan commands of eco for `decision` and keeps what to put back in it. Only an
-    /// active zone sets fans; a zone switched off still puts back what eco changed, once.
+    /// active zone sets fans; a zone switched off or back to pending puts back what eco changed,
+    /// once, and so does a unit that left the zone.
     async fn command_fans(
         &self,
         inp: &OwnedZoneInputs,
@@ -743,35 +744,69 @@ impl Hub {
         previous: &BTreeMap<String, FanRestore>,
         now: u64,
     ) {
-        let state = inp.settings.state;
-        if state == ZoneState::Pending {
-            return;
-        }
+        let (here, departed): (BTreeMap<_, _>, BTreeMap<_, _>) = previous
+            .clone()
+            .into_iter()
+            .partition(|(id, _)| inp.entity_ids.contains(id));
+        let mut kept = self.restore_departed(departed, now).await;
         let (mut memory, commands) = fan_plan(
-            previous,
+            &here,
             decision,
             &inp.devices,
             &inp.house.eco.actions,
-            state == ZoneState::Off,
+            inp.settings.state != ZoneState::Active,
         );
         for command in commands {
-            if self
+            let landed = self
                 .command_fan(&command.entity, &command.fan_mode, now)
-                .await
-            {
-                continue;
-            }
-            // Not landed: an eco setting is tried again from scratch, a restore is kept.
-            match previous.get(&command.entity) {
-                Some(restore) if restore.was == command.fan_mode => {
-                    memory.insert(command.entity, restore.clone());
+                .await;
+            match (memory.get_mut(&command.entity), landed) {
+                // Set and confirmed.
+                (Some(entry), true) if entry.set == command.fan_mode => {
+                    entry.state = FanState::Set;
                 }
-                _ => {
-                    memory.remove(&command.entity);
+                // Not confirmed: the entry stays `Sent`, and the next pass looks again.
+                (Some(_), _) => {}
+                // A restore that did not land: keep what to put back, try again next pass.
+                (None, false) => {
+                    if let Some(entry) = here.get(&command.entity) {
+                        memory.insert(command.entity, entry.clone());
+                    }
                 }
+                (None, true) => {}
             }
         }
+        memory.append(&mut kept);
         decision.eco_restore = memory;
+    }
+
+    /// Puts back the fans eco changed on units that left the zone, if still at the eco value,
+    /// and forgets them; returns the ones whose restore did not land, to try again.
+    async fn restore_departed(
+        &self,
+        departed: BTreeMap<String, FanRestore>,
+        now: u64,
+    ) -> BTreeMap<String, FanRestore> {
+        let mut kept = BTreeMap::new();
+        for (id, entry) in departed {
+            let fan = {
+                let reg = self.read();
+                if reg.entity(&id).is_none() {
+                    continue;
+                }
+                reg.state(&id).and_then(|state| match &state.value {
+                    StateValue::Climate(climate) => climate.fan_mode.clone(),
+                    _ => None,
+                })
+            };
+            if entry.state == FanState::Released || fan.as_deref() != Some(entry.set.as_str()) {
+                continue;
+            }
+            if !self.command_fan(&id, &entry.was, now).await {
+                kept.insert(id, entry);
+            }
+        }
+        kept
     }
 
     /// The mode first when it differs, then the temperature; the ledger follows each step the

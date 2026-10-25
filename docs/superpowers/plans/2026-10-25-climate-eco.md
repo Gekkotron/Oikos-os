@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Generic code: no room names, family names, vendor fan values (`"1"`, `"silence"`) or entity ids in code, tests, docs or commit messages. Test zones keep the existing neutral ids (`living`, `z`); new tests use `bedroom` when a second zone is needed.
+- Generic code: no room names, family names, vendor fan values (a device's own mode names) or entity ids in code, tests, docs or commit messages. Test zones keep the existing neutral ids (`living`, `z`); new tests use `bedroom` when a second zone is needed.
 - New defaults, the only new numbers in code: `eco.heat` 16.0, `eco.cool` 28.0, `eco.actions` empty.
 - Validation: `eco.heat >= frost`; `eco.cool <= overheat`; at most one `fan_mode` action; a `fan_mode` value is not empty.
 - No climate topic ends in `/config`; the new document is `<prefix>/zone/<zone>/eco`, QoS 1, retained.
@@ -45,7 +45,7 @@
 **Interfaces:**
 - Produces:
   - `pub struct EcoSettings { pub heat: f64, pub cool: f64, pub actions: Vec<EcoAction> }`, `#[serde(default)]`, `Default` = 16.0 / 28.0 / empty; field `HouseSettings.eco: EcoSettings`.
-  - `#[serde(rename_all = "snake_case")] pub enum EcoAction { FanMode(String) }` (externally tagged: `{ "fan_mode": "1" }`; an unknown key fails to parse).
+  - `#[serde(rename_all = "snake_case")] pub enum EcoAction { FanMode(String) }` (externally tagged: `{ "fan_mode": "low" }`; an unknown key fails to parse).
   - `impl EcoSettings { pub fn fan_mode(&self) -> Option<&str>; pub fn setpoint(&self, mode: Mode) -> f64 }`.
   - `pub struct RoomEco { pub until: u64, pub set_at: u64 }` (the `…/eco` document).
   - `pub struct FanRestore { pub was: String, pub set: String }`; field `Decision.eco_restore: BTreeMap<String, FanRestore>` with `#[serde(default, skip_serializing_if = "BTreeMap::is_empty")]`, included in `same_outcome`. (A top-level map instead of the spec's per-entity field: a unit can be remembered while safety or an override leaves it out of `entities`.)

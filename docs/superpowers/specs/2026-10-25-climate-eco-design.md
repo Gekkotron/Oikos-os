@@ -9,7 +9,7 @@ Two ways to save energy with one idea, **eco**:
 1. **Room eco until a date.** Someone is away for a week: the user puts that room in eco until the day they come back. The room holds the eco temperature, then goes back to its schedule by itself.
 2. **House eco while away.** When the alarm is armed away, every room holds the eco temperature. Disarming brings the schedules back.
 
-Eco is set once, house-wide: a temperature (heating and cooling) and optional extra actions on the room's AC units, such as "fan speed 1". The user's words: "set only one eco value, for example 15 °C, in settings; when I'm away, eco is set on every room".
+Eco is set once, house-wide: a temperature (heating and cooling) and optional extra actions on the room's AC units, such as a low fan speed. The user's words: "set only one eco value, for example 15 °C, in settings; when I'm away, eco is set on every room".
 
 The two triggers are independent. A bedroom in eco until Sunday stays in eco when the user disarms on Saturday; the other rooms go back to their schedules.
 
@@ -34,7 +34,7 @@ The two triggers are independent. A bedroom in eco until Sunday stays in eco whe
 **Anti-goals**
 - A colder or less safe house: safety rows (frost, overheat, stale) stay above eco.
 - The engine fighting the user: a fan or target changed by hand during eco is left alone, and not "restored" over the user's choice when eco ends.
-- House-specific code: no room names, vendor fan values (`"1"`, `"silence"`) or entity ids in code.
+- House-specific code: no room names, vendor fan values (a device's own mode names) or entity ids in code.
 - A room whose eco silently never ends: an expired room eco is removed, and the room is back on its schedule within one evaluation.
 
 ## 3. Decided with the user
@@ -43,7 +43,7 @@ The two triggers are independent. A bedroom in eco until Sunday stays in eco whe
 - Room eco lasts until a date the user picks.
 - House eco is triggered by the alarm in **armed away** only (not home, not night).
 - Room eco and house eco are independent; a room is in eco while either applies.
-- Eco may send extra actions to the room's AC units; the user's case is fan speed 1.
+- Eco may send extra actions to the room's AC units; the user's case is a low fan speed.
 
 ## 4. Settings
 
@@ -55,7 +55,7 @@ The two triggers are independent. A bedroom in eco until Sunday stays in eco whe
 "eco": {
   "heat": 16.0,
   "cool": 28.0,
-  "actions": [ { "fan_mode": "1" } ]
+  "actions": [ { "fan_mode": "low" } ]
 }
 ```
 
@@ -145,7 +145,7 @@ The fan is not re-asserted: one command on entry, one on exit, retried like the 
 
 **The zone stops being managed.** When a zone in eco is switched `off`, or a unit leaves the zone, the remembered fans are restored once (if still at the eco value) and forgotten; the room eco document is kept and simply expires, so switching the zone back on before `until` resumes it. Disabling climate stops the engine as in v1: nothing is sent, the memory stays in the retained decision, and the restore happens when eco ends after climate is enabled again.
 
-**Surviving a restart.** The remembered fan modes live in the retained decision's `entities` record (v1 §5.3), each entity gaining an optional `eco_restore: { "fan_mode": { "was": "auto", "set": "1" } }`: what the unit had before eco and what eco set, so the "still at the eco value" check compares against what was actually sent even if the setting changed since.
+**Surviving a restart.** The remembered fan modes live in the retained decision (v1 §5.3), in a top-level `eco_restore: { "<entity>": { "was": "auto", "set": "low", "state": "set" } }` map (a unit can be left out of `entities` while safety or an override acts): what the unit had before eco, what eco wants, and where eco stands with it — `set` (sent and seen), `{ "sent": { "from": … } }` (sent, not seen landing yet: a late echo still counts, a unit still at `from` is sent again) or `released` (already at the eco value, or moved by the user: left alone until eco ends). Each unit is set at most once per eco period, so a fan changed by hand is never re-applied.
 
 ## 8. HTTP and MCP
 

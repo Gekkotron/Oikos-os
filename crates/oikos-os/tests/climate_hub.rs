@@ -1619,7 +1619,15 @@ mod engine {
         rig.sim.fans.insert(0, other);
         rig.sim.report(&rig.hub, 0);
         assert!(fan_commands(&rig.pass(120).await).is_empty());
-        assert!(rig.zone().decision.unwrap().eco_restore.is_empty());
+        // Later eco passes leave the user's choice alone too.
+        assert!(
+            fan_commands(&rig.pass(180).await).is_empty(),
+            "not re-applied"
+        );
+        assert!(
+            fan_commands(&rig.pass(240).await).is_empty(),
+            "not re-applied"
+        );
         assert!(fan_commands(&rig.pass(700).await).is_empty());
     }
 
@@ -1633,8 +1641,11 @@ mod engine {
         rig.sim.echo = false;
         assert_eq!(fan_commands(&rig.pass(60).await), vec![fan.clone()]);
         assert!(
-            rig.zone().decision.unwrap().eco_restore.is_empty(),
-            "nothing to restore from a command that did not land"
+            matches!(
+                rig.zone().decision.unwrap().eco_restore[&rig.id].state,
+                oikos_climate::doc::FanState::Sent { .. }
+            ),
+            "a command that did not land is only sent, not set"
         );
         rig.sim.echo = true;
         assert_eq!(fan_commands(&rig.pass(180).await), vec![fan]);
@@ -1684,6 +1695,94 @@ mod engine {
             fan_commands(&again.pass(180).await),
             vec!["auto".to_owned()]
         );
+    }
+
+    /// The fan commands sent to unit `n`.
+    fn fan_commands_to(out: &[Publish], n: u8) -> Vec<String> {
+        let topic = format!("daikin/192.168.1.15{n}/ha/fan_mode/set");
+        out.iter()
+            .filter(|p| p.topic == topic)
+            .map(|p| p.payload.clone())
+            .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_late_fan_echo_is_still_restored() {
+        let (mut rig, fan) = fan_rig().await;
+        rig.hub
+            .set_climate_eco("living", eco_for(&rig, 600))
+            .await
+            .unwrap();
+        rig.sim.echo = false;
+        assert_eq!(fan_commands(&rig.pass(60).await), vec![fan.clone()]);
+        // The unit applies it after the hub stopped waiting.
+        rig.sim.echo = true;
+        rig.sim.fans.insert(0, fan);
+        rig.sim.report(&rig.hub, 0);
+        assert!(fan_commands(&rig.pass(120).await).is_empty());
+        assert_eq!(fan_commands(&rig.pass(700).await), vec!["auto".to_owned()]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_command_after_the_eco_fan_changes_keeps_the_original() {
+        let (mut rig, fan) = fan_rig().await;
+        let other = other_fans(&rig)
+            .into_iter()
+            .find(|m| *m != fan)
+            .expect("two modes");
+        rig.hub
+            .set_climate_eco("living", eco_for(&rig, 600))
+            .await
+            .unwrap();
+        assert_eq!(fan_commands(&rig.pass(60).await), vec![fan]);
+        let mut house = rig.hub.climate_view().unwrap().house;
+        house.eco.actions = vec![oikos_climate::doc::EcoAction::FanMode(other.clone())];
+        rig.hub.set_climate_house(house).unwrap();
+        drain(&mut rig.rx);
+        rig.sim.echo = false;
+        assert_eq!(fan_commands(&rig.pass(120).await), vec![other.clone()]);
+        rig.sim.echo = true;
+        assert_eq!(fan_commands(&rig.pass(180).await), vec![other]);
+        assert_eq!(fan_commands(&rig.pass(700).await), vec!["auto".to_owned()]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_unit_leaving_the_zone_gets_its_fan_back() {
+        let (mut rig, fan) = fan_rig().await;
+        feed_daikin(&rig.hub, 1, "living").await;
+        rig.sim.fans.insert(1, "auto".to_owned());
+        rig.sim.set(&rig.hub, 1, "heat", 19.0, 20.0);
+        drain(&mut rig.rx);
+        rig.hub
+            .set_climate_eco("living", eco_for(&rig, 600))
+            .await
+            .unwrap();
+        let out = rig.pass(60).await;
+        assert_eq!(fan_commands_to(&out, 0), vec![fan.clone()]);
+        let id = rig.id.clone();
+        place(&rig.hub, &id, "bedroom").await;
+        drain(&mut rig.rx);
+        let out = rig.pass(120).await;
+        assert_eq!(fan_commands_to(&out, 0), vec!["auto".to_owned()]);
+        assert!(
+            !rig.zone().decision.unwrap().eco_restore.contains_key(&id),
+            "forgotten once put back"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_zone_set_to_pending_restores_the_fan() {
+        let (mut rig, fan) = fan_rig().await;
+        rig.hub
+            .set_climate_eco("living", eco_for(&rig, 600))
+            .await
+            .unwrap();
+        assert_eq!(fan_commands(&rig.pass(60).await), vec![fan]);
+        rig.settings(ZoneSettings {
+            state: ZoneState::Pending,
+            ..heat_rules(19.0)
+        });
+        assert_eq!(fan_commands(&rig.pass(120).await), vec!["auto".to_owned()]);
     }
 
     #[tokio::test(start_paused = true)]

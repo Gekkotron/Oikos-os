@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use crate::decide::Device;
-use crate::doc::{Decision, EcoAction, FanRestore, Source, fan_mode_of};
+use crate::doc::{Decision, EcoAction, FanRestore, FanState, Source, fan_mode_of};
 
 /// A fan mode to send to one climate entity.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,6 +18,10 @@ pub struct FanCommand {
 
 /// The fan commands for `decision` and the memory to keep with it. `previous` is the memory of
 /// the zone's previous decision; `zone_off` puts every remembered fan back, once.
+///
+/// Within one eco period each unit is set at most once: a unit already at the eco value, or one
+/// the user moves, is released and left alone until eco ends. A unit whose fan is unknown keeps
+/// its memory until the fan is known again.
 pub fn fan_plan(
     previous: &BTreeMap<String, FanRestore>,
     decision: &Decision,
@@ -34,72 +38,76 @@ pub fn fan_plan(
     }
     let want = fan_mode_of(actions);
     for device in devices {
-        let entry = memory.get(&device.id).cloned();
-        let current = device.fan_mode.as_deref();
-        let mut restore = |memory: &mut BTreeMap<String, FanRestore>, r: &FanRestore| {
-            if current == Some(r.set.as_str()) {
-                commands.push(FanCommand {
-                    entity: device.id.clone(),
-                    fan_mode: r.was.clone(),
-                });
-            }
-            memory.remove(&device.id);
-        };
-        if zone_off || !in_eco {
-            if let Some(r) = &entry {
-                restore(&mut memory, r);
-            }
+        let id = &device.id;
+        let Some(current) = device.fan_mode.clone() else {
             continue;
-        }
+        };
+        let mut send = |fan_mode: &str| {
+            commands.push(FanCommand {
+                entity: id.clone(),
+                fan_mode: fan_mode.to_owned(),
+            })
+        };
+        let entry = memory.get(id).cloned();
         let listed = want.filter(|v| device.caps.fan_modes.iter().any(|m| m == v));
-        let Some(v) = listed else {
-            if let Some(r) = &entry {
-                restore(&mut memory, r);
+        let Some(v) = listed.filter(|_| in_eco && !zone_off) else {
+            if let Some(r) = entry {
+                if r.state != FanState::Released && current == r.set {
+                    send(&r.was);
+                }
+                memory.remove(id);
             }
             continue;
         };
         let driven = decision
             .entities
-            .get(&device.id)
+            .get(id)
             .is_some_and(|t| !t.held && t.mode != "off");
         if !driven {
             continue;
         }
-        match entry {
+        let sent = |was: String, from: String| FanRestore {
+            was,
+            set: v.to_owned(),
+            state: FanState::Sent { from },
+        };
+        let next = match entry {
+            None if current == v => FanRestore {
+                was: current,
+                set: v.to_owned(),
+                state: FanState::Released,
+            },
             None => {
-                if let Some(f) = current.filter(|f| *f != v) {
-                    memory.insert(
-                        device.id.clone(),
+                send(v);
+                sent(current.clone(), current)
+            }
+            Some(r) => match r.state.clone() {
+                FanState::Released => r,
+                // At what eco set (or seen landing): done, unless the eco value changed.
+                FanState::Set | FanState::Sent { .. } if current == r.set => {
+                    if r.set == v {
                         FanRestore {
-                            was: f.to_owned(),
-                            set: v.to_owned(),
-                        },
-                    );
-                    commands.push(FanCommand {
-                        entity: device.id.clone(),
-                        fan_mode: v.to_owned(),
-                    });
+                            state: FanState::Set,
+                            ..r
+                        }
+                    } else {
+                        send(v);
+                        sent(r.was, r.set)
+                    }
                 }
-            }
-            Some(r) if current != Some(r.set.as_str()) => {
-                // Moved by hand while in eco: the user's choice, never undone.
-                memory.remove(&device.id);
-            }
-            Some(r) if r.set != v => {
-                memory.insert(
-                    device.id.clone(),
-                    FanRestore {
-                        was: r.was,
-                        set: v.to_owned(),
-                    },
-                );
-                commands.push(FanCommand {
-                    entity: device.id.clone(),
-                    fan_mode: v.to_owned(),
-                });
-            }
-            Some(_) => {}
-        }
+                // Still where it was when sent: the command did not land, send it again.
+                FanState::Sent { from } if current == from => {
+                    send(v);
+                    sent(r.was, from)
+                }
+                // Anywhere else: the user moved it, never undone.
+                _ => FanRestore {
+                    state: FanState::Released,
+                    ..r
+                },
+            },
+        };
+        memory.insert(id.clone(), next);
     }
     (memory, commands)
 }
@@ -110,7 +118,7 @@ mod tests {
     use crate::decide::DeviceCaps;
     use crate::doc::DeviceTarget;
 
-    fn device(id: &str, fan: &str, modes: &[&str]) -> Device {
+    fn device(id: &str, fan: Option<&str>, modes: &[&str]) -> Device {
         Device {
             id: id.into(),
             caps: DeviceCaps {
@@ -122,12 +130,12 @@ mod tests {
             },
             target: Some(16.0),
             mode: Some("heat".into()),
-            fan_mode: Some(fan.into()),
+            fan_mode: fan.map(str::to_owned),
         }
     }
 
     fn unit(fan: &str) -> Device {
-        device("a", fan, &["auto", "low", "high"])
+        device("a", Some(fan), &["auto", "low", "high"])
     }
 
     fn decision(source: Source, targets: &[(&str, &str, bool)]) -> Decision {
@@ -165,18 +173,35 @@ mod tests {
         decision(Source::Eco, &[("a", "heat", false)])
     }
 
+    fn schedule() -> Decision {
+        decision(Source::Schedule, &[("a", "heat", false)])
+    }
+
     fn want(m: &str) -> Vec<EcoAction> {
         vec![EcoAction::FanMode(m.into())]
     }
 
-    fn memory(was: &str, set: &str) -> BTreeMap<String, FanRestore> {
+    fn entry(was: &str, set: &str, state: FanState) -> BTreeMap<String, FanRestore> {
         BTreeMap::from([(
             "a".to_string(),
             FanRestore {
                 was: was.into(),
                 set: set.into(),
+                state,
             },
         )])
+    }
+
+    fn set(was: &str, v: &str) -> BTreeMap<String, FanRestore> {
+        entry(was, v, FanState::Set)
+    }
+
+    fn sent(was: &str, v: &str, from: &str) -> BTreeMap<String, FanRestore> {
+        entry(was, v, FanState::Sent { from: from.into() })
+    }
+
+    fn released(was: &str, v: &str) -> BTreeMap<String, FanRestore> {
+        entry(was, v, FanState::Released)
     }
 
     fn cmd(m: &str) -> Vec<FanCommand> {
@@ -186,125 +211,170 @@ mod tests {
         }]
     }
 
+    fn plan(
+        previous: &BTreeMap<String, FanRestore>,
+        d: &Decision,
+        devices: &[Device],
+        actions: &[EcoAction],
+    ) -> (BTreeMap<String, FanRestore>, Vec<FanCommand>) {
+        fan_plan(previous, d, devices, actions, false)
+    }
+
     #[test]
-    fn entering_eco_sets_the_fan_and_remembers() {
-        let (mem, cmds) = fan_plan(
-            &BTreeMap::new(),
-            &eco(),
-            &[unit("auto")],
-            &want("low"),
-            false,
-        );
+    fn entering_eco_sends_the_fan_and_remembers_it_as_sent() {
+        let (mem, cmds) = plan(&BTreeMap::new(), &eco(), &[unit("auto")], &want("low"));
         assert_eq!(cmds, cmd("low"));
-        assert_eq!(mem, memory("auto", "low"));
+        assert_eq!(mem, sent("auto", "low", "auto"));
     }
 
     #[test]
     fn away_counts_as_eco() {
         let d = decision(Source::Away, &[("a", "heat", false)]);
-        let (_, cmds) = fan_plan(&BTreeMap::new(), &d, &[unit("auto")], &want("low"), false);
+        let (_, cmds) = plan(&BTreeMap::new(), &d, &[unit("auto")], &want("low"));
         assert_eq!(cmds, cmd("low"));
     }
 
     #[test]
-    fn already_at_eco_value_sends_nothing() {
-        let (mem, cmds) = fan_plan(
-            &BTreeMap::new(),
+    fn a_sent_fan_that_landed_is_set() {
+        let (mem, cmds) = plan(
+            &sent("auto", "low", "auto"),
             &eco(),
             &[unit("low")],
             &want("low"),
-            false,
         );
         assert!(cmds.is_empty());
+        assert_eq!(mem, set("auto", "low"));
+    }
+
+    #[test]
+    fn a_sent_fan_that_did_not_land_is_sent_again() {
+        let (mem, cmds) = plan(
+            &sent("auto", "low", "auto"),
+            &eco(),
+            &[unit("auto")],
+            &want("low"),
+        );
+        assert_eq!(cmds, cmd("low"));
+        assert_eq!(mem, sent("auto", "low", "auto"));
+    }
+
+    #[test]
+    fn a_sent_fan_moved_elsewhere_is_released() {
+        let (mem, cmds) = plan(
+            &sent("auto", "low", "auto"),
+            &eco(),
+            &[unit("high")],
+            &want("low"),
+        );
+        assert!(cmds.is_empty());
+        assert_eq!(mem, released("auto", "low"));
+    }
+
+    #[test]
+    fn already_at_eco_value_is_released_and_never_reasserted() {
+        let (mem, cmds) = plan(&BTreeMap::new(), &eco(), &[unit("low")], &want("low"));
+        assert!(cmds.is_empty());
+        assert_eq!(mem, released("low", "low"));
+        // The user then moves it: eco leaves it alone for the rest of the period.
+        let (mem, cmds) = plan(&mem, &eco(), &[unit("high")], &want("low"));
+        assert!(cmds.is_empty());
+        let (_, cmds) = plan(&mem, &schedule(), &[unit("high")], &want("low"));
+        assert!(cmds.is_empty());
+    }
+
+    #[test]
+    fn a_fan_moved_during_eco_is_released_for_good() {
+        let (mem, cmds) = plan(&set("auto", "low"), &eco(), &[unit("high")], &want("low"));
+        assert!(cmds.is_empty());
+        assert_eq!(mem, released("auto", "low"));
+        let (mem, cmds) = plan(&mem, &eco(), &[unit("high")], &want("low"));
+        assert!(cmds.is_empty(), "not re-applied on the next pass");
+        let (mem, cmds) = plan(&mem, &schedule(), &[unit("high")], &want("low"));
+        assert!(cmds.is_empty(), "nor restored over the user's choice");
         assert!(mem.is_empty());
     }
 
     #[test]
     fn unit_without_the_value_is_left_alone() {
-        let d = device("a", "auto", &["auto"]);
-        let (mem, cmds) = fan_plan(&BTreeMap::new(), &eco(), &[d], &want("low"), false);
+        let d = device("a", Some("auto"), &["auto"]);
+        let (mem, cmds) = plan(&BTreeMap::new(), &eco(), &[d], &want("low"));
         assert!(cmds.is_empty());
         assert!(mem.is_empty());
     }
 
     #[test]
-    fn unit_without_fan_state_is_left_alone() {
-        let mut d = unit("auto");
-        d.fan_mode = None;
-        let (mem, cmds) = fan_plan(&BTreeMap::new(), &eco(), &[d], &want("low"), false);
+    fn unknown_fan_state_waits() {
+        let d = device("a", None, &["auto", "low"]);
+        let (mem, cmds) = plan(
+            &BTreeMap::new(),
+            &eco(),
+            std::slice::from_ref(&d),
+            &want("low"),
+        );
         assert!(cmds.is_empty());
         assert!(mem.is_empty());
+        let (mem, cmds) = plan(
+            &set("auto", "low"),
+            &eco(),
+            std::slice::from_ref(&d),
+            &want("low"),
+        );
+        assert!(cmds.is_empty());
+        assert_eq!(mem, set("auto", "low"), "kept in eco");
+        let (mem, cmds) = plan(&set("auto", "low"), &schedule(), &[d], &want("low"));
+        assert!(cmds.is_empty());
+        assert_eq!(mem, set("auto", "low"), "kept until the fan is known");
     }
 
     #[test]
     fn held_or_off_units_get_no_fan_command() {
         for target in [("a", "heat", true), ("a", "off", false)] {
             let d = decision(Source::Eco, &[target]);
-            let (mem, cmds) = fan_plan(&BTreeMap::new(), &d, &[unit("auto")], &want("low"), false);
+            let (mem, cmds) = plan(&BTreeMap::new(), &d, &[unit("auto")], &want("low"));
             assert!(cmds.is_empty(), "{target:?}");
             assert!(mem.is_empty());
         }
         let not_driven = decision(Source::Eco, &[]);
-        let (_, cmds) = fan_plan(
-            &BTreeMap::new(),
-            &not_driven,
-            &[unit("auto")],
-            &want("low"),
-            false,
-        );
+        let (_, cmds) = plan(&BTreeMap::new(), &not_driven, &[unit("auto")], &want("low"));
         assert!(cmds.is_empty());
     }
 
     #[test]
     fn a_held_unit_keeps_its_memory() {
         let d = decision(Source::Eco, &[("a", "heat", true)]);
-        let (mem, cmds) = fan_plan(
-            &memory("auto", "low"),
-            &d,
-            &[unit("low")],
-            &want("low"),
-            false,
-        );
+        let (mem, cmds) = plan(&set("auto", "low"), &d, &[unit("low")], &want("low"));
         assert!(cmds.is_empty());
-        assert_eq!(mem, memory("auto", "low"));
+        assert_eq!(mem, set("auto", "low"));
     }
 
     #[test]
     fn leaving_eco_restores_when_unchanged() {
-        let d = decision(Source::Schedule, &[("a", "heat", false)]);
-        let (mem, cmds) = fan_plan(
-            &memory("auto", "low"),
-            &d,
-            &[unit("low")],
+        for previous in [set("auto", "low"), sent("auto", "low", "auto")] {
+            let (mem, cmds) = plan(&previous, &schedule(), &[unit("low")], &want("low"));
+            assert_eq!(cmds, cmd("auto"));
+            assert!(mem.is_empty());
+        }
+    }
+
+    #[test]
+    fn leaving_eco_with_a_fan_that_never_landed_sends_nothing() {
+        let (mem, cmds) = plan(
+            &sent("auto", "low", "auto"),
+            &schedule(),
+            &[unit("auto")],
             &want("low"),
-            false,
         );
-        assert_eq!(cmds, cmd("auto"));
+        assert!(cmds.is_empty());
         assert!(mem.is_empty());
     }
 
     #[test]
     fn leaving_eco_leaves_a_hand_changed_fan() {
-        let d = decision(Source::Schedule, &[("a", "heat", false)]);
-        let (mem, cmds) = fan_plan(
-            &memory("auto", "low"),
-            &d,
+        let (mem, cmds) = plan(
+            &set("auto", "low"),
+            &schedule(),
             &[unit("high")],
             &want("low"),
-            false,
-        );
-        assert!(cmds.is_empty());
-        assert!(mem.is_empty());
-    }
-
-    #[test]
-    fn a_fan_moved_during_eco_is_forgotten() {
-        let (mem, cmds) = fan_plan(
-            &memory("auto", "low"),
-            &eco(),
-            &[unit("high")],
-            &want("low"),
-            false,
         );
         assert!(cmds.is_empty());
         assert!(mem.is_empty());
@@ -314,48 +384,37 @@ mod tests {
     fn safety_or_override_keeps_memory() {
         for source in [Source::Safety, Source::Override] {
             let d = decision(source, &[("a", "heat", false)]);
-            let (mem, cmds) = fan_plan(
-                &memory("auto", "low"),
-                &d,
-                &[unit("low")],
-                &want("low"),
-                false,
-            );
+            let (mem, cmds) = plan(&set("auto", "low"), &d, &[unit("low")], &want("low"));
             assert!(cmds.is_empty(), "{source:?}");
-            assert_eq!(mem, memory("auto", "low"));
+            assert_eq!(mem, set("auto", "low"));
         }
     }
 
     #[test]
     fn eco_to_away_sends_nothing_again() {
         let d = decision(Source::Away, &[("a", "heat", false)]);
-        let (mem, cmds) = fan_plan(
-            &memory("auto", "low"),
-            &d,
-            &[unit("low")],
-            &want("low"),
-            false,
-        );
+        let (mem, cmds) = plan(&set("auto", "low"), &d, &[unit("low")], &want("low"));
         assert!(cmds.is_empty());
-        assert_eq!(mem, memory("auto", "low"));
+        assert_eq!(mem, set("auto", "low"));
     }
 
     #[test]
     fn changing_the_eco_value_moves_units_still_at_the_old_one() {
-        let (mem, cmds) = fan_plan(
-            &memory("auto", "low"),
-            &eco(),
-            &[unit("low")],
-            &want("high"),
-            false,
-        );
+        let (mem, cmds) = plan(&set("auto", "low"), &eco(), &[unit("low")], &want("high"));
         assert_eq!(cmds, cmd("high"));
-        assert_eq!(mem, memory("auto", "high"));
+        assert_eq!(mem, sent("auto", "high", "low"));
+        // Not landed yet: sent again, the original fan still remembered.
+        let (mem, cmds) = plan(&mem, &eco(), &[unit("low")], &want("high"));
+        assert_eq!(cmds, cmd("high"));
+        assert_eq!(mem, sent("auto", "high", "low"));
+        let (mem, _) = plan(&mem, &eco(), &[unit("high")], &want("high"));
+        let (_, cmds) = plan(&mem, &schedule(), &[unit("high")], &want("high"));
+        assert_eq!(cmds, cmd("auto"));
     }
 
     #[test]
     fn removing_the_action_restores() {
-        let (mem, cmds) = fan_plan(&memory("auto", "low"), &eco(), &[unit("low")], &[], false);
+        let (mem, cmds) = plan(&set("auto", "low"), &eco(), &[unit("low")], &[]);
         assert_eq!(cmds, cmd("auto"));
         assert!(mem.is_empty());
     }
@@ -363,7 +422,7 @@ mod tests {
     #[test]
     fn zone_off_restores() {
         let (mem, cmds) = fan_plan(
-            &memory("auto", "low"),
+            &set("auto", "low"),
             &eco(),
             &[unit("low")],
             &want("low"),
@@ -376,8 +435,8 @@ mod tests {
     #[test]
     fn absent_device_keeps_its_memory() {
         let d = decision(Source::Schedule, &[]);
-        let (mem, cmds) = fan_plan(&memory("auto", "low"), &d, &[], &want("low"), false);
+        let (mem, cmds) = plan(&set("auto", "low"), &d, &[], &want("low"));
         assert!(cmds.is_empty());
-        assert_eq!(mem, memory("auto", "low"));
+        assert_eq!(mem, set("auto", "low"));
     }
 }

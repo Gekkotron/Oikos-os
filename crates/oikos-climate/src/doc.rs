@@ -408,12 +408,29 @@ pub struct RoomEco {
     pub set_at: u64,
 }
 
-/// A fan mode eco changed on a unit: what it had, and what eco set.
+/// What eco did with a unit's fan in the current eco period.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub enum FanState {
+    /// Eco set it and saw it land: put back `was` when eco ends, if still at `set`.
+    #[default]
+    Set,
+    /// Sent while the unit was at `from`, not seen landing yet.
+    Sent { from: String },
+    /// Already at the eco value, or moved by the user: left alone until eco ends.
+    Released,
+}
+
+/// A unit's fan under eco: what it had before (`was`), what eco wants (`set`), and where eco
+/// stands with it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct FanRestore {
     pub was: String,
     pub set: String,
+    #[serde(default)]
+    pub state: FanState,
 }
 
 /// A rejected proposal, remembered until `until` (Unix seconds).
@@ -944,6 +961,7 @@ mod tests {
             FanRestore {
                 was: "auto".into(),
                 set: "low".into(),
+                state: FanState::Set,
             },
         );
         assert!(!with.same_outcome(&d));
