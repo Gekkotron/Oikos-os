@@ -173,3 +173,100 @@ async fn outdoor_picker_opens_on_thermometers() {
     assert!(!ids.iter().any(|id| id.ends_with("-opt-h_out")), "{ids:?}");
     assert!(!ids.iter().any(|id| id.ends_with("-opt-door")), "{ids:?}");
 }
+
+fn alarm_panel() -> EntityView {
+    let mut e = sensor("alarm", Kind::AlarmPanel, "alarm");
+    e.device_class = None;
+    e
+}
+
+#[wasm_bindgen_test]
+async fn presence_picker_suggests_alarm_panels() {
+    let host = host(600);
+    let house = House::new();
+    for e in [alarm_panel(), sensor("humid", Kind::Sensor, "humidity")] {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(house);
+            provide_context(Toasts::new());
+            provide_context(Now(RwSignal::new(1_700_000_060)));
+            view! {
+                <SettingsSheet
+                    house=HouseSettings::default()
+                    on_saved=Callback::new(|_| {})
+                    on_close=Callback::new(|_| {})
+                />
+            }
+        },
+    ));
+    tick().await;
+    // The Presence field is the sheet's list field; its add button opens the picker.
+    let add: web_sys::HtmlElement = host
+        .query_selector(".chip--add")
+        .unwrap()
+        .expect("presence add button")
+        .unchecked_into();
+    add.click();
+    tick().await;
+    TimeoutFuture::new(30).await;
+    let options = host.query_selector_all("[role=option]").unwrap();
+    let ids: Vec<String> = (0..options.length())
+        .map(|i| options.item(i).unwrap().unchecked_into::<Element>().id())
+        .collect();
+    assert!(ids.iter().any(|id| id.ends_with("-opt-alarm")), "{ids:?}");
+    assert!(!ids.iter().any(|id| id.ends_with("-opt-humid")), "{ids:?}");
+}
+
+#[wasm_bindgen_test]
+async fn room_thermometer_never_offers_other_sensors() {
+    use oikos_web::climate::entity_field::ThermometerField;
+    let host = host(600);
+    let house = House::new();
+    for e in [
+        sensor("t_room", Kind::Sensor, "temperature"),
+        sensor("h_room", Kind::Sensor, "humidity"),
+    ] {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(house);
+            provide_context(Now(RwSignal::new(1_700_000_060)));
+            view! {
+                <ThermometerField
+                    value=Signal::stored(None)
+                    auto=Signal::stored(None)
+                    on_change=Callback::new(|_| {})
+                />
+            }
+        },
+    ));
+    tick().await;
+    let button: web_sys::HtmlElement = host
+        .query_selector("button.picker-field")
+        .unwrap()
+        .expect("field")
+        .unchecked_into();
+    button.click();
+    tick().await;
+    TimeoutFuture::new(30).await;
+    // Every chip shows the same pool: look at All explicitly.
+    let chips = host.query_selector_all(".picker__chips .chip").unwrap();
+    for i in 0..chips.length() {
+        let chip: web_sys::HtmlElement = chips.item(i).unwrap().unchecked_into();
+        if chip.text_content().unwrap() == "All" {
+            chip.click();
+        }
+    }
+    tick().await;
+    let options = host.query_selector_all("[role=option]").unwrap();
+    let ids: Vec<String> = (0..options.length())
+        .map(|i| options.item(i).unwrap().unchecked_into::<Element>().id())
+        .collect();
+    assert!(ids.iter().any(|id| id.ends_with("-opt-t_room")), "{ids:?}");
+    assert!(!ids.iter().any(|id| id.ends_with("-opt-h_room")), "{ids:?}");
+}

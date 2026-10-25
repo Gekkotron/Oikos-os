@@ -18,13 +18,15 @@ pub fn is_thermometer(entity: &EntityView) -> bool {
     entity.kind == Kind::Sensor && entity.device_class.as_deref() == Some("temperature")
 }
 
-/// Whether `e` reports presence: a presence, occupancy or motion sensor, or a tracker.
+/// Whether `e` reports presence: a presence, occupancy or motion sensor, a tracker or an alarm
+/// panel (the hub reads its armed state as "home").
 pub fn is_presence(e: &EntityView) -> bool {
-    (e.kind == Kind::BinarySensor
-        && matches!(
-            e.device_class.as_deref(),
-            Some("presence" | "occupancy" | "motion")
-        ))
+    e.kind == Kind::AlarmPanel
+        || (e.kind == Kind::BinarySensor
+            && matches!(
+                e.device_class.as_deref(),
+                Some("presence" | "occupancy" | "motion")
+            ))
         || is_tracker(e)
 }
 
@@ -128,6 +130,12 @@ mod tests {
             Kind::Sensor,
             Some("motion"),
             "sensor"
+        )));
+        assert!(is_presence(&ent(
+            "al",
+            Kind::AlarmPanel,
+            None,
+            "alarm_control_panel"
         )));
         assert!(is_presence(&tracker()));
         assert!(is_tracker(&tracker()));

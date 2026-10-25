@@ -54,6 +54,10 @@ dialog.picker::backdrop {
   cursor: pointer;
 }
 
+.picker__close-back {
+  display: none;
+}
+
 .picker__close:hover {
   background: var(--raised);
 }
@@ -285,8 +289,16 @@ dialog.picker::backdrop {
   }
 
   .picker__rooms,
-  .picker__row-room {
+  dialog.picker .picker__row-room {
     display: none;
+  }
+
+  .picker__close-x {
+    display: none;
+  }
+
+  .picker__close-back {
+    display: inline;
   }
 
   .picker-body--room .picker__section-title {

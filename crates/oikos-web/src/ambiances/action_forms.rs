@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use crate::entity_picker::{EntityPickField, Keep};
 use crate::format::list_label;
 use crate::house::House;
+use crate::i18n::devices::{DeviceText, device_text};
 use crate::i18n::flows::{FlowText, flow_text};
 use crate::i18n::format::parse_decimal;
 use crate::i18n::settings::{SettingsText, select_option, set_mode, settings_text};
@@ -689,8 +690,8 @@ pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
     view! {
         <div class="ambiance-form">
             <EntityPickField
-                label=Signal::derive(move || t(Key::AmbSearchDevice).to_owned())
-                value=Signal::derive(move || dev.with(|d| Some(d.entity.clone())))
+                label=Signal::derive(move || device_text(i18n::use_lang()(), DeviceText::Device).to_owned())
+                value=Signal::derive(move || dev.with(|d| Some(d.entity.clone()).filter(|e| !e.is_empty())))
                 on_change=Callback::new(move |v: Option<String>| {
                     if let Some(id) = v {
                         pick(id);

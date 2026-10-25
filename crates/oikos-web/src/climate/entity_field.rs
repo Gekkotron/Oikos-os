@@ -2,13 +2,12 @@
 
 use leptos::prelude::*;
 
+use crate::entity_picker::EntityPickField;
 use crate::entity_picker::needs::{is_thermometer, keep};
-use crate::entity_picker::{EntityPickField, Suggest};
 use crate::format::{list_label, room_name};
 use crate::house::House;
 use crate::i18n::Lang;
 use crate::i18n::climate::{ClimateText, automatic_with, climate_text};
-use crate::i18n::picker::PickerText;
 use crate::i18n::use_lang;
 
 /// The label of `id` followed by its room, or the id itself when the house no longer has it.
@@ -57,11 +56,7 @@ pub fn ThermometerField(
             label=label
             value=value
             on_change=on_change
-            pool=None
-            suggest=Some(Suggest {
-                text: PickerText::Thermometers,
-                keep: keep(is_thermometer),
-            })
+            pool=Some(keep(is_thermometer))
             pinned=Some(pinned)
             class=Some("climate-field".to_owned())
         />

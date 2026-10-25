@@ -8,12 +8,13 @@ use oikos_core::flow::{IfParams, Missing, Node, NodeKind, Op};
 use super::Editor;
 use super::graph::Selection;
 use super::sun::{FallbackBadge, sun_sheet};
-use crate::entity_picker::EntityPickField;
 use crate::entity_picker::needs::{is_commandable, is_signal, keep};
+use crate::entity_picker::{EntityPickField, Suggest};
 use crate::flow_edit::remove_node;
 use crate::house::House;
 use crate::i18n::flows::{FlowText, flow_text, invalid_json, use_flow_text};
 use crate::i18n::format::parse_decimal;
+use crate::i18n::picker::PickerText;
 use crate::i18n::{Lang, use_lang};
 use crate::screens::flow_schedule::ScheduleField;
 
@@ -617,6 +618,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     label=word(FlowText::Entity)
                     value=entity_value
                     on_change=entity_write
+                    pool=Some(keep(|e| !is_signal(e)))
                     compact=true
                     class=Some("node-editor__field".to_owned())
                 />
@@ -946,7 +948,10 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     label=word(FlowText::Entity)
                     value=entity_value
                     on_change=entity_write
-                    pool=Some(keep(is_commandable))
+                    suggest=Some(Suggest {
+                        text: PickerText::Commandable,
+                        keep: keep(is_commandable),
+                    })
                     compact=true
                     class=Some("node-editor__field".to_owned())
                 />

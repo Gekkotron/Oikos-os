@@ -19,9 +19,9 @@ pub enum PickerText {
     NoMatch,
     /// The empty state's button that drops the room and chip narrowing.
     SearchAll,
-    /// Chip on a chosen entity the house no longer lists.
+    /// Marks a chosen entity that is offline.
     Unavailable,
-    /// Marks a chosen id the house lacks, after the raw id.
+    /// Chip on a chosen entity the house no longer lists, after the raw id.
     Missing,
     Close,
     /// A list chip's remove label.
@@ -32,6 +32,8 @@ pub enum PickerText {
     Thermometers,
     Presence,
     OnOff,
+    /// The flow command field's suggestion: entities a flow can send a command to.
+    Commandable,
 }
 
 /// The text of a fixed word.
@@ -56,6 +58,7 @@ pub fn picker_text(lang: Lang, k: PickerText) -> &'static str {
         T::Thermometers => ("Thermometers", "Thermomètres"),
         T::Presence => ("Presence", "Présence"),
         T::OnOff => ("On / off", "Marche / arrêt"),
+        T::Commandable => ("Controllable", "Pilotables"),
     };
     match lang {
         Lang::En => en,
@@ -108,6 +111,7 @@ mod tests {
             T::Thermometers,
             T::Presence,
             T::OnOff,
+            T::Commandable,
         ];
         assert_table(&all, picker_text, &[T::Diagnostic]);
     }

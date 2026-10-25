@@ -545,6 +545,8 @@ struct HistoryHook {
     listener: StoredValue<Option<Closure<dyn FnMut()>>, LocalStorage>,
     attached: StoredValue<bool, LocalStorage>,
     popped: StoredValue<bool, LocalStorage>,
+    /// The `picker` field of the state this instance pushed.
+    marker: StoredValue<String, LocalStorage>,
 }
 
 impl HistoryHook {
@@ -553,6 +555,7 @@ impl HistoryHook {
             listener: StoredValue::new_local(None),
             attached: StoredValue::new_local(false),
             popped: StoredValue::new_local(false),
+            marker: StoredValue::new_local(next_prefix()),
         }
     }
 
@@ -562,7 +565,13 @@ impl HistoryHook {
             return;
         };
         if let Ok(history) = window.history() {
-            let _ = history.push_state(&JsValue::NULL, "");
+            let state = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &state,
+                &JsValue::from_str("picker"),
+                &JsValue::from_str(&self.marker.get_value()),
+            );
+            let _ = history.push_state(&state, "");
         }
         let popped = self.popped;
         let cb = Closure::<dyn FnMut()>::new(move || {
@@ -590,8 +599,16 @@ impl HistoryHook {
                     .remove_event_listener_with_callback("popstate", cb.as_ref().unchecked_ref());
             }
         });
+        // Only drop the entry while it is still the top one: if something else navigated, the
+        // picker's entry is not ours to pop.
         if !self.popped.get_value()
             && let Ok(history) = window.history()
+            && history.state().ok().is_some_and(|s| {
+                js_sys::Reflect::get(&s, &JsValue::from_str("picker"))
+                    .ok()
+                    .and_then(|m| m.as_string())
+                    .is_some_and(|m| m == self.marker.get_value())
+            })
         {
             let _ = history.back();
         }
@@ -658,6 +675,8 @@ pub fn EntityPicker(
                 ev.prevent_default();
                 open.set(false);
             }
+            on:close=move |_| open.set(false)
+            on:keydown=|ev: KeyboardEvent| ev.stop_propagation()
             on:click=move |ev| {
                 let target = ev.target();
                 let me: Option<web_sys::EventTarget> = dialog.get_untracked().map(Into::into);
@@ -685,7 +704,8 @@ pub fn EntityPicker(
                         aria-label=move || t(PickerText::Close)
                         on:click=close
                     >
-                        "✕"
+                        <span class="picker__close-x">"✕"</span>
+                        <span class="picker__close-back">"←"</span>
                     </button>
                 </header>
                 {move || {

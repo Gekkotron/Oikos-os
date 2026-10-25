@@ -669,6 +669,26 @@ async fn backspace_in_input_keeps_card() {
 }
 
 #[wasm_bindgen_test]
+async fn keys_in_an_open_picker_do_not_delete_the_card() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    select_card(&host, "on").await;
+    click_any(&host, ".flow-drawer button.picker-field");
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(30).await;
+    let chip = element(&host, ".picker__chips .chip");
+    chip.clone()
+        .unchecked_into::<web_sys::HtmlElement>()
+        .focus()
+        .unwrap();
+    press(&chip, "Backspace", false, false);
+    press(&chip, "z", true, false);
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, "[data-node=on]"), 1, "{html}");
+    assert_eq!(count(&host, ".flow-wire"), 4, "{html}");
+}
+
+#[wasm_bindgen_test]
 async fn wire_click_then_cut() {
     let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
     assert_eq!(count(&host, ".flow-wire-hit"), 4);
