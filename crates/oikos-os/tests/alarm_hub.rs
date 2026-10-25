@@ -75,6 +75,7 @@ fn house(hub: &Hub) {
         "device_tracker",
         "phone_a",
         json!({"name": "Phone", "unique_id": "phone_a", "state_topic": "fx/phone_a",
+               "availability_topic": "fx/phone_a/avail",
                "payload_home": "home", "payload_not_home": "not_home"}),
     );
     feed(
@@ -340,6 +341,9 @@ impl Rig {
             door,
             task,
         };
+        // The engine reaches its boot settle before the clock moves: it reads the wall clock
+        // again when it resumes, and the paused clock never moves that.
+        rig.pump().await;
         rig.advance(6).await;
         rig
     }
@@ -601,7 +605,6 @@ async fn alarm_changed_during_an_outage_does_not_reseed() {
         reason: "test".to_owned(),
     });
     rig.pump().await;
-    eprintln!("offline: {}", rig.state());
     // A settings document arriving while the link is down announces AlarmChanged.
     let mut settings = rig.hub.alarm_settings();
     settings.siren_s = 60;
@@ -611,7 +614,6 @@ async fn alarm_changed_during_an_outage_does_not_reseed() {
     rig.pump().await;
     rig.hub.set_connection(ConnectionStatus::Online);
     rig.pump().await;
-    eprintln!("before replay: {}", rig.state());
     rig.hub.ingest_message("fx/front_door", b"open", true);
     rig.pump().await;
     assert_eq!(rig.state(), "armed_away");
@@ -1125,15 +1127,270 @@ async fn delayed_door_with_known_state_goes_pending() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn first_ever_open_of_a_stateless_sensor_goes_pending() {
+async fn first_ever_open_of_a_stateless_sensor_is_watched_for_closing() {
     use oikos_core::model::AlarmMode;
     let (mut rig, silent) = delayed_rig().await;
     rig.command(arm(AlarmMode::Away)).await;
     rig.advance(61).await;
     assert_eq!(rig.state(), "armed_away");
     assert!(rig.hub.entity_view(&silent).is_some());
-    // Live (non-retained) first publication of `open` on a sensor never seen before.
+    // Live (non-retained) first publication of `open` on a sensor never seen before: it may
+    // have been open for hours, so it is found open, not opened.
     rig.hub.ingest_message("fx/back_door", b"open", false);
     rig.pump().await;
-    assert_eq!(rig.state(), "pending", "first value was taken for a seed");
+    assert_eq!(rig.state(), "armed_away");
+    assert_eq!(
+        rig.hub.alarm_view().open_at_arm,
+        std::slice::from_ref(&silent)
+    );
+    assert!(rig.alarm_alerts().iter().all(|a| !is_alert(a, "critical")));
+    // Closing it is the event, per its entry: delayed goes pending.
+    rig.hub.ingest_message("fx/back_door", b"closed", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "pending");
+}
+
+/// Armed away from a retained runtime, a second (instant) window that has not reported yet.
+#[tokio::test(start_paused = true)]
+async fn restart_with_an_open_window_does_not_trigger() {
+    use oikos_alarm::machine::{Phase, Runtime};
+    let mut window = String::new();
+    let (hub, rx) = boot_hub(
+        |hub, settings| {
+            window = entity_id(hub, "back_door");
+            settings.sensors.push(SensorRule {
+                entity: window.clone(),
+                kind: SensorKind::Opening,
+                modes: BTreeSet::from([ArmMode::Away]),
+                entry: Entry::Instant,
+            });
+        },
+        |_| Runtime {
+            phase: Phase::Armed {
+                mode: ArmMode::Away,
+            },
+            ..Runtime::default()
+        },
+    );
+    let task = hub.start_alarm();
+    let mut rig = Rig {
+        door: entity_id(&hub, "front_door"),
+        hub,
+        rx,
+        log: Vec::new(),
+        task,
+    };
+    rig.pump().await;
+    rig.advance(6).await;
+    assert_eq!(rig.state(), "armed_away");
+    // Zigbee2MQTT publishes non-retained: the window's first report after the boot is `open`.
+    rig.hub.ingest_message("fx/back_door", b"open", false);
+    rig.pump().await;
+    assert_eq!(
+        rig.state(),
+        "armed_away",
+        "an open window is not a new opening"
+    );
+    assert_eq!(
+        rig.hub.alarm_view().open_at_arm,
+        std::slice::from_ref(&window)
+    );
+    rig.hub.ingest_message("fx/back_door", b"closed", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "triggered", "closing it is the event");
+}
+
+/// Tens of events the engine never reads: more than the broadcast channel holds.
+fn flood(hub: &Hub) {
+    for n in 0..1100 {
+        hub.ingest_message("fx/temp", n.to_string().as_bytes(), false);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn lagged_events_are_treated_like_a_reconnect() {
+    use oikos_core::model::AlarmMode;
+    let mut rig = Rig::new().await;
+    rig.command(arm(AlarmMode::Away)).await;
+    rig.advance(61).await;
+    assert_eq!(rig.state(), "armed_away");
+    // The engine does not run between these calls: the flood overruns its receiver, and the
+    // door's opening comes last, so it is still delivered after the lag.
+    flood(&rig.hub);
+    rig.hub.ingest_message("fx/front_door", b"open", false);
+    rig.pump().await;
+    assert_eq!(
+        rig.state(),
+        "armed_away",
+        "what was known before the lag is not compared with what follows it"
+    );
+    // Once settled, the engine is synced again and a change counts.
+    rig.advance(6).await;
+    rig.hub.ingest_message("fx/front_door", b"closed", false);
+    rig.hub.ingest_message("fx/front_door", b"open", false);
+    rig.pump().await;
+    assert_eq!(rig.state(), "triggered");
+}
+
+#[tokio::test(start_paused = true)]
+async fn late_retained_runtime_is_not_overwritten() {
+    use oikos_alarm::machine::{Phase, Runtime};
+    let (hub, rx) = hub();
+    house(&hub);
+    let door = entity_id(&hub, "front_door");
+    hub.ingest("fx/front_door", b"closed");
+    hub.ingest_message(
+        "oikos/alarm/settings",
+        serde_json::to_string(&enabled_with(&door))
+            .unwrap()
+            .as_bytes(),
+        true,
+    );
+    hub.on_connected();
+    hub.on_suback();
+    let task = hub.start_alarm();
+    let mut rig = Rig {
+        door,
+        hub,
+        rx,
+        log: Vec::new(),
+        task,
+    };
+    rig.pump().await;
+    // The settle is over and the runtime has not arrived.
+    rig.advance(10).await;
+    let armed = Runtime {
+        phase: Phase::Armed {
+            mode: ArmMode::Away,
+        },
+        ..Runtime::default()
+    };
+    rig.hub.ingest_message(
+        "oikos/alarm/state",
+        serde_json::to_string(&armed).unwrap().as_bytes(),
+        true,
+    );
+    rig.advance(5).await;
+    assert_eq!(rig.state(), "armed_away");
+    rig.advance(40).await;
+    assert_eq!(rig.state(), "armed_away");
+}
+
+#[tokio::test(start_paused = true)]
+async fn missing_runtime_is_taken_as_empty_after_the_wait() {
+    let (hub, rx) = hub();
+    house(&hub);
+    let door = entity_id(&hub, "front_door");
+    hub.ingest_message(
+        "oikos/alarm/settings",
+        serde_json::to_string(&enabled_with(&door))
+            .unwrap()
+            .as_bytes(),
+        true,
+    );
+    hub.on_connected();
+    hub.on_suback();
+    let task = hub.start_alarm();
+    let mut rig = Rig {
+        door,
+        hub,
+        rx,
+        log: Vec::new(),
+        task,
+    };
+    rig.pump().await;
+    rig.advance(6).await;
+    assert!(rig.sent("oikos/alarm/state").is_empty(), "still waiting");
+    rig.advance(31).await;
+    assert_eq!(rig.state(), "disarmed");
+    assert!(
+        !rig.sent(CONFIG_TOPIC).is_empty(),
+        "the entity is published"
+    );
+}
+
+/// A presence tracker that is offline reads as unknown, whatever it last reported.
+#[tokio::test(start_paused = true)]
+async fn offline_tracker_blocks_auto_arm() {
+    let mut rig = Rig::with(|hub, settings| {
+        settings.presence.trackers = vec![entity_id(hub, "phone_a")];
+        settings.presence.arm = true;
+        settings.presence.arm_after_s = 60;
+        // Someone is home when the alarm is switched on, so presence may arm once they leave.
+        hub.ingest("fx/phone_a", b"home");
+    })
+    .await;
+    // The phone's last word is `not_home`, then it goes offline with no one else around.
+    rig.hub.ingest_message("fx/phone_a", b"not_home", false);
+    rig.pump().await;
+    rig.hub
+        .ingest_message("fx/phone_a/avail", b"offline", false);
+    rig.pump().await;
+    rig.advance(600).await;
+    assert_eq!(rig.state(), "disarmed", "an offline phone is not away");
+}
+
+#[tokio::test(start_paused = true)]
+async fn tracker_stays_away_when_online_so_auto_arm_works() {
+    let mut rig = Rig::with(|hub, settings| {
+        settings.presence.trackers = vec![entity_id(hub, "phone_a")];
+        settings.presence.arm = true;
+        settings.presence.arm_after_s = 60;
+        hub.ingest("fx/phone_a", b"home");
+    })
+    .await;
+    rig.hub.ingest_message("fx/phone_a", b"not_home", false);
+    rig.pump().await;
+    rig.advance(120).await;
+    assert_eq!(rig.state(), "armed_away");
+}
+
+#[tokio::test(start_paused = true)]
+async fn saving_settings_while_ringing_silences_a_dropped_siren() {
+    let mut rig = armed_rig().await;
+    trip(&mut rig).await;
+    rig.clear();
+    let mut settings = rig.hub.alarm_settings();
+    settings
+        .sirens
+        .retain(|s| matches!(s, oikos_alarm::doc::Siren::Entity { .. }));
+    rig.hub.set_alarm_settings(settings).await.unwrap();
+    rig.pump().await;
+    assert_eq!(
+        rig.sent(MQTT_SIREN),
+        ["OFF"],
+        "the dropped siren is switched off"
+    );
+    assert!(rig.sent(SIREN_SET).is_empty(), "the kept one keeps ringing");
+    assert_eq!(rig.state(), "triggered");
+}
+
+#[tokio::test(start_paused = true)]
+async fn disabling_while_ringing_switches_off_the_previous_sirens_too() {
+    let mut rig = armed_rig().await;
+    trip(&mut rig).await;
+    rig.clear();
+    let mut settings = rig.hub.alarm_settings();
+    settings.enabled = false;
+    settings
+        .sirens
+        .retain(|s| matches!(s, oikos_alarm::doc::Siren::Entity { .. }));
+    rig.hub.set_alarm_settings(settings).await.unwrap();
+    rig.pump().await;
+    assert_eq!(rig.sent(MQTT_SIREN), ["OFF"]);
+    assert_eq!(rig.sent(SIREN_SET), ["OFF"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_chirp_is_refused_while_ringing() {
+    let mut rig = armed_rig().await;
+    trip(&mut rig).await;
+    rig.clear();
+    let err = rig.hub.alarm_test_chirp(1).unwrap_err();
+    match err {
+        HubError::Rejected(reason) => assert!(reason.contains("ringing"), "{reason}"),
+        other => panic!("{other:?}"),
+    }
+    rig.pump().await;
+    assert!(rig.sent(MQTT_SIREN).is_empty(), "nothing was published");
 }

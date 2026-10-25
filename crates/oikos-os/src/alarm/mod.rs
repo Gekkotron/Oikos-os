@@ -33,7 +33,9 @@ pub struct AlarmHub {
     pub(crate) engine_started: AtomicBool,
     /// Unix seconds and the monotonic instant they were read at: the engine's clock is this
     /// anchor plus the time elapsed since, so deadlines never depend on the wall clock moving.
-    pub(crate) anchor: (u64, tokio::time::Instant),
+    /// It is read again at every resume: on a host without a battery clock the wall clock is
+    /// wrong at process start and right once the network time has arrived.
+    pub(crate) anchor: Mutex<(u64, tokio::time::Instant)>,
     /// Makes the trigger alert ids unique within one clock second.
     pub(crate) alert_seq: AtomicU64,
     /// The watched sensors whose offline warning is open, so it is raised once per outage.
@@ -50,7 +52,7 @@ impl AlarmHub {
             runtime_loaded: AtomicBool::new(false),
             pass: tokio::sync::Mutex::new(()),
             engine_started: AtomicBool::new(false),
-            anchor: (crate::clock::now(), tokio::time::Instant::now()),
+            anchor: Mutex::new((crate::clock::now(), tokio::time::Instant::now())),
             alert_seq: AtomicU64::new(0),
             offline_raised: Mutex::new(BTreeSet::new()),
         }

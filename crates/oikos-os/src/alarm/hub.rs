@@ -10,12 +10,11 @@ use oikos_alarm::topics::{self, AlarmTopic};
 use oikos_alarm::view::AlarmView;
 use oikos_api::WsEvent;
 use oikos_core::command::Publish;
-use oikos_core::model::{Entity, Kind, StateValue};
+use oikos_core::model::{Availability, Entity, EntityState, Kind, StateValue};
 use oikos_core::types::{Placement, type_def};
 
 use super::{ALARM_ENTITY_ID, engine, entity, lock};
 use crate::climate::store::{Applied, apply_validated};
-use crate::clock;
 use crate::hub::{Hub, HubError};
 
 impl Hub {
@@ -55,7 +54,10 @@ impl Hub {
         settings.validate().map_err(HubError::Rejected)?;
         self.check_alarm_entities(&settings)
             .map_err(HubError::Rejected)?;
-        let was_enabled = self.alarm_settings().enabled;
+        // Taken before the new document is in force: a siren this save drops may be ringing.
+        let before = self.alarm_settings();
+        let was_enabled = before.enabled;
+        let ringing = lock(&self.alarm.runtime).state_name() == "triggered";
         let payload = serde_json::to_string(&settings)
             .map_err(|err| HubError::Rejected(format!("serialize: {err}")))?;
         let topic = topics::settings_topic(&self.alarm.prefix);
@@ -72,7 +74,19 @@ impl Hub {
         }
         self.sync_alarm_entity()?;
         if was_enabled && !enabled {
-            self.alarm_disable().await?;
+            self.alarm_disable(&before.sirens).await?;
+        } else if ringing && enabled {
+            let dropped: Vec<Siren> = before
+                .sirens
+                .into_iter()
+                .filter(|siren| !settings.sirens.contains(siren))
+                .collect();
+            if !dropped.is_empty() {
+                let _pass = self.alarm.pass.lock().await;
+                for failure in self.alarm_sirens_of(&dropped, false).await {
+                    tracing::warn!(%failure, "alarm siren could not be switched off");
+                }
+            }
         }
         self.broadcast(WsEvent::AlarmChanged);
         Ok(())
@@ -201,7 +215,7 @@ impl Hub {
     fn alarm_reset_runtime(&self, settings: &AlarmSettings) -> Result<(), HubError> {
         let trackers = self.alarm_live_presence(&settings.presence.trackers);
         let rt = Runtime {
-            since: clock::now(),
+            since: self.alarm_now(),
             auto_arm_ready: initial_ready(&trackers),
             trackers,
             ..Runtime::default()
@@ -209,20 +223,27 @@ impl Hub {
         self.persist_alarm_runtime(&rt)
     }
 
-    /// Switching the alarm off: sirens off if they ring, every alert resolved, and the runtime
-    /// back to its default. Runs under the engine pass so no step is in flight.
-    pub(crate) async fn alarm_disable(self: &Arc<Self>) -> Result<(), HubError> {
+    /// Switching the alarm off: sirens off if they ring (the saved list and `dropped`, the one
+    /// it replaced), every alert resolved, and the runtime back to its default. Runs under the
+    /// engine pass so no step is in flight.
+    pub(crate) async fn alarm_disable(self: &Arc<Self>, dropped: &[Siren]) -> Result<(), HubError> {
         use oikos_alarm::machine::Effect;
         let _pass = self.alarm.pass.lock().await;
         let ringing = lock(&self.alarm.runtime).state_name() == "triggered";
-        let mut effects = Vec::new();
         if ringing {
-            effects.push(Effect::SirensOff);
+            let mut sirens = self.alarm_settings().sirens;
+            for siren in dropped {
+                if !sirens.contains(siren) {
+                    sirens.push(siren.clone());
+                }
+            }
+            for failure in self.alarm_sirens_of(&sirens, false).await {
+                tracing::warn!(%failure, "alarm siren could not be switched off");
+            }
         }
-        effects.push(Effect::ResolveAlerts);
-        self.run_alarm_effects(effects).await;
+        self.run_alarm_effects(vec![Effect::ResolveAlerts]).await;
         self.persist_alarm_runtime(&Runtime {
-            since: clock::now(),
+            since: self.alarm_now(),
             ..Runtime::default()
         })
     }
@@ -233,9 +254,7 @@ impl Hub {
         trackers
             .iter()
             .map(|id| {
-                let seen = reg
-                    .state(id)
-                    .map_or(Presence::Unknown, |s| tracker_presence(&s.value));
+                let seen = reg.state(id).map_or(Presence::Unknown, tracker_presence);
                 (id.clone(), seen)
             })
             .collect()
@@ -323,9 +342,13 @@ impl Hub {
     }
 }
 
-/// What a tracker's state value says: `home`, `not_home`, or unknown.
-pub(crate) fn tracker_presence(value: &StateValue) -> Presence {
-    match value {
+/// What a tracker says: `home`, `not_home`, or unknown. An offline tracker is unknown, whatever
+/// it last reported: a phone with a dead battery must not look like a phone that left.
+pub(crate) fn tracker_presence(state: &EntityState) -> Presence {
+    if state.availability == Availability::Offline {
+        return Presence::Unknown;
+    }
+    match &state.value {
         StateValue::Generic(g) => match g.fields.get("state") {
             Some(oikos_core::model::GenericValue::Text(t)) => presence_of(t),
             _ => Presence::Unknown,

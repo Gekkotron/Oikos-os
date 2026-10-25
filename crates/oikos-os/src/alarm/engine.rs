@@ -21,6 +21,10 @@ use crate::hub::{Hub, StateSeen};
 /// How long after the broker link comes up the engine waits for the retained states to land.
 const ALARM_BOOT_SETTLE: Duration = Duration::from_secs(5);
 
+/// How long a hub that boots with the alarm on waits for the retained runtime document, once
+/// the settle is over, before it takes the runtime as empty.
+const ALARM_RUNTIME_WAIT: Duration = Duration::from_secs(30);
+
 /// What a raw `<p>/panel/set` payload asks for.
 pub(crate) fn parse_panel_command(payload: &[u8]) -> Option<Command> {
     let arm = |mode| Some(Command::Arm { mode, code: None });
@@ -52,7 +56,7 @@ impl Hub {
 
     /// The engine's clock: Unix seconds, advanced by the monotonic clock from a fixed anchor.
     pub(crate) fn alarm_now(&self) -> u64 {
-        let (wall, at) = self.alarm.anchor;
+        let (wall, at) = *lock(&self.alarm.anchor);
         wall + at.elapsed().as_secs()
     }
 
@@ -151,6 +155,7 @@ impl Hub {
     /// After the settle (boot or reconnect): the engine owns the runtime from here on, the
     /// panel entity is republished in case the broker lost it, and the machine catches up.
     async fn alarm_resume(self: &Arc<Self>) {
+        *lock(&self.alarm.anchor) = (crate::clock::now(), tokio::time::Instant::now());
         self.alarm.engine_started.store(true, Ordering::SeqCst);
         if !self.alarm_settings().enabled {
             return;
@@ -178,6 +183,15 @@ impl Hub {
             }
             resumed_epoch = self.link_epoch();
             tokio::time::sleep(ALARM_BOOT_SETTLE).await;
+            // A retained runtime that lands after the settle must not be overwritten by an
+            // empty one: with the alarm on, give it a while longer.
+            let waited = tokio::time::Instant::now();
+            while self.alarm_settings().enabled
+                && !self.alarm.runtime_loaded.load(Ordering::SeqCst)
+                && waited.elapsed() < ALARM_RUNTIME_WAIT
+            {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
             // What queued up during the settle is dropped: the seed below reflects the final
             // registry, and a queued replay read against it would look like a change.
             drain(&mut events, &mut seen);
@@ -192,7 +206,8 @@ impl Hub {
         // Seeding is allowed only while the link is up and settled: during an outage the
         // registry holds the values from before the drop.
         let mut synced = true;
-        let mut resume_at: Option<tokio::time::Instant> = None;
+        // When a reconnect or a lag has settled: the instant, and whether the machine resumes.
+        let mut resume_at: Option<(tokio::time::Instant, bool)> = None;
         loop {
             let now = self.alarm_now();
             let deadline = self.alarm_deadline();
@@ -200,7 +215,7 @@ impl Hub {
                 biased;
                 event = events.recv() => match event {
                     Ok(WsEvent::StateChanged { id, state }) => {
-                        self.alarm_state_changed(&mut known, &id, &state).await;
+                        self.alarm_state_changed(&mut known, synced, &id, &state).await;
                     }
                     Ok(WsEvent::SignalReceived { id, signal }) => {
                         let remote = self.alarm_settings().remotes.iter().any(|r| r.entity == id);
@@ -218,14 +233,27 @@ impl Hub {
                     }
                     Ok(WsEvent::ConnectionChanged(_)) if self.link_epoch() != resumed_epoch => {
                         resumed_epoch = self.link_epoch();
-                        resume_at = Some(tokio::time::Instant::now() + ALARM_BOOT_SETTLE);
+                        resume_at = Some((tokio::time::Instant::now() + ALARM_BOOT_SETTLE, true));
+                    }
+                    // Events were lost, perhaps the link drop and its return among them: what
+                    // is known may be older than the registry. Forget it like a reconnect
+                    // does, and seed again once things have settled.
+                    Err(RecvError::Lagged(_)) => {
+                        known = Known::default();
+                        synced = false;
+                        let reconnected = self.link_epoch() != resumed_epoch;
+                        resumed_epoch = self.link_epoch();
+                        resume_at = matches!(*link.borrow(), ConnectionStatus::Online).then(|| {
+                            let resume = reconnected || resume_at.is_some_and(|(_, r)| r);
+                            (tokio::time::Instant::now() + ALARM_BOOT_SETTLE, resume)
+                        });
                     }
                     // A newly watched entity has no known value yet: its first change would be
                     // taken for a first sighting. (Not while a reconnect is settling: the
                     // registry still holds the value from before the drop.)
                     Ok(WsEvent::AlarmChanged) if synced => self.alarm_seed_all(&mut known),
                     // The deadline is recomputed at the top of every pass.
-                    Ok(_) | Err(RecvError::Lagged(_)) => {}
+                    Ok(_) => {}
                     Err(RecvError::Closed) => break,
                 },
                 // After the events, so a change is stored by `StateChanged` first. This only
@@ -238,13 +266,17 @@ impl Hub {
                 },
                 () = async {
                     match resume_at {
-                        Some(at) => tokio::time::sleep_until(at).await,
+                        Some((at, _)) => tokio::time::sleep_until(at).await,
                         None => std::future::pending().await,
                     }
                 } => {
+                    let resume = resume_at.is_some_and(|(_, resume)| resume);
                     resume_at = None;
+                    // Seeded before the resume, so what the machine does reads current values.
                     self.alarm_seed_all(&mut known);
-                    self.alarm_resume().await;
+                    if resume {
+                        self.alarm_resume().await;
+                    }
                     synced = true;
                 }
                 () = async {
@@ -261,32 +293,36 @@ impl Hub {
         }
     }
 
-    /// A watched sensor or tracker changed state. Only a change between two known values is an
-    /// event: a first sighting, or a value appearing or vanishing, is recorded silently.
+    /// A watched sensor or tracker changed state. A change between two known values is an
+    /// event. A sensor's first definite value since it was unknown or absent is a "found" event
+    /// while the engine is synced (a restart, say: a window already open is not a new opening),
+    /// and is only recorded while it is not (a replay).
     async fn alarm_state_changed(
         self: &Arc<Self>,
         known: &mut Known,
+        synced: bool,
         id: &str,
         state: &EntityState,
     ) {
-        let value = &state.value;
         let settings = self.alarm_settings();
         if settings.sensors.iter().any(|r| r.entity == id) {
             self.alarm_watch_availability(id, state.availability);
-            let next = sensor_on(value);
-            let previous = known.sensors.insert(id.to_owned(), next);
-            if let Some(Some(previous)) = previous
-                && let Some(next) = next
-                && previous != next
-            {
-                let ev = Event::Sensor {
+            let next = sensor_on(&state.value);
+            let previous = known.sensors.insert(id.to_owned(), next).flatten();
+            let ev = match (previous, next) {
+                (Some(previous), Some(next)) if previous != next => Event::Sensor {
                     entity: id.to_owned(),
                     on: next,
-                };
-                self.alarm_event(ev, self.alarm_now()).await;
-            }
+                },
+                (None, Some(on)) if synced => Event::SensorFound {
+                    entity: id.to_owned(),
+                    on,
+                },
+                _ => return,
+            };
+            self.alarm_event(ev, self.alarm_now()).await;
         } else if settings.presence.trackers.iter().any(|t| t == id) {
-            let next = tracker_presence(value);
+            let next = tracker_presence(state);
             let previous = known.trackers.insert(id.to_owned(), next);
             if previous.is_some_and(|p| p != next) {
                 let ev = Event::Tracker {
@@ -325,9 +361,7 @@ impl Hub {
                 .trackers
                 .iter()
                 .map(|id| {
-                    let seen = reg
-                        .state(id)
-                        .map_or(Presence::Unknown, |s| tracker_presence(&s.value));
+                    let seen = reg.state(id).map_or(Presence::Unknown, tracker_presence);
                     (id.clone(), seen)
                 })
                 .collect()
@@ -349,14 +383,14 @@ impl Hub {
             known
                 .sensors
                 .entry(rule.entity.clone())
-                .or_insert_with(|| seed_sensor(reg.state(&rule.entity)));
+                .or_insert_with(|| reg.state(&rule.entity).and_then(|s| sensor_on(&s.value)));
         }
         for id in &settings.presence.trackers {
             if let Some(state) = reg.state(id) {
                 known
                     .trackers
                     .entry(id.clone())
-                    .or_insert_with(|| tracker_presence(&state.value));
+                    .or_insert_with(|| tracker_presence(state));
             }
         }
     }
@@ -374,14 +408,14 @@ impl Hub {
             known
                 .sensors
                 .entry(id.to_owned())
-                .or_insert_with(|| seed_sensor(reg.state(id)));
+                .or_insert_with(|| reg.state(id).and_then(|s| sensor_on(&s.value)));
         } else if settings.presence.trackers.iter().any(|t| t == id)
             && let Some(state) = reg.state(id)
         {
             known
                 .trackers
                 .entry(id.to_owned())
-                .or_insert_with(|| tracker_presence(&state.value));
+                .or_insert_with(|| tracker_presence(state));
         }
     }
 }
@@ -396,19 +430,6 @@ fn drain(events: &mut broadcast::Receiver<WsEvent>, seen: &mut broadcast::Receiv
         seen.try_recv(),
         Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed)
     ) {}
-}
-
-/// The value a watched sensor is seeded with. A sensor the registry has no state (or only `Unknown`) for yet
-/// counts as off, so its first report (`open`) is a change and not a seed. That is replay-safe: seeding
-/// only runs while synced, after the settle drain, so a retained replay of an existing state is
-/// already in the registry by then, and every link drop clears the known values and the synced
-/// flag.
-fn seed_sensor(state: Option<&EntityState>) -> Option<bool> {
-    match state {
-        None => Some(false),
-        Some(s) if matches!(s.value, StateValue::Unknown) => Some(false),
-        Some(s) => sensor_on(&s.value),
-    }
 }
 
 /// Whether a binary sensor reads on; `None` while its state is unknown.

@@ -85,6 +85,15 @@ impl Hub {
     /// Switches every siren on or off at once; the failures come back as readable lines.
     async fn alarm_sirens(self: &Arc<Self>, on: bool) -> Vec<String> {
         let sirens = self.alarm_settings().sirens;
+        self.alarm_sirens_of(&sirens, on).await
+    }
+
+    /// Switches the given sirens on or off at once.
+    pub(crate) async fn alarm_sirens_of(
+        self: &Arc<Self>,
+        sirens: &[Siren],
+        on: bool,
+    ) -> Vec<String> {
         let results = join_all(sirens.iter().map(|siren| async move {
             let (label, outcome) = match siren {
                 Siren::Entity { entity, .. } => (
@@ -187,6 +196,12 @@ impl Hub {
     /// whether or not the alarm is enabled. `Rejected` when there is no such siren or it has no
     /// chirp.
     pub fn alarm_test_chirp(self: &Arc<Self>, index: usize) -> Result<(), HubError> {
+        // A chirp payload can replace a siren's long ring: never while it rings.
+        if lock(&self.alarm.runtime).state_name() == "triggered" {
+            return Err(HubError::Rejected(
+                "the alarm is ringing, disarm it first".to_owned(),
+            ));
+        }
         let siren = self
             .alarm_settings()
             .sirens
