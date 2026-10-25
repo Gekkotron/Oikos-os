@@ -14,7 +14,7 @@ use crate::cards::light::has_colour;
 use crate::components::hs_wheel::HsWheel;
 
 use crate::components::card_place::InSheet;
-use crate::format::{list_label, title_suffix, type_word, wrap_id};
+use crate::format::{area_name, list_label, title_suffix, type_word, wrap_id};
 use crate::house::House;
 use crate::i18n::devices::{
     DeviceText, availability_text, key_signal, text_signal, use_device_text,
@@ -254,7 +254,7 @@ pub fn SheetBody(id: String) -> impl IntoView {
                 areas
                     .iter()
                     .find(|a| a.id == e.area)
-                    .map_or_else(|| e.area.clone(), |a| a.name.clone())
+                    .map_or_else(|| e.area.clone(), |a| area_name(lang(), &a.id, &a.name))
             });
             let availability = e.state.availability;
             let title = match title_suffix(lang(), &e) {

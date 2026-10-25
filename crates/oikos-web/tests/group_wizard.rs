@@ -121,7 +121,10 @@ async fn step_one_lists_controllable_kinds_only() {
         "vacuum",
         "water heater",
     ] {
-        assert!(text.contains(kind), "{kind} missing from {text}");
+        assert!(
+            text.to_lowercase().contains(kind),
+            "{kind} missing from {text}"
+        );
     }
     for kind in [
         "sensor",
@@ -137,7 +140,7 @@ async fn step_one_lists_controllable_kinds_only() {
 async fn step_two_filters_by_effective_kind_and_groups_by_room() {
     let host = mount();
     tick().await;
-    click(&host, "button.card", "light").await;
+    click(&host, "button.card", "Light").await;
     click(&host, "button.btn", "Next").await;
     let text = host.text_content().unwrap();
     assert!(text.contains("Salon") && text.contains("Cuisine"), "{text}");
@@ -149,7 +152,7 @@ async fn step_two_filters_by_effective_kind_and_groups_by_room() {
 async fn step_three_hides_members_by_default() {
     let host = mount();
     tick().await;
-    click(&host, "button.card", "light").await;
+    click(&host, "button.card", "Light").await;
     click(&host, "button.btn", "Next").await;
     click(&host, "button.card", "lamp").await;
     click(&host, "button.btn", "Next").await;
@@ -178,7 +181,7 @@ async fn the_wizard_follows_the_language_without_a_remount() {
     assert!(text.contains("Nouveau groupe"), "{text}");
     assert!(text.contains("Étape 1 sur 3"), "{text}");
     assert!(
-        text.contains("lumière") && text.contains("chauffe-eau"),
+        text.contains("Lumière") && text.contains("Chauffe-eau"),
         "{text}"
     );
     assert!(
@@ -186,7 +189,7 @@ async fn the_wizard_follows_the_language_without_a_remount() {
         "{text}"
     );
 
-    click(&host, "button.card", "lumière").await;
+    click(&host, "button.card", "Lumière").await;
     click(&host, "button.btn", "Suivant").await;
     let text = host.text_content().unwrap();
     assert!(

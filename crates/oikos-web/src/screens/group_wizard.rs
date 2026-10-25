@@ -210,7 +210,14 @@ pub fn GroupWizardScreen() -> impl IntoView {
             .areas
             .get()
             .into_iter()
-            .map(|a| view! { <option value=a.id.clone()>{a.name}</option> })
+            .map(|a| {
+                let value = a.id.clone();
+                view! {
+                    <option value=value>
+                        {move || crate::format::area_name(lang(), &a.id, &a.name)}
+                    </option>
+                }
+            })
             .collect_view()
     };
 
