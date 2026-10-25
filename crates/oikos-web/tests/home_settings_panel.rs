@@ -1,9 +1,11 @@
 #![cfg(target_arch = "wasm32")]
 
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::tick;
 use oikos_api::{EntityView, HomeSettings, WsEvent};
 use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride};
+use oikos_web::components::now::Now;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
 use oikos_web::screens::home_settings_panel::HomeSettingsPanel;
@@ -54,6 +56,7 @@ async fn mount() -> (web_sys::Element, House) {
         move || {
             provide_context(house);
             provide_context(Toasts::new());
+            provide_context(Now(RwSignal::new(1_700_000_060)));
             view! { <HomeSettingsPanel /> }
         },
     ));
@@ -68,23 +71,36 @@ fn input(host: &web_sys::Element, id: &str) -> web_sys::HtmlInputElement {
         .unchecked_into()
 }
 
+/// Opens the Mode picker (the panel's first picker field).
+async fn open_mode(host: &web_sys::Element) {
+    let button: web_sys::HtmlElement = host
+        .query_selector("button.picker-field")
+        .unwrap()
+        .expect("mode field")
+        .unchecked_into();
+    button.click();
+    tick().await;
+    TimeoutFuture::new(30).await;
+}
+
+/// The entity ids listed by the open picker, in order.
+fn mode_values(host: &web_sys::Element) -> Vec<String> {
+    let options = host.query_selector_all("[role=option]").unwrap();
+    (0..options.length())
+        .filter_map(|i| {
+            let id = options.item(i)?.unchecked_into::<web_sys::Element>().id();
+            id.split_once("-opt-").map(|(_, e)| e.to_owned())
+        })
+        .collect()
+}
+
 #[wasm_bindgen_test]
 async fn panel_lists_selects_and_saves_draft() {
     let (host, house) = mount().await;
-    let values: Vec<String> = {
-        let options = host.query_selector_all("#home-Mode option").unwrap();
-        (0..options.length())
-            .map(|i| {
-                options
-                    .item(i)
-                    .unwrap()
-                    .unchecked_into::<web_sys::HtmlOptionElement>()
-                    .value()
-            })
-            .collect()
-    };
-    // None, then the hub's virtual select, then the others; the sensor is no mode.
-    assert_eq!(values, ["", "virtual_mode", "alpha_select"]);
+    open_mode(&host).await;
+    // Only selects (the sensor is no mode), by title, with a pinned None row.
+    assert_eq!(mode_values(&host), ["alpha_select", "virtual_mode"]);
+    assert!(host.query_selector("[id$=-pin]").unwrap().is_some());
     assert_eq!(input(&host, "home-Cold").placeholder(), "15");
     assert_eq!(input(&host, "home-Hot").placeholder(), "26");
 
@@ -97,17 +113,20 @@ async fn panel_lists_selects_and_saves_draft() {
     assert_eq!(input(&host, "home-Cold").value(), "12");
 }
 
-fn mode_values(host: &web_sys::Element) -> Vec<String> {
-    let options = host.query_selector_all("#home-Mode option").unwrap();
-    (0..options.length())
-        .map(|i| {
-            options
-                .item(i)
-                .unwrap()
-                .unchecked_into::<web_sys::HtmlOptionElement>()
-                .value()
-        })
-        .collect()
+#[wasm_bindgen_test]
+async fn picking_a_mode_sets_the_draft() {
+    let (host, _house) = mount().await;
+    open_mode(&host).await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-virtual_mode']")
+        .unwrap()
+        .expect("virtual_mode row")
+        .unchecked_into();
+    row.click();
+    tick().await;
+    TimeoutFuture::new(30).await;
+    let field = host.query_selector("button.picker-field").unwrap().unwrap();
+    assert!(field.text_content().unwrap().contains("virtual_mode"));
 }
 
 #[wasm_bindgen_test]
@@ -117,6 +136,7 @@ async fn mode_list_hides_non_primary_selects_but_keeps_the_chosen_one() {
     diag.category = EntityCategory::Diagnostic;
     house.apply(WsEvent::EntityUpserted(diag));
     tick().await;
+    open_mode(&host).await;
     assert!(!mode_values(&host).contains(&"diag_select".to_owned()));
     house.home_settings.set(HomeSettings {
         mode_entity: Some("diag_select".into()),

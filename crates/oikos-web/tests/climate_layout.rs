@@ -1,10 +1,18 @@
 #![cfg(target_arch = "wasm32")]
 //! Layout checks that need the real stylesheet: the climate rules and the screen width.
 
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::tick;
+use oikos_api::{EntityView, WsEvent};
+use oikos_climate::doc::HouseSettings;
 use oikos_climate::doc::{Block, Day, HhMm, ModeRules, Setpoint};
+use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
+use oikos_web::climate::settings_sheet::SettingsSheet;
 use oikos_web::climate::timeline::WeekTimeline;
+use oikos_web::components::now::Now;
+use oikos_web::components::toast::Toasts;
+use oikos_web::house::House;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 use web_sys::Element;
@@ -95,4 +103,73 @@ fn the_header_spans_the_climate_screen() {
     };
     assert!(width(".screen") > 1300.0, "the screen is not capped");
     assert_eq!(width(".content-header"), width(".screen"));
+}
+
+fn sensor(id: &str, kind: Kind, class: &str) -> EntityView {
+    EntityView {
+        id: id.into(),
+        device_id: None,
+        name: id.into(),
+        device_name: None,
+        label: None,
+        kind,
+        component: kind.component().to_string(),
+        protocol_kind: kind,
+        device_class: Some(class.into()),
+        unit: None,
+        icon: None,
+        category: EntityCategory::Primary,
+        enabled_by_default: true,
+        area: "hall".into(),
+        part_of: None,
+        capabilities: Capabilities::default(),
+        ui: UiOverride::default(),
+        state: EntityState::default(),
+    }
+}
+
+#[wasm_bindgen_test]
+async fn outdoor_picker_opens_on_thermometers() {
+    let host = host(600);
+    let house = House::new();
+    for e in [
+        sensor("t_out", Kind::Sensor, "temperature"),
+        sensor("h_out", Kind::Sensor, "humidity"),
+        sensor("door", Kind::BinarySensor, "door"),
+    ] {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(house);
+            provide_context(Toasts::new());
+            provide_context(Now(RwSignal::new(1_700_000_060)));
+            view! {
+                <SettingsSheet
+                    house=HouseSettings::default()
+                    on_saved=Callback::new(|_| {})
+                    on_close=Callback::new(|_| {})
+                />
+            }
+        },
+    ));
+    tick().await;
+    // The Outdoor temperature field is the first picker field of the sheet.
+    let button: web_sys::HtmlElement = host
+        .query_selector("button.picker-field")
+        .unwrap()
+        .expect("outdoor field")
+        .unchecked_into();
+    button.click();
+    tick().await;
+    TimeoutFuture::new(30).await;
+    let options = host.query_selector_all("[role=option]").unwrap();
+    let ids: Vec<String> = (0..options.length())
+        .map(|i| options.item(i).unwrap().unchecked_into::<Element>().id())
+        .collect();
+    assert!(ids.iter().any(|id| id.ends_with("-pin")), "{ids:?}");
+    assert!(ids.iter().any(|id| id.ends_with("-opt-t_out")), "{ids:?}");
+    assert!(!ids.iter().any(|id| id.ends_with("-opt-h_out")), "{ids:?}");
+    assert!(!ids.iter().any(|id| id.ends_with("-opt-door")), "{ids:?}");
 }
