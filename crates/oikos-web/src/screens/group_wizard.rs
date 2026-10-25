@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use leptos::prelude::*;
 use leptos_router::hooks::{use_navigate, use_params_map};
 use oikos_api::{AreaView, EntityView, GroupSpec};
-use oikos_core::model::Kind;
+use oikos_core::model::{Kind, UNASSIGNED_AREA};
 
 use crate::api::{encode_id, list_groups, set_group, set_override};
 use crate::cards::PowerToggle;
@@ -15,7 +15,7 @@ use crate::flow_edit::fold_accents;
 use crate::format::list_label;
 use crate::house::House;
 use crate::i18n::devices::{DeviceText, device_text};
-use crate::i18n::groups::{GroupText, group_text, group_text_signal, kind_name, step_of};
+use crate::i18n::groups::{GroupText, group_text, group_text_signal, kind_label, step_of};
 use crate::i18n::{Key, Lang, text, use_lang};
 use crate::icons::{CHECK, MAGNIFIER};
 use crate::nav::{BackLink, use_back};
@@ -77,7 +77,7 @@ pub fn group_by_room(
     for area in areas {
         if let Some(mut list) = by_area.remove(&area.id) {
             list.sort_by_key(|(_, label)| fold_accents(label));
-            rooms.push((area.name.clone(), list));
+            rooms.push((crate::format::area_name(lang, &area.id, &area.name), list));
         }
     }
     for (area, mut list) in by_area {
@@ -90,6 +90,16 @@ pub fn group_by_room(
         rooms.push((name, list));
     }
     rooms
+}
+
+/// The room select's value for a group's area: the hub's catch-all has no option of its own, so
+/// it opens as the blank "No room" choice (saving a blank room writes no override, as before).
+fn room_choice(area: &str) -> String {
+    if area == UNASSIGNED_AREA {
+        String::new()
+    } else {
+        area.to_owned()
+    }
 }
 
 #[component]
@@ -122,7 +132,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                         kind.set(Some(group.kind));
                         selected.set(group.members.iter().map(|m| m.id.clone()).collect());
                         name.set(group.name);
-                        area.set(group.entity.area);
+                        area.set(room_choice(&group.entity.area));
                         hide_members.set(group.hide_members);
                         loading.set(false);
                     }
@@ -210,7 +220,15 @@ pub fn GroupWizardScreen() -> impl IntoView {
             .areas
             .get()
             .into_iter()
-            .map(|a| view! { <option value=a.id.clone()>{a.name}</option> })
+            .filter(|a| a.id != UNASSIGNED_AREA)
+            .map(|a| {
+                let value = a.id.clone();
+                view! {
+                    <option value=value>
+                        {move || crate::format::area_name(lang(), &a.id, &a.name)}
+                    </option>
+                }
+            })
             .collect_view()
     };
 
@@ -267,7 +285,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                                         kind.set(Some(k));
                                                     }
                                                 >
-                                                    <span class="card__name">{move || kind_name(lang(), k)}</span>
+                                                    <span class="card__name">{move || kind_label(lang(), k)}</span>
                                                 </button>
                                             }
                                         })
@@ -532,5 +550,33 @@ mod tests {
             &BTreeSet::new(),
         );
         assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn a_group_in_the_catch_all_room_opens_with_no_room() {
+        assert_eq!(room_choice(UNASSIGNED_AREA), "");
+        assert_eq!(room_choice("salon"), "salon");
+    }
+
+    #[test]
+    fn the_catch_all_room_reads_in_french() {
+        let mut entities = BTreeMap::new();
+        for e in [
+            entity("lamp", Kind::Light, Kind::Light, "salon"),
+            entity("orphan", Kind::Light, Kind::Light, "Unassigned"),
+        ] {
+            entities.insert(e.id.clone(), e);
+        }
+        let areas = [area("salon", "Salon"), area("Unassigned", "Unassigned")];
+        let rooms = members_by_room(
+            Lang::Fr,
+            &entities,
+            &areas,
+            Kind::Light,
+            "",
+            &BTreeSet::new(),
+        );
+        let names: Vec<&str> = rooms.iter().map(|(r, _)| r.as_str()).collect();
+        assert_eq!(names, ["Salon", "Sans pièce"]);
     }
 }

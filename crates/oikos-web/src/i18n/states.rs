@@ -227,8 +227,31 @@ pub fn device_class_word(lang: Lang, class: &str) -> Option<&'static str> {
         "voltage" => ("Voltage", "Tension"),
         "current" => ("Current", "Courant"),
         "pressure" => ("Pressure", "Pression"),
-        "co2" => ("Co2", "CO2"),
-        "pm25" => ("Pm25", "PM2,5"),
+        "co2" => ("CO2", "CO2"),
+        "pm25" => ("PM2.5", "PM2,5"),
+        "pm10" => ("PM10", "PM10"),
+        "atmospheric_pressure" => ("Atmospheric pressure", "Pression atmosphérique"),
+        "frequency" => ("Frequency", "Fréquence"),
+        "precipitation" => ("Precipitation", "Précipitations"),
+        "wind_speed" => ("Wind speed", "Vitesse du vent"),
+        "water" => ("Water", "Eau"),
+        "vibration" => ("Vibration", "Vibration"),
+        "safety" => ("Safety", "Sécurité"),
+        "problem" => ("Problem", "Problème"),
+        "connectivity" => ("Connectivity", "Connexion"),
+        "tamper" => ("Tamper", "Sabotage"),
+        "firmware" => ("Firmware", "Micrologiciel"),
+        "timestamp" => ("Timestamp", "Horodatage"),
+        "restart" => ("Restart", "Redémarrage"),
+        "identify" => ("Identify", "Identification"),
+        "apparent_power" => ("Apparent power", "Puissance apparente"),
+        "power_factor" => ("Power factor", "Facteur de puissance"),
+        "distance" => ("Distance", "Distance"),
+        "speed" => ("Speed", "Vitesse"),
+        "duration" => ("Duration", "Durée"),
+        "sound_pressure" => ("Sound pressure", "Pression acoustique"),
+        "signal_strength" => ("Signal strength", "Puissance du signal"),
+        "irradiance" => ("Irradiance", "Rayonnement"),
         _ => return None,
     };
     Some(pick(lang, en, fr))
@@ -259,6 +282,19 @@ mod tests {
 
     use super::*;
     use crate::i18n::Lang;
+
+    #[test]
+    fn sensor_classes_the_house_reports_have_french_words() {
+        for (class, fr) in [
+            ("frequency", "Fréquence"),
+            ("atmospheric_pressure", "Pression atmosphérique"),
+            ("wind_speed", "Vitesse du vent"),
+            ("precipitation", "Précipitations"),
+        ] {
+            assert_eq!(device_class_word(Lang::Fr, class), Some(fr));
+        }
+        assert_eq!(device_class_word(Lang::En, "frequency"), Some("Frequency"));
+    }
 
     #[test]
     fn agreement_follows_the_device_class() {

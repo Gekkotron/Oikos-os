@@ -15,7 +15,7 @@ use crate::cards::{PowerToggle, Sender};
 use crate::components::card_frame::open_entity;
 use crate::components::card_place::InSheet;
 use crate::components::toast::Toasts;
-use crate::format::{display_value, is_on};
+use crate::format::{area_name, display_value, is_on};
 use crate::house::House;
 use crate::i18n::devices::{DeviceText, device_text, key_value};
 use crate::i18n::groups::{
@@ -120,7 +120,7 @@ fn GroupBody(group: RwSignal<Option<Option<GroupView>>>) -> impl IntoView {
             areas
                 .iter()
                 .find(|a| a.id == area)
-                .map_or_else(|| area.clone(), |a| a.name.clone())
+                .map_or_else(|| area.clone(), |a| area_name(lang(), &a.id, &a.name))
         })
     });
 
@@ -177,7 +177,7 @@ fn member_row(house: House, kind: Kind, member: GroupMemberView) -> impl IntoVie
                     areas
                         .iter()
                         .find(|a| a.id == e.area)
-                        .map_or_else(|| e.area.clone(), |a| a.name.clone())
+                        .map_or_else(|| e.area.clone(), |a| area_name(lang(), &a.id, &a.name))
                 });
                 format!(
                     "{room} · {}",

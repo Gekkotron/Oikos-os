@@ -368,7 +368,7 @@ pub fn RoomPanel(
                                                 view! {
                                                     <button
                                                         type="button"
-                                                        class="btn"
+                                                        class="btn climate-hold__next"
                                                         on:click=move |_| hold_next(m)
                                                     >
                                                         <span class="climate-hold__long">

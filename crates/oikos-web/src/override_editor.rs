@@ -308,6 +308,7 @@ fn ChipField(
 #[component]
 fn AreaField(draft: Draft) -> impl IntoView {
     let house = expect_context::<House>();
+    let lang = use_lang();
     let t = use_device_text();
     let known = move |value: &str| house.areas.with(|a| a.iter().any(|a| a.id == value));
     // Free text mode starts on when the stored area is not one of the hub's.
@@ -346,7 +347,7 @@ fn AreaField(draft: Draft) -> impl IntoView {
                         let id = area.id.clone();
                         view! {
                             <option value=id.clone() prop:selected=move || selected() == id>
-                                {area.name}
+                                {move || crate::format::area_name(lang(), &area.id, &area.name)}
                             </option>
                         }
                     }
