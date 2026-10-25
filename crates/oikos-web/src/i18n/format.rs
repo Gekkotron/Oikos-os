@@ -224,7 +224,9 @@ pub fn date_time(lang: Lang, t: NaiveDateTime) -> String {
 }
 
 /// How long ago, from `secs` seconds: "à l'instant", "il y a 5 min", "il y a 3 h", "hier",
-/// "il y a 4 j" / "just now", "5 min ago", "3 h ago", "yesterday", "4 d ago".
+/// "il y a 4 j" / "just now", "5 min ago", "3 h ago", "yesterday", "4 d ago". Callers compute
+/// `secs` as `now.saturating_sub(then)`, so a timestamp in the future reads "just now" instead of
+/// underflowing.
 pub fn ago(lang: Lang, secs: u64) -> String {
     let (n, fr_unit, en_unit) = match secs {
         0..60 => {

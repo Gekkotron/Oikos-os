@@ -95,16 +95,15 @@ pub fn detail_text(lang: Lang, d: &Detail) -> String {
 
 /// The lights chip: "3 lights on" / "3 lumières allumées"; `short` drops the "on" part.
 pub fn lights_chip(lang: Lang, n: usize, short: bool) -> String {
-    match (lang, n == 1, short) {
-        (Lang::Fr, true, true) => format!("{n} lumière"),
-        (Lang::Fr, false, true) => format!("{n} lumières"),
-        (Lang::Fr, true, false) => format!("{n} lumière allumée"),
-        (Lang::Fr, false, false) => format!("{n} lumières allumées"),
-        (Lang::En, true, true) => format!("{n} light"),
-        (Lang::En, false, true) => format!("{n} lights"),
-        (Lang::En, true, false) => format!("{n} light on"),
-        (Lang::En, false, false) => format!("{n} lights on"),
-    }
+    let (one, other) = if short {
+        (("light", "lumière"), ("lights", "lumières"))
+    } else {
+        (
+            ("light on", "lumière allumée"),
+            ("lights on", "lumières allumées"),
+        )
+    };
+    crate::i18n::format::count(lang, n, one, other)
 }
 
 /// The indoor chip: "19.6 °C inside" / "19,6 °C à l'intérieur"; `short` is the temperature alone.
@@ -234,6 +233,16 @@ pub fn home_text(lang: Lang, k: HomeText) -> &'static str {
 mod tests {
     use super::*;
     use crate::home_header::summary::Opening;
+
+    #[test]
+    fn lights_chip_agrees_at_zero_and_one() {
+        assert_eq!(lights_chip(Lang::Fr, 0, false), "0 lumière allumée");
+        assert_eq!(lights_chip(Lang::Fr, 1, true), "1 lumière");
+        assert_eq!(lights_chip(Lang::Fr, 2, false), "2 lumières allumées");
+        assert_eq!(lights_chip(Lang::En, 0, true), "0 lights");
+        assert_eq!(lights_chip(Lang::En, 1, false), "1 light on");
+    }
+
     #[test]
     fn home_panel_copy_has_both_languages() {
         use HomeText::*;

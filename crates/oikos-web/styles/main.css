@@ -6445,6 +6445,12 @@ html:has(.flow-canvas-screen) {
 
   .climate-hold > .btn {
     flex: 1;
+    min-width: 0;
+  }
+
+  /* "Prochain changement" does not fit beside the other three: it takes its own row. */
+  .climate-hold > .climate-hold__next {
+    flex: 1 1 100%;
   }
 
   .climate-hold__short {

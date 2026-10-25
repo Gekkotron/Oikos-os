@@ -22,9 +22,11 @@ fn name_of(house: House, lang: Lang, lookup: Lookup) -> Option<String> {
                 }
             })
         }),
-        Lookup::Room(id) => house
-            .areas
-            .with(|list| list.iter().find(|a| a.id == id).map(|a| a.name.clone())),
+        Lookup::Room(id) => house.areas.with(|list| {
+            list.iter()
+                .find(|a| a.id == id)
+                .map(|a| crate::format::area_name(lang, &a.id, &a.name))
+        }),
         Lookup::Flow(id) => house.flows.with(|list| {
             list.iter()
                 .find(|f| f.definition.id == id)

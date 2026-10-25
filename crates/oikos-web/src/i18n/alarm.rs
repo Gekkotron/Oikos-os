@@ -99,7 +99,7 @@ pub fn alarm_text(lang: Lang, k: AlarmText) -> &'static str {
         SensorsTitle => ("Sensors", "Capteurs"),
         SensorsHint => (
             "Tick \"home\" on the outside doors, and set entry doors to delayed.",
-            "Coche « présent » sur les portes extérieures et mets les portes d'entrée en temporisée.",
+            "Cochez «\u{A0}présent\u{A0}» sur les portes extérieures et réglez les portes d'entrée sur «\u{A0}temporisée\u{A0}».",
         ),
         SensorsEmpty => ("No sensor watched yet.", "Aucun capteur surveillé."),
         AddSensor => ("Add a sensor…", "Ajouter un capteur…"),

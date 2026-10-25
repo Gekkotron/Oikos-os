@@ -18,7 +18,7 @@ use crate::house::House;
 use crate::i18n::security::{
     SecurityText, action_label, section_title, security_text, since_days, since_yesterday,
 };
-use crate::i18n::{Key, Lang, format as fmt, use_lang, use_text};
+use crate::i18n::{Key, Lang, format as fmt, text, use_lang, use_text};
 use crate::icons::{PLAY, PLUG, sensor_icon};
 use crate::security::{ActionRow, SecurityUi, SensorRow};
 
@@ -109,7 +109,7 @@ fn SensorTile(row: SensorRow) -> impl IntoView {
                         move || {
                             area.clone()
                                 .unwrap_or_else(|| {
-                                    security_text(lang(), SecurityText::Unassigned).to_owned()
+                                    text(lang(), Key::Unassigned).to_owned()
                                 })
                         }
                     }
@@ -191,7 +191,7 @@ fn ActionTile(row: ActionRow, confirming: RwSignal<Option<String>>) -> impl Into
                         {move || {
                             area.clone()
                                 .unwrap_or_else(|| {
-                                    security_text(lang(), SecurityText::Unassigned).to_owned()
+                                    text(lang(), Key::Unassigned).to_owned()
                                 })
                         }}
                     </span>

@@ -132,6 +132,19 @@ async fn settle() {
     tick().await;
 }
 
+/// Waits until `selector` matches at least `n` elements, then lets the handlers attach.
+async fn wait_for(host: &web_sys::Element, selector: &str, n: usize) {
+    for _ in 0..80 {
+        if all(host, selector).len() >= n {
+            break;
+        }
+        gloo_timers::future::TimeoutFuture::new(25).await;
+    }
+    let found = all(host, selector).len();
+    assert!(found >= n, "waited for {n} x {selector:?}, found {found}");
+    settle().await;
+}
+
 #[wasm_bindgen_test]
 async fn sidebar_has_my_moods_between_overview_and_automations() {
     let document = web_sys::window().unwrap().document().unwrap();
@@ -263,7 +276,7 @@ async fn pin_and_move_write_through_put() {
             vec![view(mood("a", 1, false)), view(mood("b", 2, false))],
         )
     });
-    tick().await;
+    wait_for(&m.host, ".mood-card [role=switch]", 2).await;
     all(&m.host, ".mood-card")[0]
         .query_selector("[role=switch]")
         .unwrap()

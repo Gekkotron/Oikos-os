@@ -7,6 +7,7 @@ use oikos_core::model::UNASSIGNED_AREA;
 use crate::api::encode_id;
 use crate::components::card_place::{CardPlace, provide_card_place};
 use crate::components::room_title::RoomTitle;
+use crate::format::area_name;
 use crate::groups::{HomeItem, home_items};
 use crate::house::House;
 use crate::i18n::settings::{SettingsText, settings_text};
@@ -67,7 +68,7 @@ pub(crate) fn RoomSection(id: String, #[prop(optional)] anchored: bool) -> impl 
             house.areas.with(|a| {
                 a.iter()
                     .find(|a| a.id == id)
-                    .map(|a| a.name.clone())
+                    .map(|a| area_name(lang(), &a.id, &a.name))
                     .unwrap_or_default()
             })
         })

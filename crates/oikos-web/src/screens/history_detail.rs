@@ -10,7 +10,7 @@ use oikos_core::energy::{EnergyMeters, EnergyUnits};
 
 use crate::components::history_chart::{Flavor, HistoryChart};
 use crate::energy::{energy_entities, energy_entity};
-use crate::format::{title_suffix, type_word, wrap_id};
+use crate::format::{area_name, title_suffix, type_word, wrap_id};
 use crate::house::House;
 use crate::i18n::devices::availability_text;
 use crate::i18n::history::{HistoryText, history_text, range_chip};
@@ -96,7 +96,7 @@ pub fn HistoryDetailScreen() -> impl IntoView {
                 areas
                     .iter()
                     .find(|a| a.id == e.area)
-                    .map_or_else(|| e.area.clone(), |a| a.name.clone())
+                    .map_or_else(|| e.area.clone(), |a| area_name(lang(), &a.id, &a.name))
             });
             let availability = e.state.availability;
             let title = match title_suffix(lang(), &e) {

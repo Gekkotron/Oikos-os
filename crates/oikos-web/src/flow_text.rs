@@ -338,9 +338,9 @@ pub fn subline(node: &Node, ctx: &Ctx) -> Option<String> {
         .areas
         .iter()
         .find(|a| a.id == entity.area)
-        .map(|a| a.name.as_str());
+        .map(|a| crate::format::area_name(ctx.lang, &a.id, &a.name));
     let device = entity.device_name.as_deref();
-    let parts: Vec<&str> = [area, device]
+    let parts: Vec<String> = [area, device.map(str::to_owned)]
         .into_iter()
         .flatten()
         .filter(|s| !s.is_empty())

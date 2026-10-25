@@ -73,7 +73,11 @@ fn mount_lang(lang: RwSignal<Lang>) -> web_sys::Element {
         house.apply(WsEvent::EntityUpserted(e));
     }
     house.apply(WsEvent::AreasChanged {
-        areas: vec![area("salon", "Salon"), area("cuisine", "Cuisine")],
+        areas: vec![
+            area("salon", "Salon"),
+            area("cuisine", "Cuisine"),
+            area("Unassigned", "Unassigned"),
+        ],
     });
     let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         provide_context(house);
@@ -121,7 +125,10 @@ async fn step_one_lists_controllable_kinds_only() {
         "vacuum",
         "water heater",
     ] {
-        assert!(text.contains(kind), "{kind} missing from {text}");
+        assert!(
+            text.to_lowercase().contains(kind),
+            "{kind} missing from {text}"
+        );
     }
     for kind in [
         "sensor",
@@ -137,7 +144,7 @@ async fn step_one_lists_controllable_kinds_only() {
 async fn step_two_filters_by_effective_kind_and_groups_by_room() {
     let host = mount();
     tick().await;
-    click(&host, "button.card", "light").await;
+    click(&host, "button.card", "Light").await;
     click(&host, "button.btn", "Next").await;
     let text = host.text_content().unwrap();
     assert!(text.contains("Salon") && text.contains("Cuisine"), "{text}");
@@ -149,7 +156,7 @@ async fn step_two_filters_by_effective_kind_and_groups_by_room() {
 async fn step_three_hides_members_by_default() {
     let host = mount();
     tick().await;
-    click(&host, "button.card", "light").await;
+    click(&host, "button.card", "Light").await;
     click(&host, "button.btn", "Next").await;
     click(&host, "button.card", "lamp").await;
     click(&host, "button.btn", "Next").await;
@@ -178,7 +185,7 @@ async fn the_wizard_follows_the_language_without_a_remount() {
     assert!(text.contains("Nouveau groupe"), "{text}");
     assert!(text.contains("Étape 1 sur 3"), "{text}");
     assert!(
-        text.contains("lumière") && text.contains("chauffe-eau"),
+        text.contains("Lumière") && text.contains("Chauffe-eau"),
         "{text}"
     );
     assert!(
@@ -186,7 +193,7 @@ async fn the_wizard_follows_the_language_without_a_remount() {
         "{text}"
     );
 
-    click(&host, "button.card", "lumière").await;
+    click(&host, "button.card", "Lumière").await;
     click(&host, "button.btn", "Suivant").await;
     let text = host.text_content().unwrap();
     assert!(
@@ -210,6 +217,16 @@ async fn the_wizard_follows_the_language_without_a_remount() {
     assert!(text.contains("Masquer les membres sur l'accueil"), "{text}");
     assert!(text.contains("Créer le groupe"), "{text}");
     assert!(!text.contains("Unassigned"), "{text}");
+    let options = host.query_selector_all("option").unwrap();
+    let no_room = (0..options.length())
+        .filter(|i| {
+            options
+                .item(*i)
+                .and_then(|o| o.text_content())
+                .is_some_and(|t| t == "Sans pièce")
+        })
+        .count();
+    assert_eq!(no_room, 1, "one empty-room option only: {text}");
 
     lang.set(Lang::En);
     tick().await;

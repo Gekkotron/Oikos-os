@@ -191,6 +191,7 @@ pub enum Key {
     AmbAutomationType,
     AmbWhere,
     AmbWholeHouse,
+    Unassigned,
     AmbSeeWhich,
     AmbHold,
     AmbBackToSchedule,
@@ -329,6 +330,7 @@ impl Key {
         Key::AmbAutomationType,
         Key::AmbWhere,
         Key::AmbWholeHouse,
+        Key::Unassigned,
         Key::AmbSeeWhich,
         Key::AmbHold,
         Key::AmbBackToSchedule,
@@ -466,7 +468,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         ),
         Key::AmbiancesAbout2 => (
             "\"Every light\", \"every plug\" and \"every shutter\" include devices you add later. Only switches shown as a plug count as plugs.",
-            "« Tous les éclairages », « toutes les prises » et « tous les volets » incluent les appareils ajoutés plus tard. Seuls les interrupteurs affichés comme prise comptent comme des prises.",
+            "«\u{A0}Tous les éclairages\u{A0}», «\u{A0}toutes les prises\u{A0}» et «\u{A0}tous les volets\u{A0}» incluent les appareils ajoutés plus tard. Seuls les interrupteurs affichés comme prise comptent comme des prises.",
         ),
         Key::AmbiancesAbout3 => (
             "After a tap, a message says it is done or how many devices did not respond; the last run of each mood is on its page.",
@@ -486,6 +488,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::AmbAutomationType => ("Automation", "Automatisation"),
         Key::AmbWhere => ("Where", "Où"),
         Key::AmbWholeHouse => ("Whole house", "Toute la maison"),
+        Key::Unassigned => ("Unassigned", "Sans pièce"),
         Key::AmbSeeWhich => ("See which", "Voir lesquels"),
         Key::AmbHold => ("Hold", "Maintenir"),
         Key::AmbBackToSchedule => ("Back to the schedule", "Revenir au programme"),
@@ -595,7 +598,7 @@ pub fn unseen_alerts(lang: Lang, badge: &str) -> String {
 pub fn flow_started(lang: Lang, name: &str) -> String {
     match lang {
         Lang::En => format!("Started {name}"),
-        Lang::Fr => format!("Lancement de « {name} »"),
+        Lang::Fr => format!("Lancement de «\u{A0}{name}\u{A0}»"),
     }
 }
 
@@ -739,6 +742,7 @@ mod tests {
             | Key::AmbAutomationType
             | Key::AmbWhere
             | Key::AmbWholeHouse
+            | Key::Unassigned
             | Key::AmbSeeWhich
             | Key::AmbHold
             | Key::AmbBackToSchedule
@@ -830,7 +834,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 133);
+        assert_eq!(Key::ALL.len(), 134);
     }
     #[test]
     fn every_key_differs_between_languages() {
