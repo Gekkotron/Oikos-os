@@ -1,6 +1,8 @@
 //! The picker's screens: [`PickerBody`] (search, chips, rooms, the list) and [`EntityPicker`],
 //! the modal `<dialog>` that holds it.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -58,11 +60,18 @@ fn items(l: &Listing) -> Vec<Item> {
     out
 }
 
-const PINNED_DOM_ID: &str = "picker-pin";
+/// A prefix no other picker on the page shares, so ids and the ARIA references to them stay unique.
+fn next_prefix() -> String {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    format!("picker{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
 
-/// The DOM id of the row for `id` (`None` is the pinned row).
-fn dom_id(id: Option<&str>) -> String {
-    id.map_or_else(|| PINNED_DOM_ID.to_owned(), |id| format!("picker-opt-{id}"))
+/// The DOM id of the row for `id` (`None` is the pinned row) in the picker with `prefix`.
+fn dom_id(prefix: &str, id: Option<&str>) -> String {
+    id.map_or_else(
+        || format!("{prefix}-pin"),
+        |id| format!("{prefix}-opt-{id}"),
+    )
 }
 
 fn scroll_to(dom: &str) {
@@ -77,6 +86,7 @@ fn scroll_to(dom: &str) {
 #[component]
 fn PickerRow(
     row: Row,
+    prefix: String,
     mode: Mode,
     current: Signal<Vec<String>>,
     active: Memo<Option<String>>,
@@ -87,7 +97,7 @@ fn PickerRow(
     let t = use_picker_text();
     let now = use_context::<Now>();
     let id = row.id.clone();
-    let dom = dom_id(Some(&id));
+    let dom = dom_id(&prefix, Some(&id));
     let value = Memo::new({
         let id = id.clone();
         move |_| {
@@ -197,6 +207,9 @@ pub fn PickerBody(
     let house = expect_context::<House>();
     let lang = use_lang();
     let t = use_picker_text();
+    let prefix = next_prefix();
+    let list_id = format!("{prefix}-list");
+    let pin_id = dom_id(&prefix, None);
     let query = RwSignal::new(String::new());
     let room = RwSignal::new(None::<String>);
     let chip = RwSignal::new(if suggest.is_some() {
@@ -251,9 +264,12 @@ pub fn PickerBody(
         });
         out
     });
-    let active = Memo::new(move |_| {
-        hi.get()
-            .and_then(|i| flat.with(|f| f.get(i).map(|id| dom_id(id.as_deref()))))
+    let active = Memo::new({
+        let prefix = prefix.clone();
+        move |_| {
+            hi.get()
+                .and_then(|i| flat.with(|f| f.get(i).map(|id| dom_id(&prefix, id.as_deref()))))
+        }
     });
     // A narrowing starts the highlight over.
     Effect::new(move |_| {
@@ -319,7 +335,7 @@ pub fn PickerBody(
                 class="picker__search"
                 role="combobox"
                 autocomplete="off"
-                aria-controls="picker-list"
+                aria-controls=list_id.clone()
                 aria-expanded="true"
                 aria-autocomplete="list"
                 aria-activedescendant=move || active.get()
@@ -397,16 +413,18 @@ pub fn PickerBody(
                         }
                     />
                 </nav>
-                <div class="picker__list" id="picker-list" role="listbox">
+                <div class="picker__list" id=list_id role="listbox">
                     {pinned_text
                         .map(|text| {
+                            let pin_dom = pin_id.clone();
+                            let pin_active = pin_id.clone();
                             view! {
                                 <div
-                                    id=PINNED_DOM_ID
+                                    id=pin_dom
                                     role="option"
                                     class="picker__row picker__row--pinned"
                                     class:picker__row--active=move || {
-                                        active.with(|a| a.as_deref() == Some(PINNED_DOM_ID))
+                                        active.with(|a| a.as_deref() == Some(pin_active.as_str()))
                                     }
                                     aria-selected=move || current.with(Vec::is_empty).to_string()
                                     on:click=move |_| on_pick.run(None)
@@ -420,8 +438,10 @@ pub fn PickerBody(
                     <For
                         each=missing
                         key=|id| id.clone()
-                        children=move |id| {
-                            let dom = dom_id(Some(&id));
+                        children={
+                            let prefix = prefix.clone();
+                            move |id| {
+                            let dom = dom_id(&prefix, Some(&id));
                             let selected = {
                                 let id = id.clone();
                                 move || current.with(|c| c.contains(&id)).to_string()
@@ -450,6 +470,7 @@ pub fn PickerBody(
                                     </span>
                                 </div>
                             }
+                            }
                         }
                     />
                     <For
@@ -463,6 +484,7 @@ pub fn PickerBody(
                                 view! {
                                     <PickerRow
                                         row=r
+                                        prefix=prefix.clone()
                                         mode=mode
                                         current=current
                                         active=active
@@ -587,6 +609,7 @@ pub fn EntityPicker(
     let lang = use_lang();
     let t = use_picker_text();
     let dialog = NodeRef::<leptos::html::Dialog>::new();
+    let title_id = format!("{}-title", next_prefix());
     // The body mounts once the dialog is open, so it can take focus and starts fresh each time.
     let shown = RwSignal::new(false);
     let hook = HistoryHook::new();
@@ -624,7 +647,7 @@ pub fn EntityPicker(
         <dialog
             node_ref=dialog
             class="picker"
-            aria-labelledby="picker-title"
+            aria-labelledby=title_id.clone()
             on:cancel=move |ev: web_sys::Event| {
                 ev.prevent_default();
                 open.set(false);
@@ -639,7 +662,7 @@ pub fn EntityPicker(
         >
             <div class="picker__panel">
                 <header class="picker__head">
-                    <h2 id="picker-title" class="picker__title">
+                    <h2 id=title_id.clone() class="picker__title">
                         {move || title.get()}
                     </h2>
                     {(mode == Mode::Multi)

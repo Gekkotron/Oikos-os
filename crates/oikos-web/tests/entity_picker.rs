@@ -140,7 +140,7 @@ impl Fx {
 
     fn option(&self, id: &str) -> web_sys::HtmlElement {
         self.host
-            .query_selector(&format!("[id='picker-opt-{id}']"))
+            .query_selector(&format!("[id$='-opt-{id}']"))
             .unwrap()
             .unwrap_or_else(|| panic!("no row {id}"))
             .unchecked_into()
@@ -148,7 +148,7 @@ impl Fx {
 
     fn pinned(&self) -> web_sys::HtmlElement {
         self.host
-            .query_selector("#picker-pin")
+            .query_selector("[id$=-pin]")
             .unwrap()
             .expect("pinned row")
             .unchecked_into()
@@ -236,7 +236,7 @@ async fn typing_filters_rows() {
     fx.type_query("plug b").await;
     let rows = fx.options();
     assert_eq!(rows.len(), 2, "pinned + one match");
-    assert_eq!(rows[1].id(), "picker-opt-b");
+    assert!(rows[1].id().ends_with("-opt-b"));
     fx.finish().await;
 }
 
@@ -312,7 +312,7 @@ async fn arrows_and_enter_pick() {
     fx.key("ArrowDown").await;
     fx.key("ArrowDown").await;
     let id = fx.search().get_attribute("aria-activedescendant").unwrap();
-    assert_eq!(id, "picker-opt-b");
+    assert!(id.ends_with("-opt-b"), "{id}");
     fx.key("Enter").await;
     assert_eq!(fx.picked.get_untracked(), vec![Some("b".to_string())]);
     fx.finish().await;
@@ -326,7 +326,7 @@ async fn echo_keeps_highlight() {
         fx.key("ArrowDown").await;
     }
     let before = fx.search().get_attribute("aria-activedescendant").unwrap();
-    assert_eq!(before, "picker-opt-t");
+    assert!(before.ends_with("-opt-t"), "{before}");
     assert!(fx.option("t").text_content().unwrap().contains("20"));
     fx.house.apply(WsEvent::EntityUpserted(probe(21.5)));
     tick().await;
@@ -408,4 +408,35 @@ async fn escape_pops_the_pushed_entry() {
     assert!(!fx.open.get_untracked());
     assert_eq!(pathname(), path);
     fx.finish().await;
+}
+
+#[wasm_bindgen_test]
+async fn two_pickers_have_distinct_ids() {
+    let one = mount(Mode::Single, vec![], false, false);
+    let two = mount(Mode::Single, vec![], false, false);
+    tick().await;
+    let doc = web_sys::window().unwrap().document().unwrap();
+    let mut titles = Vec::new();
+    for fx in [&one, &two] {
+        let label = fx.dialog().get_attribute("aria-labelledby").unwrap();
+        let title = doc.get_element_by_id(&label).expect("title resolves");
+        assert!(
+            fx.host.contains(Some(&title)),
+            "label points at its own title"
+        );
+        titles.push(label);
+    }
+    assert_ne!(titles[0], titles[1]);
+    let list = |fx: &Fx| {
+        fx.host
+            .query_selector("[role=listbox]")
+            .unwrap()
+            .unwrap()
+            .id()
+    };
+    assert_ne!(list(&one), list(&two));
+    let controls = one.search().get_attribute("aria-controls").unwrap();
+    assert_eq!(controls, list(&one));
+    one.finish().await;
+    two.finish().await;
 }
