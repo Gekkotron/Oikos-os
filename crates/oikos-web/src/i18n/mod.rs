@@ -8,6 +8,7 @@ pub mod climate;
 mod dashboards;
 pub mod devices;
 pub mod energy;
+pub mod errors;
 pub mod flows;
 pub mod format;
 pub mod groups;
@@ -124,6 +125,7 @@ pub fn install_lang() -> RwSignal<Lang> {
     #[cfg(target_arch = "wasm32")]
     Effect::new(move |_| {
         let current = lang.get();
+        remember(current);
         if let Some(root) = web_sys::window()
             .and_then(|w| w.document())
             .and_then(|d| d.document_element())
@@ -600,13 +602,39 @@ pub fn flow_started(lang: Lang, name: &str) -> String {
 /// The language in context, read reactively; English when there is none.
 pub fn use_lang() -> impl Fn() -> Lang + Copy + 'static {
     let lang = use_context::<RwSignal<Lang>>();
-    move || lang.map_or(Lang::En, |l| l.get())
+    move || {
+        lang.map_or(Lang::En, |l| {
+            let current = l.get();
+            remember(current);
+            current
+        })
+    }
+}
+
+thread_local! {
+    /// The language last read from the context signal: what `current_lang` returns where there
+    /// is no reactive owner to find the context through.
+    static LAST_SEEN: std::cell::Cell<Lang> = const { std::cell::Cell::new(Lang::En) };
+}
+
+fn remember(lang: Lang) {
+    LAST_SEEN.with(|c| c.set(lang));
 }
 
 /// The language in context right now, without tracking it: for a view built once that does not
-/// follow a later toggle (cards rebuilt from the entity). English when there is none.
+/// follow a later toggle (cards rebuilt from the entity). With an owner but no language context
+/// it is English; with no owner at all (an async task, a timer or a window listener) it is the
+/// language last rendered, since the context cannot be reached from there.
 pub fn current_lang() -> Lang {
-    untrack(use_lang())
+    match use_context::<RwSignal<Lang>>() {
+        Some(l) => {
+            let current = l.get_untracked();
+            remember(current);
+            current
+        }
+        None if Owner::current().is_none() => LAST_SEEN.with(|c| c.get()),
+        None => Lang::En,
+    }
 }
 
 /// A translator bound to the language signal in context (reactive), or English when there is none.

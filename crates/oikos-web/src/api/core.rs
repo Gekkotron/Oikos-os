@@ -11,47 +11,79 @@ use oikos_core::model::{AreasDocument, Command};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-/// What a 503 on a command means: the hub cannot reach the broker.
-pub const BROKER_OFFLINE: &str = "Broker offline — command refused";
+pub use crate::i18n::errors::WebError;
+use crate::i18n::{current_lang, errors::web_error_text};
 
-fn network_error(e: impl std::fmt::Display) -> ApiError {
-    ApiError {
-        error: format!("network error: {e}"),
+/// A web failure as an `ApiError` whose text is built now, in the language active now. The hub's
+/// own messages never come through here: they stay as received.
+impl From<WebError> for ApiError {
+    fn from(e: WebError) -> Self {
+        ApiError {
+            error: web_error_text(current_lang(), &e),
+        }
     }
 }
 
-/// The error for a non-2xx reply: the hub's own `ApiError` body, or `HTTP <status>`.
-fn decode_error(status: u16, body: &str) -> ApiError {
-    serde_json::from_str::<ApiError>(body).unwrap_or_else(|_| ApiError {
-        error: format!("HTTP {status}"),
-    })
+fn network_error(e: impl std::fmt::Display) -> ApiError {
+    WebError::Network(e.to_string()).into()
 }
 
-/// Sends `request` and turns a transport failure or a status of 400 and up into an `ApiError`.
-pub(crate) async fn check(
-    request: Result<Request, gloo_net::Error>,
-    on_503: Option<&str>,
-) -> Result<Response, ApiError> {
-    let response = request
+/// The error for a non-2xx reply: the hub's own `ApiError` body, or "The hub answered HTTP <status>".
+fn decode_error(status: u16, body: &str) -> ApiError {
+    serde_json::from_str::<ApiError>(body).unwrap_or_else(|_| WebError::Http(status).into())
+}
+
+async fn send(request: Result<Request, gloo_net::Error>) -> Result<Response, ApiError> {
+    request
         .map_err(network_error)?
         .send()
         .await
-        .map_err(network_error)?;
+        .map_err(network_error)
+}
+
+/// The error for a reply with a status of 400 and up.
+async fn reject(response: Response) -> ApiError {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    decode_error(status, &body)
+}
+
+/// Sends `request` and turns a transport failure or a status of 400 and up into an `ApiError`.
+/// A 503 becomes `on_503` when there is one.
+pub(crate) async fn check(
+    request: Result<Request, gloo_net::Error>,
+    on_503: Option<WebError>,
+) -> Result<Response, ApiError> {
+    let response = send(request).await?;
     let status = response.status();
     if status == 503
-        && let Some(text) = on_503
+        && let Some(e) = on_503
     {
-        return Err(ApiError { error: text.into() });
+        return Err(e.into());
     }
     if status >= 400 {
-        let body = response.text().await.unwrap_or_default();
-        return Err(decode_error(status, &body));
+        return Err(reject(response).await);
     }
     Ok(response)
 }
 
+/// Like [`check`], but a 503 is `Ok(None)`: the hub has nothing to show yet.
+pub(crate) async fn check_unless_503(
+    request: Result<Request, gloo_net::Error>,
+) -> Result<Option<Response>, ApiError> {
+    let response = send(request).await?;
+    match response.status() {
+        503 => Ok(None),
+        status if status >= 400 => Err(reject(response).await),
+        _ => Ok(Some(response)),
+    }
+}
+
 pub(crate) async fn read_json<T: DeserializeOwned>(response: Response) -> Result<T, ApiError> {
-    response.json::<T>().await.map_err(network_error)
+    response
+        .json::<T>()
+        .await
+        .map_err(|e| WebError::Decode(e.to_string()).into())
 }
 
 /// `id` as one URL path segment: everything but the unreserved characters (`A-Za-z0-9-._~`)
@@ -74,7 +106,11 @@ pub fn encode_id(id: &str) -> String {
 
 pub async fn send_command(id: &str, cmd: Command) -> Result<CommandResponse, ApiError> {
     let url = format!("/api/v1/entities/{}/command", encode_id(id));
-    let response = check(Request::post(&url).json(&cmd), Some(BROKER_OFFLINE)).await?;
+    let response = check(
+        Request::post(&url).json(&cmd),
+        Some(WebError::BrokerOffline),
+    )
+    .await?;
     read_json(response).await
 }
 
@@ -85,7 +121,7 @@ pub async fn send_alert_action(id: &str, action: &str) -> Result<(), ApiError> {
         encode_id(id),
         encode_id(action)
     );
-    check(Request::post(&url).build(), Some(BROKER_OFFLINE)).await?;
+    check(Request::post(&url).build(), Some(WebError::BrokerOffline)).await?;
     Ok(())
 }
 
@@ -209,9 +245,7 @@ pub async fn put_dashboard(d: &Dashboard) -> Result<Dashboard, ApiError> {
     let response = check(Request::put(&url).json(d), None).await?;
     // Plain serde would reject widget kinds this build does not know; decode_dashboard drops them.
     let value: Value = read_json(response).await?;
-    oikos_api::decode_dashboard(value).map_err(|e| ApiError {
-        error: format!("decode dashboard: {e}"),
-    })
+    oikos_api::decode_dashboard(value).map_err(|e| WebError::Decode(e.to_string()).into())
 }
 
 /// House cannot be deleted (the hub answers 403), so the client hides its delete UI.
@@ -258,8 +292,8 @@ mod tests {
     fn unparsable_body_falls_back_to_status() {
         assert_eq!(
             decode_error(502, "<html>bad gateway</html>").error,
-            "HTTP 502"
+            "The hub answered HTTP 502"
         );
-        assert_eq!(decode_error(500, "").error, "HTTP 500");
+        assert_eq!(decode_error(500, "").error, "The hub answered HTTP 500");
     }
 }

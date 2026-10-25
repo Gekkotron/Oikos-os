@@ -4,6 +4,9 @@ use leptos::prelude::*;
 use leptos_router::components::A;
 use leptos_router::hooks::use_location;
 
+use crate::i18n::errors::{ErrorText, error_text};
+use crate::i18n::use_lang;
+
 /// The pages visited so far, path and query, oldest first; the last one is the current page.
 /// Back goes to the one before it, so every sheet returns to the page it was opened from, and a
 /// chain of sheets (dashboard → group → member → history) unwinds one step at a time.
@@ -129,10 +132,11 @@ pub fn TrackBackStack() -> impl IntoView {
 #[component]
 pub fn BackLink() -> impl IntoView {
     let back = use_back();
+    let lang = use_lang();
     view! {
         <A href=move || back.get() attr:class="sheet__back">
             "←"
-            <span class="sheet__back-label">"Back"</span>
+            <span class="sheet__back-label">{move || error_text(lang(), ErrorText::Back)}</span>
         </A>
     }
 }

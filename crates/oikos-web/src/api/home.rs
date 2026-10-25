@@ -3,26 +3,21 @@
 use gloo_net::http::Request;
 use oikos_api::{ApiError, HomeSettings, SolarView, WeatherView};
 
-use super::core::{check, read_json};
+use super::core::{check, check_unless_503, read_json};
 
 /// The current weather; `Ok(None)` while the hub has none (weather off, or not fetched yet: 503).
 pub async fn get_weather() -> Result<Option<WeatherView>, ApiError> {
-    let request = Request::get("/api/v1/weather").build();
-    match check(request, Some("Weather unavailable")).await {
-        Ok(response) => read_json(response).await.map(Some),
-        // `check` turned the 503 into this exact text; any other failure keeps its own message.
-        Err(e) if e.error == "Weather unavailable" => Ok(None),
-        Err(e) => Err(e),
+    match check_unless_503(Request::get("/api/v1/weather").build()).await? {
+        Some(response) => read_json(response).await.map(Some),
+        None => Ok(None),
     }
 }
 
 /// The solar forecast; `Ok(None)` while the hub has none (solar off, or not fetched yet: 503).
 pub async fn get_solar() -> Result<Option<SolarView>, ApiError> {
-    let request = Request::get("/api/v1/solar").build();
-    match check(request, Some("Solar unavailable")).await {
-        Ok(response) => read_json(response).await.map(Some),
-        Err(e) if e.error == "Solar unavailable" => Ok(None),
-        Err(e) => Err(e),
+    match check_unless_503(Request::get("/api/v1/solar").build()).await? {
+        Some(response) => read_json(response).await.map(Some),
+        None => Ok(None),
     }
 }
 
