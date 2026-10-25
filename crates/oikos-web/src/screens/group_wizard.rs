@@ -15,7 +15,7 @@ use crate::flow_edit::fold_accents;
 use crate::format::list_label;
 use crate::house::House;
 use crate::i18n::devices::{DeviceText, device_text};
-use crate::i18n::groups::{GroupText, group_text, group_text_signal, kind_name, step_of};
+use crate::i18n::groups::{GroupText, group_text, group_text_signal, kind_label, step_of};
 use crate::i18n::{Key, Lang, text, use_lang};
 use crate::icons::{CHECK, MAGNIFIER};
 use crate::nav::{BackLink, use_back};
@@ -267,7 +267,7 @@ pub fn GroupWizardScreen() -> impl IntoView {
                                                         kind.set(Some(k));
                                                     }
                                                 >
-                                                    <span class="card__name">{move || kind_name(lang(), k)}</span>
+                                                    <span class="card__name">{move || kind_label(lang(), k)}</span>
                                                 </button>
                                             }
                                         })

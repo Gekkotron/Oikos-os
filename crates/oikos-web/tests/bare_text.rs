@@ -14,6 +14,7 @@ const READ_ATTRS: &[&str] = &["aria-label=", "title=", "placeholder=", "alt="];
 const TECH_ATTRS: &[&str] = &[
     "class=",
     "class:",
+    "attr:class=",
     "id=",
     "href=",
     "style=",
@@ -111,7 +112,7 @@ fn flagged(source: &str) -> Vec<String> {
             let in_text =
                 after_tag || (in_view && before.is_empty() && matches!(after, "" | "," | "}"));
             let read = in_text || READ_ATTRS.iter().any(|a| before.ends_with(a));
-            if !read && TECH_ATTRS.iter().any(|a| before.ends_with(a)) {
+            if !read && TECH_ATTRS.iter().any(|a| ends_with_attr(before, a)) {
                 continue;
             }
             if looks_like_text(&lit, read) {
@@ -120,6 +121,17 @@ fn flagged(source: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// `before` ends with the attribute `attr` as a whole name: `d=` matches `d=` and ` d=` but not
+/// `checked=`, and `id=` not `valid=`.
+fn ends_with_attr(before: &str, attr: &str) -> bool {
+    before.strip_suffix(attr).is_some_and(|head| {
+        !head
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == ':')
+    })
 }
 
 /// A literal people read: a word of two letters or more (placeholders like `{hour}` aside), and
@@ -174,6 +186,41 @@ fn is_svg_path(lit: &str) -> bool {
             .all(|c| "MmLlHhVvCcSsQqTtAaZz0123456789 ,.-".contains(c))
 }
 
+/// The CSS properties the UI writes inline.
+const PROPERTIES: &[&str] = &[
+    "left",
+    "right",
+    "top",
+    "bottom",
+    "width",
+    "height",
+    "min-width",
+    "max-width",
+    "min-height",
+    "max-height",
+    "transform",
+    "display",
+    "background",
+    "background-size",
+    "background-position",
+    "color",
+    "opacity",
+    "fill",
+    "stroke",
+    "stroke-width",
+    "animation-duration",
+    "animation-delay",
+    "transition",
+    "margin",
+    "padding",
+    "gap",
+    "flex",
+    "grid-template-columns",
+    "font-size",
+    "z-index",
+    "border",
+];
+
 /// A CSS declaration or value: "left: {}%", "hsl({} {}% 55%)", "var(--x)".
 fn is_css(s: &str) -> bool {
     const FUNCS: &[&str] = &[
@@ -185,9 +232,10 @@ fn is_css(s: &str) -> bool {
         "var(--",
         "rotate(",
     ];
-    let property = s.split_once(':').is_some_and(|(p, _)| {
-        !p.is_empty() && p.chars().all(|c| c.is_ascii_lowercase() || c == '-')
-    });
+    // Only a real property name: "error: {e}" or "failed: {}" is a sentence people read.
+    let property = s
+        .split_once(':')
+        .is_some_and(|(p, _)| PROPERTIES.contains(&p));
     property || FUNCS.iter().any(|f| s.contains(f))
 }
 
@@ -475,4 +523,27 @@ fn a_top_level_test_module_ends_at_its_closing_brace() {
     .join("\n");
     let source = source.as_str();
     assert_eq!(flagged(source), ["Shown words"]);
+}
+
+/// `d=` must not match the end of `checked=`, nor `id=` the end of `valid=`.
+#[test]
+fn tech_attrs_need_a_word_boundary() {
+    assert!(flagged(r#"<path d="Some words here"/>"#).is_empty());
+    assert!(flagged(r#"<div id="Some words here">"#).is_empty());
+    assert_eq!(
+        flagged(r#"<input checked="Some words here"/>"#),
+        ["Some words here"]
+    );
+    assert_eq!(
+        flagged(r#"<input valid="Some words here"/>"#),
+        ["Some words here"]
+    );
+}
+
+/// "error: {e}" reads like a sentence; "left: {}%" is CSS.
+#[test]
+fn a_word_colon_literal_is_not_always_css() {
+    assert_eq!(flagged(r#"let m = format!("error: {e}");"#), ["error: {e}"]);
+    assert!(flagged(r#"let s = format!("left: {}%", x);"#).is_empty());
+    assert!(flagged(r#"let s = "display: none".to_owned();"#).is_empty());
 }

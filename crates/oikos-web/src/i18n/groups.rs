@@ -98,6 +98,16 @@ pub fn kind_name(lang: Lang, kind: Kind) -> String {
     states::kind_word(lang, kind).to_lowercase()
 }
 
+/// A group kind as a standalone label, in sentence case: "Light" / "Lumière".
+pub fn kind_label(lang: Lang, kind: Kind) -> String {
+    let name = kind_name(lang, kind);
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => name,
+    }
+}
+
 /// "3 lights" / "3 lumières", "1 light" / "1 lumière", "0 lumière".
 pub fn kind_count(lang: Lang, kind: Kind, n: usize) -> String {
     let one = kind_name(lang, kind);
@@ -220,6 +230,9 @@ mod tests {
         assert_eq!(kind_count(Lang::Fr, Kind::Cover, 2), "2 volets");
         assert_eq!(kind_count(Lang::Fr, Kind::WaterHeater, 2), "2 chauffe-eau");
         assert_eq!(kind_name(Lang::Fr, Kind::WaterHeater), "chauffe-eau");
+        assert_eq!(kind_label(Lang::Fr, Kind::Light), "Lumière");
+        assert_eq!(kind_label(Lang::Fr, Kind::WaterHeater), "Chauffe-eau");
+        assert_eq!(kind_label(Lang::En, Kind::Light), "Light");
     }
 
     #[test]

@@ -184,6 +184,7 @@ async fn a_named_failure_toast_reads_french_with_no_owner() {
         "{text}"
     );
 
+    drop(stub);
     let stub = FetchStub::install();
     stub.reply(
         "POST",
