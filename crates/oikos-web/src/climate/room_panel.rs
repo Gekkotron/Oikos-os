@@ -15,13 +15,16 @@ use crate::api::climate::{self as api, OverrideBody};
 use crate::climate::entity_field::ThermometerField;
 use crate::climate::proposal::{ProposalPanel, RulesPanel};
 use crate::climate::{
-    age_text, can_hold, decision_line, degrees_text, learn_status_text, minutes_to_next_change,
-    mode_word, row_line, setpoint_text, source_word, until_text, week_minute,
+    age_text, can_hold, decision_line, degrees_text, eco_until, learn_status_text,
+    minutes_to_next_change, mode_word, row_line, setpoint_text, source_word, until_text,
+    week_minute,
 };
 use crate::components::now::{Now, unix_now};
 use crate::components::toast::Toasts;
 use crate::i18n::Lang;
-use crate::i18n::climate::{ClimateText, climate_text, hold_until, now_with_age, use_climate_text};
+use crate::i18n::climate::{
+    ClimateText, climate_text, eco_until_line, hold_until, now_with_age, use_climate_text,
+};
 use crate::i18n::format::{input_number, parse_decimal};
 use crate::i18n::{current_lang, use_lang};
 
@@ -235,6 +238,118 @@ pub fn RoomPanel(
     // A memo, so a refetch that keeps the state does not rebuild the hold input being typed in.
     let holdable = Memo::new(move |_| zone.with(|z| can_hold(z.settings.state)));
 
+    // Eco until a date: the room holds the house eco setpoint, then its schedule again.
+    let eco_open = RwSignal::new(false);
+    let eco_date = RwSignal::new(String::new());
+    let eco_time = RwSignal::new("00:00".to_owned());
+    let eco_allowed = Memo::new(move |_| zone.with(|z| z.settings.state != ZoneState::Off));
+    let eco_live = move || {
+        let now = clock.get();
+        zone.with(|z| z.eco.clone()).filter(|e| e.until > now)
+    };
+    let start_eco = {
+        let id = id.clone();
+        move || {
+            let until = eco_until(
+                &eco_date.get_untracked(),
+                &eco_time.get_untracked(),
+                tz.get_untracked(),
+            )
+            .filter(|until| *until > unix_now());
+            let Some(until) = until else {
+                toasts.push(climate_text(untrack(lang), ClimateText::EcoPickDate));
+                return;
+            };
+            eco_open.set(false);
+            let id = id.clone();
+            act(
+                toasts,
+                on_changed,
+                async move { api::set_eco(&id, until).await },
+            );
+        }
+    };
+    let cancel_eco = {
+        let id = id.clone();
+        move || {
+            let id = id.clone();
+            act(toasts, on_changed, async move { api::clear_eco(&id).await });
+        }
+    };
+    let open_eco = move || {
+        // Tomorrow by default, in the house's time zone.
+        let tomorrow = unix_now() + 86_400;
+        let date = chrono::DateTime::from_timestamp(i64::try_from(tomorrow).unwrap_or(0), 0)
+            .map(|t| {
+                t.with_timezone(&tz.get_untracked())
+                    .format("%Y-%m-%d")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        eco_date.set(date);
+        eco_time.set("00:00".to_owned());
+        eco_open.set(true);
+    };
+    let eco_row = move || {
+        eco_allowed.get().then(|| {
+            let start_eco = start_eco.clone();
+            let cancel_eco = cancel_eco.clone();
+            let body = match eco_live() {
+                Some(eco) => {
+                    let line = eco_until_line(
+                        lang(),
+                        &until_text(lang(), eco.until, unix_now(), tz.get()),
+                    );
+                    view! {
+                        <span class="chip climate-eco__line">{line}</span>
+                        <button
+                            type="button"
+                            class="btn btn--compact"
+                            on:click=move |_| cancel_eco()
+                        >
+                            {move || t(ClimateText::CancelEco)}
+                        </button>
+                    }
+                    .into_any()
+                }
+                None if eco_open.get() => view! {
+                    <label class="climate-eco__field">
+                        <span>{move || t(ClimateText::EcoUntilDate)}</span>
+                        <input
+                            class="field"
+                            type="date"
+                            prop:value=move || eco_date.get()
+                            on:input=move |ev| eco_date.set(event_target_value(&ev))
+                        />
+                    </label>
+                    <label class="climate-eco__field">
+                        <span>{move || t(ClimateText::EcoUntilTime)}</span>
+                        <input
+                            class="field"
+                            type="time"
+                            prop:value=move || eco_time.get()
+                            on:input=move |ev| eco_time.set(event_target_value(&ev))
+                        />
+                    </label>
+                    <button type="button" class="btn btn--active" on:click=move |_| start_eco()>
+                        {move || t(ClimateText::StartEco)}
+                    </button>
+                    <button type="button" class="btn" on:click=move |_| eco_open.set(false)>
+                        {move || t(ClimateText::Cancel)}
+                    </button>
+                }
+                .into_any(),
+                None => view! {
+                    <button type="button" class="btn" on:click=move |_| open_eco()>
+                        {move || t(ClimateText::EcoUntilButton)}
+                    </button>
+                }
+                .into_any(),
+            };
+            view! { <div class="climate-eco">{body}</div> }
+        })
+    };
+
     // Learning.
     let learn_line = move || zone.with(|z| learn_status_text(lang(), &z.learn));
     let can_learn = move || zone.with(|z| z.settings.state != ZoneState::Off);
@@ -386,6 +501,7 @@ pub fn RoomPanel(
                         })
                 }}
                 {overrides}
+                {eco_row}
             </div>
             <div class="card climate-week">
                 <RulesPanel zone=zone on_changed=on_changed now=now />

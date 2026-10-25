@@ -5992,7 +5992,8 @@ html:has(.flow-canvas-screen) {
 
 .climate-hold,
 .climate-learn,
-.climate-overrides {
+.climate-overrides,
+.climate-eco {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -6022,6 +6023,19 @@ html:has(.flow-canvas-screen) {
   flex: 1 1 auto;
   margin: 0;
   padding-left: 18px;
+}
+
+.climate-eco__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font: var(--type-label);
+  color: var(--muted);
+}
+
+.climate-room__eco {
+  margin-left: 6px;
+  font: var(--type-label);
 }
 
 .climate-legend {
@@ -6087,8 +6101,20 @@ html:has(.flow-canvas-screen) {
 }
 
 .climate-settings__title,
+.climate-settings__group,
+.climate-field__hint,
 .climate-settings > .segmented {
   grid-column: 1 / -1;
+}
+
+.climate-settings__group {
+  margin: 8px 0 0;
+}
+
+.climate-field__hint {
+  margin: 0;
+  font: var(--type-label);
+  color: var(--muted);
 }
 
 .climate-settings__title {
