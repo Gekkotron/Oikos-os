@@ -1,13 +1,16 @@
-//! The house-wide climate settings: season, outdoor sensor, thresholds, presence and learning.
+//! The house-wide climate settings: season, outdoor sensor, thresholds, presence, eco and
+//! learning.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use oikos_climate::doc::{HhMm, HouseSettings, Season};
+use oikos_climate::doc::{EcoAction, HhMm, HouseSettings, Season};
 
 use crate::api::climate as api;
 use crate::climate::entity_field::{EntityField, EntityListField};
+use crate::climate::fan_mode_choices;
 use crate::components::toast::Toasts;
-use crate::i18n::climate::{ClimateText, could_not_save, use_climate_text};
+use crate::house::House;
+use crate::i18n::climate::{ClimateText, could_not_save, fan_choice, use_climate_text};
 use crate::i18n::format::{input_number, parse_decimal};
 use crate::i18n::states::{StateCtx, state_word};
 use crate::i18n::{Key, use_lang, use_text};
@@ -71,6 +74,57 @@ fn NumField(
                     }
                 }
             />
+        </label>
+    }
+}
+
+/// Eco's extra action on the fans: a speed the house's climate units list, or none.
+#[component]
+fn EcoFanField(draft: RwSignal<HouseSettings>) -> impl IntoView {
+    let house = expect_context::<House>();
+    let lang = use_lang();
+    let t = use_climate_text();
+    let choices = Memo::new(move |_| house.entities.with(|m| fan_mode_choices(m.values())));
+    let current = move || draft.with(|d| d.eco.fan_mode().map(str::to_owned));
+    view! {
+        <label class="climate-field">
+            <span class="climate-field__label">
+                {move || t(ClimateText::ExtraActions)} " · " {move || t(ClimateText::FanSpeed)}
+            </span>
+            <select
+                class="field"
+                on:change=move |ev| {
+                    let v = event_target_value(&ev);
+                    draft.update(|d| {
+                        d.eco.actions = if v.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![EcoAction::FanMode(v)]
+                        };
+                    });
+                }
+            >
+                <option value="" selected=move || current().is_none()>
+                    {move || t(ClimateText::DontChange)}
+                </option>
+                {move || {
+                    let (list, units) = choices.get();
+                    list.into_iter()
+                        .map(|(mode, n)| {
+                            let label = fan_choice(lang(), &mode, n, units);
+                            let selected = mode.clone();
+                            view! {
+                                <option
+                                    value=mode
+                                    selected=move || current().as_deref() == Some(selected.as_str())
+                                >
+                                    {label}
+                                </option>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </select>
         </label>
     }
 }
@@ -156,9 +210,14 @@ pub fn SettingsSheet(
                 value=Signal::derive(move || draft.with(|d| d.presence.clone()))
                 on_change=Callback::new(move |v| draft.update(|d| d.presence = v))
             />
+            <p class="climate-field__hint">{move || t(ClimateText::PresenceAlarmHint)}</p>
             {num(ClimateText::AwayGrace, Unit::Word(ClimateText::UnitMin), |d| f64::from(d.away_grace_min), |d, v| {
                 d.away_grace_min = v.max(0.0) as u32
             })}
+            <h3 class="climate-settings__group">{move || t(ClimateText::Eco)}</h3>
+            {num(ClimateText::EcoHeat, Unit::Celsius, |d| d.eco.heat, |d, v| d.eco.heat = v)}
+            {num(ClimateText::EcoCool, Unit::Celsius, |d| d.eco.cool, |d, v| d.eco.cool = v)}
+            <EcoFanField draft=draft />
             <EntityField
                 label=Signal::derive(move || t(ClimateText::Holiday).to_owned())
                 value=Signal::derive(move || draft.with(|d| d.holiday_entity.clone()))

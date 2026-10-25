@@ -163,6 +163,7 @@ mod tests {
 
     fn zone(id: &str, reading: Option<f64>) -> ZoneView {
         ZoneView {
+            eco: None,
             zone: id.into(),
             name: id.into(),
             orphan: false,

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use oikos_climate::doc::{
-    Mode, Override, OverrideOrigin, Proposal, ProposalKind, Rejection, Rules, ZoneState,
+    Mode, Override, OverrideOrigin, Proposal, ProposalKind, Rejection, RoomEco, Rules, ZoneState,
     check_setpoint,
 };
 use oikos_climate::topics::{self, ZoneDoc};
@@ -222,6 +222,30 @@ impl Hub {
         self.require_zone(zone)?;
         self.update_overrides(zone, Vec::clear);
         Ok(())
+    }
+
+    /// Holds the zone in eco until `eco.until`, replacing any eco it had.
+    pub async fn set_climate_eco(
+        self: &Arc<Self>,
+        zone: &str,
+        eco: RoomEco,
+    ) -> Result<(), HubError> {
+        self.require_climate()?;
+        self.require_zone(zone)?;
+        if self.zone_settings(zone).state == ZoneState::Off {
+            return Err(HubError::Rejected("zone is off".to_owned()));
+        }
+        if eco.until <= clock::now() {
+            return Err(HubError::Rejected("eco already ended".to_owned()));
+        }
+        self.publish_zone_doc(zone, ZoneDoc::Eco, Some(&eco))
+    }
+
+    /// Ends the zone's eco, so its schedule applies again.
+    pub async fn clear_climate_eco(self: &Arc<Self>, zone: &str) -> Result<(), HubError> {
+        self.require_climate()?;
+        self.require_zone(zone)?;
+        self.publish_zone_doc(zone, ZoneDoc::Eco, None::<&RoomEco>)
     }
 
     /// A push response on `<push prefix>/responses`. Only a button of a climate proposal that is

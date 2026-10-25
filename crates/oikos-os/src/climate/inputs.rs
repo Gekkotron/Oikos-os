@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::NaiveDateTime;
 use chrono_tz::Tz;
 use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
-use oikos_climate::doc::{HouseSettings, Mode, Override, SafetyCause, ZoneSettings};
+use oikos_climate::doc::{HouseSettings, Mode, Override, RoomEco, SafetyCause, ZoneSettings};
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
 use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind, StateValue};
 
@@ -41,6 +41,8 @@ pub(crate) struct OwnedZoneInputs {
     pub safety_memory: Option<SafetyMemory>,
     /// The cause of the zone's previous safety decision, set by the caller.
     pub previous_cause: Option<SafetyCause>,
+    /// The zone's own eco, if set.
+    pub room_eco: Option<RoomEco>,
 }
 
 impl OwnedZoneInputs {
@@ -60,6 +62,7 @@ impl OwnedZoneInputs {
             now: self.now,
             safety_memory: self.safety_memory.as_ref(),
             previous_cause: self.previous_cause,
+            room_eco: self.room_eco.as_ref(),
         }
     }
 }
@@ -142,21 +145,48 @@ fn home_of(state: &EntityState) -> Option<bool> {
             other => Some(other == "home"),
         },
         StateValue::OnOff(on) => Some(*on),
+        StateValue::Alarm(state) => alarm_home(state),
+        _ => None,
+    }
+}
+
+/// What an alarm panel's state says about who is home: armed away (or vacation) is nobody,
+/// disarmed or armed while inside is someone, and a passing state (arming, pending,
+/// triggered, …) says nothing.
+fn alarm_home(state: &str) -> Option<bool> {
+    match state.trim() {
+        "armed_away" | "armed_vacation" => Some(false),
+        "disarmed" | "armed_home" | "armed_night" | "armed_custom_bypass" => Some(true),
         _ => None,
     }
 }
 
 /// Whether the house is home right now: some presence entity says so, or none says anything
 /// definite (an unknown tracker never sends the house away). No presence entity means home.
+/// An entity that says nothing now keeps its last definite answer, so a triggered alarm or an
+/// entry delay does not bring the heating back.
 pub(crate) fn presence_home_now(hub: &Hub, house: &HouseSettings) -> bool {
     if house.presence.is_empty() {
         return true;
     }
-    let reg = hub.read();
-    let known: Vec<bool> = house
-        .presence
-        .iter()
-        .filter_map(|id| reg.state(id).and_then(home_of))
+    let now: Vec<(String, Option<bool>)> = {
+        let reg = hub.read();
+        house
+            .presence
+            .iter()
+            .map(|id| (id.clone(), reg.state(id).and_then(home_of)))
+            .collect()
+    };
+    let mut rt = hub.climate_runtime();
+    let known: Vec<bool> = now
+        .into_iter()
+        .filter_map(|(id, answer)| match answer {
+            Some(home) => {
+                rt.presence_last.insert(id, home);
+                Some(home)
+            }
+            None => rt.presence_last.get(&id).copied(),
+        })
         .collect();
     known.is_empty() || known.contains(&true)
 }
@@ -289,13 +319,14 @@ pub(crate) fn outdoor_reading(hub: &Hub, house: &HouseSettings, now: u64) -> Opt
 /// Everything `decide` needs for `zone`, or `None` while the engine is off.
 pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<OwnedZoneInputs> {
     hub.climate.as_ref()?;
-    let (house, settings, overrides) = {
+    let (house, settings, overrides, room_eco) = {
         let store = hub.climate_store();
         let docs = store.zones.get(zone);
         (
             store.house.clone(),
             docs.map(|d| d.settings.clone()).unwrap_or_default(),
             docs.map(|d| d.overrides.clone()).unwrap_or_default(),
+            docs.and_then(|d| d.eco.clone()),
         )
     };
     let entity_ids = zone_entity_ids(hub, zone, &settings);
@@ -314,12 +345,14 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
                     id: id.clone(),
                     caps: DeviceCaps {
                         hvac_modes: entity.capabilities.hvac_modes.clone(),
+                        fan_modes: entity.capabilities.fan_modes.clone(),
                         min_temp: entity.capabilities.min_temp,
                         max_temp: entity.capabilities.max_temp,
                         temp_step: entity.capabilities.temp_step,
                     },
                     target: climate.target,
                     mode: climate.mode.clone(),
+                    fan_mode: climate.fan_mode.clone(),
                 })
             })
             .collect()
@@ -366,5 +399,29 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         now,
         safety_memory,
         previous_cause: None,
+        room_eco,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alarm_states_say_who_is_home() {
+        for away in ["armed_away", "armed_vacation"] {
+            assert_eq!(alarm_home(away), Some(false), "{away}");
+        }
+        for home in [
+            "disarmed",
+            "armed_home",
+            "armed_night",
+            "armed_custom_bypass",
+        ] {
+            assert_eq!(alarm_home(home), Some(true), "{home}");
+        }
+        for unsure in ["arming", "disarming", "pending", "triggered", "unknown", ""] {
+            assert_eq!(alarm_home(unsure), None, "{unsure}");
+        }
+    }
 }

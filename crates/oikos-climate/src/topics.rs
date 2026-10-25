@@ -10,6 +10,7 @@ pub enum ZoneDoc {
     Proposal,
     Override,
     Decision,
+    Eco,
 }
 
 impl ZoneDoc {
@@ -20,6 +21,7 @@ impl ZoneDoc {
             ZoneDoc::Proposal => "proposal",
             ZoneDoc::Override => "override",
             ZoneDoc::Decision => "decision",
+            ZoneDoc::Eco => "eco",
         }
     }
 
@@ -29,6 +31,7 @@ impl ZoneDoc {
             "proposal" => ZoneDoc::Proposal,
             "override" => ZoneDoc::Override,
             "decision" => ZoneDoc::Decision,
+            "eco" => ZoneDoc::Eco,
             _ => return None,
         })
     }
@@ -116,6 +119,17 @@ mod tests {
             None
         );
         assert_eq!(parse("oikos/climate", "other/zone/living/decision"), None);
+        assert_eq!(
+            zone_topic("oikos/climate", "living", ZoneDoc::Eco),
+            "oikos/climate/zone/living/eco"
+        );
+        assert_eq!(
+            parse("oikos/climate", "oikos/climate/zone/living/eco"),
+            Some(ClimateTopic::Zone {
+                zone: "living".into(),
+                doc: ZoneDoc::Eco
+            })
+        );
         assert_eq!(
             filters("oikos/climate"),
             [

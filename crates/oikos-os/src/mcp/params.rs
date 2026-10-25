@@ -555,6 +555,15 @@ pub struct SetClimateOverrideParams {
     pub request: oikos_climate::view::OverrideRequest,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetClimateEcoParams {
+    /// The zone id.
+    pub zone: String,
+    /// Eco ends at this Unix time, in seconds.
+    pub until: u64,
+}
+
 /// The zone a climate write was applied to.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ClimateAck {

@@ -40,7 +40,7 @@ The table lists every topic the hub reads or writes, with its default prefix. "I
 | `oikos/push/history` | in, out | yes | JSON array of the normalised alerts, newest first | `[push] prefix` |
 | `oikos-push/notification/+`, `oikos-push/tokens/+`, `oikos-push/history` | in; out to clear tokens | as above | OikosPush's topics, read during the switch-over. The hub only ever publishes an empty retained payload on `oikos-push/tokens/<id>` to clear a dead token | `[push] legacy_prefix` (empty turns them off) |
 | `oikos/climate/house` | in, out | yes | The house settings document | `[climate] prefix` |
-| `oikos/climate/zone/<zone>/<doc>`, `<doc>` being `settings`, `proposal`, `override` or `decision` | in, out | yes | A zone document | `[climate] prefix` |
+| `oikos/climate/zone/<zone>/<doc>`, `<doc>` being `settings`, `proposal`, `override`, `decision` or `eco` (`{until, set_at}`, the zone's eco until a date; the hub deletes it once ended) | in, out | yes | A zone document | `[climate] prefix` |
 | `<prefix>/settings` (alarm) | in, out | yes | The alarm settings document; `enabled` defaults to false. Default prefix `oikos/alarm` | `[alarm] prefix` |
 | `<prefix>/state` (alarm) | in, out | yes | The alarm's runtime: state, mode, source, timers, motion hits, open sensors and the open alert | `[alarm] prefix` |
 | `<prefix>/panel` (alarm) | out | yes | The panel entity's state: `disarmed`, `arming`, `armed_away`, `armed_home`, `armed_night`, `pending` or `triggered` | `[alarm] prefix` |

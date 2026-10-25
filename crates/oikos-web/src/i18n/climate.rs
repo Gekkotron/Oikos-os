@@ -28,6 +28,7 @@ pub enum ClimateText {
     SrcOverride,
     SrcHoliday,
     SrcAway,
+    SrcEco,
     SrcSchedule,
     Tomorrow,
     Until,
@@ -100,6 +101,19 @@ pub enum ClimateText {
     Heating,
     Inlet,
     Tank,
+    Eco,
+    EcoHeat,
+    EcoCool,
+    ExtraActions,
+    FanSpeed,
+    DontChange,
+    PresenceAlarmHint,
+    EcoUntilButton,
+    EcoUntilDate,
+    EcoUntilTime,
+    StartEco,
+    CancelEco,
+    EcoPickDate,
 }
 
 impl ClimateText {
@@ -125,6 +139,7 @@ impl ClimateText {
         ClimateText::SrcOverride,
         ClimateText::SrcHoliday,
         ClimateText::SrcAway,
+        ClimateText::SrcEco,
         ClimateText::SrcSchedule,
         ClimateText::Tomorrow,
         ClimateText::Until,
@@ -197,6 +212,19 @@ impl ClimateText {
         ClimateText::Heating,
         ClimateText::Inlet,
         ClimateText::Tank,
+        ClimateText::Eco,
+        ClimateText::EcoHeat,
+        ClimateText::EcoCool,
+        ClimateText::ExtraActions,
+        ClimateText::FanSpeed,
+        ClimateText::DontChange,
+        ClimateText::PresenceAlarmHint,
+        ClimateText::EcoUntilButton,
+        ClimateText::EcoUntilDate,
+        ClimateText::EcoUntilTime,
+        ClimateText::StartEco,
+        ClimateText::CancelEco,
+        ClimateText::EcoPickDate,
     ];
 }
 
@@ -240,6 +268,7 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
         T::SrcOverride => ("Override", "Dérogation"),
         T::SrcHoliday => ("Holiday", "Vacances"),
         T::SrcAway => ("Away", "Absence"),
+        T::SrcEco => ("Eco", "Éco"),
         T::SrcSchedule => ("Schedule", "Programmation"),
         T::Tomorrow => ("tomorrow", "demain"),
         T::Until => ("until", "jusqu'à"),
@@ -327,6 +356,25 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
         T::Heating => ("Heating", "En chauffe"),
         T::Inlet => ("Inlet", "Arrivée"),
         T::Tank => ("Tank", "Ballon"),
+        T::Eco => ("Eco", "Éco"),
+        T::EcoHeat => ("Eco heating", "Éco chauffage"),
+        T::EcoCool => ("Eco cooling", "Éco climatisation"),
+        T::ExtraActions => ("Extra actions", "Actions en plus"),
+        T::FanSpeed => ("Fan speed", "Vitesse du ventilateur"),
+        T::DontChange => ("Don't change", "Ne pas changer"),
+        T::PresenceAlarmHint => (
+            "An alarm panel can be added: armed away means nobody home",
+            "Une alarme peut être ajoutée\u{A0}: armée absent veut dire personne à la maison",
+        ),
+        T::EcoUntilButton => ("Eco until…", "Éco jusqu'au…"),
+        T::EcoUntilDate => ("Until", "Jusqu'au"),
+        T::EcoUntilTime => ("Time", "Heure"),
+        T::StartEco => ("Start eco", "Lancer l'éco"),
+        T::CancelEco => ("Cancel eco", "Annuler l'éco"),
+        T::EcoPickDate => (
+            "Pick an end date in the future",
+            "Choisissez une date de fin à venir",
+        ),
     };
     match lang {
         Lang::En => en,
@@ -394,9 +442,41 @@ pub fn heating_power(lang: Lang, percent: u8) -> String {
     )
 }
 
+/// A fan speed choice: "low (on 2 of 4 units)" / "low (sur 2 des 4 appareils)".
+pub fn fan_choice(lang: Lang, mode: &str, n: usize, of: usize) -> String {
+    pick(
+        lang,
+        format!("{mode} (on {n} of {of} units)"),
+        format!("{mode} (sur {n} des {of} appareils)"),
+    )
+}
+
+/// A room's eco line: "Eco until Sun 00:00" / "Éco jusqu'à dim. 00:00".
+pub fn eco_until_line(lang: Lang, until: &str) -> String {
+    pick(
+        lang,
+        format!("Eco until {until}"),
+        format!("Éco jusqu'à {until}"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn eco_sentences() {
+        assert_eq!(fan_choice(Lang::En, "low", 2, 4), "low (on 2 of 4 units)");
+        assert_eq!(
+            fan_choice(Lang::Fr, "low", 2, 4),
+            "low (sur 2 des 4 appareils)"
+        );
+        assert_eq!(eco_until_line(Lang::En, "Sun 00:00"), "Eco until Sun 00:00");
+        assert_eq!(
+            eco_until_line(Lang::Fr, "dim. 00:00"),
+            "Éco jusqu'à dim. 00:00"
+        );
+    }
 
     /// Same word in both languages.
     const SAME: &[ClimateText] = &[

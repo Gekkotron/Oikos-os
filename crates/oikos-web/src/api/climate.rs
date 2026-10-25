@@ -4,7 +4,7 @@ use gloo_net::http::Request;
 use oikos_api::ApiError;
 use oikos_climate::doc::{HouseSettings, Rules, ZoneSettings};
 pub use oikos_climate::view::OverrideRequest as OverrideBody;
-use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus};
+use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus, RoomEcoRequest};
 
 use super::core::{WebError, check, encode_id, read_json};
 
@@ -63,6 +63,26 @@ pub async fn set_override(zone: &str, body: OverrideBody) -> Result<(), ApiError
 pub async fn clear_override(zone: &str) -> Result<(), ApiError> {
     check(
         Request::delete(&zone_url(zone, "/override")).build(),
+        Some(CLIMATE_DISABLED),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Puts the zone in eco until `until` (Unix seconds).
+pub async fn set_eco(zone: &str, until: u64) -> Result<(), ApiError> {
+    check(
+        Request::put(&zone_url(zone, "/eco")).json(&RoomEcoRequest { until }),
+        Some(CLIMATE_DISABLED),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Ends the zone's eco.
+pub async fn clear_eco(zone: &str) -> Result<(), ApiError> {
+    check(
+        Request::delete(&zone_url(zone, "/eco")).build(),
         Some(CLIMATE_DISABLED),
     )
     .await?;

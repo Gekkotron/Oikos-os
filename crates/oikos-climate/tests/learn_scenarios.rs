@@ -57,6 +57,7 @@ fn history(days: u32, f: impl Fn(NaiveDate) -> Vec<TargetSample>) -> Vec<DeviceH
 fn caps() -> DeviceCaps {
     DeviceCaps {
         hvac_modes: vec!["heat".into(), "cool".into(), "off".into()],
+        fan_modes: vec![],
         min_temp: None,
         max_temp: None,
         temp_step: Some(0.5),

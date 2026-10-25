@@ -139,11 +139,13 @@ Available when `[climate] enabled = true`; otherwise these routes answer `503`. 
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/v1/climate` | The climate engine: house settings and every zone with its reading, decision and why, overrides, pending proposal and learner state. |
+| `GET /api/v1/climate` | The climate engine: house settings (with `eco`) and every zone with its reading, decision and why, overrides, its eco (`eco: {until, set_at}` or `null`), pending proposal and learner state. |
 | `PUT /api/v1/climate/house` | Replaces the house settings (`204`); `422` when they do not validate. |
 | `PUT /api/v1/climate/zones/{id}` | Replaces a zone's settings (`204`); `404` for an area that is not a zone, `422` when they do not validate. |
 | `POST /api/v1/climate/zones/{id}/override` | `{setpoint?, mode?, minutes?, until?}`: holds a target and/or mode, with exactly one of `minutes` and `until` (`204`, else `422`). |
 | `DELETE /api/v1/climate/zones/{id}/override` | Clears the zone's overrides (`204`). |
+| `PUT /api/v1/climate/zones/{id}/eco` | `{until}` (unix seconds): holds the zone in eco until then (`204`; a past `until` or an `off` zone is `422`). |
+| `DELETE /api/v1/climate/zones/{id}/eco` | Ends the zone's eco (`204`). |
 | `POST /api/v1/climate/zones/{id}/proposal/approve` | Approves the pending proposal, optionally with edited `Rules` as the body (`204`); `422` when there is none. |
 | `POST /api/v1/climate/zones/{id}/proposal/reject` | Drops the pending proposal (`204`); `422` when there is none. |
 | `POST /api/v1/climate/zones/{id}/learn` | Learns the zone now; `200` with the learner state. |

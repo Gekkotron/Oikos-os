@@ -1807,6 +1807,40 @@ async fn climate_put_zone_rejects_invalid() {
 }
 
 #[tokio::test]
+async fn climate_room_eco_put_and_delete() {
+    let server = climate_server().await;
+    let url = server.url("/api/v1/climate/zones/living/eco");
+    let put = |body: Value| {
+        let req = server.client.put(&url).json(&body);
+        async move { req.send().await.expect("PUT").status() }
+    };
+    assert_eq!(
+        put(json!({"until": 4_000_000_000u64})).await,
+        StatusCode::NO_CONTENT
+    );
+    let view: Value = server
+        .client
+        .get(server.url("/api/v1/climate"))
+        .send()
+        .await
+        .expect("GET")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(view["zones"][0]["eco"]["until"], 4_000_000_000u64);
+    assert_eq!(
+        put(json!({"until": 1})).await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        put(json!({"until": 4_000_000_000u64, "x": 1})).await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let deleted = server.client.delete(&url).send().await.expect("DELETE");
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
 async fn climate_override_minutes_and_until_exclusive() {
     let server = climate_server().await;
     let url = server.url("/api/v1/climate/zones/living/override");

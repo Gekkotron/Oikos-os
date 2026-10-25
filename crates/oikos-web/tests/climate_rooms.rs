@@ -181,8 +181,10 @@ fn zone(id: &str, name: &str, state: ZoneState, setpoint: Option<f64>) -> ZoneVi
             applied: true,
             at: 0,
             entities: Default::default(),
+            eco_restore: Default::default(),
         }),
         overrides: vec![],
+        eco: None,
         proposal: None,
         learn: LearnStatus::Off,
     }
@@ -223,6 +225,7 @@ async fn room_list_marks_the_selected_room_and_selects_on_click() {
     let host = host();
     let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
         let sink = sink.clone();
+        provide_context(oikos_web::components::now::install_now());
         view! {
             <RoomList
                 zones=Signal::from(zones.clone())

@@ -64,6 +64,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "reject_climate_proposal",
     "set_climate_override",
     "clear_climate_override",
+    "set_climate_eco",
+    "clear_climate_eco",
     "learn_climate_zone",
     "get_weather",
     "get_solar",

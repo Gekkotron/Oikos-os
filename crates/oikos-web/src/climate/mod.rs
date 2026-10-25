@@ -9,8 +9,10 @@ pub mod timeline;
 
 use chrono::{DateTime, Datelike, Timelike};
 use chrono_tz::Tz;
+use oikos_api::EntityView;
 use oikos_climate::doc::{Day, Decision, Mode, Rules, Setpoint, Source, ZoneState};
 use oikos_climate::view::{DecisionRow, LearnStatus, ZoneView};
+use oikos_core::model::Kind;
 
 use crate::i18n::Lang;
 use crate::i18n::climate::{ClimateText, climate_text, learning_progress};
@@ -86,6 +88,7 @@ pub fn source_word(lang: Lang, source: Source) -> &'static str {
             Source::Override => ClimateText::SrcOverride,
             Source::Holiday => ClimateText::SrcHoliday,
             Source::Away => ClimateText::SrcAway,
+            Source::Eco => ClimateText::SrcEco,
             Source::Schedule => ClimateText::SrcSchedule,
             Source::Idle => ClimateText::Idle,
         },
@@ -99,6 +102,7 @@ pub fn history_source(lang: Lang, raw: &str) -> String {
         "override" => Some(Source::Override),
         "holiday" => Some(Source::Holiday),
         "away" => Some(Source::Away),
+        "eco" => Some(Source::Eco),
         "schedule" => Some(Source::Schedule),
         "idle" => Some(Source::Idle),
         _ => None,
@@ -145,6 +149,55 @@ pub fn until_text(lang: Lang, until: u64, now: u64, tz: Tz) -> String {
             format!("{day} {clock}")
         }
     }
+}
+
+/// The fan modes the house's climate units list, in first-seen order with how many units list
+/// each, and how many climate units there are (groups left out).
+pub fn fan_mode_choices<'a>(
+    entities: impl IntoIterator<Item = &'a EntityView>,
+) -> (Vec<(String, usize)>, usize) {
+    let mut choices: Vec<(String, usize)> = Vec::new();
+    let mut units = 0;
+    for entity in entities {
+        if entity.kind != Kind::Climate || entity.id.starts_with("group_") {
+            continue;
+        }
+        units += 1;
+        for mode in &entity.capabilities.fan_modes {
+            match choices.iter_mut().find(|(m, _)| m == mode) {
+                Some((_, n)) => *n += 1,
+                None => choices.push((mode.clone(), 1)),
+            }
+        }
+    }
+    (choices, units)
+}
+
+/// A local date (`YYYY-MM-DD`) and time (`HH:MM`, empty = midnight) in `tz` as Unix seconds. A
+/// time the clocks skip (spring forward) is moved to the first valid minute after it.
+pub fn eco_until(date: &str, time: &str, tz: Tz) -> Option<u64> {
+    let date = chrono::NaiveDate::parse_from_str(date.trim(), "%Y-%m-%d").ok()?;
+    let time = match time.trim() {
+        "" => chrono::NaiveTime::MIN,
+        t => chrono::NaiveTime::parse_from_str(t, "%H:%M").ok()?,
+    };
+    let mut at = date.and_time(time);
+    // A spring-forward gap is at most a few hours; step until the clock exists.
+    for _ in 0..=240 {
+        if let Some(t) = at.and_local_timezone(tz).earliest() {
+            return u64::try_from(t.timestamp()).ok();
+        }
+        at += chrono::Duration::minutes(1);
+    }
+    None
+}
+
+/// Whether the zone is in eco now: its own eco until a date, or the house's while nobody is home.
+pub fn in_eco(z: &ZoneView, now: u64) -> bool {
+    z.eco.as_ref().is_some_and(|e| e.until > now)
+        || z.decision
+            .as_ref()
+            .is_some_and(|d| matches!(d.source, Source::Eco | Source::Away))
 }
 
 /// The weekday and minute of the day at `now` in `tz`.
@@ -299,6 +352,7 @@ mod tests {
 
     fn zone_view(state: ZoneState) -> ZoneView {
         ZoneView {
+            eco: None,
             zone: "z".into(),
             name: "Z".into(),
             orphan: false,
@@ -320,6 +374,7 @@ mod tests {
 
     fn decided(mut z: ZoneView, setpoint: Setpoint) -> ZoneView {
         z.decision = Some(Decision {
+            eco_restore: Default::default(),
             zone: z.zone.clone(),
             mode: Some(Mode::Heat),
             setpoint: Some(setpoint),
@@ -567,6 +622,8 @@ mod tests {
         assert_eq!(history_source(Lang::Fr, "schedule"), "Programmation");
         assert_eq!(history_source(Lang::Fr, "override"), "Dérogation");
         assert_eq!(history_source(Lang::En, "away"), "Away");
+        assert_eq!(history_source(Lang::En, "eco"), "Eco");
+        assert_eq!(history_source(Lang::Fr, "eco"), "Éco");
         assert_eq!(history_source(Lang::Fr, "mystery_source"), "Mystery source");
     }
 
@@ -598,5 +655,89 @@ mod tests {
             minutes_to_next_change(&rules(vec![]), Mode::Heat, Day::Mon, 0),
             None
         );
+    }
+
+    fn climate_entity(id: &str, fans: &[&str]) -> oikos_api::EntityView {
+        oikos_api::EntityView {
+            id: id.into(),
+            device_id: None,
+            name: id.into(),
+            device_name: None,
+            label: None,
+            kind: oikos_core::model::Kind::Climate,
+            component: "climate".into(),
+            protocol_kind: oikos_core::model::Kind::Climate,
+            device_class: None,
+            unit: None,
+            icon: None,
+            category: oikos_core::model::EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "a".into(),
+            part_of: None,
+            capabilities: oikos_core::model::Capabilities {
+                fan_modes: fans.iter().map(|f| f.to_string()).collect(),
+                ..Default::default()
+            },
+            ui: Default::default(),
+            state: Default::default(),
+        }
+    }
+
+    #[test]
+    fn fan_mode_choices_unions_and_counts() {
+        let a = climate_entity("a", &["auto", "low", "high"]);
+        let b = climate_entity("b", &["auto", "quiet"]);
+        let (choices, units) = fan_mode_choices([&a, &b]);
+        assert_eq!(units, 2);
+        assert_eq!(
+            choices,
+            vec![
+                ("auto".to_owned(), 2),
+                ("low".to_owned(), 1),
+                ("high".to_owned(), 1),
+                ("quiet".to_owned(), 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn fan_mode_choices_skips_groups_and_non_climate() {
+        let group = climate_entity("group_all", &["low"]);
+        let mut sensor = climate_entity("s", &["low"]);
+        sensor.kind = oikos_core::model::Kind::Sensor;
+        let none = climate_entity("c", &[]);
+        let (choices, units) = fan_mode_choices([&group, &sensor, &none]);
+        assert!(choices.is_empty());
+        assert_eq!(
+            units, 1,
+            "a climate without fan control still counts as a unit"
+        );
+    }
+
+    #[test]
+    fn eco_until_local_and_dst_gap() {
+        let paris = parse_zone("Europe/Paris");
+        // 00:00 on 2026-11-01 in Paris (CET) is 23:00 UTC the day before.
+        assert_eq!(eco_until("2026-11-01", "00:00", paris), Some(1_793_487_600));
+        // 02:30 does not exist on 2026-03-29: the clocks jump to 03:00 (01:00 UTC).
+        assert_eq!(eco_until("2026-03-29", "02:30", paris), Some(1_774_746_000));
+        assert_eq!(eco_until("2026-11-01", "", paris), Some(1_793_487_600));
+        assert_eq!(eco_until("nope", "00:00", paris), None);
+    }
+
+    #[test]
+    fn in_eco_for_room_and_away() {
+        let mut z = zone_view(ZoneState::Active);
+        assert!(!in_eco(&z, 100));
+        z.eco = Some(oikos_climate::doc::RoomEco {
+            until: 200,
+            set_at: 0,
+        });
+        assert!(in_eco(&z, 100));
+        assert!(!in_eco(&z, 200), "ended");
+        z.eco = None;
+        let mut z = decided(z, Setpoint::Temp(16.0));
+        z.decision.as_mut().unwrap().source = Source::Away;
+        assert!(in_eco(&z, 100));
     }
 }

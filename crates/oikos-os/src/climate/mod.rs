@@ -73,6 +73,8 @@ pub(crate) struct ClimateRuntime {
     /// The last decisions per zone, newest last.
     pub decisions: HashMap<String, VecDeque<Decision>>,
     pub last_home_at: Option<u64>,
+    /// Presence entity -> its last definite answer (true = home), kept while it says nothing.
+    pub presence_last: HashMap<String, bool>,
     pub previous_mode: Option<Mode>,
     /// (fetched at, mean) of the outdoor sensor's last 24 h, from history.
     pub outdoor_cache: Option<(u64, Option<f64>)>,

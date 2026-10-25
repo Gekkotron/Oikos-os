@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use chrono::{Duration, NaiveDateTime};
 
 use crate::doc::{
-    Decision, DeviceTarget, HouseSettings, Mode, Override, SafetyCause, Setpoint, Source,
+    Decision, DeviceTarget, HouseSettings, Mode, Override, RoomEco, SafetyCause, Setpoint, Source,
     ZoneSettings, ZoneState,
 };
 use crate::schedule::Reading;
@@ -19,6 +19,8 @@ const DEFAULT_STEP: f64 = 0.5;
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceCaps {
     pub hvac_modes: Vec<String>,
+    /// The fan modes the device lists, empty without fan control.
+    pub fan_modes: Vec<String>,
     pub min_temp: Option<f64>,
     pub max_temp: Option<f64>,
     pub temp_step: Option<f64>,
@@ -31,6 +33,7 @@ pub struct Device {
     pub caps: DeviceCaps,
     pub target: Option<f64>,
     pub mode: Option<String>,
+    pub fan_mode: Option<String>,
 }
 
 /// What the engine found on the devices before a safety action, to put back when it clears.
@@ -77,6 +80,8 @@ pub struct ZoneInputs<'a> {
     /// The cause of the zone's previous safety decision, so a limit that was crossed holds
     /// until the reading is clearly back inside it.
     pub previous_cause: Option<SafetyCause>,
+    /// The zone's own eco, if set; one whose `until` has passed is ignored.
+    pub room_eco: Option<&'a RoomEco>,
 }
 
 /// How far back inside the overheat or overcool limit the reading must be before that latched
@@ -178,6 +183,7 @@ fn base_decision(inp: &ZoneInputs, source: Source, reason: String) -> Decision {
         applied: false,
         at: inp.now,
         entities: BTreeMap::new(),
+        eco_restore: BTreeMap::new(),
     }
 }
 
@@ -341,7 +347,7 @@ fn latched(inp: &ZoneInputs, cause: SafetyCause) -> bool {
     inp.previous_cause == Some(cause)
 }
 
-/// The stale-reading row: no usable reading, so never let a schedule, override or away setpoint
+/// The stale-reading row: no usable reading, so never let a schedule, override or eco setpoint
 /// through in an active zone.
 fn stale(inp: &ZoneInputs) -> Option<Decision> {
     let what = match inp.reading {
@@ -505,33 +511,70 @@ fn choose(inp: &ZoneInputs, mode: Option<Mode>) -> Choice {
             reason: format!("Holiday: {}", setpoint_text(sp)),
         };
     }
-    if !inp.home {
-        let away = &inp.settings.away_setpoint;
-        let sp = Setpoint::Temp(match mode {
-            Mode::Heat => away.heat,
-            Mode::Cool => away.cool,
-        });
+    let (scheduled, block) = match inp.settings.rules.get(mode) {
+        None => return idle(&format!("No rules for {} mode", mode_str(mode))),
+        Some(r) => r.at(inp.local_now),
+    };
+    let room_eco = inp.room_eco.filter(|e| e.until > inp.now);
+    if room_eco.is_some() || !inp.home {
+        let eco = inp.house.eco.setpoint(mode);
+        let sp = eco_setpoint(mode, eco, scheduled);
+        let mut reason = match room_eco {
+            Some(e) if inp.home => format!(
+                "Eco until {}: {}",
+                day_clock(inp, e.until),
+                setpoint_text(sp)
+            ),
+            Some(e) => format!(
+                "Eco until {} (nobody home): {}",
+                day_clock(inp, e.until),
+                setpoint_text(sp)
+            ),
+            None => format!("Nobody home: eco {}", setpoint_text(sp)),
+        };
+        if sp != Setpoint::Temp(eco) {
+            reason.push_str(match mode {
+                Mode::Heat => "; schedule already lower",
+                Mode::Cool => "; schedule already higher",
+            });
+        }
         return Choice {
-            source: Source::Away,
+            source: if room_eco.is_some() {
+                Source::Eco
+            } else {
+                Source::Away
+            },
             setpoint: Some(sp),
-            reason: format!("Nobody home: away setpoint {}", setpoint_text(sp)),
+            reason,
         };
     }
-    match inp.settings.rules.get(mode) {
-        None => idle(&format!("No rules for {} mode", mode_str(mode))),
-        Some(r) => {
-            let (sp, block) = r.at(inp.local_now);
-            let reason = match block {
-                Some(i) => format!("Schedule block {}: {}", i + 1, setpoint_text(sp)),
-                None => format!("Schedule base: {}", setpoint_text(sp)),
-            };
-            Choice {
-                source: Source::Schedule,
-                setpoint: Some(sp),
-                reason,
-            }
-        }
+    let reason = match block {
+        Some(i) => format!("Schedule block {}: {}", i + 1, setpoint_text(scheduled)),
+        None => format!("Schedule base: {}", setpoint_text(scheduled)),
+    };
+    Choice {
+        source: Source::Schedule,
+        setpoint: Some(scheduled),
+        reason,
     }
+}
+
+/// What eco holds in `mode` given what the schedule asks for: never more than the schedule
+/// (the lower of the two in heat, the higher in cool), and a schedule `off` stays `off`.
+pub fn eco_setpoint(mode: Mode, eco: f64, schedule: Setpoint) -> Setpoint {
+    match (mode, schedule) {
+        (_, Setpoint::Off) => Setpoint::Off,
+        (Mode::Heat, Setpoint::Temp(t)) => Setpoint::Temp(t.min(eco)),
+        (Mode::Cool, Setpoint::Temp(t)) => Setpoint::Temp(t.max(eco)),
+    }
+}
+
+/// `until` as the house's weekday and clock time ("Sun 00:00").
+fn day_clock(inp: &ZoneInputs, until: u64) -> String {
+    let secs = i64::try_from(until.saturating_sub(inp.now)).unwrap_or(i64::MAX / 2);
+    (inp.local_now + Duration::seconds(secs))
+        .format("%a %H:%M")
+        .to_string()
 }
 
 /// Holiday, away and schedule, then per-device overrides on top.
@@ -572,15 +615,14 @@ fn hold_devices(inp: &ZoneInputs, d: &mut Decision, fallback: Option<Setpoint>) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::doc::{
-        AwaySetpoints, Block, Day, HhMm, ModeRules, OverrideOrigin, Rules, ZoneSettings,
-    };
+    use crate::doc::{Block, Day, HhMm, ModeRules, OverrideOrigin, RoomEco, Rules, ZoneSettings};
 
     const NOW: u64 = 1_000_000;
 
     fn caps(modes: &[&str]) -> DeviceCaps {
         DeviceCaps {
             hvac_modes: modes.iter().map(|m| m.to_string()).collect(),
+            fan_modes: vec![],
             min_temp: Some(5.0),
             max_temp: Some(30.0),
             temp_step: Some(0.5),
@@ -593,6 +635,7 @@ mod tests {
             caps: caps(modes),
             target,
             mode: Some("heat".into()),
+            fan_mode: None,
         }
     }
 
@@ -646,7 +689,6 @@ mod tests {
                 heat: Some(mode_rules(base)),
                 cool: Some(mode_rules(Setpoint::Temp(26.0))),
             },
-            away_setpoint: AwaySetpoints::default(),
             ..Default::default()
         }
     }
@@ -661,6 +703,7 @@ mod tests {
         overrides: Vec<Override>,
         devices: Vec<Device>,
         memory: Option<SafetyMemory>,
+        room_eco: Option<RoomEco>,
         previous: Option<SafetyCause>,
     }
 
@@ -677,6 +720,7 @@ mod tests {
                 devices: vec![trv()],
                 memory: None,
                 previous: None,
+                room_eco: None,
             }
         }
 
@@ -696,6 +740,7 @@ mod tests {
                 now: NOW,
                 safety_memory: self.memory.as_ref(),
                 previous_cause: self.previous,
+                room_eco: self.room_eco.as_ref(),
             })
         }
     }
@@ -1217,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn away_uses_away_setpoint() {
+    fn away_uses_eco_setpoint() {
         let mut c = Case::new();
         c.home = false;
         let d = c.run();
@@ -1322,5 +1367,145 @@ mod tests {
     fn safety_memory_captures_devices() {
         let m = SafetyMemory::capture(&[trv()]);
         assert_eq!(m.found["trv"], target(Some(21.0), "heat", false));
+    }
+
+    fn eco_until(until: u64) -> Option<RoomEco> {
+        Some(RoomEco {
+            until,
+            set_at: NOW - 60,
+        })
+    }
+
+    #[test]
+    fn room_eco_lowers_to_eco() {
+        let mut c = Case::new();
+        c.room_eco = eco_until(NOW + 3600);
+        let d = c.run();
+        assert_eq!(d.source, Source::Eco);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(16.0)));
+        assert_eq!(d.entities["trv"], target(Some(16.0), "heat", false));
+        assert_eq!(d.reason, "Eco until Wed 11:00: 16.0 °C");
+    }
+
+    #[test]
+    fn room_eco_and_away_together() {
+        let mut c = Case::new();
+        c.room_eco = eco_until(NOW + 3600);
+        c.home = false;
+        let d = c.run();
+        assert_eq!(d.source, Source::Eco);
+        assert_eq!(d.reason, "Eco until Wed 11:00 (nobody home): 16.0 °C");
+    }
+
+    #[test]
+    fn away_reason_names_eco() {
+        let mut c = Case::new();
+        c.home = false;
+        assert_eq!(c.run().reason, "Nobody home: eco 16.0 °C");
+    }
+
+    #[test]
+    fn eco_never_raises_heat() {
+        let mut c = Case::new();
+        c.settings.rules.heat.as_mut().unwrap().blocks.clear();
+        c.settings.rules.heat.as_mut().unwrap().base = Setpoint::Temp(14.0);
+        c.room_eco = eco_until(NOW + 3600);
+        let d = c.run();
+        assert_eq!(d.source, Source::Eco);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(14.0)));
+        assert_eq!(
+            d.reason,
+            "Eco until Wed 11:00: 14.0 °C; schedule already lower"
+        );
+    }
+
+    #[test]
+    fn eco_never_raises_cool() {
+        let mut c = Case::new();
+        c.mode = Some(Mode::Cool);
+        c.devices = vec![Device {
+            mode: Some("cool".into()),
+            ..dev("ac", &["off", "cool"], Some(26.0))
+        }];
+        c.settings.rules.cool.as_mut().unwrap().blocks.clear();
+        c.settings.rules.cool.as_mut().unwrap().base = Setpoint::Temp(30.0);
+        c.home = false;
+        let d = c.run();
+        assert_eq!(d.source, Source::Away);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(30.0)));
+        assert!(
+            d.reason.ends_with("; schedule already higher"),
+            "{}",
+            d.reason
+        );
+        c.settings.rules.cool.as_mut().unwrap().base = Setpoint::Temp(25.0);
+        assert_eq!(c.run().setpoint, Some(Setpoint::Temp(28.0)));
+    }
+
+    #[test]
+    fn eco_keeps_schedule_off() {
+        let mut c = Case::new();
+        c.settings.rules.heat.as_mut().unwrap().blocks[0].setpoint = Setpoint::Off;
+        c.room_eco = eco_until(NOW + 3600);
+        let d = c.run();
+        assert_eq!(d.source, Source::Eco);
+        assert_eq!(d.entities["trv"], target(None, "off", false));
+    }
+
+    #[test]
+    fn eco_without_rules_for_mode_stays_idle() {
+        let mut c = Case::new();
+        c.settings.rules.heat = None;
+        c.home = false;
+        c.room_eco = eco_until(NOW + 3600);
+        let d = c.run();
+        assert_eq!(d.source, Source::Idle);
+        assert!(d.entities.is_empty());
+    }
+
+    #[test]
+    fn expired_room_eco_is_ignored() {
+        let mut c = Case::new();
+        c.room_eco = eco_until(NOW);
+        let d = c.run();
+        assert_eq!(d.source, Source::Schedule);
+        assert_eq!(d.entities["trv"].setpoint, Some(20.5));
+    }
+
+    #[test]
+    fn override_and_holiday_win_over_eco() {
+        let mut c = Case::new();
+        c.room_eco = eco_until(NOW + 3600);
+        c.overrides = vec![zone_ov(22.0, NOW + 1800)];
+        assert_eq!(c.run().source, Source::Override);
+        c.overrides.clear();
+        c.holiday = true;
+        assert_eq!(c.run().source, Source::Holiday);
+    }
+
+    #[test]
+    fn hand_hold_survives_eco() {
+        let mut c = Case::new();
+        c.room_eco = eco_until(NOW + 3600);
+        c.overrides = vec![Override {
+            entity: Some("trv".into()),
+            setpoint: Some(Setpoint::Temp(22.0)),
+            mode: None,
+            until: NOW + 1800,
+            origin: OverrideOrigin::Hand,
+        }];
+        let d = c.run();
+        assert_eq!(d.source, Source::Eco);
+        assert_eq!(d.entities["trv"], target(Some(22.0), "heat", true));
+    }
+
+    #[test]
+    fn eco_setpoint_rules() {
+        let t = Setpoint::Temp;
+        assert_eq!(eco_setpoint(Mode::Heat, 16.0, t(20.0)), t(16.0));
+        assert_eq!(eco_setpoint(Mode::Heat, 16.0, t(14.0)), t(14.0));
+        assert_eq!(eco_setpoint(Mode::Heat, 16.0, Setpoint::Off), Setpoint::Off);
+        assert_eq!(eco_setpoint(Mode::Cool, 28.0, t(24.0)), t(28.0));
+        assert_eq!(eco_setpoint(Mode::Cool, 28.0, t(30.0)), t(30.0));
     }
 }

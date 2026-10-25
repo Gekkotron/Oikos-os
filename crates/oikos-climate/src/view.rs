@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::doc::{
-    Decision, HouseSettings, Mode, Override, OverrideOrigin, Proposal, Setpoint, ZoneSettings,
+    Decision, HouseSettings, Mode, Override, OverrideOrigin, Proposal, RoomEco, Setpoint,
+    ZoneSettings,
 };
 
 /// Where the learner stands for one zone.
@@ -44,6 +45,9 @@ pub struct ZoneView {
     pub room_sensor: Option<String>,
     pub decision: Option<Decision>,
     pub overrides: Vec<Override>,
+    /// The zone's own eco, while set.
+    #[serde(default)]
+    pub eco: Option<RoomEco>,
     pub proposal: Option<Proposal>,
     pub learn: LearnStatus,
 }
@@ -130,6 +134,28 @@ impl OverrideRequest {
     }
 }
 
+/// A zone's eco as a person asks for it: held until a Unix time, in seconds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct RoomEcoRequest {
+    /// Eco ends at this Unix time, in seconds.
+    pub until: u64,
+}
+
+impl RoomEcoRequest {
+    /// The eco document this asks for, set at `now`.
+    pub fn into_room_eco(self, now: u64) -> Result<RoomEco, String> {
+        if self.until <= now {
+            return Err("until is already past".to_owned());
+        }
+        Ok(RoomEco {
+            until: self.until,
+            set_at: now,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +189,19 @@ mod tests {
             ..OverrideRequest::default()
         };
         assert!(bare.into_override(0).is_err());
+    }
+
+    #[test]
+    fn room_eco_request_refuses_the_past() {
+        let r = RoomEcoRequest { until: 100 };
+        assert_eq!(
+            r.clone().into_room_eco(50).expect("ok"),
+            RoomEco {
+                until: 100,
+                set_at: 50
+            }
+        );
+        assert_eq!(r.into_room_eco(100).unwrap_err(), "until is already past");
+        assert!(serde_json::from_str::<RoomEcoRequest>(r#"{"until":1,"x":2}"#).is_err());
     }
 }
