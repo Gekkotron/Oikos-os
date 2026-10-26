@@ -15,7 +15,7 @@ use super::{Editor, Panel, Selection};
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::toast::Toasts;
-use crate::flow_edit::flow_uuid;
+use crate::flow_edit::{flow_uuid, stamp_notify_lang};
 use crate::flow_layout::{tidy, with_resolved_positions};
 use crate::flow_list::clear_stale_area;
 use crate::house::House;
@@ -73,6 +73,7 @@ fn EditControls(
         house
             .areas
             .with_untracked(|areas| clear_stale_area(&mut snapshot, areas));
+        stamp_notify_lang(&mut snapshot, lang().core());
         let is_new = snapshot.id.is_empty();
         if is_new {
             snapshot.id = flow_uuid(random_bytes());

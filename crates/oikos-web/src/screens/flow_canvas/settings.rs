@@ -8,6 +8,7 @@ use oikos_core::flow::{IfParams, Missing, Node, NodeKind, Op};
 use super::Editor;
 use super::graph::Selection;
 use super::sun::{FallbackBadge, sun_sheet};
+use super::template_field::TemplateField;
 use crate::entity_picker::needs::{is_commandable, is_signal, keep};
 use crate::entity_picker::{EntityPickField, Suggest};
 use crate::flow_edit::remove_node;
@@ -510,14 +511,14 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
     let severity = p.severity.clone().unwrap_or_else(|| "info".to_owned());
     let silent = p.silent.unwrap_or(false);
     view! {
-        <TextField
+        <TemplateField
             label=word(FlowText::TitleLabel)
             initial=p.title
             placeholder=word(FlowText::TitleExample)
             optional=false
             write=title_write
         />
-        <TextField
+        <TemplateField
             label=word(FlowText::BodyLabel)
             initial=p.body.unwrap_or_default()
             placeholder=word(FlowText::NoneParen)

@@ -62,6 +62,14 @@ pub enum Lang {
 }
 
 impl Lang {
+    /// The same language as the shared flow code names it.
+    pub fn core(self) -> oikos_core::flow::Lang {
+        match self {
+            Lang::En => oikos_core::flow::Lang::En,
+            Lang::Fr => oikos_core::flow::Lang::Fr,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Lang::En => "en",
