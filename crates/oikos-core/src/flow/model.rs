@@ -289,9 +289,16 @@ pub struct IfParams {
     /// What to do when the value is missing (unknown or unavailable); absent behaves as `fail`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub missing: Option<Missing>,
+    /// Compare the mean of the entity's readings over this window (`15m`, `1h`, at most
+    /// `24h`), the newest included, instead of its current value; `value` must then be a number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub average: Option<String>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }
+
+/// The longest `average` window an `if` accepts, in seconds.
+pub const MAX_AVERAGE_SECS: u64 = 24 * 3600;
 
 /// How an `if` behaves when the compared entity has no value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -600,6 +607,17 @@ mod tests {
         let p: IfParams = serde_json::from_str(r#"{"op":"lt","value":65}"#).unwrap();
         assert_eq!(p.missing, None);
         assert!(serde_json::to_value(&p).unwrap().get("missing").is_none());
+    }
+
+    #[test]
+    fn if_average_round_trips_and_defaults() {
+        let p: IfParams =
+            serde_json::from_str(r#"{"op":"lte","value":70,"average":"15m"}"#).unwrap();
+        assert_eq!(p.average.as_deref(), Some("15m"));
+        assert!(p.extra.is_empty());
+        let p: IfParams = serde_json::from_str(r#"{"op":"lt","value":65}"#).unwrap();
+        assert_eq!(p.average, None);
+        assert!(serde_json::to_value(&p).unwrap().get("average").is_none());
     }
 
     const REFERENCE: &str = r#"{

@@ -216,6 +216,8 @@ pub enum FlowText {
     SevCritical,
     OpIsDark,
     WhenUnknown,
+    AverageOver,
+    AverageHint,
 }
 
 impl FlowText {
@@ -418,6 +420,8 @@ impl FlowText {
         FlowText::SevCritical,
         FlowText::OpIsDark,
         FlowText::WhenUnknown,
+        FlowText::AverageOver,
+        FlowText::AverageHint,
     ];
 }
 
@@ -682,6 +686,11 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::SevCritical => ("critical", "critique"),
         T::OpIsDark => ("is dark", "fait nuit"),
         T::WhenUnknown => ("When the value is unknown", "Quand la valeur est inconnue"),
+        T::AverageOver => ("Average over", "Moyenne sur"),
+        T::AverageHint => (
+            "empty = current value \u{b7} e.g. 15m",
+            "vide = valeur actuelle \u{b7} ex. 15m",
+        ),
     };
     match lang {
         Lang::En => en,
@@ -724,6 +733,15 @@ pub fn ask(lang: Lang, s: &str) -> String {
         Lang::En => format!("{s}?"),
         Lang::Fr => format!("{s}{NBSP}?"),
     }
+}
+
+/// "Temperature avg 15 min" / "Temperature moy. 15 min": the entity's average over a window.
+pub fn average_of(lang: Lang, e: &str, window: &str) -> String {
+    pick(
+        lang,
+        format!("{e} avg {window}"),
+        format!("{e} moy. {window}"),
+    )
 }
 
 /// "When Door changes" / "Quand Door change".

@@ -2,6 +2,7 @@
 
 pub mod engine;
 mod hub;
+pub mod readings;
 pub mod schedule;
 mod store;
 mod sun;
