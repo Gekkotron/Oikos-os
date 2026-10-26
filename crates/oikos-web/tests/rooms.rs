@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
-use oikos_api::{AreaView, EntityView};
+use oikos_api::{AreaView, CameraInfo, CamerasView, EntityView};
 use oikos_core::model::{
     Capabilities, EntityCategory, EntityState, Kind, UNASSIGNED_AREA, UiOverride,
 };
@@ -84,6 +84,16 @@ async fn mount_with(path: &str, with_entities: bool) -> (Mounted, House) {
 
 /// As [`mount_with`], with the language signal the test can flip.
 async fn mount_lang(path: &str, with_entities: bool, lang: RwSignal<Lang>) -> (Mounted, House) {
+    mount_cameras(path, with_entities, lang, CamerasView::default()).await
+}
+
+/// As [`mount_lang`], with the hub's camera list.
+async fn mount_cameras(
+    path: &str,
+    with_entities: bool,
+    lang: RwSignal<Lang>,
+    cameras: CamerasView,
+) -> (Mounted, House) {
     let window = web_sys::window().unwrap();
     window
         .history()
@@ -107,6 +117,9 @@ async fn mount_lang(path: &str, with_entities: bool, lang: RwSignal<Lang>) -> (M
         provide_context(house);
         provide_context(RwSignal::new(Theme::Auto));
         provide_context(lang);
+        provide_context(oikos_web::cameras::CameraList(RwSignal::new(
+            cameras.clone(),
+        )));
         provide_context(oikos_web::components::toast::Toasts::new());
         provide_context(oikos_web::commands::Pending::new());
         provide_context(oikos_web::components::confirm::Confirming::new());
@@ -145,6 +158,39 @@ fn texts(host: &web_sys::Element, selector: &str) -> Vec<String> {
     (0..list.length())
         .map(|i| list.item(i).unwrap().text_content().unwrap_or_default())
         .collect()
+}
+
+fn two_cameras(live: bool) -> CamerasView {
+    CamerasView {
+        live,
+        cameras: ["front_door", "garden"]
+            .map(|id| CameraInfo {
+                id: id.into(),
+                name: id.into(),
+            })
+            .into(),
+    }
+}
+
+/// With `[frigate] live` on, the House overview shows every camera, one tile each.
+#[wasm_bindgen_test]
+async fn the_house_shows_every_camera_while_live() {
+    let lang = RwSignal::new(Lang::En);
+    let (m, _) = mount_cameras("/dashboards/house", true, lang, two_cameras(true)).await;
+    let tiles = m
+        .host
+        .query_selector_all(".house-cameras .camera-widget")
+        .unwrap();
+    assert_eq!(tiles.length(), 2);
+    assert!(texts(&m.host, ".room__title").contains(&"Cameras".to_owned()));
+}
+
+/// With `[frigate] live` off, the House overview has no Cameras section.
+#[wasm_bindgen_test]
+async fn the_house_has_no_cameras_while_live_is_off() {
+    let lang = RwSignal::new(Lang::En);
+    let (m, _) = mount_cameras("/dashboards/house", true, lang, two_cameras(false)).await;
+    assert!(m.host.query_selector(".house-cameras").unwrap().is_none());
 }
 
 /// The Favorites title follows the language with no remount.
