@@ -5,6 +5,8 @@ use chrono::{DateTime, Timelike, Utc};
 use chrono_tz::Tz;
 use oikos_api::SolarPeriod;
 
+use crate::components::curve::{finite, pt, smooth_tail};
+
 /// Paths and marks of one day's curve, in a `w` x `h` pixel box.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Curve {
@@ -41,77 +43,6 @@ fn mid(p: &SolarPeriod) -> f64 {
     p.end as f64 - p.minutes as f64 * 30.0
 }
 
-fn pt(x: f64, y: f64) -> String {
-    format!("{x:.1} {y:.1}")
-}
-
-fn finite(v: f64) -> f64 {
-    if v.is_finite() { v } else { 0.0 }
-}
-
-/// The tangent at the middle point of three (d3's `curveMonotoneX`): zero at a peak or a trough,
-/// never steeper than either side, so the curve stays between its points.
-fn inner_slope(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
-    let (h0, h1) = (b.0 - a.0, c.0 - b.0);
-    if h0 <= 0.0 || h1 <= 0.0 {
-        return 0.0;
-    }
-    let (s0, s1) = ((b.1 - a.1) / h0, (c.1 - b.1) / h1);
-    if s0 * s1 <= 0.0 {
-        return 0.0;
-    }
-    let p = (s0 * h1 + s1 * h0) / (h0 + h1);
-    finite(2.0 * s0.signum() * s0.abs().min(s1.abs()).min(0.5 * p.abs()))
-}
-
-/// The tangent at an end of the line, from its neighbour's tangent `t`.
-fn end_slope(a: (f64, f64), b: (f64, f64), t: f64) -> f64 {
-    let h = b.0 - a.0;
-    if h > 0.0 {
-        finite((3.0 * (b.1 - a.1) / h - t) / 2.0)
-    } else {
-        t
-    }
-}
-
-/// The smooth line through `pts` after its first point, as ` C …` segments: a monotone cubic,
-/// so it passes through every point and never overshoots them (no dip below zero, no false peak).
-fn smooth_tail(pts: &[(f64, f64)]) -> String {
-    let n = pts.len();
-    if n < 2 {
-        return String::new();
-    }
-    let mut t = vec![0.0; n];
-    for i in 1..n - 1 {
-        t[i] = inner_slope(pts[i - 1], pts[i], pts[i + 1]);
-    }
-    if n == 2 {
-        let h = pts[1].0 - pts[0].0;
-        let s = if h > 0.0 {
-            (pts[1].1 - pts[0].1) / h
-        } else {
-            0.0
-        };
-        t = vec![finite(s); 2];
-    } else {
-        t[0] = end_slope(pts[0], pts[1], t[1]);
-        t[n - 1] = end_slope(pts[n - 2], pts[n - 1], t[n - 2]);
-    }
-    let mut out = String::new();
-    for i in 0..n - 1 {
-        let (a, b) = (pts[i], pts[i + 1]);
-        let dx = (b.0 - a.0) / 3.0;
-        out.push_str(&format!(
-            " C {} {} {}",
-            pt(a.0 + dx, a.1 + dx * t[i]),
-            pt(b.0 - dx, b.1 - dx * t[i + 1]),
-            pt(b.0, b.1)
-        ));
-    }
-    out
-}
-
-/// Each inner point blended with its neighbours (¼ ½ ¼), which softens a passing cloud into a
 /// gentle dip; the ends stay as measured, so the line starts at sunrise and ends on today's value.
 fn soften(pts: &[(f64, f64)]) -> Vec<(f64, f64)> {
     if pts.len() < 3 {

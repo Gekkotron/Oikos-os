@@ -208,6 +208,29 @@ pub fn tooltip_time(lang: Lang, range: HistoryRange, t_secs: i64, _now_secs: i64
     }
 }
 
+/// The day a bar stands for, in the house zone: "Tue 06 Oct" / "Mar. 06 oct.".
+pub fn tooltip_day(lang: Lang, t_secs: i64) -> String {
+    let dt = local(t_secs);
+    format!(
+        "{} {:02} {}",
+        fmt::weekday_short(lang, chrono_weekday(dt.weekday())),
+        dt.day(),
+        fmt::month_short(lang, dt.month() as u32),
+    )
+}
+
+/// A discrete entity's value as the tooltip words it: "On" / "Off" for lights and switches, a
+/// percentage for covers. `None` for a numeric sensor.
+pub fn state_value_label(lang: Lang, kind: &str, v: f64) -> Option<String> {
+    let on = v >= 0.5;
+    match kind.to_ascii_lowercase().as_str() {
+        "light" => Some(states::on_off(lang, true, on).to_owned()),
+        "onoff" | "switch" | "binarysensor" => Some(states::on_off(lang, false, on).to_owned()),
+        "cover" => Some(format!("{}%", fmt::decimal_grouped(lang, v, 0))),
+        _ => None,
+    }
+}
+
 /// For discrete-kind entities, the Y-axis label pair that stands in for numeric min/max. `None`
 /// when the entity is a numeric sensor and should keep its numeric labels.
 ///
@@ -431,5 +454,30 @@ mod tests {
             state_axis_labels(Lang::Fr, None, "Switch"),
             Some(("désactivé".into(), "activé".into()))
         );
+    }
+
+    #[test]
+    fn tooltip_day_names_the_day_without_a_time() {
+        // 2026-10-06 12:00 UTC is a Tuesday.
+        assert_eq!(tooltip_day(Lang::En, 1_791_288_000), "Tue 06 Oct");
+        assert_eq!(tooltip_day(Lang::Fr, 1_791_288_000), "Mar. 06 oct.");
+    }
+
+    #[test]
+    fn state_value_label_words_discrete_values_and_skips_numbers() {
+        assert_eq!(
+            state_value_label(Lang::En, "Light", 1.0).as_deref(),
+            Some("On")
+        );
+        assert_eq!(
+            state_value_label(Lang::En, "Light", 0.0).as_deref(),
+            Some("Off")
+        );
+        assert!(state_value_label(Lang::Fr, "BinarySensor", 1.0).is_some());
+        assert_eq!(
+            state_value_label(Lang::En, "Cover", 40.0).as_deref(),
+            Some("40%")
+        );
+        assert_eq!(state_value_label(Lang::En, "Sensor", 1.0), None);
     }
 }
