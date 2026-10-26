@@ -8,7 +8,7 @@ mod words;
 
 use serde::{Deserialize, Serialize};
 
-pub use parse::parse;
+pub use parse::{parse, placeholder_for};
 pub use render::{Reading, render};
 pub use words::{format_number, on_off_word, text_word, with_unit};
 

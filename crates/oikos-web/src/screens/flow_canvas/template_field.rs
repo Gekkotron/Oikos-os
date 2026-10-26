@@ -3,7 +3,7 @@
 
 use leptos::prelude::*;
 
-use oikos_core::flow::template::{Reading, Template, TemplateError, parse};
+use oikos_core::flow::template::{Reading, Template, TemplateError, parse, placeholder_for};
 
 use crate::entity_picker::needs::{is_signal, keep};
 use crate::entity_picker::{EntityPicker, Mode, Pinned};
@@ -70,7 +70,11 @@ pub fn TemplateField(
         remember(());
     };
     let on_pick = Callback::new(move |id: Option<String>| {
-        let piece = format!("{{{}}}", id.as_deref().unwrap_or("trigger"));
+        // The pool only offers ids that read back, so the fallback never shows.
+        let piece = match id {
+            Some(id) => placeholder_for(&id).unwrap_or_else(|| format!("{{{id}}}")),
+            None => "{trigger}".to_owned(),
+        };
         let (text, at) = insert_at(&raw.get_untracked(), caret.get_value(), &piece);
         raw.set(text.clone());
         send(&text);
@@ -113,7 +117,7 @@ pub fn TemplateField(
             title=label
             mode=Mode::Single
             current=Signal::derive(Vec::new)
-            pool=Some(keep(|e| !is_signal(e)))
+            pool=Some(keep(|e| !is_signal(e) && placeholder_for(&e.id).is_some()))
             pinned=Some(Pinned {
                 text: Signal::derive(move || t(FlowText::TriggerValueRow).to_owned()),
             })

@@ -8,6 +8,9 @@ use super::{BinOp, Expr, Part, Template, TemplateError};
 
 /// The most decimals `:N` may ask for.
 const MAX_DECIMALS: u32 = 6;
+/// The most tokens in one placeholder: bounds the depth of the parsed expression, so parsing,
+/// rendering and dropping it never overflow the stack.
+const MAX_TOKENS: usize = 64;
 
 /// Parses a notify title or body.
 pub fn parse(text: &str) -> Result<Template, TemplateError> {
@@ -47,6 +50,18 @@ pub fn parse(text: &str) -> Result<Template, TemplateError> {
     Ok(Template { parts })
 }
 
+/// `{id}`, when it reads back as exactly that entity: an id with whitespace, parentheses, braces
+/// or a trailing `:digits`, or one that reads as a number or `trigger`, cannot be a placeholder.
+pub fn placeholder_for(id: &str) -> Option<String> {
+    let text = format!("{{{id}}}");
+    let template = parse(&text).ok()?;
+    let reads_back = matches!(
+        template.parts.as_slice(),
+        [Part::Value { expr: Expr::Entity(read), decimals: None }] if read == id
+    );
+    reads_back.then_some(text)
+}
+
 /// One `{…}`: an expression with an optional trailing `:N`.
 fn placeholder(inner: &str) -> Result<Part, TemplateError> {
     let mut inner = inner.trim();
@@ -64,6 +79,11 @@ fn placeholder(inner: &str) -> Result<Part, TemplateError> {
     let tokens = tokenize(inner);
     if tokens.is_empty() {
         return Err(TemplateError::new("empty {}"));
+    }
+    if tokens.len() > MAX_TOKENS {
+        return Err(TemplateError::new(format!(
+            "placeholder too long (at most {MAX_TOKENS} values, operators and parentheses)"
+        )));
     }
     let mut parser = Parser { tokens, at: 0 };
     let expr = parser.expr()?;
@@ -234,6 +254,40 @@ mod tests {
                 .reason
                 .contains("decimals must be 0 to 6")
         );
+    }
+
+    #[test]
+    fn long_placeholders_are_refused_not_overflowed() {
+        let sum = format!("{{{}}}", vec!["a"; 40].join(" + "));
+        assert!(
+            parse(&sum).unwrap_err().reason.contains("too long"),
+            "{sum}"
+        );
+        let nested = format!("{{{}x{}}}", "(".repeat(40), ")".repeat(40));
+        assert!(parse(&nested).unwrap_err().reason.contains("too long"));
+        let huge = format!("{{{}x{}}}", "(".repeat(100_000), ")".repeat(100_000));
+        assert!(parse(&huge).is_err());
+        assert!(parse(&format!("{{{}}}", vec!["a"; 20].join(" + "))).is_ok());
+    }
+
+    #[test]
+    fn placeholder_quotes_only_ids_that_read_back() {
+        assert_eq!(
+            placeholder_for("double_take_rémi").as_deref(),
+            Some("{double_take_rémi}")
+        );
+        assert_eq!(placeholder_for("a-b,c").as_deref(), Some("{a-b,c}"));
+        for id in [
+            "aa:bb:cc:dd:ee:12",
+            "Living room temp",
+            "a(b)",
+            "x{y",
+            "trigger",
+            "12",
+            "-",
+        ] {
+            assert_eq!(placeholder_for(id), None, "{id}");
+        }
     }
 
     #[test]
