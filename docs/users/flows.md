@@ -47,6 +47,27 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
 
 The sun nodes and `is_dark` read the house location. Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`, both or neither; without them the hub uses Paris, and the web UI shows a "Paris fallback" badge on sun cards. See [Configuration](../reference/configuration.md).
 
+### Values in a notification
+
+A `notify` card's title and body can show live values. In the editor, **＋ Value** under each field opens the entity picker and inserts a placeholder at the cursor; a **Preview** line under the body shows the message filled with the house's current values. The hub fills the placeholders when the step runs.
+
+| Template | Sent in English | Sent in French |
+| --- | --- | --- |
+| `{weather_temperature}` | `10.1 °C` | `10,1 °C` |
+| `{weather_temperature:0}` | `10 °C` | `10 °C` |
+| `{weather_today_max - weather_today_min:1}` | `5.4 °C` | `5,4 °C` |
+| `{weather_tomorrow_precipitation * 2}` | `0 mm` | `0 mm` |
+| `{weather_condition}` | `Cloudy` | `Nuageux` |
+| `{trigger}` | the value that started the run | the same |
+| `{{` and `}}` | a literal `{` and `}` | the same |
+
+- A placeholder reads an entity's value with its unit. `:N` rounds to N decimals (0 to 6); without it a number shows at most 2 decimals.
+- Maths uses `+ - * /` and parentheses. Put spaces around operators: `a-b` is a valid entity id, `a - b` is a subtraction.
+- On/off and text values are translated (open/closed, detected/clear, weather conditions, cover, alarm and climate states).
+- A value that is unknown when the step runs prints `?`; the push is still sent. `{trigger}` prints `?` in a run that no state change started (a schedule, the sun, **Run now**).
+- The language is the web app's language when the flow is saved, stored as the card's `lang` (`en` or `fr`).
+- A text that does not parse, or a placeholder naming an entity the house does not have, is refused when the flow is saved.
+
 ## How a run goes
 
 A run follows the graph from the trigger that fired, depth first. A failing node ends the run as `failed` at that step. A schedule tick that comes while the broker link is down is recorded as a skipped run, since its commands could not go out. A non-trigger node with no incoming edge never runs. A manual run (the Run button, `run_flow`) starts from the flow's first trigger node and is refused when the flow is disabled, invalid, or already running.
