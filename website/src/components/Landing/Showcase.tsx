@@ -3,7 +3,7 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 import Heading from '@theme/Heading';
 import styles from './Landing.module.css';
 
-type Row = { eyebrow: string; title: string; text: string; to: string; cta: string; img: string; alt: string };
+type Row = { eyebrow: string; title: string; text: string; to: string; cta: string; img: string; height: number; alt: string };
 
 const ROWS: Row[] = [
   {
@@ -13,6 +13,7 @@ const ROWS: Row[] = [
     to: '/docs/users/flows',
     cta: 'How flows work',
     img: '/img/screens/flow-canvas.webp',
+    height: 1800,
     alt: 'The flow canvas: a trigger connected to a check, an action and a delay.',
   },
   {
@@ -22,7 +23,8 @@ const ROWS: Row[] = [
     to: '/docs/users/web-ui#energy',
     cta: 'About the Energy tab',
     img: '/img/screens/energy.webp',
-    alt: 'The Energy tab: live power flow between solar, grid, house and consumers.',
+    height: 2176,
+    alt: 'The Energy tab: live power flow between solar, grid, house and consumers, above the day chart of the grid.',
   },
 ];
 
@@ -41,7 +43,7 @@ function ShowRow({ row, flip }: { row: Row; flip: boolean }) {
         </Link>
       </div>
       <div className={styles.rowMedia}>
-        <img src={src} loading="lazy" width={2880} height={1800} alt={row.alt} className={styles.rowImg} />
+        <img src={src} loading="lazy" width={2880} height={row.height} alt={row.alt} className={styles.rowImg} />
       </div>
     </div>
   );
