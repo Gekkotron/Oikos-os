@@ -205,6 +205,8 @@ fn command_sentence(command: &Command, entity: &str, ctx: &Ctx) -> String {
         Command::Close => verb(FlowText::Close),
         Command::Stop => verb(FlowText::Stop),
         Command::Press => verb(FlowText::Press),
+        Command::Arm { mode, .. } => t::arm(lang, &e, *mode),
+        Command::Disarm { .. } => verb(FlowText::Disarm),
         Command::SetPosition { position } => {
             t::set_to(lang, &e, &with_unit(position.to_string(), Some("%")))
         }

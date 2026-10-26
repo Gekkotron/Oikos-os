@@ -6,7 +6,7 @@ use oikos_core::flow::{
     CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, NotifyParams, Op,
     Scalar, SunWhich, TriggerScheduleParams, TriggerStateParams,
 };
-use oikos_core::model::{Command, Kind};
+use oikos_core::model::{AlarmMode, Command, Kind};
 use oikos_core::types::{Shape, type_def};
 use serde_json::{Value, json};
 
@@ -96,8 +96,26 @@ pub(crate) fn commands(entity: &EntityView, current: Option<&Scalar>) -> Vec<Com
         Kind::Button => vec![Command::Press],
         Kind::Climate => vec![Command::SetTemperature { temperature: 20.0 }],
         Kind::Generic => generic_controls(entity),
+        Kind::AlarmPanel => alarm_commands(entity),
         _ => Vec::new(),
     }
+}
+
+/// Disarm, then one Arm per mode the panel announces (home, away, night when it announces none).
+fn alarm_commands(entity: &EntityView) -> Vec<Command> {
+    let announced = &entity.capabilities.alarm_modes;
+    let modes: Vec<AlarmMode> = if announced.is_empty() {
+        vec![AlarmMode::Home, AlarmMode::Away, AlarmMode::Night]
+    } else {
+        announced.iter().copied().collect()
+    };
+    std::iter::once(Command::Disarm { code: None })
+        .chain(
+            modes
+                .into_iter()
+                .map(|mode| Command::Arm { mode, code: None }),
+        )
+        .collect()
 }
 
 /// One `control` command per announced control, with a sensible default value for its shape.
@@ -521,6 +539,59 @@ mod tests {
             control: "open".into(),
             value: None
         }));
+    }
+
+    #[test]
+    fn picker_offers_alarm_disarm_and_announced_modes() {
+        let mut panel = ent("a1", "Alarm", Kind::AlarmPanel);
+        panel.capabilities.alarm_modes = [AlarmMode::Away, AlarmMode::Night].into();
+        assert_eq!(
+            commands(&panel, None),
+            vec![
+                Command::Disarm { code: None },
+                Command::Arm {
+                    mode: AlarmMode::Away,
+                    code: None
+                },
+                Command::Arm {
+                    mode: AlarmMode::Night,
+                    code: None
+                },
+            ]
+        );
+        panel.capabilities.alarm_modes.clear();
+        assert_eq!(commands(&panel, None).len(), 4);
+    }
+
+    #[test]
+    fn alarm_cards_read_in_both_languages() {
+        let mut panel = ent("a1", "Alarme", Kind::AlarmPanel);
+        panel.capabilities.alarm_modes = [AlarmMode::Away].into();
+        let entities = house(vec![panel]);
+        let areas: Vec<AreaView> = Vec::new();
+        for (lang, want) in [
+            (
+                crate::i18n::Lang::En,
+                ["Disarm Alarme", "Arm Alarme (away)"],
+            ),
+            (
+                crate::i18n::Lang::Fr,
+                ["Désactiver Alarme", "Activer Alarme (absent)"],
+            ),
+        ] {
+            let ctx = Ctx {
+                entities: &entities,
+                areas: &areas,
+                flows: &[],
+                lang,
+            };
+            let labels: Vec<String> = entries("alarme", &ctx)
+                .into_iter()
+                .filter(|e| e.group == Group::Then)
+                .map(|e| e.label)
+                .collect();
+            assert_eq!(labels, want);
+        }
     }
 
     #[test]

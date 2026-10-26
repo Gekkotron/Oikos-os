@@ -2,6 +2,7 @@
 
 use super::*;
 use oikos_core::flow::SunWhich;
+use oikos_core::model::AlarmMode;
 
 const NBSP: char = '\u{A0}';
 
@@ -18,6 +19,7 @@ pub enum FlowText {
     Press,
     Lock,
     Unlock,
+    Disarm,
     Wait,
     Notify,
     Enable,
@@ -224,6 +226,7 @@ impl FlowText {
         FlowText::Press,
         FlowText::Lock,
         FlowText::Unlock,
+        FlowText::Disarm,
         FlowText::Wait,
         FlowText::Notify,
         FlowText::Enable,
@@ -424,6 +427,7 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::Press => ("Press", "Appuyer sur"),
         T::Lock => ("Lock", "Verrouiller"),
         T::Unlock => ("Unlock", "Déverrouiller"),
+        T::Disarm => ("Disarm", "Désactiver"),
         T::Wait => ("Wait", "Attendre"),
         T::Notify => ("Notify", "Notifier"),
         T::Enable => ("Enable", "Activer"),
@@ -862,6 +866,22 @@ pub fn set_to(lang: Lang, e: &str, v: &str) -> String {
         lang,
         format!("Set {e} to {v}"),
         format!("Régler {e} sur {v}"),
+    )
+}
+
+/// "Arm Alarm (away)" / "Activer Alarme (absent)": the security screen's arm words.
+pub fn arm(lang: Lang, e: &str, mode: AlarmMode) -> String {
+    let (en, fr) = match mode {
+        AlarmMode::Home => ("home", "présent"),
+        AlarmMode::Away => ("away", "absent"),
+        AlarmMode::Night => ("night", "nuit"),
+        AlarmMode::Vacation => ("vacation", "vacances"),
+        AlarmMode::CustomBypass => ("custom bypass", "personnalisée"),
+    };
+    pick(
+        lang,
+        format!("Arm {e} ({en})"),
+        format!("Activer {e} ({fr})"),
     )
 }
 

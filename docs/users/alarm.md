@@ -131,6 +131,10 @@ A presence arm skips the exit delay, because you have already left. A manual arm
 
 The hub reads the trackers' state at start-up too. A phone that came home while the hub was down disarms the alarm once the hub is back, and a house that emptied while it was down starts the 120 s timer.
 
+## From a flow
+
+A [flow](flows.md) can arm or disarm the alarm. In the editor's card library, search for the alarm: the THEN group offers **Disarm** and one **Arm** card per mode the panel offers (**Arm Alarm (away)**, and so on). As JSON, the `command` is `{"type": "disarm"}` or `{"type": "arm", "mode": "away"}` (`home`, `away` or `night`). A flow arm counts as a manual arm, so it waits out the exit delay.
+
 ## Phone push
 
 The alarm sends its pushes on the `alarm` channel. Three kinds of push can arrive:
