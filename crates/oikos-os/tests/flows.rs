@@ -1753,6 +1753,76 @@ async fn notify_step_submits_v1_alert() {
     assert_eq!(id, format!("flow-door-{run_id}"));
 }
 
+const TEMP_ID: &str = "0x00124b0008fd6568_temperature_1_zigbee2mqtt";
+const TEMP_CONFIG_TOPIC: &str = "oikos/sensor/0x00124b0008fd6568/temperature_1/config";
+
+/// Adds a temperature sensor (°C) reading 10.14 to the hub.
+fn ingest_temperature(hub: &Hub) {
+    hub.ingest(
+        TEMP_CONFIG_TOPIC,
+        &fixture("discovery/sensor__0x00124b0008fd6568__temperature_1.json"),
+    );
+    hub.ingest(
+        "zigbee2mqtt/greenhouse/soil_sensors",
+        br#"{"temperature_1": 10.14}"#,
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn notify_renders_values_in_the_flow_language() {
+    let (hub, mut publisher, _engine) = engine_hub();
+    ingest_temperature(&hub);
+    hub.ingest(MOTION_STATE_TOPIC, br#"{"occupancy": false}"#);
+    push_ready(&hub).await;
+    let list = run_notify(
+        &hub,
+        &mut publisher,
+        "temp",
+        serde_json::json!({
+            "title": format!("Temp {{{TEMP_ID}:1}}"),
+            "body": format!("{{{MOTION_ID}}} {{trigger}}"),
+            "lang": "fr",
+        }),
+    )
+    .await;
+    assert_eq!(list[0]["title"], "Temp 10,1\u{a0}°C", "{list}");
+    // A manual run has no trigger value.
+    assert_eq!(list[0]["body"], "Rien ?", "{list}");
+    let flow = hub.flow("temp").expect("flow");
+    let step = &flow.runs[0].steps.last().expect("step").detail;
+    assert!(step.ends_with(": Temp 10,1\u{a0}°C"), "{step}");
+}
+
+#[tokio::test]
+async fn set_flow_rejects_unknown_entity_in_notify_text() {
+    let (hub, mut publisher) = hub_with_entities();
+    let notify = serde_json::json!(
+        { "id": "n", "type": "notify", "params": { "title": "T {nope}" } }
+    );
+    let flow = Flow::decode(chain_json("temp", true, vec![notify]).as_bytes()).expect("flow");
+    match hub.set_flow(flow).await {
+        Err(HubError::InvalidFlow(reason)) => assert!(reason.contains("nope"), "{reason}"),
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+    assert!(publisher.try_recv().is_err(), "nothing was published");
+}
+
+#[tokio::test(start_paused = true)]
+async fn notify_with_a_vanished_entity_still_sends() {
+    let (hub, mut publisher, _engine) = engine_hub();
+    ingest_temperature(&hub);
+    hub.ingest(TEMP_CONFIG_TOPIC, b"");
+    push_ready(&hub).await;
+    let list = run_notify(
+        &hub,
+        &mut publisher,
+        "temp",
+        serde_json::json!({ "title": format!("T {{{TEMP_ID}}}") }),
+    )
+    .await;
+    assert_eq!(list[0]["title"], "T ?", "{list}");
+}
+
 #[tokio::test(start_paused = true)]
 async fn notify_with_fixed_id_replaces_previous() {
     let (hub, mut publisher, _engine) = engine_hub();
