@@ -111,6 +111,23 @@
   background: #000;
 }
 
+/* The grid sets no row height, and an absolutely placed picture adds none, so the tile takes
+   its shape from the pictures: 16:9 each, two stacked for the Stack layout. A taller row still
+   stretches it. */
+.camera-widget--single,
+.camera-widget--carousel,
+.camera-widget--grid { aspect-ratio: 16 / 9; }
+.camera-widget--stack { aspect-ratio: 8 / 9; }
+
+/* House overview: every camera, one 16:9 tile each. */
+.house-cameras__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 12px;
+}
+
+.house-cameras__grid .camera-widget { height: auto; }
+
 .camera-widget__single,
 .camera-widget__carousel {
   position: relative;

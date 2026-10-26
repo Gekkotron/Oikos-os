@@ -130,10 +130,41 @@ pub fn frame_height(css_px: f64, dpr: f64) -> u32 {
     }
 }
 
+/// The cameras the House overview shows: every camera the hub lists, in its order, while
+/// `[frigate] live` is on; none while it is off.
+pub fn house_cameras(view: &CamerasView) -> Vec<String> {
+    if !view.live {
+        return Vec::new();
+    }
+    view.cameras.iter().map(|c| c.id.clone()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oikos_api::AlertSeverity;
+    use oikos_api::{AlertSeverity, CameraInfo};
+
+    fn cameras(live: bool) -> CamerasView {
+        CamerasView {
+            live,
+            cameras: ["front_door", "garden"]
+                .map(|id| CameraInfo {
+                    id: id.into(),
+                    name: id.into(),
+                })
+                .into(),
+        }
+    }
+
+    #[test]
+    fn house_shows_every_camera_while_live() {
+        assert_eq!(house_cameras(&cameras(true)), ["front_door", "garden"]);
+    }
+
+    #[test]
+    fn house_shows_no_camera_while_live_is_off() {
+        assert!(house_cameras(&cameras(false)).is_empty());
+    }
 
     const NOW: u64 = 1_800_000_000;
     const DAY: u64 = 86_400;

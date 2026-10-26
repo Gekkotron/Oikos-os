@@ -36,7 +36,7 @@ The alerts are delivered as described in [Push notifications](push-notifications
 
 ## Live view on dashboards
 
-The dashboard Camera widget shows up to four Frigate cameras live. The hub serves the frames, so they stay off until you turn them on:
+The dashboard Camera widget shows up to four Frigate cameras live. The House overview also shows every camera in a Cameras section while `live` is on. The hub serves the frames, so they stay off until you turn them on:
 
 ```toml
 [frigate]

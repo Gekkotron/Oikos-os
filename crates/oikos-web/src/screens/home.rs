@@ -1,12 +1,13 @@
 //! The Home screen: every room's cards, then the latest alerts.
 
 use leptos::prelude::*;
-use oikos_api::EntityView;
+use oikos_api::{EntityView, Span};
 use oikos_core::model::{Kind, SwitchType};
 use oikos_core::types::Placement as TypePlacement;
 use std::collections::HashSet;
 
 use crate::ambiances::row::HomeAmbiances;
+use crate::cameras::{CameraList, house_cameras};
 use crate::cards::alarm::AlarmPanelCard;
 use crate::cards::binary_sensor::BinarySensorCard;
 use crate::cards::button::ButtonCard;
@@ -30,7 +31,9 @@ use crate::cards::vacuum::VacuumCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::components::alert_row::RecentAlerts;
 use crate::components::card_frame::GROUP_PREFIX;
+use crate::dashboards::camera_widget::CameraWidget;
 use crate::home_header::view::HomeHeader;
+use crate::i18n::{DashText, dash_text, use_lang};
 use crate::rooms::{generic_placement, use_group_refresh, use_loaded, use_room_chips};
 use crate::screens::room::{RoomSection, RoomsSkeleton};
 
@@ -121,12 +124,37 @@ pub fn HomeScreen() -> impl IntoView {
         <Show when=move || loaded.get() fallback=|| view! { <RoomsSkeleton /> }>
             <HomeHeader />
             <HomeAmbiances />
+            <HouseCameras />
             <For
                 each=move || chips.get()
                 key=|c| c.id.clone()
                 children=|area| view! { <RoomSection id=area.id anchored=true /> }
             />
             <RecentAlerts />
+        </Show>
+    }
+}
+
+/// Every Frigate camera, one live tile each, while `[frigate] live` is on; nothing otherwise.
+#[component]
+fn HouseCameras() -> impl IntoView {
+    let lang = use_lang();
+    let list = use_context::<CameraList>().unwrap_or_default();
+    let ids = Memo::new(move |_| list.0.with(house_cameras));
+    view! {
+        <Show when=move || ids.with(|v| !v.is_empty())>
+            <section class="room house-cameras">
+                <div class="room__heading">
+                    <h1 class="room__title">{move || dash_text(lang(), DashText::CamerasLabel)}</h1>
+                </div>
+                <div class="house-cameras__grid">
+                    <For
+                        each=move || ids.get()
+                        key=|id| id.clone()
+                        children=|id| view! { <CameraWidget cameras=vec![id] span=Span::X2x1 /> }
+                    />
+                </div>
+            </section>
         </Show>
     }
 }
