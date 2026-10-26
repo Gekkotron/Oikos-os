@@ -1,5 +1,5 @@
-//! The floating bars over the canvas: top-left the back link, the flow's name (a text field
-//! while editing) and its mode;
+//! The floating bars over the canvas: top-left the back link, the flow's name and its mode
+//! (a text field and a single/restart select while editing);
 //! top-right the enable switch, Run, Edit and Runs (Tidy, Undo, Cancel and Save while editing).
 
 use leptos::prelude::*;
@@ -15,7 +15,7 @@ use super::{Editor, Panel, Selection};
 use crate::api;
 use crate::components::flow_switch::FlowSwitch;
 use crate::components::toast::Toasts;
-use crate::flow_edit::slug_id;
+use crate::flow_edit::flow_uuid;
 use crate::flow_layout::{tidy, with_resolved_positions};
 use crate::flow_list::clear_stale_area;
 use crate::house::House;
@@ -24,6 +24,17 @@ use crate::i18n::use_lang;
 use crate::icons::{CHECK, PENCIL, PLAY, X_MARK};
 use crate::nav::use_back;
 use crate::screens::flow_schedule::SaveBlocked;
+
+/// 16 bytes from the browser's `crypto.getRandomValues`, which (unlike `randomUUID`) also
+/// works on a plain-HTTP LAN address.
+fn random_bytes() -> [u8; 16] {
+    let mut bytes = [0u8; 16];
+    web_sys::window()
+        .and_then(|w| w.crypto().ok())
+        .and_then(|c| c.get_random_values_with_u8_array(&mut bytes).ok())
+        .expect("crypto.getRandomValues is available in every supported browser");
+    bytes
+}
 
 #[component]
 fn EditControls(
@@ -64,10 +75,7 @@ fn EditControls(
             .with_untracked(|areas| clear_stale_area(&mut snapshot, areas));
         let is_new = snapshot.id.is_empty();
         if is_new {
-            let taken = house
-                .flows
-                .with_untracked(|flows| flows.iter().map(|f| f.definition.id.clone()).collect());
-            snapshot.id = slug_id(&snapshot.name, &taken);
+            snapshot.id = flow_uuid(random_bytes());
         }
         let navigate = navigate.clone();
         spawn_local(async move {
@@ -244,6 +252,23 @@ pub fn Toolbar(
             FlowMode::Restart => FlowText::ModeRestart,
         }))
     };
+    let draft_mode = move || match editor.draft.with(|f| f.mode) {
+        FlowMode::Single => "single",
+        FlowMode::Restart => "restart",
+    };
+    let pick_mode = move |ev: web_sys::Event| {
+        let mode = match event_target_value(&ev).as_str() {
+            "restart" => FlowMode::Restart,
+            _ => FlowMode::Single,
+        };
+        if mode == editor.draft.with_untracked(|f| f.mode) {
+            return;
+        }
+        editor
+            .history
+            .update_value(|h| h.record(editor.draft.get_untracked()));
+        editor.draft.update(|f| f.mode = mode);
+    };
     let house = expect_context::<House>();
     // A room the house no longer has reads as "No room" (and is cleared on save).
     let draft_room = move || {
@@ -297,7 +322,25 @@ pub fn Toolbar(
                     on:input=rename
                 />
             </Show>
-            <span class="flow-toolbar__mode">{mode}</span>
+            <Show
+                when=move || editing.get()
+                fallback=move || view! { <span class="flow-toolbar__mode">{mode}</span> }
+            >
+                <select
+                    class="field flow-toolbar__room"
+                    aria-label=move || t(FlowText::Mode)
+                    title=move || t(FlowText::ModeHint)
+                    prop:value=draft_mode
+                    on:change=pick_mode
+                >
+                    <option value="single" selected=move || draft_mode() == "single">
+                        {move || t(FlowText::ModeSingle)}
+                    </option>
+                    <option value="restart" selected=move || draft_mode() == "restart">
+                        {move || t(FlowText::ModeRestart)}
+                    </option>
+                </select>
+            </Show>
             <Show
                 when=move || editing.get()
                 fallback=move || {
