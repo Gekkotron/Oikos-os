@@ -841,3 +841,164 @@ fn remote_subscribes_to_its_action_topics() {
 fn solar_is_reserved() {
     assert!(RegistryConfig::default_reserved().contains(&"solar".to_owned()));
 }
+
+const REMOTE_ACTION_TOPIC: &str = "zigbee2mqtt/rooms/hall/remote/action";
+
+/// A `bridge/devices` list with one device named `rooms/hall/remote` exposing `exposes`.
+fn remote_devices(exposes: serde_json::Value) -> Inbound {
+    Inbound::Z2mDevices(
+        json!([{
+            "ieee_address": "0xd4fe12345",
+            "friendly_name": "rooms/hall/remote",
+            "type": "EndDevice",
+            "supported": true,
+            "interview_state": "SUCCESSFUL",
+            "definition": {"model": "TS0043", "vendor": "Tuya", "description": "Wireless remote", "exposes": exposes}
+        }])
+        .to_string()
+        .into_bytes(),
+    )
+}
+
+fn action_exposes(values: &[&str]) -> serde_json::Value {
+    json!([
+        {"type": "numeric", "name": "battery", "property": "battery", "access": 1},
+        {"type": "enum", "name": "action", "property": "action", "access": 1, "values": values}
+    ])
+}
+
+fn remote_actions(registry: &Registry) -> Vec<serde_json::Value> {
+    registry
+        .entity(REMOTE)
+        .and_then(|e| e.bindings.config.get("actions"))
+        .and_then(|a| a.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn is_seeded(action: &serde_json::Value) -> bool {
+    action.get("seeded").is_some()
+}
+
+#[test]
+fn exposed_actions_create_the_remote() {
+    let mut registry = Registry::new(config());
+    let changes = registry.apply(remote_devices(action_exposes(&[
+        "1_single", "1_double", "1_hold",
+    ])));
+    assert!(changes.contains(&Change::EntityUpserted(REMOTE.to_owned())));
+    assert!(changes.contains(&Change::SubscriptionsChanged));
+    assert_eq!(signals(&registry), ["1_single", "1_double", "1_hold"]);
+    let first = &remote_actions(&registry)[0];
+    assert_eq!(first["topic"], REMOTE_ACTION_TOPIC);
+    assert_eq!(first["object"], "action_1_single");
+    assert!(is_seeded(first));
+    assert!(registry.subscription_topics().contains(REMOTE_ACTION_TOPIC));
+}
+
+#[test]
+fn nested_and_duplicate_exposed_actions_are_read_once() {
+    let mut registry = Registry::new(config());
+    registry.apply(remote_devices(json!([
+        {"type": "composite", "features": [
+            {"type": "enum", "name": "action", "values": ["a", "", "b"]}
+        ]},
+        {"type": "enum", "property": "action", "values": ["b", "c"]}
+    ])));
+    assert_eq!(signals(&registry), ["a", "b", "c"]);
+}
+
+#[test]
+fn discovered_action_replaces_its_seeded_twin() {
+    let mut registry = Registry::new(config());
+    registry.apply(remote_devices(action_exposes(&["on", "off", "toggle"])));
+    feed(
+        &mut registry,
+        &remote_topic("action_off"),
+        remote_config("off"),
+    );
+    assert_eq!(signals(&registry), ["on", "off", "toggle"]);
+    let actions = remote_actions(&registry);
+    assert_eq!(actions.len(), 3);
+    assert!(is_seeded(&actions[0]));
+    assert!(!is_seeded(&actions[1]));
+    assert!(is_seeded(&actions[2]));
+}
+
+#[test]
+fn devices_after_discovery_keep_discovered_and_seed_the_rest() {
+    let mut registry = Registry::new(config());
+    feed(
+        &mut registry,
+        &remote_topic("action_off"),
+        remote_config("off"),
+    );
+    registry.apply(remote_devices(action_exposes(&["on", "off", "toggle"])));
+    assert_eq!(signals(&registry), ["on", "off", "toggle"]);
+    let seeded: Vec<bool> = remote_actions(&registry).iter().map(is_seeded).collect();
+    assert_eq!(seeded, [true, false, true]);
+}
+
+#[test]
+fn removing_an_exposed_discovered_action_keeps_it_seeded() {
+    let mut registry = Registry::new(config());
+    registry.apply(remote_devices(action_exposes(&["on", "off"])));
+    feed(
+        &mut registry,
+        &remote_topic("action_off"),
+        remote_config("off"),
+    );
+    feed(&mut registry, &remote_topic("action_off"), Vec::new());
+    assert_eq!(signals(&registry), ["on", "off"]);
+    assert!(remote_actions(&registry).iter().all(is_seeded));
+}
+
+#[test]
+fn device_leaving_removes_a_seeded_only_remote() {
+    let mut registry = Registry::new(config());
+    registry.apply(remote_devices(action_exposes(&["on", "off"])));
+    let changes = registry.apply(Inbound::Z2mDevices(b"[]".to_vec()));
+    assert!(changes.contains(&Change::EntityRemoved(REMOTE.to_owned())));
+    assert!(registry.entity(REMOTE).is_none());
+}
+
+#[test]
+fn device_leaving_keeps_discovered_actions() {
+    let mut registry = Registry::new(config());
+    registry.apply(remote_devices(action_exposes(&["on", "off"])));
+    feed(
+        &mut registry,
+        &remote_topic("action_off"),
+        remote_config("off"),
+    );
+    registry.apply(remote_devices(json!([])));
+    assert_eq!(signals(&registry), ["off"]);
+    assert!(!is_seeded(&remote_actions(&registry)[0]));
+}
+
+#[test]
+fn device_without_action_expose_creates_nothing() {
+    let mut registry = Registry::new(config());
+    registry.apply(remote_devices(json!([
+        {"type": "numeric", "name": "battery", "property": "battery"}
+    ])));
+    assert!(registry.entity(REMOTE).is_none());
+}
+
+#[test]
+fn seeded_action_is_a_signal() {
+    use oikos_core::template::Templates;
+    use oikos_core::types::{signals::signal_of, type_def};
+    let mut registry = Registry::new(config());
+    registry.apply(remote_devices(action_exposes(&["1_double"])));
+    let entity = registry.entity(REMOTE).expect("remote");
+    let def = type_def("device_automation").unwrap();
+    let templates = Templates::new();
+    let of = |topic: &str, payload: &[u8]| signal_of(entity, def, topic, payload, &templates);
+    assert_eq!(
+        of(REMOTE_ACTION_TOPIC, b"1_double"),
+        Some("1_double".to_owned())
+    );
+    assert_eq!(of(REMOTE_ACTION_TOPIC, b"1_hold"), None);
+    assert_eq!(of("zigbee2mqtt/other/action", b"1_double"), None);
+}
