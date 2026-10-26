@@ -306,6 +306,7 @@ mod tests {
             value: Some(json!(true)),
             entity: None,
             missing: None,
+            average: None,
             extra: Default::default(),
         })
     }

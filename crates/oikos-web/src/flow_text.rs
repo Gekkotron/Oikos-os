@@ -283,6 +283,10 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
                 ),
             };
             let v = value_words(lang, p.value.as_ref().unwrap_or(&Value::Null), unit, entity);
+            let e = match p.average.as_deref() {
+                Some(window) => t::average_of(lang, &e, &duration_words(window)),
+                None => e,
+            };
             match p.op {
                 Op::Eq => t::is_value(lang, &e, &v),
                 Op::Ne => t::is_not_value(lang, &e, &v),
@@ -813,5 +817,38 @@ mod generic_tests {
         assert_eq!(signal_chip_label(En, "1_hold"), "Button 1 held");
         assert_eq!(signal_chip_label(Fr, "single"), "Appuyé");
         assert_eq!(signal_chip_label(Fr, "brightness_up"), "brightness_up");
+    }
+
+    #[test]
+    fn if_with_an_average_names_the_window() {
+        let entities = BTreeMap::new();
+        let node = |average: Option<&str>| Node {
+            id: "n".into(),
+            name: None,
+            position: None,
+            kind: NodeKind::If(oikos_core::flow::IfParams {
+                op: Op::Lte,
+                value: Some(json!(19)),
+                entity: Some("Temperature".into()),
+                missing: None,
+                average: average.map(Into::into),
+                extra: Default::default(),
+            }),
+            extra: Default::default(),
+        };
+        let en = ctx_of(&entities);
+        let fr = Ctx {
+            lang: crate::i18n::Lang::Fr,
+            ..ctx_of(&entities)
+        };
+        assert_eq!(sentence(&node(None), &en), "Temperature \u{2264} 19?");
+        assert_eq!(
+            sentence(&node(Some("15m")), &en),
+            "Temperature avg 15\u{a0}min \u{2264} 19?"
+        );
+        assert_eq!(
+            sentence(&node(Some("1h30m")), &fr),
+            "Temperature moy. 1\u{a0}h 30\u{a0}min \u{2264} 19\u{a0}?"
+        );
     }
 }

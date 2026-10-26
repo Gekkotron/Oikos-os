@@ -16,8 +16,9 @@ use oikos_core::flow::sun::is_dark_at;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
     Flow, Missing, Node, NodeKind, Op, Reading, Scalar, Schedule, compare, format_duration,
-    pick_duration,
+    parse_duration, pick_duration,
 };
+use oikos_core::history::buckets::{Sample, readings_mean};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, JoinSet};
@@ -200,6 +201,7 @@ impl Engine {
             }
         }
         self.watched = watched;
+        self.hub.set_averaged(averaged_windows(&self.flows));
         let stale: Vec<String> = self
             .active
             .iter()
@@ -845,10 +847,16 @@ async fn run_node(
             else {
                 return failed("value is not a scalar".to_owned());
             };
-            let left = match (&params.entity, trigger) {
-                (Some(entity), _) => hub.entity_scalar(entity),
-                (None, Some(trigger)) => hub.entity_scalar(&trigger.entity),
+            let entity = match (&params.entity, trigger) {
+                (Some(entity), _) => entity.as_str(),
+                (None, Some(trigger)) => trigger.entity.as_str(),
                 (None, None) => return failed("no triggering entity".to_owned()),
+            };
+            let left = match params.average.as_deref() {
+                Some(window) => window_average(hub, entity, window, now())
+                    .await
+                    .map(Scalar::Number),
+                None => hub.entity_scalar(entity),
             };
             match (&left, params.missing) {
                 (None, Some(Missing::True)) => {
@@ -859,9 +867,15 @@ async fn run_node(
                 }
                 _ => {}
             }
+            let shown = |outcome: bool| match (params.average.as_deref(), &left) {
+                (Some(window), Some(Scalar::Number(mean))) => {
+                    format!("average {window} = {mean:.1} → {outcome}")
+                }
+                _ => outcome.to_string(),
+            };
             match compare(left.as_ref(), params.op, &right) {
-                Ok(true) => (StepOutcome::Ok, "true".to_owned(), Some("true")),
-                Ok(false) => (StepOutcome::Ok, "false".to_owned(), Some("false")),
+                Ok(true) => (StepOutcome::Ok, shown(true), Some("true")),
+                Ok(false) => (StepOutcome::Ok, shown(false), Some("false")),
                 Err(err) => failed(err.to_string()),
             }
         }
@@ -898,6 +912,74 @@ async fn run_node(
             }
         }
     }
+}
+
+/// The entities the `if` nodes of `flows` average, each with its longest window in
+/// microseconds. An `if` without `entity` averages the entities its flow's triggers watch.
+fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
+    let mut windows = BTreeMap::new();
+    for flow in flows {
+        let triggers: Vec<&String> = flow
+            .nodes
+            .iter()
+            .filter_map(|node| match &node.kind {
+                NodeKind::TriggerState(params) => Some(&params.entity),
+                _ => None,
+            })
+            .collect();
+        for node in &flow.nodes {
+            let NodeKind::If(params) = &node.kind else {
+                continue;
+            };
+            let Some(window) = params
+                .average
+                .as_deref()
+                .and_then(|w| parse_duration(w).ok())
+            else {
+                continue;
+            };
+            let micros = i64::try_from(window.as_micros()).unwrap_or(i64::MAX);
+            let entities = match &params.entity {
+                Some(entity) => vec![entity],
+                None => triggers.clone(),
+            };
+            for entity in entities {
+                let longest = windows.entry(entity.clone()).or_insert(micros);
+                *longest = (*longest).max(micros);
+            }
+        }
+    }
+    windows
+}
+
+/// The mean of the readings of `entity` over the `window` ending at `now`: the ones the hub
+/// kept, newest included, with history filling the part of the window before them (after a
+/// restart, or a flow saved since). With no reading in the window the value held throughout,
+/// the current one, is the mean. `None` when the entity is unknown, unavailable or not a number.
+async fn window_average(
+    hub: &Hub,
+    entity: &str,
+    window: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<f64> {
+    let Scalar::Number(current) = hub.entity_scalar(entity)? else {
+        return None;
+    };
+    let window = parse_duration(window).ok()?;
+    let end = now.timestamp_micros();
+    let start = end - i64::try_from(window.as_micros()).ok()?;
+    let recent = hub.readings_since(entity, start);
+    let recorded = match hub.history().map(|history| history.db()) {
+        Some(Ok(db)) => match db.samples(start, end + 1, Some(entity)).await {
+            Ok(rows) => rows.into_iter().map(|(_, sample)| sample).collect(),
+            Err(err) => {
+                tracing::warn!(%entity, %err, "if average: history read failed");
+                Vec::new()
+            }
+        },
+        _ => Vec::<Sample>::new(),
+    };
+    Some(readings_mean(&recorded, &recent, start).unwrap_or(current))
 }
 
 #[cfg(test)]
@@ -965,5 +1047,82 @@ mod tests {
             .ingest("oikos/automation/day", sun_flow("day", false).as_bytes());
         engine.reload();
         assert!(engine.sun_timers.is_empty());
+    }
+
+    /// Runs one `if` node with `average` on an engine hub that has no history.
+    async fn run_if_average(
+        extra: serde_json::Value,
+    ) -> (StepOutcome, String, Option<&'static str>) {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let mut params = serde_json::json!({
+            "op": "lte", "value": 19, "average": "30m", "entity": "sensor_temperature"
+        });
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let node: Node = serde_json::from_value(serde_json::json!({
+            "id": "check", "type": "if", "params": params
+        }))
+        .unwrap();
+        run_node(&engine.hub, &engine.now, "f", "r", &node, None).await
+    }
+
+    #[tokio::test]
+    async fn if_average_without_history_takes_the_missing_port() {
+        let (outcome, detail, port) =
+            run_if_average(serde_json::json!({ "missing": "false" })).await;
+        assert_eq!(outcome, StepOutcome::Ok);
+        assert_eq!(detail, "missing → false");
+        assert_eq!(port, Some("false"));
+        let (_, detail, port) = run_if_average(serde_json::json!({ "missing": "true" })).await;
+        assert_eq!(detail, "missing → true");
+        assert_eq!(port, Some("true"));
+    }
+
+    #[tokio::test]
+    async fn if_average_without_history_and_default_missing_compares_nothing() {
+        let (outcome, _, port) = run_if_average(serde_json::json!({})).await;
+        assert_eq!(outcome, StepOutcome::Ok);
+        assert_eq!(port, Some("false"));
+    }
+
+    #[tokio::test]
+    async fn if_average_counts_every_reading_including_the_newest() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/sensor/room/temperature/config",
+            br#"{"unique_id":"room_temperature","state_topic":"test/room","value_template":"{{ value_json.temperature }}","unit_of_measurement":"\u00b0C"}"#,
+        );
+        let entity = engine.hub.snapshot().entities[0].id.clone();
+        let flow = serde_json::json!({
+            "id": "avg", "name": "avg", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "check", "type": "if", "params": { "op": "lte", "value": 19, "average": "30m" } }
+            ],
+            "edges": [{ "from": "t", "to": "check" }]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/avg", flow.to_string().as_bytes());
+        engine.reload();
+        // A repeated reading counts again, and the newest one counts.
+        for t in [20, 20, 17] {
+            engine
+                .hub
+                .ingest("test/room", format!(r#"{{"temperature":{t}}}"#).as_bytes());
+        }
+        let node = engine.flows[0].nodes[1].clone();
+        let trigger = TriggerInfo {
+            entity: entity.clone(),
+            value: serde_json::json!(17),
+            previous: serde_json::json!(20),
+        };
+        let (outcome, detail, port) =
+            run_node(&engine.hub, &engine.now, "avg", "r", &node, Some(&trigger)).await;
+        assert_eq!(outcome, StepOutcome::Ok);
+        assert_eq!(detail, "average 30m = 19.0 → true");
+        assert_eq!(port, Some("true"));
     }
 }

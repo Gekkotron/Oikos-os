@@ -260,6 +260,7 @@ struct IfStash {
     value: Option<serde_json::Value>,
     entity: Option<String>,
     missing: Option<Missing>,
+    average: Option<String>,
 }
 
 /// Changes an `if`'s op. `is_dark` reads the sun, so the validator rejects any operand: they
@@ -271,11 +272,13 @@ fn switch_op(i: &mut IfParams, op: Op, stash: &mut IfStash) {
             value: i.value.take(),
             entity: i.entity.take(),
             missing: i.missing.take(),
+            average: i.average.take(),
         };
     } else if was_dark && op != Op::IsDark {
         i.value = stash.value.take();
         i.entity = stash.entity.take();
         i.missing = stash.missing.take();
+        i.average = stash.average.take();
     }
     i.op = op;
 }
@@ -809,11 +812,19 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         })
                 }
             });
-            let entity_id = id;
+            let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
                 form.update(&entity_id, |n| {
                     if let NodeKind::If(ref mut i) = n.kind {
                         i.entity = value;
+                    }
+                });
+            });
+            let average_id = id;
+            let average_write = Callback::new(move |value: Option<String>| {
+                form.update(&average_id, |n| {
+                    if let NodeKind::If(ref mut i) = n.kind {
+                        i.average = value;
                     }
                 });
             });
@@ -855,6 +866,13 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         pinned=Some(word(FlowText::TriggerValue))
                         compact=true
                         class=Some("node-editor__field".to_owned())
+                    />
+                    <TextField
+                        label=word(FlowText::AverageOver)
+                        initial=live.run(()).and_then(|i| i.average).unwrap_or_default()
+                        placeholder=word(FlowText::AverageHint)
+                        optional=true
+                        write=average_write
                     />
                     <label class="node-editor__field">
                         <span class="node-editor__label">{move || t(FlowText::WhenUnknown)}</span>
@@ -1017,6 +1035,7 @@ mod tests {
             value: Some(json!(true)),
             entity: Some("x".into()),
             missing: Some(Missing::True),
+            average: Some("15m".into()),
             extra: Default::default(),
         };
         let mut stash = IfStash::default();
@@ -1039,6 +1058,7 @@ mod tests {
             value: Some(json!(1)),
             entity: None,
             missing: None,
+            average: None,
             extra: Default::default(),
         };
         switch_op(&mut i, Op::Gt, &mut IfStash::default());

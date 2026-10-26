@@ -89,7 +89,7 @@ pub fn is_valid_node_id(id: &str) -> bool {
 /// Checks the structure of a flow: ids, edges and ports, params, at least one trigger and no
 /// cycle. It does not look at entities, which only the hub can resolve.
 pub fn validate(flow: &Flow) -> Result<(), FlowError> {
-    use super::{NodeKind, Op, Scalar, Schedule};
+    use super::{MAX_AVERAGE_SECS, NodeKind, Op, Scalar, Schedule, parse_duration};
 
     if !is_valid_flow_id(&flow.id) {
         return Err(FlowError::BadFlowId(flow.id.clone()));
@@ -165,6 +165,8 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     Some("entity")
                 } else if p.missing.is_some() {
                     Some("missing")
+                } else if p.average.is_some() {
+                    Some("average")
                 } else {
                     None
                 };
@@ -187,7 +189,24 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                         node: node.id.clone(),
                     });
                 }
-                Some(_) => {}
+                Some(value) => {
+                    if let Some(window) = &p.average {
+                        let bad = |reason: String| FlowError::BadOperand {
+                            node: node.id.clone(),
+                            reason,
+                        };
+                        match parse_duration(window) {
+                            Err(e) => return Err(bad(format!("average: {e}"))),
+                            Ok(d) if d.as_secs() > MAX_AVERAGE_SECS => {
+                                return Err(bad("average must be at most 24h".to_owned()));
+                            }
+                            Ok(_) => {}
+                        }
+                        if !value.is_number() {
+                            return Err(bad("value must be a number with average".to_owned()));
+                        }
+                    }
+                }
             },
             _ => {}
         }
@@ -474,6 +493,33 @@ mod tests {
     }
 
     #[test]
+    fn bad_if_average() {
+        let set = |average: &str, value: serde_json::Value| {
+            let mut f = reference_flow();
+            if let NodeKind::If(p) = &mut f.nodes[1].kind {
+                p.average = Some(average.into());
+                p.value = Some(value);
+            }
+            validate(&f)
+        };
+        let reason = |r: Result<(), FlowError>| match r {
+            Err(FlowError::BadOperand { node, reason }) if node == "moving" => reason,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert_eq!(set("15m", serde_json::json!(70)), Ok(()));
+        assert_eq!(set("24h", serde_json::json!(70.5)), Ok(()));
+        assert!(reason(set("15", serde_json::json!(70))).starts_with("average: "));
+        assert_eq!(
+            reason(set("24h1s", serde_json::json!(70))),
+            "average must be at most 24h"
+        );
+        assert_eq!(
+            reason(set("15m", serde_json::json!(true))),
+            "value must be a number with average"
+        );
+    }
+
+    #[test]
     fn ids_are_checked() {
         let mut f = reference_flow();
         f.id = "Living LED".into();
@@ -740,6 +786,7 @@ mod tests {
             ("value", r#"{"op":"is_dark","value":1}"#),
             ("entity", r#"{"op":"is_dark","entity":"e"}"#),
             ("missing", r#"{"op":"is_dark","missing":"true"}"#),
+            ("average", r#"{"op":"is_dark","average":"15m"}"#),
         ] {
             let err = validate(&flow_with_if_params_json(patch)).unwrap_err();
             assert!(

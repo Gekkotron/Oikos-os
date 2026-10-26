@@ -12,9 +12,9 @@ mod validate;
 
 pub use duration::{DurationError, format_duration, parse_duration, pick_duration};
 pub use model::{
-    CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, Missing, Node,
-    NodeKind, NotifyParams, Op, Position, SunWhich, TriggerScheduleParams, TriggerSignalParams,
-    TriggerStateParams, TriggerSunParams, uses_sun_or_is_dark,
+    CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, MAX_AVERAGE_SECS,
+    Missing, Node, NodeKind, NotifyParams, Op, Position, SunWhich, TriggerScheduleParams,
+    TriggerSignalParams, TriggerStateParams, TriggerSunParams, uses_sun_or_is_dark,
 };
 pub use scalar::{CompareError, Scalar, compare};
 pub use schedule::{Schedule, ScheduleError};

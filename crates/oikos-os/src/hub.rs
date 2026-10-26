@@ -197,6 +197,8 @@ pub struct Hub {
     acl_watchdog: Option<AclWatchdog>,
     /// The retained flow definitions and their runs.
     flow_store: Mutex<FlowStore>,
+    /// Every reading of the entities an `if` averages; the engine sets which on reload.
+    recent_readings: Mutex<crate::flows::readings::RecentReadings>,
     group_store: Mutex<GroupStore>,
     /// `[groups] enabled`: group writes and listing are refused while it is false.
     groups_enabled: bool,
@@ -336,6 +338,7 @@ impl Hub {
                 dog: Mutex::new(oikos_watchdog::AclWatchdog::new(cfg.watchdog.acl.cooldown)),
             }),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
+            recent_readings: Mutex::new(Default::default()),
             group_store: Mutex::new(GroupStore::default()),
             groups_enabled: cfg.groups.enabled,
             climate: cfg
@@ -383,6 +386,47 @@ impl Hub {
     /// The recorder, when one is configured.
     pub fn history(&self) -> Option<&Arc<History>> {
         self.history.get()
+    }
+
+    fn recent_readings(&self) -> MutexGuard<'_, crate::flows::readings::RecentReadings> {
+        self.recent_readings
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Keeps every reading of the entities in `windows`, each for its window in microseconds.
+    pub fn set_averaged(&self, windows: std::collections::BTreeMap<String, i64>) {
+        self.recent_readings().set_windows(windows);
+    }
+
+    /// The readings of `id` received at or after `from` while it was averaged, oldest first.
+    pub fn readings_since(&self, id: &str, from: i64) -> Vec<oikos_core::history::buckets::Sample> {
+        self.recent_readings().since(id, from)
+    }
+
+    /// Records the numeric reading of each averaged entity in `seen`, repeats included.
+    fn record_readings(&self, seen: &[String], at: i64) {
+        let wanted: Vec<&String> = {
+            let recent = self.recent_readings();
+            seen.iter().filter(|id| recent.wants(id)).collect()
+        };
+        if wanted.is_empty() {
+            return;
+        }
+        let nums: Vec<(&String, f64)> = {
+            let reg = self.read();
+            wanted
+                .into_iter()
+                .filter_map(|id| {
+                    let num = history_num_of(reg.entity(id)?, &reg.state(id)?.value)?;
+                    Some((id, num))
+                })
+                .collect()
+        };
+        let mut recent = self.recent_readings();
+        for (id, num) in nums {
+            recent.push(id, at, num);
+        }
     }
 
     /// Routes and applies one broker message, broadcasts the resulting events and reports the
@@ -512,6 +556,7 @@ impl Hub {
                 _ => None,
             })
             .collect();
+        self.record_readings(&seen, at_micros);
         for id in seen {
             touched.insert(id.clone());
             // An error only means no command is waiting right now.

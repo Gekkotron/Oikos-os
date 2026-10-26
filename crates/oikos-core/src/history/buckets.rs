@@ -201,6 +201,21 @@ pub fn fill(
     out
 }
 
+/// Mean of the readings at or after `start`: `recent` holds every reading the hub received
+/// (sorted), `recorded` the history rows (sorted, one per change) and fills only the part of
+/// the window before the first recent reading. `None` when no reading falls in the window.
+pub fn readings_mean(recorded: &[Sample], recent: &[Sample], start: Micros) -> Option<f64> {
+    let first_recent = recent.first().map_or(Micros::MAX, |r| r.at);
+    let readings: Vec<f64> = recorded
+        .iter()
+        .filter(|r| r.at < first_recent)
+        .chain(recent)
+        .filter(|r| r.at >= start)
+        .map(|r| r.num)
+        .collect();
+    (!readings.is_empty()).then(|| readings.iter().sum::<f64>() / readings.len() as f64)
+}
+
 /// Merges consecutive buckets into UTC-aligned windows of `window`. Sums `covered`,
 /// `integral` and `increase`, takes min of `min` and max of `max`, and keeps the last
 /// bucket's `last` within each window.
@@ -356,5 +371,27 @@ mod tests {
     #[test]
     fn round3_rounds_half_away() {
         assert_eq!(round3(1.23456), 1.235);
+    }
+
+    #[test]
+    fn readings_mean_counts_every_recent_reading_including_the_newest() {
+        let recent = [s(M, 80.0), s(5 * M, 70.0), s(9 * M, 70.0), s(13 * M, 60.0)];
+        assert_eq!(readings_mean(&[], &recent, 0), Some(70.0));
+        // Readings before the window are left out.
+        assert_eq!(readings_mean(&[], &recent, 2 * M), Some(200.0 / 3.0));
+    }
+
+    #[test]
+    fn readings_mean_fills_the_start_of_the_window_from_history() {
+        let recorded = [s(M, 90.0), s(5 * M, 70.0), s(9 * M, 60.0)];
+        let recent = [s(9 * M, 60.0), s(13 * M, 50.0)];
+        assert_eq!(readings_mean(&recorded, &recent, 0), Some(67.5));
+        assert_eq!(readings_mean(&recorded, &[], 0), Some(220.0 / 3.0));
+    }
+
+    #[test]
+    fn readings_mean_without_a_reading_in_the_window_is_none() {
+        assert_eq!(readings_mean(&[s(M, 90.0)], &[], 2 * M), None);
+        assert_eq!(readings_mean(&[], &[], 0), None);
     }
 }

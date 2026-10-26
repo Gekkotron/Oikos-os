@@ -137,6 +137,7 @@ Branches on a comparison.
 | `value` | bool, number or string | The constant to compare with. Required for every op except `is_dark`, where it is refused. |
 | `entity` | string, optional | The entity whose current scalar is read, live. Absent: the entity that triggered the run. Refused with `is_dark`. |
 | `missing` | `fail`, `true` or `false`, optional | What to do when the value is unknown. Refused with `is_dark`. |
+| `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window instead of its current value. `value` must then be a number. Refused with `is_dark`. |
 
 Outputs: two ports, `true` and `false`. Every edge leaving an `if` names one.
 
@@ -147,7 +148,14 @@ Outputs: two ports, `true` and `false`. Every edge leaving an `if` names one.
 :::caution
 `missing: "fail"` (and leaving `missing` out) does not fail the node today: an unknown value goes through the comparison above, so `eq` and the ordering ops take `false` and `ne` takes `true`. Set `missing` to `true` or `false` when the branch matters.
 :::
+- `average` is the plain mean of the readings received in the window ending now, the newest included. While a flow uses it the hub keeps every reading of that entity, repeats included; for the part of the window before that (after a hub restart, or right after the flow is saved) it reads history, which holds one row per change, so a repeated reading there counts once. With no reading in the window the current value is the mean. The value is unknown, so `missing` applies, when the entity is unknown, unavailable or not a number. History is optional: without it the average starts from the readings received since the flow was loaded. The run detail shows what was compared, for example `average 30m = 18.6 → true`.
 - `is_dark` is true between civil dusk and civil dawn (sun centre 6 degrees or more below the horizon) at the house position, now. It reads the sun, not an entity.
+
+Example: a temperature sensor averaging 19 or less over 30 minutes takes `true`, so a single noisy reading does not trigger the branch.
+
+```json
+{ "id": "low", "type": "if", "params": { "entity": "sensor_temperature", "op": "lte", "value": 19, "average": "30m", "missing": "false" } }
+```
 
 ## `delay`
 
