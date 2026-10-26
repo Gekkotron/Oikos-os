@@ -1,9 +1,10 @@
 //! Frigate media behind the hub: alert snapshots and clips live on Frigate's login port, which
 //! the browser cannot reach without the session cookie. The hub rewrites those URLs to
-//! `/api/v1/media?url=…` and fetches them itself with the `frigate_token` cookie.
+//! `/api/v1/media?url=…` and fetches them itself with the `frigate_token` cookie. With
+//! `[frigate] live` it also serves live camera frames, from a separate, narrower set of paths.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use futures_util::TryStreamExt;
@@ -23,6 +24,34 @@ const COOKIE_NAME: &str = "frigate_token";
 const EVENT_FILES: [&str; 3] = ["snapshot.jpg", "clip.mp4", "thumbnail.jpg"];
 /// A login that takes longer than this has failed.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
+/// The camera list (`/api/config`) and a `latest.jpg` frame must arrive within this. The MJPEG
+/// stream has no total timeout.
+const SHORT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the camera list is reused before `/api/config` is read again.
+const CAMERAS_TTL: Duration = Duration::from_secs(60);
+/// An unknown camera id re-reads the list at most this often.
+const CAMERAS_MISS_REFRESH: Duration = Duration::from_secs(10);
+/// The MJPEG stream's frame rate.
+const STREAM_FPS: u32 = 5;
+
+/// A live camera file the hub may fetch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CameraFile {
+    /// `/api/{id}/latest.jpg`, one frame.
+    Latest,
+    /// `/api/{id}`, the MJPEG stream.
+    Stream,
+}
+
+/// Whether `id` looks like a Frigate camera id: 1 to 64 of `[A-Za-z0-9_-]`. Anything else
+/// (a slash, a dot, a space) never reaches Frigate.
+pub fn is_camera_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
 
 /// `scheme://host[:port]` of an absolute http(s) URL, host lowercased, default port dropped.
 pub fn origin_of(url: &str) -> Option<String> {
@@ -90,6 +119,9 @@ pub struct MediaProxy {
     token: Mutex<Option<String>>,
     /// The last failure warned about, so a Frigate that stays down is logged once.
     last_warning: std::sync::Mutex<Option<String>>,
+    live: bool,
+    /// The enabled camera ids and when they were read.
+    cameras: Mutex<Option<(Vec<String>, Instant)>>,
 }
 
 impl MediaProxy {
@@ -115,7 +147,14 @@ impl MediaProxy {
             login,
             token: Mutex::new(None),
             last_warning: std::sync::Mutex::new(None),
+            live: cfg.live,
+            cameras: Mutex::new(None),
         }))
+    }
+
+    /// `[frigate] live`: whether live camera frames may be served.
+    pub fn live(&self) -> bool {
+        self.live
     }
 
     /// `scheme://host[:port]` the proxy serves.
@@ -130,6 +169,104 @@ impl MediaProxy {
         if origin_of(url).as_deref() != Some(self.origin.as_str()) || !is_event_media(url) {
             return Err(MediaError::Forbidden);
         }
+        self.get(url, range, None).await.map(upstream)
+    }
+
+    /// The enabled camera ids from Frigate's `/api/config` (only the keys of `cameras` are
+    /// kept), read again once they are older than [`CAMERAS_TTL`].
+    pub async fn camera_ids(&self) -> Result<Vec<String>, MediaError> {
+        let mut slot = self.cameras.lock().await;
+        if let Some((ids, read_at)) = slot.as_ref()
+            && read_at.elapsed() < CAMERAS_TTL
+        {
+            return Ok(ids.clone());
+        }
+        let ids = self.read_camera_ids().await?;
+        *slot = Some((ids.clone(), Instant::now()));
+        Ok(ids)
+    }
+
+    /// Whether `id` is one of Frigate's enabled cameras. A miss reads the list again when it
+    /// is older than [`CAMERAS_MISS_REFRESH`], so a camera just added works straight away.
+    pub async fn has_camera(&self, id: &str) -> Result<bool, MediaError> {
+        if self.camera_ids().await?.iter().any(|known| known == id) {
+            return Ok(true);
+        }
+        let mut slot = self.cameras.lock().await;
+        if slot
+            .as_ref()
+            .is_some_and(|(_, read_at)| read_at.elapsed() < CAMERAS_MISS_REFRESH)
+        {
+            return Ok(false);
+        }
+        let ids = self.read_camera_ids().await?;
+        let found = ids.iter().any(|known| known == id);
+        *slot = Some((ids, Instant::now()));
+        Ok(found)
+    }
+
+    /// Fetches a live frame (`latest.jpg`) or the MJPEG stream of camera `id` at `height`
+    /// pixels. Both height spellings are sent because Frigate versions differ; Frigate ignores
+    /// the one it does not know. `Forbidden` for an id that fails [`is_camera_id`].
+    pub async fn fetch_camera(
+        &self,
+        id: &str,
+        file: CameraFile,
+        height: u32,
+    ) -> Result<Upstream, MediaError> {
+        if !is_camera_id(id) {
+            return Err(MediaError::Forbidden);
+        }
+        let base = &self.base;
+        let (url, timeout) = match file {
+            CameraFile::Latest => (
+                format!("{base}/api/{id}/latest.jpg?h={height}&height={height}"),
+                Some(SHORT_TIMEOUT),
+            ),
+            CameraFile::Stream => (
+                format!("{base}/api/{id}?h={height}&height={height}&fps={STREAM_FPS}"),
+                None,
+            ),
+        };
+        self.get(&url, None, timeout).await.map(upstream)
+    }
+
+    async fn read_camera_ids(&self) -> Result<Vec<String>, MediaError> {
+        let url = format!("{}/api/config", self.base);
+        let response = self.get(&url, None, Some(SHORT_TIMEOUT)).await?;
+        let status = response.status();
+        if !status.is_success() {
+            let message = format!("camera list http {}", status.as_u16());
+            self.warn_once(message.clone());
+            return Err(MediaError::Unavailable(message));
+        }
+        let config: serde_json::Value = response.json().await.map_err(|err| {
+            let message = format!("camera list: {err}");
+            self.warn_once(message.clone());
+            MediaError::Unavailable(message)
+        })?;
+        Ok(config
+            .get("cameras")
+            .and_then(serde_json::Value::as_object)
+            .map(|cameras| {
+                cameras
+                    .iter()
+                    .filter(|(_, camera)| camera.get("enabled") != Some(&false.into()))
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// GETs `url` with the cookie when a login is configured, passing `range` through and
+    /// bounding the whole exchange by `timeout` when set. A 401 triggers one new login and one
+    /// retry; a second 401 is returned as is.
+    async fn get(
+        &self,
+        url: &str,
+        range: Option<&str>,
+        timeout: Option<Duration>,
+    ) -> Result<reqwest::Response, MediaError> {
         let mut retried = false;
         loop {
             let token = match &self.login {
@@ -143,6 +280,9 @@ impl MediaProxy {
             if let Some(range) = range {
                 request = request.header(RANGE, range);
             }
+            if let Some(timeout) = timeout {
+                request = request.timeout(timeout);
+            }
             let response = request.send().await.map_err(|err| {
                 self.warn_once(format!("media fetch failed: {err}"));
                 MediaError::Unavailable(err.to_string())
@@ -153,7 +293,7 @@ impl MediaProxy {
                 *self.token.lock().await = None;
                 continue;
             }
-            return Ok(upstream(response));
+            return Ok(response);
         }
     }
 

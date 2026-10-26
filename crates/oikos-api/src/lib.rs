@@ -4,6 +4,7 @@
 
 mod alerts;
 mod ambiances;
+mod cameras;
 mod dashboards;
 mod energy;
 mod events;
@@ -24,6 +25,7 @@ pub use ambiances::{
     Problem, Target, already_there, category_members, is_valid_ambiance_id, plan_category,
     validate_ambiance,
 };
+pub use cameras::{CameraInfo, CamerasView};
 pub use dashboards::{
     Dashboard, DashboardReorder, DashboardView, HOUSE_ID, HOUSE_NAME, MAX_CAMERAS, Span, Widget,
     WidgetConfig, WidgetKind, allowed_spans, decode_dashboard,

@@ -220,6 +220,9 @@ pub struct FrigateConfig {
     pub ttl: u32,
     /// Frigate's MQTT `topic_prefix`.
     pub topic_prefix: String,
+    /// Serves live camera frames through the hub (`/api/v1/cameras/{id}/…`). Off by default:
+    /// anyone on the LAN can read them once it is on.
+    pub live: bool,
 }
 
 impl Default for FrigateConfig {
@@ -238,6 +241,7 @@ impl Default for FrigateConfig {
             severity: "warning".to_owned(),
             ttl: 43200,
             topic_prefix: "frigate".to_owned(),
+            live: false,
         }
     }
 }

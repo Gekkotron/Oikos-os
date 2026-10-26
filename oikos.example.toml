@@ -72,6 +72,7 @@ password = ""
 # severity = "warning"           # info, warning or critical
 # ttl = 43200                    # seconds
 # topic_prefix = "frigate"       # Frigate's MQTT topic_prefix
+# live = false  # live frames through the hub: readable by every device on the LAN
 
 # Watchdogs that raise `system` push alerts. Both are off by default.
 # Gateway health: alerts when a component under `<prefix>/` turns non-ok or recovers.

@@ -28,6 +28,20 @@ fn defaults_match_spec() {
         assert_eq!(cfg.frigate.user, None);
         assert_eq!(cfg.frigate.password, None);
         assert_eq!(cfg.frigate.connect_timeout_ms, 5000);
+        assert!(!cfg.frigate.live);
+        Ok(())
+    });
+}
+
+#[test]
+fn frigate_live_parses() {
+    Jail::expect_with(|jail| {
+        jail.create_file(
+            "oikos.toml",
+            "[frigate]\nurl = \"http://f:8971\"\nlive = true\n",
+        )?;
+        let cfg = Config::load(None)?;
+        assert!(cfg.frigate.live);
         Ok(())
     });
 }
