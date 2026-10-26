@@ -249,6 +249,9 @@ fn CameraListField(
                                 }
                             });
                         }
+                        // Back to the prompt, or the next camera would show as already picked
+                        // and choosing it would fire no change.
+                        event_target::<web_sys::HtmlSelectElement>(&ev).set_value("");
                     }
                 >
                     <option value="" selected=true disabled=true>

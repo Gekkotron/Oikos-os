@@ -1,14 +1,16 @@
 //! The full-screen view of one camera of a Camera widget: Frigate's MJPEG stream through the
 //! hub while `[frigate] live` is on, the latest alert snapshot otherwise. Arrows step through
-//! the widget's cameras; the close button, Escape and Back close it. Closing empties the
-//! picture's `src` first, which ends the stream's connection.
+//! the widget's cameras; the close button, Escape and Back (a history pop, or the dialog's
+//! `cancel` on Android) close it. Closing empties the picture's `src` first, which ends the
+//! stream's connection; so does a hidden tab, until it is shown again.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use leptos::ev;
 use leptos::prelude::*;
 
-use crate::cameras::{CameraList, frame_height, latest_alert_for};
+use crate::cameras::{CameraList, PageVisible, frame_height, latest_alert_for};
 use crate::components::back_close::BackClose;
 use crate::dashboards::camera_widget::{camera_name, use_now};
 use crate::house::House;
@@ -48,8 +50,12 @@ pub fn CameraViewer(cameras: Vec<String>, start: usize, on_close: Callback<()>) 
             latest_alert_for(alerts, &id, now.get(), u64::MAX).and_then(|a| a.image_url.clone())
         })
     });
+    let page = use_context::<PageVisible>();
     let src = move || {
         if live.get() {
+            if !page.is_none_or(|p| p.0.get()) {
+                return None;
+            }
             Some(format!(
                 "/api/v1/cameras/{}/stream?h={}",
                 crate::api::encode_id(&current.get()),
@@ -67,9 +73,14 @@ pub fn CameraViewer(cameras: Vec<String>, start: usize, on_close: Callback<()>) 
             img.set_src("");
         }
     };
+    // Escape, Back, `cancel` and `close` can all arrive for one closing; only the first counts.
+    let closed = Arc::new(AtomicBool::new(false));
     let close = Callback::new(move |()| {
+        if closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
         stop_stream();
-        on_close.run(());
+        on_close.try_run(());
     });
     let hook = BackClose::new();
     Effect::new(move |_| {
@@ -83,7 +94,7 @@ pub fn CameraViewer(cameras: Vec<String>, start: usize, on_close: Callback<()>) 
     });
     let escape = window_event_listener(ev::keydown, move |ev| {
         if ev.key() == "Escape" {
-            close.run(());
+            close.try_run(());
         }
     });
     on_cleanup(move || {
@@ -132,16 +143,28 @@ pub fn CameraViewer(cameras: Vec<String>, start: usize, on_close: Callback<()>) 
         })
     };
     view! {
-        // Escape is handled by the window listener; the dialog's own cancel would close it
-        // behind the app's back.
-        <dialog class="camera-viewer" node_ref=dialog on:cancel=|ev: web_sys::Event| ev.prevent_default()>
+        // The dialog must not close itself behind the app's back: `cancel` (Escape, Android's
+        // Back) closes it through `close`, and a close the browser forces anyway ends it too.
+        <dialog
+            class="camera-viewer"
+            node_ref=dialog
+            on:cancel=move |ev: web_sys::Event| {
+                ev.prevent_default();
+                close.try_run(());
+            }
+            on:close=move |_| {
+                close.try_run(());
+            }
+        >
             <div class="camera-viewer__bar">
                 <span class="camera-viewer__name">{move || camera_name(list, &current.get())}</span>
                 <button
                     type="button"
                     class="camera-viewer__close"
                     aria-label=move || dash_text(lang(), DashText::Close)
-                    on:click=move |_| close.run(())
+                    on:click=move |_| {
+                        close.try_run(());
+                    }
                 >
                     "✕"
                 </button>

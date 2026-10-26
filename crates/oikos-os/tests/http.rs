@@ -1305,6 +1305,76 @@ async fn frigate_down_lists_nothing_and_frames_fail() {
 }
 
 #[tokio::test]
+async fn a_frigate_failure_is_remembered_briefly() {
+    // A Frigate that accepts connections and hangs up at once: every read fails fast.
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let accepted = Arc::clone(&accepted);
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                accepted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+    }
+    let mut cfg = config();
+    cfg.frigate.url = Some(format!("http://{addr}"));
+    cfg.frigate.live = true;
+    let server = Server::start_with(cfg).await;
+
+    for _ in 0..4 {
+        let response = server.get("/api/v1/cameras/front_door/latest.jpg").await;
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+    let body: Value = server
+        .get("/api/v1/cameras")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(body["cameras"], json!([]));
+    assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_failed_frame_fetch_spares_frigate_briefly() {
+    // A Frigate whose list answers but whose frame request drops the connection (the handler
+    // panics), as when Frigate goes down after the list was read.
+    use axum::routing::get;
+    let frames = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let app = {
+        let frames = Arc::clone(&frames);
+        axum::Router::new()
+            .route(
+                "/api/config",
+                get(|| async { r#"{"cameras":{"front_door":{}}}"# }),
+            )
+            .route(
+                "/api/front_door/latest.jpg",
+                get(move || {
+                    frames.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    async { panic!("connection lost") as &'static str }
+                }),
+            )
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(axum::serve(listener, app).into_future());
+    let mut cfg = config();
+    cfg.frigate.url = Some(format!("http://{addr}"));
+    cfg.frigate.live = true;
+    let server = Server::start_with(cfg).await;
+
+    for _ in 0..4 {
+        let response = server.get("/api/v1/cameras/front_door/latest.jpg").await;
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+    assert_eq!(frames.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn put_flow_then_get_and_list() {
     let server = Server::start_with_flows().await;
 

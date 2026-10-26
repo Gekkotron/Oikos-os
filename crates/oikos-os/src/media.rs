@@ -31,6 +31,9 @@ const SHORT_TIMEOUT: Duration = Duration::from_secs(10);
 const CAMERAS_TTL: Duration = Duration::from_secs(60);
 /// An unknown camera id re-reads the list at most this often.
 const CAMERAS_MISS_REFRESH: Duration = Duration::from_secs(10);
+/// After a failed read of the list, Frigate is not asked again for this long: the requests in
+/// between answer at once instead of each waiting out a connect timeout.
+const CAMERAS_RETRY: Duration = Duration::from_secs(10);
 /// The MJPEG stream's frame rate.
 const STREAM_FPS: u32 = 5;
 
@@ -120,8 +123,16 @@ pub struct MediaProxy {
     /// The last failure warned about, so a Frigate that stays down is logged once.
     last_warning: std::sync::Mutex<Option<String>>,
     live: bool,
-    /// The enabled camera ids and when they were read.
-    cameras: Mutex<Option<(Vec<String>, Instant)>>,
+    /// The camera list. Held across a read, so concurrent callers share one.
+    cameras: Mutex<CameraCache>,
+}
+
+/// The last camera list Frigate gave, and when the last read failed.
+#[derive(Default)]
+struct CameraCache {
+    ids: Vec<String>,
+    read_at: Option<Instant>,
+    failed_at: Option<Instant>,
 }
 
 impl MediaProxy {
@@ -148,7 +159,7 @@ impl MediaProxy {
             token: Mutex::new(None),
             last_warning: std::sync::Mutex::new(None),
             live: cfg.live,
-            cameras: Mutex::new(None),
+            cameras: Mutex::new(CameraCache::default()),
         }))
     }
 
@@ -173,36 +184,72 @@ impl MediaProxy {
     }
 
     /// The enabled camera ids from Frigate's `/api/config` (only the keys of `cameras` are
-    /// kept), read again once they are older than [`CAMERAS_TTL`].
+    /// kept), read again once they are older than [`CAMERAS_TTL`]. When a read fails the last
+    /// list stays in use, and Frigate is left alone for [`CAMERAS_RETRY`].
     pub async fn camera_ids(&self) -> Result<Vec<String>, MediaError> {
-        let mut slot = self.cameras.lock().await;
-        if let Some((ids, read_at)) = slot.as_ref()
-            && read_at.elapsed() < CAMERAS_TTL
-        {
-            return Ok(ids.clone());
-        }
-        let ids = self.read_camera_ids().await?;
-        *slot = Some((ids.clone(), Instant::now()));
-        Ok(ids)
+        let mut cache = self.cameras.lock().await;
+        self.cached_ids(&mut cache, CAMERAS_TTL).await
     }
 
     /// Whether `id` is one of Frigate's enabled cameras. A miss reads the list again when it
     /// is older than [`CAMERAS_MISS_REFRESH`], so a camera just added works straight away.
+    /// Within [`CAMERAS_RETRY`] of a failure (a list read or a frame) it fails at once.
     pub async fn has_camera(&self, id: &str) -> Result<bool, MediaError> {
-        if self.camera_ids().await?.iter().any(|known| known == id) {
+        let mut cache = self.cameras.lock().await;
+        if cache
+            .failed_at
+            .is_some_and(|at| at.elapsed() < CAMERAS_RETRY)
+        {
+            return Err(MediaError::Unavailable("Frigate failed lately".into()));
+        }
+        if self
+            .cached_ids(&mut cache, CAMERAS_TTL)
+            .await?
+            .iter()
+            .any(|known| known == id)
+        {
             return Ok(true);
         }
-        let mut slot = self.cameras.lock().await;
-        if slot
-            .as_ref()
-            .is_some_and(|(_, read_at)| read_at.elapsed() < CAMERAS_MISS_REFRESH)
-        {
-            return Ok(false);
+        let ids = self.cached_ids(&mut cache, CAMERAS_MISS_REFRESH).await?;
+        Ok(ids.iter().any(|known| known == id))
+    }
+
+    /// The list when it is younger than `max_age`, else a fresh read; see [`Self::camera_ids`].
+    async fn cached_ids(
+        &self,
+        cache: &mut CameraCache,
+        max_age: Duration,
+    ) -> Result<Vec<String>, MediaError> {
+        if cache.read_at.is_some_and(|at| at.elapsed() < max_age) {
+            return Ok(cache.ids.clone());
         }
-        let ids = self.read_camera_ids().await?;
-        let found = ids.iter().any(|known| known == id);
-        *slot = Some((ids, Instant::now()));
-        Ok(found)
+        let failed_lately = cache
+            .failed_at
+            .is_some_and(|at| at.elapsed() < CAMERAS_RETRY);
+        let result = if failed_lately {
+            Err(MediaError::Unavailable(
+                "camera list: Frigate failed lately".into(),
+            ))
+        } else {
+            self.read_camera_ids().await
+        };
+        match result {
+            Ok(ids) => {
+                cache.ids = ids.clone();
+                cache.read_at = Some(Instant::now());
+                cache.failed_at = None;
+                Ok(ids)
+            }
+            Err(err) => {
+                if !failed_lately {
+                    cache.failed_at = Some(Instant::now());
+                }
+                match cache.read_at {
+                    Some(_) => Ok(cache.ids.clone()),
+                    None => Err(err),
+                }
+            }
+        }
     }
 
     /// Fetches a live frame (`latest.jpg`) or the MJPEG stream of camera `id` at `height`
@@ -228,7 +275,14 @@ impl MediaProxy {
                 None,
             ),
         };
-        self.get(&url, None, timeout).await.map(upstream)
+        match self.get(&url, None, timeout).await {
+            Ok(response) => Ok(upstream(response)),
+            Err(err) => {
+                // Frigate is likely down: spare it (and the browser's connections) for a while.
+                self.cameras.lock().await.failed_at = Some(Instant::now());
+                Err(err)
+            }
+        }
     }
 
     async fn read_camera_ids(&self) -> Result<Vec<String>, MediaError> {

@@ -8,9 +8,12 @@ use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::Router;
 use oikos_api::{AlertChannel, AlertSeverity, AlertView, CameraInfo, CamerasView, Span};
-use oikos_web::cameras::CameraList;
+use oikos_core::dashboard::{Dashboard, Widget, WidgetConfig, WidgetKind};
+use oikos_web::cameras::{CameraList, PageVisible};
 use oikos_web::components::now::Now;
 use oikos_web::dashboards::camera_widget::CameraWidget;
+use oikos_web::dashboards::config_sheet::WidgetConfigSheet;
+use oikos_web::dashboards::edit::EditState;
 use oikos_web::house::House;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -55,6 +58,10 @@ fn camera_list(live: bool) -> CamerasView {
 }
 
 fn mount(cameras: &[&str], span: Span, live: bool) -> web_sys::Element {
+    mount_with(cameras, span, live, true)
+}
+
+fn mount_with(cameras: &[&str], span: Span, live: bool, page_shown: bool) -> web_sys::Element {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -67,6 +74,7 @@ fn mount(cameras: &[&str], span: Span, live: bool) -> web_sys::Element {
             provide_context(house);
             provide_context(Now(RwSignal::new(NOW)));
             provide_context(CameraList(RwSignal::new(camera_list(live))));
+            provide_context(PageVisible(RwSignal::new(page_shown)));
             let cameras = cameras.clone();
             view! { <Router><CameraWidget cameras=cameras span=span /></Router> }
         },
@@ -192,4 +200,84 @@ async fn viewer_streams_and_closes_on_escape() {
     web_sys::window().unwrap().dispatch_event(&event).unwrap();
     tick().await;
     assert_eq!(all(&host, ".camera-viewer"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn viewer_closes_on_the_dialogs_cancel() {
+    // Android's Back reaches a modal dialog as `cancel`, not as a history pop.
+    let host = mount(&["front_door"], Span::X2x1, true);
+    tick().await;
+    one(&host, ".camera-frame").click();
+    tick().await;
+    let cancel = web_sys::Event::new_with_event_init_dict("cancel", &{
+        let init = web_sys::EventInit::new();
+        init.set_cancelable(true);
+        init
+    })
+    .unwrap();
+    one(&host, ".camera-viewer")
+        .dispatch_event(&cancel)
+        .unwrap();
+    tick().await;
+    assert_eq!(all(&host, ".camera-viewer"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn viewer_streams_nothing_while_the_tab_is_hidden() {
+    let host = mount_with(&["front_door"], Span::X2x1, true, false);
+    tick().await;
+    one(&host, ".camera-frame").click();
+    tick().await;
+    let src = one(&host, ".camera-viewer img")
+        .get_attribute("src")
+        .unwrap_or_default();
+    assert!(!src.contains("/stream"), "{src}");
+}
+
+#[wasm_bindgen_test]
+async fn add_camera_select_resets_after_a_pick() {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let dashboard = Dashboard {
+        id: "d".into(),
+        name: "D".into(),
+        order: 1,
+        widgets: vec![Widget {
+            id: "w".into(),
+            kind: WidgetKind::Camera,
+            span: Span::X2x1,
+            config: WidgetConfig::Cameras {
+                cameras: vec!["front_door".into()],
+                title: None,
+            },
+        }],
+        show_header: false,
+    };
+    let mut list = camera_list(true);
+    list.cameras.push(CameraInfo {
+        id: "porch".into(),
+        name: "Porch".into(),
+    });
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(CameraList(RwSignal::new(list.clone())));
+            let state = EditState::new(dashboard.clone(), true);
+            view! { <WidgetConfigSheet state=state index=0 on_close=Callback::new(|()| {}) /> }
+        },
+    ));
+    tick().await;
+    let select: web_sys::HtmlSelectElement = host
+        .query_selector(".camera-list + select")
+        .unwrap()
+        .expect("the Add camera select")
+        .unchecked_into();
+    select.set_value("garden");
+    select
+        .dispatch_event(&web_sys::Event::new("change").unwrap())
+        .unwrap();
+    tick().await;
+    assert_eq!(all(&host, ".camera-list__row"), 2);
+    assert_eq!(select.value(), "");
 }
