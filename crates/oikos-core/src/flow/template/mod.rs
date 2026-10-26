@@ -3,10 +3,14 @@
 //! the web preview render the same text.
 
 mod parse;
+mod render;
+mod words;
 
 use serde::{Deserialize, Serialize};
 
 pub use parse::parse;
+pub use render::{Reading, render};
+pub use words::{format_number, on_off_word, text_word, with_unit};
 
 /// The language text values are written in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

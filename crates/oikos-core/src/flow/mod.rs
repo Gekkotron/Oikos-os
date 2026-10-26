@@ -21,7 +21,7 @@ pub use schedule::{Schedule, ScheduleError};
 pub use sun::{
     APPARENT_ALTITUDE_DEG, CIVIL_ALTITUDE_DEG, SunEvents, is_dark_at, sun_altitude, sun_events,
 };
-pub use template::{Lang, Template, TemplateError};
+pub use template::{Lang, Reading, Template, TemplateError};
 pub use validate::{
     FlowError, NOTIFY_CHANNELS, NOTIFY_SEVERITIES, is_valid_flow_id, is_valid_node_id,
     notify_channel_error, notify_severity_error, validate,
