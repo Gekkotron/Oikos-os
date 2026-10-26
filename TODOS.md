@@ -4,10 +4,6 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ## Dashboards (landed on `feat/dashboards`, 2026-10-22; triaged 2026-10-24)
 
-### P1 — correctness / forward-compat
-
-- `Camera` / `Lock` widgets: not offered by the library yet; add them with their cards.
-
 ### P2 — polish / test coverage
 
 - `Grid` keys tiles by widget id alone and `WidgetView` takes the widget once, so a title change from the config sheet only shows after a remount.

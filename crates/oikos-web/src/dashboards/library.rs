@@ -1,24 +1,25 @@
 //! The widget library in the side panel while editing a dashboard: a search box over the
 //! widgets that can be added, grouped by kind, each row showing its icon, title, room and
-//! device. Clicking a row builds a `Widget` with the smallest allowed span for its kind and
-//! calls `on_add`.
+//! device. Clicking a row builds a `Widget` with the smallest allowed span for its kind (a
+//! big tile for several cameras) and calls `on_add`.
 
 use std::collections::BTreeMap;
 
 use leptos::ev;
 use leptos::prelude::*;
-use oikos_api::{AreaView, EntityView};
+use oikos_api::{AlertChannel, AreaView, CameraInfo, EntityView};
 use oikos_core::dashboard::{
-    DashboardHistoryRange, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
+    DashboardHistoryRange, MAX_CAMERAS, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
 };
 use oikos_core::model::Kind;
 
 use super::energy_stat::ENERGY_METRICS;
+use crate::cameras::{CameraList, load_cameras};
 use crate::flow_edit::fold_accents;
 use crate::format::{entity_title, kind_search_words, room_name};
 use crate::house::House;
 use crate::i18n::{DashText, Lang, dash_text, widget_text};
-use crate::icons::{BOLT, HOUSE, PLAY, entity_icon};
+use crate::icons::{BOLT, HOUSE, PLAY, channel_icon, entity_icon};
 
 /// A timestamp is unique enough: widgets are added by hand, one click at a time.
 #[cfg(target_arch = "wasm32")]
@@ -27,9 +28,18 @@ fn new_widget_id() -> String {
     format!("w_{:x}", n)
 }
 
-/// Smallest allowed span keeps a fresh widget from crowding the grid; the user resizes later.
+/// The span of a fresh widget: the smallest allowed one keeps it from crowding the grid (the
+/// user resizes later), except a Camera widget with several cameras, which gets the big tile
+/// that shows them side by side.
+fn initial_span(kind: WidgetKind, config: &WidgetConfig) -> Span {
+    match config {
+        WidgetConfig::Cameras { cameras, .. } if cameras.len() >= 2 => Span::X2x2,
+        _ => allowed_spans(kind).first().copied().unwrap_or(Span::X1x1),
+    }
+}
+
 fn make_widget_with_id(id: String, kind: WidgetKind, config: WidgetConfig) -> Widget {
-    let span = allowed_spans(kind).first().copied().unwrap_or(Span::X1x1);
+    let span = initial_span(kind, &config);
     Widget {
         id,
         kind,
@@ -58,6 +68,7 @@ pub enum Section {
     Sensors,
     WaterHeaters,
     Locks,
+    Cameras,
     Rooms,
     FlowButtons,
     Energy,
@@ -75,6 +86,7 @@ impl Section {
                 Self::Sensors => DashText::SectionSensors,
                 Self::WaterHeaters => DashText::SectionWaterHeaters,
                 Self::Locks => DashText::SectionLocks,
+                Self::Cameras => DashText::SectionCameras,
                 Self::Rooms => DashText::SectionRoomGroups,
                 Self::FlowButtons => DashText::SectionFlowButtons,
                 Self::Energy => DashText::SectionEnergy,
@@ -92,6 +104,7 @@ impl Section {
             Self::Sensors => "sensors",
             Self::WaterHeaters => "water-heaters",
             Self::Locks => "locks",
+            Self::Cameras => "cameras",
             Self::Rooms => "rooms",
             Self::FlowButtons => "flows",
             Self::Energy => "energy",
@@ -128,13 +141,15 @@ fn subline(entity: &EntityView, areas: &[AreaView], title: &str) -> Option<Strin
 }
 
 /// What `query` offers to put on a dashboard, ordered by section, then title. A row matches
-/// when its title or second line contains the query, ignoring case and accents.
+/// when its title or second line contains the query, ignoring case and accents. Each Frigate
+/// camera is a row, plus "All cameras" (the first [`MAX_CAMERAS`]) when there are several.
 pub fn entries(
     lang: Lang,
     query: &str,
     entities: &BTreeMap<String, EntityView>,
     areas: &[AreaView],
     flows: &[(String, String)],
+    cameras: &[CameraInfo],
 ) -> Vec<Entry> {
     // Each row with the kind words that also find it ("cover", "volet"), for entity rows.
     let mut rows: Vec<(String, Entry, Option<[String; 2]>)> = Vec::new();
@@ -228,6 +243,45 @@ pub fn entries(
             Some(both(DashText::FlowButtonSub)),
         ));
     }
+    let camera_icon = channel_icon(AlertChannel::Camera);
+    for camera in cameras {
+        rows.push((
+            camera.id.clone(),
+            Entry {
+                section: Section::Cameras,
+                title: camera.name.clone(),
+                sub: None,
+                icon: camera_icon,
+                kind: WidgetKind::Camera,
+                config: WidgetConfig::Cameras {
+                    cameras: vec![camera.id.clone()],
+                    title: None,
+                },
+            },
+            Some(both(DashText::CamerasLabel)),
+        ));
+    }
+    if cameras.len() >= 2 {
+        rows.push((
+            String::new(),
+            Entry {
+                section: Section::Cameras,
+                title: dash_text(lang, DashText::AllCameras).to_owned(),
+                sub: None,
+                icon: camera_icon,
+                kind: WidgetKind::Camera,
+                config: WidgetConfig::Cameras {
+                    cameras: cameras
+                        .iter()
+                        .take(MAX_CAMERAS)
+                        .map(|c| c.id.clone())
+                        .collect(),
+                    title: None,
+                },
+            },
+            Some(both(DashText::CamerasLabel)),
+        ));
+    }
     for (id, label) in ENERGY_METRICS {
         rows.push((
             id.to_owned(),
@@ -274,6 +328,9 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
     let lang = crate::i18n::use_lang();
     let query = RwSignal::new(String::new());
     let highlight = RwSignal::new(0_usize);
+    // Refreshed on open, so a camera just added to Frigate shows up.
+    let cameras = use_context::<CameraList>().unwrap_or_default();
+    load_cameras(cameras);
 
     let results = Memo::new(move |_| {
         let query = query.get();
@@ -284,9 +341,11 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
                 .collect()
         });
         house.entities.with(|entities| {
-            house
-                .areas
-                .with(|areas| entries(lang(), &query, entities, areas, &flows))
+            house.areas.with(|areas| {
+                cameras
+                    .0
+                    .with(|list| entries(lang(), &query, entities, areas, &flows, &list.cameras))
+            })
         })
     });
 
@@ -430,7 +489,14 @@ mod tests {
     }
 
     fn run(query: &str, entities: &BTreeMap<String, EntityView>) -> Vec<Entry> {
-        entries(Lang::En, query, entities, &[area("salon", "Salon")], &[])
+        entries(
+            Lang::En,
+            query,
+            entities,
+            &[area("salon", "Salon")],
+            &[],
+            &[],
+        )
     }
 
     fn of(entries: &[Entry], section: Section) -> Vec<&Entry> {
@@ -493,7 +559,7 @@ mod tests {
         let flows = [("f1".to_string(), "Night".to_string())];
         let areas = [area("salon", "Salon")];
         let entities = BTreeMap::new();
-        let find = |q: &str| entries(Lang::Fr, q, &entities, &areas, &flows);
+        let find = |q: &str| entries(Lang::Fr, q, &entities, &areas, &flows, &[]);
         for (query, section) in [
             ("lights", Section::Rooms),
             ("runs the flow", Section::FlowButtons),
@@ -522,6 +588,7 @@ mod tests {
             &entities,
             &[area("salon", "Salon")],
             &[("f1".into(), "Night".into())],
+            &[],
         );
         let mut sections: Vec<_> = got.iter().map(|e| e.section).collect();
         sections.dedup();
@@ -538,6 +605,83 @@ mod tests {
                 Section::HistoryCharts,
             ]
         );
+    }
+
+    fn cams(ids: &[&str]) -> Vec<CameraInfo> {
+        ids.iter()
+            .map(|id| CameraInfo {
+                id: (*id).into(),
+                name: oikos_frigate::pretty(id),
+            })
+            .collect()
+    }
+
+    fn with_cameras(cameras: &[CameraInfo]) -> Vec<Entry> {
+        entries(Lang::En, "", &BTreeMap::new(), &[], &[], cameras)
+    }
+
+    fn camera_ids(entry: &Entry) -> Vec<String> {
+        match &entry.config {
+            WidgetConfig::Cameras { cameras, .. } => cameras.clone(),
+            other => panic!("not a camera config: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cameras_section_lists_each_camera_and_all() {
+        let got = with_cameras(&cams(&["front_door", "garden"]));
+        let rows = of(&got, Section::Cameras);
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|e| e.kind == WidgetKind::Camera));
+        let all = rows
+            .iter()
+            .find(|e| e.title == "All cameras")
+            .expect("an All cameras row");
+        assert_eq!(camera_ids(all), ["front_door", "garden"]);
+        let one = rows.iter().find(|e| e.title == "Garden").expect("Garden");
+        assert_eq!(camera_ids(one), ["garden"]);
+    }
+
+    #[test]
+    fn one_camera_has_no_all_row() {
+        let got = with_cameras(&cams(&["front_door"]));
+        let rows = of(&got, Section::Cameras);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "Front Door");
+    }
+
+    #[test]
+    fn no_cameras_no_section() {
+        assert!(of(&with_cameras(&[]), Section::Cameras).is_empty());
+    }
+
+    #[test]
+    fn all_cameras_keeps_the_first_four() {
+        let got = with_cameras(&cams(&["a", "b", "c", "d", "e"]));
+        let all = of(&got, Section::Cameras)
+            .into_iter()
+            .find(|e| e.title == "All cameras")
+            .expect("an All cameras row");
+        assert_eq!(camera_ids(all), ["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn initial_span_is_big_for_several_cameras() {
+        let two = WidgetConfig::Cameras {
+            cameras: vec!["a".into(), "b".into()],
+            title: None,
+        };
+        let one = WidgetConfig::Cameras {
+            cameras: vec!["a".into()],
+            title: None,
+        };
+        let entity = WidgetConfig::Entity {
+            entity_id: "light.a".into(),
+            title: None,
+        };
+        assert_eq!(initial_span(WidgetKind::Camera, &two), Span::X2x2);
+        assert_eq!(initial_span(WidgetKind::Camera, &one), Span::X2x1);
+        assert_eq!(initial_span(WidgetKind::Light, &entity), Span::X1x1);
     }
 
     #[test]
@@ -588,7 +732,7 @@ mod tests {
 
     #[test]
     fn empty_sections_have_no_rows() {
-        let got = entries(Lang::En, "", &BTreeMap::new(), &[], &[]);
+        let got = entries(Lang::En, "", &BTreeMap::new(), &[], &[], &[]);
         assert!(got.iter().all(|e| e.section == Section::Energy));
         assert_eq!(got.len(), ENERGY_METRICS.len());
     }

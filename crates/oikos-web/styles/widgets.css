@@ -320,3 +320,27 @@ dialog.camera-viewer::backdrop { background: #000; }
   background: rgb(0 0 0 / 55%);
   transform: translateX(-50%);
 }
+
+/* The Camera widget's ordered camera list in the config sheet. */
+.camera-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.camera-list__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.camera-list__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

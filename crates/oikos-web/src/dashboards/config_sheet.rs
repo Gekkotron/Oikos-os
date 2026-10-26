@@ -5,20 +5,24 @@ use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
 use oikos_api::HOUSE_ID;
 use oikos_core::dashboard::{
-    Dashboard, DashboardHistoryRange, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
+    Dashboard, DashboardHistoryRange, MAX_CAMERAS, Span, Widget, WidgetConfig, WidgetKind,
+    allowed_spans,
 };
 
 use crate::api;
+use crate::cameras::CameraList;
 use crate::components::confirm::{ConfirmBar, Confirming};
 use crate::components::toast::Toasts;
+use crate::dashboards::camera_widget::camera_name;
 use crate::dashboards::edit::EditState;
 use crate::dashboards::history_widget::chart_range;
 use crate::house::House;
 use crate::i18n::history::range_name;
 use crate::i18n::{DashText, Key, dash_text, delete_question, text, use_lang, widget_sheet_title};
 
-/// Per-widget sheet: title override, size, a history chart's range and delete. Swapping the
-/// widget's target entity is deferred; delete + re-add covers it for v1.
+/// Per-widget sheet: title override, size, a history chart's range, a Camera widget's ordered
+/// camera list and delete. Swapping the widget's target entity is deferred; delete + re-add
+/// covers it for v1.
 #[component]
 pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>) -> impl IntoView {
     let lang = use_lang();
@@ -31,6 +35,14 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
             .draft
             .with(|d| match d.widgets.get(index).map(|w| &w.config) {
                 Some(WidgetConfig::History { range, .. }) => Some(*range),
+                _ => None,
+            })
+    });
+    let cameras = Memo::new(move |_| {
+        state
+            .draft
+            .with(|d| match d.widgets.get(index).map(|w| &w.config) {
+                Some(WidgetConfig::Cameras { cameras, .. }) => Some(cameras.clone()),
                 _ => None,
             })
     });
@@ -122,6 +134,9 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
                     </select>
                 </label>
             </Show>
+            <Show when=move || cameras.with(Option::is_some)>
+                <CameraListField state=state index=index cameras=cameras />
+            </Show>
             <button
                 type="button"
                 class="btn btn--danger"
@@ -137,6 +152,129 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
             </button>
         </aside>
     }
+}
+
+/// A Camera widget's cameras in display order: each row moves up or down or goes (not the last
+/// one), and a select adds a camera the hub lists that is not there yet, up to [`MAX_CAMERAS`].
+#[component]
+fn CameraListField(
+    state: EditState,
+    index: usize,
+    cameras: Memo<Option<Vec<String>>>,
+) -> impl IntoView {
+    let lang = use_lang();
+    let list = use_context::<CameraList>().unwrap_or_default();
+    let edit = move |change: &dyn Fn(&mut Vec<String>)| {
+        state.draft.update(|d| {
+            if let Some(Widget {
+                config: WidgetConfig::Cameras { cameras, .. },
+                ..
+            }) = d.widgets.get_mut(index)
+            {
+                change(cameras);
+            }
+        });
+    };
+    let ids = move || cameras.get().unwrap_or_default();
+    let rows = move || {
+        let ids = ids();
+        let last = ids.len() == 1;
+        ids.iter()
+            .map(|id| {
+                let name = camera_name(list, id);
+                let (up, down, gone) = (id.clone(), id.clone(), id.clone());
+                view! {
+                    <li class="camera-list__row">
+                        <span class="camera-list__name">{name}</span>
+                        <button
+                            type="button"
+                            class="btn btn--compact"
+                            aria-label=move || dash_text(lang(), DashText::MoveUp)
+                            on:click=move |_| edit(&|c| *c = shifted_order(c.clone(), &up, -1))
+                        >
+                            "▲"
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn--compact"
+                            aria-label=move || dash_text(lang(), DashText::MoveDown)
+                            on:click=move |_| edit(&|c| *c = shifted_order(c.clone(), &down, 1))
+                        >
+                            "▼"
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn--compact"
+                            aria-label=move || dash_text(lang(), DashText::RemoveCamera)
+                            disabled=last
+                            on:click=move |_| edit(&|c| {
+                                remove_camera(c, &gone);
+                            })
+                        >
+                            "✕"
+                        </button>
+                    </li>
+                }
+            })
+            .collect_view()
+    };
+    let addable = Memo::new(move |_| {
+        let ids = cameras.get().unwrap_or_default();
+        if ids.len() >= MAX_CAMERAS {
+            return Vec::new();
+        }
+        list.0.with(|v| {
+            v.cameras
+                .iter()
+                .filter(|c| !ids.contains(&c.id))
+                .map(|c| (c.id.clone(), c.name.clone()))
+                .collect::<Vec<_>>()
+        })
+    });
+    view! {
+        <div class="sheet-form__field">
+            <span class="sheet-form__label">{move || dash_text(lang(), DashText::CamerasLabel)}</span>
+            <ul class="camera-list">{rows}</ul>
+            <Show when=move || addable.with(|a| !a.is_empty())>
+                <select
+                    class="select"
+                    aria-label=move || dash_text(lang(), DashText::AddCamera)
+                    prop:value=""
+                    on:change=move |ev| {
+                        let id = event_target_value(&ev);
+                        if !id.is_empty() {
+                            edit(&|c| {
+                                if c.len() < MAX_CAMERAS && !c.contains(&id) {
+                                    c.push(id.clone());
+                                }
+                            });
+                        }
+                    }
+                >
+                    <option value="" selected=true disabled=true>
+                        {move || dash_text(lang(), DashText::AddCamera)}
+                    </option>
+                    {move || {
+                        addable
+                            .get()
+                            .into_iter()
+                            .map(|(id, name)| view! { <option value=id>{name}</option> })
+                            .collect_view()
+                    }}
+                </select>
+            </Show>
+        </div>
+    }
+}
+
+/// Removes camera `id` from `ids` unless it is the last one; whether it went.
+fn remove_camera(ids: &mut Vec<String>, id: &str) -> bool {
+    if ids.len() <= 1 {
+        return false;
+    }
+    let before = ids.len();
+    ids.retain(|i| i != id);
+    ids.len() != before
 }
 
 /// History widgets carry no title in the model, so the override is a no-op for them.
@@ -369,6 +507,25 @@ mod tests {
                 title: None,
             },
         }
+    }
+
+    #[test]
+    fn a_camera_moves_down_the_list() {
+        let ids = vec!["front_door".to_owned(), "garden".to_owned()];
+        assert_eq!(
+            shifted_order(ids, "front_door", 1),
+            ["garden", "front_door"]
+        );
+    }
+
+    #[test]
+    fn the_last_camera_cannot_be_removed() {
+        let mut ids = vec!["front_door".to_owned(), "garden".to_owned()];
+        assert!(remove_camera(&mut ids, "front_door"));
+        assert_eq!(ids, ["garden"]);
+        assert!(!remove_camera(&mut ids, "garden"));
+        assert_eq!(ids, ["garden"]);
+        assert!(!remove_camera(&mut ids, "nope"));
     }
 
     #[test]
