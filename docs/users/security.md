@@ -4,7 +4,7 @@ sidebar_position: 13
 description: What the hub does not protect in v1, what that means for your LAN and how to keep it off the internet.
 ---
 
-There is no authentication yet, and that is deliberate for v1. The hub binds on `0.0.0.0`, answers any origin (CORS `*`) and its MCP endpoint accepts any `Host` header. Any device on the LAN, and any web page open in a browser on the LAN (through DNS rebinding), can therefore read the whole house and send commands, alarm arming and disarming included. Authentication and TLS arrive in a later phase.
+There is no authentication yet, and that is deliberate for v1. The hub binds on `0.0.0.0` (`[http] bind`, port 8081 by default) and serves the REST API, the WebSocket, the MCP endpoint and the web UI on that one listener, with no login on any of them. It answers any origin (CORS `*`) and its MCP endpoint accepts any `Host` header. Any device on the LAN, and any web page open in a browser on the LAN (through DNS rebinding), can therefore read the whole house and send commands, alarm arming and disarming included. Authentication and TLS arrive in a later phase.
 
 :::danger Keep the hub off the internet
 No port forwarding, and no exposure through a reverse proxy without authentication in front of it.

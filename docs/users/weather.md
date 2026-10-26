@@ -34,7 +34,9 @@ With weather on, the house overview has a weather card in its header, next to th
 
 The weather document also carries the next five days, starting tomorrow. Each day has its condition, lowest and highest temperature, highest feels-like temperature, precipitation total and chance, wind speed, gusts and direction, UV index, and the day's mean humidity, pressure and cloud cover.
 
-Tap the card to open the weather page (`/weather`). It shows the wind, humidity, pressure, cloud cover, today's rain, the UV index, the sun and the next five days, from the same data as the document above. The header rules and the page layout are in [The web UI](web-ui.md#home-header).
+Tap the card to open the weather page (`/weather`), from the same data as the document above. It opens on **Now**: a big temperature with the condition and the feels-like temperature, and on the right today's low and high, the lowest temperature tonight and whether rain is expected within the hour. Under it are tiles for **Wind** (speed, an arrow showing where it blows to, the compass point and gusts), **Humidity**, **Pressure**, **Clouds**, **Rain** (today's total and chance), **Max gusts**, **UV index** (with its level) and **Sun** (sunset and sunrise).
+
+Under the tiles, a **Forecast** strip shows **Today** and the next five days, each with its condition, high, low and chance of rain. Tap a day to see that day on the same page, with the tiles showing its values (the address becomes `/weather?day=<date>`); tap **Today** to come back. The footer gives the place the hub found, the update time and the Open-Meteo credit, plus "Data from HH:MM" when the data is stale. With weather off, the page says the weather is unavailable and to enable `[weather]` in `oikos.toml`. The header rules and the page layout are in [The web UI](web-ui.md#home-header).
 
 ## The entities
 

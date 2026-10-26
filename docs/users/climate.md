@@ -18,6 +18,30 @@ enabled = false
 
 Settings are retained documents under `[climate] prefix` (`oikos/climate` by default), edited over REST and MCP. While `enabled` is false the REST routes answer `503` and the MCP tools answer `climate disabled`.
 
+## The Climate screen
+
+The **Climate** tab appears when `[climate] enabled = true`. It lists the rooms with their state, the current reading and what the engine decided (the source and the reason). Open a room to see its panel:
+
+- **Zone state**: Off, Pending or Active.
+- **Room thermometer**: Automatic (the room's own temperature sensor when it has one, else the mean of its climate devices' readings) or a sensor you pick.
+- **Hold temperature**: a zone override, **Until next change** or until a time you set. Active holds are listed with a **Clear** button.
+- **Eco until…** and **Cancel eco** (see [Eco](#eco)).
+- **This week**: the approved schedule as a week calendar, with a base temperature and coloured blocks. **Create schedule** starts one when there is none, **Edit rules** changes it, and you tap an empty spot to add a block.
+- **Proposed schedule**: what the learner found, with **Approve**, **Reject** and, after you edit it, **Approve edited**. **Learn now** runs the learner on demand.
+- **Recent decisions**: the engine's last decisions for the room.
+
+The **Settings** button opens **Climate settings**, the house document (see below). Banners explain when learning is off or [History](history.md) is not set up.
+
+## House settings
+
+These are the house-wide settings, with their defaults:
+
+- **Season**: `auto` (default), `heat`, `cool` or `off`. In `auto` the mean outdoor temperature picks heat when it is below **Heat below** (`heat_below`, 16 °C) and cool when it is above **Cool above** (`cool_above`, 24 °C); in between the previous mode holds. With no outdoor reading it heats. **Outdoor temperature** (`outdoor_entity`) names the sensor.
+- **Holiday** (`holiday_entity`): an entity that, while on, puts every zone in holiday: frost temperature in heat, off in cool.
+- Safety limits: **Frost** (`frost`, 7 °C), **Overheat** (`overheat`, 30 °C), **Overcool** (`overcool`, 16 °C), and **Stale after** (`stale_after_min`, 60 minutes without a reading).
+- Learner: **Learning window** (`learn_days`, 28), **Minimum days** (`learn_min_days`, 10), **Agreement needed** (`learn_support`, 0.6) and **Learn at** (`learn_at`, 03:30).
+- **Presence**, **Away grace** and the eco settings (see [Eco](#eco)).
+
 ## Zones
 
 Each area with a climate device is a zone. A zone is in one of three states:

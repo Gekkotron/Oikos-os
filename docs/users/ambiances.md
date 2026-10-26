@@ -26,7 +26,7 @@ An ambiance belongs to the house, not to a room. A room only appears inside an a
 }
 ```
 
-`id` is 1 to 48 characters of `a-z`, `0-9` and `_`. `name` is required (60 characters at most); `subtitle` (80 characters at most) and `icon` are optional. The icon is one of `sofa`, `moon`, `door_out`, `book`, `sun`, `sparkle`, `film`, `plate`, `bath`, `leaf`, `flame` or `house`. `pinned` and `order` are stored with the definition for the interfaces that show them.
+`id` is 1 to 48 characters of `a-z`, `0-9` and `_`. `name` is required (60 characters at most); `subtitle` (80 characters at most) and `icon` are optional. The icon is one of `sofa`, `moon`, `door_out`, `book`, `sun`, `sparkle`, `film`, `plate`, `bath`, `leaf`, `flame` or `house`. `pinned` and `order` are stored with the definition. The web UI uses them: it shows up to four pinned ambiances, by `order`, in a row on the house overview, and lists all of them in that order on its Moods page.
 
 ## The four action types
 
@@ -111,10 +111,10 @@ The outcome is:
 - **`skipped`** when nothing was attempted. The action's `reason` says why: `no matching entities` (a category with no device in it), `every target is offline` (each targeted entity was offline; they are listed under `skipped`), `no active zone` (a climate action with no zone running), `the climate engine is off`, `no longer exists`.
 - **`ok`** otherwise. An action that skipped some offline entities is still `ok`; the offline ones are listed under `skipped`, so look there if a device did not change.
 
-The report is returned to whoever applied the ambiance and sent on the WebSocket to the other open clients. The hub does not keep it, so once the page is closed it is gone.
+The report is returned to whoever applied the ambiance and sent on the WebSocket to the other open clients. The hub does not keep it, so once the page is closed it is gone. In the web UI, a card on the Moods page links to **Last run** while a report for that mood has reached the page since it was opened.
 
 ## Creating and applying ambiances
 
-Ambiances are created and applied through the REST API or the MCP tools. See [HTTP API](../reference/http-api.md#ambiances) and [MCP tools](../reference/mcp-tools.md#ambiances). An assistant connected through MCP can list, create, change, delete and apply them with `list_ambiances`, `set_ambiance`, `delete_ambiance` and `apply_ambiance`.
+In the web UI, the **My moods** page creates, edits, reorders, deletes and applies ambiances, and the house overview applies the pinned ones with one tap. See [Moods](web-ui.md#moods). They can also be managed through the REST API or the MCP tools. See [HTTP API](../reference/http-api.md#ambiances) and [MCP tools](../reference/mcp-tools.md#ambiances). An assistant connected through MCP can list, create, change, delete and apply them with `list_ambiances`, `set_ambiance`, `delete_ambiance` and `apply_ambiance`.
 
 Each ambiance is a retained message on `oikos/ui/ambiances/<id>`, so it survives a restart of the hub. An ambiance whose stored definition cannot be read is kept and listed with its reason, and it cannot be applied until it is fixed or deleted.

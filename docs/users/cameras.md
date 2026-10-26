@@ -4,7 +4,7 @@ sidebar_position: 9
 description: Serve Frigate snapshots and clips to the browser through the hub, and turn Frigate detections into camera alerts.
 ---
 
-Alert snapshots and clips are URLs on Frigate. When they point at Frigate's login port (8971) the browser cannot load them, so give the hub the Frigate login and it serves them itself: media on that origin is rewritten to `/api/v1/media?url=…`, and the hub fetches it with Frigate's session cookie (logging in on demand, once more on a 401). Any other origin is refused. Leave `user` and `password` out for the unauthenticated port (5000).
+Alert snapshots and clips are URLs on Frigate. The web UI shows them on an alert's page (the clip in a player, the snapshot as a picture). When they point at Frigate's login port (8971) the browser cannot load them, so give the hub the Frigate login and it serves them itself: media on that origin is rewritten to `/api/v1/media?url=…`, and the hub fetches it with Frigate's session cookie (logging in on demand, once more on a 401). Any other origin is refused. Leave `user` and `password` out for the unauthenticated port (5000).
 
 ```toml
 [frigate]
@@ -36,7 +36,7 @@ The alerts are delivered as described in [Push notifications](push-notifications
 
 ## Live view on dashboards
 
-The dashboard Camera widget shows up to four Frigate cameras live. The House overview also shows every camera in a Cameras section while `live` is on. The hub serves the frames, so they stay off until you turn them on:
+The dashboard **Camera** widget shows one to four Frigate cameras in one tile; its settings sheet picks the cameras and their order (**Add camera**, move up or down, **Remove camera**). The House overview also shows every camera in a **Cameras** section while `live` is on, one 16:9 tile each. The hub serves the frames, so they stay off until you turn them on:
 
 ```toml
 [frigate]
@@ -47,7 +47,14 @@ live = true    # every device on the LAN can then read the live frames
 ```
 
 - `GET /api/v1/cameras` lists Frigate's enabled cameras (read from Frigate's `/api/config`, which the hub never passes on, and kept for about a minute) and says whether `live` is on.
-- `GET /api/v1/cameras/{id}/latest.jpg?h=` serves one frame, `GET /api/v1/cameras/{id}/stream?h=` the MJPEG stream. `h` is the height in pixels, at most 1080.
-- Both answer `403` while `live` is off and `404` for a camera Frigate does not list. They only ever fetch `/api/{id}/latest.jpg` and `/api/{id}` from the `url` origin, with the same login.
+- `GET /api/v1/cameras/{id}/latest.jpg?h=` serves one frame, `GET /api/v1/cameras/{id}/stream?h=` the MJPEG stream. `h` is the height in pixels, from 1 to 1080.
+- `h` is 360 when left out. Both answer `403` while `live` is off, `404` for a camera Frigate does not list and `502` when Frigate cannot be reached. They only ever fetch `/api/{id}/latest.jpg` and `/api/{id}` from the `url` origin, with the same login.
 
-With `live` off the widget shows each camera's latest alert snapshot instead, or "No events yet" when the alert history holds none for that camera.
+In the widget:
+
+- One camera fills the tile. Two cameras stack on a 2×2 tile, three or four make a grid on it; on any other size the tile shows one camera at a time, with arrows, dots and a swipe to change.
+- With `live` on, each visible picture refreshes about once a second and carries a **Live** label. A camera Frigate does not list reads **Camera not found**, and one that does not answer reads **Camera unavailable**. Pictures stop refreshing while the tile is off screen or the tab is hidden.
+- A badge with the alert text and how long ago it was sent appears on a camera that raised an alert in the last 24 hours. It opens that alert.
+- Tap a picture to open it full screen. The viewer plays the MJPEG stream while `live` is on, has arrows to step through the widget's cameras, and closes with its button, Escape or Back.
+
+With `live` off the widget shows each camera's latest alert snapshot with **Live view off** over it, or "No events yet" when the alert history holds none for that camera.
