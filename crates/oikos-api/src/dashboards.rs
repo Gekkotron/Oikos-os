@@ -13,7 +13,7 @@ use serde_json::Value;
 /// unknown widget kinds.
 pub use oikos_core::dashboard::Dashboard;
 pub use oikos_core::dashboard::{
-    HOUSE_ID, HOUSE_NAME, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
+    HOUSE_ID, HOUSE_NAME, MAX_CAMERAS, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
 };
 
 /// Decodes a dashboard, silently dropping widgets whose `kind` this build does not know.

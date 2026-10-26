@@ -5544,7 +5544,9 @@ html:has(.flow-canvas-screen) {
 .dashboard-library__header--sensors,
 .dashboard-library__item--sensors,
 .dashboard-library__header--history,
-.dashboard-library__item--history {
+.dashboard-library__item--history,
+.dashboard-library__header--cameras,
+.dashboard-library__item--cameras {
   --node-accent: var(--accent-violet);
 }
 

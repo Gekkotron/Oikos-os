@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use oikos_api::{
-    Dashboard, HOUSE_ID, Widget, WidgetConfig, WidgetKind, allowed_spans, decode_dashboard,
+    Dashboard, HOUSE_ID, MAX_CAMERAS, Widget, WidgetConfig, WidgetKind, allowed_spans,
+    decode_dashboard,
 };
 
 /// What `apply` did, so the caller knows whether to republish.
@@ -169,8 +170,11 @@ pub fn validate_widget(w: &Widget) -> Result<(), String> {
         | WidgetKind::Climate
         | WidgetKind::Lock
         | WidgetKind::Sensor
-        | WidgetKind::WaterHeater
-        | WidgetKind::Camera => matches!(w.config, WidgetConfig::Entity { .. }),
+        | WidgetKind::WaterHeater => matches!(w.config, WidgetConfig::Entity { .. }),
+        WidgetKind::Camera => match &w.config {
+            WidgetConfig::Cameras { cameras, .. } => return validate_cameras(cameras),
+            _ => false,
+        },
         WidgetKind::FlowButton => matches!(w.config, WidgetConfig::Flow { .. }),
         WidgetKind::RoomGroup => matches!(w.config, WidgetConfig::Area { .. }),
         WidgetKind::EnergyStat => matches!(w.config, WidgetConfig::Energy { .. }),
@@ -178,6 +182,26 @@ pub fn validate_widget(w: &Widget) -> Result<(), String> {
     };
     if !shape_ok {
         return Err(format!("config shape does not match kind {kind}"));
+    }
+    Ok(())
+}
+
+/// A Camera widget holds 1 to `MAX_CAMERAS` distinct, non-empty Frigate camera ids. They are not
+/// checked against Frigate, which may be down when the dashboard is saved.
+fn validate_cameras(cameras: &[String]) -> Result<(), String> {
+    if cameras.is_empty() || cameras.len() > MAX_CAMERAS {
+        return Err(format!(
+            "camera widget holds {} cameras, expected 1 to {MAX_CAMERAS}",
+            cameras.len()
+        ));
+    }
+    for (i, id) in cameras.iter().enumerate() {
+        if id.is_empty() {
+            return Err("camera widget holds an empty camera id".to_owned());
+        }
+        if cameras[..i].contains(id) {
+            return Err(format!("camera widget lists camera {id} twice"));
+        }
     }
     Ok(())
 }
@@ -272,7 +296,34 @@ mod tests {
             "{err}"
         );
         assert!(validate_widget(&widget(WidgetKind::RoomGroup, Span::X1x1, area)).is_ok());
-        assert!(validate_widget(&widget(WidgetKind::Camera, Span::X2x1, entity_config())).is_ok());
+        assert!(validate_widget(&widget(WidgetKind::Camera, Span::X2x1, entity_config())).is_err());
+    }
+
+    fn cameras(ids: &[&str]) -> WidgetConfig {
+        WidgetConfig::Cameras {
+            cameras: ids.iter().map(|id| (*id).to_owned()).collect(),
+            title: None,
+        }
+    }
+
+    #[test]
+    fn camera_widget_rules() {
+        let camera = |config| validate_widget(&widget(WidgetKind::Camera, Span::X2x2, config));
+        assert!(camera(cameras(&["front_door"])).is_ok());
+        assert!(camera(cameras(&["a", "b", "c", "d"])).is_ok());
+        assert!(camera(cameras(&[])).is_err());
+        assert!(camera(cameras(&["a", "b", "c", "d", "e"])).is_err());
+        assert!(camera(cameras(&["a", "a"])).is_err());
+        assert!(camera(cameras(&[""])).is_err());
+        assert!(camera(entity_config()).is_err());
+        assert!(
+            validate_widget(&widget(
+                WidgetKind::Lock,
+                Span::X1x1,
+                cameras(&["front_door"])
+            ))
+            .is_err()
+        );
     }
 
     #[test]

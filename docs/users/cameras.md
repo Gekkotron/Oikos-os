@@ -33,3 +33,21 @@ topic_prefix = "frigate"                # Frigate's MQTT topic_prefix
 The broker user needs read on `<topic_prefix>/events`. Frigate needs `snapshots.enabled: true`, and event clips retained (`record.enabled`) for the clip update.
 
 The alerts are delivered as described in [Push notifications](push-notifications.md). Use a Frigate *viewer* account for `user` and `password`, not the admin; see [Security](security.md).
+
+## Live view on dashboards
+
+The dashboard Camera widget shows up to four Frigate cameras live. The hub serves the frames, so they stay off until you turn them on:
+
+```toml
+[frigate]
+url = "http://<frigate-host>:8971"
+user = "oikos"
+password = "…"
+live = true    # every device on the LAN can then read the live frames
+```
+
+- `GET /api/v1/cameras` lists Frigate's enabled cameras (read from Frigate's `/api/config`, which the hub never passes on, and kept for about a minute) and says whether `live` is on.
+- `GET /api/v1/cameras/{id}/latest.jpg?h=` serves one frame, `GET /api/v1/cameras/{id}/stream?h=` the MJPEG stream. `h` is the height in pixels, at most 1080.
+- Both answer `403` while `live` is off and `404` for a camera Frigate does not list. They only ever fetch `/api/{id}/latest.jpg` and `/api/{id}` from the `url` origin, with the same login.
+
+With `live` off the widget shows each camera's latest alert snapshot instead, or "No events yet" when the alert history holds none for that camera.

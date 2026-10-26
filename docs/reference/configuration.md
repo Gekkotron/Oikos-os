@@ -168,6 +168,7 @@ Frigate, for alert media and the event bridge. See [Cameras (Frigate)](../users/
 | `severity` | `"warning"` | Severity of the alerts: `info`, `warning` or `critical`. |
 | `ttl` | `43200` | Time to live of the alerts, in seconds. |
 | `topic_prefix` | `"frigate"` | Frigate's MQTT `topic_prefix`. |
+| `live` | `false` | Serve live camera frames at `/api/v1/cameras/{id}/latest.jpg` and `/stream` (the dashboard Camera widget). Every device on the LAN can read them once it is on. Needs `url`. |
 
 ```toml
 [frigate]

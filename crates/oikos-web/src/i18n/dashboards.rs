@@ -100,10 +100,18 @@ pub enum DashText {
     SectionSensors,
     SectionWaterHeaters,
     SectionLocks,
+    SectionCameras,
     SectionRoomGroups,
     SectionFlowButtons,
     SectionEnergy,
     SectionHistory,
+    // Camera widgets.
+    AllCameras,
+    CamerasLabel,
+    AddCamera,
+    MoveUp,
+    MoveDown,
+    RemoveCamera,
 }
 
 pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
@@ -149,10 +157,17 @@ pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
         T::SectionSensors => ("SENSORS", "CAPTEURS"),
         T::SectionWaterHeaters => ("WATER HEATERS", "CHAUFFE-EAU"),
         T::SectionLocks => ("LOCKS", "SERRURES"),
+        T::SectionCameras => ("CAMERAS", "CAMÉRAS"),
         T::SectionRoomGroups => ("ROOM GROUPS", "PIÈCES"),
         T::SectionFlowButtons => ("FLOW BUTTONS", "BOUTONS D'AUTOMATISATION"),
         T::SectionEnergy => ("ENERGY", "ÉNERGIE"),
         T::SectionHistory => ("HISTORY CHARTS", "GRAPHIQUES D'HISTORIQUE"),
+        T::AllCameras => ("All cameras", "Toutes les caméras"),
+        T::CamerasLabel => ("Cameras", "Caméras"),
+        T::AddCamera => ("Add camera", "Ajouter une caméra"),
+        T::MoveUp => ("Move up", "Monter"),
+        T::MoveDown => ("Move down", "Descendre"),
+        T::RemoveCamera => ("Remove camera", "Retirer la caméra"),
     };
     match lang {
         Lang::En => en,
@@ -222,6 +237,14 @@ pub enum WidgetText {
     GridPowerNow,
     SolarPowerNow,
     SelfConsumption,
+    // Camera widget.
+    Live,
+    LiveOff,
+    NoEvents,
+    CameraNotFound,
+    CameraUnavailable,
+    PrevCamera,
+    NextCamera,
 }
 
 pub fn widget_text(lang: Lang, t: WidgetText) -> &'static str {
@@ -234,6 +257,13 @@ pub fn widget_text(lang: Lang, t: WidgetText) -> &'static str {
         WidgetText::GridPowerNow => ("Grid now", "Réseau"),
         WidgetText::SolarPowerNow => ("Solar now", "Solaire"),
         WidgetText::SelfConsumption => ("Self-use", "Autoconso"),
+        WidgetText::Live => ("Live", "En direct"),
+        WidgetText::LiveOff => ("Live view off", "Direct désactivé"),
+        WidgetText::NoEvents => ("No events yet", "Aucun événement"),
+        WidgetText::CameraNotFound => ("Camera not found", "Caméra introuvable"),
+        WidgetText::CameraUnavailable => ("Camera unavailable", "Caméra indisponible"),
+        WidgetText::PrevCamera => ("Previous camera", "Caméra précédente"),
+        WidgetText::NextCamera => ("Next camera", "Caméra suivante"),
     };
     match lang {
         Lang::En => en,

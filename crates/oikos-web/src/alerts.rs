@@ -239,6 +239,7 @@ mod tests {
             image_url: None,
             video_url: None,
             entity_id: None,
+            camera: None,
             actions: vec![],
             source: None,
             silent: false,

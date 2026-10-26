@@ -1,3 +1,4 @@
+pub mod camera_widget;
 pub mod config_sheet;
 pub mod edit;
 pub mod energy_stat;

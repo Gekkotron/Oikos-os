@@ -1,5 +1,7 @@
 pub mod alarm_hero;
 pub mod alert_row;
+pub mod back_close;
+pub mod camera_viewer;
 pub mod card_frame;
 pub mod card_place;
 pub mod confirm;

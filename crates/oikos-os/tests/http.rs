@@ -718,7 +718,9 @@ async fn alert_action_refused_offline() {
 mod fake_frigate {
     //! A Frigate stand-in: `/api/login` hands out `frigate_token=tok<N>` for user `u` /
     //! password `p` (N counts the logins); the snapshot wants the latest token, and when
-    //! `expire_used` is set a token is accepted only once.
+    //! `expire_used` is set a token is accepted only once. `/api/config` lists the cameras
+    //! `front_door`, `garden` and a disabled `old`; their frames want the token too. Every
+    //! request path is logged.
 
     use std::net::SocketAddr;
     use std::sync::Arc;
@@ -726,8 +728,9 @@ mod fake_frigate {
 
     use axum::Router;
     use axum::body::Body;
-    use axum::extract::State;
+    use axum::extract::{RawQuery, Request, State};
     use axum::http::{HeaderMap, StatusCode, header};
+    use axum::middleware::{self, Next};
     use axum::response::{IntoResponse, Response};
     use axum::routing::{get, post};
     use serde_json::Value;
@@ -745,6 +748,9 @@ mod fake_frigate {
         expire_used: bool,
         used: Mutex<Vec<String>>,
         config_reads: AtomicUsize,
+        camera_config_reads: AtomicUsize,
+        frame_queries: Mutex<Vec<String>>,
+        paths: Mutex<Vec<String>>,
     }
 
     impl Fake {
@@ -755,6 +761,9 @@ mod fake_frigate {
                 expire_used,
                 used: Mutex::new(Vec::new()),
                 config_reads: AtomicUsize::new(0),
+                camera_config_reads: AtomicUsize::new(0),
+                frame_queries: Mutex::new(Vec::new()),
+                paths: Mutex::new(Vec::new()),
             });
             let app = Router::new()
                 .route("/api/login", post(login))
@@ -763,6 +772,11 @@ mod fake_frigate {
                 .route("/api/events/1/thumbnail.jpg", get(snapshot))
                 .route("/api/events/redirect/snapshot.jpg", get(redirect_to_config))
                 .route("/api/config/raw", get(config_raw))
+                .route("/api/config", get(camera_config))
+                .route("/api/front_door/latest.jpg", get(latest))
+                .route("/api/garden/latest.jpg", get(latest))
+                .route("/api/front_door", get(mjpeg))
+                .layer(middleware::from_fn_with_state(Arc::clone(&state), log_path))
                 .with_state(Arc::clone(&state));
             let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let addr = listener.local_addr().expect("addr");
@@ -790,6 +804,65 @@ mod fake_frigate {
         pub fn config_reads(&self) -> usize {
             self.state.config_reads.load(Ordering::SeqCst)
         }
+
+        /// How many times `/api/config` (the camera list) was read.
+        pub fn camera_config_reads(&self) -> usize {
+            self.state.camera_config_reads.load(Ordering::SeqCst)
+        }
+
+        /// The query strings of the `latest.jpg` requests, in order.
+        pub async fn frame_queries(&self) -> Vec<String> {
+            self.state.frame_queries.lock().await.clone()
+        }
+
+        /// Every request path, in order.
+        pub async fn paths(&self) -> Vec<String> {
+            self.state.paths.lock().await.clone()
+        }
+    }
+
+    async fn log_path(
+        State(state): State<Arc<FakeState>>,
+        request: Request,
+        next: Next,
+    ) -> Response {
+        state
+            .paths
+            .lock()
+            .await
+            .push(request.uri().path().to_owned());
+        next.run(request).await
+    }
+
+    async fn camera_config(State(state): State<Arc<FakeState>>) -> Response {
+        state.camera_config_reads.fetch_add(1, Ordering::SeqCst);
+        let config = r#"{"mqtt":{"password":"secret"},"cameras":{"front_door":{"enabled":true},"garden":{},"old":{"enabled":false}}}"#;
+        ([(header::CONTENT_TYPE, "application/json")], config).into_response()
+    }
+
+    async fn latest(
+        State(state): State<Arc<FakeState>>,
+        RawQuery(query): RawQuery,
+        headers: HeaderMap,
+    ) -> Response {
+        state
+            .frame_queries
+            .lock()
+            .await
+            .push(query.unwrap_or_default());
+        snapshot(State(state), headers).await
+    }
+
+    async fn mjpeg() -> Response {
+        Response::builder()
+            .header(
+                header::CONTENT_TYPE,
+                "multipart/x-mixed-replace; boundary=frame",
+            )
+            .body(Body::from(
+                "--frame\r\nContent-Type: image/jpeg\r\n\r\nJPEG\r\n",
+            ))
+            .expect("response")
     }
 
     async fn redirect_to_config() -> Response {
@@ -1069,6 +1142,236 @@ async fn media_proxy_gives_up_quickly_on_an_unreachable_frigate() {
         "took {:?}",
         started.elapsed()
     );
+}
+
+fn live_config(fake: &fake_frigate::Fake) -> Config {
+    let mut cfg = frigate_config(fake, true);
+    cfg.frigate.live = true;
+    cfg
+}
+
+fn header_of(response: &reqwest::Response, name: &str) -> Option<String> {
+    response
+        .headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+}
+
+#[tokio::test]
+async fn cameras_lists_enabled_frigate_cameras() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(live_config(&fake)).await;
+
+    let body: Value = server
+        .get("/api/v1/cameras")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(
+        body,
+        json!({"live": true, "cameras": [
+            {"id": "front_door", "name": "Front Door"},
+            {"id": "garden", "name": "Garden"},
+        ]})
+    );
+    server.get("/api/v1/cameras").await;
+    assert_eq!(fake.camera_config_reads(), 1);
+}
+
+#[tokio::test]
+async fn cameras_without_frigate_is_empty() {
+    let server = Server::start().await;
+    let response = server.get("/api/v1/cameras").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = response.json().await.expect("json");
+    assert_eq!(body, json!({"live": false, "cameras": []}));
+}
+
+#[tokio::test]
+async fn camera_frames_need_live() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(frigate_config(&fake, true)).await;
+
+    for path in [
+        "/api/v1/cameras/front_door/latest.jpg",
+        "/api/v1/cameras/front_door/stream",
+    ] {
+        assert_eq!(
+            server.get(path).await.status(),
+            StatusCode::FORBIDDEN,
+            "{path}"
+        );
+    }
+    assert!(fake.frame_queries().await.is_empty());
+    assert!(
+        !fake
+            .paths()
+            .await
+            .iter()
+            .any(|p| p.starts_with("/api/front_door")),
+        "{:?}",
+        fake.paths().await
+    );
+}
+
+#[tokio::test]
+async fn camera_latest_passes_through_with_login() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(live_config(&fake)).await;
+
+    let response = server
+        .get("/api/v1/cameras/front_door/latest.jpg?h=720")
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        header_of(&response, "content-type").as_deref(),
+        Some("image/jpeg")
+    );
+    assert_eq!(
+        header_of(&response, "cache-control").as_deref(),
+        Some("no-store")
+    );
+    assert_eq!(response.text().await.expect("body"), "JPEG");
+
+    let response = server.get("/api/v1/cameras/garden/latest.jpg?h=5000").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        fake.frame_queries().await,
+        ["h=720&height=720", "h=1080&height=1080"]
+    );
+}
+
+#[tokio::test]
+async fn camera_stream_is_multipart() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(live_config(&fake)).await;
+
+    let response = server.get("/api/v1/cameras/front_door/stream?h=360").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let content_type = header_of(&response, "content-type").unwrap_or_default();
+    assert!(
+        content_type.starts_with("multipart/x-mixed-replace"),
+        "{content_type}"
+    );
+    assert_eq!(
+        header_of(&response, "cache-control").as_deref(),
+        Some("no-store")
+    );
+}
+
+#[tokio::test]
+async fn unknown_or_odd_camera_ids_never_reach_frigate() {
+    let fake = fake_frigate::Fake::start(false).await;
+    let server = Server::start_with(live_config(&fake)).await;
+
+    for id in ["nope", "..%2Fconfig", "a%20b", "old"] {
+        for file in ["latest.jpg", "stream"] {
+            let path = format!("/api/v1/cameras/{id}/{file}");
+            assert_eq!(
+                server.get(&path).await.status(),
+                StatusCode::NOT_FOUND,
+                "{path}"
+            );
+        }
+    }
+    let paths = fake.paths().await;
+    assert!(
+        paths
+            .iter()
+            .all(|p| p == "/api/login" || p == "/api/config"),
+        "{paths:?}"
+    );
+}
+
+#[tokio::test]
+async fn frigate_down_lists_nothing_and_frames_fail() {
+    let closed = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = closed.local_addr().expect("addr");
+    drop(closed);
+    let mut cfg = config();
+    cfg.frigate.url = Some(format!("http://{addr}"));
+    cfg.frigate.live = true;
+    let server = Server::start_with(cfg).await;
+
+    let response = server.get("/api/v1/cameras").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = response.json().await.expect("json");
+    assert_eq!(body, json!({"live": true, "cameras": []}));
+
+    let response = server.get("/api/v1/cameras/front_door/latest.jpg").await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+}
+
+#[tokio::test]
+async fn a_frigate_failure_is_remembered_briefly() {
+    // A Frigate that accepts connections and hangs up at once: every read fails fast.
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let accepted = Arc::clone(&accepted);
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                accepted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+    }
+    let mut cfg = config();
+    cfg.frigate.url = Some(format!("http://{addr}"));
+    cfg.frigate.live = true;
+    let server = Server::start_with(cfg).await;
+
+    for _ in 0..4 {
+        let response = server.get("/api/v1/cameras/front_door/latest.jpg").await;
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+    let body: Value = server
+        .get("/api/v1/cameras")
+        .await
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(body["cameras"], json!([]));
+    assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_failed_frame_fetch_spares_frigate_briefly() {
+    // A Frigate whose list answers but whose frame request drops the connection (the handler
+    // panics), as when Frigate goes down after the list was read.
+    use axum::routing::get;
+    let frames = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let app = {
+        let frames = Arc::clone(&frames);
+        axum::Router::new()
+            .route(
+                "/api/config",
+                get(|| async { r#"{"cameras":{"front_door":{}}}"# }),
+            )
+            .route(
+                "/api/front_door/latest.jpg",
+                get(move || {
+                    frames.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    async { panic!("connection lost") as &'static str }
+                }),
+            )
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(axum::serve(listener, app).into_future());
+    let mut cfg = config();
+    cfg.frigate.url = Some(format!("http://{addr}"));
+    cfg.frigate.live = true;
+    let server = Server::start_with(cfg).await;
+
+    for _ in 0..4 {
+        let response = server.get("/api/v1/cameras/front_door/latest.jpg").await;
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+    assert_eq!(frames.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

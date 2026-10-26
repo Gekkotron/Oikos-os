@@ -116,6 +116,9 @@ See [Flow nodes](flow-nodes.md) for the document format.
 | Route | What it does |
 | --- | --- |
 | `GET /api/v1/media?url=…` | A Frigate snapshot or clip fetched by the hub with the Frigate login (`[frigate]`). `Range` is passed through so clips seek. `400` without a valid absolute `url`, `403` off the Frigate origin or without a `[frigate] url`, `502` when Frigate is unreachable or refuses the login. |
+| `GET /api/v1/cameras` | `{ "live": bool, "cameras": [{ "id", "name" }] }`: Frigate's enabled cameras (from its `/api/config`, cached about a minute) and the `[frigate] live` switch. An empty list without `[frigate] url` or when Frigate is unreachable. |
+| `GET /api/v1/cameras/{id}/latest.jpg?h=` | One live frame of camera `id`, `h` pixels high (default 360, at most 1080), with `cache-control: no-store`. `403` while `live` is off, `404` for an id Frigate does not list, `502` when Frigate is unreachable. |
+| `GET /api/v1/cameras/{id}/stream?h=` | The camera's MJPEG stream (`multipart/x-mixed-replace`), with no total timeout; the hub drops it when the browser disconnects. Same answers as `latest.jpg`. |
 
 When alerts point at Frigate's login port (8971) the browser cannot load them, so media on that origin is rewritten to `/api/v1/media?url=…`. The hub logs in on demand, and once more on a `401`.
 

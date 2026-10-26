@@ -4,13 +4,12 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use leptos::prelude::*;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
 use web_sys::{KeyboardEvent, ScrollIntoViewOptions, ScrollLogicalPosition};
 
 use super::model::{Chip, Filter, Listing, Row, listing};
 use super::{Keep, Suggest};
 use crate::alerts::relative_time;
+use crate::components::back_close::BackClose;
 use crate::components::now::Now;
 use crate::format::display_value;
 use crate::house::House;
@@ -538,84 +537,6 @@ pub fn PickerBody(
     }
 }
 
-/// What the dialog keeps while open: the `popstate` listener and whether Back already popped
-/// the entry the picker pushed.
-#[derive(Clone, Copy)]
-struct HistoryHook {
-    listener: StoredValue<Option<Closure<dyn FnMut()>>, LocalStorage>,
-    attached: StoredValue<bool, LocalStorage>,
-    popped: StoredValue<bool, LocalStorage>,
-    /// The `picker` field of the state this instance pushed.
-    marker: StoredValue<String, LocalStorage>,
-}
-
-impl HistoryHook {
-    fn new() -> Self {
-        Self {
-            listener: StoredValue::new_local(None),
-            attached: StoredValue::new_local(false),
-            popped: StoredValue::new_local(false),
-            marker: StoredValue::new_local(next_prefix()),
-        }
-    }
-
-    /// Pushes an entry (no URL change, so the router stays out) and closes `open` on Back.
-    fn attach(self, open: RwSignal<bool>) {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        if let Ok(history) = window.history() {
-            let state = js_sys::Object::new();
-            let _ = js_sys::Reflect::set(
-                &state,
-                &JsValue::from_str("picker"),
-                &JsValue::from_str(&self.marker.get_value()),
-            );
-            let _ = history.push_state(&state, "");
-        }
-        let popped = self.popped;
-        let cb = Closure::<dyn FnMut()>::new(move || {
-            popped.set_value(true);
-            open.set(false);
-        });
-        let _ = window.add_event_listener_with_callback("popstate", cb.as_ref().unchecked_ref());
-        self.listener.set_value(Some(cb));
-        self.popped.set_value(false);
-        self.attached.set_value(true);
-    }
-
-    /// Removes the listener first, then drops the pushed entry unless Back already did.
-    fn detach(self) {
-        if !self.attached.get_value() {
-            return;
-        }
-        self.attached.set_value(false);
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        self.listener.with_value(|cb| {
-            if let Some(cb) = cb {
-                let _ = window
-                    .remove_event_listener_with_callback("popstate", cb.as_ref().unchecked_ref());
-            }
-        });
-        // Only drop the entry while it is still the top one: if something else navigated, the
-        // picker's entry is not ours to pop.
-        if !self.popped.get_value()
-            && let Ok(history) = window.history()
-            && history.state().ok().is_some_and(|s| {
-                js_sys::Reflect::get(&s, &JsValue::from_str("picker"))
-                    .ok()
-                    .and_then(|m| m.as_string())
-                    .is_some_and(|m| m == self.marker.get_value())
-            })
-        {
-            let _ = history.back();
-        }
-        self.popped.set_value(false);
-    }
-}
-
 /// The modal picker: a `<dialog>` opened while `open` is true. Esc, the backdrop, the close
 /// button and the browser's Back all close it; a Single pick closes it too.
 #[component]
@@ -635,7 +556,7 @@ pub fn EntityPicker(
     let title_id = format!("{}-title", next_prefix());
     // The body mounts once the dialog is open, so it can take focus and starts fresh each time.
     let shown = RwSignal::new(false);
-    let hook = HistoryHook::new();
+    let hook = BackClose::new();
     Effect::new(move |_| {
         let want = open.get();
         let Some(d) = dialog.get() else {
@@ -645,8 +566,8 @@ pub fn EntityPicker(
             if !d.open() {
                 let _ = d.show_modal();
             }
-            if !hook.attached.get_value() {
-                hook.attach(open);
+            if !hook.is_attached() {
+                hook.attach(Callback::new(move |()| open.set(false)));
             }
             shown.set(true);
         } else {

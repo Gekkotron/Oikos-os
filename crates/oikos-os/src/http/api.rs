@@ -14,11 +14,11 @@ use axum::routing::{get, patch, post, put};
 use oikos_alarm::doc::AlarmSettings;
 use oikos_alarm::view::AlarmView;
 use oikos_api::{
-    AlertView, Ambiance, AmbianceView, ApiError, ApplyReport, AreaView, CommandResponse,
-    ConnectionStatus, Dashboard, DashboardReorder, DashboardView, EnergyKind, EntityView, FlowView,
-    FlowWriteOutcome, FlowsConfigView, GridDay, GroupSpec, GroupView, HistoryDaily, HistoryRange,
-    HistorySeries, HistoryToday, HomeSettings, IgnoredView, LastChange, OverridePatch, RunView,
-    SchedulePreview, Snapshot, VirtualSpec, WeatherView,
+    AlertView, Ambiance, AmbianceView, ApiError, ApplyReport, AreaView, CameraInfo, CamerasView,
+    CommandResponse, ConnectionStatus, Dashboard, DashboardReorder, DashboardView, EnergyKind,
+    EntityView, FlowView, FlowWriteOutcome, FlowsConfigView, GridDay, GroupSpec, GroupView,
+    HistoryDaily, HistoryRange, HistorySeries, HistoryToday, HomeSettings, IgnoredView, LastChange,
+    OverridePatch, RunView, SchedulePreview, Snapshot, VirtualSpec, WeatherView,
 };
 use oikos_climate::doc::{HouseSettings, Rules, ZoneSettings};
 use oikos_climate::view::{ClimateView, DecisionLog, LearnStatus, OverrideRequest, RoomEcoRequest};
@@ -28,7 +28,7 @@ use serde::Serialize;
 
 use crate::history::{HistoryError, query as history_query};
 use crate::hub::{Hub, HubError};
-use crate::media::MediaError;
+use crate::media::{CameraFile, MediaError, Upstream, is_camera_id};
 
 type HubState = State<Arc<Hub>>;
 
@@ -51,6 +51,9 @@ pub(super) fn routes() -> Router<Arc<Hub>> {
         .route("/alerts/{id}/actions/{action}", post(alert_action))
         .route("/push", get(push_status))
         .route("/media", get(media))
+        .route("/cameras", get(cameras))
+        .route("/cameras/{id}/latest.jpg", get(camera_latest))
+        .route("/cameras/{id}/stream", get(camera_stream))
         .route("/flows", get(flows))
         .route("/schedule", get(schedule_preview))
         .route("/config/flows", get(flows_config))
@@ -410,13 +413,22 @@ async fn media(
         error: "no Frigate configured".to_owned(),
     })?;
     let range = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
-    let upstream = proxy.fetch(&url, range).await.map_err(|err| HttpError {
+    let upstream = proxy.fetch(&url, range).await.map_err(media_error)?;
+    Ok(upstream_response(upstream))
+}
+
+fn media_error(err: MediaError) -> HttpError {
+    HttpError {
         status: match err {
             MediaError::Forbidden => StatusCode::FORBIDDEN,
             MediaError::Unavailable(_) => StatusCode::BAD_GATEWAY,
         },
         error: err.to_string(),
-    })?;
+    }
+}
+
+/// Frigate's status, the headers an `<img>` or `<video>` needs and the streamed body.
+fn upstream_response(upstream: Upstream) -> Response {
     let mut response = Response::new(HttpBody::empty());
     *response.status_mut() =
         StatusCode::from_u16(upstream.status).unwrap_or(StatusCode::BAD_GATEWAY);
@@ -432,6 +444,96 @@ async fn media(
         }
     }
     *response.body_mut() = upstream.body;
+    response
+}
+
+/// The Frigate cameras (names from the bridge's `pretty` rule) and the `[frigate] live`
+/// switch. An empty list without a `[frigate]` section or when Frigate is out of reach.
+async fn cameras(State(hub): HubState) -> Json<CamerasView> {
+    let Some(proxy) = hub.media() else {
+        return Json(CamerasView::default());
+    };
+    let cameras = proxy
+        .camera_ids()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| CameraInfo {
+            name: oikos_frigate::pretty(&id),
+            id,
+        })
+        .collect();
+    Json(CamerasView {
+        live: proxy.live(),
+        cameras,
+    })
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct FrameQuery {
+    h: Option<u32>,
+}
+
+/// The frame height when the browser names none.
+const DEFAULT_FRAME_HEIGHT: u32 = 360;
+const MAX_FRAME_HEIGHT: u32 = 1080;
+
+/// One live frame of camera `id`; see [`camera_frame`].
+async fn camera_latest(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    Query(query): Query<FrameQuery>,
+) -> Result<Response, HttpError> {
+    camera_frame(&hub, &id, CameraFile::Latest, query.h).await
+}
+
+/// The MJPEG stream of camera `id`, with no total timeout; see [`camera_frame`].
+async fn camera_stream(
+    State(hub): HubState,
+    Path(id): Path<String>,
+    Query(query): Query<FrameQuery>,
+) -> Result<Response, HttpError> {
+    camera_frame(&hub, &id, CameraFile::Stream, query.h).await
+}
+
+/// `403` while `[frigate] live` is off or without Frigate, `404` for an id that is not one of
+/// Frigate's enabled cameras (nothing is fetched for it), `502` when Frigate is out of reach,
+/// otherwise Frigate's reply, never cached. `h` is clamped to `1..=1080`.
+async fn camera_frame(
+    hub: &Hub,
+    id: &str,
+    file: CameraFile,
+    height: Option<u32>,
+) -> Result<Response, HttpError> {
+    let proxy = hub.media().filter(|proxy| proxy.live()).ok_or(HttpError {
+        status: StatusCode::FORBIDDEN,
+        error: "live camera frames are off".to_owned(),
+    })?;
+    let not_found = || HttpError {
+        status: StatusCode::NOT_FOUND,
+        error: format!("no camera {id}"),
+    };
+    if !is_camera_id(id) {
+        return Err(not_found());
+    }
+    let known = proxy.has_camera(id).await.map_err(|err| HttpError {
+        status: StatusCode::BAD_GATEWAY,
+        error: err.to_string(),
+    })?;
+    if !known {
+        return Err(not_found());
+    }
+    let height = height
+        .unwrap_or(DEFAULT_FRAME_HEIGHT)
+        .clamp(1, MAX_FRAME_HEIGHT);
+    let upstream = proxy
+        .fetch_camera(id, file, height)
+        .await
+        .map_err(media_error)?;
+    let mut response = upstream_response(upstream);
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     Ok(response)
 }
 

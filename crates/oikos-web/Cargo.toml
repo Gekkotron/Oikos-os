@@ -27,6 +27,7 @@ oikos-alarm = { path = "../oikos-alarm" }
 oikos-api = { path = "../oikos-api" }
 oikos-climate = { path = "../oikos-climate" }
 oikos-core = { path = "../oikos-core" }
+oikos-frigate = { path = "../oikos-frigate" }
 serde.workspace = true
 serde-wasm-bindgen.workspace = true
 serde_json.workspace = true
@@ -41,6 +42,7 @@ web-sys = { workspace = true, features = [
     "AudioParam",
     "AudioScheduledSourceNode",
     "BaseAudioContext",
+    "Blob",
     "Document",
     "DomRect",
     "Clipboard",
@@ -51,6 +53,8 @@ web-sys = { workspace = true, features = [
     "History",
     "HtmlDialogElement",
     "HtmlElement",
+    "HtmlImageElement",
+    "HtmlSelectElement",
     "IntersectionObserver",
     "IntersectionObserverEntry",
     "KeyboardEvent",
@@ -63,9 +67,10 @@ web-sys = { workspace = true, features = [
     "ScrollBehavior",
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
+    "Url",
     "WheelEvent",
 ] }
 
 [dev-dependencies]
-web-sys = { workspace = true, features = ["Document", "Element", "SvgElement", "Event", "EventInit", "HtmlDialogElement", "HtmlElement", "HtmlInputElement", "KeyboardEvent", "KeyboardEventInit", "History", "Node", "NodeList", "PointerEvent", "PointerEventInit", "DragEvent", "DragEventInit"] }
+web-sys = { workspace = true, features = ["Document", "Element", "SvgElement", "Event", "EventInit", "HtmlDialogElement", "HtmlElement", "HtmlInputElement", "HtmlSelectElement", "KeyboardEvent", "KeyboardEventInit", "History", "Node", "NodeList", "PointerEvent", "PointerEventInit", "DragEvent", "DragEventInit"] }
 wasm-bindgen-test.workspace = true

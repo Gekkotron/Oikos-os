@@ -2,6 +2,7 @@ use leptos::prelude::*;
 use oikos_api::EntityView;
 use oikos_core::dashboard::{Widget, WidgetConfig, WidgetKind};
 
+use super::camera_widget::CameraWidget;
 use super::energy_stat::EnergyStatWidget;
 use super::flow_button::FlowButtonWidget;
 use super::history_widget::HistoryWidget;
@@ -18,10 +19,31 @@ use crate::i18n::{use_lang, widget_kind_word, widget_placeholder};
 /// Picks the card for a widget. Only the presence of what the widget points at is tracked, so
 /// the card mounts once the state snapshot lands (a dashboard opened by its address paints
 /// before it) without remounting on every state change; the card subscribes to its own updates.
+///
+/// `current` is the widget as the dashboard holds it now (the grid keeps a tile mounted across
+/// edits); the Camera widget follows its span and camera list, which pick its layout.
 #[component]
-pub fn WidgetView(widget: Widget) -> impl IntoView {
+pub fn WidgetView(
+    widget: Widget,
+    #[prop(optional, into)] current: Option<Signal<Widget>>,
+) -> impl IntoView {
     let house = expect_context::<House>();
     match (widget.kind, widget.config) {
+        (WidgetKind::Camera, WidgetConfig::Cameras { cameras, .. }) => {
+            let span = widget.span;
+            let shape = Memo::new(move |_| match current {
+                Some(current) => current.with(|w| match &w.config {
+                    WidgetConfig::Cameras { cameras, .. } => (cameras.clone(), w.span),
+                    _ => (Vec::new(), w.span),
+                }),
+                None => (cameras.clone(), span),
+            });
+            (move || {
+                let (cameras, span) = shape.get();
+                view! { <CameraWidget cameras=cameras span=span /> }
+            })
+            .into_any()
+        }
         (kind, WidgetConfig::Entity { entity_id, .. }) => {
             entity_widget(house, entity_id.clone(), move |entity| match kind {
                 WidgetKind::Light => view! { <LightCard entity=entity /> }.into_any(),
@@ -30,7 +52,7 @@ pub fn WidgetView(widget: Widget) -> impl IntoView {
                 WidgetKind::Sensor => view! { <SensorCard entity=entity /> }.into_any(),
                 WidgetKind::WaterHeater => view! { <WaterHeaterCard entity=entity /> }.into_any(),
                 WidgetKind::Lock => view! { <LockCard entity=entity /> }.into_any(),
-                // Camera is not offered by the library: a labelled placeholder.
+                // A kind that takes no entity (an invalid widget): a labelled placeholder.
                 _ => {
                     let lang = use_lang();
                     let id = entity_id.clone();

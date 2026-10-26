@@ -55,7 +55,7 @@ pub struct FrigateBridge {
 }
 
 /// `front_door` -> `Front Door`, like Python's `str.title()` after `_` and `-` become spaces.
-fn pretty(name: &str) -> String {
+pub fn pretty(name: &str) -> String {
     let spaced = name.replace(['_', '-'], " ");
     let mut out = String::new();
     let mut in_word = false;
@@ -168,6 +168,9 @@ impl FrigateBridge {
             json!(pretty(text(event, "camera").unwrap_or("Camera"))),
         );
         payload.insert("body".into(), json!(body));
+        if let Some(camera) = text(event, "camera") {
+            payload.insert("camera".into(), json!(camera));
+        }
         payload.insert("image_url".into(), json!(format!("{base}/snapshot.jpg")));
         payload.insert("silent".into(), json!(silent));
         payload.insert("ttl".into(), json!(s.ttl));
@@ -286,7 +289,7 @@ mod tests {
             a,
             Some(json!({
                 "v": 1, "id": "frigate-1696.5-abc", "channel": "camera", "severity": "warning",
-                "title": "Front Door", "body": "Person detected",
+                "title": "Front Door", "body": "Person detected", "camera": "front_door",
                 "image_url": format!("{URL}/api/events/1696.5-abc/snapshot.jpg"),
                 "silent": false, "ttl": 43200,
                 "loc": {"key": "frigate.object", "args": {"label": "person"}},

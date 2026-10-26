@@ -55,6 +55,8 @@ pub struct Alert {
     pub source: String,
     /// Localized-sentence hint `{"key", "args"}`; `None` when absent or invalid.
     pub loc: Option<Value>,
+    /// The raw Frigate camera id (`front_door`) of a camera alert; v1 payloads only.
+    pub camera: Option<String>,
 }
 
 impl Default for Alert {
@@ -75,6 +77,7 @@ impl Default for Alert {
             sent_at: 0,
             source: String::new(),
             loc: None,
+            camera: None,
         }
     }
 }
@@ -305,6 +308,7 @@ fn normalize_v1(
         sent_at,
         source: source.into(),
         loc: loc(payload.get("loc")),
+        camera: opt(payload.get("camera")),
     })
 }
 
@@ -369,6 +373,7 @@ fn normalize_legacy(source: &str, payload: &Map<String, Value>, sent_at: u64) ->
         sent_at,
         source: source.into(),
         loc: None,
+        camera: None,
     }
 }
 
@@ -506,7 +511,7 @@ mod tests {
             "title": "Front door", "body": "Person detected",
             "image_url": "http://192.168.1.20:5000/api/events/1696/snapshot.jpg",
             "video_url": "http://192.168.1.20:5000/api/events/1696/clip.mp4",
-            "entity_id": "binary_sensor.front_door",
+            "entity_id": "binary_sensor.front_door", "camera": "front_door",
             "actions": [{"id": "disarm", "label": "Disarm"}],
             "silent": true, "ttl": 600,
         }));
@@ -528,6 +533,7 @@ mod tests {
                 sent_at: NOW,
                 source: "frigate".into(),
                 loc: None,
+                camera: Some("front_door".into()),
             }
         );
     }
@@ -547,6 +553,7 @@ mod tests {
             ("misc", "info", "", 0, false, DEFAULT_TTL)
         );
         assert_eq!((a.image_url, a.video_url, a.entity_id), (None, None, None));
+        assert_eq!(a.camera, None);
     }
 
     #[test]
@@ -711,6 +718,7 @@ mod tests {
                 sent_at: NOW,
                 source: "jeedom".into(),
                 loc: None,
+                camera: None,
             }
         );
     }

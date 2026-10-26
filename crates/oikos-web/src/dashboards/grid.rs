@@ -62,6 +62,15 @@ pub fn Grid(
                             format!(concat!("widget", " widget-span-{}"), span.as_str())
                         }
                     };
+                    let current = {
+                        let id = id.clone();
+                        let initial = w.clone();
+                        Signal::derive(move || {
+                            widgets
+                                .with(|ws| ws.iter().find(|x| x.id == id).cloned())
+                                .unwrap_or_else(|| initial.clone())
+                        })
+                    };
                     let is_fresh = {
                         let id = id.clone();
                         move || edit.is_some_and(|e| e.fresh.with(|f| f.as_deref() == Some(id.as_str())))
@@ -116,7 +125,7 @@ pub fn Grid(
                     });
                     view! {
                         <div class=class class:widget--fresh=is_fresh data-widget-id=id>
-                            <WidgetView widget=w />
+                            <WidgetView widget=w current=current />
                             // An overlay (not a tile click handler) so the inner card's own
                             // controls, e.g. a light toggle, cannot fire while editing. It sits
                             // above the card and below `.widget__tools` (z-index 2).
