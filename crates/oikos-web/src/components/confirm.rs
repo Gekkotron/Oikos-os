@@ -23,6 +23,11 @@ impl Confirming {
         self.0.with(|c| c.as_deref() == Some(id))
     }
 
+    /// True while `id`'s card is asking, without tracking.
+    pub fn is_asking_untracked(&self, id: &str) -> bool {
+        self.0.with_untracked(|c| c.as_deref() == Some(id))
+    }
+
     pub fn clear(&self) {
         self.0.set(None);
     }

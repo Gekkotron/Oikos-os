@@ -10,6 +10,7 @@ pub mod door;
 pub mod generic;
 pub mod group;
 pub mod light;
+pub mod lock;
 pub mod number;
 pub mod select;
 pub mod sensor;

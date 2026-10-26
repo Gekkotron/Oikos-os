@@ -133,6 +133,11 @@ pub fn GenericPanel(entity: Memo<Option<EntityView>>) -> impl IntoView {
                 match def.placement {
                     Placement::Card => {
                         for name in &caps.controls {
+                            // The lock card above asks before unlocking; a second, one-tap
+                            // Unlock here would undo that.
+                            if e.component == "lock" && name == "locked" {
+                                continue;
+                            }
                             let Some(ctl) = def.controls.get(name) else { continue };
                             let widget = if ctl.shape == Shape::Text && !ctl.press {
                                 text_field(&e, def, name, caps.secret, sender)

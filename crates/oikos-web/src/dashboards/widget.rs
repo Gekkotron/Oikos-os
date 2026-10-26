@@ -9,6 +9,7 @@ use super::room_group::RoomGroupWidget;
 use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
 use crate::cards::light::LightCard;
+use crate::cards::lock::LockCard;
 use crate::cards::sensor::SensorCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::house::House;
@@ -28,7 +29,8 @@ pub fn WidgetView(widget: Widget) -> impl IntoView {
                 WidgetKind::Climate => view! { <ClimateCard entity=entity /> }.into_any(),
                 WidgetKind::Sensor => view! { <SensorCard entity=entity /> }.into_any(),
                 WidgetKind::WaterHeater => view! { <WaterHeaterCard entity=entity /> }.into_any(),
-                // Lock and Camera are not offered by the library: a labelled placeholder.
+                WidgetKind::Lock => view! { <LockCard entity=entity /> }.into_any(),
+                // Camera is not offered by the library: a labelled placeholder.
                 _ => {
                     let lang = use_lang();
                     let id = entity_id.clone();
