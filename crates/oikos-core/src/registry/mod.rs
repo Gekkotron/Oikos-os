@@ -193,6 +193,12 @@ impl Registry {
                 {
                     self.devices = devices;
                     changes.push(Change::DevicesChanged);
+                    let before = self.subscriptions.clone();
+                    self.sync_exposed_actions(&mut changes);
+                    self.recompute(&mut changes);
+                    if self.subscriptions != before {
+                        changes.push(Change::SubscriptionsChanged);
+                    }
                 }
             }
             Inbound::Z2mBridgeInfo(payload) => {

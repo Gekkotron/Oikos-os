@@ -767,5 +767,35 @@ mod generic_tests {
         };
         assert_eq!(sentence(&node(Some("on")), &fr), "Quand Remote envoie on");
         assert_eq!(sentence(&node(None), &fr), "Quand Remote envoie un signal");
+        assert_eq!(
+            sentence(&node(Some("brightness_up")), &ctx),
+            "When Remote sends brightness_up"
+        );
+        assert_eq!(sentence(&node(Some("1_hold")), &ctx), "When button 1 held");
+        assert_eq!(sentence(&node(Some("double")), &fr), "Quand appuyé 2×");
+    }
+
+    #[test]
+    fn press_signals_read_as_button_words() {
+        use crate::i18n::Lang::{En, Fr};
+        use crate::i18n::flows::{press_label, signal_chip_label};
+        let cases = [
+            ("1_single", "button 1 pressed", "bouton 1 appuyé"),
+            ("1_double", "button 1 pressed 2×", "bouton 1 appuyé 2×"),
+            ("2_triple", "button 2 pressed 3×", "bouton 2 appuyé 3×"),
+            ("3_hold", "button 3 held", "bouton 3 maintenu"),
+            ("1_long", "button 1 held", "bouton 1 maintenu"),
+            ("2_release", "button 2 released", "bouton 2 relâché"),
+            ("double", "pressed 2×", "appuyé 2×"),
+        ];
+        for (signal, en, fr) in cases {
+            assert_eq!(press_label(En, signal).as_deref(), Some(en), "{signal}");
+            assert_eq!(press_label(Fr, signal).as_deref(), Some(fr), "{signal}");
+        }
+        assert_eq!(press_label(En, "brightness_up"), None);
+        assert_eq!(press_label(En, "_hold"), None);
+        assert_eq!(signal_chip_label(En, "1_hold"), "Button 1 held");
+        assert_eq!(signal_chip_label(Fr, "single"), "Appuyé");
+        assert_eq!(signal_chip_label(Fr, "brightness_up"), "brightness_up");
     }
 }

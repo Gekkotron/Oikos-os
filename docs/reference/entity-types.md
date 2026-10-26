@@ -72,7 +72,7 @@ The hub publishes the whole table retained on `<ui_prefix>/_types` (default `oik
 ## Behaviours
 
 - **Secret text.** A `text` entity with `mode: password` is masked as `••••` on every state path out of the hub (REST, WebSocket, MCP) and is left out of history.
-- **Remotes fold into one entity.** Several `device_automation` configs for one device fold into a single remote entity, whose `capabilities.generic.signals` lists their payloads. `trigger.signal` in a flow fires on those remotes, on events and on tags.
+- **Remotes fold into one entity.** Several `device_automation` configs for one device fold into a single remote entity, whose `capabilities.generic.signals` lists their payloads. Zigbee2MQTT announces an action only after it first sees it, so the hub also seeds each Zigbee2MQTT remote with every value of the `action` enum its device exposes in `bridge/devices` (in that order, marked `"seeded": true`): a double press is a signal before anyone double-presses, and a remote that was never pressed is listed. An announced action replaces its seeded twin. `trigger.signal` in a flow fires on those remotes, on events and on tags.
 - **Main control.** The override `mainControl` names one announced control, or `"none"` to hide the main control. Without it the card leads with the first announced entry of the type's `main` list.
 - **Firmware marks.** `update` entities feed the firmware marks (`installed`, `latest`, `available`) that the device view shows. A device with several `update` entities shows the first that reports a version.
 - **Pictures.** Camera and image entities carry their picture in the `picture` field.

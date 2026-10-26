@@ -81,10 +81,22 @@ async fn ingest_broadcasts_and_snapshots() {
         "zigbee2mqtt/bridge/devices",
         &fixture("bridge_devices.json"),
     );
-    assert!(matches!(
-        next_event(&mut events).await,
-        WsEvent::DevicesChanged { devices } if devices.len() == 66
-    ));
+    // Changes go out sorted, so the remotes seeded from the devices' exposed actions come
+    // before the device list.
+    let mut remotes = Vec::new();
+    loop {
+        match next_event(&mut events).await {
+            WsEvent::EntityUpserted(view) if view.id.starts_with("device_automation.") => {
+                remotes.push(view.id);
+            }
+            WsEvent::DevicesChanged { devices } => {
+                assert_eq!(devices.len(), 66);
+                break;
+            }
+            other => panic!("expected a seeded remote or DevicesChanged, got {other:?}"),
+        }
+    }
+    assert!(!remotes.is_empty());
 
     feed_switch(&hub);
     match next_event(&mut events).await {
@@ -109,8 +121,13 @@ async fn ingest_broadcasts_and_snapshots() {
     }
 
     let snapshot = hub.snapshot();
-    assert_eq!(snapshot.entities.len(), 1);
-    assert_eq!(snapshot.entities[0].state.value, StateValue::OnOff(false));
+    assert_eq!(snapshot.entities.len(), 1 + remotes.len());
+    let switch = snapshot
+        .entities
+        .iter()
+        .find(|e| e.id == SWITCH_ID)
+        .expect("the switch");
+    assert_eq!(switch.state.value, StateValue::OnOff(false));
     assert_eq!(snapshot.devices.len(), 66);
     assert!(hub.subscription_topics().contains(&switch_state_topic()));
 }
