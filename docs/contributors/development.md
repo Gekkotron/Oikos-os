@@ -75,7 +75,7 @@ cd crates/oikos-web && trunk build --release
 cd ../.. && cargo build --release -p oikos-os
 ```
 
-The hub embeds `crates/oikos-web/dist/` with `rust-embed` when it is compiled. Rebuild the hub after every `trunk build`. A binary built before `trunk build` has no UI to serve: every path that is not `/api`, `/ws` or `/mcp` answers a `503` page that says the UI has not been built. `index.html` is never cached; hashed assets are cached for a year.
+The hub embeds `crates/oikos-web/dist/` with `rust-embed` when it is compiled. Rebuild the hub after every `trunk build`. A binary built before `trunk build` has no UI to serve: every path that is not `/api`, `/ws` or `/mcp` answers a `503` page that says the UI has not been built. `index.html` is never cached; hashed assets are cached for a year. A release `trunk build` also writes `.gz` copies of the wasm, js and css (and `.br` copies when `brotli` is installed), through the `post_build` hook in `crates/oikos-web/compress.sh`; the hub sends them to browsers that accept them. Browsers offer brotli only over HTTPS, so a plain-HTTP hub sends gzip, which takes the wasm from about 11 MB to about 3.4 MB.
 
 ### Smoke test
 

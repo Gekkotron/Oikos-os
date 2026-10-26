@@ -56,6 +56,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo chef cook --release --target wasm32-unknown-unknown -p oikos-web --recipe-path recipe.json
 
+# brotli for the web assets' pre-compressed copies (crates/oikos-web/compress.sh). Its own
+# layer after the cooked deps, so adding it did not invalidate them.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends brotli \
+ && rm -rf /var/lib/apt/lists/*
+
 # Bring the real source in and build the workspace crates against the
 # cooked target/ directory.
 COPY . .

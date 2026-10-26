@@ -1,8 +1,9 @@
 //! The embedded web UI (`crates/oikos-web/dist`, built by `trunk build`), served for every
 //! path the API does not claim. Unknown paths get `index.html` so the client-side router can
-//! resolve them.
+//! resolve them. A release `trunk build` also writes `.br` and `.gz` copies of the big assets
+//! (`crates/oikos-web/compress.sh`); they are sent to browsers that accept them.
 
-use axum::http::{HeaderValue, StatusCode, Uri, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{Html, IntoResponse, Response};
 use rust_embed::RustEmbed;
 
@@ -11,11 +12,14 @@ use rust_embed::RustEmbed;
 struct Dist;
 
 const INDEX: &str = "index.html";
+/// The pre-compressed copies, best first: `Accept-Encoding` coding and file suffix. Browsers
+/// offer `br` only over HTTPS, so on a plain-HTTP LAN it is gzip that gets used.
+const ENCODINGS: [(&str, &str); 2] = [("br", ".br"), ("gzip", ".gz")];
 const NOT_BUILT: &str = "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
     <title>Oikos-os</title></head><body><p>The Oikos-os web UI has not been built. \
     Run <code>trunk build --release</code> in <code>crates/oikos-web</code>.</p></body></html>";
 
-pub(super) async fn index(uri: Uri) -> Response {
+pub(super) async fn index(uri: Uri, request_headers: HeaderMap) -> Response {
     let path = uri.path().trim_start_matches('/');
     if !path.is_empty()
         && path != INDEX
@@ -27,7 +31,31 @@ pub(super) async fn index(uri: Uri) -> Response {
         } else {
             "no-cache"
         };
-        return file_response(mime.as_ref(), cache, file.data.into_owned());
+        let accept = request_headers
+            .get(header::ACCEPT_ENCODING)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let copies: Vec<_> = ENCODINGS
+            .iter()
+            .filter_map(|(coding, suffix)| Some((*coding, Dist::get(&format!("{path}{suffix}"))?)))
+            .collect();
+        let has_copies = !copies.is_empty();
+        let chosen = copies
+            .into_iter()
+            .find(|(coding, _)| accepts(accept, coding));
+        let (coding, body) = match chosen {
+            Some((coding, copy)) => (Some(coding), copy.data),
+            None => (None, file.data),
+        };
+        let mut response = file_response(mime.as_ref(), cache, body.into_owned());
+        let headers = response.headers_mut();
+        if has_copies {
+            headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+        }
+        if let Some(coding) = coding {
+            headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(coding));
+        }
+        return response;
     }
     match Dist::get(INDEX) {
         Some(file) => file_response(
@@ -51,6 +79,21 @@ fn file_response(content_type: &str, cache: &'static str, body: Vec<u8>) -> Resp
     response
 }
 
+/// Whether an `Accept-Encoding` value lists `coding` without `q=0`.
+fn accepts(accept: &str, coding: &str) -> bool {
+    accept.split(',').any(|item| {
+        let mut params = item.split(';').map(str::trim);
+        params
+            .next()
+            .is_some_and(|c| c.eq_ignore_ascii_case(coding))
+            && params.all(|p| {
+                p.strip_prefix("q=")
+                    .and_then(|q| q.trim().parse::<f32>().ok())
+                    .is_none_or(|q| q > 0.0)
+            })
+    })
+}
+
 /// Whether the file name carries a Trunk content hash: a `-` followed by at least eight hex
 /// digits (`oikos-web-836a2c4c498c2ec4_bg.wasm`, `main-c920ca43256fdcb9.css`).
 fn is_hashed(path: &str) -> bool {
@@ -62,7 +105,7 @@ fn is_hashed(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_hashed;
+    use super::{accepts, is_hashed};
 
     #[test]
     fn trunk_hashes_are_detected() {
@@ -71,5 +114,18 @@ mod tests {
         assert!(!is_hashed("index.html"));
         assert!(!is_hashed("oikos-web.wasm"));
         assert!(!is_hashed("my-favicon.ico"));
+    }
+
+    #[test]
+    fn accept_encoding_lists_the_coding_with_a_non_zero_quality() {
+        assert!(accepts("gzip, deflate", "gzip"));
+        assert!(accepts("gzip, deflate, br, zstd", "br"));
+        assert!(accepts("br;q=0.5, GZIP", "gzip"));
+        assert!(accepts("br ; q=1.0", "br"));
+        assert!(!accepts("gzip, deflate", "br"));
+        assert!(!accepts("br;q=0, gzip", "br"));
+        assert!(!accepts("br; q=0.000", "br"));
+        assert!(!accepts("", "gzip"));
+        assert!(!accepts("x-gzip", "gzip"));
     }
 }

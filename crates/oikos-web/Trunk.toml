@@ -15,3 +15,9 @@ ws = true
 
 [[proxy]]
 backend = "http://127.0.0.1:8081/mcp/"
+
+# Pre-compressed copies of the release assets (see compress.sh).
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["compress.sh"]

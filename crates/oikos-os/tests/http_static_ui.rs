@@ -5,7 +5,9 @@ use oikos_os::config::Config;
 use oikos_os::http::router;
 use oikos_os::hub::Hub;
 use reqwest::StatusCode;
-use reqwest::header::{CACHE_CONTROL, CONTENT_TYPE, HeaderMap};
+use reqwest::header::{
+    ACCEPT_ENCODING, CACHE_CONTROL, CONTENT_ENCODING, CONTENT_TYPE, HeaderMap, VARY,
+};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
@@ -19,17 +21,29 @@ async fn get(path: &str) -> (StatusCode, Option<String>, String) {
 }
 
 async fn fetch(path: &str) -> (StatusCode, HeaderMap, String) {
+    let (status, headers, body) = fetch_bytes(path, None).await;
+    (status, headers, String::from_utf8_lossy(&body).into_owned())
+}
+
+/// Like [`fetch`], sending `accept_encoding` when given and returning the body undecoded.
+async fn fetch_bytes(
+    path: &str,
+    accept_encoding: Option<&str>,
+) -> (StatusCode, HeaderMap, Vec<u8>) {
     let (tx, _publisher) = mpsc::channel(8);
     let hub = Hub::new(&Config::default(), tx);
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
     tokio::spawn(axum::serve(listener, router(hub)).into_future());
-    let response = reqwest::get(format!("http://{addr}{path}"))
-        .await
-        .expect("GET");
+    let mut request = reqwest::Client::new().get(format!("http://{addr}{path}"));
+    if let Some(accept) = accept_encoding {
+        request = request.header(ACCEPT_ENCODING, accept);
+    }
+    let response = request.send().await.expect("GET");
     let status = response.status();
     let headers = response.headers().clone();
-    (status, headers, response.text().await.expect("body"))
+    let body = response.bytes().await.expect("body").to_vec();
+    (status, headers, body)
 }
 
 #[tokio::test]
@@ -73,4 +87,33 @@ async fn index_is_never_cached_and_hashed_assets_are_immutable() {
         headers[CACHE_CONTROL],
         "public, max-age=31536000, immutable"
     );
+}
+
+#[tokio::test]
+async fn wasm_is_sent_gzipped_only_to_browsers_that_accept_it() {
+    let (status, _, index) = fetch("/").await;
+    if status != StatusCode::OK {
+        return; // dist not built
+    }
+    let wasm = index
+        .split('"')
+        .find(|s| s.ends_with(".wasm"))
+        .expect("a wasm reference in index.html");
+    let (status, headers, plain) = fetch_bytes(wasm, Some("identity")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers.get(CONTENT_ENCODING).is_none());
+    assert!(plain.starts_with(b"\0asm"));
+
+    let (status, headers, body) = fetch_bytes(wasm, Some("gzip, deflate")).await;
+    assert_eq!(status, StatusCode::OK);
+    match headers.get(CONTENT_ENCODING) {
+        // A debug `trunk build` writes no compressed copies.
+        None => assert_eq!(body, plain),
+        Some(coding) => {
+            assert_eq!(coding, "gzip");
+            assert_eq!(headers[VARY], "accept-encoding");
+            assert!(body.starts_with(&[0x1f, 0x8b]), "gzip magic");
+            assert!(body.len() < plain.len());
+        }
+    }
 }
