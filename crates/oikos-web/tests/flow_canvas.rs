@@ -5,7 +5,7 @@ use leptos::task::tick;
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::path;
 use oikos_api::{FlowView, FlowWriteOutcome, RunStatus, RunView, StepOutcome, StepView};
-use oikos_core::flow::{Flow, Position};
+use oikos_core::flow::{Flow, FlowMode, Position};
 use oikos_web::components::now::install_now;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
@@ -1400,37 +1400,36 @@ async fn save_new_flow(
     (puts(&fetch), path, host.inner_html())
 }
 
-#[wasm_bindgen_test]
-async fn saving_a_new_flow_derives_its_id_and_opens_it() {
-    let (requests, path, html) = save_new_flow(vec![], "nouveau_flow").await;
+/// The id a new flow's first Save sent, after checking it is a v4 UUID and the PUT's URL.
+fn sent_uuid(requests: &[(String, String, String)]) -> String {
     assert_eq!(requests.len(), 1, "{requests:?}");
     let (method, url, body) = &requests[0];
     assert_eq!(method, "PUT");
-    assert_eq!(url, "/api/v1/flows/nouveau_flow");
     let sent: serde_json::Value = serde_json::from_str(body).unwrap();
-    assert_eq!(sent["id"], "nouveau_flow");
+    let id = sent["id"].as_str().unwrap().to_owned();
+    assert_eq!(id.len(), 36, "{id}");
+    assert_eq!(id.as_bytes()[14], b'4', "{id}");
+    assert!(oikos_core::flow::is_valid_flow_id(&id), "{id}");
+    assert!(!id.contains("nouveau"), "{id}");
+    assert_eq!(url, &format!("/api/v1/flows/{id}"));
     assert_eq!(sent["enabled"], false);
-    assert_eq!(path, "/flows/nouveau_flow", "{html}");
+    id
 }
 
 #[wasm_bindgen_test]
-async fn saving_a_new_flow_avoids_a_taken_id() {
-    let taken = FlowView {
-        definition: Flow {
-            id: "nouveau_flow".into(),
-            name: "Nouveau flow".into(),
-            ..Default::default()
-        },
-        invalid: None,
-        active_run: None,
-        runs: vec![],
-    };
-    let (requests, path, html) = save_new_flow(vec![taken], "nouveau_flow_2").await;
-    assert_eq!(requests.len(), 1, "{requests:?}");
-    assert_eq!(requests[0].1, "/api/v1/flows/nouveau_flow_2");
-    let sent: serde_json::Value = serde_json::from_str(&requests[0].2).unwrap();
-    assert_eq!(sent["id"], "nouveau_flow_2");
-    assert_eq!(path, "/flows/nouveau_flow_2", "{html}");
+async fn saving_a_new_flow_gives_it_a_uuid_and_opens_it() {
+    let answer = "0b6f3c1e-2d4a-4f8b-9c7d-5e1a2b3c4d5e";
+    let (requests, path, html) = save_new_flow(vec![], answer).await;
+    sent_uuid(&requests);
+    assert_eq!(path, format!("/flows/{answer}"), "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn new_flows_with_the_same_name_get_different_ids() {
+    let answer = "0b6f3c1e-2d4a-4f8b-9c7d-5e1a2b3c4d5e";
+    let (first, _, _) = save_new_flow(vec![], answer).await;
+    let (second, _, _) = save_new_flow(vec![], answer).await;
+    assert_ne!(sent_uuid(&first), sent_uuid(&second));
 }
 
 #[wasm_bindgen_test]
@@ -1806,4 +1805,31 @@ async fn a_new_flow_is_named_in_the_language_active_at_creation() {
     lang.set(Lang::En);
     tick().await;
     assert_eq!(name(), "Nouvelle automatisation");
+}
+
+#[wasm_bindgen_test]
+async fn the_mode_select_saves_the_other_mode() {
+    let view = reference_view(None, vec![]);
+    let (want, label) = match view.definition.mode {
+        FlowMode::Single => ("restart", "single"),
+        FlowMode::Restart => ("single", "restart"),
+    };
+    let (host, _mounted, _) = editing(view.clone()).await;
+    let select: web_sys::HtmlSelectElement =
+        element(&host, ".flow-toolbar select[aria-label=Mode]").unchecked_into();
+    assert_eq!(select.value(), label);
+    select.set_value(want);
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    select
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+    tick().await;
+    let fetch = FakeFetch::answer(&write_outcome(&view));
+    click(&host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let requests = puts(&fetch);
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    let sent: serde_json::Value = serde_json::from_str(&requests[0].2).unwrap();
+    assert_eq!(sent["mode"], want);
 }
