@@ -42,7 +42,7 @@
 
 ## Part A — Lock widget (PR 1, branch `feat/camera-lock-widgets`)
 
-### Task A1: Lock face logic and text
+### Task 1 (A1): Lock face logic and text
 
 **Files:**
 - Create: `crates/oikos-web/src/cards/lock.rs` (pure part only in this task)
@@ -116,7 +116,7 @@ fn commands_use_the_locked_control() {
 - [ ] **Step 4: Run** `cargo test -p oikos-web --lib cards::lock i18n::security`. Expected: PASS.
 - [ ] **Step 5: Commit**: `feat(web): lock card state logic and words`.
 
-### Task A2: `LockCard` and Home dispatch
+### Task 2 (A2): `LockCard` and Home dispatch
 
 **Files:**
 - Modify: `crates/oikos-web/src/cards/lock.rs` (the component)
@@ -146,7 +146,7 @@ Lock sends straight away. Unlock calls `confirming.ask(&id)`. `on_yes` re-reads 
 - [ ] **Step 4: Run** the same command. Expected: PASS. Also run `cargo test -p oikos-web --test bare_text`.
 - [ ] **Step 5: Commit**: `feat(web): lock card with a question before unlocking`.
 
-### Task A3: Lock widget in the dashboard and the library
+### Task 3 (A3): Lock widget in the dashboard and the library
 
 **Files:**
 - Modify: `crates/oikos-web/src/dashboards/widget.rs:25-37` (add `WidgetKind::Lock => view! { <LockCard entity=entity /> }`; the placeholder arm then serves only `Camera`, until B5)
@@ -191,7 +191,7 @@ fn no_lock_no_lock_section() {
 
 ## Part B — Camera widget (PR 2, branch `feat/camera-widget` from `origin/main` after PR 1 merges)
 
-### Task B1: `WidgetConfig::Cameras` and its validation
+### Task 4 (B1): `WidgetConfig::Cameras` and its validation
 
 **Files:**
 - Modify: `crates/oikos-core/src/dashboard/model.rs` (the variant and its tests)
@@ -214,7 +214,7 @@ fn no_lock_no_lock_section() {
 - [ ] **Step 4: Run** the same commands, plus `cargo check -p oikos-web --target wasm32-unknown-unknown`. Expected: PASS.
 - [ ] **Step 5: Commit**: `feat(dashboards): camera widget config holds 1 to 4 cameras`.
 
-### Task B2: Alerts carry the Frigate camera id
+### Task 5 (B2): Alerts carry the Frigate camera id
 
 **Files:**
 - Modify: `crates/oikos-frigate/src/lib.rs` (`payload.insert("camera", raw id)`, when present; make `pretty` a `pub fn`)
@@ -235,7 +235,7 @@ fn no_lock_no_lock_section() {
 - [ ] **Step 4: Run** the same command, plus `cargo check --workspace --all-targets`. Expected: PASS.
 - [ ] **Step 5: Commit**: `feat(alerts): frigate alerts carry their camera id`.
 
-### Task B3: Hub camera routes behind `[frigate] live`
+### Task 6 (B3): Hub camera routes behind `[frigate] live`
 
 **Files:**
 - Create: `crates/oikos-api/src/cameras.rs` (export it from `lib.rs`)
@@ -285,7 +285,7 @@ fn no_lock_no_lock_section() {
 - [ ] **Step 4: Run** `cargo test -p oikos-os --test http`, which covers the existing `media_proxy_*` tests (they must stay green), and `cargo test -p oikos-os --lib media`. Expected: PASS.
 - [ ] **Step 5: Commit**: `feat(hub): live camera frames behind [frigate] live`.
 
-### Task B4: Web camera data and pure helpers
+### Task 7 (B4): Web camera data and pure helpers
 
 **Files:**
 - Create: `crates/oikos-web/src/cameras.rs` (export it from `lib.rs`)
@@ -315,7 +315,7 @@ fn no_lock_no_lock_section() {
 - [ ] **Step 4: Run** the same command. Expected: PASS.
 - [ ] **Step 5: Commit**: `feat(web): camera list and camera tile helpers`.
 
-### Task B5: `CameraWidget` and the full-screen viewer
+### Task 8 (B5): `CameraWidget` and the full-screen viewer
 
 **Files:**
 - Create: `crates/oikos-web/src/dashboards/camera_widget.rs` (the tile, one `CameraFrame` per camera, the carousel, the badge)
@@ -355,7 +355,7 @@ fn no_lock_no_lock_section() {
 - [ ] **Step 4: Run** the same command, plus `cargo test -p oikos-web --test bare_text` and `cargo clippy -p oikos-web --target wasm32-unknown-unknown -- -D warnings`. Expected: PASS.
 - [ ] **Step 5: Commit**: `feat(web): live camera widget and full-screen viewer`.
 
-### Task B6: Cameras in the library and the config sheet
+### Task 9 (B6): Cameras in the library and the config sheet
 
 **Files:**
 - Modify: `crates/oikos-web/src/dashboards/library.rs`:

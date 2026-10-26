@@ -52,7 +52,19 @@ pub enum SecurityText {
     VerbRing,
     VerbPlay,
     VerbTurnOn,
+    VerbLock,
+    VerbUnlock,
     Ringing,
+    // A lock's state words.
+    LockLocked,
+    LockUnlocked,
+    LockLocking,
+    LockUnlocking,
+    LockJammed,
+    LockOpen,
+    LockOpening,
+    LockOffline,
+    LockUnknown,
     // Alerts.
     JustNow,
     Resolved,
@@ -115,7 +127,18 @@ impl SecurityText {
         SecurityText::VerbRing,
         SecurityText::VerbPlay,
         SecurityText::VerbTurnOn,
+        SecurityText::VerbLock,
+        SecurityText::VerbUnlock,
         SecurityText::Ringing,
+        SecurityText::LockLocked,
+        SecurityText::LockUnlocked,
+        SecurityText::LockLocking,
+        SecurityText::LockUnlocking,
+        SecurityText::LockJammed,
+        SecurityText::LockOpen,
+        SecurityText::LockOpening,
+        SecurityText::LockOffline,
+        SecurityText::LockUnknown,
         SecurityText::JustNow,
         SecurityText::Resolved,
         SecurityText::All,
@@ -186,7 +209,18 @@ pub fn security_text(lang: Lang, k: SecurityText) -> &'static str {
         T::VerbRing => ("Ring", "Faire sonner"),
         T::VerbPlay => ("Play", "Sonner"),
         T::VerbTurnOn => ("Turn on", "Activer"),
+        T::VerbLock => ("Lock", "Verrouiller"),
+        T::VerbUnlock => ("Unlock", "Déverrouiller"),
         T::Ringing => ("Ringing", "Sonnerie en cours"),
+        T::LockLocked => ("Locked", "Verrouillé"),
+        T::LockUnlocked => ("Unlocked", "Déverrouillé"),
+        T::LockLocking => ("Locking…", "Verrouillage…"),
+        T::LockUnlocking => ("Unlocking…", "Déverrouillage…"),
+        T::LockJammed => ("Jammed", "Bloqué"),
+        T::LockOpen => ("Open", "Ouvert"),
+        T::LockOpening => ("Opening…", "Ouverture…"),
+        T::LockOffline => ("Offline", "Hors ligne"),
+        T::LockUnknown => ("Unknown", "Inconnu"),
         T::JustNow => ("Just now", "À l'instant"),
         T::Resolved => ("Resolved", "Résolue"),
         T::All => ("All", "Tous"),
@@ -221,6 +255,23 @@ pub fn security_text(lang: Lang, k: SecurityText) -> &'static str {
         Lang::En => en,
         Lang::Fr => fr,
     }
+}
+
+/// A lock card's state word.
+pub fn lock_word(lang: Lang, w: crate::cards::lock::LockWord) -> &'static str {
+    use crate::cards::lock::LockWord as W;
+    let key = match w {
+        W::Locked => SecurityText::LockLocked,
+        W::Unlocked => SecurityText::LockUnlocked,
+        W::Locking => SecurityText::LockLocking,
+        W::Unlocking => SecurityText::LockUnlocking,
+        W::Jammed => SecurityText::LockJammed,
+        W::Open => SecurityText::LockOpen,
+        W::Opening => SecurityText::LockOpening,
+        W::Offline => SecurityText::LockOffline,
+        W::Unknown => SecurityText::LockUnknown,
+    };
+    security_text(lang, key)
 }
 
 fn pick(lang: Lang, en: String, fr: String) -> String {
@@ -426,6 +477,14 @@ mod tests {
         const SAME: &[SecurityText] =
             &[T::Code, T::WordSos, T::WordOk, T::WordVibration, T::Actions];
         assert_table(SecurityText::ALL, security_text, SAME);
+    }
+
+    #[test]
+    fn lock_words() {
+        use crate::cards::lock::LockWord;
+        assert_eq!(lock_word(Lang::Fr, LockWord::Jammed), "Bloqué");
+        assert_eq!(lock_word(Lang::En, LockWord::Locking), "Locking…");
+        assert_eq!(security_text(Lang::Fr, SecurityText::VerbUnlock), "Déverrouiller");
     }
 
     #[test]
