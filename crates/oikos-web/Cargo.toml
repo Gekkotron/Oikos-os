@@ -46,6 +46,7 @@ web-sys = { workspace = true, features = [
     "Document",
     "DomRect",
     "Clipboard",
+    "Crypto",
     "DataTransfer",
     "DragEvent",
     "Element",

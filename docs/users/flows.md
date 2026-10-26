@@ -4,7 +4,7 @@ sidebar_position: 5
 description: Automations as small graphs of triggers, checks, waits and actions, how a run walks the graph, and how to edit them in the web UI.
 ---
 
-A flow is an n8n-style automation: a small graph of nodes stored as one retained JSON document under `oikos/automation/<id>` on the broker (the id is `[a-z0-9_-]{1,64}`). The hub subscribes to that prefix, validates every document it reads, and runs the valid, enabled ones. An invalid document is kept and shown with the reason, but never runs.
+A flow is an n8n-style automation: a small graph of nodes stored as one retained JSON document under `oikos/automation/<id>` on the broker (the id is `[a-z0-9_-]{1,64}`). The hub subscribes to that prefix, validates every document it reads, and runs the valid, enabled ones. An invalid document is kept and shown with the reason, but never runs. A flow needs at least one trigger node, no cycle, and valid parameters on every node.
 
 ```json
 {
@@ -34,7 +34,7 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
 - **Triggers** start a run:
   - `trigger.state`: an entity's state changes.
   - `trigger.signal`: a remote press, an event entity or a tag scan.
-  - `trigger.schedule`: a five-field cron expression in the house local time.
+  - `trigger.schedule`: a five-field cron expression in the house time zone (`[flows] timezone`, the hub's system zone when unset).
   - `trigger.sun`: sunrise, sunset, dusk or dawn, with an optional `offset_minutes`.
 - **Checks** branch:
   - `if` compares a value with `value` using `op` (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`), or uses `op: is_dark`, which is true between civil dusk and civil dawn at the configured point. The two outputs are `true` and `false`.
@@ -45,11 +45,11 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
 - **Waits** pause the run:
   - `delay` waits for `for`, for example `90s`, `5m` or `1h30m`. With an optional `up_to` it waits a random time between the two.
 
-The sun nodes and `is_dark` read the house location. Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`; without them the hub uses Paris. See [Configuration](../reference/configuration.md).
+The sun nodes and `is_dark` read the house location. Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`, both or neither; without them the hub uses Paris, and the web UI shows a "Paris fallback" badge on sun cards. See [Configuration](../reference/configuration.md).
 
 ## How a run goes
 
-A run follows the graph from the trigger that fired, depth first. A failing node ends the run as `failed` at that step. A non-trigger node with no incoming edge never runs.
+A run follows the graph from the trigger that fired, depth first. A failing node ends the run as `failed` at that step. A schedule tick that comes while the broker link is down is recorded as a skipped run, since its commands could not go out. A non-trigger node with no incoming edge never runs. A manual run (the Run button, `run_flow`) starts from the flow's first trigger node and is refused when the flow is disabled, invalid, or already running.
 
 The scalar is the one value of a state that triggers and `if` compare: the on/off bool, the number, the text, a light's `on`, a cover's `state`.
 
@@ -63,9 +63,16 @@ A flow can sit in a room: its optional `area` is an area id, and it only decides
 
 ## The Flows page
 
-![The Flows page grouped by room, with filters and an enable switch per flow](/img/screens/flows.webp)
+![The Flows page: a search box, sort, group and view toggles, filter chips, and flows grouped by room with an enable switch and a ⋯ menu on each row](/img/screens/flows.webp)
 
-The Flows page (`/flows`) searches name, description, trigger devices and room (ignoring case and accents), filters by status (All, On, Off, ⚠ Needs attention) and trigger (Device state, Schedule, Sun, Button / event, Manual), sorts by name or last run, and groups by room (with a "No room" section last) or not at all. Room sections fold; a folded section that hides a flow needing attention shows ⚠. The **⋯** menu on a row or card moves a flow to another room (the flow editor has the same room picker) or deletes it: **Delete flow…** asks first, and a deleted flow cannot be brought back. The view, grouping, sort, filters and folded sections are remembered per browser; the search is not.
+The Flows page (`/flows`) has a **New flow** button and a bar to find flows:
+
+- A search box over name, description, trigger summary (which names the trigger devices) and room, ignoring case and accents.
+- **Sort** by Name or Last run, **Group** by Room or None, and a List / Cards toggle.
+- Status chips, each with a count: All, On (enabled and valid), Off, and ⚠ Needs attention (invalid, or the latest finished run failed).
+- Trigger chips, any of which you can combine: Device state, Schedule, Sun, Button / event, Manual.
+
+Each row shows an icon for the trigger, the name, a "restart" tag for flows in `restart` mode, a red "Invalid" tag (the reason is its tooltip) for a flow that does not validate, a trigger summary, the last run ("Done · 2 min ago", or "No runs yet"; failed runs show red), the enable switch and a **⋯** menu. Rooms are sections, with a "No room" section last; a section folds, and a folded section that hides a flow needing attention shows ⚠. The **⋯** menu opens the flow, moves it to another room (the flow editor has the same room picker; an invalid flow cannot be moved) or deletes it: **Delete flow…** asks first, and a deleted flow cannot be brought back. The view, grouping, sort, filters and folded sections are remembered per browser; the search is not.
 
 The outdoor weather is available to flows as entities (`weather_temperature`, `weather_wind_gusts`, `weather_rain_next_hour` and more): see [Weather](weather.md).
 
@@ -73,14 +80,16 @@ The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `
 
 ## The flow canvas
 
-![A flow on the canvas: sun and light triggers, checks and actions joined by wires](/img/screens/flow-canvas.webp)
+![A flow on the canvas: a header with the flow's name, mode and room, the enable switch, run, edit and Runs buttons at the top right, zoom buttons bottom left and a minimap bottom right](/img/screens/flow-canvas.webp)
 
-The flow page (`/flows/<id>`) is a full-bleed canvas: each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of a check. The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live.
+The flow page (`/flows/<id>`) is a full-bleed canvas. The top left holds a back arrow, the flow's name, its mode tag (`single` or `restart`) and its room. The top right holds the enable switch, a run button (**Run now**), a pencil to edit, and **Runs**, which opens the recent runs. Zoom buttons (+, −, fit) sit bottom left and a minimap bottom right; the wheel pans, and ⌘/Ctrl-wheel or pinch zooms. Each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of a check. The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live.
 
-The **Edit** button switches to a React Flow-style editor: click a card to select it (amber ring) and edit its settings in the drawer, drag it to move it, drag from an output pin onto another card to wire it, click a wire for its ✕, press ⌫ to delete the selection and ⌘/Ctrl-Z to undo. In edit mode the right panel holds the card library, grouped WHEN / AND / THEN / WAIT / FLOW: click a card or drag it onto the canvas to add it, and the library stays open so you can add several. Type an entity name or a device name in its search to list the triggers, checks and actions of the matching entities; several words narrow the list (`weather rain`). Enter adds the highlighted card, and ⌘/Ctrl-Z right after takes it back out, even though the search box still has the focus. Selecting a card on the canvas shows its settings there instead, and **Close** brings the library back. A card's entity is chosen with the [entity picker](web-ui.md#picking-an-entity), not typed: a `command` card opens on the entities that take a command, a `trigger.signal` card only remotes, events and tags, and an `if` card can keep **Trigger value**. **Tidy** re-lays the graph out, and nothing reaches the hub until **Save** (**Cancel** discards the draft).
+The pencil switches to a React Flow-style editor (it is disabled on an invalid flow; tapping a card does the same on a computer): click a card to select it (amber ring) and edit its settings in the drawer, drag it to move it, drag from an output pin onto another card to wire it, click a wire for its ✕, press ⌫ to delete the selection, ⌘/Ctrl-D to duplicate the selected card, ⌘/Ctrl-Z to undo (add Shift to redo) and Esc to clear the selection or stop a replay. In edit mode the right panel holds the card library, grouped WHEN / AND / THEN / WAIT / FLOW: click a card or drag it onto the canvas to add it, and the library stays open so you can add several. Type an entity name or a device name in its search to list the triggers, checks and actions of the matching entities; several words narrow the list (`weather rain`). Enter adds the highlighted card, and ⌘/Ctrl-Z right after takes it back out, even though the search box still has the focus. Selecting a card on the canvas shows its settings there instead, and **Close** brings the library back. A card's entity is chosen with the [entity picker](web-ui.md#picking-an-entity), not typed: a `command` card opens on the entities that take a command, a `trigger.signal` card only remotes, events and tags, and an `if` card can keep **Trigger value**. A schedule card opens a picker (Every N minutes, Hourly, Daily, Weekdays or Advanced for raw cron) with the next three ticks, and a sun card shows when it fires next. The top bar of the editor has the name field and a room picker, then **Tidy** (re-lay the graph out), undo, a cancel button (discards the draft) and a save button; nothing reaches the hub until you save.
 
-**New flow** on `/flows` opens an unsaved draft in edit mode; its first Save creates the flow, disabled, under a slug of its name.
+In edit mode the title bar also holds the flow's room and its mode: a **single** / **restart** select (see `mode` above). Pick **restart** for "N minutes after the last motion".
 
-On a phone (narrow or touch-only screens) the canvas is view-only: Edit and New flow are hidden, while pan, pinch-zoom, the drawer, the switch and Run still work.
+**New flow** on `/flows` opens an unsaved draft in edit mode; its first Save creates the flow, disabled, under a random UUID (`/flows/3f2c…`). The id never changes, so renaming a flow keeps its address. Flows written through `set_flow` keep the id they are given.
+
+On a phone (narrow or touch-only screens) the canvas is view-only: the pencil and New flow are hidden, while pan, pinch-zoom, the drawer, the switch and Run still work.
 
 The REST routes for flows are in the [HTTP API](../reference/http-api.md).

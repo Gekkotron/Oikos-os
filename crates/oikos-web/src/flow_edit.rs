@@ -1,5 +1,5 @@
 //! Draft operations on a flow being edited: connect rules, delete, duplicate, add, node ids,
-//! flow-id slugs and the undo history. Pure functions over `Flow`, nothing is sent to the hub.
+//! new flow ids and the undo history. Pure functions over `Flow`, nothing is sent to the hub.
 
 use std::collections::BTreeSet;
 
@@ -9,8 +9,6 @@ use crate::flow_layout::Pt;
 
 /// Snapshots kept per direction of the undo history.
 const HISTORY_CAP: usize = 100;
-/// Longest slug before a `_<n>` suffix, so the id stays within 32 characters.
-const SLUG_MAX: usize = 29;
 /// Offset of a duplicated card from its original, in canvas units.
 const DUPLICATE_OFFSET: f64 = 24.0;
 
@@ -197,38 +195,20 @@ pub(crate) fn fold_accents(text: &str) -> String {
     out
 }
 
-/// A valid, unreserved, untaken flow id derived from a display name: lowercase ASCII with
-/// accents folded, other characters collapsed to `_`, at most 29 characters, `_2`, `_3`, …
-/// appended when the result is `new` or already taken.
-pub fn slug_id(name: &str, taken: &BTreeSet<String>) -> String {
-    let mut slug = String::new();
-    for c in name.chars().flat_map(char::to_lowercase) {
-        let folded = match fold_char(c) {
-            Some(folded) => folded,
-            None if c.is_ascii_lowercase() || c.is_ascii_digit() => {
-                slug.push(c);
-                continue;
-            }
-            None => "_",
-        };
-        for f in folded.chars() {
-            if f != '_' || !slug.ends_with('_') {
-                slug.push(f);
-            }
-        }
-    }
-    let mut slug = slug.trim_matches('_').to_owned();
-    slug.truncate(SLUG_MAX);
-    let slug = slug.trim_end_matches('_');
-    let base = if slug.is_empty() { "flow" } else { slug };
-    let free = |id: &str| id != "new" && !taken.contains(id);
-    if free(base) {
-        return base.to_owned();
-    }
-    (2..)
-        .map(|n| format!("{base}_{n}"))
-        .find(|id| free(id))
-        .expect("an unbounded range always yields a free id")
+/// A new flow's id: the random-version UUID (RFC 9562 v4) spelled by `bytes`, in lowercase
+/// hex with hyphens. It never changes, so a flow keeps its address when it is renamed.
+pub fn flow_uuid(mut bytes: [u8; 16]) -> String {
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..]
+    )
 }
 
 /// Undo/redo stacks of whole-flow snapshots, 100 deep each. Callers [`record`](Self::record)
@@ -327,9 +307,6 @@ mod tests {
             nodes,
             ..Flow::default()
         }
-    }
-    fn taken(ids: &[&str]) -> BTreeSet<String> {
-        ids.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]
@@ -490,36 +467,11 @@ mod tests {
     }
 
     #[test]
-    fn slug_folds_accents() {
-        assert_eq!(slug_id("Lumière été", &taken(&[])), "lumiere_ete");
-        assert_eq!(slug_id("Cœur à ça", &taken(&[])), "coeur_a_ca");
-    }
-
-    #[test]
-    fn slug_avoids_reserved_and_taken() {
-        assert_eq!(slug_id("New", &taken(&[])), "new_2");
-        assert_eq!(
-            slug_id("Force heating loop", &taken(&["force_heating_loop"])),
-            "force_heating_loop_2"
-        );
-        assert_eq!(slug_id("a", &taken(&["a", "a_2", "a_3"])), "a_4");
-    }
-
-    #[test]
-    fn slug_cleans_punctuation_and_empty() {
-        assert_eq!(slug_id("  --Hello,   World!! ", &taken(&[])), "hello_world");
-        assert_eq!(slug_id("!!!", &taken(&[])), "flow");
-        assert_eq!(slug_id("", &taken(&[])), "flow");
-    }
-
-    #[test]
-    fn slug_max_len() {
-        let long = "x".repeat(60);
-        let id = slug_id(&long, &taken(&[]));
-        assert_eq!(id.len(), 29);
-        let again = slug_id(&long, &taken(&[id.as_str()]));
-        assert!(again.len() <= 32);
-        assert!(again.ends_with("_2"));
+    fn flow_uuid_is_a_v4_uuid() {
+        assert_eq!(flow_uuid([0; 16]), "00000000-0000-4000-8000-000000000000");
+        let id = flow_uuid([0xff; 16]);
+        assert_eq!(id, "ffffffff-ffff-4fff-bfff-ffffffffffff");
+        assert!(oikos_core::flow::is_valid_flow_id(&id));
     }
 
     #[test]

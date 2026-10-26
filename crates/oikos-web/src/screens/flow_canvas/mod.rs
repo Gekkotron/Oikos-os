@@ -494,7 +494,7 @@ pub fn FlowCanvasScreen() -> impl IntoView {
 }
 
 /// A flow that does not exist yet, opened in edit mode. Its empty id marks it unsaved: the first
-/// Save derives the id from the name, and success moves to the flow's own page.
+/// Save gives it a random UUID, and success moves to the flow's own page.
 #[component]
 pub fn NewFlowScreen() -> impl IntoView {
     let blank = FlowView {
