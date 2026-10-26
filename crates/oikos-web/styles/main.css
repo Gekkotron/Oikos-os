@@ -63,6 +63,14 @@ body {
   color: var(--danger);
 }
 
+.card--warn {
+  border-color: var(--warning);
+}
+
+.card--warn .card__icon {
+  color: var(--warning);
+}
+
 .card__note {
   font: var(--type-label);
   opacity: 0.7;

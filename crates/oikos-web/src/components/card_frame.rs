@@ -51,6 +51,9 @@ pub fn CardFrame(
     /// Draws the card in the alarm colour (a ringing siren).
     #[prop(optional)]
     alert: bool,
+    /// Draws the card in the warning colour (an unlocked or jammed lock).
+    #[prop(optional)]
+    warn: bool,
     /// The control at the top right, beside the header.
     #[prop(optional)]
     trailing: Option<AnyView>,
@@ -118,6 +121,7 @@ pub fn CardFrame(
             class:card--offline=offline
             class:card--pending=move || pending.get()
             class:card--alert=alert
+            class:card--warn=warn
         >
             <div class="card__top">
                 <button type="button" class="card__header" on:click=move |_| on_click.run(())>

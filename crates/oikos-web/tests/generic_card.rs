@@ -11,6 +11,7 @@ use oikos_core::model::{
 use oikos_core::types::{self, GenericCaps};
 use oikos_web::cards::generic::GenericCard;
 use oikos_web::commands::Pending;
+use oikos_web::components::confirm::Confirming;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
 use oikos_web::i18n::Lang;
@@ -137,7 +138,8 @@ async fn the_generic_panel_follows_the_language_without_a_remount() {
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
-    let entity = generic("lock", &["locked"], "locked");
+    // A lock's sheet has no controls of its own (its card asks before unlocking): use a fan.
+    let entity = generic("fan", &["power"], "off");
     let lang = RwSignal::new(Lang::Fr);
     std::mem::forget(leptos::mount::mount_to(
         host.clone().unchecked_into(),
@@ -171,6 +173,7 @@ fn mount_in(entity: EntityView, lang: RwSignal<Lang>) -> web_sys::Element {
             provide_context(House::new());
             provide_context(Toasts::new());
             provide_context(Pending::new());
+            provide_context(Confirming::new());
             provide_context(lang);
             let entity = entity.clone();
             view! { <Router>{card_for(entity)}</Router> }

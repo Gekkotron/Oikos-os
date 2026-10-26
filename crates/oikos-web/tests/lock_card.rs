@@ -13,6 +13,7 @@ use oikos_web::commands::Pending;
 use oikos_web::components::confirm::Confirming;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
+use oikos_web::screens::generic_panel::GenericPanel;
 use oikos_web::screens::home::card_for;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -157,4 +158,50 @@ async fn question_closes_when_the_lock_unlocks_by_hand() {
     tick().await;
     assert!(m.host.query_selector(".confirm").unwrap().is_none());
     assert!(!sent(&m));
+}
+
+#[wasm_bindgen_test]
+async fn mounted_card_follows_availability() {
+    // A dashboard mounts the card once; the frame must follow the live state like the face.
+    let m = mount(lock("locked", Availability::Offline));
+    tick().await;
+    assert!(m.host.query_selector(".card--offline").unwrap().is_some());
+    m.house.entities.update(|map| {
+        if let Some(e) = map.get_mut(ID) {
+            e.state = state("locked", Availability::Online);
+        }
+    });
+    tick().await;
+    assert!(m.host.query_selector(".card--offline").unwrap().is_none());
+    assert!(m.host.query_selector(".dot--offline").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn unlocked_lock_uses_the_warning_colour() {
+    let m = mount(lock("unlocked", Availability::Online));
+    tick().await;
+    assert!(m.host.query_selector(".card--warn").unwrap().is_some());
+    assert!(m.host.query_selector(".card--alert").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn the_lock_sheet_offers_no_one_tap_unlock() {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let entity = lock("locked", Availability::Online);
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(House::new());
+            provide_context(Toasts::new());
+            provide_context(Pending::new());
+            let entity = entity.clone();
+            let memo = Memo::new(move |_| Some(entity.clone()));
+            view! { <GenericPanel entity=memo /> }
+        },
+    ));
+    tick().await;
+    let text = host.text_content().unwrap_or_default();
+    assert!(!text.contains("Unlock"), "{text}");
 }

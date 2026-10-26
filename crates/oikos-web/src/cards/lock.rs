@@ -152,6 +152,10 @@ pub fn LockCard(entity: EntityView) -> impl IntoView {
     let on_click = open_entity(&id);
     move || {
         let face = face.get();
+        // A dashboard mounts the card once, so the frame (offline dot and look) reads the live
+        // state too, not the snapshot it was mounted with.
+        let mut shown = entity.clone();
+        shown.state = live.get();
         let label = move || match face.action {
             Some(LockAction::Lock) => security_text(lang(), SecurityText::VerbLock),
             Some(LockAction::Unlock) => security_text(lang(), SecurityText::VerbUnlock),
@@ -159,7 +163,7 @@ pub fn LockCard(entity: EntityView) -> impl IntoView {
         };
         let asking = asking.clone();
         view! {
-            <CardFrame entity=entity.clone() on_click=on_click pending=pending alert=face.warn>
+            <CardFrame entity=shown on_click=on_click pending=pending warn=face.warn>
                 <span class="card__note">{move || lock_word(lang(), face.word)}</span>
                 <Show
                     when=asking
