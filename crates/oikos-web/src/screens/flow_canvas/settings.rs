@@ -8,6 +8,7 @@ use oikos_core::flow::{IfParams, Missing, Node, NodeKind, Op};
 use super::Editor;
 use super::graph::Selection;
 use super::sun::{FallbackBadge, sun_sheet};
+use super::template_field::{NotifyPreview, TemplateField};
 use crate::entity_picker::needs::{is_commandable, is_signal, keep};
 use crate::entity_picker::{EntityPickField, Suggest};
 use crate::flow_edit::remove_node;
@@ -498,6 +499,30 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
             }
         });
     };
+    let draft = form.editor.draft;
+    let notify_of = move |id: &str, read: fn(&oikos_core::flow::NotifyParams) -> String| {
+        draft.with(|f| match f.node(id).map(|n| &n.kind) {
+            Some(NodeKind::Notify(p)) => read(p),
+            _ => String::new(),
+        })
+    };
+    let preview_id = id.clone();
+    let preview_title = Signal::derive(move || notify_of(&preview_id, |p| p.title.clone()));
+    let preview_id = id.clone();
+    let preview_body = Signal::derive(move || {
+        Some(notify_of(&preview_id, |p| {
+            p.body.clone().unwrap_or_default()
+        }))
+        .filter(|b| !b.is_empty())
+    });
+    let trigger_entity = Signal::derive(move || {
+        draft.with(|f| {
+            f.nodes.iter().find_map(|n| match &n.kind {
+                NodeKind::TriggerState(t) => Some(t.entity.clone()),
+                _ => None,
+            })
+        })
+    });
     let on_silent = move |ev: web_sys::Event| {
         let silent = event_target_checked(&ev);
         form.update(&id, |n| {
@@ -510,20 +535,21 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
     let severity = p.severity.clone().unwrap_or_else(|| "info".to_owned());
     let silent = p.silent.unwrap_or(false);
     view! {
-        <TextField
+        <TemplateField
             label=word(FlowText::TitleLabel)
             initial=p.title
             placeholder=word(FlowText::TitleExample)
             optional=false
             write=title_write
         />
-        <TextField
+        <TemplateField
             label=word(FlowText::BodyLabel)
             initial=p.body.unwrap_or_default()
             placeholder=word(FlowText::NoneParen)
             optional=true
             write=body_write
         />
+        <NotifyPreview title=preview_title body=preview_body trigger_entity=trigger_entity />
         <label class="node-editor__field">
             <span class="node-editor__label">{move || t(FlowText::Channel)}</span>
             <select class="field" on:change=on_channel>

@@ -10,6 +10,7 @@ mod graph;
 mod library;
 mod settings;
 pub(crate) mod sun;
+mod template_field;
 mod toolbar;
 mod viewport;
 

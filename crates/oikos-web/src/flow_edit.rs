@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use oikos_core::flow::{Edge, Flow, Node, NodeKind, Position};
+use oikos_core::flow::{Edge, Flow, Lang, Node, NodeKind, Position};
 
 use crate::flow_layout::Pt;
 
@@ -148,6 +148,15 @@ pub fn add_node(flow: &mut Flow, kind: NodeKind, at: Pt) -> String {
     id
 }
 
+/// Writes `lang` into every notify node, so the push speaks the language the flow was saved in.
+pub fn stamp_notify_lang(flow: &mut Flow, lang: Lang) {
+    for node in &mut flow.nodes {
+        if let NodeKind::Notify(params) = &mut node.kind {
+            params.lang = Some(lang);
+        }
+    }
+}
+
 /// `<prefix>_<n>` with the lowest free `n >= 1`.
 pub fn next_node_id(flow: &Flow, kind: &NodeKind) -> String {
     let prefix = match kind {
@@ -269,8 +278,8 @@ fn push_capped(stack: &mut Vec<Flow>, flow: Flow) {
 #[cfg(test)]
 mod tests {
     use oikos_core::flow::{
-        CommandParams, DelayParams, FlowEnableParams, IfParams, Op, TriggerScheduleParams,
-        TriggerStateParams,
+        CommandParams, DelayParams, FlowEnableParams, IfParams, NotifyParams, Op,
+        TriggerScheduleParams, TriggerStateParams,
     };
     use serde_json::json;
 
@@ -421,6 +430,28 @@ mod tests {
         assert_eq!(copy.position, Some(Position { x: 34.0, y: 44.0 }));
         assert_eq!(f.edges.len(), 1);
         assert_eq!(duplicate_node(&mut f, "nope"), None);
+    }
+
+    #[test]
+    fn stamp_sets_lang_on_every_notify() {
+        let notify = |lang: Option<Lang>| {
+            NodeKind::Notify(NotifyParams {
+                title: "T".into(),
+                lang,
+                ..Default::default()
+            })
+        };
+        let mut flow = flow(vec![
+            node("a", notify(None)),
+            node("b", notify(Some(Lang::En))),
+            delay("w"),
+        ]);
+        let before = flow.nodes[2].clone();
+        stamp_notify_lang(&mut flow, Lang::Fr);
+        for n in &flow.nodes[..2] {
+            assert!(matches!(&n.kind, NodeKind::Notify(p) if p.lang == Some(Lang::Fr)));
+        }
+        assert_eq!(flow.nodes[2], before);
     }
 
     #[test]

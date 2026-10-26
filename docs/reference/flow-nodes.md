@@ -183,14 +183,15 @@ Sends a phone push notification.
 
 | Param | Type | Description |
 | --- | --- | --- |
-| `title` | string | Required, not empty. |
-| `body` | string, optional | The alert body. |
+| `title` | string | Required, not empty. Takes `{entity_id}` placeholders, see [Values in a notification](../users/flows.md#values-in-a-notification). |
+| `body` | string, optional | The alert body. Takes placeholders like `title`. |
 | `channel` | string, optional | `alarm`, `security`, `camera`, `energy`, `climate`, `system` or `misc` (default). |
 | `severity` | string, optional | `info` (default), `warning` or `critical`. |
 | `entity_id` | string, optional | The entity the alert is about. |
 | `image_url` | string, optional | An image to show with the alert. |
 | `silent` | bool, optional | Deliver without sound. |
 | `id` | string, optional | A fixed alert id. Absent: `flow-<flow id>-<run id>`, one alert per run. A fixed `id` makes each run replace the previous alert. |
+| `lang` | string, optional | The language placeholder values are written in: `en` (default) or `fr`. The web editor sets it on save. |
 
 Outputs: one. The step fails if the push service rejects the alert.
 

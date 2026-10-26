@@ -13,8 +13,10 @@ use std::sync::Arc;
 
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
 use oikos_core::flow::sun::is_dark_at;
+use oikos_core::flow::template::render;
 use oikos_core::flow::{
-    Flow, Missing, Node, NodeKind, Op, Scalar, Schedule, compare, format_duration, pick_duration,
+    Flow, Missing, Node, NodeKind, Op, Reading, Scalar, Schedule, compare, format_duration,
+    pick_duration,
 };
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
@@ -787,30 +789,48 @@ async fn run_node(
             }
         }
         NodeKind::Notify(params) => {
+            let lang = params.lang.unwrap_or_default();
+            let lookup = |id: &str| hub.reading(id);
+            // The value the trigger carried, with the unit and words of its entity.
+            let trigger = trigger.and_then(|t| {
+                let value = Scalar::from_json(&t.value)?;
+                let mut reading = hub.reading(&t.entity).unwrap_or(Reading {
+                    value: value.clone(),
+                    unit: None,
+                    device_class: None,
+                });
+                reading.value = value;
+                Some(reading)
+            });
+            // `validate` refused a text that does not parse, so the fallback never shows.
+            let fill = |text: &str| {
+                render(text, lang, &lookup, trigger.as_ref()).unwrap_or_else(|_| text.to_owned())
+            };
+            let title = fill(&params.title);
             let mut alert = serde_json::json!({
                 "v": 1,
                 "id": params
                     .id
                     .clone()
                     .unwrap_or_else(|| format!("flow-{flow_id}-{run_id}")),
-                "title": params.title,
+                "title": title,
                 "channel": params.channel.as_deref().unwrap_or("misc"),
                 "severity": params.severity.as_deref().unwrap_or("info"),
             });
             for (key, value) in [
-                ("body", params.body.as_ref()),
-                ("entity_id", params.entity_id.as_ref()),
-                ("image_url", params.image_url.as_ref()),
+                ("body", params.body.as_deref().map(fill)),
+                ("entity_id", params.entity_id.clone()),
+                ("image_url", params.image_url.clone()),
             ] {
                 if let Some(value) = value {
-                    alert[key] = Value::String(value.clone());
+                    alert[key] = Value::String(value);
                 }
             }
             if let Some(silent) = params.silent {
                 alert["silent"] = Value::Bool(silent);
             }
             match hub.notify("flow", &alert) {
-                Ok(id) => (StepOutcome::Ok, format!("sent {id}"), None),
+                Ok(id) => (StepOutcome::Ok, format!("sent {id}: {title}"), None),
                 Err(rejected) => failed(rejected.reason),
             }
         }

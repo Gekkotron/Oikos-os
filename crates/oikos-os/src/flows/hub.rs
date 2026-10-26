@@ -11,7 +11,8 @@ use oikos_api::{
     WsEvent,
 };
 use oikos_core::command::{Publish, map_command};
-use oikos_core::flow::{Flow, NodeKind, Scalar, uses_sun_or_is_dark, validate};
+use oikos_core::flow::template::parse;
+use oikos_core::flow::{Flow, NodeKind, Reading, Scalar, uses_sun_or_is_dark, validate};
 use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
 use oikos_core::types::{Placement, type_def};
 
@@ -282,6 +283,18 @@ impl Hub {
     }
 
     /// The headline value of an entity, `None` for an unknown entity or an absent value.
+    /// An entity's value with its unit, as a notify placeholder reads it.
+    pub fn reading(&self, id: &str) -> Option<Reading> {
+        let reg = self.read();
+        let entity = reg.entity(id)?;
+        Reading::of(
+            &entity.component,
+            entity.device_class.as_deref(),
+            entity.unit.as_deref(),
+            &reg.state(id)?.value,
+        )
+    }
+
     pub fn entity_scalar(&self, id: &str) -> Option<Scalar> {
         let reg = self.read();
         reg.entity(id)?;
@@ -325,6 +338,22 @@ impl Hub {
     fn check_house(&self, flow: &Flow) -> Result<(), HubError> {
         let reg = self.read();
         for node in &flow.nodes {
+            if let NodeKind::Notify(params) = &node.kind {
+                // `validate` already refused a text that does not parse.
+                let texts = [Some(&params.title), params.body.as_ref()];
+                for template in texts.into_iter().flatten().filter_map(|t| parse(t).ok()) {
+                    if let Some(id) = template
+                        .entities()
+                        .into_iter()
+                        .find(|id| reg.entity(id).is_none())
+                    {
+                        return Err(HubError::InvalidFlow(format!(
+                            "unknown entity `{id}` in node `{}`",
+                            node.id
+                        )));
+                    }
+                }
+            }
             let entity = match &node.kind {
                 NodeKind::TriggerState(params) => Some(&params.entity),
                 NodeKind::TriggerSignal(params) => Some(&params.entity),

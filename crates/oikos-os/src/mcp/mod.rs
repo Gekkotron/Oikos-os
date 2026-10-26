@@ -150,8 +150,16 @@ fn instructions() -> String {
          leaving it name the port `true` or `false`; `missing` is `fail` (the default), `true` \
          or `false` and picks that port when the value is unknown), `delay` (`for`: `5m`, `1h30m`; \
          with `up_to` it waits a random time between the two), \
-         `command` (the same JSON as `send_command`) and `notify` (a phone push: `title`, optional `body`, `channel`, `severity`, `entity_id`, `image_url`, `silent`, `id`). Entity ids come from `search` or \
-         `list_entities`. For \"N minutes after the last motion\" use `mode: restart`, so \
+         `command` (the same JSON as `send_command`) and `notify` (a phone push: `title`, optional `body`, `channel`, `severity`, `entity_id`, \
+         `image_url`, `silent`, `id`, `lang`). Its `title` and `body` take placeholders filled at \
+         run time: `{{entity_id}}` is the entity's value with its unit (`{{weather_temperature}}` \
+         → `10.1 °C`), `{{trigger}}` the value that started the run, `:N` rounds to N decimals \
+         (`{{weather_temperature:0}}`), and `+ - * /` with spaces around them plus parentheses do \
+         maths (`{{weather_today_max - weather_today_min:1}}`). Text and on/off values are \
+         written in `lang` (`en`, the default, or `fr`: pass the language the user writes in). \
+         `{{{{` and `}}}}` are literal braces; a value that is unknown at run time prints `?`. \
+         Entity ids come from `search` or `list_entities`. For \"N minutes after the last \
+         motion\" use `mode: restart`, so \
          every new trigger restarts the wait; the default `single` ignores triggers while a \
          run is active. Sun events use `trigger.sun` with `which` one of `sunrise`, `sunset`, \
          `dusk` (civil), `dawn` (civil), and an optional `offset_minutes` in [-720, 720]. `if` \
@@ -280,6 +288,14 @@ mod tests {
     fn instructions_mention_flows() {
         let text = instructions();
         for needle in ["set_flow", "restart", "oikos/automation", "run_flow"] {
+            assert!(text.contains(needle), "{needle} missing");
+        }
+    }
+
+    #[test]
+    fn instructions_explain_notify_placeholders() {
+        let text = instructions();
+        for needle in ["{trigger}", "`lang`", ":N", "{{"] {
             assert!(text.contains(needle), "{needle} missing");
         }
     }

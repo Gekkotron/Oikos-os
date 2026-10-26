@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use oikos_api::{AreaView, EntityView};
 use oikos_core::command::command_name;
-use oikos_core::flow::{Node, NodeKind, Op, SunWhich, parse_duration};
+use oikos_core::flow::{Node, NodeKind, Op, SunWhich, parse_duration, template};
 use oikos_core::model::{Command, Hs, Kind};
 use serde_json::Value;
 
@@ -295,7 +295,13 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             p.up_to.as_deref().map(duration_words).as_deref(),
         ),
         NodeKind::Command(p) => command_sentence(&p.command, &p.entity, ctx),
-        NodeKind::Notify(p) => t::notify(lang, &p.title),
+        NodeKind::Notify(p) => {
+            // Placeholders show the entity's name; a text that does not parse shows as typed.
+            let name = |id: &str| ctx.entities.get(id).map(|e| entity_title(lang, e));
+            let title =
+                template::parse(&p.title).map_or_else(|_| p.title.clone(), |t| t.label(&name));
+            t::notify(lang, &title)
+        }
         NodeKind::FlowEnable(p) => {
             let target = match &p.flow {
                 None => flow_text(lang, FlowText::ThisFlow).to_owned(),
@@ -605,6 +611,14 @@ mod tests {
         assert_eq!(text(n), "Notify \"Door open\"");
         let empty = r#"{"id":"a","type":"notify","params":{"title":""}}"#;
         assert_eq!(text(empty), "Notify");
+    }
+
+    #[test]
+    fn notify_title_names_placeholder_entities() {
+        let n = r#"{"id":"a","type":"notify","params":{"title":"Light {lux:0} {gone} {trigger}"}}"#;
+        assert_eq!(text(n), "Notify \"Light {Entrée:0} {gone} {trigger}\"");
+        let broken = r#"{"id":"a","type":"notify","params":{"title":"Light {lux"}}"#;
+        assert_eq!(text(broken), "Notify \"Light {lux\"");
     }
 
     #[test]

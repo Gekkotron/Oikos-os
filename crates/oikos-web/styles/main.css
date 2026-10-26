@@ -3667,6 +3667,17 @@ html:has(.flow-canvas-screen) {
   color: var(--accent-rose);
 }
 
+/* The notify text filled with live values, under the body field. */
+.node-editor__preview-text {
+  margin: 0;
+  font: var(--type-body);
+  overflow-wrap: anywhere;
+}
+
+.node-editor__add-value {
+  justify-self: start;
+}
+
 /* Fields fill the drawer's width without overflowing it. */
 .node-editor .field {
   box-sizing: border-box;

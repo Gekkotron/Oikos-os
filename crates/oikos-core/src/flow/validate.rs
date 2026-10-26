@@ -1,6 +1,6 @@
 //! Structural validation of a flow.
 
-use super::Flow;
+use super::{Flow, template};
 
 /// Why a flow is not structurally valid.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -136,6 +136,12 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                 };
                 if p.title.trim().is_empty() {
                     return Err(bad("title must not be empty".to_owned()));
+                }
+                let fields = [("title", Some(&p.title)), ("body", p.body.as_ref())];
+                for (field, text) in fields {
+                    if let Some(Err(err)) = text.map(|text| template::parse(text)) {
+                        return Err(bad(format!("{field}: {err}")));
+                    }
                 }
                 if let Some(reason) = p.channel.as_deref().and_then(notify_channel_error) {
                     return Err(bad(reason));
@@ -531,6 +537,27 @@ mod tests {
             }
         );
         assert!(validate(&notify_flow(r#"{"title":"Door"}"#)).is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_bad_notify_templates() {
+        let err = validate(&notify_flow(r#"{"title":"Temp {x"}"#)).unwrap_err();
+        assert!(
+            matches!(&err, FlowError::BadNotify { reason, .. }
+                if reason.starts_with("title:") && reason.contains("unclosed {")),
+            "{err:?}"
+        );
+        let err = validate(&notify_flow(r#"{"title":"T","body":"{a b}"}"#)).unwrap_err();
+        assert!(
+            matches!(&err, FlowError::BadNotify { reason, .. } if reason.starts_with("body:")),
+            "{err:?}"
+        );
+        assert!(
+            validate(&notify_flow(
+                r#"{"title":"{weather_temperature:0}","body":"{{ok}}","lang":"fr"}"#
+            ))
+            .is_ok()
+        );
     }
 
     #[test]
