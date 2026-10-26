@@ -117,9 +117,7 @@ When weather is off or not fetched yet, the page says that the weather is unavai
 
 ## Dashboards
 
-![The House dashboard: room chips and the Favorites cards](/img/screens/house.webp)
-
-*This screenshot predates the sidebar: the rooms are now listed in the sidebar instead of as chips.*
+![The House dashboard: the sidebar with the rooms, the greeting with the weather and solar cards, the moods and the Favorites cards](/img/screens/house.webp)
 
 Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview. House is always the first entry, and the page the web UI opens on: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
 
@@ -174,7 +172,7 @@ After a run, **Last run** opens the report (`/ambiances/<id>/report`), with the 
 
 ## Energy
 
-![The Energy screen: live power flow between solar, grid, house and consumers](/img/screens/energy.webp)
+![The Energy screen: live power flow between solar, grid, house and consumers, above the grid day chart](/img/screens/energy.webp)
 
 Energy (`/energy`): the live power flow as in the app. Solar on top, the house in the centre, the grid on the left, consumers on an arc to the right, the battery or the water meter bottom-left; lines thicken and run faster with power and follow import or export. Under the diagram, one card per node with the live value and the lifetime kWh of its paired energy counter.
 

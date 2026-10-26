@@ -66,8 +66,8 @@ function ProductShot() {
             src={useBaseUrl('/img/screens/house.webp')}
             className={styles.shot}
             width={2880}
-            height={1340}
-            alt="The Oikos-os House dashboard: rooms as cards, lit rooms in amber."
+            height={2270}
+            alt="The Oikos-os House dashboard: rooms in the sidebar, the weather and solar cards, moods and favourite devices."
           />
         </div>
       </div>
