@@ -27,6 +27,7 @@ pub fn to_history_entry(alert: &Alert) -> Value {
         ("image_url", &alert.image_url),
         ("video_url", &alert.video_url),
         ("entity_id", &alert.entity_id),
+        ("camera", &alert.camera),
     ] {
         if let Some(v) = value {
             entry.insert(key.into(), v.clone().into());
@@ -267,6 +268,7 @@ mod tests {
             image_url: Some("http://i".into()),
             video_url: Some("http://v".into()),
             entity_id: Some("e.x".into()),
+            camera: Some("front_door".into()),
             actions: vec![Action {
                 id: "go".into(),
                 label: "Go".into(),
@@ -281,7 +283,7 @@ mod tests {
             json!({
                 "v": 1, "id": "a", "channel": "alarm", "severity": "critical",
                 "title": "T", "body": "B", "image_url": "http://i",
-                "video_url": "http://v", "entity_id": "e.x",
+                "video_url": "http://v", "entity_id": "e.x", "camera": "front_door",
                 "actions": [{"id": "go", "label": "Go"}], "silent": true,
                 "sent_at": NOW, "source": "s"
             })
@@ -296,7 +298,14 @@ mod tests {
             source: "s".into(),
             ..Alert::default()
         });
-        for k in ["image_url", "video_url", "entity_id", "cancel", "loc"] {
+        for k in [
+            "image_url",
+            "video_url",
+            "entity_id",
+            "camera",
+            "cancel",
+            "loc",
+        ] {
             assert!(entry.get(k).is_none(), "{k}");
         }
         assert_eq!(entry["actions"], json!([]));

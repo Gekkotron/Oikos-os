@@ -272,6 +272,7 @@ fn alert(id: &str, sent_at: u64) -> AlertView {
         image_url: None,
         video_url: None,
         entity_id: None,
+        camera: None,
         actions: vec![],
         source: None,
         silent: false,

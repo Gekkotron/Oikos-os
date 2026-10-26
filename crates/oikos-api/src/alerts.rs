@@ -98,6 +98,8 @@ pub struct AlertView {
     pub image_url: Option<String>,
     pub video_url: Option<String>,
     pub entity_id: Option<String>,
+    /// The raw Frigate camera id of a camera alert; older entries have none.
+    pub camera: Option<String>,
     /// At most [`MAX_ACTIONS`].
     pub actions: Vec<AlertAction>,
     pub source: Option<String>,
@@ -156,6 +158,7 @@ fn parse_entry(entry: &Value) -> Option<AlertView> {
         image_url: text(object.get("image_url")),
         video_url: text(object.get("video_url")),
         entity_id: text(object.get("entity_id")),
+        camera: text(object.get("camera")),
         actions,
         source: text(object.get("source")),
         silent: object
@@ -176,7 +179,7 @@ fn text(value: Option<&Value>) -> Option<String> {
 mod tests {
     use super::*;
 
-    const ENTRY: &str = r#"{"v":1,"id":"frigate-front-1696","channel":"camera","severity":"warning","title":"Front Door","body":"Person in Porch","image_url":"http://192.168.1.20:5000/api/events/1696/snapshot.jpg","video_url":"http://192.168.1.20:5000/api/events/1696/clip.mp4","entity_id":"binary_sensor.front_door","actions":[{"id":"disarm","label":"Disarm"}],"silent":false,"sent_at":1760880000,"source":"frigate","loc":{"key":"frigate.object","args":{"label":"person","zone":"Porch"}}}"#;
+    const ENTRY: &str = r#"{"v":1,"id":"frigate-front-1696","channel":"camera","severity":"warning","title":"Front Door","body":"Person in Porch","image_url":"http://192.168.1.20:5000/api/events/1696/snapshot.jpg","video_url":"http://192.168.1.20:5000/api/events/1696/clip.mp4","entity_id":"binary_sensor.front_door","camera":"front_door","actions":[{"id":"disarm","label":"Disarm"}],"silent":false,"sent_at":1760880000,"source":"frigate","loc":{"key":"frigate.object","args":{"label":"person","zone":"Porch"}}}"#;
 
     fn history(entries: &[&str]) -> Vec<u8> {
         format!("[{}]", entries.join(",")).into_bytes()
@@ -205,6 +208,7 @@ mod tests {
                 image_url: Some("http://192.168.1.20:5000/api/events/1696/snapshot.jpg".into()),
                 video_url: Some("http://192.168.1.20:5000/api/events/1696/clip.mp4".into()),
                 entity_id: Some("binary_sensor.front_door".into()),
+                camera: Some("front_door".into()),
                 actions: vec![AlertAction {
                     id: "disarm".into(),
                     label: "Disarm".into()
@@ -215,6 +219,13 @@ mod tests {
                 sent_at: 1_760_880_000,
             }]
         );
+    }
+
+    #[test]
+    fn an_entry_without_camera_has_none() {
+        let entry = with(ENTRY, r#"{"camera":null}"#);
+        let alerts = parse_history(&history(&[&entry])).unwrap();
+        assert_eq!(alerts[0].camera, None);
     }
 
     #[test]
