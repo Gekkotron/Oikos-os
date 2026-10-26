@@ -327,17 +327,17 @@ pub fn Toolbar(
                 fallback=move || view! { <span class="flow-toolbar__mode">{mode}</span> }
             >
                 <select
-                    class="field flow-toolbar__room"
+                    class="select flow-toolbar__room"
                     aria-label=move || t(FlowText::Mode)
                     title=move || t(FlowText::ModeHint)
                     prop:value=draft_mode
                     on:change=pick_mode
                 >
                     <option value="single" selected=move || draft_mode() == "single">
-                        {move || t(FlowText::ModeSingle)}
+                        {move || t(FlowText::ModeSingleOption)}
                     </option>
                     <option value="restart" selected=move || draft_mode() == "restart">
-                        {move || t(FlowText::ModeRestart)}
+                        {move || t(FlowText::ModeRestartOption)}
                     </option>
                 </select>
             </Show>
@@ -349,7 +349,7 @@ pub fn Toolbar(
                 }
             >
                 <select
-                    class="field flow-toolbar__room"
+                    class="select flow-toolbar__room"
                     aria-label=move || t(FlowText::GroupRoom)
                     prop:value=draft_room
                     on:change=pick_room
