@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use oikos_api::{
-    ConnectionStatus, WeatherCondition, WeatherCurrent, WeatherPlace, WeatherToday, WeatherView,
-    WsEvent,
+    ConnectionStatus, WeatherCondition, WeatherCurrent, WeatherDay, WeatherPlace, WeatherToday,
+    WeatherView, WsEvent,
 };
 use oikos_core::command::Publish;
 use oikos_core::model::{Kind, StateValue};
@@ -68,7 +68,22 @@ fn sample_view() -> WeatherView {
         },
         rain_next_hour: Some(0.5),
         tonight_min: Some(8.0),
-        days: vec![],
+        days: vec![WeatherDay {
+            date: "2026-10-24".into(),
+            condition: Some(WeatherCondition::Rain),
+            min: Some(8.0),
+            max: Some(13.5),
+            precipitation_probability: Some(85.0),
+            apparent_max: Some(12.0),
+            precipitation: Some(4.6),
+            wind_speed_max: Some(25.4),
+            wind_gusts_max: Some(41.0),
+            wind_direction: Some(250.0),
+            humidity: Some(78.0),
+            pressure: Some(1005.8),
+            cloud_cover: Some(90.0),
+            uv_index_max: Some(1.8),
+        }],
     }
 }
 
@@ -87,14 +102,14 @@ fn publish_configs_then_apply_publishes_states_and_online() {
     let (hub, mut rx) = hub();
     hub.publish_weather_configs();
     let out = drain(&mut rx);
-    assert_eq!(out.len(), 20);
+    assert_eq!(out.len(), 27);
     assert!(out.iter().all(|p| p.retain));
     let availability = topic(&out, "oikos/weather/availability");
     assert_eq!(availability.len(), 1);
     assert_eq!(availability[0].payload, "offline");
     assert_eq!(
         out.iter().filter(|p| p.topic.ends_with("/config")).count(),
-        19
+        26
     );
 
     hub.apply_weather(sample_view());
@@ -103,7 +118,7 @@ fn publish_configs_then_apply_publishes_states_and_online() {
         topic(&out, "oikos/weather/availability")[0].payload,
         "online"
     );
-    assert_eq!(out.len(), 20);
+    assert_eq!(out.len(), 27);
     assert!(out.iter().all(|p| p.retain));
     assert!(!hub.weather_view().expect("view").stale);
 
@@ -160,8 +175,8 @@ fn weather_publish_failure_is_retried_next_time() {
     hub.apply_weather(sample_view());
     let out = drain(&mut rx);
     // The configs lost while offline go out again with the states.
-    assert_eq!(state_count(&out), 19);
-    assert_eq!(config_count(&out), 19);
+    assert_eq!(state_count(&out), 26);
+    assert_eq!(config_count(&out), 26);
 }
 
 #[test]
@@ -267,7 +282,7 @@ fn publish_configs_makes_states_republish() {
         out.iter()
             .filter(|p| p.topic != "oikos/weather/availability")
             .count(),
-        19
+        26
     );
 }
 
@@ -284,8 +299,8 @@ fn restart_publishes_unknown_for_values_a_previous_run_left_retained() {
     assert_eq!(uv.len(), 1);
     assert_eq!(uv[0].payload, "None");
     assert!(uv[0].retain);
-    // 18 values, the unknown uv_index and the availability: each goes out once.
-    assert_eq!(out.len(), 20);
+    // 25 values, the unknown uv_index and the availability: each goes out once.
+    assert_eq!(out.len(), 27);
 }
 
 fn config_count(out: &[Publish]) -> usize {
@@ -311,8 +326,8 @@ fn configs_lost_while_offline_are_republished_by_the_next_apply() {
     hub.set_connection(ConnectionStatus::Online);
     hub.apply_weather(sample_view());
     let out = drain(&mut rx);
-    assert_eq!(config_count(&out), 19);
-    assert_eq!(state_count(&out), 19);
+    assert_eq!(config_count(&out), 26);
+    assert_eq!(state_count(&out), 26);
     assert!(hub.entity_view("weather_temperature").is_some());
 
     // Healthy now: nothing is republished.
@@ -335,7 +350,7 @@ fn removed_entity_makes_the_next_apply_republish_the_configs() {
 
     hub.apply_weather(sample_view());
     let out = drain(&mut rx);
-    assert_eq!(config_count(&out), 19);
-    assert_eq!(state_count(&out), 19);
+    assert_eq!(config_count(&out), 26);
+    assert_eq!(state_count(&out), 26);
     assert!(hub.entity_view("weather_temperature").is_some());
 }

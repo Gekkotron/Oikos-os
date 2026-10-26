@@ -136,6 +136,24 @@ pub struct WeatherDay {
     pub max: Option<f64>,
     /// %.
     pub precipitation_probability: Option<f64>,
+    /// °C, the highest "feels like" temperature.
+    pub apparent_max: Option<f64>,
+    /// mm, the day's total.
+    pub precipitation: Option<f64>,
+    /// km/h, the strongest sustained wind.
+    pub wind_speed_max: Option<f64>,
+    /// km/h, the strongest gust.
+    pub wind_gusts_max: Option<f64>,
+    /// Degrees the wind mostly comes from over the day.
+    pub wind_direction: Option<f64>,
+    /// %, the mean of the day's hours.
+    pub humidity: Option<f64>,
+    /// hPa, the mean of the day's hours.
+    pub pressure: Option<f64>,
+    /// %, the mean of the day's hours.
+    pub cloud_cover: Option<f64>,
+    /// The highest UV index of the day.
+    pub uv_index_max: Option<f64>,
 }
 
 /// The whole weather document.

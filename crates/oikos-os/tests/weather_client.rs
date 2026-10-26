@@ -160,11 +160,14 @@ async fn forecast_requests_the_needed_variables() {
         "current",
         "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,cloud_cover,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl",
     );
-    has("hourly", "temperature_2m,uv_index");
+    has(
+        "hourly",
+        "temperature_2m,uv_index,relative_humidity_2m,cloud_cover,pressure_msl",
+    );
     has("minutely_15", "precipitation");
     has(
         "daily",
-        "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max",
+        "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max,apparent_temperature_max,wind_speed_10m_max,wind_direction_10m_dominant,uv_index_max",
     );
 }
 
@@ -199,7 +202,27 @@ fn build_view_maps_current_today_and_days() {
     assert_eq!(v.days[0].min, Some(10.2));
     assert_eq!(v.days[0].max, Some(14.1));
     assert_eq!(v.days[0].precipitation_probability, Some(85.0));
+    assert_eq!(v.days[0].apparent_max, Some(12.5));
+    assert_eq!(v.days[0].precipitation, Some(4.6));
+    assert_eq!(v.days[0].wind_speed_max, Some(25.4));
+    assert_eq!(v.days[0].wind_gusts_max, Some(41.0));
+    assert_eq!(v.days[0].wind_direction, Some(250.0));
+    assert_eq!(v.days[0].uv_index_max, Some(1.8));
     assert_eq!(v.days[4].date, "2026-10-28");
+    assert_eq!(v.days[4].wind_gusts_max, Some(19.8));
+}
+
+#[test]
+fn day_means_cover_the_hours_of_that_date() {
+    let v = build_view(&parse(FORECAST), &paris(), 0);
+    // 2026-10-24: the humidity of 05:00 is missing, so the mean runs over 23 values.
+    assert_eq!(v.days[0].humidity, Some(71.8));
+    assert_eq!(v.days[0].cloud_cover, Some(75.0));
+    assert_eq!(v.days[0].pressure, Some(1005.8));
+    // The fixture has no hourly values for 2026-10-25 onward.
+    assert_eq!(v.days[1].humidity, None);
+    assert_eq!(v.days[1].cloud_cover, None);
+    assert_eq!(v.days[1].pressure, None);
 }
 
 #[test]
@@ -227,6 +250,8 @@ fn build_view_tolerates_nulls() {
     assert_eq!(v.current.uv_index, None);
     assert_eq!(v.current.temperature, Some(14.2));
     assert_eq!(v.today.max, Some(15.8));
+    assert_eq!(v.days[0].humidity, None);
+    assert_eq!(v.days[0].uv_index_max, None);
     assert!(v.tonight_min.is_some());
 }
 

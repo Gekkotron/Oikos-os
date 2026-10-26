@@ -187,12 +187,17 @@ Available when `[weather] enabled = true`. See [Weather](../users/weather.md).
   "rain_next_hour": 0.3,
   "tonight_min": 7.8,
   "days": [
-    { "date": "2026-10-24", "condition": "rain", "min": 8.0, "max": 13.5, "precipitation_probability": 85 }
+    {
+      "date": "2026-10-24", "condition": "rain", "min": 8.0, "max": 13.5,
+      "precipitation_probability": 85, "apparent_max": 12.0, "precipitation": 4.6,
+      "wind_speed_max": 25.4, "wind_gusts_max": 41.0, "wind_direction": 250,
+      "humidity": 78.3, "pressure": 1005.8, "cloud_cover": 90.5, "uv_index_max": 1.8
+    }
   ]
 }
 ```
 
-Units are metric: °C, km/h, mm, hPa and %. `fetched_at` is unix seconds. Any number may be `null` when Open-Meteo has no value. `days` holds the next five days, starting tomorrow. There are no coordinates in the response. `stale` is `true` once the last fetch is older than twice `refresh_minutes`.
+Units are metric: °C, km/h, mm, hPa and %. `fetched_at` is unix seconds. Any number may be `null` when Open-Meteo has no value. `days` holds the next five days, starting tomorrow; each has `date` (`YYYY-MM-DD`), `condition`, `min`, `max`, `apparent_max` (highest feels-like), `precipitation` (mm, day total), `precipitation_probability`, `wind_speed_max`, `wind_gusts_max`, `wind_direction` (the dominant direction, degrees), `humidity`, `pressure` and `cloud_cover` (means of the day's hours, one decimal) and `uv_index_max`. There are no coordinates in the response. `stale` is `true` once the last fetch is older than twice `refresh_minutes`.
 
 ## Solar
 

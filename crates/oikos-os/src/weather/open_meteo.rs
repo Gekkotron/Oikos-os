@@ -12,7 +12,7 @@ use serde::Deserialize;
 /// The format of every time Open-Meteo reports (local, minute precision).
 const TIME_FORMAT: &str = "%Y-%m-%dT%H:%M";
 
-/// The forecast days requested: today plus five.
+/// The forecast days requested: today plus the five days the view carries.
 const FORECAST_DAYS: &str = "6";
 
 /// Where the two Open-Meteo APIs live. Tests point these at a stub server.
@@ -157,6 +157,12 @@ pub struct Hourly {
     pub temperature_2m: Option<Vec<Option<f64>>>,
     #[serde(default)]
     pub uv_index: Option<Vec<Option<f64>>>,
+    #[serde(default)]
+    pub relative_humidity_2m: Option<Vec<Option<f64>>>,
+    #[serde(default)]
+    pub cloud_cover: Option<Vec<Option<f64>>>,
+    #[serde(default)]
+    pub pressure_msl: Option<Vec<Option<f64>>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -175,9 +181,17 @@ pub struct Daily {
     pub precipitation_probability_max: Option<Vec<Option<f64>>>,
     #[serde(default)]
     pub wind_gusts_10m_max: Option<Vec<Option<f64>>>,
+    #[serde(default)]
+    pub apparent_temperature_max: Option<Vec<Option<f64>>>,
+    #[serde(default)]
+    pub wind_speed_10m_max: Option<Vec<Option<f64>>>,
+    #[serde(default)]
+    pub wind_direction_10m_dominant: Option<Vec<Option<f64>>>,
+    #[serde(default)]
+    pub uv_index_max: Option<Vec<Option<f64>>>,
 }
 
-/// Fetches the forecast for `place`: now, the next hours, and the next five days.
+/// Fetches the forecast for `place`: now, the next hours, and the next five days (daily figures, plus hourly ones the view averages per day).
 pub async fn forecast(
     client: &reqwest::Client,
     ep: &Endpoints,
@@ -194,11 +208,14 @@ pub async fn forecast(
             "current",
             "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,cloud_cover,precipitation,wind_speed_10m,wind_gusts_10m,wind_direction_10m,pressure_msl",
         ),
-        ("hourly", "temperature_2m,uv_index"),
+        (
+            "hourly",
+            "temperature_2m,uv_index,relative_humidity_2m,cloud_cover,pressure_msl",
+        ),
         ("minutely_15", "precipitation"),
         (
             "daily",
-            "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max",
+            "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_gusts_10m_max,apparent_temperature_max,wind_speed_10m_max,wind_direction_10m_dominant,uv_index_max",
         ),
     ];
     get_json(client.get(&ep.forecast).query(&query)).await
@@ -225,12 +242,25 @@ pub fn build_view(forecast: &Forecast, place: &Place, fetched_at: u64) -> Weathe
     let cur = &forecast.current;
     let now = parse_time(&cur.time);
     let daily = &forecast.daily;
-    let day = |i: usize| WeatherDay {
-        date: daily.time.get(i).cloned().unwrap_or_default(),
-        condition: condition(at(&daily.weather_code, i)),
-        min: at(&daily.temperature_2m_min, i),
-        max: at(&daily.temperature_2m_max, i),
-        precipitation_probability: at(&daily.precipitation_probability_max, i),
+    let day = |i: usize| {
+        let date = daily.time.get(i).cloned().unwrap_or_default();
+        let hourly = &forecast.hourly;
+        WeatherDay {
+            condition: condition(at(&daily.weather_code, i)),
+            min: at(&daily.temperature_2m_min, i),
+            max: at(&daily.temperature_2m_max, i),
+            precipitation_probability: at(&daily.precipitation_probability_max, i),
+            apparent_max: at(&daily.apparent_temperature_max, i),
+            precipitation: at(&daily.precipitation_sum, i),
+            wind_speed_max: at(&daily.wind_speed_10m_max, i),
+            wind_gusts_max: at(&daily.wind_gusts_10m_max, i),
+            wind_direction: at(&daily.wind_direction_10m_dominant, i),
+            humidity: day_mean(hourly, &hourly.relative_humidity_2m, &date),
+            pressure: day_mean(hourly, &hourly.pressure_msl, &date),
+            cloud_cover: day_mean(hourly, &hourly.cloud_cover, &date),
+            uv_index_max: at(&daily.uv_index_max, i),
+            date,
+        }
     };
     WeatherView {
         place: place.view(),
@@ -269,6 +299,19 @@ fn parse_time(t: &str) -> Option<NaiveDateTime> {
 
 fn at(values: &Option<Vec<Option<f64>>>, i: usize) -> Option<f64> {
     values.as_ref()?.get(i).copied().flatten()
+}
+
+/// The mean of the hourly `values` whose local date is `date` (`YYYY-MM-DD`), to one decimal.
+/// Missing values are ignored; `None` when none is left.
+fn day_mean(hourly: &Hourly, values: &Option<Vec<Option<f64>>>, date: &str) -> Option<f64> {
+    let (sum, count) = hourly
+        .time
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.starts_with(date))
+        .filter_map(|(i, _)| at(values, i))
+        .fold((0.0, 0u32), |(sum, count), v| (sum + v, count + 1));
+    (count > 0).then(|| (sum / f64::from(count) * 10.0).round() / 10.0)
 }
 
 /// The condition for a WMO code; a code the table lacks is logged and shown as cloudy.
