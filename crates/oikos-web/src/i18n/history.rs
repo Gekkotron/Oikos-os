@@ -115,9 +115,14 @@ pub fn min_max(lang: Lang, min: f64, max: f64, unit: Option<&str>) -> String {
     )
 }
 
+/// An energy amount with its unit: "4.2 kWh" / "4,2 kWh".
+pub fn kwh(lang: Lang, v: f64) -> String {
+    format::with_unit(format::decimal_grouped(lang, v, 1), Some("kWh"))
+}
+
 /// "Last 24 hours total: 4.2 kWh" / "24 dernières heures, total : 4,2 kWh".
 pub fn total_line(lang: Lang, r: HistoryRange, total: f64) -> String {
-    let value = format::with_unit(format::decimal_grouped(lang, total, 1), Some("kWh"));
+    let value = kwh(lang, total);
     match lang {
         Lang::En => format!("{} total: {value}", range_name(lang, r)),
         Lang::Fr => format!("{}, total{NBSP}: {value}", range_name(lang, r)),

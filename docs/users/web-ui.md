@@ -194,7 +194,7 @@ Climate (`/climate`, beta) spans the page. The rooms are listed on the left (a r
 
 ## History
 
-History (`/history/<id>`): a full-screen chart of one entity over 1 h, 6 h, 24 h, 7 d, 30 d or 1 y, picked with range chips. It needs `[history] url`; see [History](history.md).
+History (`/history/<id>`): a full-screen chart of one entity over 1 h, 6 h, 24 h, 7 d, 30 d or 1 y, picked with range chips. A numeric sensor draws a smooth line over a soft fill, with round tick labels on the left and a faint grid; on 7 d, 30 d and 1 y a light band shows each bucket's min to max. Hover the chart (or touch and drag) for a crosshair and a card with the time and value, plus the min–max on the long ranges. Lights and switches keep a thin step line with their On/Off words; energy counters draw daily bars, and hovering one shows its day and total. The same chart serves the history widget on dashboards. It needs `[history] url`; see [History](history.md).
 
 ## Groups
 

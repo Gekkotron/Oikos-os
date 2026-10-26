@@ -5211,58 +5211,107 @@ html:has(.flow-canvas-screen) {
   border-radius: 12px;
 }
 
-.history-chart__svg {
+/* The y labels sit left of the plot and the x labels under it; both keep this inset. */
+.history-chart__inset {
+  padding-left: 38px;
+}
+
+/* The plot box is stretched under the SVG, so overlays positioned in % stay on the curve. */
+.history-chart__plot {
+  position: relative;
   width: 100%;
-  height: auto;
-  display: block;
   min-height: 240px;
   max-height: 460px;
   aspect-ratio: 400 / 220;
-  background: var(--card-bg);
-  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.history-chart__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
 }
 
 .history-chart__grid {
-  stroke: rgba(255, 255, 255, 0.06);
+  stroke: var(--chip-border);
+  stroke-opacity: 0.45;
   stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .history-chart__band {
-  fill: rgba(63, 108, 255, 0.12);
+  fill: var(--accent-mint);
+  fill-opacity: 0.1;
+  stroke: none;
+}
+
+.history-chart__stop-top {
+  stop-color: var(--accent-mint);
+  stop-opacity: 0.2;
+}
+
+.history-chart__stop-bottom {
+  stop-color: var(--accent-mint);
+  stop-opacity: 0;
+}
+
+.history-chart__area {
   stroke: none;
 }
 
 .history-chart__line {
-  stroke: var(--accent-mint, #3f6cff);
-  stroke-width: 1.8;
+  stroke: var(--accent-mint);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
   fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.history-chart__line--step {
+  stroke-width: 1.5;
+  stroke-linejoin: miter;
 }
 
 .history-chart__bar {
-  fill: var(--accent-mint, #3f6cff);
-  opacity: 0.9;
+  position: absolute;
+  bottom: 0;
+  background: var(--accent-mint);
+  opacity: 0.75;
+  border-radius: 4px 4px 0 0;
+  transition: opacity 0.12s;
+}
+
+.history-chart__bar--on {
+  opacity: 1;
 }
 
 .history-chart__axis-y {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
   position: absolute;
-  top: 20px;
-  left: 16px;
-  height: calc(100% - 90px);
+  inset: 0;
   font: 400 10px/12px var(--font-body);
-  opacity: 0.55;
+  color: var(--muted);
   pointer-events: none;
+}
+
+.history-chart__axis-y > span {
+  position: absolute;
+  right: calc(100% + 6px);
+  transform: translateY(-50%);
+  white-space: nowrap;
 }
 
 .history-chart__axis-x {
   position: relative;
   height: 14px;
   margin-top: 6px;
-  padding: 0 2px;
   font: 400 10px/12px var(--font-body);
-  opacity: 0.55;
+  color: var(--muted);
 }
 
 .history-chart__axis-x > span {
@@ -5274,6 +5323,74 @@ html:has(.flow-canvas-screen) {
 /* "now" sits at the right edge; anchor it there instead of overflowing the chart. */
 .history-chart__axis-x > span:last-child {
   transform: translateX(-100%);
+}
+
+/* On a narrow chart the label just before "now" would run into it. */
+@media (max-width: 600px) {
+  .history-chart__axis-x > .history-chart__tick--near-end {
+    display: none;
+  }
+}
+
+.history-chart__cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px solid var(--muted);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.history-chart__dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--accent-mint);
+  border: 2px solid var(--card-bg);
+  pointer-events: none;
+}
+
+.history-chart__tip {
+  position: absolute;
+  top: 6px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 9px;
+  transform: translateX(12px);
+  white-space: nowrap;
+  font: 400 11px/14px var(--font-body);
+  color: var(--ink);
+  background: var(--bg, var(--card-bg));
+  border: 1px solid var(--card-border, var(--chip-border));
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.history-chart__tip[hidden],
+.history-chart__cursor[hidden],
+.history-chart__dot[hidden] {
+  display: none;
+}
+
+.history-chart__tip--left {
+  transform: translateX(calc(-100% - 12px));
+}
+
+.history-chart__tip-time,
+.history-chart__tip-band {
+  color: var(--muted);
+}
+
+.history-chart__tip-value {
+  font-weight: 600;
+  font-size: 13px;
 }
 
 .history-chart__legend {

@@ -227,6 +227,47 @@ async fn the_dashboard_sheet_and_the_history_axis_follow_the_language() {
     assert!(legend.contains("24 dernières heures"), "{legend}");
     assert!(legend.contains("max 21,5\u{a0}°C"), "{legend}");
 
+    // The scale carries several round y labels and a gridline per label, and the tooltip waits
+    // hidden until the pointer is over the plot.
+    let ylabels = host
+        .query_selector_all(".history-chart__axis-y > span")
+        .unwrap();
+    assert!((3..=6).contains(&ylabels.length()), "{}", ylabels.length());
+    let grid = host.query_selector_all(".history-chart__grid").unwrap();
+    assert!(grid.length() >= ylabels.length(), "{}", grid.length());
+    let tip: web_sys::HtmlElement = host
+        .query_selector(".history-chart__tip")
+        .unwrap()
+        .expect("tooltip node")
+        .unchecked_into();
+    assert!(tip.hidden());
+    let plot: web_sys::HtmlElement = host
+        .query_selector(".history-chart__plot")
+        .unwrap()
+        .unwrap()
+        .unchecked_into();
+    let rect = plot.get_bounding_client_rect();
+    let init = web_sys::PointerEventInit::new();
+    init.set_bubbles(true);
+    init.set_client_x((rect.left() + rect.width() / 2.0) as i32);
+    init.set_client_y((rect.top() + rect.height() / 2.0) as i32);
+    plot.dispatch_event(
+        &web_sys::PointerEvent::new_with_event_init_dict("pointermove", &init).unwrap(),
+    )
+    .unwrap();
+    settle().await;
+    assert!(!tip.hidden());
+    let said = tip.text_content().unwrap_or_default();
+    assert!(said.contains("20,0\u{a0}°C"), "{said}");
+    // The one point sits near the right edge, so the card opens to its left.
+    assert!(tip.class_list().contains("history-chart__tip--left"));
+    plot.dispatch_event(
+        &web_sys::PointerEvent::new_with_event_init_dict("pointerleave", &init).unwrap(),
+    )
+    .unwrap();
+    settle().await;
+    assert!(tip.hidden());
+
     // English, with no remount: the same elements read the other language.
     lang.set(Lang::En);
     settle().await;
