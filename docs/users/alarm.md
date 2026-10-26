@@ -20,6 +20,8 @@ The alarm has no code or PIN. The hub has no authentication yet (see [Security](
 
 The alarm is switched on in its settings, not in `oikos.toml`. Open **Settings → Alarm** in the [web UI](web-ui.md), or use the [MCP tools](../reference/mcp-tools.md#alarm) or the [HTTP API](../reference/http-api.md#alarm). The only `oikos.toml` key is the topic prefix, which you rarely change (see [Configuration](../reference/configuration.md#alarm)).
 
+The page has an **Enable the alarm** switch and the sections **Sensors**, **Sirens**, **Remotes**, **Presence** and **Timing**. Nothing is applied until you press **Save**, and a toast says **Saved**. If the hub refuses the settings, the page shows the reason and the previous settings stay in force. A line at the top lists chosen entities the house no longer has.
+
 Turning it off stops everything at once: no entity is published, nothing is watched, and any ringing siren stops. The settings are kept, so turning it back on restores them. Turning it off while the alarm is armed or ringing also resolves the open alarm alerts.
 
 The panel itself is published to Home Assistant discovery as one `alarm_control_panel` entity, `oikos_alarm_house`, named **Alarm**. The web Security page shows it like any other panel.
@@ -32,7 +34,7 @@ The panel itself is published to Home Assistant discovery as one `alarm_control_
 | **Night** | Doors and windows only | Going to bed |
 | **Home** | The openings you tick for home | Staying in, with the outside doors armed |
 
-Each sensor has its own three ticks, so any house can set its own mix. The defaults are:
+Each sensor row has its own **away**, **home** and **night** ticks, so any house can set its own mix. The defaults are:
 
 - A new **opening** (door or window) watches away and night, instant.
 - A new **motion** sensor watches away only.
@@ -43,19 +45,19 @@ The panel states are:
 - **Disarmed**: nothing is watched. The SOS remote still rings the sirens.
 - **Arming**: the exit delay after a manual arm. Nothing is watched yet, so you can leave.
 - **Armed** (away, home or night): the mode's sensors are watched.
-- **Pending**: a delayed door opened, and the entry delay is counting down.
+- **Pending** (shown as **Entry delay** on the settings page): a delayed door opened, and the entry delay is counting down.
 - **Triggered**: the sirens are ringing.
 
 ## Instant and delayed openings
 
-An opening is **instant** or **delayed**, per sensor:
+An opening is **instant** or **delayed**, per sensor, with two buttons on its row (the delayed one shows the entry delay, such as "delayed (30 s)"):
 
 - An **instant** opening trips the alarm at once. Use it for windows and any door you do not come through while armed.
-- A **delayed** opening starts the entry delay (30 s by default). Disarm in time and nothing happens. Use it for the door you come in through.
+- A **delayed** opening starts the entry delay (**Entry delay (s)**, 30 s by default, 0 to 300). Disarm in time and nothing happens. Use it for the door you come in through.
 
 While the entry delay runs, other delayed openings and motion are ignored, because the person walking in would trip them. An instant opening still trips the alarm at once.
 
-Motion is always counted, never instant or delayed. The alarm trips when **two motion detections** (the default) fall within **120 seconds**. Any two motion sensors count, or the same sensor twice. A single stray detection never trips it. The count and the window are both editable on the settings page.
+Motion is always counted, never instant or delayed. The alarm trips when **two motion detections** (the default) fall within **120 seconds**. Any two motion sensors count, or the same sensor twice. A single stray detection never trips it. The count (**Motions to trigger**, 1 to 5) and the window (**Within (s)**, 10 to 900) are both editable on the settings page.
 
 Only a change to *open* counts. A sensor that the hub reads again after a restart or a reconnect is not a new event, and neither is the first report of a sensor that was open before the hub started (see [Restarts](#restarts)).
 
@@ -82,7 +84,7 @@ A siren is one of two kinds:
 
 For example, a generic MQTT siren might take `on` = `{"trigger": 6500000}` (a long trigger), `off` = `{"trigger": 100}` (a short pulse that replaces the long one) and `chirp` = `{"trigger": 100}`. Use the payloads your own device documents.
 
-When the alarm trips, every siren rings. After the **siren period** (180 s by default) every siren stops and the panel goes back to the armed mode it was in. A new detection rings the sirens again for another full period, and so on, until someone disarms. Disarming stops every siren at once.
+When the alarm trips, every siren rings. After the **siren period** (**Siren rings for (s)**, 180 s by default, 10 to 900) every siren stops and the panel goes back to the armed mode it was in. A new detection rings the sirens again for another full period, and so on, until someone disarms. Disarming stops every siren at once.
 
 A siren that does not confirm within about 2 seconds is listed as failed in the trigger alert. The other sirens still ring. Test every siren before you rely on it: use the **Test chirp** button where the settings page offers it, and for an entity siren, switch it on and off from its own device.
 
@@ -120,18 +122,18 @@ A remote only shows up in the picker once Zigbee2MQTT has seen it press a button
 
 The alarm can follow your phones. List the trackers (the `device_tracker` entities of your phones, for example the one the Oikos Android app publishes), then choose what presence may do:
 
-- **Arm away** when **every** tracker has read *away* for 120 s (the default). The 120 s absorbs a geofence flapping at the edge. An unknown tracker blocks the auto-arm, and so does an offline one: a phone that is switched off or out of battery counts as unknown, whatever it last said, so it never arms the house by accident.
-- **Disarm** when **any** tracker changes to *home*. Only a real homecoming counts: the phone must have read *away* before. A phone that is already home when someone arms the house by hand does not disarm it, and neither does one that drops offline and comes back while still at home.
+- **Arm away** (**Arm when everyone is away**) when **every** tracker has read *away* for 120 s (**Arm after (s)**, the default, 0 to 3600). The 120 s absorbs a geofence flapping at the edge. An unknown tracker blocks the auto-arm, and so does an offline one: a phone that is switched off or out of battery counts as unknown, whatever it last said, so it never arms the house by accident.
+- **Disarm** (**Disarm when someone comes home**) when **any** tracker changes to *home*. Only a real homecoming counts: the phone must have read *away* before. A phone that is already home when someone arms the house by hand does not disarm it, and neither does one that drops offline and comes back while still at home.
 
 Presence works on edges, not levels. It arms once for each time the house empties. After any disarm, from anywhere (the panel, a remote, the push button, or turning the alarm on), presence won't arm again until a tracker reads home (a phone back online at home counts) and the house empties again (or one is already home when you disarm, in which case it arms as soon as the house empties). So if you disarm to let someone in while you are out, the alarm stays disarmed until you come back and leave again.
 
-A presence arm skips the exit delay, because you have already left. A manual arm waits out the exit delay (60 s by default).
+A presence arm skips the exit delay, because you have already left. A manual arm waits out the exit delay (**Exit delay (s)**, 60 s by default, 0 to 300).
 
 The hub reads the trackers' state at start-up too. A phone that came home while the hub was down disarms the alarm once the hub is back, and a house that emptied while it was down starts the 120 s timer.
 
 ## Phone push
 
-The alarm sends its pushes on the `alarm` channel. Four kinds of push can arrive:
+The alarm sends its pushes on the `alarm` channel. Three kinds of push can arrive:
 
 - **Triggered**: a critical alert, titled *Alarm*, that names what tripped it: the door or window, the motions and their rooms, or an SOS. It has a **Disarm** button. Tapping it disarms the alarm and stops the sirens. Each new trip sends a new alert, and the earlier one is cleared when the alarm is disarmed.
 - **Armed and disarmed**: a plain alert with the normal sound, sent when the alarm becomes armed (at the end of the exit delay) and when it is disarmed. It names the mode and who did it: *Armed night*, *Armed away (everyone left)*, *Armed home by remote*, *Disarmed (someone came home)*. When something is open at arm, the same push names the sensors watched for closing: *Armed away. Office window open, watched for closing*. Disarming an alarm that is already disarmed sends nothing.

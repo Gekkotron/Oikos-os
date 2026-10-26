@@ -10,21 +10,21 @@ The web UI is a Leptos app that runs in the browser as wasm. The hub serves it o
 
 A sidebar on the left replaces the old top bar. From top to bottom it holds:
 
-- **Overview**, with House first and your own dashboards under it, plus **＋ New dashboard**.
-- **Automations** (flows) and **Groups**.
-- **My rooms**: one entry per room that has something on House, with the number of cards House shows in that room. A room opens at `/rooms/<id>`; the old room chips on House are gone, and the rooms list lives here instead.
-- **Home**: Energy, Security, Climate (beta) and Alerts (with an unseen-count pill).
+- **Overview**, then **＋ New dashboard**. Once you have made a dashboard of your own, the list unfolds under Overview with House first and yours after it.
+- **My moods**, **Automations** (flows) and **Groups**.
+- **My rooms**: one entry per room that has something on House, with the number of entities House shows in that room. A room opens at `/rooms/<id>`; the old room chips on House are gone, and the rooms list lives here instead.
+- **Home**: Energy, Security, Climate (beta, only while the climate engine is on) and Alerts (with an unseen-count pill).
 - **Settings** at the bottom, above the connection badge.
 
-The header above the screen carries a breadcrumb, the theme button and the **FR · EN** button. The theme button cycles Auto, Night Glass and Ivoire, and the choice is remembered in the browser. FR · EN switches the shell (sidebar, header and breadcrumb) between French and English; the screens themselves are still in English for now, and the choice is remembered too.
+The header above the screen carries a breadcrumb, the theme button and the **FR · EN** button. The theme button cycles Auto, Night Glass and Ivoire, and the choice is remembered in the browser. FR · EN switches the whole interface between French and English, and the choice is remembered too. Without a saved choice the UI follows the browser language: French for any `fr` locale, English otherwise. Names that come from the hub or your devices (entities, rooms, flows) are shown as they are.
 
 The themes are **Night Glass** (dark), **Ivoire** (a light, warm ivory with sage and honey accents) and **Auto**, which follows the system. The former Warm Minimal theme is gone: a browser that had saved it opens in Ivoire.
 
-On a phone or a narrow window (below 900 px) the sidebar becomes a drawer. The ☰ button at the left of the header opens it over the page; tapping the dimmed page, choosing an entry or widening the window closes it.
+On a phone or a narrow window (below 900 px) the sidebar becomes a drawer. The ☰ button at the left of the header opens it over the page; tapping the dimmed page, pressing Escape, choosing an entry or widening the window closes it.
 
 ## Home header
 
-The house overview (**House**, first under Overview) opens with a header above its cards: the date, a greeting, one sentence about the house, a detail line, a row of chips and, when weather is on, a weather card. Only the overview has it; your own dashboards do not. With `[frigate] live = true` a **Cameras** section follows the moods: every Frigate camera, one live 16:9 tile each, side by side on a computer and stacked on a phone; it is hidden while `live` is off.
+The house overview (**House**, first under Overview) opens with a header above its cards: the date, a greeting, one sentence about the house, a detail line, a row of chips and, when weather is on, a weather card (with a [solar card](#solar-card) beside it when the solar forecast is on). The overview always has it; your own dashboards show it only when their **Show header** switch is on. With `[frigate] live = true` a **Cameras** section follows the moods: every Frigate camera, one live 16:9 tile each, side by side on a computer and stacked on a phone; it is hidden while `live` is off. The overview ends with a **Recent alerts** list and a **See all** button.
 
 On a wide window the text sits on the left and the weather card on the right. On a phone everything stacks, and the weather card becomes one compact row under the chips. Without a weather card, the sentence takes the full width and the sunset moves to the detail line.
 
@@ -47,8 +47,8 @@ The sentence has two halves joined by a comma: the **activity** first, then the 
 | Half | When | French | English |
 | --- | --- | --- | --- |
 | Activity | An alert you have not seen yet (same count as the Alerts badge) | Quelque chose demande ton attention | Something needs your attention |
-| Activity | One door or window open | Ouverture : Fenêtre (Cuisine) | Open: Window (Kitchen) |
-| Activity | Several doors or windows open | 2 ouvertures | 2 doors or windows open |
+| Activity | One door, window or garage door open | Ouverture : Fenêtre (Cuisine) | Open: Window (Kitchen) |
+| Activity | Several doors, windows or garage doors open | 2 ouvertures | 2 doors or windows open |
 | Activity | Dark outside, between 22:00 and 05:59, and no light on | La maison dort | The house is asleep |
 | Activity | No light on | La maison est calme | The house is quiet |
 | Activity | Anything else | La maison est éveillée | The house is awake |
@@ -76,16 +76,18 @@ The rules behind the table:
 Under the sentence, in a muted style, the detail line holds up to two fragments joined by " · ". Each one appears only when it applies, in this order:
 
 1. Rain expected within the hour (more than 0.1 mm): « Pluie attendue dans l'heure » / "Rain expected within the hour".
-2. Frost tonight, shown from 15:00: « Gel cette nuit » / "Frost tonight".
+2. Frost tonight (a minimum of 0 °C or below), shown from 15:00: « Gel cette nuit » / "Frost tonight".
 3. The sunset time, shown from two hours before sunset until sunset, or at all times when the weather card is hidden: « Coucher du soleil à 18 h 42 » / "Sunset at 6:42 pm". When the house location is not set in `[flows]`, this fragment reads « Coucher du soleil : position de la maison non réglée » / "Sunset: house location not set" instead of a time.
 
 ### Chips
 
 Chips sit in a row under the detail line. Each one hides when its input is missing.
 
+On a phone (below 640 px) the chips and the weather card use shorter wording, for example "19.6 °C" alone, "Off" for « Chauffage éteint » or "A/C" for "Air conditioning on".
+
 - **Lights**: the number of lights on, for example « 3 lumières allumées » / "3 lights on". Shown in amber when at least one light is on, and hidden when none is.
 - **Indoor**: the indoor temperature to one decimal, for example « 19,6 °C à l'intérieur » / "19.6 °C inside". Hidden without an indoor temperature.
-- **Heating**: taken from the climate units that can heat. A unit counts as heating when its mode is heat, auto or heat_cool. A cooling-only unit is ignored.
+- **Heating**: taken from the climate units that have a heat mode. A unit counts as heating when its mode is heat, auto or heat_cool. A cooling-only unit is ignored.
   - « Clim en marche » / "Air conditioning on" when a unit is in cool mode. This case wins over the others.
   - « Chauffage éteint » / "Heating off" when no unit is heating.
   - « Chauffage en éco » / "Heating in eco" when every heating unit has a target at or below the eco setpoint. This case needs an eco setpoint in Settings › Home; without one, the chip hides.
@@ -99,29 +101,34 @@ When weather is on, the card sits on the right of the header (or under the chips
 The card hides when:
 
 - weather is off, or the hub has not fetched it yet;
-- the last fetch failed;
 - the last good data is more than six hours old.
 
-When the data is late but less than six hours old, the card stays and adds a muted "Data from 9:02 pm" line.
+When the data is late (older than twice the refresh period) but less than six hours old, the card stays and adds a muted "Data from 9:02 pm" line. A failed fetch alone does not hide the card: the hub keeps the last good data.
+
+### Solar card
+
+When the [solar forecast](solar-forecast.md) is on and its data is less than 24 hours old, a solar card sits beside the weather card (stacked on a phone). It shows today's expected kWh, the day's production curve and tomorrow's forecast. Tap it to open `/solar`.
 
 ### Weather page
 
 The weather page is at `/weather`, opened from the weather card. The Back button returns to the screen you came from. It is not in the sidebar.
 
+![The weather page: current conditions, eight Now tiles and the forecast days](/img/screens/weather.webp)
+
 - **Top**: the condition icon, the current temperature to one decimal, the condition, the feels-like temperature, today's low and high, tonight's minimum and the rain expected in the next hour.
 - **Now**: eight tiles, four across on a wide window and two on a phone. Wind (speed, an arrow for the direction the wind comes from, a compass word and gusts), humidity, pressure, cloud cover, today's rain (amount and chance), the strongest gust today, the UV index with a word (Low, Moderate, High, Very high, Extreme), and the sun (sunrise and sunset).
-- **Forecast**: a Today card, then one card per day for the next five days, each with the weekday, the condition icon, the high, the low and the chance of rain. Tap a card to show that day on the whole page (`/weather?day=YYYY-MM-DD`). The top then shows the day's high, the feels-like high, the low and high and the chance of rain, and the heading above the tiles shows the day's name ("Tomorrow", "Thursday 29"). The tiles show the day's strongest wind and main direction, the mean humidity, pressure and cloud cover, the total rain, the strongest gust, the highest UV index, and that day's sunrise and sunset. Tap Today to come back.
-- **Footer**: the place, the time of the last update, a stale notice when the data is late, and the Open-Meteo credit.
+- **Forecast**: a Today card, then one card per day for the next five days (six cards in all), each with the weekday, the condition icon, the high, the low and the chance of rain. Tap a card to show that day on the whole page (`/weather?day=YYYY-MM-DD`; the card is pressed, and tapping through days does not pile up Back entries). The top then shows the day's condition, high, feels-like high, low and high and the chance of rain, and the heading above the tiles shows the day's name ("Tomorrow", "Thursday 29"). The tiles show the day's strongest wind and main direction, the mean humidity, pressure and cloud cover, the total rain, the strongest gust, the highest UV index, and that day's sunrise and sunset. Tap Today to come back.
+- **Footer**: the place (with its region when known), the time of the last update, a stale notice when the data is late, and the Open-Meteo credit.
 
-When weather is off or not fetched yet, the page says that the weather is unavailable and tells you to enable `[weather]` in `oikos.toml`.
+The page keeps showing the last data however old it is, unlike the header card. When weather is off or not fetched yet, the page says that the weather is unavailable and tells you to enable `[weather]` in `oikos.toml`.
 
 ## Dashboards
 
 ![The House dashboard: the sidebar with the rooms, the greeting with the weather and solar cards, the moods and the Favorites cards](/img/screens/house.webp)
 
-Dashboards (`/dashboards/<id>`): the sidebar lists the dashboards under Overview. House is always the first entry, and the page the web UI opens on: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set (`1x1`, `2x1`, `2x2`, `1x2`). The grid adapts phone (2 columns) ↔ tablet (4) ↔ desktop (6).
+Dashboards (`/dashboards/<id>`): once you have a dashboard of your own, the sidebar lists the dashboards under Overview. House is always the first entry, and the page the web UI opens on: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set: `1x1` and `2x1` for most kinds, plus `2x2` for `room-group`, and `2x1`, `2x2` and `1x2` for `history-chart` and `camera`. The grid adapts phone (2 columns, up to 600 px) ↔ tablet (4, up to 1200 px) ↔ desktop (6).
 
-On a user-authored dashboard the header's pencil enters edit mode: click a widget to open its config sheet (title, size, delete; a history chart also has its range: 1 h, 6 h, 24 h, 7 d or 30 d), use move left/right to reorder, cycle the span with the resize button, Save or Discard. In edit mode a panel on the right (at the bottom on a phone) lists what can be added, grouped by kind, each row with its room and device; search narrows it, and clicking a row adds the widget at the end of the grid. Locks have their own section: a Lock widget shows the lock's state (Locked, Unlocked, Jammed, Offline…) and one button that does the opposite; Unlock asks "Unlock <name>?" first, Lock acts at once. The same card shows locks on Home. Cameras have their own section when Frigate is set up: one row per camera (a wide tile) and **All cameras** (a big tile with the first four). A Camera widget shows 1 to 4 cameras, each picture 16:9 (the tile takes its height from them): on a wide or tall tile one at a time, with arrows (or a swipe) and dots; on a big tile two stacked, or a 2×2 grid for three or four. Each picture has a red Live mark while frames flow, the camera's name, and an amber badge with its latest alert of the last 24 hours ("Car detected · 12 min ago") that opens the alert. A tap opens the camera full screen, with arrows to the widget's other cameras; the close button, Escape or Back close it. Tiles fetch about one frame a second and stop while scrolled away or while the tab is hidden. Live frames need `[frigate] live = true` (see [Cameras](cameras.md#live-view-on-dashboards)); without it a camera shows its latest alert snapshot, or "No events yet". The config sheet of a Camera widget orders its cameras (up, down, remove) and adds one from the cameras not in it yet. The gear opens the dashboard settings sheet (name, a Show header switch that puts the House greeting, chips and weather card above the widgets, move up/down in the sidebar, delete), and `＋ New dashboard` in the sidebar creates a new one at `max(order) + 1`.
+On a user-authored dashboard the pencil at the top of the page enters edit mode (a new dashboard opens straight in it): click a widget to open its config sheet (title, size, delete; a history chart also has its range: 1 h, 6 h, 24 h, 7 d or 30 d), use the ◀ and ▶ buttons (move earlier or later) to reorder, cycle the span with the resize button, then **Save** or **Discard**. Both stay disabled until something changed, and the pencil is flagged while a draft is unsaved. In edit mode a panel on the right (at the bottom on a phone) lists what can be added, grouped by kind, each row with its room and device; search narrows it, and clicking a row adds the widget at the end of the grid. Locks have their own section: a Lock widget shows the lock's state (Locked, Unlocked, Jammed, Offline…) and one button that does the opposite; Unlock asks "Unlock <name>?" first, Lock acts at once. The same card shows locks on Home. Cameras have their own section when Frigate is set up: one row per camera (a wide tile) and, with two or more cameras, **All cameras** (a big tile with the first four). A Camera widget shows 1 to 4 cameras, each picture 16:9 (the tile takes its height from them): on a wide or tall tile one at a time, with arrows (or a swipe) and dots; on a big tile two stacked, or a 2×2 grid for three or four. Each picture has a red Live mark while frames flow, the camera's name, and an amber badge with its latest alert of the last 24 hours ("Car detected · 12 min ago") that opens the alert. A tap opens the camera full screen, with arrows to the widget's other cameras; the close button, Escape or Back close it. Tiles fetch about one frame a second and stop while scrolled away or while the tab is hidden. Live frames need `[frigate] live = true` (see [Cameras](cameras.md#live-view-on-dashboards)); without it a camera shows its latest alert snapshot, or "No events yet". The config sheet of a Camera widget orders its cameras (up, down, remove; the last one cannot be removed) and adds one from the cameras not in it yet, up to four. The gear opens the dashboard settings sheet (name, a **Show header** switch that puts the House greeting, chips and weather card above the widgets, move up/down in the sidebar, **Delete dashboard** after a confirmation that sends you back to House), and `＋ New dashboard` in the sidebar creates a new one at `max(order) + 1`.
 
 Dashboards persist as MQTT retained payloads under `<ui_prefix>/dashboards/<id>`. The Home section's placement rule still applies on House: an entity with an energy role or shown on Security leaves House unless its override pins it with `homePinned`; cover/light rooms still fold into group cards exactly as before. A room's section shows only when the room has at least one card under that rule, so a room whose entities are all hidden or all elsewhere drops off House and disappears from the sidebar too. Its `/rooms/<id>` page still opens and says "Nothing here yet.", the room pickers still offer it, and it comes back once something visible lands in it.
 
@@ -131,20 +138,23 @@ A mood (in the sidebar, **My moods**) is a named list of actions that runs once,
 
 ### Home
 
-Home shows a row titled **One mood, one tap**, under the header. It holds up to four pinned moods, four across on a wide window and two by two on a phone. A tap applies the mood. While it runs, its tile is pressed, and a toast says **Good night: done**, or how many devices did not respond (**Good night: 2 devices did not respond**). The toast is the only report you get on Home; the full report is on the mood's page.
+Home shows a row titled **One mood, one tap**, under the header. It holds up to four pinned moods, in their order, four across on a wide window (700 px and up) and two by two on a phone. A tap applies the mood. While it runs, its tile is pressed, and a toast says **Good night: done**, or how many devices did not respond (**Good night: 2 devices did not respond**). The toast is the only report you get on Home; the full report is on the mood's page.
 
 - A mood with no actions shows **Add a lamp** under its name. Tapping it opens the editor instead of applying it.
 - When no mood is pinned, the row shows **Choose your moods**, which opens the page. When there are no moods at all, it shows **Create a mood** and **Add the four examples**.
-- **How it works** at the end of the row opens a short explanation.
+- **How it works**, a link beside the row title, opens a short explanation.
 - The row stays hidden until the list of moods has loaded once.
 
 ### My moods
 
-The page (`/ambiances`) lists every mood as a card, in order.
+![My moods: each mood with Apply, Edit, move up and down, Delete and its Show on Home switch](/img/screens/moods.webp)
 
-- **Show on Home**: pins the mood to the row. Only the first four pinned moods, by order, show on Home. The page says so when you pin more.
-- **↑** and **↓** change the order.
-- **Apply** runs the saved mood. **Edit** opens the editor. **Delete** removes it after a confirmation.
+The page (`/ambiances`) has the title **My moods**, a **How it works** link and a **New mood** button at the top. Below, every mood is a card, in order, with its icon, name and subtitle.
+
+- **Show on Home**: a switch on the card that pins the mood to the row. Only the first four pinned moods, by order, show on Home. The page says "Only the first 4 pinned moods show on Home." when you pin more.
+- **Apply** runs the saved mood. **Edit** opens the editor.
+- **↑** and **↓** (Move up, Move down) change the order.
+- **Delete** removes the mood after a confirmation that names the mood.
 - **Last run** opens the report of the last run, if the mood ran since this page was opened.
 - When the page is empty, it says **No mood yet.** and offers **New mood** or **Add the four examples**. The examples are *Good night*, *I'm heading out*, *Quiet evening* and *A little reading*; you can edit them like any other mood.
 - A mood the hub cannot read shows its reason on its card. It cannot be applied, so only **Delete** is offered.
@@ -153,14 +163,15 @@ The page (`/ambiances`) lists every mood as a card, in order.
 
 The editor (`/ambiances/new`, or **Edit** on a card) has:
 
-- **Name** (required), **Subtitle** and an **Icon**.
-- **Actions**, in the order they run. Each one can be moved up or down, edited or deleted. **Add an action** offers four types:
-  - **Every light, plug or shutter**: pick the kind, then **on** or **off** (lights can also get a brightness; shutters open or close). **Where** is the whole house or one room. Categories include devices you add later, so you do not have to edit the mood when you add a lamp. **See which** lists the devices in the category, grouped by room, with a checkbox on each; untick a device to leave it out.
+- **Name** (required, up to 60 characters), **Subtitle** (up to 80) and an **Icon**, then a **Show on Home** switch. A new mood starts pinned while the Home row has room.
+- **Actions**, in the order they run. Each one is a sentence with buttons to move it up or down, delete it (✕) and open or close its form (+ / −). **Add an action** offers four types:
+  - **Every light, plug or shutter**: pick the kind (**What**), then **on** or **off** (lights turned on can also get a brightness of 1 to 100 %; shutters open or close). **Where** is the whole house or one room. Categories include devices you add later, so you do not have to edit the mood when you add a lamp. **See which** lists the devices in the category, grouped by room, with a checkbox on each; untick a device to leave it out.
   - **One device**: search for a device, then pick one of its commands. A command that takes a value shows a number field.
-  - **Heating**: only shown when the climate engine is on. Pick a zone, or every zone. **Hold** sets a temperature and/or a mode for some **Hours**; **Back to the schedule** removes the hold.
+  - **Heating**: only shown when the climate engine is on. Pick a zone, or every zone. **Hold** sets a temperature (5 to 30 °C, or **Off**) and/or a mode (heat or cool) for some **Hours** (1 to 720); **Back to the schedule** removes the hold.
   - **Automation**: pick a flow, then **Switch on**, **Switch off** or **Run**.
-- **Save** stores the mood. It stays disabled until the name is filled in.
+- **Save** stores the mood and goes back. It stays disabled until the name is filled in.
 - **Try it** applies the saved version, so it is disabled while the form has unsaved changes. Its tooltip says **Save first**.
+- **Delete**, on an existing mood, asks for a confirmation and then removes it.
 
 ### Report
 
@@ -174,29 +185,37 @@ After a run, **Last run** opens the report (`/ambiances/<id>/report`), with the 
 
 ![The Energy screen: live power flow between solar, grid, house and consumers, above the grid day chart](/img/screens/energy.webp)
 
-Energy (`/energy`): the live power flow as in the app. Solar on top, the house in the centre, the grid on the left, consumers on an arc to the right, the battery or the water meter bottom-left; lines thicken and run faster with power and follow import or export. Under the diagram, one card per node with the live value and the lifetime kWh of its paired energy counter.
+Energy (`/energy`): the live power flow as in the app. Solar on top, the house in the centre, the grid on the left, consumers on an arc to the right, the battery or the water meter bottom-left; lines thicken and run faster with power and follow import or export. The diagram has room for three consumers; with more, the last slot folds the rest into "more" and a **Show all N consumers** button lists them all. A line under the title sums up the flow, and a hint asks you to check the grid or battery sign when the numbers look inverted. Under the diagram come the grid day chart (below), then one card per node, every consumer included, with the live value, the lifetime kWh of its paired energy counter and the kWh since midnight. Tap a card's title to open its sensor. Without any energy role, the screen says how to set one.
 
 Roles come from the `energyRole` override (`solar`, `grid`, `grid_export`, `battery`, `house`, `consumer`, `water`), set from the entity sheet or over MCP.
 
-Between the diagram and the cards, the **grid day chart** shows what crossed the grid meter on one day, in half-hour bars. What you bought from the grid sits above the zero line, off-peak (light blue) under peak (dark blue); what you sold, the solar export, sits below it in yellow. The off-peak periods are shaded behind the bars. Above the chart, the day's totals: bought with its off-peak and peak split, and sold. ‹ and › move to the previous or next day, from the first day with data up to today; today's bars fill up as the day goes on, refreshed about once a minute while the page is open. Hover or tap a bar for its half hour and values.
+Between the diagram and the cards, the **grid day chart** (a "Today" card) shows what crossed the grid meter on one day, in half-hour bars. What you bought from the grid sits above the zero line, off-peak (light blue) under peak (dark blue); what you sold, the solar export, sits below it in yellow. The off-peak periods are shaded behind the bars. Above the chart, the day's totals: bought with its off-peak and peak split, and sold. ‹ and › move to the previous or next day, from the first day with data up to today; today's bars fill up as the day goes on, refreshed about once a minute while the page is open. Hover or tap a bar for its half hour and values.
 
 The chart reads the lifetime counters paired with the entities that carry the `grid` role (bought) and their export twin or a `grid_export` entity (sold), so it needs [history](history.md) and a grid meter with an energy counter. The split comes from the off-peak hours in Settings › Home; without them every bar is one colour ("Bought"). A day keeps the off-peak hours that were in force on it, so changing your contract does not recolour past days.
 
 ## Security
 
-Security (`/security`): the alarm panel as a hero card (arm modes, Disarm, inline code when the panel asks for one), the opted-in actions (`securityAction`, asking first unless `securityAsk` is off), a summary line ("1 smoke · 2 open" or "All clear"), the safety and intrusion sensors in sections (Openings, Motion, Fire, Water, Other) as two-column tiles, and the recent alerts. `securityHidden` takes a sensor off the tab.
+![The Security screen: the alarm card with its arm modes, the opted-in actions, the summary line and the sensor sections](/img/screens/security.webp)
+
+Security (`/security`): the alarm panel as a hero card (the arm modes Home, Away and Night the panel offers, Disarm, an inline code field when the panel asks for one, and the exit or entry countdown and the cause while it lasts), the opted-in actions (`securityAction` on a switch or a button; a tap asks first unless `securityAsk` is off, and turning a switch off never asks), a summary line ("1 smoke · 2 open" or "All clear"), the safety and intrusion sensors in sections (Openings, Motion, Fire, Water, Other) as two-column tiles with the name, room, state and how long ago it changed, and the last five alerts of the camera, alarm and security channels with a **See all** link to [Alerts](#alerts). `securityHidden` takes a sensor off the tab; hiding it on Home does not.
 
 ## Climate
 
-Climate (`/climate`, beta) spans the page. The rooms are listed on the left (a row of chips on a phone), each with its reading, a dot in the colour of its target and where it stands. The selected room shows its status (reading, target, state, a quick hold of a setpoint for a while, and any hold with Clear), then its week as a calendar: seven day columns with the hours going down, each block coloured by its temperature (yellow below 17 °C, orange to 20 °C, red from 20 °C) and a line at the current time on today. Tapping a block shows its times. Below come the pending proposal, learning, the room thermometer field (the [entity picker](#picking-an-entity), opened on the thermometers) and the recent decisions; Settings opens the house settings sheet, and the engine's banners sit under the title. While editing the rules or a proposal, a block's ends drag up and down, tapping an empty spot on a day adds a two-hour block there (base + 2 °C), and a block's editor has day chips to add it to, or remove it from, other days. A room without rules offers **Create schedule**: an empty heating week (base 16 °C) to fill in; saving it approves it and a pending room becomes active. While editing, the base (the temperature outside the blocks) can be changed or set to Off. Switching rooms keeps an edit in progress. See [Climate](climate.md).
+![The Climate screen: the room list, the selected room's status and its week calendar](/img/screens/climate.webp)
+
+Climate (`/climate`, beta) spans the page. The rooms are listed on the left (a row of chips on a phone), each with a dot in the colour of its decided temperature, an **Eco** pill while it is in eco, its reading and a line saying where it stands ("Heat 14° · Active", "Pending · no schedule"). The selected room shows its status: the reading and how long ago it came, the target with the source of the decision and its reason, the state (Off, Pending, Active), and, on an active room, a quick hold of a setpoint for 1 h, 2 h or until the next change in the schedule; any hold is listed with **Clear**. The eco row offers **Eco until…**, which starts the room's own eco until a date and time; while it runs, the row reads "Eco until Tue 19:00" with **Cancel eco**, and the status card shows the "Eco" source. A room whose state is Off has no eco row.
+
+Under the status comes the room's week as a calendar: seven day columns with the hours going down, each block coloured by its temperature (yellow below 17 °C, orange from 17 to below 20 °C, red from 20 °C, dashed grey for Off; the legend reads "≤ 16°", "17 – 19°", "≥ 20°") and a line at the current time on today. Tapping a block shows its times. Below come the pending proposal, the learning line with **Learn now**, the room thermometer field (the [entity picker](#picking-an-entity), opened on the thermometers) and the recent decisions. Settings opens the house settings sheet, which also holds the eco settings (the eco setpoints, the fan speed and the presence list for the whole-house eco while nobody is home), and the engine's banners (an error, an invalid house document, or "History is off" when no history database is set up) sit under the title. While editing the rules or a proposal, a block's ends drag up and down, tapping an empty spot on a day adds a two-hour block there (base + 2 °C), and a block's editor has day chips to add it to, or remove it from, other days. A room without rules offers **Create schedule**: an empty heating week (base 16 °C) to fill in; saving it approves it and a pending room becomes active. While editing, the base (the temperature outside the blocks) can be changed or set to Off. Switching rooms keeps an edit in progress. See [Climate](climate.md).
 
 ## History
 
-History (`/history/<id>`): a full-screen chart of one entity over 1 h, 6 h, 24 h, 7 d, 30 d or 1 y, picked with range chips. A numeric sensor draws a smooth line over a soft fill, with round tick labels on the left and a faint grid; on 7 d, 30 d and 1 y a light band shows each bucket's min to max. Hover the chart (or touch and drag) for a crosshair and a card with the time and value, plus the min–max on the long ranges. Lights and switches keep a thin step line with their On/Off words; energy counters draw daily bars, and hovering one shows its day and total. The same chart serves the history widget on dashboards. It needs `[history] url`; see [History](history.md).
+![The History screen: a temperature over 24 hours with the hover card](/img/screens/history.webp)
+
+History (`/history/<id>`): a full-screen chart of one entity over 1 h, 6 h, 24 h (the default), 7 d, 30 d or 1 y, picked with range chips (the range is kept in the address, as `?range=7d`). The title is the entity's name and type, with its room and availability under it. A numeric sensor draws a smooth line over a soft fill, with round tick labels on the left, a faint grid and a time axis that ends at "now"; on 7 d, 30 d and 1 y a light band shows each bucket's min to max. Hover the chart (or touch and drag) for a crosshair and a card with the time and value, plus the min–max on the long ranges. Under the chart, a footer names the range ("Last 24 hours") and gives the minimum and maximum of what is drawn. Lights, switches, binary sensors and covers keep a thin step line, with their On/Off words (0 and 100 for a cover) on the axis. An energy counter draws daily bars over 7 d, 30 d and 1 y, with the range's total in the footer, and hovering a bar shows its day and total; over 1 h, 6 h and 24 h it draws the power of its paired power sensor as a line, or a single daily bar when it has none. The same chart serves the history widget on dashboards. It needs `[history] url`; see [History](history.md).
 
 ## Groups
 
-Groups (`/groups`): the hand-made groups, with a wizard to create one (`/groups/new`) or edit it, and a group sheet (`/group/<id>`) with its controls. See [Groups and virtual entities](groups-and-virtual-entities.md).
+Groups (`/groups`): the hand-made groups, one row each with its kind icon, name and member count, and a **New group** button. A three-step wizard (Type, Members, Name and room) creates a group (`/groups/new`) or edits one (`/groups/<id>/edit`); a member can only be of the group's kind, never another group. The group sheet (`/group/<id>`) has the group's controls, its members (each opens its own sheet, with its own toggle where that makes sense, and a mismatch or "Not found" chip when it no longer fits) and the settings: **Show in Favorites**, **Hide members on Home**, **Edit group** and **Delete group**, which names the flows that use the group before it confirms. See [Groups and virtual entities](groups-and-virtual-entities.md).
 
 ## Cards
 
@@ -207,17 +226,29 @@ Every device card has the same frame: an icon tile, the room (left out under a r
 - **Climate**: the target sits in a ring. Drag the ring, or focus it and use the arrow keys (Page Up/Down: 1 °C, Home/End: the ends); the value is sent when you let go, or 0.6 s after the last key. − and + step at once. The ring follows the mode's colour and is greyed out while the mode is off. The mode is a badge you can change in place; the fan speed is in the sheet.
 - **Temperature**: the value large, the humidity of the same device, and a small curve of the last 24 hours (it needs the history database; without it the card simply has no curve). The badge reads "Live" while the sensor reports, and "3 h ago" / "2 d ago" once it has been quiet for 3 hours, which is how a flat battery shows.
 - **Vacuum**: two columns wide (a full row on a phone), a sentence for what the robot is doing ("At home.", "Cleaning.", "Needs help."), its battery, Start / Pause / Resume and Send home. Other actions and the fan speed are in the sheet.
-- **Water heater**: the tank, the temperature and its caption; ⋯ opens the sheet with the target and the mode.
+- **Water heater**: a tank picture next to the temperature, an activity chip (the average heating power when the device reports it, else the mode) and the cold-water inlet temperature; ⋯ opens the sheet with the target and the mode, when the heater supports them.
+- **Cover**: open, stop and close buttons, a position slider and a "Moving" badge while it moves.
+- **Lock**: the state in words and one button that does the opposite; it asks first before it unlocks.
+- **Door opener**, **Chime** and **Siren** (a switch with its **Show as** type set in the sheet): the opener has one **Open** button that asks first by default, the chime one **Play** button, and the siren a toggle that reads "Ringing" while on and asks before ringing.
+- **Alarm panel**: the state, one button per arming mode and Disarm, with an inline code field when the panel asks for one.
+- **Binary sensor**: a state word, with the icon tinted while it is on.
+- **Number**, **Select** and **Button**: a slider over the range, a dropdown over the options, one wide press button.
+- **Group**: a hand-made [group](#groups) is one card of its own kind (light, cover, switch, climate, water heater, number, select, button or vacuum), controlling all its members at once.
 
 ## Entity sheet
 
-Entity sheet (`/entity/<id>`): the controls, the device info, the raw state and the override editor. The controls are the device's card with all its controls (see [Cards](#cards)).
+Entity sheet (`/entity/<id>`): a header with the name, room, type and availability, then:
+
+- **Controls**: the device's card with all its controls (see [Cards](#cards)), and a **View history →** link to [History](#history). A light also gets a colour panel, and a generic entity (lock, fan, siren, scene, text) the panel of its own controls.
+- **Settings**: the override editor, which keeps the entity's overrides on the hub. Its sections show only what fits the entity: **General** (name, **Favorite**, **Hide from Home** or **Show on Home**, room), **Type** (**Show as**) and **Main control**, **Light** (what it turns on at), **Security** (**Show on Security**, **Ask before acting**), **Display and energy** (card style, energy role, **Invert sign**, icon and energy counter) and **Climate** presets. **Save** keeps the edits and **Reset to defaults** clears the overrides.
+- **In groups**: the hand-made groups the entity belongs to, when there are any.
+- **Device & diagnostics**, folded: the device information, the raw state value and attributes, and the time of the last update.
 
 Back, on every sheet and detail page, returns to the page it was opened from, one step at a time: dashboard → group → member → history unwinds in that order. A form you saved (new or edited group, new flow) is skipped. A page opened directly, from a link or after a reload, goes back to its parent: Alerts for an alert, Flows for a flow, Groups for the group wizard, the entity for its history, the House dashboard for the rest.
 
 ## Devices
 
-Devices: the administration view of the Zigbee devices. Each row shows the device's room (the rooms of its entities, or "No room"), its model and vendor, and badges for firmware updates, battery, link quality and entity count. The search matches the name, room, model, vendor and IEEE address.
+Devices (`/devices`, reached from Settings › Zigbee2MQTT): the administration view of the Zigbee devices, sorted by name, with a count ("N of M"). Each row shows an availability dot, the device's room (the rooms of its entities, or "No room"), its model and vendor, and badges for a firmware update (the new version), battery, link quality and entity count. Tap a row to list its entities, each opening its [sheet](#entity-sheet). The search matches the name, room, model, vendor and IEEE address. At the bottom, the ignored MQTT topics with the reason each was ignored.
 
 ## Settings
 
@@ -228,7 +259,7 @@ Settings (`/settings`): a short list, one row per page, with a status on the rig
 - **Appearance** (`/settings/appearance`), status the current theme: the theme switch (Auto, Night Glass, Ivoire), the same choice as the header's theme button.
 - **Zigbee2MQTT** (`/settings/zigbee2mqtt`), status the number of firmware updates waiting, or the bridge state when there are none: the bridge (version, coordinator, permit join, state), the updates waiting, the counts (devices, entities, primary entities, areas, ignored topics) and the way to the [devices](#devices) list.
 - **Broker** (`/settings/broker`), status Online, Connecting… or Offline: the MQTT connection, with the reason when it is down.
-- **AI assistants (MCP)** (`/settings/mcp`): the endpoint and copy-ready connection snippets for Claude Code, Codex and Claude Desktop, built from the page's origin, so they always carry the hub's real address. The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
+- **AI assistants (MCP)** (`/settings/mcp`): the endpoint with its transport, and copy-ready connection snippets for Claude Code, Codex and Claude Desktop, built from the page's origin, so they always carry the hub's real address. The snippets are also in [Talking to the house (MCP)](assistants-mcp.md).
 - **About** (`/settings/about`), status the version: the product, its version and the hub's address.
 
 The **Home** page (**Maison** in French, `/settings/home`) holds the settings of the home header and the off-peak hours, with one Save button for the whole panel. Its fields:
@@ -244,18 +275,19 @@ The **Home** page (**Maison** in French, `/settings/home`) holds the settings of
 Every field that asks for an entity (the climate and home settings, the alarm's sensors, sirens, remotes and trackers, a flow card's entity, a mood's device action, a power sensor's energy counter, a group's members) opens the same picker. The closed field shows the chosen entity with its device, its room and its current value.
 
 - **Search**: type part of a name, a device, a room or a type (`temperature`, `interrupteur`), in either language and without accents; the id works too.
-- **Chips**: a field that needs one kind of entity opens on it (thermometers for the outdoor temperature, for example); **All** lists everything the field accepts, and **+ Diagnostic** adds the diagnostic, configuration and hidden entities.
+- **Chips**: a field that needs one kind of entity opens on it (thermometers for the outdoor temperature, for example); **All** lists everything the field accepts, and **+ Diagnostic** (a toggle) adds the diagnostic, configuration and hidden entities.
 - **Rows**: each row shows the entity, its device on the second line, and on the right its value and how long ago it changed, so two "Backlight mode" switches from two plugs are told apart.
 - **On a computer** it is a window with the rooms on the left, each with its number of matches, and the entities on the right. **On a phone** it fills the screen and groups the entities under room headings.
-- **Keys**: ↑ ↓ move, Enter picks, Esc closes. The browser's Back button also closes it.
-- Fields that take several entities keep the picker open: tick each one, then **Done**. The chosen ones stay as chips under the field; tap a chip to remove it.
+- **Pinned row**: a field with a default shows it first, for example "Automatic" or "None"; pick it to clear the field.
+- **Keys**: ↑ ↓ move, Enter picks, Esc closes. The close button, a click on the backdrop and the browser's Back button also close it.
+- Fields that take several entities keep the picker open: tick each one, then **Done (N)**, with the number picked. The chosen ones stay as chips under the field; tap a chip to remove it.
 - With **All** and no search, the first 200 entities are shown; type or pick a room to see the rest.
 - An entity the house no longer has stays in the field, marked "missing", until you replace or remove it.
 
 ## Alerts
 
-Alerts (`/alerts`): the push alerts the hub keeps in `oikos/push/history`, with channel chips and day groups, and a "Recent alerts" section on Home. The detail (`/alerts/<id>`) shows the snapshot, plays the clip, offers the alert's buttons and "Open device". These are the same screens as the Android app; the body stays in the producer's language. See [Push notifications](push-notifications.md) and [Cameras (Frigate)](cameras.md).
+Alerts (`/alerts`): the push alerts the hub keeps in `oikos/push/history`, with channel chips (All, Alarm, Security, Camera, Energy, Climate, System, Misc) and day groups (Today, Yesterday, then dates), and a "Recent alerts" section at the bottom of Home and of Security (the last five alerts of the camera, alarm and security channels). The detail (`/alerts/<id>`) shows the snapshot (a ▶ button plays the clip), the title and body, the channel and a "Resolved" badge when it is, the date, up to three of the alert's own buttons, **Open device** when the alert names one the house knows, and where it came from. These are the same screens as the Android app; the body stays in the producer's language. See [Push notifications](push-notifications.md) and [Cameras (Frigate)](cameras.md).
 
 ## Flows
 
-Flows (`/flows`, `/flows/<id>`): the flows list, grouped by room, with search, status and trigger filters, sorting and a List/Cards view; an enable switch per flow and a **New flow** button; and a full-bleed canvas per flow. See [Flows](flows.md) for what the canvas shows and how to edit it.
+Flows (`/flows`, `/flows/<id>`, `/flows/new`): the flows list, grouped by room (or ungrouped), with search; status chips (All, On, Off, Needs attention) with their counts; a trigger filter (device state, schedule, sun, button or event, manual); sorting by name or last run; a List/Cards view; an enable switch per flow; a ⋯ menu per flow (open it, move it to a room, delete it after a confirmation); and a **New flow** button. Each flow opens on a full-bleed canvas. See [Flows](flows.md) for what the canvas shows and how to edit it.
