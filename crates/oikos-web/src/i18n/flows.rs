@@ -127,6 +127,7 @@ pub enum FlowText {
     NoneParen,
     AddValue,
     TriggerValueRow,
+    Preview,
     Silent,
     Entity,
     FiresWhen,
@@ -327,6 +328,7 @@ impl FlowText {
         FlowText::NoneParen,
         FlowText::AddValue,
         FlowText::TriggerValueRow,
+        FlowText::Preview,
         FlowText::Silent,
         FlowText::Entity,
         FlowText::FiresWhen,
@@ -560,6 +562,7 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::NoneParen => ("(none)", "(aucun)"),
         T::AddValue => ("＋ Value", "＋ Valeur"),
         T::TriggerValueRow => ("Trigger value", "Valeur du déclencheur"),
+        T::Preview => ("Preview", "Aperçu"),
         T::Silent => ("Silent", "Silencieuse"),
         T::Entity => ("Entity", "Entité"),
         T::FiresWhen => (

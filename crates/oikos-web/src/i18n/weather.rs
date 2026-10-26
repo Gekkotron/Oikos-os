@@ -235,6 +235,18 @@ pub fn updated_at(lang: Lang, at: NaiveTime) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn condition_labels_match_the_notify_words() {
+        for c in WeatherCondition::ALL {
+            for lang in [Lang::En, Lang::Fr] {
+                assert_eq!(
+                    condition_label(lang, c),
+                    oikos_core::flow::template::text_word(c.as_str(), lang.core())
+                );
+            }
+        }
+    }
     #[test]
     fn weather_page_copy() {
         let sat = NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();

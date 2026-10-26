@@ -3,9 +3,13 @@
 
 use leptos::prelude::*;
 
+use oikos_core::flow::template::{Reading, Template, TemplateError, parse};
+
 use crate::entity_picker::needs::{is_signal, keep};
 use crate::entity_picker::{EntityPicker, Mode, Pinned};
+use crate::house::House;
 use crate::i18n::flows::{FlowText, use_flow_text};
+use crate::i18n::use_lang;
 
 /// `text` with `piece` inserted at `caret_utf16` (a browser caret, in UTF-16 units), and the
 /// caret after `piece`, in UTF-16 units too. No caret, or one past the end, appends.
@@ -115,6 +119,66 @@ pub fn TemplateField(
             })
             on_pick=on_pick
         />
+    }
+}
+
+/// The notify text as the phone would get it now: the house's live values, in the web app's
+/// language. `{trigger}` stands for the current value of `trigger_entity` (the flow's first
+/// state trigger). A text the hub would refuse shows its reason instead.
+#[component]
+pub fn NotifyPreview(
+    title: Signal<String>,
+    body: Signal<Option<String>>,
+    trigger_entity: Signal<Option<String>>,
+) -> impl IntoView {
+    let t = use_flow_text();
+    let lang = use_lang();
+    let house = expect_context::<House>();
+    let parsed = Memo::new(
+        move |_| -> Result<(Template, Option<Template>), TemplateError> {
+            let field = |name: &str, text: &str| {
+                parse(text).map_err(|e| TemplateError {
+                    reason: format!("{name}: {}", e.reason),
+                })
+            };
+            let title = title.with(|text| field("title", text))?;
+            let body =
+                body.with(|text| text.as_deref().map(|text| field("body", text)).transpose())?;
+            Ok((title, body))
+        },
+    );
+    let filled = move || {
+        let (title, body) = parsed.get()?;
+        let lang = lang().core();
+        Ok::<_, TemplateError>(house.entities.with(|entities| {
+            let lookup = |id: &str| {
+                let e = entities.get(id)?;
+                Reading::of(
+                    &e.component,
+                    e.device_class.as_deref(),
+                    e.unit.as_deref(),
+                    &e.state.value,
+                )
+            };
+            let trigger = trigger_entity.with(|id| id.as_deref().and_then(lookup));
+            let fill = |t: &Template| t.render(lang, &lookup, trigger.as_ref());
+            (fill(&title), body.as_ref().map(fill))
+        }))
+    };
+    view! {
+        <div class="node-editor__field node-editor__preview">
+            <span class="node-editor__label">{move || t(FlowText::Preview)}</span>
+            {move || match filled() {
+                Ok((title, body)) => view! {
+                    <p class="node-editor__preview-text">
+                        <strong>{title}</strong>
+                        {body.map(|body| view! { <br/>{body} })}
+                    </p>
+                }
+                .into_any(),
+                Err(err) => view! { <p class="node-editor__error">{err.reason}</p> }.into_any(),
+            }}
+        </div>
     }
 }
 
