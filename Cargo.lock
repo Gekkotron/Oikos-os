@@ -2380,6 +2380,7 @@ dependencies = [
  "oikos-api",
  "oikos-climate",
  "oikos-core",
+ "oikos-frigate",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

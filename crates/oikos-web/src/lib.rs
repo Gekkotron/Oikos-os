@@ -4,6 +4,7 @@ pub mod alerts;
 pub mod ambiances;
 pub mod api;
 pub mod app;
+pub mod cameras;
 pub mod cards;
 pub mod chime;
 pub mod climate;

@@ -27,6 +27,7 @@ oikos-alarm = { path = "../oikos-alarm" }
 oikos-api = { path = "../oikos-api" }
 oikos-climate = { path = "../oikos-climate" }
 oikos-core = { path = "../oikos-core" }
+oikos-frigate = { path = "../oikos-frigate" }
 serde.workspace = true
 serde-wasm-bindgen.workspace = true
 serde_json.workspace = true

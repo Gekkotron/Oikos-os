@@ -83,6 +83,9 @@ pub fn App() -> impl IntoView {
     provide_context(Pending::new());
     provide_context(Confirming::new());
     provide_context(install_now());
+    let cameras = crate::cameras::CameraList::default();
+    provide_context(cameras);
+    crate::cameras::load_cameras(cameras);
     // Dashboards are not pushed over the socket, so the shell fetches them once at start-up.
     leptos::task::spawn_local(async move {
         match crate::api::fetch_dashboards().await {

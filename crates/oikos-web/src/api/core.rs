@@ -2,8 +2,8 @@
 
 use gloo_net::http::{Request, Response};
 use oikos_api::{
-    ApiError, CommandResponse, Dashboard, DashboardReorder, DashboardView, EntityView, FlowView,
-    FlowWriteOutcome, FlowsConfigView, GroupSpec, GroupView, OverridePatch, RunView,
+    ApiError, CamerasView, CommandResponse, Dashboard, DashboardReorder, DashboardView, EntityView,
+    FlowView, FlowWriteOutcome, FlowsConfigView, GroupSpec, GroupView, OverridePatch, RunView,
     SchedulePreview,
 };
 use oikos_core::flow::Flow;
@@ -223,6 +223,12 @@ pub async fn rename_area(id: &str, name: &str) -> Result<Vec<oikos_api::AreaView
 // Reserved: a full area editor is not built yet, so nothing calls this.
 pub async fn set_areas(doc: AreasDocument) -> Result<Vec<oikos_api::AreaView>, ApiError> {
     let response = check(Request::put("/api/v1/areas").json(&doc), None).await?;
+    read_json(response).await
+}
+
+/// Frigate's cameras and the hub's `[frigate] live` switch.
+pub async fn cameras() -> Result<CamerasView, ApiError> {
+    let response = check(Request::get("/api/v1/cameras").build(), None).await?;
     read_json(response).await
 }
 
