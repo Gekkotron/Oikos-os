@@ -15,12 +15,12 @@ use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
 use crate::cards::door::DoorCard;
 use crate::cards::generic::GenericCard;
-use crate::cards::lock::LockCard;
 use crate::cards::group::{
     ButtonGroupCard, ClimateGroupCard, CoverGroupEntityCard, LightGroupEntityCard, NumberGroupCard,
     SelectGroupCard, SwitchGroupCard, VacuumGroupCard, WaterHeaterGroupCard,
 };
 use crate::cards::light::LightCard;
+use crate::cards::lock::LockCard;
 use crate::cards::number::NumberCard;
 use crate::cards::select::SelectCard;
 use crate::cards::sensor::SensorCard;
@@ -91,7 +91,9 @@ pub fn card_for(entity: EntityView) -> AnyView {
         Kind::AlarmPanel => view! { <AlarmPanelCard entity=entity /> }.into_any(),
         Kind::Vacuum => view! { <VacuumCard entity=entity /> }.into_any(),
         Kind::WaterHeater => view! { <WaterHeaterCard entity=entity /> }.into_any(),
-        Kind::Generic if entity.component == "lock" => view! { <LockCard entity=entity /> }.into_any(),
+        Kind::Generic if entity.component == "lock" => {
+            view! { <LockCard entity=entity /> }.into_any()
+        }
         Kind::Generic => match generic_placement(&entity) {
             TypePlacement::Card => view! { <GenericCard entity=entity /> }.into_any(),
             // Signal, target and update entities do not show on Home.

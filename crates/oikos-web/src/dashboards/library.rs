@@ -57,6 +57,7 @@ pub enum Section {
     Climates,
     Sensors,
     WaterHeaters,
+    Locks,
     Rooms,
     FlowButtons,
     Energy,
@@ -73,6 +74,7 @@ impl Section {
                 Self::Climates => DashText::SectionClimate,
                 Self::Sensors => DashText::SectionSensors,
                 Self::WaterHeaters => DashText::SectionWaterHeaters,
+                Self::Locks => DashText::SectionLocks,
                 Self::Rooms => DashText::SectionRoomGroups,
                 Self::FlowButtons => DashText::SectionFlowButtons,
                 Self::Energy => DashText::SectionEnergy,
@@ -89,6 +91,7 @@ impl Section {
             Self::Climates => "climates",
             Self::Sensors => "sensors",
             Self::WaterHeaters => "water-heaters",
+            Self::Locks => "locks",
             Self::Rooms => "rooms",
             Self::FlowButtons => "flows",
             Self::Energy => "energy",
@@ -149,6 +152,7 @@ pub fn entries(
             Kind::Climate => (Section::Climates, WidgetKind::Climate),
             Kind::Sensor => (Section::Sensors, WidgetKind::Sensor),
             Kind::WaterHeater => (Section::WaterHeaters, WidgetKind::WaterHeater),
+            Kind::Generic if e.component == "lock" => (Section::Locks, WidgetKind::Lock),
             _ => continue,
         };
         let title = entity_title(lang, e);
@@ -504,10 +508,13 @@ mod tests {
 
     #[test]
     fn sections_come_in_display_order() {
+        let mut lock = ent("k1", "Front door", Kind::Generic);
+        lock.component = "lock".into();
         let entities = house(vec![
             ent("s1", "Temp", Kind::Sensor),
             ent("c1", "Shutter", Kind::Cover),
             ent("l1", "Lamp", Kind::Light),
+            lock,
         ]);
         let got = entries(
             Lang::En,
@@ -524,12 +531,35 @@ mod tests {
                 Section::Lights,
                 Section::Covers,
                 Section::Sensors,
+                Section::Locks,
                 Section::Rooms,
                 Section::FlowButtons,
                 Section::Energy,
                 Section::HistoryCharts,
             ]
         );
+    }
+
+    #[test]
+    fn locks_get_their_own_section() {
+        let mut lock = ent("lock.front", "Front door", Kind::Generic);
+        lock.component = "lock".into();
+        let mut siren = ent("siren.x", "Siren", Kind::Generic);
+        siren.component = "siren".into();
+        let got = run("", &house(vec![lock, siren]));
+        let locks = of(&got, Section::Locks);
+        assert_eq!(locks.len(), 1);
+        assert_eq!(locks[0].kind, WidgetKind::Lock);
+        assert!(matches!(
+            &locks[0].config,
+            WidgetConfig::Entity { entity_id, .. } if entity_id == "lock.front"
+        ));
+    }
+
+    #[test]
+    fn no_lock_no_lock_section() {
+        let got = run("", &house(vec![ent("l1", "Lamp", Kind::Light)]));
+        assert!(of(&got, Section::Locks).is_empty());
     }
 
     #[test]

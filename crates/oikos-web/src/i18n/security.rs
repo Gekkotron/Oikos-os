@@ -484,7 +484,10 @@ mod tests {
         use crate::cards::lock::LockWord;
         assert_eq!(lock_word(Lang::Fr, LockWord::Jammed), "Bloqué");
         assert_eq!(lock_word(Lang::En, LockWord::Locking), "Locking…");
-        assert_eq!(security_text(Lang::Fr, SecurityText::VerbUnlock), "Déverrouiller");
+        assert_eq!(
+            security_text(Lang::Fr, SecurityText::VerbUnlock),
+            "Déverrouiller"
+        );
     }
 
     #[test]

@@ -5527,7 +5527,9 @@ html:has(.flow-canvas-screen) {
 .dashboard-library__header--climates,
 .dashboard-library__item--climates,
 .dashboard-library__header--water-heaters,
-.dashboard-library__item--water-heaters {
+.dashboard-library__item--water-heaters,
+.dashboard-library__header--locks,
+.dashboard-library__item--locks {
   --node-accent: var(--accent-rose);
 }
 

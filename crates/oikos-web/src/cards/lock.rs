@@ -112,8 +112,7 @@ pub fn LockCard(entity: EntityView) -> impl IntoView {
     {
         let id = id.clone();
         Effect::new(move |_| {
-            if face.get().action != Some(LockAction::Unlock)
-                && confirming.is_asking_untracked(&id)
+            if face.get().action != Some(LockAction::Unlock) && confirming.is_asking_untracked(&id)
             {
                 confirming.clear();
             }
@@ -250,8 +249,14 @@ mod tests {
     #[test]
     fn unlock_is_wanted_only_while_locked() {
         assert!(unlock_still_wanted(&state("locked", Availability::Online)));
-        assert!(!unlock_still_wanted(&state("unlocked", Availability::Online)));
-        assert!(!unlock_still_wanted(&state("locked", Availability::Offline)));
+        assert!(!unlock_still_wanted(&state(
+            "unlocked",
+            Availability::Online
+        )));
+        assert!(!unlock_still_wanted(&state(
+            "locked",
+            Availability::Offline
+        )));
     }
 
     #[test]
