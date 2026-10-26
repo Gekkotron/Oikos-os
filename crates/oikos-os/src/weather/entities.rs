@@ -9,7 +9,7 @@ use oikos_api::{WeatherCondition, WeatherView};
 use serde_json::{Value, json};
 
 /// The entity keys, in the order of the spec.
-pub const KEYS: [&str; 19] = [
+pub const KEYS: [&str; 26] = [
     "temperature",
     "apparent_temperature",
     "humidity",
@@ -29,6 +29,13 @@ pub const KEYS: [&str; 19] = [
     "today_wind_gusts_max",
     "rain_next_hour",
     "tonight_min",
+    "tomorrow_condition",
+    "tomorrow_min",
+    "tomorrow_max",
+    "tomorrow_precipitation",
+    "tomorrow_precipitation_probability",
+    "tomorrow_wind_gusts_max",
+    "tomorrow_uv_index_max",
 ];
 
 const DEVICE_ID: &str = "oikos_weather";
@@ -74,6 +81,28 @@ fn describe(
         ),
         "rain_next_hour" => ("Rain next hour", Some("mm"), Some("precipitation"), false),
         "tonight_min" => ("Tonight's minimum", Some("°C"), Some("temperature"), false),
+        "tomorrow_condition" => ("Tomorrow's condition", None, Some("enum"), false),
+        "tomorrow_min" => ("Tomorrow's minimum", Some("°C"), Some("temperature"), false),
+        "tomorrow_max" => ("Tomorrow's maximum", Some("°C"), Some("temperature"), false),
+        "tomorrow_precipitation" => (
+            "Tomorrow's precipitation",
+            Some("mm"),
+            Some("precipitation"),
+            false,
+        ),
+        "tomorrow_precipitation_probability" => (
+            "Tomorrow's precipitation probability",
+            Some("%"),
+            None,
+            false,
+        ),
+        "tomorrow_wind_gusts_max" => (
+            "Tomorrow's strongest gust",
+            Some("km/h"),
+            Some("wind_speed"),
+            false,
+        ),
+        "tomorrow_uv_index_max" => ("Tomorrow's UV index", None, None, false),
         other => unreachable!("unknown weather key `{other}`"),
     }
 }
@@ -120,7 +149,7 @@ fn config(prefix: &str, key: &str) -> Value {
         config["state_class"] = json!("measurement");
     }
     match key {
-        "condition" => {
+        "condition" | "tomorrow_condition" => {
             config["options"] = json!(WeatherCondition::ALL.map(WeatherCondition::as_str));
         }
         "daylight" => {
@@ -144,7 +173,8 @@ pub fn states(view: &WeatherView) -> Vec<(&'static str, String)> {
     let c = &view.current;
     let t = &view.today;
     let numbers = |v: Option<f64>| v.map(|v| v.to_string());
-    let values: [Option<String>; 19] = [
+    let tomorrow = view.days.first();
+    let values: [Option<String>; 26] = [
         numbers(c.temperature),
         numbers(c.apparent_temperature),
         numbers(c.humidity),
@@ -165,6 +195,13 @@ pub fn states(view: &WeatherView) -> Vec<(&'static str, String)> {
         numbers(t.wind_gusts_max),
         numbers(view.rain_next_hour),
         numbers(view.tonight_min),
+        tomorrow.and_then(|d| d.condition.map(|c| c.as_str().to_owned())),
+        tomorrow.and_then(|d| numbers(d.min)),
+        tomorrow.and_then(|d| numbers(d.max)),
+        tomorrow.and_then(|d| numbers(d.precipitation)),
+        tomorrow.and_then(|d| numbers(d.precipitation_probability)),
+        tomorrow.and_then(|d| numbers(d.wind_gusts_max)),
+        tomorrow.and_then(|d| numbers(d.uv_index_max)),
     ];
     KEYS.iter()
         .zip(values)
@@ -188,7 +225,7 @@ pub fn is_own_config(payload: &[u8]) -> bool {
 mod tests {
     use super::*;
     use crate::weather::{is_expired, is_stale};
-    use oikos_api::{WeatherCurrent, WeatherPlace, WeatherToday};
+    use oikos_api::{WeatherCurrent, WeatherDay, WeatherPlace, WeatherToday};
 
     fn view() -> WeatherView {
         WeatherView {
@@ -226,10 +263,29 @@ mod tests {
         }
     }
 
+    fn day() -> WeatherDay {
+        WeatherDay {
+            date: "2026-10-24".into(),
+            condition: Some(WeatherCondition::Snow),
+            min: Some(-1.5),
+            max: Some(4.0),
+            precipitation_probability: Some(60.0),
+            apparent_max: None,
+            precipitation: Some(3.2),
+            wind_speed_max: None,
+            wind_gusts_max: Some(55.0),
+            wind_direction: None,
+            humidity: None,
+            pressure: None,
+            cloud_cover: None,
+            uv_index_max: Some(0.5),
+        }
+    }
+
     #[test]
-    fn there_are_nineteen_configs_with_own_device() {
+    fn there_are_twenty_six_configs_with_own_device() {
         let all = configs("oikos");
-        assert_eq!(all.len(), 19);
+        assert_eq!(all.len(), 26);
         for ((_, config), key) in all.iter().zip(KEYS) {
             assert_eq!(config["device"]["identifiers"], json!(["oikos_weather"]));
             assert_eq!(config["unique_id"], json!(format!("weather_{key}")));
@@ -268,6 +324,35 @@ mod tests {
     }
 
     #[test]
+    fn tomorrow_values_come_from_the_first_day() {
+        let mut v = view();
+        let mut later = day();
+        later.min = Some(99.0);
+        v.days = vec![day(), later];
+        let states = states(&v);
+        assert!(states.contains(&("tomorrow_condition", "snow".to_owned())));
+        assert!(states.contains(&("tomorrow_min", "-1.5".to_owned())));
+        assert!(states.contains(&("tomorrow_max", "4".to_owned())));
+        assert!(states.contains(&("tomorrow_precipitation", "3.2".to_owned())));
+        assert!(states.contains(&("tomorrow_precipitation_probability", "60".to_owned())));
+        assert!(states.contains(&("tomorrow_wind_gusts_max", "55".to_owned())));
+        assert!(states.contains(&("tomorrow_uv_index_max", "0.5".to_owned())));
+    }
+
+    #[test]
+    fn tomorrow_condition_is_an_enum_sensor() {
+        let all = configs("oikos");
+        let index = KEYS
+            .iter()
+            .position(|k| *k == "tomorrow_condition")
+            .unwrap();
+        let tomorrow = &all[index].1;
+        assert_eq!(tomorrow["device_class"], json!("enum"));
+        assert_eq!(tomorrow["options"], all[3].1["options"]);
+        assert!(tomorrow.get("state_class").is_none());
+    }
+
+    #[test]
     fn states_skip_missing_values() {
         let states = states(&view());
         assert!(states.iter().all(|(key, _)| *key != "uv_index"));
@@ -299,6 +384,7 @@ mod tests {
         };
         full.rain_next_hour = Some(1.0);
         full.tonight_min = Some(1.0);
+        full.days = vec![day()];
         let keys: Vec<&str> = states(&full).iter().map(|(key, _)| *key).collect();
         assert_eq!(keys, KEYS);
     }

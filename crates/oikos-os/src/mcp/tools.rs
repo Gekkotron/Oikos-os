@@ -32,7 +32,7 @@ pub(super) type ToolResult<T> = Result<Json<T>, ToolError>;
 #[tool_router(vis = "pub(super)")]
 impl OikosMcp {
     /// The outdoor weather from Open-Meteo: now, today, rain in the next hour, tonight's low and
-    /// the next five days (metric units; `stale` is true when the data is old). Answers
+    /// the next five days with their full figures (metric units; `stale` is true when the data is old). Answers
     /// `weather unavailable` while `[weather]` is off or before the first fetch.
     #[tool(name = "get_weather", annotations(read_only_hint = true))]
     async fn get_weather(&self) -> ToolResult<WeatherView> {

@@ -1,7 +1,10 @@
-//! The weather page the header's weather card links to: now, the next five days, the source.
+//! The weather page the header's weather card links to: now or a chosen day, the next five days,
+//! the source.
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use leptos::prelude::*;
+use leptos_router::NavigateOptions;
+use leptos_router::hooks::{use_navigate, use_query_map};
 use oikos_api::{WeatherDay, WeatherView};
 
 use crate::components::now::{Now, unix_now};
@@ -35,20 +38,63 @@ fn tile(label: &'static str, value: AnyView, sub: String) -> impl IntoView {
     }
 }
 
-fn day_card(lang: Lang, d: &WeatherDay) -> impl IntoView {
+/// One card of the day strip: the key is the `day` query value, `None` for today.
+struct Card {
+    key: Option<String>,
+    title: String,
+    icon: Option<&'static str>,
+    min: Option<f64>,
+    max: Option<f64>,
+    chance: Option<f64>,
+}
+
+fn today_card(lang: Lang, w: &WeatherView) -> Card {
+    Card {
+        key: None,
+        title: weather_text(lang, T::Today).to_owned(),
+        icon: w.current.condition.map(|c| condition_icon(c, true)),
+        min: w.today.min,
+        max: w.today.max,
+        chance: w.today.precipitation_probability,
+    }
+}
+
+fn forecast_card(lang: Lang, d: &WeatherDay) -> Card {
     let title = NaiveDate::parse_from_str(&d.date, "%Y-%m-%d")
         .map(|date| i18n::short_weekday(lang, date))
         .unwrap_or_else(|_| d.date.clone());
-    let icon = d.condition.map(|c| condition_icon(c, true));
-    let max = d.max.map_or_else(|| DASH.to_owned(), |t| degrees(lang, t));
-    let min = d.min.map_or_else(|| DASH.to_owned(), |t| degrees(lang, t));
-    let chance = d
-        .precipitation_probability
+    Card {
+        key: Some(d.date.clone()),
+        title,
+        icon: d.condition.map(|c| condition_icon(c, true)),
+        min: d.min,
+        max: d.max,
+        chance: d.precipitation_probability,
+    }
+}
+
+/// A tappable card of the strip; `chosen` marks the day the page shows.
+fn day_card(lang: Lang, card: Card, chosen: bool, pick: Callback<Option<String>>) -> impl IntoView {
+    let max = card
+        .max
+        .map_or_else(|| DASH.to_owned(), |t| degrees(lang, t));
+    let min = card
+        .min
+        .map_or_else(|| DASH.to_owned(), |t| degrees(lang, t));
+    let chance = card
+        .chance
         .map(|p| format::with_unit(i18n::home_number(lang, p, 0), Some("%")));
+    let key = card.key;
     view! {
-        <div class="weather-day">
-            <div class="weather-day__name">{title}</div>
-            <span class="weather-day__icon" inner_html=icon.unwrap_or_default()></span>
+        <button
+            type="button"
+            class="weather-day"
+            class:weather-day--on=chosen
+            aria-pressed=chosen.to_string()
+            on:click=move |_| pick.run(key.clone())
+        >
+            <div class="weather-day__name">{card.title}</div>
+            <span class="weather-day__icon" inner_html=card.icon.unwrap_or_default()></span>
             <div class="weather-day__range">
                 <b>{max}</b>
                 " "
@@ -58,50 +104,68 @@ fn day_card(lang: Lang, d: &WeatherDay) -> impl IntoView {
                 <span class="weather-day__drop" inner_html=icons::DROP></span>
                 {chance}
             </div>
-        </div>
+        </button>
     }
 }
 
-/// The page body for one weather document; `midday` is any instant of the house-local day.
-fn content(
-    w: &WeatherView,
-    lang: Lang,
-    midday: DateTime<Utc>,
-    house: House,
-) -> impl IntoView + use<'_> {
-    let cur = &w.current;
-    let zone = house.flows_config.with(|c| house_place(c.as_ref()).1);
-    let (sunrise, sunset, _, fallback) = house.flows_config.with(|c| sun_today(c.as_ref(), midday));
-    let fetched = DateTime::<Utc>::from_timestamp(w.fetched_at as i64, 0)
-        .map(|t| t.with_timezone(&zone).time());
-    let updated = fetched.map(|at| i18n::updated_at(lang, at));
+/// The forecast day the `day` query names; `None` (today's view) when it is missing, unknown or
+/// today's date.
+fn pick_day<'a>(
+    query: Option<&str>,
+    today: NaiveDate,
+    days: &'a [WeatherDay],
+) -> Option<&'a WeatherDay> {
+    let asked = query?;
+    if NaiveDate::parse_from_str(asked, "%Y-%m-%d").ok() == Some(today) {
+        return None;
+    }
+    days.iter().find(|d| d.date == asked)
+}
 
-    let icon = cur
-        .condition
-        .map(|c| condition_icon(c, cur.daylight.unwrap_or(true)))
-        .unwrap_or_default();
-    let temp = cur.temperature.map_or_else(
-        || DASH.to_owned(),
-        |t| format!("{}°", i18n::home_number(lang, t + 0.0, 1)),
-    );
-    let label = cur.condition.map(|c| i18n::condition_label(lang, c));
-    let feels = cur
-        .apparent_temperature
-        .map(|t| i18n::feels_like(lang, &degrees(lang, t)));
-    let headline = [label.map(str::to_owned), feels]
+/// The big block at the top of the page.
+struct Top {
+    icon: &'static str,
+    temp: String,
+    headline: String,
+    side: Vec<String>,
+}
+
+fn headline(label: Option<&str>, feels: Option<String>) -> String {
+    [label.map(str::to_owned), feels]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
-        .join(" · ");
-    let range = match (w.today.min, w.today.max) {
+        .join(" · ")
+}
+
+fn big_temp(lang: Lang, t: Option<f64>) -> String {
+    t.map_or_else(
+        || DASH.to_owned(),
+        |t| format!("{}°", i18n::home_number(lang, t + 0.0, 1)),
+    )
+}
+
+fn range_line(lang: Lang, name: &str, min: Option<f64>, max: Option<f64>) -> Option<String> {
+    match (min, max) {
         (Some(lo), Some(hi)) => Some(format!(
-            "{} {} / {}",
-            weather_text(lang, T::Today),
+            "{name} {} / {}",
             degrees(lang, lo),
             degrees(lang, hi)
         )),
         _ => None,
-    };
+    }
+}
+
+fn now_top(w: &WeatherView, lang: Lang) -> Top {
+    let cur = &w.current;
+    let icon = cur
+        .condition
+        .map(|c| condition_icon(c, cur.daylight.unwrap_or(true)))
+        .unwrap_or_default();
+    let label = cur.condition.map(|c| i18n::condition_label(lang, c));
+    let feels = cur
+        .apparent_temperature
+        .map(|t| i18n::feels_like(lang, &degrees(lang, t)));
     let tonight = w
         .tonight_min
         .map(|t| format!("{} {}", weather_text(lang, T::TonightMin), degrees(lang, t)));
@@ -110,10 +174,103 @@ fn content(
         Some(_) => weather_text(lang, T::NoRainSoon).to_owned(),
         None => String::new(),
     };
+    let side = [
+        range_line(lang, weather_text(lang, T::Today), w.today.min, w.today.max),
+        tonight,
+        Some(rain_soon),
+    ];
+    Top {
+        icon,
+        temp: big_temp(lang, cur.temperature),
+        headline: headline(label, feels),
+        side: side.into_iter().flatten().collect(),
+    }
+}
 
-    let wind_value: AnyView = match cur.wind_speed {
+fn day_top(d: &WeatherDay, lang: Lang, name: &str) -> Top {
+    let label = d.condition.map(|c| i18n::condition_label(lang, c));
+    let feels = d
+        .apparent_max
+        .map(|t| i18n::feels_like(lang, &degrees(lang, t)));
+    let chance = d
+        .precipitation_probability
+        .map(|p| i18n::chance_sub(lang, Some(&i18n::home_number(lang, p, 0))));
+    Top {
+        icon: d
+            .condition
+            .map(|c| condition_icon(c, true))
+            .unwrap_or_default(),
+        temp: big_temp(lang, d.max),
+        headline: headline(label, feels),
+        side: [range_line(lang, name, d.min, d.max), chance]
+            .into_iter()
+            .flatten()
+            .collect(),
+    }
+}
+
+/// The numbers of the tiles, for now or for one forecast day.
+struct Figures {
+    wind_speed: Option<f64>,
+    wind_direction: Option<f64>,
+    wind_gusts: Option<f64>,
+    humidity: Option<f64>,
+    pressure: Option<f64>,
+    cloud_cover: Option<f64>,
+    rain_mm: Option<f64>,
+    rain_sub: String,
+    max_gusts: Option<f64>,
+    max_gusts_sub: String,
+    uv: Option<f64>,
+    /// Any instant of the day the sun tile is about.
+    midday: DateTime<Utc>,
+}
+
+fn chance_text(lang: Lang, p: Option<f64>) -> Option<String> {
+    p.map(|p| i18n::home_number(lang, p, 0))
+}
+
+fn now_figures(w: &WeatherView, lang: Lang, midday: DateTime<Utc>) -> Figures {
+    let cur = &w.current;
+    let chance = chance_text(lang, w.today.precipitation_probability);
+    Figures {
+        wind_speed: cur.wind_speed,
+        wind_direction: cur.wind_direction,
+        wind_gusts: cur.wind_gusts,
+        humidity: cur.humidity,
+        pressure: cur.pressure,
+        cloud_cover: cur.cloud_cover,
+        rain_mm: w.today.precipitation,
+        rain_sub: i18n::rain_sub(lang, chance.as_deref()),
+        max_gusts: w.today.wind_gusts_max,
+        max_gusts_sub: weather_text(lang, T::Today).to_lowercase(),
+        uv: cur.uv_index,
+        midday,
+    }
+}
+
+fn day_figures(d: &WeatherDay, lang: Lang, name: &str, midday: DateTime<Utc>) -> Figures {
+    let chance = chance_text(lang, d.precipitation_probability);
+    Figures {
+        wind_speed: d.wind_speed_max,
+        wind_direction: d.wind_direction,
+        wind_gusts: d.wind_gusts_max,
+        humidity: d.humidity,
+        pressure: d.pressure,
+        cloud_cover: d.cloud_cover,
+        rain_mm: d.precipitation,
+        rain_sub: i18n::chance_sub(lang, chance.as_deref()),
+        max_gusts: d.wind_gusts_max,
+        max_gusts_sub: name.to_lowercase(),
+        uv: d.uv_index_max,
+        midday,
+    }
+}
+
+fn wind_value(lang: Lang, f: &Figures) -> AnyView {
+    match f.wind_speed {
         Some(speed) => {
-            let arrow = cur.wind_direction.map(|deg| {
+            let arrow = f.wind_direction.map(|deg| {
                 view! {
                     <span
                         class="weather-wind"
@@ -125,20 +282,13 @@ fn content(
             view! { {arrow} {measure(lang, Some(speed), 0, Some("km/h"))} }.into_any()
         }
         None => DASH.into_any(),
-    };
-    let compass = cur
-        .wind_direction
-        .map(|d| i18n::compass_word(lang, compass_index(d)));
-    let gusts = cur.wind_gusts.map(|g| i18n::home_number(lang, g, 0));
-    let chance = w
-        .today
-        .precipitation_probability
-        .map(|p| i18n::home_number(lang, p, 0));
-    let uv_sub = cur
-        .uv_index
-        .map(|uv| i18n::uv_word(lang, uv_level(uv)).to_owned())
-        .unwrap_or_default();
-    let (sun_value, sun_sub) = match (fallback, sunset) {
+    }
+}
+
+/// The sun tile's value and sub-line for the day of `midday`.
+fn sun_figures(lang: Lang, midday: DateTime<Utc>, house: House) -> (String, String) {
+    let (sunrise, sunset, _, fallback) = house.flows_config.with(|c| sun_today(c.as_ref(), midday));
+    match (fallback, sunset) {
         (false, Some(set)) => (
             i18n::home_time(lang, set),
             sunrise
@@ -150,13 +300,88 @@ fn content(
             i18n::detail_text(lang, &Detail::SunsetFallback),
         ),
         _ => (DASH.to_owned(), String::new()),
+    }
+}
+
+fn tiles(lang: Lang, f: &Figures, house: House) -> AnyView {
+    let compass = f
+        .wind_direction
+        .map(|d| i18n::compass_word(lang, compass_index(d)));
+    let gusts = f.wind_gusts.map(|g| i18n::home_number(lang, g, 0));
+    let uv_sub =
+        f.uv.map(|uv| i18n::uv_word(lang, uv_level(uv)).to_owned())
+            .unwrap_or_default();
+    let (sun_value, sun_sub) = sun_figures(lang, f.midday, house);
+    view! {
+        <div class="weather-tiles">
+            {tile(weather_text(lang, T::Wind), wind_value(lang, f), i18n::wind_sub(lang, compass, gusts.as_deref()))}
+            {tile(weather_text(lang, T::Humidity), measure(lang, f.humidity, 0, Some("%")).into_any(), String::new())}
+            {tile(weather_text(lang, T::Pressure), measure(lang, f.pressure, 0, Some("hPa")).into_any(), String::new())}
+            {tile(weather_text(lang, T::Clouds), measure(lang, f.cloud_cover, 0, Some("%")).into_any(), String::new())}
+            {tile(weather_text(lang, T::Rain), measure(lang, f.rain_mm, 1, Some("mm")).into_any(), f.rain_sub.clone())}
+            {tile(weather_text(lang, T::MaxGusts), measure(lang, f.max_gusts, 0, Some("km/h")).into_any(), f.max_gusts_sub.clone())}
+            {tile(weather_text(lang, T::UvIndex), measure(lang, f.uv, 0, None).into_any(), uv_sub)}
+            {tile(weather_text(lang, T::Sun), sun_value.into_any(), sun_sub)}
+        </div>
+    }
+    .into_any()
+}
+
+/// The noon of the house-local `date`.
+fn local_noon(zone: chrono_tz::Tz, date: NaiveDate) -> Option<DateTime<Utc>> {
+    date.and_hms_opt(12, 0, 0)
+        .and_then(|noon| zone.from_local_datetime(&noon).earliest())
+        .map(|t| t.with_timezone(&Utc))
+}
+
+/// The page body for one weather document; `midday` is any instant of the house-local day and
+/// `day` the `day` query value: a forecast day to show instead of today.
+fn content<'a>(
+    w: &'a WeatherView,
+    lang: Lang,
+    midday: DateTime<Utc>,
+    day: Option<&str>,
+    pick: Callback<Option<String>>,
+    house: House,
+) -> impl IntoView + use<'a> {
+    let zone = house.flows_config.with(|c| house_place(c.as_ref()).1);
+    let today = midday.with_timezone(&zone).date_naive();
+    let fetched = DateTime::<Utc>::from_timestamp(w.fetched_at as i64, 0)
+        .map(|t| t.with_timezone(&zone).time());
+    let updated = fetched.map(|at| i18n::updated_at(lang, at));
+
+    let chosen = pick_day(day, today, &w.days);
+    let (top, figures, heading) = match chosen {
+        Some(d) => {
+            let date = NaiveDate::parse_from_str(&d.date, "%Y-%m-%d").ok();
+            let name = date.map_or_else(|| d.date.clone(), |n| i18n::day_heading(lang, n, today));
+            let noon = date.and_then(|n| local_noon(zone, n)).unwrap_or(midday);
+            (
+                day_top(d, lang, &name),
+                day_figures(d, lang, &name, noon),
+                name,
+            )
+        }
+        None => (
+            now_top(w, lang),
+            now_figures(w, lang, midday),
+            weather_text(lang, T::Now).to_owned(),
+        ),
     };
+
+    let tiles = tiles(lang, &figures, house);
     let place = [Some(w.place.name.clone()), w.place.admin.clone()]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
         .join(", ");
-    let days = w.days.iter().map(|d| day_card(lang, d)).collect_view();
+    let strip = std::iter::once((today_card(lang, w), chosen.is_none()))
+        .chain(w.days.iter().map(|d| {
+            let on = chosen.is_some_and(|c| c.date == d.date);
+            (forecast_card(lang, d), on)
+        }))
+        .map(|(card, on)| day_card(lang, card, on, pick))
+        .collect_view();
     let stale = w
         .stale
         .then(|| fetched.map(|at| i18n::data_from(lang, at)))
@@ -164,32 +389,21 @@ fn content(
 
     view! {
         <div class="weather-page__top">
-            <span class="weather-page__icon" inner_html=icon></span>
+            <span class="weather-page__icon" inner_html=top.icon></span>
             <div>
-                <div class="weather-page__temp">{temp}</div>
-                <div class="weather-page__headline">{headline}</div>
+                <div class="weather-page__temp">{top.temp}</div>
+                <div class="weather-page__headline">{top.headline}</div>
             </div>
             <div class="weather-page__side">
-                {range.map(|r| view! { <div>{r}</div> })}
-                {tonight.map(|r| view! { <div>{r}</div> })}
-                <div>{rain_soon}</div>
+                {top.side.into_iter().map(|l| view! { <div>{l}</div> }).collect_view()}
             </div>
         </div>
 
-        <h3 class="weather-page__label">{weather_text(lang, T::Now)}</h3>
-        <div class="weather-tiles">
-            {tile(weather_text(lang, T::Wind), wind_value, i18n::wind_sub(lang, compass, gusts.as_deref()))}
-            {tile(weather_text(lang, T::Humidity), measure(lang, cur.humidity, 0, Some("%")).into_any(), String::new())}
-            {tile(weather_text(lang, T::Pressure), measure(lang, cur.pressure, 0, Some("hPa")).into_any(), String::new())}
-            {tile(weather_text(lang, T::Clouds), measure(lang, cur.cloud_cover, 0, Some("%")).into_any(), String::new())}
-            {tile(weather_text(lang, T::Rain), measure(lang, w.today.precipitation, 1, Some("mm")).into_any(), i18n::rain_sub(lang, chance.as_deref()))}
-            {tile(weather_text(lang, T::MaxGusts), measure(lang, w.today.wind_gusts_max, 0, Some("km/h")).into_any(), weather_text(lang, T::Today).to_lowercase())}
-            {tile(weather_text(lang, T::UvIndex), measure(lang, cur.uv_index, 0, None).into_any(), uv_sub)}
-            {tile(weather_text(lang, T::Sun), sun_value.into_any(), sun_sub)}
-        </div>
+        <h3 class="weather-page__label">{heading}</h3>
+        {tiles}
 
         <h3 class="weather-page__label">{weather_text(lang, T::NextDays)}</h3>
-        <div class="weather-days">{days}</div>
+        <div class="weather-days">{strip}</div>
 
         <footer class="weather-page__foot">
             <p>{place}{updated.map(|u| view! { " · " {u} })}</p>
@@ -209,18 +423,29 @@ pub fn WeatherScreen() -> impl IntoView {
     let midday = Memo::new(move |_| {
         let zone = house.flows_config.with(|c| house_place(c.as_ref()).1);
         let utc = DateTime::<Utc>::from_timestamp(now.get() as i64, 0).unwrap_or_default();
-        let date = utc.with_timezone(&zone).date_naive();
-        date.and_hms_opt(12, 0, 0)
-            .and_then(|noon| zone.from_local_datetime(&noon).earliest())
-            .map_or(utc, |t| t.with_timezone(&Utc))
+        local_noon(zone, utc.with_timezone(&zone).date_naive()).unwrap_or(utc)
+    });
+    let query = use_query_map();
+    let navigate = use_navigate();
+    // Replace, not push: tapping through the days must not pile up Back entries.
+    let pick = Callback::new(move |date: Option<String>| {
+        let url = date.map_or_else(|| "/weather".to_owned(), |d| format!("/weather?day={d}"));
+        navigate(
+            &url,
+            NavigateOptions {
+                replace: true,
+                ..Default::default()
+            },
+        );
     });
     view! {
         <section class="weather-page">
             <BackLink />
             {move || {
                 let l = lang.get();
+                let day = query.with(|q| q.get("day"));
                 match house.weather.get() {
-                    Some(w) => content(&w, l, midday.get(), house).into_any(),
+                    Some(w) => content(&w, l, midday.get(), day.as_deref(), pick, house).into_any(),
                     // Nothing until the first fetch has answered, then the hint.
                     None if !house.weather_loaded.get() => ().into_any(),
                     None => {
@@ -235,5 +460,26 @@ pub fn WeatherScreen() -> impl IntoView {
                 }
             }}
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(date: &str) -> WeatherDay {
+        serde_json::from_value(serde_json::json!({ "date": date })).unwrap()
+    }
+
+    #[test]
+    fn the_query_picks_a_forecast_day_or_falls_back_to_today() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 27).unwrap();
+        let days = [day("2026-10-28"), day("2026-10-29")];
+        let date = |q| pick_day(q, today, &days).map(|d| d.date.as_str());
+        assert_eq!(date(Some("2026-10-29")), Some("2026-10-29"));
+        assert_eq!(date(None), None);
+        assert_eq!(date(Some("2026-10-27")), None);
+        assert_eq!(date(Some("2026-12-01")), None);
+        assert_eq!(date(Some("tomorrow")), None);
     }
 }

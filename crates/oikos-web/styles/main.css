@@ -7032,13 +7032,31 @@ html:has(.flow-canvas-screen) {
 
 .weather-days {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 10px;
 }
 
 .weather-day {
   padding: 12px;
+  font: inherit;
+  color: inherit;
   text-align: center;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.weather-day:hover {
+  border-color: color-mix(in srgb, var(--accent-amber) 45%, var(--card-border));
+}
+
+.weather-day:focus-visible {
+  outline: 2px solid var(--accent-amber);
+  outline-offset: 2px;
+}
+
+.weather-day--on {
+  border-color: var(--accent-amber);
+  background: color-mix(in srgb, var(--accent-amber) 14%, var(--card-bg));
 }
 
 .weather-day__name {
@@ -7122,7 +7140,7 @@ html:has(.flow-canvas-screen) {
   }
 
   .weather-days {
-    grid-template-columns: repeat(5, minmax(96px, 1fr));
+    grid-template-columns: repeat(6, minmax(96px, 1fr));
     overflow-x: auto;
   }
 }

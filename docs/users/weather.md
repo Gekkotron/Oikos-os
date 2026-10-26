@@ -32,6 +32,8 @@ See [Configuration](../reference/configuration.md#weather) for every key and env
 
 With weather on, the house overview has a weather card in its header, next to the greeting: the condition, the temperature, the feels-like temperature, today's low and high, and the sunset time. The card hides when there is no data or the last good data is more than six hours old. The header's detail line also mentions rain expected within the hour and frost tonight.
 
+The weather document also carries the next five days, starting tomorrow. Each day has its condition, lowest and highest temperature, highest feels-like temperature, precipitation total and chance, wind speed, gusts and direction, UV index, and the day's mean humidity, pressure and cloud cover.
+
 Tap the card to open the weather page (`/weather`). It shows the wind, humidity, pressure, cloud cover, today's rain, the UV index, the sun and the next five days, from the same data as the document above. The header rules and the page layout are in [The web UI](web-ui.md#home-header).
 
 ## The entities
@@ -58,6 +60,12 @@ All units are metric. Entity ids are `weather_<key>`, for instance `weather_wind
 | `today_wind_gusts_max` | Today's strongest gust, km/h |
 | `rain_next_hour` | Precipitation expected in the next hour, mm |
 | `tonight_min` | The lowest temperature from now until 09:00 the next morning, °C (frost watch) |
+| `tomorrow_condition` | Tomorrow's condition, one of the `condition` values |
+| `tomorrow_min`, `tomorrow_max` | Tomorrow's lowest and highest temperature, °C |
+| `tomorrow_precipitation` | Tomorrow's precipitation total, mm |
+| `tomorrow_precipitation_probability` | Tomorrow's highest chance of precipitation, % |
+| `tomorrow_wind_gusts_max` | Tomorrow's strongest gust, km/h |
+| `tomorrow_uv_index_max` | Tomorrow's highest UV index |
 
 The Weather device has no room. Move an entity to a room with the usual override if you want it there. A value Open-Meteo does not provide reads as unknown.
 
