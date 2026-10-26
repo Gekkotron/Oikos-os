@@ -25,8 +25,8 @@ pub use ambiances::{
     validate_ambiance,
 };
 pub use dashboards::{
-    Dashboard, DashboardReorder, DashboardView, HOUSE_ID, HOUSE_NAME, Span, Widget, WidgetConfig,
-    WidgetKind, allowed_spans, decode_dashboard,
+    Dashboard, DashboardReorder, DashboardView, HOUSE_ID, HOUSE_NAME, MAX_CAMERAS, Span, Widget,
+    WidgetConfig, WidgetKind, allowed_spans, decode_dashboard,
 };
 pub use energy::{energy_entities, energy_entity};
 pub use events::{ApiError, CommandResponse, ConnectionStatus, OverridePatch, WsEvent};

@@ -145,7 +145,8 @@ fn title_of(w: &Widget) -> Option<String> {
         WidgetConfig::Entity { title, .. }
         | WidgetConfig::Area { title, .. }
         | WidgetConfig::Flow { title, .. }
-        | WidgetConfig::Energy { title, .. } => title.clone(),
+        | WidgetConfig::Energy { title, .. }
+        | WidgetConfig::Cameras { title, .. } => title.clone(),
         WidgetConfig::History { .. } => None,
     }
 }
@@ -155,7 +156,8 @@ fn set_title(w: &mut Widget, new: Option<String>) {
         WidgetConfig::Entity { title, .. }
         | WidgetConfig::Area { title, .. }
         | WidgetConfig::Flow { title, .. }
-        | WidgetConfig::Energy { title, .. } => *title = new,
+        | WidgetConfig::Energy { title, .. }
+        | WidgetConfig::Cameras { title, .. } => *title = new,
         WidgetConfig::History { .. } => {}
     }
 }

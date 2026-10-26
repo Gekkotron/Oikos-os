@@ -111,7 +111,16 @@ pub enum WidgetConfig {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         title: Option<String>,
     },
+    /// Frigate camera ids, in display order.
+    Cameras {
+        cameras: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+    },
 }
+
+/// The most cameras one Camera widget shows.
+pub const MAX_CAMERAS: usize = 4;
 
 pub fn allowed_spans(kind: WidgetKind) -> &'static [Span] {
     use Span::*;
@@ -271,6 +280,20 @@ mod tests {
                 title: None
             }
         );
+    }
+
+    #[test]
+    fn widget_config_cameras_round_trips() {
+        let json = r#"{"cameras":["front_door","garden"],"title":"Outside"}"#;
+        let c: WidgetConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            c,
+            WidgetConfig::Cameras {
+                cameras: vec!["front_door".into(), "garden".into()],
+                title: Some("Outside".into())
+            }
+        );
+        assert_eq!(serde_json::to_string(&c).unwrap(), json);
     }
 
     #[test]
