@@ -17,6 +17,29 @@ pub fn load_cameras(list: CameraList) {
     });
 }
 
+/// Whether the page is shown (`document.visibilityState`), for the whole app: tiles stop
+/// fetching frames while it is hidden.
+#[derive(Clone, Copy)]
+pub struct PageVisible(pub RwSignal<bool>);
+
+/// Creates [`PageVisible`] with the page's one `visibilitychange` listener. Call it once.
+pub fn install_page_visible() -> PageVisible {
+    let visible = RwSignal::new(true);
+    #[cfg(target_arch = "wasm32")]
+    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+        use wasm_bindgen::JsCast;
+        visible.set(!doc.hidden());
+        let listener = doc.clone();
+        let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+            visible.set(!listener.hidden());
+        }) as Box<dyn Fn()>);
+        let _ = doc
+            .add_event_listener_with_callback("visibilitychange", closure.as_ref().unchecked_ref());
+        closure.forget();
+    }
+    PageVisible(visible)
+}
+
 /// How a Camera widget lays out its cameras.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CameraLayout {

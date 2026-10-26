@@ -222,6 +222,14 @@ pub enum WidgetText {
     GridPowerNow,
     SolarPowerNow,
     SelfConsumption,
+    // Camera widget.
+    Live,
+    LiveOff,
+    NoEvents,
+    CameraNotFound,
+    CameraUnavailable,
+    PrevCamera,
+    NextCamera,
 }
 
 pub fn widget_text(lang: Lang, t: WidgetText) -> &'static str {
@@ -234,6 +242,13 @@ pub fn widget_text(lang: Lang, t: WidgetText) -> &'static str {
         WidgetText::GridPowerNow => ("Grid now", "Réseau"),
         WidgetText::SolarPowerNow => ("Solar now", "Solaire"),
         WidgetText::SelfConsumption => ("Self-use", "Autoconso"),
+        WidgetText::Live => ("Live", "En direct"),
+        WidgetText::LiveOff => ("Live view off", "Direct désactivé"),
+        WidgetText::NoEvents => ("No events yet", "Aucun événement"),
+        WidgetText::CameraNotFound => ("Camera not found", "Caméra introuvable"),
+        WidgetText::CameraUnavailable => ("Camera unavailable", "Caméra indisponible"),
+        WidgetText::PrevCamera => ("Previous camera", "Caméra précédente"),
+        WidgetText::NextCamera => ("Next camera", "Caméra suivante"),
     };
     match lang {
         Lang::En => en,

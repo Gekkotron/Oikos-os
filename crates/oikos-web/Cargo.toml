@@ -42,6 +42,7 @@ web-sys = { workspace = true, features = [
     "AudioParam",
     "AudioScheduledSourceNode",
     "BaseAudioContext",
+    "Blob",
     "Document",
     "DomRect",
     "Clipboard",
@@ -52,6 +53,7 @@ web-sys = { workspace = true, features = [
     "History",
     "HtmlDialogElement",
     "HtmlElement",
+    "HtmlImageElement",
     "IntersectionObserver",
     "IntersectionObserverEntry",
     "KeyboardEvent",
@@ -64,6 +66,7 @@ web-sys = { workspace = true, features = [
     "ScrollBehavior",
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
+    "Url",
     "WheelEvent",
 ] }
 
