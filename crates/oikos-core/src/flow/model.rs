@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::template::Lang;
 use crate::model::Command;
 use crate::model::ui_override::strip_nulls;
 
@@ -323,8 +324,10 @@ pub struct FlowEnableParams {
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct NotifyParams {
     /// The alert title; required, not empty.
+    /// Takes `{entity_id}` placeholders filled at run time (see the flows docs).
     pub title: String,
     /// The alert body.
+    /// Takes `{entity_id}` placeholders filled at run time (see the flows docs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
     /// One of `alarm`, `security`, `camera`, `energy`, `climate`, `system`, `misc` (the default).
@@ -346,6 +349,9 @@ pub struct NotifyParams {
     /// `flow-<flow id>-<run id>`, one alert per run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// The language the text values are written in: `en` (the default) or `fr`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<Lang>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }
@@ -478,6 +484,26 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&node).unwrap(),
             serde_json::from_str::<serde_json::Value>(text).unwrap()
+        );
+    }
+
+    #[test]
+    fn notify_lang_is_en_or_fr() {
+        let node: Node = serde_json::from_str(
+            r#"{"id":"n","type":"notify","params":{"title":"T","lang":"fr"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(&node.kind, NodeKind::Notify(p) if p.lang == Some(Lang::Fr)));
+        assert!(
+            serde_json::to_string(&node)
+                .unwrap()
+                .contains(r#""lang":"fr""#)
+        );
+        assert!(
+            serde_json::from_str::<Node>(
+                r#"{"id":"n","type":"notify","params":{"title":"T","lang":"de"}}"#
+            )
+            .is_err()
         );
     }
 
