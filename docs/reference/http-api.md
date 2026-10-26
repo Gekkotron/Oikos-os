@@ -125,7 +125,7 @@ Available when `[history] url` is set. See [History](../users/history.md).
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/v1/history/series?entity=&range=` | A chart series over `24h`, `7d`, `30d` or `1y`: `{window, points: [[t, mean, min, max], …]}`, times in unix seconds. |
+| `GET /api/v1/history/series?entity=&range=` | A chart series over `1h`, `6h`, `24h`, `7d`, `30d` or `1y`: `{window, points: [[t, mean, min, max], …]}`, times in unix seconds. |
 | `GET /api/v1/history/daily?entity=&days=&kind=` | kWh per calendar day for the last `days` days (7, 30 or 365), with `kind` (`counter` or `power`): `{days: [[t, kwh], …]}`. |
 | `GET /api/v1/history/today?entity=&kind=` | kWh since local midnight: `{kwh, since}`. |
 | `GET /api/v1/history/last_change?entity=&entity=…` | Last change time of 1 to 50 entities, in request order: `{items: [{changed_at, recorded}, …]}`. |

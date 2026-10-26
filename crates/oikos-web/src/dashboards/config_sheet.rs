@@ -4,17 +4,21 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::hooks::use_navigate;
 use oikos_api::HOUSE_ID;
-use oikos_core::dashboard::{Dashboard, Span, Widget, WidgetConfig, WidgetKind, allowed_spans};
+use oikos_core::dashboard::{
+    Dashboard, DashboardHistoryRange, Span, Widget, WidgetConfig, WidgetKind, allowed_spans,
+};
 
 use crate::api;
 use crate::components::confirm::{ConfirmBar, Confirming};
 use crate::components::toast::Toasts;
 use crate::dashboards::edit::EditState;
+use crate::dashboards::history_widget::chart_range;
 use crate::house::House;
+use crate::i18n::history::range_name;
 use crate::i18n::{DashText, Key, dash_text, delete_question, text, use_lang, widget_sheet_title};
 
-/// Per-widget sheet: title override, size and delete. Swapping the widget's target
-/// entity is deferred; delete + re-add covers it for v1.
+/// Per-widget sheet: title override, size, a history chart's range and delete. Swapping the
+/// widget's target entity is deferred; delete + re-add covers it for v1.
 #[component]
 pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>) -> impl IntoView {
     let lang = use_lang();
@@ -22,6 +26,14 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
     // inputs (which would drop focus on every keystroke).
     let kind = Memo::new(move |_| state.draft.with(|d| d.widgets.get(index).map(|w| w.kind)));
     let span = Memo::new(move |_| state.draft.with(|d| d.widgets.get(index).map(|w| w.span)));
+    let range = Memo::new(move |_| {
+        state
+            .draft
+            .with(|d| match d.widgets.get(index).map(|w| &w.config) {
+                Some(WidgetConfig::History { range, .. }) => Some(*range),
+                _ => None,
+            })
+    });
     let initial_title = state
         .draft
         .with_untracked(|d| d.widgets.get(index).and_then(title_of))
@@ -79,6 +91,37 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
                     }}
                 </select>
             </label>
+            <Show when=move || range.get().is_some()>
+                <label class="sheet-form__field">
+                    <span class="sheet-form__label">{move || dash_text(lang(), DashText::Range)}</span>
+                    <select
+                        class="select"
+                        on:change=move |ev| {
+                            let v = event_target_value(&ev);
+                            state.draft.update(|d| {
+                                if let (Some(w), Some(r)) = (d.widgets.get_mut(index), parse_range(&v)) {
+                                    set_range(w, r);
+                                }
+                            });
+                        }
+                    >
+                        {move || {
+                            let cur = range.get();
+                            HISTORY_RANGES
+                                .iter()
+                                .map(|r| {
+                                    let r = *r;
+                                    view! {
+                                        <option value=range_wire(r) selected={Some(r) == cur}>
+                                            {range_name(lang(), chart_range(r))}
+                                        </option>
+                                    }
+                                })
+                                .collect::<Vec<_>>()
+                        }}
+                    </select>
+                </label>
+            </Show>
             <button
                 type="button"
                 class="btn btn--danger"
@@ -124,6 +167,36 @@ fn parse_span(s: &str) -> Option<Span> {
         "2x2" => Some(Span::X2x2),
         "1x2" => Some(Span::X1x2),
         _ => None,
+    }
+}
+
+/// The ranges a history widget offers, shortest first.
+const HISTORY_RANGES: [DashboardHistoryRange; 5] = [
+    DashboardHistoryRange::H1,
+    DashboardHistoryRange::H6,
+    DashboardHistoryRange::H24,
+    DashboardHistoryRange::D7,
+    DashboardHistoryRange::D30,
+];
+
+/// The serde wire name of a widget range, used as the option value.
+fn range_wire(r: DashboardHistoryRange) -> &'static str {
+    match r {
+        DashboardHistoryRange::H1 => "1h",
+        DashboardHistoryRange::H6 => "6h",
+        DashboardHistoryRange::H24 => "24h",
+        DashboardHistoryRange::D7 => "7d",
+        DashboardHistoryRange::D30 => "30d",
+    }
+}
+
+fn parse_range(s: &str) -> Option<DashboardHistoryRange> {
+    HISTORY_RANGES.into_iter().find(|r| range_wire(*r) == s)
+}
+
+fn set_range(w: &mut Widget, new: DashboardHistoryRange) {
+    if let WidgetConfig::History { range, .. } = &mut w.config {
+        *range = new;
     }
 }
 
@@ -312,6 +385,39 @@ mod tests {
         let d = s.draft.get();
         assert_eq!(d.widgets.len(), 1);
         assert_eq!(d.widgets[0].id, "b");
+    }
+
+    #[test]
+    fn range_wire_names_round_trip() {
+        for r in HISTORY_RANGES {
+            assert_eq!(parse_range(range_wire(r)), Some(r));
+        }
+        assert_eq!(parse_range("1y"), None);
+        assert_eq!(parse_range(""), None);
+    }
+
+    #[test]
+    fn set_range_changes_only_history_widgets() {
+        let mut h = Widget {
+            id: "h".into(),
+            kind: WidgetKind::HistoryChart,
+            span: Span::X2x1,
+            config: WidgetConfig::History {
+                entity_id: "sensor.a".into(),
+                range: DashboardHistoryRange::H24,
+            },
+        };
+        set_range(&mut h, DashboardHistoryRange::H6);
+        assert_eq!(
+            h.config,
+            WidgetConfig::History {
+                entity_id: "sensor.a".into(),
+                range: DashboardHistoryRange::H6,
+            }
+        );
+        let mut l = widget("l");
+        set_range(&mut l, DashboardHistoryRange::H6);
+        assert_eq!(l.config, widget("l").config);
     }
 
     #[test]

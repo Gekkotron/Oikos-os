@@ -15,6 +15,8 @@ pub enum HistoryText {
     CouldNotLoad,
     Retry,
     UnknownEntity,
+    LastHour,
+    Last6h,
     /// Chart legend: "Last 24 hours".
     Last24h,
     Last7d,
@@ -43,6 +45,8 @@ pub fn history_text(lang: Lang, k: HistoryText) -> &'static str {
         ),
         T::Retry => ("Retry", "Réessayer"),
         T::UnknownEntity => ("Unknown entity", "Entité inconnue"),
+        T::LastHour => ("Last hour", "Dernière heure"),
+        T::Last6h => ("Last 6 hours", "6 dernières heures"),
         T::Last24h => ("Last 24 hours", "24 dernières heures"),
         T::Last7d => ("Last 7 days", "7 derniers jours"),
         T::Last30d => ("Last 30 days", "30 derniers jours"),
@@ -61,6 +65,8 @@ pub fn range_name(lang: Lang, r: HistoryRange) -> &'static str {
     history_text(
         lang,
         match r {
+            HistoryRange::Hour => HistoryText::LastHour,
+            HistoryRange::SixHours => HistoryText::Last6h,
             HistoryRange::Day => HistoryText::Last24h,
             HistoryRange::Week => HistoryText::Last7d,
             HistoryRange::Month => HistoryText::Last30d,
@@ -69,13 +75,17 @@ pub fn range_name(lang: Lang, r: HistoryRange) -> &'static str {
     )
 }
 
-/// The range chip of the history page: "24h" / "24 h", "7d" / "7 j", "30d" / "30 j", "1y" / "1 an".
+/// The range chip of the history page: "1h" / "1 h", "6h" / "6 h", "24h" / "24 h", "7d" / "7 j", "30d" / "30 j", "1y" / "1 an".
 pub fn range_chip(lang: Lang, r: HistoryRange) -> String {
     match (lang, r) {
+        (Lang::En, HistoryRange::Hour) => "1h".into(),
+        (Lang::En, HistoryRange::SixHours) => "6h".into(),
         (Lang::En, HistoryRange::Day) => "24h".into(),
         (Lang::En, HistoryRange::Week) => "7d".into(),
         (Lang::En, HistoryRange::Month) => "30d".into(),
         (Lang::En, HistoryRange::Year) => "1y".into(),
+        (Lang::Fr, HistoryRange::Hour) => format!("1{NBSP}h"),
+        (Lang::Fr, HistoryRange::SixHours) => format!("6{NBSP}h"),
         (Lang::Fr, HistoryRange::Day) => format!("24{NBSP}h"),
         (Lang::Fr, HistoryRange::Week) => format!("7{NBSP}j"),
         (Lang::Fr, HistoryRange::Month) => format!("30{NBSP}j"),
@@ -136,6 +146,8 @@ mod tests {
             HistoryText::CouldNotLoad,
             HistoryText::Retry,
             HistoryText::UnknownEntity,
+            HistoryText::LastHour,
+            HistoryText::Last6h,
             HistoryText::Last24h,
             HistoryText::Last7d,
             HistoryText::Last30d,
@@ -178,6 +190,10 @@ mod tests {
             "Impossible de charger l'historique\u{A0}: boom"
         );
         assert_eq!(load_error(Lang::En, "boom"), "Could not load history: boom");
+        assert_eq!(range_chip(Lang::En, HistoryRange::Hour), "1h");
+        assert_eq!(range_chip(Lang::Fr, HistoryRange::SixHours), "6\u{A0}h");
+        assert_eq!(range_name(Lang::Fr, HistoryRange::Hour), "Dernière heure");
+        assert_eq!(range_name(Lang::En, HistoryRange::SixHours), "Last 6 hours");
         assert_eq!(range_chip(Lang::En, HistoryRange::Week), "7d");
         assert_eq!(range_chip(Lang::Fr, HistoryRange::Week), "7\u{A0}j");
         assert_eq!(

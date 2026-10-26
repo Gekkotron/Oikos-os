@@ -35,7 +35,7 @@ pub fn power_pair_of(entities: &BTreeMap<String, EntityView>, id: &str) -> Optio
     EnergyMeters::counter_power(&ee, &all).map(|p| p.id.clone())
 }
 
-/// Parse the `range` query parameter (`24h`, `7d`, `30d`, `1y`); default `24h`.
+/// Parse the `range` query parameter (`1h`, `6h`, `24h`, `7d`, `30d`, `1y`); default `24h`.
 pub fn parse_range(raw: Option<String>) -> HistoryRange {
     raw.as_deref()
         .and_then(HistoryRange::parse)
@@ -44,6 +44,8 @@ pub fn parse_range(raw: Option<String>) -> HistoryRange {
 
 fn range_slug(r: HistoryRange) -> &'static str {
     match r {
+        HistoryRange::Hour => "1h",
+        HistoryRange::SixHours => "6h",
         HistoryRange::Day => "24h",
         HistoryRange::Week => "7d",
         HistoryRange::Month => "30d",
@@ -51,7 +53,9 @@ fn range_slug(r: HistoryRange) -> &'static str {
     }
 }
 
-const RANGES: [HistoryRange; 4] = [
+const RANGES: [HistoryRange; 6] = [
+    HistoryRange::Hour,
+    HistoryRange::SixHours,
     HistoryRange::Day,
     HistoryRange::Week,
     HistoryRange::Month,
@@ -212,6 +216,8 @@ mod tests {
 
     #[test]
     fn range_parses_wire_names_and_defaults_to_day() {
+        assert_eq!(parse_range(Some("1h".into())), HistoryRange::Hour);
+        assert_eq!(parse_range(Some("6h".into())), HistoryRange::SixHours);
         assert_eq!(parse_range(Some("24h".into())), HistoryRange::Day);
         assert_eq!(parse_range(Some("7d".into())), HistoryRange::Week);
         assert_eq!(parse_range(Some("30d".into())), HistoryRange::Month);
@@ -222,6 +228,8 @@ mod tests {
 
     #[test]
     fn range_slugs_match_history_range_wire_names() {
+        assert_eq!(range_slug(HistoryRange::Hour), "1h");
+        assert_eq!(range_slug(HistoryRange::SixHours), "6h");
         assert_eq!(range_slug(HistoryRange::Day), "24h");
         assert_eq!(range_slug(HistoryRange::Week), "7d");
         assert_eq!(range_slug(HistoryRange::Month), "30d");

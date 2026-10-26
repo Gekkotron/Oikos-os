@@ -10,6 +10,7 @@ use oikos_api::EnergyKind;
 use oikos_core::energy::{EnergyFlow, EnergyUi, NodeKind};
 
 use crate::api::history::{fetch_daily, fetch_today};
+use crate::components::now::{Now, unix_now};
 use crate::energy::{
     HouseTodayParts, derived_house_today, energy_entities, energy_text, node_value_text, now_ms,
     plus_minus_ids,
@@ -80,6 +81,15 @@ fn live_text(lang: Lang, metric: Metric, ui: &EnergyUi) -> String {
     }
 }
 
+/// How often a kWh figure is refetched, in seconds: the Energy page's cadence, so "Today"
+/// rolls over at midnight on a dashboard left open.
+const REFRESH_SECS: u64 = 300;
+
+/// The refresh slot `now` falls in; the kWh figure is refetched when it changes.
+fn refresh_slot(now_secs: u64) -> u64 {
+    now_secs / REFRESH_SECS
+}
+
 /// kWh of one counter over `days` days, from its daily totals.
 fn sum_days(days: &[(i64, f64)]) -> f64 {
     days.iter().map(|(_, kwh)| kwh).sum()
@@ -132,8 +142,12 @@ pub fn EnergyStatWidget(metric: String, title: Option<String>) -> impl IntoView 
                 plus_minus_ids(&by_role(&all), &all)
             })
         });
+        let now = use_context::<Now>().map_or_else(|| RwSignal::new(unix_now()), |n| n.0);
+        let slot = Memo::new(move |_| refresh_slot(now.get()));
         let latest = Rc::new(Cell::new(0_u32));
         Effect::new(move |_| {
+            // `get`, not `track`: `track` never runs a lazy memo.
+            let _ = slot.get();
             let Some((plus, minus)) = counters.get() else {
                 kwh.set(None);
                 return;
@@ -250,6 +264,14 @@ mod tests {
             live_text(Lang::Fr, Metric::Power(NodeKind::Solar), &ui),
             "1,5\u{a0}kW"
         );
+    }
+
+    #[test]
+    fn the_refresh_slot_changes_every_five_minutes() {
+        assert_eq!(refresh_slot(0), refresh_slot(299));
+        assert_ne!(refresh_slot(299), refresh_slot(300));
+        // Midnight is a slot edge, so "Today" restarts within a tick of it.
+        assert_ne!(refresh_slot(86_399), refresh_slot(86_400));
     }
 
     #[test]

@@ -471,7 +471,7 @@ pub struct GetHistoryParams {
     pub entity: String,
     /// What to return: `series`, `daily`, `today` or `last_change`.
     pub what: HistoryWhat,
-    /// `24h`, `7d`, `30d` or `1y`. Required for `what = series`.
+    /// `1h`, `6h`, `24h`, `7d`, `30d` or `1y`. Required for `what = series`.
     pub range: Option<HistoryRange>,
     /// 7, 30 or 365. Required for `what = daily`.
     pub days: Option<u32>,

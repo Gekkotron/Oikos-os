@@ -9,12 +9,12 @@ use crate::format::entity_title;
 use crate::house::House;
 use crate::screens::history_detail::{flavor_for_unit, power_pair_of};
 
-/// The chart range closest to a widget's: the chart has no 1 h or 6 h view, so those show a day.
+/// The chart range that matches a widget's.
 pub fn chart_range(range: DashboardHistoryRange) -> HistoryRange {
     match range {
-        DashboardHistoryRange::H1 | DashboardHistoryRange::H6 | DashboardHistoryRange::H24 => {
-            HistoryRange::Day
-        }
+        DashboardHistoryRange::H1 => HistoryRange::Hour,
+        DashboardHistoryRange::H6 => HistoryRange::SixHours,
+        DashboardHistoryRange::H24 => HistoryRange::Day,
         DashboardHistoryRange::D7 => HistoryRange::Week,
         DashboardHistoryRange::D30 => HistoryRange::Month,
     }
@@ -48,9 +48,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn widget_ranges_map_to_the_nearest_chart_range() {
-        assert_eq!(chart_range(DashboardHistoryRange::H1), HistoryRange::Day);
-        assert_eq!(chart_range(DashboardHistoryRange::H6), HistoryRange::Day);
+    fn widget_ranges_map_to_the_matching_chart_range() {
+        assert_eq!(chart_range(DashboardHistoryRange::H1), HistoryRange::Hour);
+        assert_eq!(
+            chart_range(DashboardHistoryRange::H6),
+            HistoryRange::SixHours
+        );
         assert_eq!(chart_range(DashboardHistoryRange::H24), HistoryRange::Day);
         assert_eq!(chart_range(DashboardHistoryRange::D7), HistoryRange::Week);
         assert_eq!(chart_range(DashboardHistoryRange::D30), HistoryRange::Month);

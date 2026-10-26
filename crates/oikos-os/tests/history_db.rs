@@ -371,6 +371,34 @@ async fn series_24h_carries_into_quiet_windows() {
 }
 
 #[tokio::test]
+async fn series_short_ranges_use_raw_samples() {
+    let Some(tdb) = fresh_db().await else { return };
+    let now = 48 * HOUR;
+    tdb.db
+        .insert(&Rows {
+            values: vec![value_row("a", now - HOUR / 2, 7.0)],
+            availability: vec![],
+        })
+        .await
+        .unwrap();
+
+    let history = oikos_os::history::History::with_db(tdb.db.clone(), chrono_tz::UTC);
+    for (range, window) in [
+        (oikos_api::HistoryRange::Hour, 60),
+        (oikos_api::HistoryRange::SixHours, 300),
+    ] {
+        let series = oikos_os::history::query::series(&history, "a", range, now)
+            .await
+            .expect("series");
+        assert_eq!(series.window, window);
+        assert!(!series.points.is_empty(), "{series:?}");
+        assert!(series.points.iter().all(|p| p.1 == 7.0), "{series:?}");
+    }
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
 async fn today_power_and_unrecorded() {
     let Some(tdb) = fresh_db().await else { return };
     // Reference "now" chosen so UTC midnight is a round micros count. HOUR = 1h.

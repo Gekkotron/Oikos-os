@@ -24,9 +24,11 @@ pub enum HistoryApiError {
     Other(String),
 }
 
-/// Serde wire name of a range (`24h`, `7d`, `30d`, `1y`).
+/// Serde wire name of a range (`1h`, `6h`, `24h`, `7d`, `30d`, `1y`).
 fn range_wire(range: HistoryRange) -> &'static str {
     match range {
+        HistoryRange::Hour => "1h",
+        HistoryRange::SixHours => "6h",
         HistoryRange::Day => "24h",
         HistoryRange::Week => "7d",
         HistoryRange::Month => "30d",
@@ -207,6 +209,8 @@ mod tests {
             series_url("sensor.living/room temp", HistoryRange::Day),
             "/api/v1/history/series?entity=sensor.living%2Froom%20temp&range=24h"
         );
+        assert!(series_url("x", HistoryRange::Hour).ends_with("&range=1h"));
+        assert!(series_url("x", HistoryRange::SixHours).ends_with("&range=6h"));
         assert!(series_url("x", HistoryRange::Year).ends_with("&range=1y"));
         assert!(series_url("x", HistoryRange::Week).ends_with("&range=7d"));
         assert!(series_url("x", HistoryRange::Month).ends_with("&range=30d"));
