@@ -743,8 +743,48 @@ pub fn when_becomes(lang: Lang, e: &str, v: &str) -> String {
     )
 }
 
-/// "When Remote sends on" / "Quand Remote envoie on"; no `signal` reads "sends a signal".
+/// A remote's press signal as words, "button 1 pressed 2×" / "bouton 1 appuyé 2×": `<digits>_<press>`
+/// or a bare `<press>` with press one of single, double, triple, hold, long or release. Anything
+/// else is `None`.
+pub fn press_label(lang: Lang, signal: &str) -> Option<String> {
+    let (button, press) = match signal.split_once('_') {
+        Some((n, press)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
+            (Some(n), press)
+        }
+        _ => (None, signal),
+    };
+    let (en, fr) = match press {
+        "single" => ("pressed", "appuyé"),
+        "double" => ("pressed 2×", "appuyé 2×"),
+        "triple" => ("pressed 3×", "appuyé 3×"),
+        "hold" | "long" => ("held", "maintenu"),
+        "release" => ("released", "relâché"),
+        _ => return None,
+    };
+    Some(match button {
+        Some(n) => pick(lang, format!("button {n} {en}"), format!("bouton {n} {fr}")),
+        None => pick(lang, en.to_owned(), fr.to_owned()),
+    })
+}
+
+/// `press_label` with a capital, the signal chip's text; other signals stay raw.
+pub fn signal_chip_label(lang: Lang, signal: &str) -> String {
+    let Some(label) = press_label(lang, signal) else {
+        return signal.to_owned();
+    };
+    let mut chars = label.chars();
+    chars
+        .next()
+        .map(|c| c.to_uppercase().chain(chars).collect())
+        .unwrap_or(label)
+}
+
+/// "When Remote sends on" / "Quand Remote envoie on"; no `signal` reads "sends a signal". A press
+/// signal drops the entity, the card's second line names the device: "When button 1 held".
 pub fn when_sends(lang: Lang, e: &str, signal: Option<&str>) -> String {
+    if let Some(label) = signal.and_then(|s| press_label(lang, s)) {
+        return pick(lang, format!("When {label}"), format!("Quand {label}"));
+    }
     match signal {
         Some(s) => pick(
             lang,

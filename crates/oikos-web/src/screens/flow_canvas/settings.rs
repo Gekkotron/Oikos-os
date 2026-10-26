@@ -12,7 +12,7 @@ use crate::entity_picker::needs::{is_commandable, is_signal, keep};
 use crate::entity_picker::{EntityPickField, Suggest};
 use crate::flow_edit::remove_node;
 use crate::house::House;
-use crate::i18n::flows::{FlowText, flow_text, invalid_json, use_flow_text};
+use crate::i18n::flows::{FlowText, flow_text, invalid_json, signal_chip_label, use_flow_text};
 use crate::i18n::format::parse_decimal;
 use crate::i18n::picker::PickerText;
 use crate::i18n::{Lang, use_lang};
@@ -668,6 +668,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 })
             };
             let chip_id = id;
+            let lang = use_lang();
             let chips = move || {
                 let (entity, selected) = current();
                 let options: Vec<Option<String>> = std::iter::once(None)
@@ -697,7 +698,8 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                             >
                                 {move || {
                                     label
-                                        .clone()
+                                        .as_deref()
+                                        .map(|s| signal_chip_label(lang(), s))
                                         .unwrap_or_else(|| t(FlowText::AnySignal).to_owned())
                                 }}
                             </button>
