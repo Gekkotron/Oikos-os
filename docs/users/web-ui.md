@@ -110,7 +110,7 @@ The weather page is at `/weather`, opened from the weather card. The Back button
 
 - **Top**: the condition icon, the current temperature to one decimal, the condition, the feels-like temperature, today's low and high, tonight's minimum and the rain expected in the next hour.
 - **Now**: eight tiles, four across on a wide window and two on a phone. Wind (speed, an arrow for the direction the wind comes from, a compass word and gusts), humidity, pressure, cloud cover, today's rain (amount and chance), the strongest gust today, the UV index with a word (Low, Moderate, High, Very high, Extreme), and the sun (sunrise and sunset).
-- **Next 5 days**: one card per day with the weekday and date, the condition icon, the high, the low and the chance of rain.
+- **Forecast**: a Today card, then one card per day for the next five days, each with the weekday, the condition icon, the high, the low and the chance of rain. Tap a card to show that day on the whole page (`/weather?day=YYYY-MM-DD`). The top then shows the day's high, the feels-like high, the low and high and the chance of rain, and the heading above the tiles shows the day's name ("Tomorrow", "Thursday 29"). The tiles show the day's strongest wind and main direction, the mean humidity, pressure and cloud cover, the total rain, the strongest gust, the highest UV index, and that day's sunrise and sunset. Tap Today to come back.
 - **Footer**: the place, the time of the last update, a stale notice when the data is late, and the Open-Meteo credit.
 
 When weather is off or not fetched yet, the page says that the weather is unavailable and tells you to enable `[weather]` in `oikos.toml`.

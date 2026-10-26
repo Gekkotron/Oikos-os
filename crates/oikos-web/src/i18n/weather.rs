@@ -113,6 +113,7 @@ pub enum WeatherText {
     UvIndex,
     Sun,
     Today,
+    Tomorrow,
 }
 
 /// A fixed word of the weather page.
@@ -120,7 +121,7 @@ pub fn weather_text(lang: Lang, k: WeatherText) -> &'static str {
     use WeatherText::*;
     let (en, fr) = match k {
         Now => ("Now", "Maintenant"),
-        NextDays => ("Next 5 days", "5 prochains jours"),
+        NextDays => ("Forecast", "Prévisions"),
         NoRainSoon => ("No rain within the hour", "Pas de pluie dans l'heure"),
         UpdatedAt => ("Updated at", "Mis à jour à"),
         Unavailable => (
@@ -145,6 +146,7 @@ pub fn weather_text(lang: Lang, k: WeatherText) -> &'static str {
         UvIndex => ("UV index", "Indice UV"),
         Sun => ("Sun", "Soleil"),
         Today => ("Today", "Aujourd'hui"),
+        Tomorrow => ("Tomorrow", "Demain"),
     };
     if lang == Lang::Fr { fr } else { en }
 }
@@ -166,6 +168,15 @@ pub fn rain_sub(lang: Lang, chance: Option<&str>) -> String {
         (Lang::En, Some(c)) => format!("today · {c}{NBSP}% chance"),
         (Lang::Fr, None) => "aujourd'hui".to_owned(),
         (Lang::En, None) => "today".to_owned(),
+    }
+}
+
+/// The sub-line of a forecast day's rain tile: "93 % chance" / "risque 93 %".
+pub fn chance_sub(lang: Lang, chance: Option<&str>) -> String {
+    match (lang, chance) {
+        (Lang::Fr, Some(c)) => format!("risque {c}{NBSP}%"),
+        (Lang::En, Some(c)) => format!("{c}{NBSP}% chance"),
+        (_, None) => String::new(),
     }
 }
 
@@ -199,6 +210,19 @@ pub fn short_weekday(lang: Lang, date: NaiveDate) -> String {
     )
 }
 
+/// The name of a forecast day on the weather page: "Tomorrow" the day after `today`, else the
+/// long weekday and the day of the month ("Thursday 29" / "Jeudi 29").
+pub fn day_heading(lang: Lang, date: NaiveDate, today: NaiveDate) -> String {
+    if today.succ_opt() == Some(date) {
+        return weather_text(lang, WeatherText::Tomorrow).to_owned();
+    }
+    format!(
+        "{} {}",
+        format::weekday_long(lang, date.weekday()),
+        date.day()
+    )
+}
+
 /// "Updated at 21:02".
 pub fn updated_at(lang: Lang, at: NaiveTime) -> String {
     format!(
@@ -221,6 +245,18 @@ mod tests {
         for lang in [Lang::En, Lang::Fr] {
             assert!(!weather_text(lang, WeatherText::Credit).is_empty());
         }
+    }
+    #[test]
+    fn a_forecast_day_is_named_by_weekday_or_tomorrow() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 27).unwrap();
+        let tomorrow = NaiveDate::from_ymd_opt(2026, 10, 28).unwrap();
+        let thu = NaiveDate::from_ymd_opt(2026, 10, 29).unwrap();
+        assert_eq!(day_heading(Lang::En, tomorrow, today), "Tomorrow");
+        assert_eq!(day_heading(Lang::Fr, tomorrow, today), "Demain");
+        assert_eq!(day_heading(Lang::En, thu, today), "Thursday 29");
+        assert_eq!(day_heading(Lang::Fr, thu, today), "Jeudi 29");
+        assert_eq!(chance_sub(Lang::En, Some("93")), "93\u{A0}% chance");
+        assert_eq!(chance_sub(Lang::Fr, None), "");
     }
     #[test]
     fn units_and_colons_take_a_no_break_space() {
@@ -258,6 +294,7 @@ mod tests {
             WeatherText::UvIndex,
             WeatherText::Sun,
             WeatherText::Today,
+            WeatherText::Tomorrow,
         ];
         crate::i18n::assert_table(ALL, weather_text, &[]);
     }

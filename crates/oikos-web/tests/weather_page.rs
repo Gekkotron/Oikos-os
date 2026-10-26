@@ -14,8 +14,11 @@ wasm_bindgen_test_configure!(run_in_browser);
 fn full_weather() -> WeatherView {
     let day = |d: u32| {
         serde_json::json!({
-            "date": format!("2026-10-{d}"), "condition": "rain",
-            "min": 9.0, "max": 13.0, "precipitation_probability": 80.0
+            "date": format!("2099-01-0{d}"), "condition": "rain",
+            "min": 9.0, "max": 13.0, "precipitation_probability": 80.0,
+            "apparent_max": 10.0, "precipitation": 4.5, "wind_speed_max": 33.0,
+            "wind_gusts_max": 61.0, "wind_direction": 90.0, "humidity": 77.0,
+            "pressure": 1002.0, "cloud_cover": 88.0, "uv_index_max": 2.0
         })
     };
     serde_json::from_value(serde_json::json!({
@@ -32,13 +35,26 @@ fn full_weather() -> WeatherView {
             "precipitation_probability": 93.0, "wind_gusts_max": 73.0
         },
         "rain_next_hour": 0.0, "tonight_min": 9.0,
-        "days": [day(24), day(25), day(26), day(27), day(28)]
+        "days": [day(2), day(3), day(4), day(5), day(6)]
     }))
     .expect("weather fixture")
 }
 
 async fn mount(weather: Option<WeatherView>, loaded: bool) -> web_sys::Element {
+    set_url("/weather");
     mount_in(RwSignal::new(Lang::En), weather, loaded).await
+}
+
+/// Puts the page address back to `url`: the tests share one browser page and the router reads it.
+fn set_url(url: &str) {
+    let history = web_sys::window().unwrap().history().unwrap();
+    history
+        .replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(url))
+        .unwrap();
+}
+
+async fn mount_without_reset(weather: Option<WeatherView>) -> web_sys::Element {
+    mount_in(RwSignal::new(Lang::En), weather, true).await
 }
 
 async fn mount_in(
@@ -72,7 +88,7 @@ async fn weather_page_shows_tiles_and_days() {
         host.query_selector_all(".weather-tile").unwrap().length(),
         8
     );
-    assert_eq!(host.query_selector_all(".weather-day").unwrap().length(), 5);
+    assert_eq!(host.query_selector_all(".weather-day").unwrap().length(), 6);
     assert!(host.query_selector(".sheet__back").unwrap().is_some());
     let text = host.text_content().unwrap_or_default();
     assert!(text.contains("Open-Meteo"), "{text}");
@@ -128,4 +144,77 @@ async fn the_tiles_use_no_break_units_and_follow_the_language() {
     assert!(en.contains("6.0\u{A0}mm"), "{en}");
     assert!(en.contains("93\u{A0}% chance"), "{en}");
     assert!(!en.contains("Vent"), "{en}");
+}
+
+fn chosen_cards(host: &web_sys::Element) -> Vec<String> {
+    let nodes = host.query_selector_all(".weather-day--on").unwrap();
+    (0..nodes.length())
+        .map(|i| nodes.item(i).unwrap().text_content().unwrap_or_default())
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn the_today_card_comes_first_and_is_chosen_by_default() {
+    let host = mount(Some(full_weather()), true).await;
+    let cards = host.query_selector_all(".weather-day").unwrap();
+    let first = cards.item(0).unwrap();
+    assert!(first.text_content().unwrap().contains("Today"));
+    let first: web_sys::Element = first.unchecked_into();
+    assert_eq!(first.get_attribute("aria-pressed").as_deref(), Some("true"));
+    assert_eq!(chosen_cards(&host).len(), 1);
+    let text = host.text_content().unwrap_or_default();
+    assert!(text.contains("Now"), "{text}");
+    assert!(text.contains("No rain within the hour"), "{text}");
+}
+
+#[wasm_bindgen_test]
+async fn a_day_in_the_query_shows_that_days_figures() {
+    set_url("/weather?day=2099-01-03");
+    let host = mount_without_reset(Some(full_weather())).await;
+    let text = host.text_content().unwrap_or_default();
+    // 2099-01-03 is a Saturday.
+    assert!(text.contains("Saturday 3"), "{text}");
+    assert!(text.contains("33\u{A0}km/h"), "{text}");
+    assert!(text.contains("4.5\u{A0}mm"), "{text}");
+    assert!(text.contains("61\u{A0}km/h"), "{text}");
+    assert!(!text.contains("No rain within the hour"), "{text}");
+    assert!(!text.contains("Tonight"), "{text}");
+    let chosen = chosen_cards(&host);
+    assert_eq!(chosen.len(), 1);
+    assert!(chosen[0].contains("Sat 3"), "{chosen:?}");
+    assert!(host.query_selector(".sheet__back").unwrap().is_some());
+}
+
+#[wasm_bindgen_test]
+async fn an_unknown_day_in_the_query_shows_today() {
+    set_url("/weather?day=2000-01-01");
+    let host = mount_without_reset(Some(full_weather())).await;
+    let text = host.text_content().unwrap_or_default();
+    assert!(text.contains("No rain within the hour"), "{text}");
+    assert!(chosen_cards(&host)[0].contains("Today"));
+}
+
+#[wasm_bindgen_test]
+async fn tapping_a_card_switches_the_day_and_tapping_today_returns() {
+    let host = mount(Some(full_weather()), true).await;
+    let cards = host.query_selector_all(".weather-day").unwrap();
+    let card = |i| -> web_sys::HtmlElement { cards.item(i).unwrap().unchecked_into() };
+    card(3).click();
+    tick().await;
+    tick().await;
+    let text = host.text_content().unwrap_or_default();
+    assert!(text.contains("Sunday 4"), "{text}");
+    assert!(!text.contains("No rain within the hour"), "{text}");
+    let search = web_sys::window().unwrap().location().search().unwrap();
+    assert_eq!(search, "?day=2099-01-04");
+
+    let cards = host.query_selector_all(".weather-day").unwrap();
+    let today: web_sys::HtmlElement = cards.item(0).unwrap().unchecked_into();
+    today.click();
+    tick().await;
+    tick().await;
+    let text = host.text_content().unwrap_or_default();
+    assert!(text.contains("No rain within the hour"), "{text}");
+    assert!(chosen_cards(&host)[0].contains("Today"));
+    set_url("/");
 }
