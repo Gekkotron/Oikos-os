@@ -338,7 +338,7 @@ pub async fn series(
     let start = align_down(now - span, window);
 
     let buckets = match range {
-        HistoryRange::Day => {
+        HistoryRange::Hour | HistoryRange::SixHours | HistoryRange::Day => {
             let carry = series_carry_at(db, entity, start)
                 .await
                 .map_err(unavailable)?;

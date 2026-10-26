@@ -79,6 +79,7 @@ pub enum DashText {
     // Widget sheet.
     Title,
     Size,
+    Range,
     DeleteWidget,
     Close,
     // Dashboard sheet.
@@ -122,6 +123,7 @@ pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
         T::Resize => ("Resize", "Redimensionner"),
         T::Title => ("Title", "Titre"),
         T::Size => ("Size", "Taille"),
+        T::Range => ("Range", "Période"),
         T::DeleteWidget => ("Delete widget", "Supprimer le widget"),
         T::Close => ("Close", "Fermer"),
         T::Name => ("Name", "Nom"),
@@ -272,6 +274,7 @@ mod tests {
             T::Resize,
             T::Title,
             T::Size,
+            T::Range,
             T::DeleteWidget,
             T::Close,
             T::Name,

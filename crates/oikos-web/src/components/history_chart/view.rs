@@ -45,7 +45,7 @@ fn daily_days_for(range: HistoryRange) -> u16 {
         HistoryRange::Week => 7,
         HistoryRange::Month => 30,
         HistoryRange::Year => 365,
-        HistoryRange::Day => 1,
+        HistoryRange::Hour | HistoryRange::SixHours | HistoryRange::Day => 1,
     }
 }
 
@@ -152,10 +152,12 @@ pub fn plan_fetch(
 ) -> FetchPlan {
     match (flavor, range) {
         (Flavor::Series, _) => FetchPlan::Series(entity.to_owned()),
-        (Flavor::Counter, HistoryRange::Day) => match power_pair {
-            Some(pid) => FetchPlan::Series(pid.to_owned()),
-            None => FetchPlan::Daily(entity.to_owned(), 1),
-        },
+        (Flavor::Counter, HistoryRange::Hour | HistoryRange::SixHours | HistoryRange::Day) => {
+            match power_pair {
+                Some(pid) => FetchPlan::Series(pid.to_owned()),
+                None => FetchPlan::Daily(entity.to_owned(), 1),
+            }
+        }
         (Flavor::Counter, _) => FetchPlan::Daily(entity.to_owned(), daily_days_for(range)),
     }
 }
@@ -295,12 +297,16 @@ mod tests {
         assert_eq!(daily_days_for(HistoryRange::Week), 7);
         assert_eq!(daily_days_for(HistoryRange::Month), 30);
         assert_eq!(daily_days_for(HistoryRange::Year), 365);
+        assert_eq!(daily_days_for(HistoryRange::Hour), 1);
+        assert_eq!(daily_days_for(HistoryRange::SixHours), 1);
         assert_eq!(daily_days_for(HistoryRange::Day), 1);
     }
 
     #[test]
     fn plan_fetch_series_flavor_uses_entity_series_for_every_range() {
         for r in [
+            HistoryRange::Hour,
+            HistoryRange::SixHours,
             HistoryRange::Day,
             HistoryRange::Week,
             HistoryRange::Month,
@@ -315,24 +321,31 @@ mod tests {
 
     #[test]
     fn plan_fetch_counter_24h_uses_paired_power_series_when_present() {
-        assert_eq!(
-            plan_fetch(
-                "counter.e",
-                HistoryRange::Day,
-                Flavor::Counter,
-                Some("sensor.power"),
-            ),
-            FetchPlan::Series("sensor.power".into())
-        );
+        for r in [
+            HistoryRange::Hour,
+            HistoryRange::SixHours,
+            HistoryRange::Day,
+        ] {
+            assert_eq!(
+                plan_fetch("counter.e", r, Flavor::Counter, Some("sensor.power")),
+                FetchPlan::Series("sensor.power".into())
+            );
+        }
     }
 
     #[test]
     fn plan_fetch_counter_24h_falls_back_to_single_day_bar_without_power() {
         // Review Focus #2.
-        assert_eq!(
-            plan_fetch("counter.e", HistoryRange::Day, Flavor::Counter, None),
-            FetchPlan::Daily("counter.e".into(), 1)
-        );
+        for r in [
+            HistoryRange::Hour,
+            HistoryRange::SixHours,
+            HistoryRange::Day,
+        ] {
+            assert_eq!(
+                plan_fetch("counter.e", r, Flavor::Counter, None),
+                FetchPlan::Daily("counter.e".into(), 1)
+            );
+        }
     }
 
     #[test]

@@ -12,6 +12,10 @@ pub use oikos_core::history::buckets::EnergyKind;
 /// Named chart ranges and their window / span, in seconds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum HistoryRange {
+    #[serde(rename = "1h")]
+    Hour,
+    #[serde(rename = "6h")]
+    SixHours,
     #[serde(rename = "24h")]
     Day,
     #[serde(rename = "7d")]
@@ -25,6 +29,8 @@ pub enum HistoryRange {
 impl HistoryRange {
     pub fn window_secs(self) -> i64 {
         match self {
+            HistoryRange::Hour => 60,
+            HistoryRange::SixHours => 300,
             HistoryRange::Day => 600,
             HistoryRange::Week => 3_600,
             HistoryRange::Month => 18_000,
@@ -34,6 +40,8 @@ impl HistoryRange {
 
     pub fn span_secs(self) -> i64 {
         match self {
+            HistoryRange::Hour => 3_600,
+            HistoryRange::SixHours => 21_600,
             HistoryRange::Day => 86_400,
             HistoryRange::Week => 604_800,
             HistoryRange::Month => 2_592_000,
@@ -43,6 +51,8 @@ impl HistoryRange {
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
+            "1h" => Some(HistoryRange::Hour),
+            "6h" => Some(HistoryRange::SixHours),
             "24h" => Some(HistoryRange::Day),
             "7d" => Some(HistoryRange::Week),
             "30d" => Some(HistoryRange::Month),
@@ -148,6 +158,28 @@ mod tests {
     fn range_parses_wire_names() {
         assert_eq!(HistoryRange::parse("1y"), Some(HistoryRange::Year));
         assert_eq!(HistoryRange::parse("24h"), Some(HistoryRange::Day));
+        assert_eq!(HistoryRange::parse("1h"), Some(HistoryRange::Hour));
+        assert_eq!(HistoryRange::parse("6h"), Some(HistoryRange::SixHours));
         assert_eq!(HistoryRange::parse("2d"), None);
+    }
+
+    #[test]
+    fn short_ranges_have_window_and_span() {
+        assert_eq!(HistoryRange::Hour.window_secs(), 60);
+        assert_eq!(HistoryRange::Hour.span_secs(), 3_600);
+        assert_eq!(HistoryRange::SixHours.window_secs(), 300);
+        assert_eq!(HistoryRange::SixHours.span_secs(), 21_600);
+    }
+
+    #[test]
+    fn short_ranges_use_wire_names() {
+        assert_eq!(
+            serde_json::to_value(HistoryRange::Hour).unwrap(),
+            json!("1h")
+        );
+        assert_eq!(
+            serde_json::from_value::<HistoryRange>(json!("6h")).unwrap(),
+            HistoryRange::SixHours
+        );
     }
 }

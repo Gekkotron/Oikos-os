@@ -46,11 +46,13 @@ fn local(unix: i64) -> OffsetDateTime {
 }
 
 /// X-axis tick labels for a range ending at `now_secs`: a list of `(position in 0..=1, label)`.
-/// `now` is always the final label at position `1.0`. On the day and month axes, whose ticks
-/// are instants, a tick closer to `now` than [`NOW_GAP`] is dropped so the two labels do not run
-/// into each other; week and year labels name whole slots and are kept.
+/// `now` is always the final label at position `1.0`. On the hour, six-hour, day and month axes,
+/// whose ticks are instants, a tick closer to `now` than [`NOW_GAP`] is dropped so the two labels
+/// do not run into each other; week and year labels name whole slots and are kept.
 pub fn tick_labels(lang: Lang, range: HistoryRange, now_secs: i64) -> Vec<(f64, String)> {
     let mut out = match range {
+        HistoryRange::Hour => clock_ticks(lang, now_secs, 3_600, 900),
+        HistoryRange::SixHours => clock_ticks(lang, now_secs, 21_600, 3_600),
         HistoryRange::Day => day_ticks(lang, now_secs),
         HistoryRange::Week => return week_ticks(lang, now_secs),
         HistoryRange::Month => month_ticks(lang, now_secs),
@@ -68,6 +70,25 @@ pub fn tick_labels(lang: Lang, range: HistoryRange, now_secs: i64) -> Vec<(f64, 
 
 /// The smallest gap, as a fraction of the axis, between a tick and the final `now` label.
 const NOW_GAP: f64 = 0.12;
+
+/// Ticks on the wall clock every `step` seconds across the last `span` seconds, then "now".
+/// The house offset is a whole number of hours, so a multiple of `step` in UTC is also one on
+/// the wall clock for any `step` that divides an hour.
+fn clock_ticks(lang: Lang, now_secs: i64, span: i64, step: i64) -> Vec<(f64, String)> {
+    let start = now_secs - span;
+    let mut out = Vec::new();
+    let mut t = (start + step - 1).div_euclid(step) * step;
+    while t < now_secs {
+        let dt = local(t);
+        out.push((
+            (t - start) as f64 / span as f64,
+            format!("{:02}:{:02}", dt.hour(), dt.minute()),
+        ));
+        t += step;
+    }
+    out.push((1.0, history_text(lang, HistoryText::Now).into()));
+    out
+}
 
 fn day_ticks(lang: Lang, now_secs: i64) -> Vec<(f64, String)> {
     let start = now_secs - 86_400;
@@ -163,12 +184,14 @@ fn chrono_weekday(w: Weekday) -> chrono::Weekday {
     chrono::Weekday::try_from(w.number_days_from_monday()).unwrap_or(chrono::Weekday::Mon)
 }
 
-/// Local time for a tooltip. Relative on 24h ("14:20"), absolute from 7d up ("Tue 06 Oct 14:20" /
-/// "Mar. 06 oct. 14:20" through 30d, "Oct 2026" / "oct. 2026" for 1y). 24-hour clock in both.
+/// Local time for a tooltip. Relative up to 24h ("14:20"), absolute from 7d up
+/// ("Tue 06 Oct 14:20" / "Mar. 06 oct. 14:20" through 30d, "Oct 2026" / "oct. 2026" for 1y). 24-hour clock in both.
 pub fn tooltip_time(lang: Lang, range: HistoryRange, t_secs: i64, _now_secs: i64) -> String {
     let dt = local(t_secs);
     match range {
-        HistoryRange::Day => format!("{:02}:{:02}", dt.hour(), dt.minute()),
+        HistoryRange::Hour | HistoryRange::SixHours | HistoryRange::Day => {
+            format!("{:02}:{:02}", dt.hour(), dt.minute())
+        }
         HistoryRange::Week | HistoryRange::Month => format!(
             "{} {:02} {} {:02}:{:02}",
             fmt::weekday_short(lang, chrono_weekday(dt.weekday())),
@@ -251,6 +274,40 @@ mod tests {
     }
 
     #[test]
+    fn tick_labels_for_1h_land_on_quarter_hours() {
+        // 2026-10-20 14:00 UTC is 16:00 in Paris; 16:10 puts the ticks at 15:15 .. 16:00.
+        let now = 1_792_504_800 + 10 * 60;
+        let out = tick_labels(Lang::En, HistoryRange::Hour, now);
+        let labels: Vec<&str> = out.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(labels, ["15:15", "15:30", "15:45", "16:00", "now"]);
+        assert!(out.iter().all(|(p, _)| (0.0..=1.0).contains(p)), "{out:?}");
+        assert_eq!(out.last().unwrap().0, 1.0);
+    }
+
+    #[test]
+    fn tick_labels_for_6h_land_on_whole_hours() {
+        // 16:07: the 16:00 tick is inside NOW_GAP of "now" and is dropped.
+        let now = 1_792_504_800 + 7 * 60;
+        let out = tick_labels(Lang::En, HistoryRange::SixHours, now);
+        let labels: Vec<&str> = out.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(labels, ["11:00", "12:00", "13:00", "14:00", "15:00", "now"]);
+        assert!(out.iter().all(|(p, _)| (0.0..=1.0).contains(p)), "{out:?}");
+    }
+
+    #[test]
+    fn a_short_range_tick_next_to_now_is_dropped() {
+        for range in [HistoryRange::Hour, HistoryRange::SixHours] {
+            for step in 0..120 {
+                let now = 1_792_497_600 + step * 60;
+                let out = tick_labels(Lang::En, range, now);
+                let (last, rest) = out.split_last().unwrap();
+                assert_eq!(last.1, "now");
+                assert!(rest.iter().all(|(p, _)| *p <= 1.0 - NOW_GAP), "{out:?}");
+            }
+        }
+    }
+
+    #[test]
     fn tick_labels_for_7d_has_7_entries_ending_with_now() {
         let out = tick_labels(Lang::En, HistoryRange::Week, 1_792_497_600);
         assert_eq!(out.len(), 7);
@@ -292,6 +349,9 @@ mod tests {
         let t = now - 3_600;
         let d = tooltip_time(Lang::En, HistoryRange::Day, t, now);
         assert!(d.len() == 5 && d.chars().nth(2) == Some(':'));
+        for range in [HistoryRange::Hour, HistoryRange::SixHours] {
+            assert_eq!(tooltip_time(Lang::En, range, t, now), "13:00");
+        }
         let w = tooltip_time(Lang::En, HistoryRange::Week, t, now);
         assert!(w.len() > 10 && w.contains(':'));
         let y = tooltip_time(Lang::En, HistoryRange::Year, t, now);
@@ -326,6 +386,10 @@ mod tests {
         let now = 1_792_497_600;
         let day = tick_labels(Lang::Fr, HistoryRange::Day, now);
         assert_eq!(day.last().unwrap().1, "maintenant");
+        for range in [HistoryRange::Hour, HistoryRange::SixHours] {
+            let out = tick_labels(Lang::Fr, range, now);
+            assert_eq!(out.last().unwrap().1, "maintenant");
+        }
         let week = tick_labels(Lang::Fr, HistoryRange::Week, now);
         assert_eq!(week.last().unwrap().1, "maintenant");
         // 2026-10-20 is a Tuesday, six days before the last tick sits a Wednesday.
@@ -342,6 +406,7 @@ mod tests {
         let now = 1_792_497_600;
         let t = now - 3_600;
         assert_eq!(tooltip_time(Lang::Fr, HistoryRange::Day, t, now).len(), 5);
+        assert_eq!(tooltip_time(Lang::Fr, HistoryRange::Hour, t, now), "13:00");
         assert_eq!(
             tooltip_time(Lang::Fr, HistoryRange::Week, t, now),
             "Mar. 20 oct. 13:00"

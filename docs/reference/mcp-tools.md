@@ -89,7 +89,7 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 
 | Tool | What it does |
 | --- | --- |
-| `get_history` | One slice of an entity's history, available only when `[history] url` is set. Args: `entity`, `what`, and by `what`: `series` needs `range` (`24h`, `7d`, `30d`, `1y`); `daily` needs `days` (7, 30 or 365) and `kind` (`counter` or `power`); `today` needs `kind`; `last_change` needs nothing more. The reply is a one-field object named after `what`. Errors read `history_unavailable: …` or `not_recorded: …`. |
+| `get_history` | One slice of an entity's history, available only when `[history] url` is set. Args: `entity`, `what`, and by `what`: `series` needs `range` (`1h`, `6h`, `24h`, `7d`, `30d`, `1y`); `daily` needs `days` (7, 30 or 365) and `kind` (`counter` or `power`); `today` needs `kind`; `last_change` needs nothing more. The reply is a one-field object named after `what`. Errors read `history_unavailable: …` or `not_recorded: …`. |
 | `get_grid_day` | What crossed the grid meter on one house-local day, per half hour: kWh bought off-peak and peak, kWh sold, with the day's totals and off-peak bands (the shape of `GET /history/grid_day`). Args: `date` (`YYYY-MM-DD`, today when absent). Errors read `history_unavailable: …`, `no_grid_meter: …` or `bad_request: …`. |
 
 ## Weather
