@@ -3783,6 +3783,12 @@ html:has(.flow-canvas-screen) {
   stroke-width: 3;
 }
 
+/* The wire a dragged card would be spliced into if dropped now. */
+.flow-wire--drop {
+  stroke: var(--accent-mint);
+  stroke-width: 3;
+}
+
 /* Edit mode: a wide invisible stroke over each wire takes its click. */
 .flow-wire-hit {
   fill: none;
