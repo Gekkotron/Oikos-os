@@ -307,6 +307,7 @@ mod tests {
             entity: None,
             missing: None,
             average: None,
+            offset_minutes: None,
             extra: Default::default(),
         })
     }

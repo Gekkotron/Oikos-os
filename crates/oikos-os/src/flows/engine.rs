@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
-use oikos_core::flow::sun::is_dark_at;
+use oikos_core::flow::sun::is_dark_with_offset;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
     Flow, Missing, Node, NodeKind, Op, Reading, Scalar, Schedule, compare, format_duration,
@@ -839,7 +839,7 @@ async fn run_node(
         NodeKind::If(params) => {
             if params.op == Op::IsDark {
                 let (lat, lon) = hub.house_point();
-                let dark = is_dark_at(lat, lon, now());
+                let dark = is_dark_with_offset(lat, lon, now(), params.dark_offset());
                 let port = if dark { "true" } else { "false" };
                 return (StepOutcome::Ok, format!("is_dark → {dark}"), Some(port));
             }

@@ -272,7 +272,7 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         }
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(p) => sun_summary(lang, p.which, p.offset()),
-        NodeKind::If(p) if p.op == Op::IsDark => flow_text(lang, FlowText::IsDark).to_owned(),
+        NodeKind::If(p) if p.op == Op::IsDark => t::is_dark_sentence(lang, p.dark_offset()),
         NodeKind::If(p) => {
             let (e, unit, entity) = match &p.entity {
                 Some(id) => (entity_text(id, ctx), unit_of(id, ctx), ctx.entities.get(id)),
@@ -539,6 +539,11 @@ mod tests {
         assert_eq!(text(sun), "15\u{a0}min before civil dusk");
         let dark = r#"{"id":"d","type":"if","params":{"op":"is_dark"}}"#;
         assert_eq!(text(dark), "Is it dark now? (sun below \u{2212}6°)");
+        let early = r#"{"id":"d","type":"if","params":{"op":"is_dark","offset_minutes":-30}}"#;
+        assert_eq!(
+            text(early),
+            "Is it dark? (from 30\u{a0}min before civil dusk)"
+        );
     }
 
     #[test]
@@ -832,6 +837,7 @@ mod generic_tests {
                 entity: Some("Temperature".into()),
                 missing: None,
                 average: average.map(Into::into),
+                offset_minutes: None,
                 extra: Default::default(),
             }),
             extra: Default::default(),

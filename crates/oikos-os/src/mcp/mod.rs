@@ -163,7 +163,10 @@ fn instructions() -> String {
          every new trigger restarts the wait; the default `single` ignores triggers while a \
          run is active. Sun events use `trigger.sun` with `which` one of `sunrise`, `sunset`, \
          `dusk` (civil), `dawn` (civil), and an optional `offset_minutes` in [-720, 720]. `if` \
-         with `op: is_dark` is true between civil dusk and civil dawn at the configured point. \
+         with `op: is_dark` is true between civil dusk and civil dawn at the configured point; its \
+         optional `offset_minutes` in [-720, 720] moves dusk by that much and dawn by the \
+         opposite (`-30`: dark 30 minutes earlier in the evening and until 30 minutes later in \
+         the morning). \
          Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`; the hub falls back to \
          Paris otherwise and reports a warning on save. `get_history` returns one slice of an entity's history — a chart \
          series (`what: series` with `range`), kWh per day (`daily` with `days` and \

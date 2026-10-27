@@ -293,8 +293,19 @@ pub struct IfParams {
     /// `24h`), the newest included, instead of its current value; `value` must then be a number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub average: Option<String>,
+    /// With `op: is_dark` only: minutes added to civil dusk and taken from civil dawn (negative
+    /// makes it dark earlier in the evening and until later in the morning); absent means 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_minutes: Option<i32>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
+}
+
+impl IfParams {
+    /// The `is_dark` offset in minutes, 0 when absent.
+    pub fn dark_offset(&self) -> i32 {
+        self.offset_minutes.unwrap_or(0)
+    }
 }
 
 /// The longest `average` window an `if` accepts, in seconds.
