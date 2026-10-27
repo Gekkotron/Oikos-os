@@ -425,6 +425,7 @@ mod tests {
             at: 6,
             outcome: oikos_api::StepOutcome::Ok,
             detail: String::new(),
+            ports: None,
         });
         assert_eq!(key(&stepped), key(&running), "a step shows nothing new");
         let mut done = running.clone();

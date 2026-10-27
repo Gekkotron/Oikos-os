@@ -2032,6 +2032,7 @@ fn node_entity(kind: &oikos_core::flow::NodeKind) -> Option<&str> {
         NodeKind::TriggerState(params) => Some(params.entity.as_str()),
         NodeKind::Command(params) => Some(params.entity.as_str()),
         NodeKind::If(params) => params.entity.as_deref(),
+        NodeKind::Switch(params) => params.entity.as_deref(),
         _ => None,
     }
 }

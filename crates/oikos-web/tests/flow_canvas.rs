@@ -102,6 +102,7 @@ fn step(node: &str, detail: &str) -> StepView {
         at: 1,
         outcome: StepOutcome::Ok,
         detail: detail.into(),
+        ports: None,
     }
 }
 

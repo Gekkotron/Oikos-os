@@ -93,6 +93,10 @@ pub struct StepView {
     pub at: u64,
     pub outcome: StepOutcome,
     pub detail: String,
+    /// The output ports the run followed, for `if`, `switch` and `time.between` steps that
+    /// succeeded (possibly none); absent for every other node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ports: Option<Vec<String>>,
 }
 
 /// How a step ended.
@@ -135,6 +139,7 @@ mod tests {
                 at: 11,
                 outcome: StepOutcome::Ok,
                 detail: "sent".into(),
+                ports: None,
             }],
         };
         let event = WsEvent::FlowRunChanged {

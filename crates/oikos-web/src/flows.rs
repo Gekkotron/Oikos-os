@@ -317,6 +317,7 @@ mod tests {
             at: 1,
             outcome,
             detail: detail.into(),
+            ports: None,
         }
     }
 
