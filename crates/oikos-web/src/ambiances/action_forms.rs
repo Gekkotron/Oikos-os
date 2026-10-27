@@ -10,16 +10,15 @@ use oikos_api::{
     AmbianceAction, Category, CategoryAction, ClimateAction, DeviceAction, EntityView, FlowAction,
     FlowDo, Target, category_members,
 };
-use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
+use oikos_core::model::{Command, UNASSIGNED_AREA};
 use serde_json::{Value, json};
 
+use crate::command_form::{command_key, command_label, command_options, entity_actions, retarget};
 use crate::entity_picker::{EntityPickField, Keep};
 use crate::format::list_label;
 use crate::house::House;
 use crate::i18n::devices::{DeviceText, device_text};
-use crate::i18n::flows::{FlowText, flow_text};
 use crate::i18n::format::parse_decimal;
-use crate::i18n::settings::{SettingsText, select_option, set_mode, settings_text};
 use crate::i18n::{self, Key, Lang, use_text};
 use crate::screens::group_wizard::group_by_room;
 
@@ -45,68 +44,6 @@ fn lang() -> RwSignal<Lang> {
 }
 
 // ---- device commands -------------------------------------------------------------------------
-
-/// The commands offered for an entity: the flow picker's, plus one per select option, one per
-/// climate mode and a position for covers that have one.
-pub fn device_commands(e: &EntityView) -> Vec<Command> {
-    let mut list = crate::flow_picker::commands(e, None);
-    match e.kind {
-        Kind::Select => {
-            list.extend(
-                e.capabilities
-                    .options
-                    .iter()
-                    .map(|option| Command::SelectOption {
-                        option: option.clone(),
-                    }),
-            )
-        }
-        Kind::Climate => list.extend(
-            e.capabilities
-                .hvac_modes
-                .iter()
-                .map(|mode| Command::SetHvacMode { mode: mode.clone() }),
-        ),
-        Kind::Cover if e.capabilities.position => list.push(Command::SetPosition { position: 50 }),
-        _ => {}
-    }
-    list
-}
-
-/// Two commands with the same key are the same choice with possibly another value.
-fn command_key(c: &Command) -> String {
-    match c {
-        Command::SelectOption { option } => format!("select:{option}"),
-        Command::SetHvacMode { mode } => format!("mode:{mode}"),
-        Command::Control { control, .. } => format!("control:{control}"),
-        other => serde_json::to_value(other)
-            .ok()
-            .and_then(|v| v.get("type").and_then(Value::as_str).map(str::to_owned))
-            .unwrap_or_default(),
-    }
-}
-
-/// The label of a command in the select, in `lang`. The option or mode named is the device's own.
-fn command_label(lang: Lang, c: &Command) -> String {
-    let flow = |k| flow_text(lang, k).to_owned();
-    let word = |k| settings_text(lang, k).to_owned();
-    match c {
-        Command::TurnOn { .. } => flow(FlowText::TurnOn),
-        Command::TurnOff => flow(FlowText::TurnOff),
-        Command::Toggle => flow(FlowText::Toggle),
-        Command::Open => flow(FlowText::Open),
-        Command::Close => flow(FlowText::Close),
-        Command::Stop => flow(FlowText::Stop),
-        Command::Press => word(SettingsText::Press),
-        Command::SetPosition { .. } => word(SettingsText::SetPosition),
-        Command::SetTemperature { .. } => word(SettingsText::SetTemperature),
-        Command::SetNumber { .. } => word(SettingsText::SetValue),
-        Command::SelectOption { option } => select_option(lang, option),
-        Command::SetHvacMode { mode } => set_mode(lang, mode),
-        Command::Control { control, .. } => control.clone(),
-        other => command_key(other),
-    }
-}
 
 /// The number field beside a command that carries a value.
 #[derive(Clone, Debug, PartialEq)]
@@ -662,27 +599,20 @@ pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
     // The entity's commands, with the current one kept in the list when the entity lacks it.
     let options = Memo::new(move |_| {
         let current = dev.with(|d| d.command.clone());
-        let mut list = entity.with(|e| e.as_ref().map(device_commands).unwrap_or_default());
-        let key = command_key(&current);
-        if !list.iter().any(|c| command_key(c) == key) {
-            list.insert(0, current);
-        }
-        list
+        let list = entity.with(|e| e.as_ref().map(entity_actions).unwrap_or_default());
+        command_options(&current, &list)
+            .into_iter()
+            .map(|a| a.command)
+            .collect::<Vec<_>>()
     });
     let pick = move |id: String| {
-        let commands = house
+        let actions = house
             .entities
-            .with_untracked(|m| m.get(&id).map(device_commands))
+            .with_untracked(|m| m.get(&id).map(entity_actions))
             .unwrap_or_default();
         edit_device(rows, key, |d| {
             d.entity = id;
-            if !commands
-                .iter()
-                .any(|c| command_key(c) == command_key(&d.command))
-                && let Some(first) = commands.first()
-            {
-                d.command = first.clone();
-            }
+            d.command = retarget(&d.command, &actions);
         });
     };
     let pool: Keep = Arc::new(|e| e.is_primary() && !e.id.starts_with("group_"));
@@ -1021,7 +951,7 @@ pub fn AutomationForm(rows: Rows, key: u64) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oikos_core::model::{Capabilities, EntityCategory, EntityState, UiOverride};
+    use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
 
     fn entity(kind: Kind, caps: Capabilities) -> EntityView {
         EntityView {
@@ -1044,99 +974,6 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
-    }
-
-    #[test]
-    fn command_labels_follow_the_language() {
-        let on = Command::TurnOn {
-            brightness: None,
-            color: None,
-            effect: None,
-        };
-        assert_eq!(command_label(Lang::En, &on), "Turn on");
-        assert_eq!(command_label(Lang::Fr, &on), "Allumer");
-        assert_eq!(command_label(Lang::Fr, &Command::Stop), "Arrêter");
-        assert_eq!(command_label(Lang::Fr, &Command::Press), "Appuyer");
-        let pos = Command::SetPosition { position: 50 };
-        assert_eq!(command_label(Lang::Fr, &pos), "Régler la position");
-        let pick = Command::SelectOption {
-            option: "low".into(),
-        };
-        assert_eq!(command_label(Lang::En, &pick), "Select low");
-        assert_eq!(command_label(Lang::Fr, &pick), "Choisir low");
-        let mode = Command::SetHvacMode {
-            mode: "heat".into(),
-        };
-        assert_eq!(command_label(Lang::Fr, &mode), "Régler le mode heat");
-    }
-
-    #[test]
-    fn device_commands_for_select_lists_options() {
-        let caps = Capabilities {
-            options: vec!["low".into(), "high".into()],
-            ..Default::default()
-        };
-        let cmds = device_commands(&entity(Kind::Select, caps));
-        assert_eq!(
-            cmds,
-            vec![
-                Command::SelectOption {
-                    option: "low".into()
-                },
-                Command::SelectOption {
-                    option: "high".into()
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn device_commands_for_climate_lists_modes() {
-        let caps = Capabilities {
-            hvac_modes: vec!["heat".into(), "cool".into()],
-            ..Default::default()
-        };
-        let cmds = device_commands(&entity(Kind::Climate, caps));
-        assert!(cmds.contains(&Command::SetTemperature { temperature: 20.0 }));
-        assert!(cmds.contains(&Command::SetHvacMode {
-            mode: "heat".into()
-        }));
-        assert!(cmds.contains(&Command::SetHvacMode {
-            mode: "cool".into()
-        }));
-    }
-
-    #[test]
-    fn device_commands_for_light() {
-        let cmds = device_commands(&entity(Kind::Light, Capabilities::default()));
-        assert_eq!(
-            cmds,
-            vec![
-                Command::TurnOn {
-                    brightness: None,
-                    color: None,
-                    effect: None
-                },
-                Command::TurnOff,
-                Command::Toggle,
-            ]
-        );
-    }
-
-    #[test]
-    fn device_commands_for_cover_with_position_adds_a_position() {
-        let caps = Capabilities {
-            position: true,
-            ..Default::default()
-        };
-        let cmds = device_commands(&entity(Kind::Cover, caps));
-        assert!(cmds.contains(&Command::SetPosition { position: 50 }));
-        let plain = device_commands(&entity(Kind::Cover, Capabilities::default()));
-        assert!(
-            !plain
-                .iter()
-                .any(|c| matches!(c, Command::SetPosition { .. }))
-        );
     }
 
     #[test]

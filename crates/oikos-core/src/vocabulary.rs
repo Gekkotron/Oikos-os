@@ -267,16 +267,13 @@ pub fn actions(kind: Kind, component: &str, caps: &Capabilities) -> Vec<Action> 
             list
         }
         Kind::Climate | Kind::WaterHeater => {
-            let min = caps.min_temp.unwrap_or(5.0);
+            let (min, max) = (caps.min_temp.unwrap_or(5.0), caps.max_temp.unwrap_or(35.0));
+            let step = caps.temp_step.unwrap_or(0.5);
+            // A new action starts mid-range, on a step, rather than at the coldest setting.
+            let start = (min + ((max - min) / 2.0 / step).round() * step).clamp(min, max);
             let mut list = vec![Action {
-                command: Command::SetTemperature { temperature: min },
-                params: vec![number(
-                    "temperature",
-                    min,
-                    caps.max_temp.unwrap_or(35.0),
-                    caps.temp_step.unwrap_or(0.5),
-                    Some("°C"),
-                )],
+                command: Command::SetTemperature { temperature: start },
+                params: vec![number("temperature", min, max, step, Some("°C"))],
             }];
             list.extend(
                 caps.hvac_modes
@@ -476,6 +473,30 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(actions(Kind::Select, "select", &caps).len(), 2);
+    }
+
+    #[test]
+    fn temperature_starts_mid_range_on_a_step() {
+        let caps = Capabilities {
+            min_temp: Some(5.0),
+            max_temp: Some(35.0),
+            temp_step: Some(0.5),
+            ..Default::default()
+        };
+        assert_eq!(
+            actions(Kind::Climate, "climate", &caps)[0].command,
+            Command::SetTemperature { temperature: 20.0 }
+        );
+        let heater = Capabilities {
+            min_temp: Some(30.0),
+            max_temp: Some(61.0),
+            temp_step: Some(1.0),
+            ..Default::default()
+        };
+        assert_eq!(
+            actions(Kind::WaterHeater, "water_heater", &heater)[0].command,
+            Command::SetTemperature { temperature: 46.0 }
+        );
     }
 
     #[test]

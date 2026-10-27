@@ -8,6 +8,7 @@ pub mod cameras;
 pub mod cards;
 pub mod chime;
 pub mod climate;
+pub mod command_form;
 pub mod commands;
 pub mod components;
 pub mod dashboards;

@@ -905,19 +905,56 @@ pub fn set_to(lang: Lang, e: &str, v: &str) -> String {
     )
 }
 
-/// "Arm Alarm (away)" / "Activer Alarme (absent)": the security screen's arm words.
-pub fn arm(lang: Lang, e: &str, mode: AlarmMode) -> String {
-    let (en, fr) = match mode {
+fn alarm_mode_words(mode: AlarmMode) -> (&'static str, &'static str) {
+    match mode {
         AlarmMode::Home => ("home", "présent"),
         AlarmMode::Away => ("away", "absent"),
         AlarmMode::Night => ("night", "nuit"),
         AlarmMode::Vacation => ("vacation", "vacances"),
         AlarmMode::CustomBypass => ("custom bypass", "personnalisée"),
-    };
+    }
+}
+
+/// "Arm Alarm (away)" / "Activer Alarme (absent)": the security screen's arm words.
+pub fn arm(lang: Lang, e: &str, mode: AlarmMode) -> String {
+    let (en, fr) = alarm_mode_words(mode);
     pick(
         lang,
         format!("Arm {e} ({en})"),
         format!("Activer {e} ({fr})"),
+    )
+}
+
+/// "Arm (away)" / "Activer (absent)": an arm action in a list, without the entity.
+pub fn arm_action(lang: Lang, mode: AlarmMode) -> String {
+    let (en, fr) = alarm_mode_words(mode);
+    pick(lang, format!("Arm ({en})"), format!("Activer ({fr})"))
+}
+
+/// "Fan: Low" / "Ventilation : Low": a fan mode in an action list.
+pub fn fan_mode_action(lang: Lang, mode: &str) -> String {
+    pick(
+        lang,
+        format!("Fan: {mode}"),
+        format!("Ventilation{NBSP}: {mode}"),
+    )
+}
+
+/// "Fan speed: Max" / "Vitesse : Max": a vacuum fan speed in an action list.
+pub fn fan_speed_action(lang: Lang, speed: &str) -> String {
+    pick(
+        lang,
+        format!("Fan speed: {speed}"),
+        format!("Vitesse{NBSP}: {speed}"),
+    )
+}
+
+/// "Mode: On" / "Mode : Marche": a control set to a value in an action list.
+pub fn control_action(lang: Lang, control: &str, value: &str) -> String {
+    pick(
+        lang,
+        format!("{control}: {value}"),
+        format!("{control}{NBSP}: {value}"),
     )
 }
 

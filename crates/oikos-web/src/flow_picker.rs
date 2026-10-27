@@ -1,15 +1,14 @@
 //! Entries of the "Add" picker: what a query offers to put on the canvas. Pure, tested natively.
 
-use oikos_api::EntityView;
 use oikos_core::flow::TriggerSignalParams;
 use oikos_core::flow::{
     CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, NotifyParams, Op,
     Scalar, SunWhich, TriggerScheduleParams, TriggerStateParams,
 };
-use oikos_core::model::{AlarmMode, Command, Kind};
-use oikos_core::types::{Shape, type_def};
-use serde_json::{Value, json};
+use oikos_core::model::Command;
+use serde_json::Value;
 
+use crate::command_form::entity_actions;
 use crate::flow_edit::fold_accents;
 use crate::flow_text::{Ctx, sentence, subline};
 use crate::format::{entity_title, kind_search_words, room_name};
@@ -69,86 +68,6 @@ fn command(entity: &str, command: Command) -> NodeKind {
         command,
         extra: Default::default(),
     })
-}
-
-fn turn_on() -> Command {
-    Command::TurnOn {
-        brightness: None,
-        color: None,
-        effect: None,
-    }
-}
-
-/// The commands offered for an entity of this kind.
-pub(crate) fn commands(entity: &EntityView, current: Option<&Scalar>) -> Vec<Command> {
-    match entity.kind {
-        Kind::Light | Kind::Switch => vec![turn_on(), Command::TurnOff, Command::Toggle],
-        Kind::Cover => vec![Command::Open, Command::Close, Command::Stop],
-        Kind::Number => vec![Command::SetNumber {
-            value: match current {
-                Some(Scalar::Number(n)) => *n,
-                _ => 0.0,
-            },
-        }],
-        Kind::Button => vec![Command::Press],
-        Kind::Climate => vec![Command::SetTemperature { temperature: 20.0 }],
-        Kind::Generic => generic_controls(entity),
-        Kind::AlarmPanel => alarm_commands(entity),
-        _ => Vec::new(),
-    }
-}
-
-/// Disarm, then one Arm per mode the panel announces (home, away, night when it announces none).
-fn alarm_commands(entity: &EntityView) -> Vec<Command> {
-    let announced = &entity.capabilities.alarm_modes;
-    let modes: Vec<AlarmMode> = if announced.is_empty() {
-        vec![AlarmMode::Home, AlarmMode::Away, AlarmMode::Night]
-    } else {
-        announced.iter().copied().collect()
-    };
-    std::iter::once(Command::Disarm { code: None })
-        .chain(
-            modes
-                .into_iter()
-                .map(|mode| Command::Arm { mode, code: None }),
-        )
-        .collect()
-}
-
-/// One `control` command per announced control, with a sensible default value for its shape.
-fn generic_controls(entity: &EntityView) -> Vec<Command> {
-    let Some(caps) = entity.capabilities.generic.as_ref() else {
-        return Vec::new();
-    };
-    let def = type_def(&entity.component);
-    caps.controls
-        .iter()
-        .map(|name| {
-            let ctl = def.and_then(|d| d.controls.get(name));
-            let value = match ctl {
-                Some(c) if c.press => None,
-                Some(c) => match c.shape {
-                    Shape::OnOff => Some(json!(true)),
-                    Shape::Number => Some(json!(0.0)),
-                    Shape::Choice => Some(json!(
-                        c.field
-                            .as_ref()
-                            .and_then(|f| caps.options.get(f))
-                            .and_then(|o| o.first())
-                            .cloned()
-                            .unwrap_or_default()
-                    )),
-                    Shape::Text => Some(json!("")),
-                    _ => None,
-                },
-                None => None,
-            };
-            Command::Control {
-                control: name.clone(),
-                value,
-            }
-        })
-        .collect()
 }
 
 /// The picker entries for `query`, ordered by [`Group`] then entity title. An empty query gives
@@ -325,8 +244,8 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                     ));
                 }
             }
-            for c in commands(e, current.as_ref()) {
-                out.push(entry(Group::Then, command(&e.id, c), ctx));
+            for action in entity_actions(e) {
+                out.push(entry(Group::Then, command(&e.id, action.command), ctx));
             }
             if is_group_id(&e.id) {
                 for entry in &mut out[first..] {
@@ -344,7 +263,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use oikos_api::{AreaView, EntityView};
-    use oikos_core::model::{Capabilities, EntityCategory, EntityState, StateValue, UiOverride};
+    use oikos_core::model::{
+        AlarmMode, Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride,
+    };
+    use serde_json::json;
 
     use super::*;
 
@@ -531,7 +453,10 @@ mod tests {
             controls: vec!["locked".into(), "open".into()],
             ..Default::default()
         });
-        let cmds = commands(&lock, None);
+        let cmds: Vec<Command> = entity_actions(&lock)
+            .into_iter()
+            .map(|a| a.command)
+            .collect();
         assert!(cmds.contains(&Command::Control {
             control: "locked".into(),
             value: Some(json!(true))
@@ -547,7 +472,10 @@ mod tests {
         let mut panel = ent("a1", "Alarm", Kind::AlarmPanel);
         panel.capabilities.alarm_modes = [AlarmMode::Away, AlarmMode::Night].into();
         assert_eq!(
-            commands(&panel, None),
+            entity_actions(&panel)
+                .into_iter()
+                .map(|a| a.command)
+                .collect::<Vec<_>>(),
             vec![
                 Command::Disarm { code: None },
                 Command::Arm {
@@ -561,7 +489,8 @@ mod tests {
             ]
         );
         panel.capabilities.alarm_modes.clear();
-        assert_eq!(commands(&panel, None).len(), 4);
+        // Discovery fills the modes; a panel that announces none offers only Disarm.
+        assert_eq!(entity_actions(&panel).len(), 1);
     }
 
     #[test]
