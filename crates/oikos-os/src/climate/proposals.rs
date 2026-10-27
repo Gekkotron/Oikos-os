@@ -488,6 +488,46 @@ mod tests {
         assert_eq!(learn(&hub), LearnStatus::Proposed);
     }
 
+    #[tokio::test]
+    async fn a_zone_in_eco_is_not_learned() {
+        use oikos_climate::doc::{RoomEco, ZoneState};
+        let (hub, _rx) = hub();
+        let (history, _in) = crate::history::History::detached(8, chrono_tz::UTC);
+        hub.set_history(history);
+        hub.ingest_message(
+            "oikos/climate/zone/attic/settings",
+            settings_doc(ZoneState::Active).as_bytes(),
+            true,
+        );
+        let now = clock::now();
+        let eco = |until| {
+            serde_json::to_string(&RoomEco {
+                set_at: now - 60,
+                until,
+            })
+            .unwrap()
+        };
+        let topic = "oikos/climate/zone/attic/eco";
+        hub.ingest_message(topic, eco(now + 3_600).as_bytes(), true);
+        let learn = |hub: &Hub| hub.climate_view().unwrap().zones[0].learn.clone();
+        assert_eq!(learn(&hub), LearnStatus::Eco);
+        assert_eq!(
+            learning::learn_zone(&hub, "attic", now).await,
+            LearnStatus::Eco
+        );
+        assert_eq!(
+            hub.climate_runtime().learn_status["attic"],
+            LearnStatus::Eco
+        );
+        // An eco that has ended no longer holds learning back.
+        hub.ingest_message(topic, eco(now - 1).as_bytes(), true);
+        assert_eq!(learn(&hub), LearnStatus::UpToDate);
+        assert_ne!(
+            learning::learn_zone(&hub, "attic", now).await,
+            LearnStatus::Eco
+        );
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_new_fingerprint_under_the_same_id_replaces_the_alert() {
         let (hub, mut rx) = hub();

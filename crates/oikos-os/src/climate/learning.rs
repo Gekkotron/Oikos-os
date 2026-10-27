@@ -258,6 +258,9 @@ pub(crate) async fn learn_zone(hub: &Arc<Hub>, zone: &str, now: u64) -> LearnSta
     if settings.state == ZoneState::Off {
         return LearnStatus::Off;
     }
+    if in_eco(hub, zone, now) {
+        return eco_paused(hub, zone);
+    }
     let Some(history) = hub.history().cloned() else {
         return history_off(hub, zone);
     };
@@ -355,6 +358,23 @@ fn history_off(hub: &Hub, zone: &str) -> LearnStatus {
     LearnStatus::HistoryOff
 }
 
+/// The zone holds a room eco at `now`: its days are not its habits, so nothing is learned.
+fn in_eco(hub: &Hub, zone: &str, now: u64) -> bool {
+    hub.climate_store()
+        .zones
+        .get(zone)
+        .and_then(|docs| docs.eco.as_ref())
+        .is_some_and(|eco| eco.until > now)
+}
+
+/// The run stopped for the zone's eco: the view says so instead of what an earlier run said.
+fn eco_paused(hub: &Hub, zone: &str) -> LearnStatus {
+    hub.climate_runtime()
+        .learn_status
+        .insert(zone.to_owned(), LearnStatus::Eco);
+    LearnStatus::Eco
+}
+
 /// Applies the outcomes under the engine's pass lock, against the settings as they are now: an
 /// approval or rejection that landed during the database reads is not undone by a stale run.
 async fn conclude(
@@ -371,6 +391,10 @@ async fn conclude(
     let settings = hub.zone_settings(zone);
     if settings.state == ZoneState::Off {
         return LearnStatus::Off;
+    }
+    // An eco started during the database reads.
+    if in_eco(hub, zone, now) {
+        return eco_paused(hub, zone);
     }
     let pending = hub
         .climate_store()

@@ -569,11 +569,11 @@ pub fn eco_setpoint(mode: Mode, eco: f64, schedule: Setpoint) -> Setpoint {
     }
 }
 
-/// `until` as the house's weekday and clock time ("Sun 00:00").
+/// `until` as the house's weekday, date and clock time ("Sun 1 Nov 00:00"): eco can end days away.
 fn day_clock(inp: &ZoneInputs, until: u64) -> String {
     let secs = i64::try_from(until.saturating_sub(inp.now)).unwrap_or(i64::MAX / 2);
     (inp.local_now + Duration::seconds(secs))
-        .format("%a %H:%M")
+        .format("%a %-d %b %H:%M")
         .to_string()
 }
 
@@ -1384,7 +1384,7 @@ mod tests {
         assert_eq!(d.source, Source::Eco);
         assert_eq!(d.setpoint, Some(Setpoint::Temp(16.0)));
         assert_eq!(d.entities["trv"], target(Some(16.0), "heat", false));
-        assert_eq!(d.reason, "Eco until Wed 11:00: 16.0 °C");
+        assert_eq!(d.reason, "Eco until Wed 21 Oct 11:00: 16.0 °C");
     }
 
     #[test]
@@ -1394,7 +1394,10 @@ mod tests {
         c.home = false;
         let d = c.run();
         assert_eq!(d.source, Source::Eco);
-        assert_eq!(d.reason, "Eco until Wed 11:00 (nobody home): 16.0 °C");
+        assert_eq!(
+            d.reason,
+            "Eco until Wed 21 Oct 11:00 (nobody home): 16.0 °C"
+        );
     }
 
     #[test]
@@ -1415,7 +1418,7 @@ mod tests {
         assert_eq!(d.setpoint, Some(Setpoint::Temp(14.0)));
         assert_eq!(
             d.reason,
-            "Eco until Wed 11:00: 14.0 °C; schedule already lower"
+            "Eco until Wed 21 Oct 11:00: 14.0 °C; schedule already lower"
         );
     }
 

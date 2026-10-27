@@ -16,7 +16,7 @@ use oikos_core::model::Kind;
 
 use crate::i18n::Lang;
 use crate::i18n::climate::{ClimateText, climate_text, learning_progress};
-use crate::i18n::format::{ago, decimal, weekday_short};
+use crate::i18n::format::{ago, decimal, month_short, weekday_short};
 use crate::i18n::states::{StateCtx, state_word};
 
 /// What the learner's state says, in one line.
@@ -29,6 +29,7 @@ pub fn learn_status_text(lang: Lang, status: &LearnStatus) -> String {
         LearnStatus::UpToDate => word(ClimateText::LearnUpToDate),
         LearnStatus::Proposed => word(ClimateText::LearnProposed),
         LearnStatus::Rejected => word(ClimateText::LearnRejected),
+        LearnStatus::Eco => word(ClimateText::LearnEco),
     }
 }
 
@@ -149,6 +150,27 @@ pub fn until_text(lang: Lang, until: u64, now: u64, tz: Tz) -> String {
             format!("{day} {clock}")
         }
     }
+}
+
+/// When a room's eco ends, in `tz`: "Tue 3 Nov 19:00" / "mar. 3 nov. 19:00". The date is always
+/// there, since an eco can end days or weeks away.
+pub fn eco_end_text(lang: Lang, until: u64, tz: Tz) -> String {
+    let Some(end) = local(until, tz) else {
+        return "—".into();
+    };
+    let day = day_short(lang, Day::from_chrono(end.weekday()));
+    // Mid-sentence in French ("jusqu'au mar. 3 nov. 19:00").
+    let day = match lang {
+        Lang::Fr => day.to_lowercase(),
+        Lang::En => day.to_owned(),
+    };
+    format!(
+        "{day} {} {} {:02}:{:02}",
+        end.day(),
+        month_short(lang, end.month()),
+        end.hour(),
+        end.minute()
+    )
 }
 
 /// The fan modes the house's climate units list, in first-seen order with how many units list
@@ -489,6 +511,10 @@ mod tests {
             learn_status_text(Lang::En, &LearnStatus::UpToDate),
             "Rules up to date"
         );
+        assert_eq!(
+            learn_status_text(Lang::En, &LearnStatus::Eco),
+            "Learning paused while in eco"
+        );
     }
 
     #[test]
@@ -541,6 +567,15 @@ mod tests {
             until_text(Lang::En, at(2026, 1, 5, 23, 30), now, paris),
             "tomorrow 00:30"
         );
+    }
+
+    #[test]
+    fn eco_end_names_the_day_and_month() {
+        let paris = parse_zone("Europe/Paris");
+        // 18:00 UTC is 19:00 in Paris on Tuesday 3 November 2026.
+        let until = at(2026, 11, 3, 18, 0);
+        assert_eq!(eco_end_text(Lang::En, until, paris), "Tue 3 Nov 19:00");
+        assert_eq!(eco_end_text(Lang::Fr, until, paris), "mar. 3 nov. 19:00");
     }
 
     #[test]

@@ -24,6 +24,8 @@ pub enum LearnStatus {
     Proposed,
     /// The latest proposal was rejected and is being remembered.
     Rejected,
+    /// The room is in eco: nothing is learned until it ends.
+    Eco,
 }
 
 /// One zone of the house: its settings, live reading, decision and pending proposal.
