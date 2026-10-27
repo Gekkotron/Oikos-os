@@ -66,18 +66,17 @@ impl EditState {
         });
     }
 
+    /// Leaves edit mode, closing the widget and dashboard sheets.
+    pub fn close(&self) {
+        self.active.set(false);
+        self.selected_widget.set(None);
+        self.settings_open.set(false);
+    }
+
     pub fn discard(&self) {
         self.selected_widget.set(None);
         self.draft.set(self.original.get_untracked());
     }
-}
-
-/// The selection after a save: kept only while its index still points at the same widget id
-/// in the saved dashboard, since the hub may have normalized the widget order.
-fn kept_selection(selected: Option<usize>, before: &Dashboard, after: &Dashboard) -> Option<usize> {
-    let index = selected?;
-    let id = &before.widgets.get(index)?.id;
-    (after.widgets.get(index).map(|w| &w.id) == Some(id)).then_some(index)
 }
 
 /// The pencil's accessible name; it says so when switching edit mode off left an unsaved draft.
@@ -143,11 +142,10 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                 aria-label=move || pencil_label(lang(), state.active.get(), dirty.get())
                 aria-pressed=move || state.active.get().to_string()
                 on:click=move |_| {
-                    let now_active = !state.active.get_untracked();
-                    state.active.set(now_active);
-                    if !now_active {
-                        state.selected_widget.set(None);
-                        state.settings_open.set(false);
+                    if state.active.get_untracked() {
+                        state.close();
+                    } else {
+                        state.active.set(true);
                     }
                 }
             >
@@ -182,17 +180,12 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                         let d = state.draft.get_untracked();
                         spawn_local(async move {
                             if let Ok(saved) = api::put_dashboard(&d).await {
-                                // The hub may normalize widget order, invalidating the selection.
-                                let current = state.draft.get_untracked();
-                                let kept = kept_selection(
-                                    state.selected_widget.get_untracked(),
-                                    &current,
-                                    &saved,
-                                );
-                                state.selected_widget.set(kept);
                                 state.original.set(saved.clone());
                                 state.draft.set(saved.clone());
                                 house.store_dashboard(saved);
+                                // A save ends the edit: the widget library and any open sheet
+                                // close with it.
+                                state.close();
                             }
                             saving.set(false);
                         });
@@ -251,26 +244,14 @@ mod tests {
     }
 
     #[test]
-    fn selection_kept_only_when_widget_id_unchanged() {
-        let dash = |ids: &[&str]| Dashboard {
-            id: "d".into(),
-            name: "D".into(),
-            order: 0,
-            widgets: ids
-                .iter()
-                .map(|id| widget(id, WidgetKind::Light, Span::X1x1))
-                .collect(),
-            show_header: false,
-        };
-        let before = dash(&["a", "b"]);
-        assert_eq!(
-            kept_selection(Some(1), &before, &dash(&["a", "b"])),
-            Some(1)
-        );
-        assert_eq!(kept_selection(Some(1), &before, &dash(&["b", "a"])), None);
-        assert_eq!(kept_selection(Some(1), &before, &dash(&["a"])), None);
-        assert_eq!(kept_selection(Some(5), &before, &before), None);
-        assert_eq!(kept_selection(None, &before, &before), None);
+    fn close_leaves_edit_mode_and_closes_the_sheets() {
+        let s = state(vec![widget("a", WidgetKind::Light, Span::X1x1)]);
+        s.selected_widget.set(Some(0));
+        s.settings_open.set(true);
+        s.close();
+        assert!(!s.active.get());
+        assert_eq!(s.selected_widget.get(), None);
+        assert!(!s.settings_open.get());
     }
 
     #[test]
