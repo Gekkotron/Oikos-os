@@ -790,6 +790,8 @@ async fn run_node(
                 Err(err) => failed(err.to_string()),
             }
         }
+        // Run by a later task.
+        NodeKind::Switch(_) | NodeKind::TimeBetween(_) => failed("unsupported node".to_owned()),
         NodeKind::Notify(params) => {
             let lang = params.lang.unwrap_or_default();
             let lookup = |id: &str| hub.reading(id);

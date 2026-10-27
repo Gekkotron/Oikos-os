@@ -37,7 +37,7 @@ pub fn role(kind: &NodeKind) -> Role {
         | NodeKind::TriggerSchedule(_)
         | NodeKind::TriggerSun(_)
         | NodeKind::TriggerSignal(_) => Role::Trigger,
-        NodeKind::If(_) => Role::Check,
+        NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_) => Role::Check,
         NodeKind::Command(_) | NodeKind::FlowEnable(_) | NodeKind::Notify(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
     }
@@ -299,6 +299,7 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             p.up_to.as_deref().map(duration_words).as_deref(),
         ),
         NodeKind::Command(p) => command_sentence(&p.command, &p.entity, ctx),
+        NodeKind::Switch(_) | NodeKind::TimeBetween(_) => node.kind.type_name().to_owned(),
         NodeKind::Notify(p) => {
             // Placeholders show the entity's name; a text that does not parse shows as typed.
             let name = |id: &str| ctx.entities.get(id).map(|e| entity_title(lang, e));

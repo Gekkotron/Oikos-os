@@ -53,7 +53,7 @@ pub fn can_connect(
     }
     let ports = source.kind.ports();
     let port_ok = match port {
-        Some(p) => ports.contains(&p),
+        Some(p) => ports.iter().any(|x| x == p),
         None => ports.is_empty(),
     };
     if !port_ok {
@@ -132,11 +132,13 @@ pub fn can_insert(flow: &Flow, key: &EdgeKey, id: &str) -> Result<(), ConnectErr
 /// leaves the card by its first port (`true` on an `if`). Nothing changes on error.
 pub fn insert_into_edge(flow: &mut Flow, key: &EdgeKey, id: &str) -> Result<(), ConnectError> {
     can_insert(flow, key, id)?;
-    let out = flow.node(id).and_then(|n| n.kind.ports().first().copied());
+    let out = flow
+        .node(id)
+        .and_then(|n| n.kind.ports().into_iter().next());
     let mut next = flow.clone();
     remove_edge(&mut next, key);
     connect(&mut next, &key.0, key.1.as_deref(), id)?;
-    connect(&mut next, id, out, &key.2)?;
+    connect(&mut next, id, out.as_deref(), &key.2)?;
     *flow = next;
     Ok(())
 }
@@ -223,6 +225,8 @@ pub fn next_node_id(flow: &Flow, kind: &NodeKind) -> String {
         NodeKind::Command(_) => "command",
         NodeKind::FlowEnable(_) => "flow_switch",
         NodeKind::Notify(_) => "notify",
+        NodeKind::Switch(_) => "switch",
+        NodeKind::TimeBetween(_) => "time",
     };
     (1..)
         .map(|n| format!("{prefix}_{n}"))

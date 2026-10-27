@@ -247,7 +247,7 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     node: from.id.clone(),
                 });
             }
-            (Some(port), false) if !ports.contains(&port.as_str()) => {
+            (Some(port), false) if !ports.iter().any(|p| p == port) => {
                 return Err(FlowError::UnknownPort {
                     node: from.id.clone(),
                     port: port.clone(),
@@ -290,12 +290,12 @@ fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
                 node: node.id.clone(),
             });
         }
-        let ports: &[&str] = match node.kind.ports() {
-            [] => &[""],
-            ports => ports,
-        };
-        for port in ports {
-            pending.extend(flow.successors(&node.id, (!port.is_empty()).then_some(port)));
+        let mut ports = node.kind.ports();
+        if ports.is_empty() {
+            ports.push(String::new());
+        }
+        for port in &ports {
+            pending.extend(flow.successors(&node.id, (!port.is_empty()).then_some(port.as_str())));
         }
     }
     Ok(())

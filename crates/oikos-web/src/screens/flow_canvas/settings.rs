@@ -309,6 +309,7 @@ fn node_editor_body(
         NodeKind::Command(_) => FlowText::NodeCommand,
         NodeKind::FlowEnable(_) => FlowText::NodeFlowSwitch,
         NodeKind::Notify(_) => FlowText::Notify,
+        NodeKind::Switch(_) | NodeKind::TimeBetween(_) => FlowText::NodeIf,
     };
     let id_display = id.clone();
     let close = move |_: web_sys::MouseEvent| selected.set(None);
@@ -989,6 +990,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
         }
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Notify(p) => notify_fields(form, id, p).into_any(),
+        NodeKind::Switch(_) | NodeKind::TimeBetween(_) => ().into_any(),
         NodeKind::Delay(p) => {
             let for_id = id.clone();
             let for_write = Callback::new(move |value: Option<String>| {
