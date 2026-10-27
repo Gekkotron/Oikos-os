@@ -27,6 +27,8 @@ pub enum ConnectError {
     UnknownNode,
     /// An `if` needs a `true`/`false` port; every other node takes none.
     BadPort,
+    /// Only a card with no wires yet can be dropped into a wire.
+    AlreadyWired,
 }
 
 /// An edge identity: `(from, port, to)`.
@@ -106,6 +108,39 @@ pub fn connect(
     Ok(())
 }
 
+/// Checks whether card `id` may be dropped into the wire `key`: the wire exists, the card has
+/// an input (not a trigger) and no wire touches it yet.
+pub fn can_insert(flow: &Flow, key: &EdgeKey, id: &str) -> Result<(), ConnectError> {
+    let node = flow.node(id).ok_or(ConnectError::UnknownNode)?;
+    if !flow
+        .edges
+        .iter()
+        .any(|e| e.from == key.0 && e.port == key.1 && e.to == key.2)
+    {
+        return Err(ConnectError::UnknownNode);
+    }
+    if node.kind.is_trigger() {
+        return Err(ConnectError::IntoTrigger);
+    }
+    if flow.edges.iter().any(|e| e.from == id || e.to == id) {
+        return Err(ConnectError::AlreadyWired);
+    }
+    Ok(())
+}
+
+/// Splits the wire `key` through card `id`: `from → to` becomes `from → id → to`. The new wire
+/// leaves the card by its first port (`true` on an `if`). Nothing changes on error.
+pub fn insert_into_edge(flow: &mut Flow, key: &EdgeKey, id: &str) -> Result<(), ConnectError> {
+    can_insert(flow, key, id)?;
+    let out = flow.node(id).and_then(|n| n.kind.ports().first().copied());
+    let mut next = flow.clone();
+    remove_edge(&mut next, key);
+    connect(&mut next, &key.0, key.1.as_deref(), id)?;
+    connect(&mut next, id, out, &key.2)?;
+    *flow = next;
+    Ok(())
+}
+
 /// Removes the edge; whether it existed.
 pub fn remove_edge(flow: &mut Flow, key: &EdgeKey) -> bool {
     let before = flow.edges.len();
@@ -114,11 +149,30 @@ pub fn remove_edge(flow: &mut Flow, key: &EdgeKey) -> bool {
     flow.edges.len() != before
 }
 
-/// Removes the node and every edge touching it; whether it existed.
+/// Removes the node and every edge touching it, then bridges the gap: each card that fed it
+/// (on the same port) now feeds each card it fed, where [`can_connect`] allows. Whether it
+/// existed.
 pub fn remove_node(flow: &mut Flow, id: &str) -> bool {
     let before = flow.nodes.len();
+    let into: Vec<(String, Option<String>)> = flow
+        .edges
+        .iter()
+        .filter(|e| e.to == id)
+        .map(|e| (e.from.clone(), e.port.clone()))
+        .collect();
+    let out: Vec<String> = flow
+        .edges
+        .iter()
+        .filter(|e| e.from == id)
+        .map(|e| e.to.clone())
+        .collect();
     flow.nodes.retain(|n| n.id != id);
     flow.edges.retain(|e| e.from != id && e.to != id);
+    for (from, port) in &into {
+        for to in &out {
+            let _ = connect(flow, from, port.as_deref(), to);
+        }
+    }
     flow.nodes.len() != before
 }
 
@@ -405,14 +459,115 @@ mod tests {
     }
 
     #[test]
-    fn remove_node_drops_edges() {
+    fn insert_splits_the_wire() {
+        let mut f = flow(vec![trigger("t"), delay("d"), delay("n")]);
+        connect(&mut f, "t", None, "d").unwrap();
+        let key: EdgeKey = ("t".into(), None, "d".into());
+        assert_eq!(insert_into_edge(&mut f, &key, "n"), Ok(()));
+        assert_eq!(wires(&f), [("t", None, "n"), ("n", None, "d")]);
+    }
+
+    #[test]
+    fn insert_keeps_the_port_and_leaves_an_if_by_true() {
+        let mut f = flow(vec![
+            trigger("t"),
+            node("i", if_kind()),
+            delay("d"),
+            node("j", if_kind()),
+        ]);
+        connect(&mut f, "t", None, "i").unwrap();
+        connect(&mut f, "i", Some("false"), "d").unwrap();
+        let key: EdgeKey = ("i".into(), Some("false".into()), "d".into());
+        assert_eq!(insert_into_edge(&mut f, &key, "j"), Ok(()));
+        assert!(
+            f.edges
+                .iter()
+                .any(|e| e.from == "i" && e.port.as_deref() == Some("false") && e.to == "j")
+        );
+        assert!(
+            f.edges
+                .iter()
+                .any(|e| e.from == "j" && e.port.as_deref() == Some("true") && e.to == "d")
+        );
+        assert_eq!(f.edges.len(), 3);
+    }
+
+    #[test]
+    fn insert_refuses_wired_cards_triggers_and_unknown_wires() {
+        let mut f = flow(vec![trigger("t"), delay("d"), delay("w"), trigger("u")]);
+        connect(&mut f, "t", None, "d").unwrap();
+        connect(&mut f, "t", None, "w").unwrap();
+        let key: EdgeKey = ("t".into(), None, "d".into());
+        let before = f.clone();
+        assert_eq!(
+            insert_into_edge(&mut f, &key, "w"),
+            Err(ConnectError::AlreadyWired)
+        );
+        assert_eq!(
+            insert_into_edge(&mut f, &key, "u"),
+            Err(ConnectError::IntoTrigger)
+        );
+        let gone: EdgeKey = ("t".into(), None, "x".into());
+        assert_eq!(
+            insert_into_edge(&mut f, &gone, "d"),
+            Err(ConnectError::UnknownNode)
+        );
+        assert_eq!(f, before);
+    }
+
+    fn wires(f: &Flow) -> Vec<(&str, Option<&str>, &str)> {
+        f.edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.port.as_deref(), e.to.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn remove_node_bridges_its_neighbours() {
         let mut f = flow(vec![trigger("t"), delay("a"), delay("b")]);
         connect(&mut f, "t", None, "a").unwrap();
         connect(&mut f, "a", None, "b").unwrap();
         assert!(remove_node(&mut f, "a"));
-        assert!(f.edges.is_empty());
+        assert_eq!(wires(&f), [("t", None, "b")]);
         assert_eq!(f.nodes.len(), 2);
         assert!(!remove_node(&mut f, "a"));
+    }
+
+    #[test]
+    fn remove_node_bridges_every_pair_on_the_feeding_port() {
+        let mut f = flow(vec![
+            trigger("t"),
+            node("i", if_kind()),
+            delay("a"),
+            delay("b"),
+            delay("c"),
+        ]);
+        connect(&mut f, "t", None, "i").unwrap();
+        connect(&mut f, "i", Some("false"), "a").unwrap();
+        connect(&mut f, "a", None, "b").unwrap();
+        connect(&mut f, "a", None, "c").unwrap();
+        // `c` is already fed by `i`: no duplicate wire.
+        connect(&mut f, "i", Some("false"), "c").unwrap();
+        assert!(remove_node(&mut f, "a"));
+        assert_eq!(
+            wires(&f),
+            [
+                ("t", None, "i"),
+                ("i", Some("false"), "c"),
+                ("i", Some("false"), "b"),
+            ]
+        );
+    }
+
+    #[test]
+    fn remove_node_at_an_end_leaves_nothing_to_bridge() {
+        let mut f = flow(vec![trigger("t"), delay("a"), delay("b")]);
+        connect(&mut f, "t", None, "a").unwrap();
+        connect(&mut f, "a", None, "b").unwrap();
+        assert!(remove_node(&mut f, "t"));
+        assert_eq!(wires(&f), [("a", None, "b")]);
+        assert!(remove_node(&mut f, "b"));
+        assert!(f.edges.is_empty());
     }
 
     #[test]

@@ -35,12 +35,13 @@ pub struct Rect {
 }
 
 /// One drawn wire: its SVG path, where its "yes"/"no" label sits (just right of its pin, at
-/// the pin's height) and where its ✕ goes (halfway along).
+/// the pin's height), where its ✕ goes (halfway along) and the dense polyline it follows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Route {
     pub d: String,
     pub label_at: Pt,
     pub mid: Pt,
+    pub points: Vec<Pt>,
 }
 
 /// An edge as `(from, port, to)`.
@@ -450,13 +451,49 @@ fn finish(from: Pt, path: &[Seg]) -> Route {
             y: from.y,
         },
         mid: along(total / 2.0),
+        points,
     }
+}
+
+/// The wire that passes under a card at `at`, the one closest to the card's centre when
+/// several do; `None` when none crosses it.
+pub fn wire_under(wires: &[(Key, Route)], at: Pt) -> Option<Key> {
+    let rect = card(at);
+    let centre = Pt {
+        x: at.x + NODE_W / 2.0,
+        y: at.y + NODE_H / 2.0,
+    };
+    wires
+        .iter()
+        .filter_map(|(key, route)| {
+            route
+                .points
+                .iter()
+                .filter(|p| {
+                    p.x > rect.x && p.x < rect.x + rect.w && p.y > rect.y && p.y < rect.y + rect.h
+                })
+                .map(|p| (p.x - centre.x).hypot(p.y - centre.y))
+                .min_by(f64::total_cmp)
+                .map(|d| (d, key))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, key)| key.clone())
 }
 
 /// Every edge's wire, in edge order, keyed by `(from, port, to)`: from its [`out_anchor`] to
 /// its [`in_anchor`], routed around every card but its own two ends. Edges whose ends
 /// have no position are left out.
 pub fn routes(flow: &Flow, pos: &BTreeMap<String, Pt>) -> Vec<(Key, Route)> {
+    routes_past(flow, pos, None)
+}
+
+/// [`routes`], except that no wire steers around the card `loose` (the one being dragged), so
+/// the wires stay put under it.
+pub fn routes_past(
+    flow: &Flow,
+    pos: &BTreeMap<String, Pt>,
+    loose: Option<&str>,
+) -> Vec<(Key, Route)> {
     flow.edges
         .iter()
         .filter_map(|edge| {
@@ -466,7 +503,9 @@ pub fn routes(flow: &Flow, pos: &BTreeMap<String, Pt>) -> Vec<(Key, Route)> {
             let end = in_anchor(*pos.get(&edge.to)?);
             let obstacles: Vec<Rect> = pos
                 .iter()
-                .filter(|(id, _)| **id != edge.from && **id != edge.to)
+                .filter(|(id, _)| {
+                    **id != edge.from && **id != edge.to && Some(id.as_str()) != loose
+                })
                 .map(|(_, at)| card(*at))
                 .collect();
             Some((key, route(start, end, &obstacles)))
@@ -915,6 +954,51 @@ mod tests {
             r.d.contains(&format!("{:.1}", block.y - ROW_GAP / 2.0)),
             "{}",
             r.d
+        );
+    }
+
+    /// A trigger wired to a delay 700 px to its right, with a loose delay between them.
+    fn wire_and_loose_card(loose_y: f64) -> Flow {
+        Flow::decode(
+            format!(
+                r#"{{
+          "id": "f", "name": "F",
+          "nodes": [
+            {{ "id": "t", "type": "trigger.state", "params": {{ "entity": "e" }},
+              "position": {{ "x": 0, "y": 100 }} }},
+            {{ "id": "d", "type": "delay", "params": {{ "for": "1m" }},
+              "position": {{ "x": 700, "y": 100 }} }},
+            {{ "id": "n", "type": "delay", "params": {{ "for": "1m" }},
+              "position": {{ "x": 350, "y": {loose_y} }} }}
+          ],
+          "edges": [ {{ "from": "t", "to": "d" }} ]
+        }}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn loose_card_leaves_the_wire_under_it() {
+        let flow = wire_and_loose_card(90.0);
+        let pos = positions(&flow);
+        // Routed around it, the wire dodges the card; ignoring it, the wire runs straight under.
+        assert_eq!(wire_under(&routes(&flow, &pos), pos["n"]), None);
+        let wires = routes_past(&flow, &pos, Some("n"));
+        assert_eq!(
+            wire_under(&wires, pos["n"]),
+            Some(("t".into(), None, "d".into()))
+        );
+    }
+
+    #[test]
+    fn card_away_from_the_wire_finds_none() {
+        let flow = wire_and_loose_card(300.0);
+        let pos = positions(&flow);
+        assert_eq!(
+            wire_under(&routes_past(&flow, &pos, Some("n")), pos["n"]),
+            None
         );
     }
 }

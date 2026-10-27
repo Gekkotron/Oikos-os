@@ -638,7 +638,7 @@ async fn view_mode_click_opens_settings() {
 }
 
 #[wasm_bindgen_test]
-async fn delete_key_removes_card_and_wires() {
+async fn delete_key_removes_card_and_bridges_its_wires() {
     let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
     assert_eq!(count(&host, ".flow-wire"), 4);
     select_card(&host, "wait").await;
@@ -646,7 +646,9 @@ async fn delete_key_removes_card_and_wires() {
     tick().await;
     let html = host.inner_html();
     assert_eq!(count(&host, "[data-node=wait]"), 0, "{html}");
-    assert_eq!(count(&host, ".flow-wire"), 2, "{html}");
+    // `moving --no--> wait --> off` becomes `moving --no--> off`.
+    assert_eq!(count(&host, ".flow-wire"), 3, "{html}");
+    assert_eq!(count(&host, ".flow-wire--no"), 1, "{html}");
     assert_eq!(count(&host, ".flow-node--selected"), 0, "{html}");
 }
 
