@@ -76,6 +76,7 @@ impl Hub {
                         docs,
                         history,
                         learn.get(zone),
+                        now,
                     )
                 })
                 .collect();
@@ -90,6 +91,7 @@ impl Hub {
                         Some(docs),
                         history,
                         learn.get(zone),
+                        now,
                     ));
                 }
             }
@@ -392,6 +394,7 @@ fn zone_view(
     docs: Option<&ZoneDocs>,
     history: bool,
     ran: Option<&LearnStatus>,
+    now: u64,
 ) -> ZoneView {
     let empty = ZoneDocs::default();
     let docs = docs.unwrap_or(&empty);
@@ -399,6 +402,8 @@ fn zone_view(
         LearnStatus::Off
     } else if docs.proposal.is_some() {
         LearnStatus::Proposed
+    } else if docs.eco.as_ref().is_some_and(|eco| eco.until > now) {
+        LearnStatus::Eco
     } else if !history {
         LearnStatus::HistoryOff
     } else {

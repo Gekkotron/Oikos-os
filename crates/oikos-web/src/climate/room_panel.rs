@@ -15,7 +15,7 @@ use crate::api::climate::{self as api, OverrideBody};
 use crate::climate::entity_field::ThermometerField;
 use crate::climate::proposal::{ProposalPanel, RulesPanel};
 use crate::climate::{
-    age_text, can_hold, decision_line, degrees_text, eco_until, learn_status_text,
+    age_text, can_hold, decision_line, degrees_text, eco_end_text, eco_until, learn_status_text,
     minutes_to_next_change, mode_word, row_line, setpoint_text, source_word, until_text,
     week_minute,
 };
@@ -296,10 +296,7 @@ pub fn RoomPanel(
             let cancel_eco = cancel_eco.clone();
             let body = match eco_live() {
                 Some(eco) => {
-                    let line = eco_until_line(
-                        lang(),
-                        &until_text(lang(), eco.until, unix_now(), tz.get()),
-                    );
+                    let line = eco_until_line(lang(), &eco_end_text(lang(), eco.until, tz.get()));
                     view! {
                         <span class="chip climate-eco__line">{line}</span>
                         <button

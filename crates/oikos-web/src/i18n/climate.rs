@@ -23,6 +23,7 @@ pub enum ClimateText {
     LearnUpToDate,
     LearnProposed,
     LearnRejected,
+    LearnEco,
     Idle,
     SrcSafety,
     SrcOverride,
@@ -134,6 +135,7 @@ impl ClimateText {
         ClimateText::LearnUpToDate,
         ClimateText::LearnProposed,
         ClimateText::LearnRejected,
+        ClimateText::LearnEco,
         ClimateText::Idle,
         ClimateText::SrcSafety,
         ClimateText::SrcOverride,
@@ -263,6 +265,10 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
         T::LearnUpToDate => ("Rules up to date", "Règles à jour"),
         T::LearnProposed => ("New rules to review", "Nouvelles règles à examiner"),
         T::LearnRejected => ("Last proposal rejected", "Dernière proposition rejetée"),
+        T::LearnEco => (
+            "Learning paused while in eco",
+            "Apprentissage en pause pendant l'éco",
+        ),
         T::Idle => ("Idle", "Au repos"),
         T::SrcSafety => ("Safety", "Sécurité"),
         T::SrcOverride => ("Override", "Dérogation"),
@@ -451,12 +457,12 @@ pub fn fan_choice(lang: Lang, mode: &str, n: usize, of: usize) -> String {
     )
 }
 
-/// A room's eco line: "Eco until Sun 00:00" / "Éco jusqu'à dim. 00:00".
+/// A room's eco line: "Eco until Sun 1 Nov 00:00" / "Éco jusqu'au dim. 1 nov. 00:00".
 pub fn eco_until_line(lang: Lang, until: &str) -> String {
     pick(
         lang,
         format!("Eco until {until}"),
-        format!("Éco jusqu'à {until}"),
+        format!("Éco jusqu'au {until}"),
     )
 }
 
@@ -471,10 +477,13 @@ mod tests {
             fan_choice(Lang::Fr, "low", 2, 4),
             "low (sur 2 des 4 appareils)"
         );
-        assert_eq!(eco_until_line(Lang::En, "Sun 00:00"), "Eco until Sun 00:00");
         assert_eq!(
-            eco_until_line(Lang::Fr, "dim. 00:00"),
-            "Éco jusqu'à dim. 00:00"
+            eco_until_line(Lang::En, "Sun 1 Nov 00:00"),
+            "Eco until Sun 1 Nov 00:00"
+        );
+        assert_eq!(
+            eco_until_line(Lang::Fr, "dim. 1 nov. 00:00"),
+            "Éco jusqu'au dim. 1 nov. 00:00"
         );
     }
 
