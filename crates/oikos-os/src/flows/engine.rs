@@ -828,16 +828,17 @@ async fn run_node(
             )
         }
         NodeKind::Switch(params) => {
-            let entity = match (&params.entity, trigger) {
-                (Some(entity), _) => entity.as_str(),
-                (None, Some(trigger)) => trigger.entity.as_str(),
-                (None, None) => return failed("no triggering entity".to_owned()),
-            };
-            let left = match params.average.as_deref() {
-                Some(window) => window_average(hub, entity, window, now())
-                    .await
-                    .map(Scalar::Number),
-                None => hub.entity_scalar(entity),
+            let left = match node_left(
+                hub,
+                now,
+                params.entity.as_deref(),
+                params.average.as_deref(),
+                trigger,
+            )
+            .await
+            {
+                Ok(left) => left,
+                Err(reason) => return failed(reason),
             };
             let exits = match switch_exits(params, left.as_ref()) {
                 Ok(exits) => exits,
@@ -918,16 +919,17 @@ async fn run_node(
             else {
                 return failed("value is not a scalar".to_owned());
             };
-            let entity = match (&params.entity, trigger) {
-                (Some(entity), _) => entity.as_str(),
-                (None, Some(trigger)) => trigger.entity.as_str(),
-                (None, None) => return failed("no triggering entity".to_owned()),
-            };
-            let left = match params.average.as_deref() {
-                Some(window) => window_average(hub, entity, window, now())
-                    .await
-                    .map(Scalar::Number),
-                None => hub.entity_scalar(entity),
+            let left = match node_left(
+                hub,
+                now,
+                params.entity.as_deref(),
+                params.average.as_deref(),
+                trigger,
+            )
+            .await
+            {
+                Ok(left) => left,
+                Err(reason) => return failed(reason),
             };
             match (&left, params.missing) {
                 (None, Some(Missing::True)) => {
@@ -1008,8 +1010,31 @@ fn scalar_text(value: &Scalar) -> String {
     }
 }
 
-/// The entities the `if` nodes of `flows` average, each with its longest window in
-/// microseconds. An `if` without `entity` averages the entities its flow's triggers watch.
+/// The value an `if` or `switch` node compares: `entity` (else the one that fired the trigger),
+/// as its current value or, with `average`, the mean of its readings over that window.
+/// `Ok(None)` when the value is unknown; `Err` carries the failure reason.
+async fn node_left(
+    hub: &Hub,
+    now: &Now,
+    entity: Option<&str>,
+    average: Option<&str>,
+    trigger: Option<&TriggerInfo>,
+) -> Result<Option<Scalar>, String> {
+    let entity = match (entity, trigger) {
+        (Some(entity), _) => entity,
+        (None, Some(trigger)) => trigger.entity.as_str(),
+        (None, None) => return Err("no triggering entity".to_owned()),
+    };
+    Ok(match average {
+        Some(window) => window_average(hub, entity, window, now())
+            .await
+            .map(Scalar::Number),
+        None => hub.entity_scalar(entity),
+    })
+}
+
+/// The entities the `if` and `switch` nodes of `flows` average, each with its longest window in
+/// microseconds. A node without `entity` averages the entities its flow's triggers watch.
 fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
     let mut windows = BTreeMap::new();
     for flow in flows {
@@ -1022,18 +1047,16 @@ fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
             })
             .collect();
         for node in &flow.nodes {
-            let NodeKind::If(params) = &node.kind else {
-                continue;
+            let (entity, average) = match &node.kind {
+                NodeKind::If(params) => (&params.entity, &params.average),
+                NodeKind::Switch(params) => (&params.entity, &params.average),
+                _ => continue,
             };
-            let Some(window) = params
-                .average
-                .as_deref()
-                .and_then(|w| parse_duration(w).ok())
-            else {
+            let Some(window) = average.as_deref().and_then(|w| parse_duration(w).ok()) else {
                 continue;
             };
             let micros = i64::try_from(window.as_micros()).unwrap_or(i64::MAX);
-            let entities = match &params.entity {
+            let entities = match entity {
                 Some(entity) => vec![entity],
                 None => triggers.clone(),
             };
@@ -1067,7 +1090,7 @@ async fn window_average(
         Some(Ok(db)) => match db.samples(start, end + 1, Some(entity)).await {
             Ok(rows) => rows.into_iter().map(|(_, sample)| sample).collect(),
             Err(err) => {
-                tracing::warn!(%entity, %err, "if average: history read failed");
+                tracing::warn!(%entity, %err, "average: history read failed");
                 Vec::new()
             }
         },
@@ -1218,6 +1241,50 @@ mod tests {
         assert_eq!(port, ["true"]);
     }
 
+    #[tokio::test]
+    async fn switch_average_counts_every_reading_including_the_newest() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let entity = add_sensor(&engine, None);
+        let flow = serde_json::json!({
+            "id": "swavg", "name": "swavg", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "s", "type": "switch", "params": { "average": "30m",
+                    "rules": [{ "op": "lte", "value": 18 }, { "op": "lte", "value": 19 }] } }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/swavg", flow.to_string().as_bytes());
+        engine.reload();
+        // Only a switch registers the entity: its readings must be buffered.
+        for t in [20, 20, 17] {
+            engine
+                .hub
+                .ingest("test/room", format!(r#"{{"temperature":{t}}}"#).as_bytes());
+        }
+        let node = engine.flows[0].nodes[1].clone();
+        let trigger = TriggerInfo {
+            entity: entity.clone(),
+            value: serde_json::json!(17),
+            previous: serde_json::json!(20),
+        };
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "swavg",
+            "r",
+            &node,
+            Some(&trigger),
+        )
+        .await;
+        assert_eq!(outcome, StepOutcome::Ok);
+        // The mean is 19, not the current 17 (which would take rule 1).
+        assert_eq!(detail, "average 30m = 19.0 → 2");
+        assert_eq!(ports, ["2"]);
+    }
+
     /// Reports a numeric sensor and returns its entity id.
     fn add_sensor(engine: &Engine, value: Option<f64>) -> String {
         engine.hub.ingest(
@@ -1302,12 +1369,14 @@ mod tests {
                 { "id": "s", "type": "switch", "params": { "entity": entity, "all": true,
                     "rules": [{ "op": "gte", "value": 10 }, { "op": "lte", "value": 30 }] } },
                 { "id": "a", "type": "notify", "params": { "title": "x" } },
+                { "id": "a2", "type": "notify", "params": { "title": "x" } },
                 { "id": "b", "type": "notify", "params": { "title": "x" } }
             ],
             "edges": [
                 { "from": "t", "to": "s" },
                 { "from": "s", "to": "b", "port": "2" },
-                { "from": "s", "to": "a", "port": "1" }
+                { "from": "s", "to": "a", "port": "1" },
+                { "from": "a", "to": "a2" }
             ]
         });
         engine
@@ -1325,11 +1394,8 @@ mod tests {
             None,
         )
         .await;
-        // Exit 1 runs before exit 2 whatever the edge order.
-        let order = recorded(&engine.hub, "sw");
-        assert_eq!(&order[..2], ["t", "s"]);
-        assert_eq!(order[2], "a");
-        assert_eq!(order[3], "b");
+        // Exit 1 runs before exit 2 whatever the edge order, depth first.
+        assert_eq!(recorded(&engine.hub, "sw"), ["t", "s", "a", "a2", "b"]);
     }
 
     /// Runs a `time.between` node with the clock at `utc`.
@@ -1397,5 +1463,38 @@ mod tests {
         assert_eq!(steps[1].ports, Some(vec!["in".to_owned()]));
         assert_eq!(steps[2].node, "c");
         assert_eq!(steps[2].ports, None);
+    }
+
+    #[tokio::test]
+    async fn step_view_records_no_ports_for_a_failed_branching_step() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let entity = add_sensor(&engine, Some(20.0));
+        let flow = serde_json::json!({
+            "id": "pf", "name": "pf", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "tm", "type": "switch", "params": { "rules": [{ "op": "gt", "value": 1 }] } }
+            ],
+            "edges": [{ "from": "t", "to": "tm" }]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/pf", flow.to_string().as_bytes());
+        engine.reload();
+        let flow = engine.flows[0].clone();
+        let run = engine.hub.begin_run("pf", None).unwrap();
+        execute(
+            engine.hub.clone(),
+            engine.now.clone(),
+            flow,
+            run.id,
+            "t".to_owned(),
+            None,
+        )
+        .await;
+        let steps = engine.hub.flow("pf").unwrap().runs[0].steps.clone();
+        assert_eq!(steps[1].node, "tm");
+        assert_eq!(steps[1].outcome, StepOutcome::Failed);
+        assert_eq!(steps[1].ports, None);
     }
 }
