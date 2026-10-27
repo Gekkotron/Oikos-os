@@ -24,7 +24,7 @@ use crate::cards::light::LightCard;
 use crate::cards::lock::LockCard;
 use crate::cards::number::NumberCard;
 use crate::cards::select::SelectCard;
-use crate::cards::sensor::SensorCard;
+use crate::cards::sensor::{SensorCard, companion};
 use crate::cards::siren::SirenCard;
 use crate::cards::switch::SwitchCard;
 use crate::cards::vacuum::VacuumCard;
@@ -41,20 +41,18 @@ fn is_sensor_of_class(e: &EntityView, class: &str) -> bool {
     e.kind == Kind::Sensor && e.device_class.as_deref() == Some(class)
 }
 
-/// `shown` without the humidity sensors whose device's temperature sensor is also in `shown`:
-/// the temperature card carries the humidity reading.
-pub(crate) fn without_paired_humidity(mut shown: Vec<&EntityView>) -> Vec<&EntityView> {
-    let with_temperature: HashSet<&str> = shown
+/// `shown` without the humidity (or soil moisture) sensors whose device's temperature sensor is
+/// also in `shown`: the temperature card carries that reading.
+pub(crate) fn without_paired_companions(mut shown: Vec<&EntityView>) -> Vec<&EntityView> {
+    let folded: HashSet<&str> = shown
         .iter()
+        .copied()
         .filter(|e| is_sensor_of_class(e, "temperature"))
         .filter_map(|e| e.device_id.as_deref())
+        .filter_map(|d| companion(shown.iter().copied(), d))
+        .map(|e| e.id.as_str())
         .collect();
-    shown.retain(|e| {
-        !(is_sensor_of_class(e, "humidity")
-            && e.device_id
-                .as_deref()
-                .is_some_and(|d| with_temperature.contains(d)))
-    });
+    shown.retain(|e| !folded.contains(e.id.as_str()));
     shown
 }
 
@@ -305,6 +303,46 @@ mod tests {
         let lamp = entity("lamp", Kind::Light, None, UiOverride::default());
         let all = [t, h, lamp];
         assert_eq!(entity_ids(all.iter(), "living"), ["lamp", "th_t"]);
+    }
+
+    #[test]
+    fn soil_moisture_is_folded_into_its_temperature_sensor() {
+        let t = on_device(
+            entity(
+                "soil_t",
+                Kind::Sensor,
+                Some("temperature"),
+                UiOverride::default(),
+            ),
+            "soil",
+        );
+        let m = on_device(
+            entity(
+                "soil_m",
+                Kind::Sensor,
+                Some("moisture"),
+                UiOverride::default(),
+            ),
+            "soil",
+        );
+        let all = [t, m];
+        assert_eq!(entity_ids(all.iter(), "living"), ["soil_t"]);
+    }
+
+    #[test]
+    fn only_the_preferred_companion_is_folded() {
+        let [t, h] = thermometer_parts("th", "dev");
+        let m = on_device(
+            entity(
+                "th_m",
+                Kind::Sensor,
+                Some("moisture"),
+                UiOverride::default(),
+            ),
+            "dev",
+        );
+        let all = [t, h, m];
+        assert_eq!(entity_ids(all.iter(), "living"), ["th_m", "th_t"]);
     }
 
     #[test]

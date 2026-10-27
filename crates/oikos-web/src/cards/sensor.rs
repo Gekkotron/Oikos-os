@@ -51,19 +51,33 @@ fn humidity_text(humidity: Option<f64>) -> String {
     humidity.map_or_else(|| "—".into(), |h| format!("{} %", h.round()))
 }
 
-/// The sensor of `class` on `device_id` that Home shows, if any.
+/// The percentage classes a temperature card shows under its reading, preferred first: the air
+/// humidity of a thermometer, then the moisture of a soil sensor.
+const COMPANION_CLASSES: [&str; 2] = ["humidity", "moisture"];
+
+/// The sensor among `candidates` that the temperature card of `device_id` shows under its
+/// reading: the device's sensor of the first class in [`COMPANION_CLASSES`] it has.
+pub(crate) fn companion<'a>(
+    candidates: impl IntoIterator<Item = &'a EntityView>,
+    device_id: &str,
+) -> Option<&'a EntityView> {
+    candidates
+        .into_iter()
+        .filter(|e| e.kind == Kind::Sensor && e.device_id.as_deref() == Some(device_id))
+        .filter_map(|e| {
+            let class = e.device_class.as_deref()?;
+            Some((COMPANION_CLASSES.iter().position(|c| *c == class)?, e))
+        })
+        .min_by_key(|(rank, _)| *rank)
+        .map(|(_, e)| e)
+}
+
+/// The companion sensor on `device_id` that Home shows, if any.
 fn partner<'a>(
     entities: impl Iterator<Item = &'a EntityView>,
     device_id: Option<&str>,
-    class: &str,
 ) -> Option<&'a EntityView> {
-    let device_id = device_id?;
-    entities.into_iter().find(|e| {
-        e.kind == Kind::Sensor
-            && e.device_class.as_deref() == Some(class)
-            && e.device_id.as_deref() == Some(device_id)
-            && shows_on_home(e)
-    })
+    companion(entities.filter(|e| shows_on_home(e)), device_id?)
 }
 
 /// The humidity bar under a reading.
@@ -91,9 +105,9 @@ fn history_href(id: &str) -> String {
     format!("/history/{}", crate::api::encode_id(id))
 }
 
-/// The body of a temperature card: the temperature large, then the humidity of the same device
-/// (when Home shows one) and the curve of the last 24 hours. The value and the curve open the
-/// temperature's history, the humidity its own.
+/// The body of a temperature card: the temperature large, then the humidity (or soil moisture) of
+/// the same device when Home shows one, and the curve of the last 24 hours. The value and the
+/// curve open the temperature's history, the humidity its own.
 fn temperature_body(entity: &EntityView, house: House) -> impl IntoView + use<> {
     let lang = use_lang();
     let value = numeric(&entity.state);
@@ -113,13 +127,12 @@ fn temperature_body(entity: &EntityView, house: House) -> impl IntoView + use<> 
     let humidity_id: Memo<Option<String>> = Memo::new(move |_| {
         house
             .entities
-            .with(|m| partner(m.values(), device_id.as_deref(), "humidity").map(|e| e.id.clone()))
+            .with(|m| partner(m.values(), device_id.as_deref()).map(|e| e.id.clone()))
     });
     let humidity_value: Memo<Option<f64>> = Memo::new(move |_| {
-        house.entities.with(|m| {
-            partner(m.values(), device_id_val.as_deref(), "humidity")
-                .and_then(|e| numeric(&e.state))
-        })
+        house
+            .entities
+            .with(|m| partner(m.values(), device_id_val.as_deref()).and_then(|e| numeric(&e.state)))
     });
     let id = entity.id.clone();
     view! {
@@ -190,9 +203,9 @@ pub fn SensorCard(entity: EntityView) -> impl IntoView {
         match entity.device_class.as_deref() {
             Some("temperature") => {
                 let house = expect_context::<House>();
-                let paired = house.entities.with_untracked(|m| {
-                    partner(m.values(), entity.device_id.as_deref(), "humidity").is_some()
-                });
+                let paired = house
+                    .entities
+                    .with_untracked(|m| partner(m.values(), entity.device_id.as_deref()).is_some());
                 let title = if paired {
                     short_name(&entity.name, entity.device_name.as_deref())
                 } else {
@@ -246,7 +259,9 @@ pub fn SensorCard(entity: EntityView) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::{bar_percent, comfort_class, humidity_text, numeric, partner, sensor_text};
+    use super::{
+        bar_percent, comfort_class, companion, humidity_text, numeric, partner, sensor_text,
+    };
     use oikos_api::EntityView;
     use oikos_core::model::{
         Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride,
@@ -318,17 +333,35 @@ mod tests {
             sensor("h_other", Some("other"), "humidity", 50.0),
             sensor("h", Some("dev"), "humidity", 60.0),
         ];
-        let found = partner(all.iter(), Some("dev"), "humidity");
+        let found = partner(all.iter(), Some("dev"));
         assert_eq!(found.map(|e| e.id.as_str()), Some("h"));
-        assert!(partner(all.iter(), None, "humidity").is_none());
-        assert!(partner(all.iter(), Some("none"), "humidity").is_none());
+        assert!(partner(all.iter(), None).is_none());
+        assert!(partner(all.iter(), Some("none")).is_none());
     }
 
     #[test]
     fn partner_must_be_shown_on_home() {
         let mut hidden = sensor("h", Some("dev"), "humidity", 60.0);
         hidden.ui.hidden = true;
-        assert!(partner([hidden].iter(), Some("dev"), "humidity").is_none());
+        assert!(partner([hidden].iter(), Some("dev")).is_none());
+    }
+
+    #[test]
+    fn soil_moisture_is_a_companion() {
+        let all = [
+            sensor("t", Some("soil"), "temperature", 14.0),
+            sensor("m", Some("soil"), "moisture", 100.0),
+        ];
+        assert_eq!(companion(&all, "soil").map(|e| e.id.as_str()), Some("m"));
+    }
+
+    #[test]
+    fn humidity_is_preferred_over_moisture() {
+        let all = [
+            sensor("m", Some("dev"), "moisture", 30.0),
+            sensor("h", Some("dev"), "humidity", 60.0),
+        ];
+        assert_eq!(companion(&all, "dev").map(|e| e.id.as_str()), Some("h"));
     }
 
     #[test]

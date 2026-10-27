@@ -9,7 +9,7 @@ use crate::cards::cover::is_moving;
 use crate::format::is_on;
 use crate::i18n::{GroupState, Lang, group_state};
 use crate::rooms::{FAVORITES, shows_on_home};
-use crate::screens::home::without_paired_humidity;
+use crate::screens::home::without_paired_companions;
 
 /// One card on Home: a single entity (a hand-made group is an entity too).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -51,7 +51,7 @@ pub fn home_items<'a>(
             e.ui.favorite
         })
         .collect();
-    let candidates = without_paired_humidity(candidates);
+    let candidates = without_paired_companions(candidates);
 
     let mut placed: Vec<(i32, usize, HomeItem)> = candidates
         .into_iter()
