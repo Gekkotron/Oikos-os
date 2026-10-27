@@ -12,6 +12,10 @@ mod switch;
 mod vacuum;
 mod water_heater;
 
+pub(crate) use alarm::STATES as ALARM_STATES;
+pub(crate) use cover::STATES as COVER_STATES;
+pub(crate) use vacuum::STATES as VACUUM_STATES;
+
 use super::{Applied, StateError};
 use crate::model::{Entity, EntityState, Kind, StateValue};
 use crate::template::Templates;

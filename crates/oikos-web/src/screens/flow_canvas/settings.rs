@@ -4,11 +4,14 @@
 
 use leptos::prelude::*;
 use oikos_core::flow::{IfParams, Missing, Node, NodeKind, Op};
+use oikos_core::model::Command;
 
 use super::Editor;
 use super::graph::Selection;
 use super::sun::{FallbackBadge, sun_sheet};
 use super::template_field::{NotifyPreview, TemplateField};
+use super::value_field::IfValueField;
+use crate::command_form::{CommandFields, FieldStyle, entity_actions, retarget};
 use crate::entity_picker::needs::{is_commandable, is_signal, keep};
 use crate::entity_picker::{EntityPickField, Suggest};
 use crate::flow_edit::remove_node;
@@ -17,6 +20,7 @@ use crate::i18n::flows::{FlowText, flow_text, invalid_json, signal_chip_label, u
 use crate::i18n::format::parse_decimal;
 use crate::i18n::picker::PickerText;
 use crate::i18n::{Lang, use_lang};
+use crate::if_value::{after_entity_change, upstream_trigger_entity, value_input};
 use crate::screens::flow_schedule::ScheduleField;
 
 /// A fixed word as a signal that follows the language, for a field's label or placeholder.
@@ -817,13 +821,37 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         })
                 }
             });
+            let house = expect_context::<House>();
+            let draft = form.editor.draft;
+            // The entity the value is compared with: the card's own, else its state trigger's.
+            let resolved = {
+                let id = id.clone();
+                move |own: Option<String>| {
+                    let target = own.or_else(|| draft.with(|f| upstream_trigger_entity(f, &id)))?;
+                    house.entities.with(|m| m.get(&target).cloned())
+                }
+            };
+            let compared = Memo::new({
+                let resolved = resolved.clone();
+                move |_| resolved(entity_value.get())
+            });
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
+                let next = untrack(|| resolved(value.clone()));
+                let input = value_input(lang(), next.as_ref());
                 form.update(&entity_id, |n| {
                     if let NodeKind::If(ref mut i) = n.kind {
+                        i.value = after_entity_change(i.value.as_ref(), &input);
                         i.entity = value;
                     }
                 });
+            });
+            let value_id = id.clone();
+            let stored_value = Signal::derive(move || {
+                draft.with(|f| match f.node(&value_id).map(|n| &n.kind) {
+                    Some(NodeKind::If(i)) => i.value.clone(),
+                    _ => None,
+                })
             });
             let shift_id = id.clone();
             let shift_write = Callback::new(move |ev: web_sys::Event| {
@@ -887,11 +915,10 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         <FallbackBadge cfg=cfg />
                     }
                 >
-                    <JsonField
-                        label=word(FlowText::ValueJson)
-                        initial=live.run(()).and_then(|i| i.value).unwrap_or(serde_json::Value::Null)
-                        optional=false
-                        write=value_write
+                    <IfValueField
+                        value=stored_value
+                        entity=Signal::from(compared)
+                        write=Callback::new(move |v| value_write.run(Some(v)))
                     />
                     <EntityPickField
                         label=word(FlowText::EntityDefaults)
@@ -1002,27 +1029,61 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 NodeKind::Command(t) => Some(t.entity.clone()),
                 _ => None,
             });
+            let house = expect_context::<House>();
+            let entity = Memo::new(move |_| {
+                let id = entity_value.get()?;
+                house.entities.with(|m| m.get(&id).cloned())
+            });
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
+                let actions = value.as_ref().and_then(|v| {
+                    house
+                        .entities
+                        .with_untracked(|m| m.get(v).map(entity_actions))
+                });
                 form.update(&entity_id, |n| {
                     if let NodeKind::Command(ref mut c) = n.kind {
                         c.entity = value.unwrap_or_default();
+                        if let Some(actions) = &actions {
+                            c.command = retarget(&c.command, actions);
+                        }
                     }
                 });
             });
+            let draft = form.editor.draft;
+            let command_id = id.clone();
+            let command = Signal::derive(move || {
+                draft.with(|f| match f.node(&command_id).map(|n| &n.kind) {
+                    Some(NodeKind::Command(c)) => c.command.clone(),
+                    _ => p.command.clone(),
+                })
+            });
             let cmd_id = id;
-            let command_json = serde_json::to_value(&p.command).unwrap_or(serde_json::Value::Null);
-            let cmd_write = Callback::new(move |value: Option<serde_json::Value>| {
-                if let Some(v) = value
-                    && let Ok(cmd) = serde_json::from_value(v)
-                {
-                    form.update(&cmd_id, |n| {
-                        if let NodeKind::Command(ref mut c) = n.kind {
-                            c.command = cmd;
-                        }
-                    });
+            let command_write = Callback::new(move |cmd: Command| {
+                form.update(&cmd_id, |n| {
+                    if let NodeKind::Command(ref mut c) = n.kind {
+                        c.command = cmd;
+                    }
+                });
+            });
+            let json_write = Callback::new(move |value: Option<serde_json::Value>| {
+                if let Some(cmd) = value.and_then(|v| serde_json::from_value(v).ok()) {
+                    command_write.run(cmd);
                 }
             });
+            let json_box = move || {
+                let initial = command
+                    .with_untracked(|c| serde_json::to_value(c))
+                    .unwrap_or(serde_json::Value::Null);
+                view! {
+                    <JsonField
+                        label=word(FlowText::CommandJson)
+                        initial=initial
+                        optional=false
+                        write=json_write
+                    />
+                }
+            };
             view! {
                 <EntityPickField
                     label=word(FlowText::Entity)
@@ -1035,12 +1096,15 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     compact=true
                     class=Some("node-editor__field".to_owned())
                 />
-                <JsonField
-                    label=word(FlowText::CommandJson)
-                    initial=command_json
-                    optional=false
-                    write=cmd_write
-                />
+                <Show when=move || entity.with(Option::is_some) fallback=json_box>
+                    <CommandFields
+                        command=command
+                        entity=Signal::from(entity)
+                        write=command_write
+                        style=FieldStyle::Node
+                        advanced=ViewFn::from(json_box)
+                    />
+                </Show>
             }
             .into_any()
         }

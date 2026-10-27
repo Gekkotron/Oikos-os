@@ -16,3 +16,4 @@ pub mod registry;
 pub mod state;
 pub mod template;
 pub mod types;
+pub mod vocabulary;

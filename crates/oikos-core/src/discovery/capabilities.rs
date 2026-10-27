@@ -61,6 +61,10 @@ fn by_kind(kind: Kind, cfg: &Value) -> Capabilities {
         Kind::Light => light(cfg),
         Kind::Cover => Capabilities {
             position: cfg.get("set_position_topic").is_some_and(Value::is_string),
+            open_close: has_str(cfg, "command_topic"),
+            // Home Assistant turns Stop off when `payload_stop` is published as null.
+            stop: has_str(cfg, "command_topic")
+                && !cfg.get("payload_stop").is_some_and(Value::is_null),
             ..Capabilities::default()
         },
         Kind::Climate => Capabilities {
@@ -208,4 +212,25 @@ fn str_list(cfg: &Value, key: &str) -> Option<Vec<String>> {
             .map(str::to_owned)
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn cover_stop_follows_payload_stop() {
+        let with_null = json!({"command_topic": "c/set", "payload_stop": null});
+        let caps = from_config(Kind::Cover, &with_null);
+        assert!(caps.open_close);
+        assert!(!caps.stop);
+        let plain = from_config(Kind::Cover, &json!({"command_topic": "c/set"}));
+        assert!(plain.open_close);
+        assert!(plain.stop);
+        let read_only = from_config(Kind::Cover, &json!({"state_topic": "c"}));
+        assert!(!read_only.open_close);
+        assert!(!read_only.stop);
+    }
 }

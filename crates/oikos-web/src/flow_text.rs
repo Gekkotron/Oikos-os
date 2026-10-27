@@ -150,7 +150,7 @@ fn control_sentence(lang: Lang, control: &str, value: Option<&Value>, e: &str) -
 }
 
 /// The colour word of a hue (0..360) and saturation (0..100): white when barely saturated.
-fn colour_name(hs: Hs) -> FlowText {
+pub(crate) fn colour_name(hs: Hs) -> FlowText {
     if hs.s < 15.0 {
         return FlowText::ColourWhite;
     }

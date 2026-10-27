@@ -8,7 +8,7 @@ use crate::state::{Applied, StateError};
 use crate::template::Templates;
 
 /// The states Home Assistant accepts from an MQTT alarm panel.
-const STATES: &[&str] = &[
+pub(crate) const STATES: &[&str] = &[
     "disarmed",
     "armed_home",
     "armed_away",

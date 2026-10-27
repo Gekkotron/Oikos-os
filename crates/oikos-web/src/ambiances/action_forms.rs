@@ -10,16 +10,15 @@ use oikos_api::{
     AmbianceAction, Category, CategoryAction, ClimateAction, DeviceAction, EntityView, FlowAction,
     FlowDo, Target, category_members,
 };
-use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
+use oikos_core::model::{Command, UNASSIGNED_AREA};
 use serde_json::{Value, json};
 
+use crate::command_form::{CommandFields, FieldStyle, entity_actions, retarget};
 use crate::entity_picker::{EntityPickField, Keep};
 use crate::format::list_label;
 use crate::house::House;
 use crate::i18n::devices::{DeviceText, device_text};
-use crate::i18n::flows::{FlowText, flow_text};
 use crate::i18n::format::parse_decimal;
-use crate::i18n::settings::{SettingsText, select_option, set_mode, settings_text};
 use crate::i18n::{self, Key, Lang, use_text};
 use crate::screens::group_wizard::group_by_room;
 
@@ -45,129 +44,6 @@ fn lang() -> RwSignal<Lang> {
 }
 
 // ---- device commands -------------------------------------------------------------------------
-
-/// The commands offered for an entity: the flow picker's, plus one per select option, one per
-/// climate mode and a position for covers that have one.
-pub fn device_commands(e: &EntityView) -> Vec<Command> {
-    let mut list = crate::flow_picker::commands(e, None);
-    match e.kind {
-        Kind::Select => {
-            list.extend(
-                e.capabilities
-                    .options
-                    .iter()
-                    .map(|option| Command::SelectOption {
-                        option: option.clone(),
-                    }),
-            )
-        }
-        Kind::Climate => list.extend(
-            e.capabilities
-                .hvac_modes
-                .iter()
-                .map(|mode| Command::SetHvacMode { mode: mode.clone() }),
-        ),
-        Kind::Cover if e.capabilities.position => list.push(Command::SetPosition { position: 50 }),
-        _ => {}
-    }
-    list
-}
-
-/// Two commands with the same key are the same choice with possibly another value.
-fn command_key(c: &Command) -> String {
-    match c {
-        Command::SelectOption { option } => format!("select:{option}"),
-        Command::SetHvacMode { mode } => format!("mode:{mode}"),
-        Command::Control { control, .. } => format!("control:{control}"),
-        other => serde_json::to_value(other)
-            .ok()
-            .and_then(|v| v.get("type").and_then(Value::as_str).map(str::to_owned))
-            .unwrap_or_default(),
-    }
-}
-
-/// The label of a command in the select, in `lang`. The option or mode named is the device's own.
-fn command_label(lang: Lang, c: &Command) -> String {
-    let flow = |k| flow_text(lang, k).to_owned();
-    let word = |k| settings_text(lang, k).to_owned();
-    match c {
-        Command::TurnOn { .. } => flow(FlowText::TurnOn),
-        Command::TurnOff => flow(FlowText::TurnOff),
-        Command::Toggle => flow(FlowText::Toggle),
-        Command::Open => flow(FlowText::Open),
-        Command::Close => flow(FlowText::Close),
-        Command::Stop => flow(FlowText::Stop),
-        Command::Press => word(SettingsText::Press),
-        Command::SetPosition { .. } => word(SettingsText::SetPosition),
-        Command::SetTemperature { .. } => word(SettingsText::SetTemperature),
-        Command::SetNumber { .. } => word(SettingsText::SetValue),
-        Command::SelectOption { option } => select_option(lang, option),
-        Command::SetHvacMode { mode } => set_mode(lang, mode),
-        Command::Control { control, .. } => control.clone(),
-        other => command_key(other),
-    }
-}
-
-/// The number field beside a command that carries a value.
-#[derive(Clone, Debug, PartialEq)]
-struct ValueSpec {
-    value: Option<f64>,
-    min: f64,
-    max: f64,
-    step: f64,
-}
-
-fn value_spec(c: &Command, e: Option<&EntityView>) -> Option<ValueSpec> {
-    let caps = e.map(|e| &e.capabilities);
-    match c {
-        // Shown as a percentage, stored as 0..=255.
-        Command::TurnOn { brightness, .. } if caps.is_some_and(|c| c.brightness) => {
-            Some(ValueSpec {
-                value: brightness.map(|b| (f64::from(b) * 100.0 / 255.0).round()),
-                min: 1.0,
-                max: 100.0,
-                step: 1.0,
-            })
-        }
-        Command::SetPosition { position } => Some(ValueSpec {
-            value: Some(f64::from(*position)),
-            min: 0.0,
-            max: 100.0,
-            step: 1.0,
-        }),
-        Command::SetTemperature { temperature } => Some(ValueSpec {
-            value: Some(*temperature),
-            min: caps.and_then(|c| c.min_temp).unwrap_or(5.0),
-            max: caps.and_then(|c| c.max_temp).unwrap_or(35.0),
-            step: caps.and_then(|c| c.temp_step).unwrap_or(0.5),
-        }),
-        Command::SetNumber { value } => Some(ValueSpec {
-            value: Some(*value),
-            min: caps.and_then(|c| c.min).unwrap_or(0.0),
-            max: caps.and_then(|c| c.max).unwrap_or(100.0),
-            step: caps.and_then(|c| c.step).unwrap_or(1.0),
-        }),
-        _ => None,
-    }
-}
-
-/// `c` carrying `text` as its value; an empty text only clears a light's brightness.
-fn with_value(c: &Command, text: &str) -> Command {
-    let parsed = parse_decimal(text);
-    match (c, parsed) {
-        (Command::TurnOn { color, effect, .. }, v) => Command::TurnOn {
-            brightness: v.map(|v| (v.clamp(1.0, 100.0) * 255.0 / 100.0).round() as u8),
-            color: *color,
-            effect: effect.clone(),
-        },
-        (Command::SetPosition { .. }, Some(v)) => Command::SetPosition {
-            position: v.clamp(0.0, 100.0).round() as u8,
-        },
-        (Command::SetTemperature { .. }, Some(v)) => Command::SetTemperature { temperature: v },
-        (Command::SetNumber { .. }, Some(v)) => Command::SetNumber { value: v },
-        _ => c.clone(),
-    }
-}
 
 // ---- the list of actions ---------------------------------------------------------------------
 
@@ -651,38 +527,20 @@ fn edit_device(rows: Rows, key: u64, f: impl FnOnce(&mut DeviceAction)) {
 
 #[component]
 pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
-    let t = use_text();
-    let lang = lang();
     let house = expect_context::<House>();
     let dev = device_memo(rows, key);
     let entity = Memo::new(move |_| {
         let id = dev.with(|d| d.entity.clone());
         house.entities.with(|m| m.get(&id).cloned())
     });
-    // The entity's commands, with the current one kept in the list when the entity lacks it.
-    let options = Memo::new(move |_| {
-        let current = dev.with(|d| d.command.clone());
-        let mut list = entity.with(|e| e.as_ref().map(device_commands).unwrap_or_default());
-        let key = command_key(&current);
-        if !list.iter().any(|c| command_key(c) == key) {
-            list.insert(0, current);
-        }
-        list
-    });
     let pick = move |id: String| {
-        let commands = house
+        let actions = house
             .entities
-            .with_untracked(|m| m.get(&id).map(device_commands))
+            .with_untracked(|m| m.get(&id).map(entity_actions))
             .unwrap_or_default();
         edit_device(rows, key, |d| {
             d.entity = id;
-            if !commands
-                .iter()
-                .any(|c| command_key(c) == command_key(&d.command))
-                && let Some(first) = commands.first()
-            {
-                d.command = first.clone();
-            }
+            d.command = retarget(&d.command, &actions);
         });
     };
     let pool: Keep = Arc::new(|e| e.is_primary() && !e.id.starts_with("group_"));
@@ -699,52 +557,13 @@ pub fn DeviceForm(rows: Rows, key: u64) -> impl IntoView {
                 })
                 pool=Some(pool)
             />
-            <label class="field">
-                <span class="field__caption">{move || t(Key::AmbCommand)}</span>
-                <select
-                    class="field__input field__select ambiance-device__command"
-                    on:change=move |ev| {
-                        let picked = event_target_value(&ev).parse::<usize>().ok();
-                        if let Some(c) = picked.and_then(|i| options.with(|o| o.get(i).cloned())) {
-                            edit_device(rows, key, |d| d.command = c);
-                        }
-                    }
-                >
-                    {move || {
-                        let current = command_key(&dev.with(|d| d.command.clone()));
-                        options
-                            .get()
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, c)| {
-                                let selected = command_key(&c) == current;
-                                view! { <option value=i.to_string() selected=selected>{command_label(lang.get(), &c)}</option> }
-                            })
-                            .collect_view()
-                    }}
-                </select>
-            </label>
-            {move || {
-                let command = dev.with(|d| d.command.clone());
-                let spec = entity.with(|e| value_spec(&command, e.as_ref()))?;
-                Some(view! {
-                    <label class="field">
-                        <span class="field__caption">{move || t(Key::AmbValue)}</span>
-                        <input
-                            class="field__input ambiance-device__value"
-                            type="number"
-                            min=spec.min.to_string()
-                            max=spec.max.to_string()
-                            step=spec.step.to_string()
-                            prop:value=spec.value.map(|v| v.to_string()).unwrap_or_default()
-                            on:change=move |ev| {
-                                let text = event_target_value(&ev);
-                                edit_device(rows, key, |d| d.command = with_value(&d.command, &text));
-                            }
-                        />
-                    </label>
-                })
-            }}
+            <CommandFields
+                command=Signal::derive(move || dev.with(|d| d.command.clone()))
+                entity=Signal::from(entity)
+                write=Callback::new(move |c: Command| edit_device(rows, key, |d| d.command = c))
+                style=FieldStyle::Ambiance
+                action_class="ambiance-device__command"
+            />
         </div>
     }
 }
@@ -1021,7 +840,7 @@ pub fn AutomationForm(rows: Rows, key: u64) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oikos_core::model::{Capabilities, EntityCategory, EntityState, UiOverride};
+    use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
 
     fn entity(kind: Kind, caps: Capabilities) -> EntityView {
         EntityView {
@@ -1047,137 +866,12 @@ mod tests {
     }
 
     #[test]
-    fn command_labels_follow_the_language() {
-        let on = Command::TurnOn {
-            brightness: None,
-            color: None,
-            effect: None,
-        };
-        assert_eq!(command_label(Lang::En, &on), "Turn on");
-        assert_eq!(command_label(Lang::Fr, &on), "Allumer");
-        assert_eq!(command_label(Lang::Fr, &Command::Stop), "Arrêter");
-        assert_eq!(command_label(Lang::Fr, &Command::Press), "Appuyer");
-        let pos = Command::SetPosition { position: 50 };
-        assert_eq!(command_label(Lang::Fr, &pos), "Régler la position");
-        let pick = Command::SelectOption {
-            option: "low".into(),
-        };
-        assert_eq!(command_label(Lang::En, &pick), "Select low");
-        assert_eq!(command_label(Lang::Fr, &pick), "Choisir low");
-        let mode = Command::SetHvacMode {
-            mode: "heat".into(),
-        };
-        assert_eq!(command_label(Lang::Fr, &mode), "Régler le mode heat");
-    }
-
-    #[test]
-    fn device_commands_for_select_lists_options() {
-        let caps = Capabilities {
-            options: vec!["low".into(), "high".into()],
-            ..Default::default()
-        };
-        let cmds = device_commands(&entity(Kind::Select, caps));
-        assert_eq!(
-            cmds,
-            vec![
-                Command::SelectOption {
-                    option: "low".into()
-                },
-                Command::SelectOption {
-                    option: "high".into()
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn device_commands_for_climate_lists_modes() {
-        let caps = Capabilities {
-            hvac_modes: vec!["heat".into(), "cool".into()],
-            ..Default::default()
-        };
-        let cmds = device_commands(&entity(Kind::Climate, caps));
-        assert!(cmds.contains(&Command::SetTemperature { temperature: 20.0 }));
-        assert!(cmds.contains(&Command::SetHvacMode {
-            mode: "heat".into()
-        }));
-        assert!(cmds.contains(&Command::SetHvacMode {
-            mode: "cool".into()
-        }));
-    }
-
-    #[test]
-    fn device_commands_for_light() {
-        let cmds = device_commands(&entity(Kind::Light, Capabilities::default()));
-        assert_eq!(
-            cmds,
-            vec![
-                Command::TurnOn {
-                    brightness: None,
-                    color: None,
-                    effect: None
-                },
-                Command::TurnOff,
-                Command::Toggle,
-            ]
-        );
-    }
-
-    #[test]
-    fn device_commands_for_cover_with_position_adds_a_position() {
-        let caps = Capabilities {
-            position: true,
-            ..Default::default()
-        };
-        let cmds = device_commands(&entity(Kind::Cover, caps));
-        assert!(cmds.contains(&Command::SetPosition { position: 50 }));
-        let plain = device_commands(&entity(Kind::Cover, Capabilities::default()));
-        assert!(
-            !plain
-                .iter()
-                .any(|c| matches!(c, Command::SetPosition { .. }))
-        );
-    }
-
-    #[test]
     fn setpoint_is_clamped_and_stepped() {
         assert_eq!(clamp_setpoint(2.0), 5.0);
         assert_eq!(clamp_setpoint(99.0), 30.0);
         assert_eq!(clamp_setpoint(20.3), 20.5);
         assert_eq!(clamp_setpoint(20.2), 20.0);
         assert_eq!(clamp_setpoint(21.0), 21.0);
-    }
-
-    #[test]
-    fn brightness_value_is_a_percentage() {
-        let light = entity(
-            Kind::Light,
-            Capabilities {
-                brightness: true,
-                ..Default::default()
-            },
-        );
-        let on = Command::TurnOn {
-            brightness: None,
-            color: None,
-            effect: None,
-        };
-        assert!(value_spec(&on, Some(&light)).is_some());
-        assert!(value_spec(&on, Some(&entity(Kind::Light, Capabilities::default()))).is_none());
-        assert!(matches!(
-            with_value(&on, "50"),
-            Command::TurnOn {
-                brightness: Some(128),
-                ..
-            }
-        ));
-        assert!(matches!(
-            with_value(&on, ""),
-            Command::TurnOn {
-                brightness: None,
-                ..
-            }
-        ));
     }
 
     #[test]

@@ -67,7 +67,7 @@ pub fn is_signal(e: &EntityView) -> bool {
 
 /// Whether a flow can send `e` a command.
 pub fn is_commandable(e: &EntityView) -> bool {
-    !crate::flow_picker::commands(e, None).is_empty()
+    !crate::command_form::entity_actions(e).is_empty()
 }
 
 #[cfg(test)]

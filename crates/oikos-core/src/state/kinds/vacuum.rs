@@ -8,7 +8,7 @@ use crate::state::{Applied, StateError};
 use crate::template::Templates;
 
 /// The activities Home Assistant accepts from an MQTT vacuum.
-const STATES: &[&str] = &["cleaning", "docked", "paused", "idle", "returning", "error"];
+pub(crate) const STATES: &[&str] = &["cleaning", "docked", "paused", "idle", "returning", "error"];
 
 pub(super) fn apply(
     entity: &Entity,

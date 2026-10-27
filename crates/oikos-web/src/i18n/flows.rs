@@ -135,7 +135,6 @@ pub enum FlowText {
     FiresWhen,
     OnlyAfter,
     AnySignal,
-    ValueJson,
     EntityDefaults,
     MissingFail,
     MissingTrue,
@@ -144,6 +143,20 @@ pub enum FlowText {
     UpToRandom,
     ExactDuration,
     CommandJson,
+    OtherValue,
+    ChooseValue,
+    BackToList,
+    Action,
+    NoneChoice,
+    ColourCustom,
+    AdvancedJson,
+    ParamPosition,
+    ParamTemperature,
+    ParamValue,
+    ParamBrightness,
+    ParamColour,
+    ParamEffect,
+    ParamCode,
     ParisFallback,
     SunRise,
     SunSet,
@@ -343,7 +356,6 @@ impl FlowText {
         FlowText::FiresWhen,
         FlowText::OnlyAfter,
         FlowText::AnySignal,
-        FlowText::ValueJson,
         FlowText::EntityDefaults,
         FlowText::MissingFail,
         FlowText::MissingTrue,
@@ -352,6 +364,20 @@ impl FlowText {
         FlowText::UpToRandom,
         FlowText::ExactDuration,
         FlowText::CommandJson,
+        FlowText::OtherValue,
+        FlowText::ChooseValue,
+        FlowText::BackToList,
+        FlowText::Action,
+        FlowText::NoneChoice,
+        FlowText::ColourCustom,
+        FlowText::AdvancedJson,
+        FlowText::ParamPosition,
+        FlowText::ParamTemperature,
+        FlowText::ParamValue,
+        FlowText::ParamBrightness,
+        FlowText::ParamColour,
+        FlowText::ParamEffect,
+        FlowText::ParamCode,
         FlowText::ParisFallback,
         FlowText::SunRise,
         FlowText::SunSet,
@@ -590,7 +616,6 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
             "Seulement après (valeur précédente, JSON, facultatif)",
         ),
         T::AnySignal => ("any", "n'importe lequel"),
-        T::ValueJson => ("Value (JSON)", "Valeur (JSON)"),
         T::EntityDefaults => (
             "Entity (defaults to trigger value)",
             "Entité (par défaut\u{A0}: valeur du déclencheur)",
@@ -605,6 +630,20 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
             r#"Command (JSON, e.g. {"type":"turn_on"})"#,
             r#"Commande (JSON, p. ex. {"type":"turn_on"})"#,
         ),
+        T::OtherValue => ("Other value…", "Autre valeur…"),
+        T::ChooseValue => ("Choose…", "Choisir…"),
+        T::BackToList => ("Back to the list", "Revenir à la liste"),
+        T::Action => ("Action", "Action"),
+        T::NoneChoice => ("None", "Aucun"),
+        T::ColourCustom => ("Custom", "Personnalisée"),
+        T::AdvancedJson => ("Advanced (JSON)", "Avancé (JSON)"),
+        T::ParamPosition => ("Position", "Position"),
+        T::ParamTemperature => ("Temperature", "Température"),
+        T::ParamValue => ("Value", "Valeur"),
+        T::ParamBrightness => ("Brightness", "Luminosité"),
+        T::ParamColour => ("Colour", "Couleur"),
+        T::ParamEffect => ("Effect", "Effet"),
+        T::ParamCode => ("Code", "Code"),
         T::ParisFallback => ("Paris fallback", "Paris par défaut"),
         T::SunRise => ("Sunrise", "Lever du soleil"),
         T::SunSet => ("Sunset", "Coucher du soleil"),
@@ -905,19 +944,56 @@ pub fn set_to(lang: Lang, e: &str, v: &str) -> String {
     )
 }
 
-/// "Arm Alarm (away)" / "Activer Alarme (absent)": the security screen's arm words.
-pub fn arm(lang: Lang, e: &str, mode: AlarmMode) -> String {
-    let (en, fr) = match mode {
+fn alarm_mode_words(mode: AlarmMode) -> (&'static str, &'static str) {
+    match mode {
         AlarmMode::Home => ("home", "présent"),
         AlarmMode::Away => ("away", "absent"),
         AlarmMode::Night => ("night", "nuit"),
         AlarmMode::Vacation => ("vacation", "vacances"),
         AlarmMode::CustomBypass => ("custom bypass", "personnalisée"),
-    };
+    }
+}
+
+/// "Arm Alarm (away)" / "Activer Alarme (absent)": the security screen's arm words.
+pub fn arm(lang: Lang, e: &str, mode: AlarmMode) -> String {
+    let (en, fr) = alarm_mode_words(mode);
     pick(
         lang,
         format!("Arm {e} ({en})"),
         format!("Activer {e} ({fr})"),
+    )
+}
+
+/// "Arm (away)" / "Activer (absent)": an arm action in a list, without the entity.
+pub fn arm_action(lang: Lang, mode: AlarmMode) -> String {
+    let (en, fr) = alarm_mode_words(mode);
+    pick(lang, format!("Arm ({en})"), format!("Activer ({fr})"))
+}
+
+/// "Fan: Low" / "Ventilation : Low": a fan mode in an action list.
+pub fn fan_mode_action(lang: Lang, mode: &str) -> String {
+    pick(
+        lang,
+        format!("Fan: {mode}"),
+        format!("Ventilation{NBSP}: {mode}"),
+    )
+}
+
+/// "Fan speed: Max" / "Vitesse : Max": a vacuum fan speed in an action list.
+pub fn fan_speed_action(lang: Lang, speed: &str) -> String {
+    pick(
+        lang,
+        format!("Fan speed: {speed}"),
+        format!("Vitesse{NBSP}: {speed}"),
+    )
+}
+
+/// "Mode: On" / "Mode : Marche": a control set to a value in an action list.
+pub fn control_action(lang: Lang, control: &str, value: &str) -> String {
+    pick(
+        lang,
+        format!("{control}: {value}"),
+        format!("{control}{NBSP}: {value}"),
     )
 }
 
@@ -1150,6 +1226,9 @@ mod tests {
 
     /// Same word in both languages.
     const SAME: &[FlowText] = &[
+        FlowText::Action,
+        FlowText::ParamPosition,
+        FlowText::ParamCode,
         FlowText::ColourOrange,
         FlowText::ColourCyan,
         FlowText::ColourMagenta,

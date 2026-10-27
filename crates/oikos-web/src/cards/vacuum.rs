@@ -16,7 +16,7 @@ use crate::i18n::{Key, Lang, text, use_lang, use_text};
 use crate::icons::vacuum_action_icon;
 
 /// The short button label for a vacuum action.
-fn action_label(lang: Lang, action: &str) -> String {
+pub(crate) fn action_label(lang: Lang, action: &str) -> String {
     match action {
         "return_to_base" => device_text(lang, DeviceText::Dock).into(),
         "clean_spot" => device_text(lang, DeviceText::Spot).into(),
