@@ -10,6 +10,7 @@ use super::Editor;
 use super::graph::Selection;
 use super::sun::{FallbackBadge, sun_sheet};
 use super::template_field::{NotifyPreview, TemplateField};
+use super::value_field::IfValueField;
 use crate::command_form::{CommandFields, FieldStyle, entity_actions, retarget};
 use crate::entity_picker::needs::{is_commandable, is_signal, keep};
 use crate::entity_picker::{EntityPickField, Suggest};
@@ -19,6 +20,7 @@ use crate::i18n::flows::{FlowText, flow_text, invalid_json, signal_chip_label, u
 use crate::i18n::format::parse_decimal;
 use crate::i18n::picker::PickerText;
 use crate::i18n::{Lang, use_lang};
+use crate::if_value::{after_entity_change, upstream_trigger_entity, value_input};
 use crate::screens::flow_schedule::ScheduleField;
 
 /// A fixed word as a signal that follows the language, for a field's label or placeholder.
@@ -819,13 +821,37 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         })
                 }
             });
+            let house = expect_context::<House>();
+            let draft = form.editor.draft;
+            // The entity the value is compared with: the card's own, else its state trigger's.
+            let resolved = {
+                let id = id.clone();
+                move |own: Option<String>| {
+                    let target = own.or_else(|| draft.with(|f| upstream_trigger_entity(f, &id)))?;
+                    house.entities.with(|m| m.get(&target).cloned())
+                }
+            };
+            let compared = Memo::new({
+                let resolved = resolved.clone();
+                move |_| resolved(entity_value.get())
+            });
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
+                let next = untrack(|| resolved(value.clone()));
+                let input = value_input(lang(), next.as_ref());
                 form.update(&entity_id, |n| {
                     if let NodeKind::If(ref mut i) = n.kind {
+                        i.value = after_entity_change(i.value.as_ref(), &input);
                         i.entity = value;
                     }
                 });
+            });
+            let value_id = id.clone();
+            let stored_value = Signal::derive(move || {
+                draft.with(|f| match f.node(&value_id).map(|n| &n.kind) {
+                    Some(NodeKind::If(i)) => i.value.clone(),
+                    _ => None,
+                })
             });
             let shift_id = id.clone();
             let shift_write = Callback::new(move |ev: web_sys::Event| {
@@ -889,11 +915,10 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         <FallbackBadge cfg=cfg />
                     }
                 >
-                    <JsonField
-                        label=word(FlowText::ValueJson)
-                        initial=live.run(()).and_then(|i| i.value).unwrap_or(serde_json::Value::Null)
-                        optional=false
-                        write=value_write
+                    <IfValueField
+                        value=stored_value
+                        entity=Signal::from(compared)
+                        write=Callback::new(move |v| value_write.run(Some(v)))
                     />
                     <EntityPickField
                         label=word(FlowText::EntityDefaults)

@@ -12,6 +12,7 @@ mod settings;
 pub(crate) mod sun;
 mod template_field;
 mod toolbar;
+mod value_field;
 mod viewport;
 
 use std::collections::BTreeMap;
