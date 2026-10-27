@@ -1,7 +1,8 @@
 //! The flow itself, in world coordinates: one pill per node (role colour, icon, sentence title,
 //! sub-line, pins) and the routed wires between them, with "yes"/"no" labels and the classes a
 //! run lights, dims or animates. Used in view and edit mode alike; in edit mode cards drag,
-//! output pins drag out new wires and wires can be selected and cut.
+//! output pins drag out new wires, wires can be selected and cut, and a card with no wires
+//! dropped onto a wire is spliced into it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -16,8 +17,8 @@ use super::sun::fallback_badge_visible;
 use super::viewport::Camera;
 use super::{Editor, Fresh};
 use crate::components::now::Now;
-use crate::flow_edit::{EdgeKey, can_connect, connect, remove_edge};
-use crate::flow_layout::{NODE_H, Pt, out_anchor, positions, route, routes};
+use crate::flow_edit::{EdgeKey, can_connect, can_insert, connect, insert_into_edge, remove_edge};
+use crate::flow_layout::{NODE_H, Pt, out_anchor, positions, route, routes_past, wire_under};
 use crate::flow_text::{Ctx, Role, role, subline, title};
 use crate::flows::{Highlight, orphans};
 use crate::house::House;
@@ -154,6 +155,8 @@ struct Shared {
     /// The draft as it was when the current drag started; recorded once it really moves.
     drag_before: StoredValue<Option<Flow>>,
     connecting: RwSignal<Option<Connecting>>,
+    /// The wire the dragged card would be spliced into if dropped now.
+    drop_into: Memo<Option<EdgeKey>>,
     /// The `(from, port)` of the wire being dragged out, without the pointer position.
     wiring: Memo<Option<(String, Option<&'static str>)>>,
     editor: Option<Editor>,
@@ -190,7 +193,20 @@ pub fn Graph(
     let lang = use_lang();
     let t = use_flow_text();
     let placed = Memo::new(move |_| flow.with(positions));
-    let wires = Memo::new(move |_| flow.with(|f| placed.with(|p| routes(f, p))));
+    let drag = RwSignal::new(None::<Drag>);
+    // The card being dragged: no wire steers around it, so the one under it stays there.
+    let loose =
+        Memo::new(move |_| drag.with(|d| d.as_ref().filter(|d| d.moved).map(|d| d.node.clone())));
+    let wires = Memo::new(move |_| {
+        loose.with(|loose| flow.with(|f| placed.with(|p| routes_past(f, p, loose.as_deref()))))
+    });
+    let drop_into = Memo::new(move |_| {
+        let id = loose.get()?;
+        let at = placed.with(|p| p.get(&id).copied())?;
+        let key = wires.with(|w| wire_under(w, at))?;
+        flow.with(|f| can_insert(f, &key, &id).is_ok())
+            .then_some(key)
+    });
     let ids =
         Memo::new(move |_| flow.with(|f| f.nodes.iter().map(|n| n.id.clone()).collect::<Vec<_>>()));
     let names = Memo::new(move |_| {
@@ -238,9 +254,10 @@ pub fn Graph(
         names,
         selection,
         mode,
-        drag: RwSignal::new(None),
+        drag,
         drag_before: StoredValue::new(None),
         connecting,
+        drop_into,
         wiring: Memo::new(move |_| {
             connecting.with(|w| w.as_ref().map(|w| (w.from.clone(), w.port)))
         }),
@@ -253,6 +270,7 @@ pub fn Graph(
         let lit = lit.get();
         let (dim, live) = (dim.get(), live.get());
         let selected = selection.get();
+        let drop = drop_into.get();
         wires.with(|w| {
             w.iter()
                 .map(|(key, route)| {
@@ -271,6 +289,9 @@ pub fn Graph(
                     }
                     if matches!(&selected, Some(Selection::Edge(k)) if k == key) {
                         class.push_str(" flow-wire--selected");
+                    }
+                    if drop.as_ref() == Some(key) {
+                        class.push_str(" flow-wire--drop");
                     }
                     view! { <path class=class d=route.d.clone() /> }
                 })
@@ -484,12 +505,16 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
     };
     let target_id = id.clone();
     let target = move || {
-        c.wiring.with(|w| {
-            w.as_ref().is_some_and(|(from, port)| {
-                c.flow
-                    .with(|f| can_connect(f, from, *port, &target_id).is_ok())
+        let splicing = c.drop_into.with(Option::is_some)
+            && c.drag
+                .with(|d| d.as_ref().is_some_and(|d| d.node == target_id));
+        splicing
+            || c.wiring.with(|w| {
+                w.as_ref().is_some_and(|(from, port)| {
+                    c.flow
+                        .with(|f| can_connect(f, from, *port, &target_id).is_ok())
+                })
             })
-        })
     };
     let step_id = id.clone();
     let step = move || match c.parked.get() {
@@ -579,6 +604,13 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         let was_click = drag.with_untracked(
             |d| matches!(d, Some(Drag { node, moved: false, .. }) if node == &id_for_up),
         );
+        // Dropped onto a wire: spliced into it, within the drag's undo step.
+        let mine = drag.with_untracked(|d| d.as_ref().is_some_and(|d| d.node == id_for_up));
+        if let (true, Some(key), Some(editor)) = (mine, c.drop_into.get_untracked(), c.editor) {
+            editor.draft.update(|f| {
+                let _ = insert_into_edge(f, &key, &id_for_up);
+            });
+        }
         drag.set(None);
         c.drag_before.set_value(None);
         if was_click {
