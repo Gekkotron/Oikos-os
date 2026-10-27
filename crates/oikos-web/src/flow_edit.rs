@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use oikos_core::flow::{Edge, Flow, Lang, Node, NodeKind, Position};
+use oikos_core::flow::{Edge, Flow, Lang, Node, NodeKind, Position, SwitchParams, SwitchRule};
 
 use crate::flow_layout::Pt;
 
@@ -141,6 +141,108 @@ pub fn insert_into_edge(flow: &mut Flow, key: &EdgeKey, id: &str) -> Result<(), 
     connect(&mut next, id, out.as_deref(), &key.2)?;
     *flow = next;
     Ok(())
+}
+
+/// The params of switch `node`, when it is one.
+fn switch_params<'a>(flow: &'a mut Flow, node: &str) -> Option<&'a mut SwitchParams> {
+    flow.nodes
+        .iter_mut()
+        .find(|n| n.id == node)
+        .and_then(|n| match &mut n.kind {
+            NodeKind::Switch(p) => Some(p),
+            _ => None,
+        })
+}
+
+/// Rewrites the numeric exit ports of `node`'s edges through `map` (old 0-based rule index to
+/// the new one, `None` drops the wire). Other ports are left alone. Returns the edges dropped.
+fn remap_exits(flow: &mut Flow, node: &str, map: impl Fn(usize) -> Option<usize>) -> usize {
+    let before = flow.edges.len();
+    flow.edges.retain_mut(|e| {
+        if e.from != node {
+            return true;
+        }
+        let Some(old) = e
+            .port
+            .as_deref()
+            .and_then(|p| p.parse::<usize>().ok())
+            .and_then(|n| n.checked_sub(1))
+        else {
+            return true;
+        };
+        match map(old) {
+            Some(new) => {
+                e.port = Some((new + 1).to_string());
+                true
+            }
+            None => false,
+        }
+    });
+    before - flow.edges.len()
+}
+
+/// Appends `rule` to switch `node`; its new exit has no wire yet. Does nothing on another node.
+pub fn add_rule(flow: &mut Flow, node: &str, rule: SwitchRule) {
+    if let Some(p) = switch_params(flow, node) {
+        p.rules.push(rule);
+    }
+}
+
+/// Moves rule `from` to position `to` (0-based) in switch `node`; every wire follows its rule.
+/// Does nothing when an index is out of range.
+pub fn move_rule(flow: &mut Flow, node: &str, from: usize, to: usize) {
+    let Some(p) = switch_params(flow, node) else {
+        return;
+    };
+    if from >= p.rules.len() || to >= p.rules.len() || from == to {
+        return;
+    }
+    let rule = p.rules.remove(from);
+    p.rules.insert(to, rule);
+    remap_exits(flow, node, |i| {
+        Some(if i == from {
+            to
+        } else if from < to && i > from && i <= to {
+            i - 1
+        } else if to < from && i >= to && i < from {
+            i + 1
+        } else {
+            i
+        })
+    });
+}
+
+/// Deletes rule `index` (0-based) from switch `node`: its wires go, later exits are renumbered.
+/// Returns how many wires were removed.
+pub fn delete_rule(flow: &mut Flow, node: &str, index: usize) -> usize {
+    let Some(p) = switch_params(flow, node) else {
+        return 0;
+    };
+    if index >= p.rules.len() {
+        return 0;
+    }
+    p.rules.remove(index);
+    remap_exits(flow, node, |i| match i.cmp(&index) {
+        std::cmp::Ordering::Less => Some(i),
+        std::cmp::Ordering::Equal => None,
+        std::cmp::Ordering::Greater => Some(i - 1),
+    })
+}
+
+/// Turns the `otherwise` exit of switch `node` on or off; off drops its wires. Returns how many
+/// wires were removed.
+pub fn set_otherwise(flow: &mut Flow, node: &str, on: bool) -> usize {
+    let Some(p) = switch_params(flow, node) else {
+        return 0;
+    };
+    p.otherwise = on;
+    if on {
+        return 0;
+    }
+    let before = flow.edges.len();
+    flow.edges
+        .retain(|e| !(e.from == node && e.port.as_deref() == Some("otherwise")));
+    before - flow.edges.len()
 }
 
 /// Removes the edge; whether it existed.
@@ -339,6 +441,7 @@ mod tests {
         CommandParams, DelayParams, FlowEnableParams, IfParams, NotifyParams, Op,
         TriggerScheduleParams, TriggerStateParams,
     };
+    use oikos_core::flow::{RuleOp, SwitchParams, SwitchRule, TimeBetweenParams};
     use serde_json::json;
 
     use super::*;
@@ -460,6 +563,161 @@ mod tests {
         assert!(remove_edge(&mut f, &key));
         assert!(!remove_edge(&mut f, &key));
         assert!(f.edges.is_empty());
+    }
+
+    fn switch_kind(rules: usize, otherwise: bool) -> NodeKind {
+        NodeKind::Switch(SwitchParams {
+            rules: (0..rules).map(|i| rule(i as i64)).collect(),
+            otherwise,
+            ..Default::default()
+        })
+    }
+    /// A delay that passes `validate`.
+    fn wait(id: &str) -> Node {
+        node(
+            id,
+            NodeKind::Delay(DelayParams {
+                for_: "5s".into(),
+                ..Default::default()
+            }),
+        )
+    }
+    fn rule(v: i64) -> SwitchRule {
+        SwitchRule {
+            op: RuleOp::Eq,
+            value: json!(v),
+            to: None,
+            extra: Default::default(),
+        }
+    }
+    /// Trigger `t` into switch `s` (3 rules + otherwise), one target per exit.
+    fn switch_flow() -> Flow {
+        let mut f = flow(vec![
+            trigger("t"),
+            node("s", switch_kind(3, true)),
+            wait("a"),
+            wait("b"),
+            wait("c"),
+            wait("o"),
+        ]);
+        connect(&mut f, "t", None, "s").unwrap();
+        for (port, to) in [("1", "a"), ("2", "b"), ("3", "c"), ("otherwise", "o")] {
+            connect(&mut f, "s", Some(port), to).unwrap();
+        }
+        assert_eq!(oikos_core::flow::validate(&f), Ok(()));
+        f
+    }
+    fn exits(f: &Flow) -> Vec<(String, String)> {
+        let mut v: Vec<_> = f
+            .edges
+            .iter()
+            .filter(|e| e.from == "s")
+            .map(|e| (e.port.clone().unwrap(), e.to.clone()))
+            .collect();
+        v.sort();
+        v
+    }
+    fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
+        v.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn delete_rule_renumbers_later_exits() {
+        let mut f = switch_flow();
+        assert_eq!(delete_rule(&mut f, "s", 1), 1);
+        assert_eq!(
+            exits(&f),
+            pairs(&[("1", "a"), ("2", "c"), ("otherwise", "o")])
+        );
+        assert_eq!(oikos_core::flow::validate(&f), Ok(()));
+    }
+
+    #[test]
+    fn move_rule_carries_its_wires() {
+        let mut f = switch_flow();
+        move_rule(&mut f, "s", 0, 2);
+        assert_eq!(
+            exits(&f),
+            pairs(&[("1", "b"), ("2", "c"), ("3", "a"), ("otherwise", "o")])
+        );
+        assert_eq!(oikos_core::flow::validate(&f), Ok(()));
+        move_rule(&mut f, "s", 2, 0);
+        assert_eq!(
+            exits(&f),
+            pairs(&[("1", "a"), ("2", "b"), ("3", "c"), ("otherwise", "o")])
+        );
+        let NodeKind::Switch(p) = &f.node("s").unwrap().kind else {
+            panic!()
+        };
+        let values: Vec<_> = p.rules.iter().map(|r| r.value.clone()).collect();
+        assert_eq!(values, [json!(0), json!(1), json!(2)]);
+    }
+
+    #[test]
+    fn add_rule_appends_without_touching_wires() {
+        let mut f = switch_flow();
+        add_rule(&mut f, "s", rule(9));
+        assert_eq!(f.node("s").unwrap().kind.ports().len(), 5);
+        assert_eq!(exits(&f).len(), 4);
+        assert_eq!(oikos_core::flow::validate(&f), Ok(()));
+    }
+
+    #[test]
+    fn set_otherwise_off_drops_its_wires() {
+        let mut f = switch_flow();
+        assert_eq!(set_otherwise(&mut f, "s", false), 1);
+        assert_eq!(exits(&f), pairs(&[("1", "a"), ("2", "b"), ("3", "c")]));
+        assert_eq!(oikos_core::flow::validate(&f), Ok(()));
+        assert_eq!(set_otherwise(&mut f, "s", true), 0);
+        assert_eq!(oikos_core::flow::validate(&f), Ok(()));
+    }
+
+    #[test]
+    fn can_connect_accepts_switch_and_time_ports() {
+        let f = flow(vec![
+            node("s", switch_kind(2, false)),
+            node(
+                "m",
+                NodeKind::TimeBetween(TimeBetweenParams {
+                    from: "08:00".into(),
+                    to: "20:00".into(),
+                    extra: Default::default(),
+                }),
+            ),
+            delay("d"),
+        ]);
+        assert_eq!(can_connect(&f, "s", Some("2"), "d"), Ok(()));
+        assert_eq!(
+            can_connect(&f, "s", Some("3"), "d"),
+            Err(ConnectError::BadPort)
+        );
+        assert_eq!(can_connect(&f, "s", None, "d"), Err(ConnectError::BadPort));
+        assert_eq!(can_connect(&f, "m", Some("in"), "d"), Ok(()));
+        assert_eq!(can_connect(&f, "m", Some("out"), "d"), Ok(()));
+        assert_eq!(can_connect(&f, "m", None, "d"), Err(ConnectError::BadPort));
+    }
+
+    #[test]
+    fn splice_uses_first_port() {
+        for (kind, first) in [
+            (switch_kind(2, true), "1"),
+            (
+                NodeKind::TimeBetween(TimeBetweenParams {
+                    from: "08:00".into(),
+                    to: "20:00".into(),
+                    extra: Default::default(),
+                }),
+                "in",
+            ),
+        ] {
+            let mut f = flow(vec![trigger("t"), delay("d"), node("n", kind)]);
+            connect(&mut f, "t", None, "d").unwrap();
+            let key: EdgeKey = ("t".into(), None, "d".into());
+            assert_eq!(insert_into_edge(&mut f, &key, "n"), Ok(()));
+            assert_eq!(wires(&f), [("t", None, "n"), ("n", Some(first), "d")]);
+        }
     }
 
     #[test]
