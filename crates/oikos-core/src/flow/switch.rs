@@ -101,4 +101,17 @@ mod tests {
             Err(CompareError::NotNumeric)
         );
     }
+
+    #[test]
+    fn switch_exits_between_edges() {
+        let p = params(json!({ "rules": [{ "op": "between", "value": 1, "to": 5 }],
+            "otherwise": true }));
+        assert_eq!(switch_exits(&p, None).unwrap(), ["otherwise"]);
+        assert_eq!(
+            switch_exits(&p, Some(&Scalar::Text("on".into()))),
+            Err(CompareError::NotNumeric)
+        );
+        let no_to = params(json!({ "rules": [{ "op": "between", "value": 1 }] }));
+        assert!(switch_exits(&no_to, Some(&n(3.0))).unwrap().is_empty());
+    }
 }
