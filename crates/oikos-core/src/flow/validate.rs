@@ -176,6 +176,18 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                         reason: format!("{field} is not allowed with op: is_dark"),
                     });
                 }
+                if !(-720..=720).contains(&p.dark_offset()) {
+                    return Err(FlowError::BadSunOffset {
+                        node: node.id.clone(),
+                        offset_minutes: p.dark_offset(),
+                    });
+                }
+            }
+            NodeKind::If(p) if p.offset_minutes.is_some() => {
+                return Err(FlowError::BadOperand {
+                    node: node.id.clone(),
+                    reason: "offset_minutes is only allowed with op: is_dark".to_owned(),
+                });
             }
             NodeKind::If(p) => match &p.value {
                 None => {
@@ -794,6 +806,31 @@ mod tests {
                 "{field}: {err:?}"
             );
         }
+    }
+
+    #[test]
+    fn is_dark_offset_is_bounded_and_only_for_is_dark() {
+        assert_eq!(
+            validate(&sun_then_if_flow(
+                serde_json::json!({ "op": "is_dark", "offset_minutes": -45 })
+            )),
+            Ok(())
+        );
+        assert!(matches!(
+            validate(&sun_then_if_flow(
+                serde_json::json!({ "op": "is_dark", "offset_minutes": 721 })
+            )),
+            Err(FlowError::BadSunOffset {
+                offset_minutes: 721,
+                ..
+            })
+        ));
+        assert!(matches!(
+            validate(&sun_then_if_flow(
+                serde_json::json!({ "op": "eq", "entity": "l", "value": 1, "offset_minutes": -45 })
+            )),
+            Err(FlowError::BadOperand { reason, .. }) if reason.contains("offset_minutes")
+        ));
     }
 
     #[test]

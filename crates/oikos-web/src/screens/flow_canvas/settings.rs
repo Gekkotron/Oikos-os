@@ -253,14 +253,15 @@ pub fn NodeEditor(editor: Editor, selected: RwSignal<Option<Selection>>) -> impl
     }
 }
 
-/// What an `if` held before it switched to `is_dark`, put back when it switches away so the
-/// fields on screen and the draft agree.
+/// What an `if` held before it switched to `is_dark` (and the `is_dark` shift before it switched
+/// away), put back when it switches again so the fields on screen and the draft agree.
 #[derive(Default)]
 struct IfStash {
     value: Option<serde_json::Value>,
     entity: Option<String>,
     missing: Option<Missing>,
     average: Option<String>,
+    offset_minutes: Option<i32>,
 }
 
 /// Changes an `if`'s op. `is_dark` reads the sun, so the validator rejects any operand: they
@@ -268,17 +269,21 @@ struct IfStash {
 fn switch_op(i: &mut IfParams, op: Op, stash: &mut IfStash) {
     let was_dark = i.op == Op::IsDark;
     if op == Op::IsDark && !was_dark {
+        let offset_minutes = stash.offset_minutes.take();
         *stash = IfStash {
             value: i.value.take(),
             entity: i.entity.take(),
             missing: i.missing.take(),
             average: i.average.take(),
+            offset_minutes: None,
         };
+        i.offset_minutes = offset_minutes;
     } else if was_dark && op != Op::IsDark {
         i.value = stash.value.take();
         i.entity = stash.entity.take();
         i.missing = stash.missing.take();
         i.average = stash.average.take();
+        stash.offset_minutes = i.offset_minutes.take();
     }
     i.op = op;
 }
@@ -820,6 +825,18 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     }
                 });
             });
+            let shift_id = id.clone();
+            let shift_write = Callback::new(move |ev: web_sys::Event| {
+                let Some(m) = parse_decimal(&event_target_value(&ev)) else {
+                    return;
+                };
+                let m = (m as i32).clamp(-720, 720);
+                form.update(&shift_id, |n| {
+                    if let NodeKind::If(ref mut i) = n.kind {
+                        i.offset_minutes = (m != 0).then_some(m);
+                    }
+                });
+            });
             let average_id = id;
             let average_write = Callback::new(move |value: Option<String>| {
                 form.update(&average_id, |n| {
@@ -850,6 +867,23 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     when=not_dark
                     fallback=move || view! {
                         <p class="node-editor__hint">{move || t(FlowText::IsDark)}</p>
+                        <label class="node-editor__field">
+                            <span class="node-editor__label">{move || t(FlowText::DarkShift)}</span>
+                            <input
+                                type="number"
+                                class="field"
+                                min="-720"
+                                max="720"
+                                step="5"
+                                prop:value=live
+                                    .run(())
+                                    .and_then(|i| i.offset_minutes)
+                                    .unwrap_or(0)
+                                    .to_string()
+                                on:input=move |ev| shift_write.run(ev)
+                            />
+                        </label>
+                        <p class="node-editor__hint">{move || t(FlowText::DarkShiftHint)}</p>
                         <FallbackBadge cfg=cfg />
                     }
                 >
@@ -1036,6 +1070,7 @@ mod tests {
             entity: Some("x".into()),
             missing: Some(Missing::True),
             average: Some("15m".into()),
+            offset_minutes: None,
             extra: Default::default(),
         };
         let mut stash = IfStash::default();
@@ -1052,6 +1087,24 @@ mod tests {
     }
 
     #[test]
+    fn leaving_is_dark_sets_the_shift_aside_and_restores_it() {
+        let mut i = IfParams {
+            op: Op::IsDark,
+            value: None,
+            entity: None,
+            missing: None,
+            average: None,
+            offset_minutes: Some(-30),
+            extra: Default::default(),
+        };
+        let mut stash = IfStash::default();
+        switch_op(&mut i, Op::Gt, &mut stash);
+        assert_eq!(i.offset_minutes, None);
+        switch_op(&mut i, Op::IsDark, &mut stash);
+        assert_eq!(i.offset_minutes, Some(-30));
+    }
+
+    #[test]
     fn switching_between_comparisons_leaves_operands_alone() {
         let mut i = IfParams {
             op: Op::Eq,
@@ -1059,6 +1112,7 @@ mod tests {
             entity: None,
             missing: None,
             average: None,
+            offset_minutes: None,
             extra: Default::default(),
         };
         switch_op(&mut i, Op::Gt, &mut IfStash::default());

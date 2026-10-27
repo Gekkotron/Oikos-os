@@ -218,6 +218,8 @@ pub enum FlowText {
     WhenUnknown,
     AverageOver,
     AverageHint,
+    DarkShift,
+    DarkShiftHint,
 }
 
 impl FlowText {
@@ -422,6 +424,8 @@ impl FlowText {
         FlowText::WhenUnknown,
         FlowText::AverageOver,
         FlowText::AverageHint,
+        FlowText::DarkShift,
+        FlowText::DarkShiftHint,
     ];
 }
 
@@ -690,6 +694,11 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::AverageHint => (
             "empty = current value \u{b7} e.g. 15m",
             "vide = valeur actuelle \u{b7} ex. 15m",
+        ),
+        T::DarkShift => ("Shift (minutes)", "Décalage (minutes)"),
+        T::DarkShiftHint => (
+            "\u{2212}30 = dark 30\u{a0}min before civil dusk and until 30\u{a0}min after civil dawn",
+            "\u{2212}30 = nuit 30\u{a0}min avant le crépuscule civil et jusqu'à 30\u{a0}min après l'aube civile",
         ),
     };
     match lang {
@@ -989,6 +998,24 @@ pub fn sun_sentence(lang: Lang, which: SunWhich, offset_minutes: i32) -> String 
     }
 }
 
+/// The `is_dark` card: the plain question without a shift, else where the dark starts:
+/// "Is it dark? (from 30 min before civil dusk)" / "Fait-il nuit\u{A0}? (dès 30 min avant le
+/// crépuscule civil)".
+pub fn is_dark_sentence(lang: Lang, offset_minutes: i32) -> String {
+    let n = offset_minutes.unsigned_abs();
+    match (lang, offset_minutes) {
+        (_, 0) => flow_text(lang, FlowText::IsDark).to_owned(),
+        (Lang::En, o) if o < 0 => format!("Is it dark? (from {n}{NBSP}min before civil dusk)"),
+        (Lang::En, _) => format!("Is it dark? (from {n}{NBSP}min after civil dusk)"),
+        (Lang::Fr, o) if o < 0 => {
+            format!("Fait-il nuit{NBSP}? (dès {n}{NBSP}min avant le crépuscule civil)")
+        }
+        (Lang::Fr, _) => {
+            format!("Fait-il nuit{NBSP}? (dès {n}{NBSP}min après le crépuscule civil)")
+        }
+    }
+}
+
 /// The name of a sun event as a select option: "Sunrise" / "Lever du soleil".
 pub fn sun_name(lang: Lang, which: SunWhich) -> &'static str {
     flow_text(
@@ -1146,6 +1173,22 @@ mod tests {
     fn french_questions_take_a_no_break_space() {
         assert_eq!(ask(Lang::En, "Lamp is on"), "Lamp is on?");
         assert_eq!(ask(Lang::Fr, "Lamp est allumée"), "Lamp est allumée\u{A0}?");
+    }
+
+    #[test]
+    fn is_dark_sentences_name_the_shift() {
+        assert_eq!(
+            is_dark_sentence(Lang::En, 0),
+            flow_text(Lang::En, FlowText::IsDark)
+        );
+        assert_eq!(
+            is_dark_sentence(Lang::En, -30),
+            "Is it dark? (from 30\u{A0}min before civil dusk)"
+        );
+        assert_eq!(
+            is_dark_sentence(Lang::Fr, 15),
+            "Fait-il nuit\u{A0}? (dès 15\u{A0}min après le crépuscule civil)"
+        );
     }
 
     #[test]

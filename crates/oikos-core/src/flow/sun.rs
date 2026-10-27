@@ -84,6 +84,22 @@ pub fn is_dark_at(lat: f64, lon: f64, at: DateTime<Utc>) -> bool {
     sun_altitude(lat, lon, at) <= CIVIL_ALTITUDE_DEG
 }
 
+/// Whether it is dark at `at` with civil dusk moved by `offset_minutes` and civil dawn by the
+/// opposite: a negative offset starts the dark earlier in the evening and ends it later in the
+/// morning, a positive one shortens it at both ends. 0 is `is_dark_at`.
+pub fn is_dark_with_offset(lat: f64, lon: f64, at: DateTime<Utc>, offset_minutes: i32) -> bool {
+    let shift = Duration::minutes(i64::from(offset_minutes.unsigned_abs()));
+    let (sooner, later) = (
+        is_dark_at(lat, lon, at + shift),
+        is_dark_at(lat, lon, at - shift),
+    );
+    if offset_minutes < 0 {
+        sooner || later
+    } else {
+        sooner && later
+    }
+}
+
 /// First upward and first downward crossing of `threshold` in the 24 hours from `start`.
 fn crossings(
     lat: f64,
@@ -178,6 +194,66 @@ mod tests {
         let dawn = e.dawn.unwrap();
         assert!(is_dark_at(lat, lon, dawn - Duration::seconds(60)));
         assert!(!is_dark_at(lat, lon, dawn + Duration::seconds(60)));
+    }
+
+    #[test]
+    fn is_dark_offset_moves_dusk_and_dawn_in_opposite_directions() {
+        let (lat, lon) = (48.8566, 2.3522);
+        let e = sun_events(lat, lon, NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());
+        let (dusk, dawn) = (e.dusk.unwrap(), e.dawn.unwrap());
+        let minute = Duration::seconds(60);
+        assert!(is_dark_with_offset(
+            lat,
+            lon,
+            dusk - Duration::minutes(30),
+            -30
+        ));
+        assert!(!is_dark_with_offset(
+            lat,
+            lon,
+            dusk - Duration::minutes(30) - minute,
+            -30
+        ));
+        assert!(is_dark_with_offset(
+            lat,
+            lon,
+            dawn + Duration::minutes(30) - minute,
+            -30
+        ));
+        assert!(!is_dark_with_offset(
+            lat,
+            lon,
+            dawn + Duration::minutes(30) + minute,
+            -30
+        ));
+        assert!(!is_dark_with_offset(
+            lat,
+            lon,
+            dusk + Duration::minutes(30) - minute,
+            30
+        ));
+        assert!(is_dark_with_offset(
+            lat,
+            lon,
+            dusk + Duration::minutes(30),
+            30
+        ));
+        assert!(is_dark_with_offset(
+            lat,
+            lon,
+            dawn - Duration::minutes(30) - minute,
+            30
+        ));
+        assert!(!is_dark_with_offset(
+            lat,
+            lon,
+            dawn - Duration::minutes(30) + minute,
+            30
+        ));
+        assert_eq!(
+            is_dark_with_offset(lat, lon, dusk, 0),
+            is_dark_at(lat, lon, dusk)
+        );
     }
 
     #[test]

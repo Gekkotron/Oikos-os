@@ -9,7 +9,7 @@ use std::time::Duration;
 use chrono::Utc;
 use oikos_api::{ConnectionStatus, RunStatus, RunView, WsEvent};
 use oikos_core::command::Publish;
-use oikos_core::flow::sun::is_dark_at;
+use oikos_core::flow::sun::{is_dark_at, is_dark_with_offset};
 use oikos_os::config::Config;
 use oikos_os::hub::Hub;
 use tokio::sync::mpsc;
@@ -75,11 +75,15 @@ fn sun_flow(id: &str, which: &str, offset: i32) -> String {
 }
 
 fn state_then_is_dark_flow(id: &str) -> String {
+    state_then_if_flow(id, serde_json::json!({ "op": "is_dark" }))
+}
+
+fn state_then_if_flow(id: &str, if_params: serde_json::Value) -> String {
     serde_json::json!({
         "id": id, "name": id, "enabled": true, "mode": "single",
         "nodes": [
             { "id": "motion", "type": "trigger.state", "params": { "entity": MOTION_ID } },
-            { "id": "dark", "type": "if", "params": { "op": "is_dark" } },
+            { "id": "dark", "type": "if", "params": if_params },
             { "id": "on", "type": "command",
               "params": { "entity": LED_ID, "command": { "type": "turn_on" } } }
         ],
@@ -188,4 +192,43 @@ async fn if_is_dark_takes_true_branch_at_night_regardless_of_trigger() {
         .expect("dark step");
     assert!(step.detail.contains("is_dark → true"), "{}", step.detail);
     assert!(run.steps.iter().any(|s| s.node == "on"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn if_is_dark_negative_offset_widens_the_dark() {
+    let (lat, lon) = (48.8566, 2.3522);
+    let hub = test_hub_with_point(lat, lon, "Europe/Paris");
+    settle().await;
+    publish_flow(
+        &hub,
+        "early_dark",
+        &state_then_if_flow(
+            "early_dark",
+            serde_json::json!({ "op": "is_dark", "offset_minutes": -60 }),
+        ),
+    );
+    settle().await;
+    hub.ingest(MOTION_STATE_TOPIC, br#"{"occupancy":false}"#);
+    settle().await;
+
+    // A minute in the hour before civil dusk or after civil dawn: dark only thanks to the offset.
+    let start = Utc::now();
+    let minutes = (1..=24 * 60)
+        .find(|m| {
+            let at = start + chrono::Duration::minutes(*m);
+            is_dark_with_offset(lat, lon, at, -60) && !is_dark_at(lat, lon, at)
+        })
+        .expect("a twilight hour falls in a day");
+    tokio::time::advance(Duration::from_secs(minutes as u64 * 60)).await;
+    settle().await;
+
+    let mut events = hub.subscribe();
+    hub.ingest(MOTION_STATE_TOPIC, br#"{"occupancy":true}"#);
+    let run = next_done_run(&mut events).await;
+    let step = run
+        .steps
+        .iter()
+        .find(|s| s.node == "dark")
+        .expect("dark step");
+    assert!(step.detail.contains("is_dark → true"), "{}", step.detail);
 }

@@ -19,7 +19,8 @@ pub use model::{
 pub use scalar::{CompareError, Scalar, compare};
 pub use schedule::{Schedule, ScheduleError};
 pub use sun::{
-    APPARENT_ALTITUDE_DEG, CIVIL_ALTITUDE_DEG, SunEvents, is_dark_at, sun_altitude, sun_events,
+    APPARENT_ALTITUDE_DEG, CIVIL_ALTITUDE_DEG, SunEvents, is_dark_at, is_dark_with_offset,
+    sun_altitude, sun_events,
 };
 pub use template::{Lang, Reading, Template, TemplateError};
 pub use validate::{
