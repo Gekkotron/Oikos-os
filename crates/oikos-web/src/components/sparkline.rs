@@ -47,9 +47,12 @@ const HEIGHT: f64 = 28.0;
 
 /// The curve of `entity_id`'s last 24 hours, or nothing when the hub has no history for it.
 /// The series is fetched the first time the curve comes on screen, through the shared cache.
+/// The wrapper keeps its height while loading and takes `spark-wrap--empty` once there is no
+/// curve to draw.
 #[component]
 pub fn Sparkline(entity_id: String) -> impl IntoView {
     let known = cached_day_series(&entity_id);
+    let loaded = RwSignal::new(known.is_some());
     let series = RwSignal::new(known.clone().flatten());
     let node = NodeRef::<leptos::html::Span>::new();
     if known.is_none() {
@@ -58,16 +61,23 @@ pub fn Sparkline(entity_id: String) -> impl IntoView {
             leptos::task::spawn_local(async move {
                 let points = day_series(&id).await;
                 series.try_set(points);
+                loaded.try_set(true);
             });
         };
         when_visible(node, load);
     }
+    let points = Memo::new(move |_| {
+        series.with(|s| {
+            s.as_deref()
+                .and_then(|p| sparkline_points(p, WIDTH, HEIGHT))
+        })
+    });
+    let empty = move || loaded.get() && points.with(Option::is_none);
     view! {
-        <span class="spark-wrap" node_ref=node>
+        <span class="spark-wrap" class:spark-wrap--empty=empty node_ref=node>
             {move || {
-                series
+                points
                     .get()
-                    .and_then(|p| sparkline_points(&p, WIDTH, HEIGHT))
                     .map(|points| {
                         view! {
                             <svg

@@ -146,18 +146,34 @@ fn temperature_body(entity: &EntityView, house: House) -> impl IntoView + use<> 
     }
 }
 
-/// The body of a lone humidity card. The readout itself links to the history chart.
+/// The body of a lone humidity card. The readout itself links to the history chart; the curve of
+/// the last 24 hours sits under the bar.
 fn humidity_body(entity: &EntityView) -> impl IntoView + use<> {
     let value = numeric(&entity.state);
     let href = history_href(&entity.id);
+    let id = entity.id.clone();
     view! {
         <div class="readout">
             <A href=href attr:class="readout__link">
                 <span class="readout__temp">{humidity_text(value)}</span>
                 {humidity_view(move || value)}
+                <Sparkline entity_id=id />
             </A>
         </div>
     }
+}
+
+/// The curve of a numeric sensor's last 24 hours, opening its history chart. Nothing for a sensor
+/// that reports text: it has no curve to draw.
+fn value_spark(entity: &EntityView) -> Option<impl IntoView + use<>> {
+    numeric(&entity.state)?;
+    let href = history_href(&entity.id);
+    let id = entity.id.clone();
+    Some(view! {
+        <A href=href attr:class="value__spark">
+            <Sparkline entity_id=id />
+        </A>
+    })
 }
 
 #[component]
@@ -218,9 +234,11 @@ pub fn SensorCard(entity: EntityView) -> impl IntoView {
             _ => {}
         }
     }
+    let spark = value_spark(&entity);
     view! {
         <CardFrame entity=entity on_click=on_click pending=pending>
             <span class=class>{text}</span>
+            {spark}
         </CardFrame>
     }
     .into_any()
