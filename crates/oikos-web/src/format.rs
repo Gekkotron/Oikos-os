@@ -1,6 +1,6 @@
 //! Human-readable state values for cards.
 
-use oikos_api::{AreaView, EntityView};
+use oikos_api::{AreaView, EntityView, WEATHER_DEVICE_NAME, weather_entity_name};
 use oikos_core::model::{EntityState, GenericValue, Kind, StateValue, SwitchType, UNASSIGNED_AREA};
 use oikos_core::types::{GenericCaps, TypeDef};
 
@@ -206,9 +206,37 @@ pub fn title_suffix(lang: Lang, entity: &EntityView) -> Option<String> {
     (!suffix.eq_ignore_ascii_case(&entity.name)).then_some(suffix)
 }
 
+/// The entity's name as shown: a hub weather entity still under the hub's English name reads in
+/// `lang`; every other name, a renamed weather entity included, is the one the house gives.
+pub fn shown_name(lang: Lang, entity: &EntityView) -> &str {
+    entity
+        .id
+        .strip_prefix("weather_")
+        .and_then(weather_entity_name)
+        .filter(|[en, _]| *en == entity.name)
+        .map_or(&entity.name, |names| names[lang_index(lang)])
+}
+
+/// The device name as shown: the hub's weather device reads in `lang`.
+pub fn shown_device_name(lang: Lang, entity: &EntityView) -> Option<&str> {
+    let device = entity.device_name.as_deref()?;
+    if entity.id.starts_with("weather_") && device == WEATHER_DEVICE_NAME[0] {
+        return Some(WEATHER_DEVICE_NAME[lang_index(lang)]);
+    }
+    Some(device)
+}
+
+/// The index of `lang` in an `[en, fr]` pair.
+fn lang_index(lang: Lang) -> usize {
+    match lang {
+        Lang::En => 0,
+        Lang::Fr => 1,
+    }
+}
+
 /// The card title: [`short_name`] plus the [`title_suffix`] when there is one.
 pub fn entity_title(lang: Lang, entity: &EntityView) -> String {
-    let short = short_name(&entity.name, entity.device_name.as_deref());
+    let short = short_name(shown_name(lang, entity), shown_device_name(lang, entity));
     match title_suffix(lang, entity) {
         Some(suffix) => format!("{short} · {suffix}"),
         None => short,
@@ -218,7 +246,7 @@ pub fn entity_title(lang: Lang, entity: &EntityView) -> String {
 /// The label of an entity in a list of links: its title and its kind, where the suffix of a
 /// same-named entity stands in for the kind.
 pub fn list_label(lang: Lang, entity: &EntityView) -> String {
-    let short = short_name(&entity.name, entity.device_name.as_deref());
+    let short = short_name(shown_name(lang, entity), shown_device_name(lang, entity));
     let tail = title_suffix(lang, entity).unwrap_or_else(|| type_word(lang, entity));
     if tail.eq_ignore_ascii_case(&short) {
         return short;
@@ -321,7 +349,10 @@ pub fn generic_value(
 
 #[cfg(test)]
 mod tests {
-    use super::{display_value, entity_title, entity_value, list_label, wrap_id};
+    use super::{
+        display_value, entity_title, entity_value, list_label, shown_device_name, shown_name,
+        wrap_id,
+    };
     use crate::i18n::Lang;
     use oikos_api::EntityView;
     use oikos_core::model::{
@@ -350,6 +381,24 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn weather_entities_read_in_the_language_on_screen() {
+        let mut cloud = entity("Cloud cover", "Weather", Kind::Sensor, None);
+        cloud.id = "weather_cloud_cover".into();
+        assert_eq!(shown_name(Lang::Fr, &cloud), "Couverture nuageuse");
+        assert_eq!(shown_name(Lang::En, &cloud), "Cloud cover");
+        assert_eq!(shown_device_name(Lang::Fr, &cloud), Some("Météo"));
+        assert_eq!(entity_title(Lang::Fr, &cloud), "Couverture nuageuse");
+        // A name the user gave stays, in both languages.
+        cloud.name = "Nuages".into();
+        assert_eq!(shown_name(Lang::En, &cloud), "Nuages");
+        // Only the hub's weather entities are translated.
+        let mut other = entity("Cloud cover", "Weather", Kind::Sensor, None);
+        other.id = "station_cloud_cover".into();
+        assert_eq!(shown_name(Lang::Fr, &other), "Cloud cover");
+        assert_eq!(shown_device_name(Lang::Fr, &other), Some("Weather"));
     }
 
     #[test]

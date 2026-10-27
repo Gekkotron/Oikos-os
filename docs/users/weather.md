@@ -40,7 +40,7 @@ Under the tiles, a **Forecast** strip shows **Today** and the next five days, ea
 
 ## The entities
 
-All units are metric. Entity ids are `weather_<key>`, for instance `weather_wind_gusts`.
+All units are metric. Entity ids are `weather_<key>`, for instance `weather_wind_gusts`. The hub names them in English ("Wind gusts", device "Weather"); the web shows them in its language ("Rafales", device "Météo" in French) and finds them by either name, until you rename one.
 
 | Key | Meaning |
 | --- | --- |

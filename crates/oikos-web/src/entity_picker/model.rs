@@ -9,7 +9,8 @@ use oikos_core::model::UNASSIGNED_AREA;
 use super::Keep;
 use crate::flow_edit::fold_accents;
 use crate::format::{
-    area_name, entity_title, kind_search_words, list_label, room_name, title_suffix,
+    area_name, entity_title, kind_search_words, list_label, room_name, shown_device_name,
+    title_suffix,
 };
 use crate::i18n::Lang;
 use crate::i18n::picker::{PickerText, picker_text};
@@ -83,8 +84,9 @@ pub struct Listing {
     pub shown: usize,
 }
 
-/// Whether `e` matches the folded `needle`: it is part of the entity's list label, name, device,
-/// room, kind words (both languages) or id. An empty needle matches everything.
+/// Whether `e` matches the folded `needle`: it is part of the entity's list label, name, device
+/// (as shown and as named), room, kind words (both languages) or id. An empty needle matches
+/// everything.
 pub fn matches(lang: Lang, e: &EntityView, room: Option<&str>, needle: &str) -> bool {
     if needle.is_empty() {
         return true;
@@ -94,6 +96,7 @@ pub fn matches(lang: Lang, e: &EntityView, room: Option<&str>, needle: &str) -> 
         list_label(lang, e),
         e.name.clone(),
         e.device_name.clone().unwrap_or_default(),
+        shown_device_name(lang, e).unwrap_or_default().to_owned(),
         room.unwrap_or_default().to_owned(),
         kind_en,
         kind_fr,
@@ -116,10 +119,9 @@ fn area_key(area: &str) -> &str {
 pub fn row_of(lang: Lang, e: &EntityView, room: Option<String>) -> Row {
     let title = entity_title(lang, e);
     // A title with a suffix is "device · kind": it already names the device.
-    let device = e
-        .device_name
-        .clone()
-        .filter(|d| !d.is_empty() && *d != title && title_suffix(lang, e).is_none());
+    let device = shown_device_name(lang, e)
+        .filter(|d| !d.is_empty() && *d != title && title_suffix(lang, e).is_none())
+        .map(str::to_owned);
     Row {
         id: e.id.clone(),
         title,
@@ -332,6 +334,38 @@ mod tests {
             ids(&listing(Lang::Fr, &h, &areas, &filter("switch"))),
             ["s"]
         );
+    }
+
+    #[test]
+    fn weather_entities_match_french_words() {
+        let h = house(vec![
+            ent(
+                "weather_rain_next_hour",
+                "Rain next hour",
+                "Weather",
+                "",
+                Kind::Sensor,
+                Some("precipitation"),
+            ),
+            ent(
+                "weather_pressure",
+                "Pressure",
+                "Weather",
+                "",
+                Kind::Sensor,
+                None,
+            ),
+            ent("s", "Plug", "", "", Kind::Switch, None),
+        ]);
+        let fr = |q| ids(&listing(Lang::Fr, &h, &[], &filter(q))).join(",");
+        assert_eq!(fr("météo"), "weather_rain_next_hour,weather_pressure");
+        assert_eq!(fr("meteo"), "weather_rain_next_hour,weather_pressure");
+        assert_eq!(fr("pluie"), "weather_rain_next_hour");
+        // The hub's English names still match.
+        assert_eq!(fr("weather"), "weather_rain_next_hour,weather_pressure");
+        let rows = listing(Lang::Fr, &h, &[], &filter("pluie")).sections;
+        assert_eq!(rows[0].rows[0].title, "Pluie dans l'heure");
+        assert_eq!(rows[0].rows[0].device.as_deref(), Some("Météo"));
     }
 
     #[test]

@@ -173,6 +173,50 @@ pub struct WeatherView {
     pub days: Vec<WeatherDay>,
 }
 
+/// The weather device's name, `[en, fr]`. The hub publishes the English one.
+pub const WEATHER_DEVICE_NAME: [&str; 2] = ["Weather", "Météo"];
+
+/// The name of the `weather_<key>` entity, `[en, fr]`, or `None` for a key the hub does not
+/// publish. The hub publishes the English one; a client shows its language's while the entity
+/// still carries that default.
+pub fn weather_entity_name(key: &str) -> Option<[&'static str; 2]> {
+    Some(match key {
+        "temperature" => ["Outdoor temperature", "Température extérieure"],
+        "apparent_temperature" => ["Feels like", "Ressenti"],
+        "humidity" => ["Outdoor humidity", "Humidité extérieure"],
+        "condition" => ["Condition", "Temps"],
+        "daylight" => ["Daylight", "Jour"],
+        "cloud_cover" => ["Cloud cover", "Couverture nuageuse"],
+        "precipitation" => ["Precipitation", "Précipitations"],
+        "wind_speed" => ["Wind speed", "Vitesse du vent"],
+        "wind_gusts" => ["Wind gusts", "Rafales"],
+        "wind_direction" => ["Wind direction", "Direction du vent"],
+        "pressure" => ["Pressure", "Pression"],
+        "uv_index" => ["UV index", "Indice UV"],
+        "today_min" => ["Today's minimum", "Minimum du jour"],
+        "today_max" => ["Today's maximum", "Maximum du jour"],
+        "today_precipitation" => ["Today's precipitation", "Précipitations du jour"],
+        "today_precipitation_probability" => [
+            "Today's precipitation probability",
+            "Probabilité de pluie du jour",
+        ],
+        "today_wind_gusts_max" => ["Today's strongest gust", "Rafale max du jour"],
+        "rain_next_hour" => ["Rain next hour", "Pluie dans l'heure"],
+        "tonight_min" => ["Tonight's minimum", "Minimum cette nuit"],
+        "tomorrow_condition" => ["Tomorrow's condition", "Temps demain"],
+        "tomorrow_min" => ["Tomorrow's minimum", "Minimum demain"],
+        "tomorrow_max" => ["Tomorrow's maximum", "Maximum demain"],
+        "tomorrow_precipitation" => ["Tomorrow's precipitation", "Précipitations demain"],
+        "tomorrow_precipitation_probability" => [
+            "Tomorrow's precipitation probability",
+            "Probabilité de pluie demain",
+        ],
+        "tomorrow_wind_gusts_max" => ["Tomorrow's strongest gust", "Rafale max demain"],
+        "tomorrow_uv_index_max" => ["Tomorrow's UV index", "Indice UV demain"],
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
