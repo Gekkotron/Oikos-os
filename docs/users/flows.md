@@ -37,6 +37,8 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
   - `trigger.schedule`: a five-field cron expression in the house time zone (`[flows] timezone`, the hub's system zone when unset).
   - `trigger.sun`: sunrise, sunset, dusk or dawn, with an optional `offset_minutes`.
 - **Checks** branch:
+  - `switch` compares one value with up to 10 rules and has one output per rule (see [Branch on several values](#branch-on-several-values)).
+  - `time.between` is true inside a daily range of the clock (see [Only at certain hours](#only-at-certain-hours)).
   - `if` compares a value with `value` using `op` (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`), or uses `op: is_dark`, which is true between civil dusk and civil dawn at the configured point. Give `is_dark` an `offset_minutes` (the card's Shift field) to move that window: `-30` makes it dark 30 minutes before civil dusk and keeps it dark until 30 minutes after civil dawn. The two outputs are `true` and `false`. Add `average` (for example `15m`, at most `24h`) to compare the mean of the entity's readings over that window, the newest included, instead of its current value: a temperature whose 30-minute average is 19 or less, rather than one noisy reading.
 - **Actions** do something:
   - `command` sends a command to an entity.
@@ -46,6 +48,35 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
   - `delay` waits for `for`, for example `90s`, `5m` or `1h30m`. With an optional `up_to` it waits a random time between the two.
 
 The sun nodes and `is_dark` read the house location. Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`, both or neither; without them the hub uses Paris, and the web UI shows a "Paris fallback" badge on sun cards. See [Configuration](../reference/configuration.md).
+
+### Branch on several values
+
+An `if` has two outputs. A `switch` has one output per rule, so one card can sort a value into bands. Each rule is a comparison (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`, or `between`, which includes both ends). The outputs are named `1`, `2`, ... after the rules, and `otherwise` when you turn it on.
+
+By default the first rule that matches wins. Turn on `all` to follow every rule that matches. Like an `if`, a `switch` can read another entity and can use `average`.
+
+```json
+{ "id": "band", "type": "switch", "params": {
+    "entity": "sensor_temperature",
+    "rules": [
+      { "op": "lt", "value": 18 },
+      { "op": "between", "value": 18, "to": 22 },
+      { "op": "gt", "value": 22 }
+    ],
+    "otherwise": true } }
+```
+
+In the editor, add a **Switch** card from the library, then add, reorder or delete rules in its settings. The card shows one labelled output per rule; wires follow their rule when you reorder or delete rules. An unknown value follows `otherwise` (or nothing when it is off).
+
+### Only at certain hours
+
+A `time.between` card sends the run to `in` or `out` depending on the time of day: `from` is included, `to` is excluded. A range that ends before it starts crosses midnight, so `22:00` to `06:00` covers the night. Times are `HH:MM`, 24-hour, in the house time zone.
+
+```json
+{ "id": "daytime", "type": "time.between", "params": { "from": "07:00", "to": "22:30" } }
+```
+
+In the editor it is the **Time of day** card in the library. It needs no entity, so it works after a schedule or a sun trigger.
 
 ### Values in a notification
 
@@ -70,7 +101,7 @@ A `notify` card's title and body can show live values. In the editor, **＋ Valu
 
 ## How a run goes
 
-A run follows the graph from the trigger that fired, depth first. A failing node ends the run as `failed` at that step. A schedule tick that comes while the broker link is down is recorded as a skipped run, since its commands could not go out. A non-trigger node with no incoming edge never runs. A manual run (the Run button, `run_flow`) starts from the flow's first trigger node and is refused when the flow is disabled, invalid, or already running.
+A run follows the graph from the trigger that fired, depth first. A branching step records the output ports it followed, and the canvas lights those wires. A failing node ends the run as `failed` at that step. A schedule tick that comes while the broker link is down is recorded as a skipped run, since its commands could not go out. A non-trigger node with no incoming edge never runs. A manual run (the Run button, `run_flow`) starts from the flow's first trigger node and is refused when the flow is disabled, invalid, or already running.
 
 The scalar is the one value of a state that triggers and `if` compare: the on/off bool, the number, the text, a light's `on`, a cover's `state`.
 
@@ -103,7 +134,7 @@ The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `
 
 ![A flow on the canvas: a header with the flow's name, mode and room, the enable switch, run, edit and Runs buttons at the top right, zoom buttons bottom left and a minimap bottom right](/img/screens/flow-canvas.webp)
 
-The flow page (`/flows/<id>`) is a full-bleed canvas. The top left holds a back arrow, the flow's name, its mode tag (`single` or `restart`) and its room. The top right holds the enable switch, a run button (**Run now**), a pencil to edit, and **Runs**, which opens the recent runs. Zoom buttons (+, −, fit) sit bottom left and a minimap bottom right; the wheel pans, and ⌘/Ctrl-wheel or pinch zooms. Each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of a check. The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live.
+The flow page (`/flows/<id>`) is a full-bleed canvas. The top left holds a back arrow, the flow's name, its mode tag (`single` or `restart`) and its room. The top right holds the enable switch, a run button (**Run now**), a pencil to edit, and **Runs**, which opens the recent runs. Zoom buttons (+, −, fit) sit bottom left and a minimap bottom right; the wheel pans, and ⌘/Ctrl-wheel or pinch zooms. Each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of an `if`, and a label per output on a `switch` (the rule, such as "< 18", or "otherwise") or a time-of-day card (the range, such as "07:00–22:30", and "outside"). The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live.
 
 The pencil switches to a React Flow-style editor (it is disabled on an invalid flow; tapping a card does the same on a computer): click a card to select it (amber ring) and edit its settings in the drawer, drag it to move it, drag from an output pin onto another card to wire it, drop a card that has no wires yet onto a wire to splice it in (the wire turns green first; an `if` passes it on by **yes**), click a wire for its ✕, press ⌫ to delete the selection (deleting a card between two others wires them together again), ⌘/Ctrl-D to duplicate the selected card, ⌘/Ctrl-Z to undo (add Shift to redo) and Esc to clear the selection or stop a replay. In edit mode the right panel holds the card library, grouped WHEN / AND / THEN / WAIT / FLOW: click a card or drag it onto the canvas to add it, and the library stays open so you can add several. Type an entity name, a device name or a room in its search to list the triggers, checks and actions of every matching entity, sorted by name ignoring case and accents; several words narrow the list (`weather rain`, or a room plus `shutter`). Enter adds the highlighted card, and ⌘/Ctrl-Z right after takes it back out, even though the search box still has the focus. Selecting a card on the canvas shows its settings there instead, and **Close** brings the library back. A card's entity is chosen with the [entity picker](web-ui.md#picking-an-entity), not typed: a `command` card opens on the entities that take a command, a `trigger.signal` card only remotes, events and tags, and an `if` card can keep **Trigger value**. An `if` card's **Value** lists what its entity can report, worded in your language (a shutter's Open, Closed, Opening, Closing; a sensor's on/off; a climate's modes; a select's options), and a measurement gets a number box with its unit; **Other value…** takes anything else (a number, `true`/`false`, or text). With **Trigger value**, the list follows the state trigger that feeds the card. A `command` card's **Action** lists what its entity accepts, each with its own fields: a position or temperature, a light's brightness, colour and effect, an alarm code when the panel needs one. **Advanced (JSON)** at the end of the list takes a command typed by hand. Both lists come from what the device announced in its discovery config. A schedule card opens a picker (Every N minutes, Hourly, Daily, Weekdays or Advanced for raw cron) with the next three ticks, and a sun card shows when it fires next. The top bar of the editor has the name field and a room picker, then **Tidy** (re-lay the graph out), undo, a cancel button (discards the draft) and a save button; nothing reaches the hub until you save.
 
