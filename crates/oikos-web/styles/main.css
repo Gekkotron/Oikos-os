@@ -4045,8 +4045,8 @@ html:has(.flow-canvas-screen) {
   padding-right: 86px;
 }
 
-/* A card with no sub line (the time card) wraps its title to two lines before cutting it. */
-.flow-node--exits .flow-node__title:last-child {
+/* The time card and the tall switch cards wrap their title to two lines before cutting it. */
+.flow-node--wrap .flow-node__title {
   display: -webkit-box;
   white-space: normal;
   -webkit-box-orient: vertical;

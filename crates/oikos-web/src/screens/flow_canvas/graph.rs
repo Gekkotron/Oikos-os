@@ -452,6 +452,10 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
                 if matches!(k, NodeKind::Switch(_) | NodeKind::TimeBetween(_)) {
                     class.push_str(" flow-node--exits");
                 }
+                // Cards with room to spare wrap their title to two lines before cutting it.
+                if matches!(k, NodeKind::TimeBetween(_)) || node_height(k) >= 74.0 {
+                    class.push_str(" flow-node--wrap");
+                }
                 if c.mode == Mode::Edit {
                     class.push_str(" flow-node--editing");
                 }
