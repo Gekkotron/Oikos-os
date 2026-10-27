@@ -1,3 +1,4 @@
+use leptos::html::Div;
 use leptos::prelude::*;
 use oikos_core::dashboard::Widget;
 
@@ -10,6 +11,66 @@ use crate::icons::GRIP;
 /// stays a click that opens its settings.
 const DRAG_THRESHOLD: f64 = 6.0;
 
+/// Where a dragged tile lands, shown as a bar on that side of the tile.
+#[derive(Clone, Debug, PartialEq)]
+enum Slot {
+    Before(String),
+    After(String),
+}
+
+/// A tile's box on screen, in client pixels.
+struct TileBox {
+    id: String,
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
+impl TileBox {
+    fn middle(&self) -> f64 {
+        (self.left + self.right) / 2.0
+    }
+}
+
+/// The slot under the pointer at (`x`, `y`) while tile `dragged` is dragged; `tiles` are in
+/// grid order. Over a tile, its nearer side. Over a gap or the page around the grid, before the
+/// first tile that comes after the pointer in reading order, else after the last tile, so the
+/// empty space below the grid moves a tile to the end.
+fn slot_at(tiles: &[TileBox], dragged: &str, x: f64, y: f64) -> Option<Slot> {
+    let mut others = tiles.iter().filter(|t| t.id != dragged);
+    let side = |t: &TileBox| {
+        if x < t.middle() {
+            Slot::Before(t.id.clone())
+        } else {
+            Slot::After(t.id.clone())
+        }
+    };
+    if let Some(t) = others
+        .clone()
+        .find(|t| (t.left..t.right).contains(&x) && (t.top..t.bottom).contains(&y))
+    {
+        return Some(side(t));
+    }
+    if let Some(t) = others
+        .clone()
+        .find(|t| t.top > y || ((t.top..t.bottom).contains(&y) && t.middle() > x))
+    {
+        return Some(Slot::Before(t.id.clone()));
+    }
+    others.next_back().map(|t| Slot::After(t.id.clone()))
+}
+
+/// The index tile `from` moves to when dropped in `slot`, or `None` when it stays put.
+fn drop_index(ids: &[&str], from: usize, slot: &Slot) -> Option<usize> {
+    let before = match slot {
+        Slot::Before(id) => ids.iter().position(|x| x == id)?,
+        Slot::After(id) => ids.iter().position(|x| x == id)? + 1,
+    };
+    let to = if before > from { before - 1 } else { before };
+    (to != from).then_some(to)
+}
+
 /// A press on a tile or its grip, until it is released.
 #[derive(Clone)]
 struct Press {
@@ -19,32 +80,20 @@ struct Press {
     y: f64,
     /// Set once the pointer travelled past [`DRAG_THRESHOLD`].
     dragging: bool,
-    /// The tile the dragged one last moved onto (see [`drag_step`]).
-    last: Option<String>,
 }
 
-/// One pointer move of a drag of tile `dragged`, now over tile `hovered` (`None` over a gap):
-/// the tile to move onto, if any, and the new `last`. Moving onto the tile it just moved onto
-/// is skipped: a taller neighbour can still sit under the pointer after the swap and would
-/// swap straight back. Reaching the dragged tile itself clears that, so going back works.
-fn drag_step(
-    dragged: &str,
-    hovered: Option<&str>,
-    last: Option<&str>,
-) -> (Option<String>, Option<String>) {
-    match hovered {
-        Some(h) if h == dragged => (None, None),
-        Some(h) if Some(h) != last => (Some(h.to_owned()), Some(h.to_owned())),
-        _ => (None, last.map(str::to_owned)),
-    }
-}
-
-/// Drag-to-reorder state shared by every tile of a grid.
+/// Drag-to-reorder state shared by every tile of a grid. Tiles stay in place while a tile is
+/// dragged: it follows the pointer and a bar marks where it will land, and the order changes
+/// on release. Reordering live made tiles of different sizes jump under the pointer.
 #[derive(Clone, Copy)]
 struct Drag {
     press: StoredValue<Option<Press>>,
     /// The id of the tile being dragged, for its lifted look.
     dragging: RwSignal<Option<String>>,
+    /// How far the dragged tile has travelled from where it was picked up.
+    offset: RwSignal<(f64, f64)>,
+    /// Where the dragged tile would land if released now; `None` when it would stay put.
+    slot: RwSignal<Option<Slot>>,
     /// Set when a drag ends, so the click that follows the release does not open the settings
     /// of the tile under the pointer.
     swallow_click: StoredValue<bool>,
@@ -55,6 +104,8 @@ impl Drag {
         Self {
             press: StoredValue::new(None),
             dragging: RwSignal::new(None),
+            offset: RwSignal::new((0.0, 0.0)),
+            slot: RwSignal::new(None),
             swallow_click: StoredValue::new(false),
         }
     }
@@ -70,13 +121,12 @@ impl Drag {
             x: f64::from(ev.client_x()),
             y: f64::from(ev.client_y()),
             dragging: false,
-            last: None,
         }));
     }
 
-    /// Follows the pointer on the window rather than on the tile: the tile moves in the DOM
-    /// while it is dragged, which can drop a pointer capture.
-    fn moved(&self, ev: &web_sys::PointerEvent, widgets: Signal<Vec<Widget>>, state: EditState) {
+    /// Follows the pointer on the window rather than on the tile, so the drag goes on over the
+    /// gaps and the page around the grid.
+    fn moved(&self, ev: &web_sys::PointerEvent, widgets: Signal<Vec<Widget>>, grid: NodeRef<Div>) {
         let Some(mut press) = self.press.get_value() else {
             return;
         };
@@ -90,36 +140,90 @@ impl Drag {
             }
             press.dragging = true;
             self.dragging.set(Some(press.id.clone()));
+            self.press.set_value(Some(press.clone()));
         }
         ev.prevent_default();
-        let hovered = document()
-            .element_from_point(x as f32, y as f32)
-            .and_then(|el| el.closest("[data-widget-id]").ok().flatten())
-            .and_then(|el| el.get_attribute("data-widget-id"));
-        let (onto, last) = drag_step(&press.id, hovered.as_deref(), press.last.as_deref());
-        press.last = last;
-        if let Some(onto) = onto {
-            let (from, to) = widgets.with_untracked(|ws| {
-                let at = |id: &str| ws.iter().position(|w| w.id == id);
-                (at(&press.id), at(&onto))
-            });
-            if let (Some(from), Some(to)) = (from, to) {
-                state.reorder(from, to);
-            }
+        self.offset.set((x - press.x, y - press.y));
+        let slot = self.slot_under(&press.id, x, y, widgets, grid);
+        if self.slot.with_untracked(|s| *s != slot) {
+            self.slot.set(slot);
         }
-        self.press.set_value(Some(press));
     }
 
-    fn up(&self, ev: &web_sys::PointerEvent) {
+    fn slot_under(
+        &self,
+        dragged: &str,
+        x: f64,
+        y: f64,
+        widgets: Signal<Vec<Widget>>,
+        grid: NodeRef<Div>,
+    ) -> Option<Slot> {
+        let grid = grid.get_untracked()?;
+        // The widget library is not a drop target: releasing over it leaves the order alone.
+        let over_library = document()
+            .query_selector(".dashboard-library-panel")
+            .ok()
+            .flatten()
+            .is_some_and(|panel| {
+                let r = panel.get_bounding_client_rect();
+                (r.left()..r.right()).contains(&x) && (r.top()..r.bottom()).contains(&y)
+            });
+        if over_library {
+            return None;
+        }
+        let (tiles, ids): (Vec<TileBox>, Vec<String>) = widgets.with_untracked(|ws| {
+            let tiles = ws
+                .iter()
+                .filter_map(|w| {
+                    let selector = format!("[data-widget-id=\"{}\"]", w.id);
+                    let r = grid
+                        .query_selector(&selector)
+                        .ok()??
+                        .get_bounding_client_rect();
+                    Some(TileBox {
+                        id: w.id.clone(),
+                        left: r.left(),
+                        top: r.top(),
+                        right: r.right(),
+                        bottom: r.bottom(),
+                    })
+                })
+                .collect();
+            (tiles, ws.iter().map(|w| w.id.clone()).collect())
+        });
+        let slot = slot_at(&tiles, dragged, x, y)?;
+        let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let from = ids.iter().position(|id| *id == dragged)?;
+        drop_index(&ids, from, &slot).map(|_| slot)
+    }
+
+    /// Ends the press; a drag that was over a slot moves its tile there.
+    fn up(&self, ev: &web_sys::PointerEvent, widgets: Signal<Vec<Widget>>, state: EditState) {
         let Some(press) = self.press.get_value() else {
             return;
         };
         if press.pointer != ev.pointer_id() {
             return;
         }
+        if let Some(slot) = self.slot.get_untracked() {
+            let to = widgets.with_untracked(|ws| {
+                let ids: Vec<&str> = ws.iter().map(|w| w.id.as_str()).collect();
+                let from = ids.iter().position(|id| *id == press.id)?;
+                Some((from, drop_index(&ids, from, &slot)?))
+            });
+            if let Some((from, to)) = to {
+                state.reorder(from, to);
+            }
+        }
         self.swallow_click.set_value(press.dragging);
+        self.cancel();
+    }
+
+    fn cancel(&self) {
         self.press.set_value(None);
         self.dragging.set(None);
+        self.slot.set(None);
+        self.offset.set((0.0, 0.0));
     }
 }
 
@@ -129,8 +233,8 @@ impl Drag {
 ///
 /// In edit mode tiles reorder by drag: from the grip in each tile's tool pill (mouse, pen or
 /// touch; the arrow keys move a focused grip) or, with a mouse or pen, from anywhere on the
-/// tile. A touch on the tile itself still scrolls the page. Pointer events rather than HTML5
-/// drag, which has no touch support.
+/// tile. A touch on the tile itself still scrolls the page. Escape cancels a drag. Pointer
+/// events rather than HTML5 drag, which has no touch support.
 #[component]
 pub fn Grid(
     widgets: Signal<Vec<Widget>>,
@@ -139,16 +243,25 @@ pub fn Grid(
     let active = move || edit.is_some_and(|e| e.active.get());
     let lang = use_lang();
     let drag = Drag::new();
+    let grid = NodeRef::<Div>::new();
     if let Some(state) = edit {
         let moved = window_event_listener(leptos::ev::pointermove, move |ev| {
-            drag.moved(&ev, widgets, state);
+            drag.moved(&ev, widgets, grid);
         });
-        let up = window_event_listener(leptos::ev::pointerup, move |ev| drag.up(&ev));
-        let cancel = window_event_listener(leptos::ev::pointercancel, move |ev| drag.up(&ev));
+        let up = window_event_listener(leptos::ev::pointerup, move |ev| {
+            drag.up(&ev, widgets, state);
+        });
+        let cancel = window_event_listener(leptos::ev::pointercancel, move |_| drag.cancel());
+        let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+            if ev.key() == "Escape" && drag.dragging.with_untracked(Option::is_some) {
+                drag.cancel();
+            }
+        });
         on_cleanup(move || {
             moved.remove();
             up.remove();
             cancel.remove();
+            escape.remove();
         });
     }
     // The tile of a widget just added is brought into view once it has rendered.
@@ -169,7 +282,11 @@ pub fn Grid(
         });
     }
     view! {
-        <div class="dashboard-grid" class:dashboard-grid--dragging=move || drag.dragging.with(Option::is_some)>
+        <div
+            node_ref=grid
+            class="dashboard-grid"
+            class:dashboard-grid--dragging=move || drag.dragging.with(Option::is_some)
+        >
             <For
                 each=move || widgets.get()
                 key=|w| w.id.clone()
@@ -210,6 +327,26 @@ pub fn Grid(
                     let is_dragged = {
                         let id = id.clone();
                         move || drag.dragging.with(|d| d.as_deref() == Some(id.as_str()))
+                    };
+                    // Only the dragged tile reads the offset, so a pointer move re-renders it alone.
+                    let lifted = {
+                        let is_dragged = is_dragged.clone();
+                        move || {
+                            is_dragged().then(|| {
+                                let (dx, dy) = drag.offset.get();
+                                format!("translate({dx}px, {dy}px) scale(1.02)")
+                            })
+                        }
+                    };
+                    let drop_side = |after: bool| {
+                        let id = id.clone();
+                        move || {
+                            drag.slot.with(|s| match s {
+                                Some(Slot::Before(x)) => !after && *x == id,
+                                Some(Slot::After(x)) => after && *x == id,
+                                None => false,
+                            })
+                        }
                     };
                     let tools = edit.map(|state| {
                         let grip_id = id.clone();
@@ -262,6 +399,9 @@ pub fn Grid(
                             class=class
                             class:widget--fresh=is_fresh
                             class:widget--dragging=is_dragged
+                            class:widget--drop-before=drop_side(false)
+                            class:widget--drop-after=drop_side(true)
+                            style:transform=lifted
                             data-widget-id=id
                         >
                             <WidgetView widget=w current=current />
@@ -307,26 +447,78 @@ pub fn Grid(
 
 #[cfg(test)]
 mod tests {
-    use super::drag_step;
+    use super::{Slot, TileBox, drop_index, slot_at};
 
-    fn s(v: &str) -> Option<String> {
-        Some(v.to_owned())
+    fn tile(id: &str, left: f64, top: f64, right: f64, bottom: f64) -> TileBox {
+        TileBox {
+            id: id.to_owned(),
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    /// Two rows of 100×100 tiles with 10 px gaps: a b c, then d.
+    fn tiles() -> Vec<TileBox> {
+        vec![
+            tile("a", 0.0, 0.0, 100.0, 100.0),
+            tile("b", 110.0, 0.0, 210.0, 100.0),
+            tile("c", 220.0, 0.0, 320.0, 100.0),
+            tile("d", 0.0, 110.0, 100.0, 210.0),
+        ]
+    }
+
+    fn before(id: &str) -> Option<Slot> {
+        Some(Slot::Before(id.to_owned()))
+    }
+
+    fn after(id: &str) -> Option<Slot> {
+        Some(Slot::After(id.to_owned()))
     }
 
     #[test]
-    fn moves_onto_a_new_neighbour() {
-        assert_eq!(drag_step("a", Some("b"), None), (s("b"), s("b")));
-        assert_eq!(drag_step("a", Some("c"), Some("b")), (s("c"), s("c")));
+    fn over_a_tile_picks_its_nearer_side() {
+        assert_eq!(slot_at(&tiles(), "a", 130.0, 50.0), before("b"));
+        assert_eq!(slot_at(&tiles(), "a", 190.0, 50.0), after("b"));
     }
 
     #[test]
-    fn does_not_swap_back_onto_the_tile_it_just_moved_onto() {
-        assert_eq!(drag_step("a", Some("b"), Some("b")), (None, s("b")));
+    fn the_dragged_tile_is_never_a_target() {
+        // Over a's own box: the next tile in reading order.
+        assert_eq!(slot_at(&tiles(), "a", 50.0, 50.0), before("b"));
     }
 
     #[test]
-    fn over_itself_clears_last_and_over_a_gap_keeps_it() {
-        assert_eq!(drag_step("a", Some("a"), Some("b")), (None, None));
-        assert_eq!(drag_step("a", None, Some("b")), (None, s("b")));
+    fn a_gap_lands_before_the_next_tile_in_reading_order() {
+        assert_eq!(slot_at(&tiles(), "d", 105.0, 50.0), before("b"));
+        assert_eq!(slot_at(&tiles(), "a", 330.0, 50.0), before("d"));
+        assert_eq!(slot_at(&tiles(), "d", 330.0, 50.0), after("c"));
+    }
+
+    #[test]
+    fn empty_space_after_the_last_tile_moves_to_the_end() {
+        assert_eq!(slot_at(&tiles(), "a", 300.0, 160.0), after("d"));
+        assert_eq!(slot_at(&tiles(), "a", 50.0, 600.0), after("d"));
+        // Dragging the last tile itself: after the one before it, which drop_index skips.
+        assert_eq!(slot_at(&tiles(), "d", 50.0, 600.0), after("c"));
+    }
+
+    #[test]
+    fn above_the_grid_lands_first() {
+        assert_eq!(slot_at(&tiles(), "c", 50.0, -40.0), before("a"));
+    }
+
+    #[test]
+    fn drop_index_moves_or_stays() {
+        let ids = ["a", "b", "c", "d"];
+        let slot = |s: Option<Slot>| s.unwrap();
+        assert_eq!(drop_index(&ids, 0, &slot(after("d"))), Some(3));
+        assert_eq!(drop_index(&ids, 0, &slot(before("c"))), Some(1));
+        assert_eq!(drop_index(&ids, 3, &slot(before("a"))), Some(0));
+        assert_eq!(drop_index(&ids, 1, &slot(before("b"))), None);
+        assert_eq!(drop_index(&ids, 1, &slot(before("c"))), None);
+        assert_eq!(drop_index(&ids, 1, &slot(after("a"))), None);
+        assert_eq!(drop_index(&ids, 0, &slot(before("x"))), None);
     }
 }

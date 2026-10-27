@@ -5563,16 +5563,17 @@ html:has(.flow-canvas-screen) {
    column count would create implicit columns; none exists, as the widest span is 2 and the
    grid never has fewer than 2 columns. */
 .dashboard-grid {
+  --dash-cols: 2;
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--dash-cols), minmax(0, 1fr));
   padding: 12px;
 }
 @media (min-width: 601px) {
-  .dashboard-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .dashboard-grid { --dash-cols: 4; }
 }
 @media (min-width: 1201px) {
-  .dashboard-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .dashboard-grid { --dash-cols: 6; }
 }
 .widget-span-1x1 { grid-column: span 1; grid-row: span 1; }
 .widget-span-2x1 { grid-column: span 2; grid-row: span 1; }
@@ -5666,16 +5667,29 @@ html:has(.flow-canvas-screen) {
 .dashboard-grid--dragging,
 .dashboard-grid--dragging .widget__edit-overlay,
 .dashboard-grid--dragging .widget__grip { cursor: grabbing; }
+/* The dragged tile follows the pointer (an inline transform) above the others, which stay in
+   place; a bar in the gap marks where it will land. */
 .widget--dragging {
   z-index: 3;
   border-radius: var(--radius-card);
   box-shadow: 0 0 0 2px var(--accent-amber), var(--shadow);
   opacity: 0.85;
-  transform: scale(1.02);
 }
-@media (prefers-reduced-motion: no-preference) {
-  .widget--dragging { transition: transform 120ms var(--ease); }
+.widget--drop-before::before,
+.widget--drop-after::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--accent-amber);
+  pointer-events: none;
+  z-index: 3;
 }
+/* Centred in the 12px column gap. */
+.widget--drop-before::before { left: -8px; }
+.widget--drop-after::after { right: -8px; }
 
 /* Widget library: an always-open panel beside the grid while editing a dashboard. It reuses
    the flow library's rows; each section sets its own accent. */
@@ -5742,9 +5756,23 @@ html:has(.flow-canvas-screen) {
     align-items: flex-start;
   }
 
+  /* The library takes 360px beside the grid; its columns keep the width they have outside edit
+     mode (a share of the whole layout, measured as a container) and the tiles wrap instead of
+     shrinking. A column never takes more than half the grid, so a 2-wide tile always fits. */
+  .dashboard-edit-layout {
+    container-type: inline-size;
+  }
+
   .dashboard-edit-layout .dashboard-grid {
     flex: 1;
     min-width: 0;
+    grid-template-columns: repeat(
+      auto-fill,
+      min(
+        calc((100cqw - 24px - (var(--dash-cols) - 1) * 12px) / var(--dash-cols)),
+        calc((100% - 12px) / 2)
+      )
+    );
   }
 
   .dashboard-library-panel {
