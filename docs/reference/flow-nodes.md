@@ -227,7 +227,7 @@ Outputs: two ports, `in` and `out`. Every edge leaving a `time.between` names on
 { "id": "daytime", "type": "time.between", "params": { "from": "07:00", "to": "22:30" } }
 ```
 
-A `time.between` refuses to save when `from` or `to` is not a `HH:MM` time (the reason reads "from: 7:00 is not a HH:MM time"), or when `from` and `to` are equal (`from and to must differ`).
+A `time.between` refuses to save when `from` or `to` is not a `HH:MM` time (the reason reads ``from: `7:00` is not a HH:MM time``), or when `from` and `to` are equal (`from and to must differ`).
 
 ## `delay`
 

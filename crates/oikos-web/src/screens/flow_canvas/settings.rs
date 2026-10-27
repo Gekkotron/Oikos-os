@@ -1186,7 +1186,6 @@ fn update_rule(form: Form, id: &str, index: usize, mutate: impl FnOnce(&mut Swit
 }
 
 /// One rule of a switch: operator, value (and upper bound for `between`), move and delete.
-#[allow(clippy::too_many_arguments)]
 fn rule_row(
     form: Form,
     id: String,

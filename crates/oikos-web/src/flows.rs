@@ -184,8 +184,9 @@ pub fn orphans(flow: &Flow) -> BTreeSet<String> {
 
 /// The `delay` node a running run is parked on, with the second it started waiting at. The
 /// engine records a `delay` step only after the wait, so while it waits the run's last step is
-/// the node before it (an `if`, whose `detail` names the port taken, or a command): the parked
-/// node is that step's first successor that is a `delay`. The countdown ends at
+/// the node before it (an `if`, `switch` or `time.between`, whose step records the `ports`
+/// taken, with `detail` as the fallback for an `if`; or a command): the parked node is that
+/// step's first successor that is a `delay`. The countdown ends at
 /// `since + parse_duration(for)`.
 pub fn parked_node(flow: &Flow, run: &RunView) -> Option<(String, u64)> {
     if run.status != RunStatus::Running {

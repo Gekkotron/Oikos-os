@@ -66,7 +66,7 @@ By default the first rule that matches wins. Turn on `all` to follow every rule 
     "otherwise": true } }
 ```
 
-In the editor, add a **Switch** card from the library, then add, reorder or delete rules in its settings. The card shows one labelled output per rule; wires follow their rule when you reorder or delete rules. An unknown value follows `otherwise` (or nothing when it is off).
+In the editor, add a **Switch** card from the library, then add, reorder or delete rules in its settings. The card shows one labelled output per rule; wires follow their rule when you reorder or delete rules. An unknown value follows `otherwise` (or nothing when it is off), unless an `ne` rule matches it.
 
 ### Only at certain hours
 

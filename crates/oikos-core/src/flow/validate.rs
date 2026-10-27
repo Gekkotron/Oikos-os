@@ -312,7 +312,8 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     kind: match from.kind.type_name() {
                         "if" => "an if",
                         "switch" => "a switch",
-                        _ => "a time.between",
+                        "time.between" => "a time.between",
+                        other => unreachable!("{other} has no ports"),
                     },
                 });
             }
