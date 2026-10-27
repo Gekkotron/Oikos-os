@@ -196,7 +196,7 @@ A short example, the `device_tracker` entry:
 
 The hub publishes the whole table retained on `oikos/ui/_types` (`{ui_prefix}/_types`) on every connection, so the Android app reads the same vocabulary. Its own echo is ignored. Camera and image entities carry their picture in the `picture` field. `GET /api/v1/entities/{id}/picture` serves the stored bytes, or the bytes of its URL fetched by the hub now (10 s timeout, 5 MiB cap, no redirects followed).
 
-Check it with `GET /api/v1/ignored` (the component must no longer appear there) and `GET /api/v1/snapshot` (the entity must show its primary field).
+Check it with `GET /api/v1/ignored` (the component must no longer appear there) and `GET /api/v1/snapshot` (the entity must show its primary field). A type-table entry needs no other change to appear in the flow editor: `oikos_core::vocabulary` turns its announced controls into actions and its primary field into the values an `if` card offers.
 
 ### A hand-written kind (Rust)
 
@@ -210,12 +210,13 @@ Base the PR on how `water_heater` was added. A kind touches these files:
 | `crates/oikos-core/src/state/kinds/<kind>.rs`, `state/kinds/mod.rs` | Reading the kind's state. |
 | `crates/oikos-core/src/command/kinds.rs` | Mapping commands to publishes. |
 | `crates/oikos-core/src/flow/scalar.rs` | The kind's scalar for flows. |
+| `crates/oikos-core/src/vocabulary.rs` | What the kind accepts (`actions`) and reports (`reports`): the flow editor's Action and Value lists and the ambiance device action read them. |
 | `crates/oikos-core/src/energy/units.rs` | Only if the kind reports energy. |
 | `crates/oikos-web/src/cards/<kind>.rs`, `icons.rs`, `format.rs`, `screens/home.rs` | Web card. |
 
 The Android app needs the matching card.
 
-Tests run against recorded broker messages in `crates/oikos-core/tests/fixtures`. Add cases to `crates/oikos-core/tests/state.rs`.
+Tests run against recorded broker messages in `crates/oikos-core/tests/fixtures`. Add cases to `crates/oikos-core/tests/state.rs`. `crates/oikos-core/tests/vocabulary.rs` runs every action `vocabulary::actions` lists through the command mapper, so the editors never offer a command the hub refuses; add a hand-written config there when the recording has no entity of the new kind.
 
 Before opening the PR, run the commands in [Development](development.md#checks): `cargo test`, `clippy -D warnings`, `fmt --check`, and the wasm32 checks for `oikos-core`, `oikos-api` and `oikos-web`.
 

@@ -3662,6 +3662,22 @@ html:has(.flow-canvas-screen) {
   opacity: 0.75;
 }
 
+/* A number input with its unit beside it (command and If value fields). */
+.command-field__number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.command-field__number > input {
+  flex: 1;
+  min-width: 0;
+}
+
+.command-field__unit {
+  opacity: 0.75;
+}
+
 .sched {
   display: grid;
   gap: 12px;
