@@ -40,6 +40,10 @@ pub struct Capabilities {
     /// The light's `effect_list`, in published order; empty when it has no effects.
     pub effects: Vec<String>,
     pub position: bool,
+    /// A cover with a `command_topic`: it can be told to open and close.
+    pub open_close: bool,
+    /// A cover that can be stopped: a `command_topic` and a `payload_stop` that is not null.
+    pub stop: bool,
     pub hvac_modes: Vec<String>,
     /// The climate's `fan_modes`, in published order; empty when it has no fan control.
     pub fan_modes: Vec<String>,
