@@ -239,6 +239,17 @@ pub enum FlowText {
     AverageHint,
     DarkShift,
     DarkShiftHint,
+    OpBetween,
+    AddRule,
+    OtherwiseExit,
+    FireAll,
+    MoveRuleUp,
+    MoveRuleDown,
+    DeleteRule,
+    RuleAnd,
+    TimeFrom,
+    TimeTo,
+    RuleLabel,
 }
 
 impl FlowText {
@@ -464,6 +475,17 @@ impl FlowText {
         FlowText::AverageHint,
         FlowText::DarkShift,
         FlowText::DarkShiftHint,
+        FlowText::OpBetween,
+        FlowText::AddRule,
+        FlowText::OtherwiseExit,
+        FlowText::FireAll,
+        FlowText::MoveRuleUp,
+        FlowText::MoveRuleDown,
+        FlowText::DeleteRule,
+        FlowText::RuleAnd,
+        FlowText::TimeFrom,
+        FlowText::TimeTo,
+        FlowText::RuleLabel,
     ];
 }
 
@@ -763,6 +785,20 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
             "\u{2212}30 = dark 30\u{a0}min before civil dusk and until 30\u{a0}min after civil dawn",
             "\u{2212}30 = nuit 30\u{a0}min avant le crépuscule civil et jusqu'à 30\u{a0}min après l'aube civile",
         ),
+        T::OpBetween => ("between", "entre"),
+        T::AddRule => ("Add rule", "Ajouter une règle"),
+        T::OtherwiseExit => ("Otherwise exit", "Sortie « sinon »"),
+        T::FireAll => (
+            "Fire every matching rule",
+            "Déclencher toutes les règles vraies",
+        ),
+        T::MoveRuleUp => ("Move rule up", "Monter la règle"),
+        T::MoveRuleDown => ("Move rule down", "Descendre la règle"),
+        T::DeleteRule => ("Delete rule", "Supprimer la règle"),
+        T::RuleAnd => ("and", "et"),
+        T::TimeFrom => ("From", "De"),
+        T::TimeTo => ("Until", "Jusqu'à"),
+        T::RuleLabel => ("Rule", "Règle"),
     };
     match lang {
         Lang::En => en,
@@ -1116,6 +1152,17 @@ pub fn time_between(lang: Lang, from: &str, to: &str) -> String {
     )
 }
 
+/// The note under the rule list after a delete or an Otherwise toggle took wires with it:
+/// "Removed 2 wires" / "2 fils supprimés".
+pub fn removed_wires(lang: Lang, n: usize) -> String {
+    match (lang, n) {
+        (Lang::En, 1) => "Removed 1 wire".to_owned(),
+        (Lang::En, n) => format!("Removed {n} wires"),
+        (Lang::Fr, 1) => "1 fil supprimé".to_owned(),
+        (Lang::Fr, n) => format!("{n} fils supprimés"),
+    }
+}
+
 /// The `is_dark` card: the plain question without a shift, else where the dark starts:
 /// "Is it dark? (from 30 min before civil dusk)" / "Fait-il nuit\u{A0}? (dès 30 min avant le
 /// crépuscule civil)".
@@ -1284,6 +1331,14 @@ mod tests {
         FlowText::SevInfo,
         FlowText::NodeAction,
     ];
+
+    #[test]
+    fn removed_wires_counts() {
+        assert_eq!(removed_wires(Lang::En, 1), "Removed 1 wire");
+        assert_eq!(removed_wires(Lang::En, 3), "Removed 3 wires");
+        assert_eq!(removed_wires(Lang::Fr, 1), "1 fil supprimé");
+        assert_eq!(removed_wires(Lang::Fr, 2), "2 fils supprimés");
+    }
 
     #[test]
     fn switch_and_time_sentences() {

@@ -7874,3 +7874,31 @@ html:has(.flow-canvas-screen) {
   margin: 0 0 12px;
   font: var(--type-label);
 }
+
+/* The switch editor: one bordered row per rule. */
+.rule-list {
+  display: grid;
+  gap: 8px;
+}
+
+.rule-row {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-radius: 8px;
+}
+
+.rule-row__buttons {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.node-editor__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
