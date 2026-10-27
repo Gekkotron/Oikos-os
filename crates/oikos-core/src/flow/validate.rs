@@ -15,8 +15,8 @@ pub enum FlowError {
     UnknownNode { edge_index: usize, node: String },
     #[error("node `{node}` has no port `{port}`")]
     UnknownPort { node: String, port: String },
-    #[error("node `{node}` is an if and needs a port")]
-    MissingPort { node: String },
+    #[error("node `{node}` is {kind} and needs a port")]
+    MissingPort { node: String, kind: &'static str },
     #[error("node `{node}` has a single output and takes no port")]
     UnexpectedPort { node: String },
     #[error("cycle through {}", .0.join(" → "))]
@@ -31,6 +31,8 @@ pub enum FlowError {
     BadCron { node: String, reason: String },
     #[error("node `{node}`: an if after a schedule or sun trigger must name an entity")]
     IfNeedsEntity { node: String },
+    #[error("node `{node}`: a switch after a schedule or sun trigger must name an entity")]
+    SwitchNeedsEntity { node: String },
     #[error("node `{node}`: `{flow}` is not a valid flow id")]
     BadFlowTarget { node: String, flow: String },
     #[error("node `{node}`: offset_minutes {offset_minutes} is outside [-720, 720]")]
@@ -89,7 +91,10 @@ pub fn is_valid_node_id(id: &str) -> bool {
 /// Checks the structure of a flow: ids, edges and ports, params, at least one trigger and no
 /// cycle. It does not look at entities, which only the hub can resolve.
 pub fn validate(flow: &Flow) -> Result<(), FlowError> {
-    use super::{MAX_AVERAGE_SECS, NodeKind, Op, Scalar, Schedule, parse_duration};
+    use super::{
+        MAX_AVERAGE_SECS, MAX_SWITCH_RULES, NodeKind, Op, RuleOp, Scalar, Schedule, parse_clock,
+        parse_duration,
+    };
 
     if !is_valid_flow_id(&flow.id) {
         return Err(FlowError::BadFlowId(flow.id.clone()));
@@ -220,6 +225,70 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     }
                 }
             },
+            NodeKind::Switch(p) => {
+                let bad = |reason: String| FlowError::BadOperand {
+                    node: node.id.clone(),
+                    reason,
+                };
+                if p.rules.is_empty() || p.rules.len() > MAX_SWITCH_RULES {
+                    return Err(bad(format!(
+                        "rules must hold 1 to {MAX_SWITCH_RULES} entries"
+                    )));
+                }
+                if let Some(window) = &p.average {
+                    match parse_duration(window) {
+                        Err(e) => return Err(bad(format!("average: {e}"))),
+                        Ok(d) if d.as_secs() > MAX_AVERAGE_SECS => {
+                            return Err(bad("average must be at most 24h".to_owned()));
+                        }
+                        Ok(_) => {}
+                    }
+                }
+                for (i, rule) in p.rules.iter().enumerate() {
+                    let n = i + 1;
+                    if Scalar::from_json(&rule.value).is_none() {
+                        return Err(bad(format!(
+                            "rule {n}: value must be a boolean, a number or a string"
+                        )));
+                    }
+                    match (&rule.op, &rule.to) {
+                        (RuleOp::Between, None) => {
+                            return Err(bad(format!("rule {n}: to is required for op between")));
+                        }
+                        (RuleOp::Between, Some(to)) => match (rule.value.as_f64(), to.as_f64()) {
+                            (Some(low), Some(high)) if high < low => {
+                                return Err(bad(format!("rule {n}: to must be at least value")));
+                            }
+                            (Some(_), Some(_)) => {}
+                            _ => return Err(bad(format!("rule {n}: between needs numbers"))),
+                        },
+                        (_, Some(_)) => {
+                            return Err(bad(format!(
+                                "rule {n}: to is only allowed with op between"
+                            )));
+                        }
+                        (_, None) => {}
+                    }
+                    if p.average.is_some() && !rule.value.is_number() {
+                        return Err(bad(format!(
+                            "rule {n}: value must be a number with average"
+                        )));
+                    }
+                }
+            }
+            NodeKind::TimeBetween(p) => {
+                let bad = |reason: String| FlowError::BadOperand {
+                    node: node.id.clone(),
+                    reason,
+                };
+                let from = parse_clock(&p.from)
+                    .map_err(|_| bad(format!("from: `{}` is not a HH:MM time", p.from)))?;
+                let to = parse_clock(&p.to)
+                    .map_err(|_| bad(format!("to: `{}` is not a HH:MM time", p.to)))?;
+                if from == to {
+                    return Err(bad("from and to must differ".to_owned()));
+                }
+            }
             _ => {}
         }
     }
@@ -240,6 +309,12 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
             (None, false) => {
                 return Err(FlowError::MissingPort {
                     node: from.id.clone(),
+                    kind: match from.kind.type_name() {
+                        "if" => "an if",
+                        "switch" => "a switch",
+                        "time.between" => "a time.between",
+                        other => unreachable!("{other} has no ports"),
+                    },
                 });
             }
             (Some(_), true) => {
@@ -247,7 +322,7 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     node: from.id.clone(),
                 });
             }
-            (Some(port), false) if !ports.contains(&port.as_str()) => {
+            (Some(port), false) if !ports.iter().any(|p| p == port) => {
                 return Err(FlowError::UnknownPort {
                     node: from.id.clone(),
                     port: port.clone(),
@@ -265,8 +340,9 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     check_ifs_after_valueless_triggers(flow)
 }
 
-/// A schedule or a sun event has no trigger value, so an `if` reachable from one must read an
-/// entity, unless it is `op: is_dark`, which reads the sun.
+/// A schedule or a sun event has no trigger value, so an `if` or a `switch` reachable from one
+/// must read an entity, unless the `if` is `op: is_dark`, which reads the sun. `time.between`
+/// reads the clock and needs none.
 fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
     use super::{NodeKind, Op};
 
@@ -290,12 +366,17 @@ fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
                 node: node.id.clone(),
             });
         }
-        let ports: &[&str] = match node.kind.ports() {
-            [] => &[""],
-            ports => ports,
-        };
-        for port in ports {
-            pending.extend(flow.successors(&node.id, (!port.is_empty()).then_some(port)));
+        if matches!(&node.kind, NodeKind::Switch(p) if p.entity.is_none()) {
+            return Err(FlowError::SwitchNeedsEntity {
+                node: node.id.clone(),
+            });
+        }
+        let mut ports = node.kind.ports();
+        if ports.is_empty() {
+            ports.push(String::new());
+        }
+        for port in &ports {
+            pending.extend(flow.successors(&node.id, (!port.is_empty()).then_some(port.as_str())));
         }
     }
     Ok(())
@@ -375,7 +456,8 @@ mod tests {
         assert_eq!(
             validate(&f),
             Err(FlowError::MissingPort {
-                node: "moving".into()
+                node: "moving".into(),
+                kind: "an if"
             })
         );
         assert!(
@@ -851,6 +933,254 @@ mod tests {
         assert_eq!(
             validate(&sun_then_plain_if_flow()),
             Err(FlowError::IfNeedsEntity { node: "chk".into() })
+        );
+    }
+
+    fn switch_flow(params: serde_json::Value, edges: serde_json::Value) -> Flow {
+        decode_flow(
+            serde_json::json!([
+                { "id": "m", "type": "trigger.state", "params": { "entity": "sensor" } },
+                { "id": "s", "type": "switch", "params": params },
+                { "id": "a", "type": "command", "params": { "entity": "l", "command": { "type": "turn_on" } } },
+                { "id": "b", "type": "command", "params": { "entity": "l", "command": { "type": "turn_off" } } },
+            ]),
+            edges,
+        )
+    }
+
+    fn two_rule_edges() -> serde_json::Value {
+        serde_json::json!([
+            { "from": "m", "to": "s" },
+            { "from": "s", "to": "a", "port": "1" },
+            { "from": "s", "to": "b", "port": "2" },
+        ])
+    }
+
+    fn two_rules() -> serde_json::Value {
+        serde_json::json!({ "rules": [
+            { "op": "lt", "value": 18 },
+            { "op": "between", "value": 18, "to": 22 } ] })
+    }
+
+    fn switch_reason(params: serde_json::Value) -> String {
+        match validate(&switch_flow(params, two_rule_edges())) {
+            Err(FlowError::BadOperand { node, reason }) if node == "s" => reason,
+            other => panic!("expected BadOperand on s, got {other:?}"),
+        }
+    }
+
+    fn time_flow(params: serde_json::Value, edges: serde_json::Value) -> Flow {
+        decode_flow(
+            serde_json::json!([
+                { "id": "m", "type": "trigger.schedule", "params": { "cron": "0 7 * * *" } },
+                { "id": "t", "type": "time.between", "params": params },
+                { "id": "a", "type": "command", "params": { "entity": "l", "command": { "type": "turn_on" } } },
+                { "id": "b", "type": "command", "params": { "entity": "l", "command": { "type": "turn_off" } } },
+            ]),
+            edges,
+        )
+    }
+
+    fn time_edges() -> serde_json::Value {
+        serde_json::json!([
+            { "from": "m", "to": "t" },
+            { "from": "t", "to": "a", "port": "in" },
+            { "from": "t", "to": "b", "port": "out" },
+        ])
+    }
+
+    #[test]
+    fn valid_switch_and_time_flows_pass() {
+        assert_eq!(
+            validate(&switch_flow(two_rules(), two_rule_edges())),
+            Ok(())
+        );
+        let with_otherwise = serde_json::json!({
+            "average": "15m", "otherwise": true, "all": true,
+            "rules": [{ "op": "gte", "value": 1 }, { "op": "between", "value": 2, "to": 2 }] });
+        let edges = serde_json::json!([
+            { "from": "m", "to": "s" },
+            { "from": "s", "to": "a", "port": "otherwise" },
+        ]);
+        assert_eq!(validate(&switch_flow(with_otherwise, edges)), Ok(()));
+        let text = serde_json::json!({ "rules": [{ "op": "eq", "value": "on" }] });
+        assert_eq!(validate(&switch_flow(text, serde_json::json!([]))), Ok(()));
+        assert_eq!(
+            validate(&time_flow(
+                serde_json::json!({ "from": "22:00", "to": "06:00" }),
+                time_edges()
+            )),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn switch_rule_errors() {
+        let rules = |r: serde_json::Value| serde_json::json!({ "rules": r });
+        assert_eq!(
+            switch_reason(rules(serde_json::json!([]))),
+            "rules must hold 1 to 10 entries"
+        );
+        let eleven: Vec<_> = (0..11)
+            .map(|i| serde_json::json!({ "op": "eq", "value": i }))
+            .collect();
+        assert_eq!(
+            switch_reason(rules(serde_json::json!(eleven))),
+            "rules must hold 1 to 10 entries"
+        );
+        assert_eq!(
+            switch_reason(rules(serde_json::json!([
+                { "op": "eq", "value": 1 }, { "op": "eq", "value": [1] }]))),
+            "rule 2: value must be a boolean, a number or a string"
+        );
+        assert_eq!(
+            switch_reason(rules(serde_json::json!([{ "op": "between", "value": 1 }]))),
+            "rule 1: to is required for op between"
+        );
+        assert_eq!(
+            switch_reason(rules(
+                serde_json::json!([{ "op": "lt", "value": 1, "to": 2 }])
+            )),
+            "rule 1: to is only allowed with op between"
+        );
+        assert_eq!(
+            switch_reason(rules(serde_json::json!([
+                { "op": "between", "value": "a", "to": 2 }]))),
+            "rule 1: between needs numbers"
+        );
+        assert_eq!(
+            switch_reason(rules(serde_json::json!([
+                { "op": "between", "value": 1, "to": true }]))),
+            "rule 1: between needs numbers"
+        );
+        assert_eq!(
+            switch_reason(rules(serde_json::json!([
+                { "op": "between", "value": 5, "to": 4 }]))),
+            "rule 1: to must be at least value"
+        );
+        assert_eq!(
+            switch_reason(serde_json::json!({ "average": "15m", "rules": [
+                { "op": "eq", "value": 1 }, { "op": "eq", "value": "x" }] })),
+            "rule 2: value must be a number with average"
+        );
+        assert!(
+            switch_reason(serde_json::json!({ "average": "soon", "rules": [
+                { "op": "eq", "value": 1 }] }))
+            .starts_with("average: ")
+        );
+        assert_eq!(
+            switch_reason(serde_json::json!({ "average": "25h", "rules": [
+                { "op": "eq", "value": 1 }] })),
+            "average must be at most 24h"
+        );
+    }
+
+    #[test]
+    fn switch_ports_checked() {
+        let edges = serde_json::json!([
+            { "from": "m", "to": "s" }, { "from": "s", "to": "a", "port": "3" }]);
+        assert_eq!(
+            validate(&switch_flow(two_rules(), edges)),
+            Err(FlowError::UnknownPort {
+                node: "s".into(),
+                port: "3".into()
+            })
+        );
+        let edges = serde_json::json!([
+            { "from": "m", "to": "s" }, { "from": "s", "to": "a", "port": "otherwise" }]);
+        assert_eq!(
+            validate(&switch_flow(two_rules(), edges)),
+            Err(FlowError::UnknownPort {
+                node: "s".into(),
+                port: "otherwise".into()
+            })
+        );
+        let edges = serde_json::json!([
+            { "from": "m", "to": "s" }, { "from": "s", "to": "a" }]);
+        let err = validate(&switch_flow(two_rules(), edges)).unwrap_err();
+        assert_eq!(
+            err,
+            FlowError::MissingPort {
+                node: "s".into(),
+                kind: "a switch"
+            }
+        );
+        assert_eq!(err.to_string(), "node `s` is a switch and needs a port");
+    }
+
+    #[test]
+    fn switch_after_schedule_needs_entity() {
+        let flow = |params: serde_json::Value| {
+            decode_flow(
+                serde_json::json!([
+                    { "id": "tick", "type": "trigger.schedule", "params": { "cron": "0 7 * * *" } },
+                    { "id": "s", "type": "switch", "params": params },
+                    { "id": "a", "type": "command", "params": { "entity": "l", "command": { "type": "turn_on" } } },
+                ]),
+                serde_json::json!([
+                    { "from": "tick", "to": "s" },
+                    { "from": "s", "to": "a", "port": "1" },
+                ]),
+            )
+        };
+        let err = validate(&flow(
+            serde_json::json!({ "rules": [{ "op": "eq", "value": 1 }] }),
+        ))
+        .unwrap_err();
+        assert_eq!(err, FlowError::SwitchNeedsEntity { node: "s".into() });
+        assert_eq!(
+            err.to_string(),
+            "node `s`: a switch after a schedule or sun trigger must name an entity"
+        );
+        assert_eq!(
+            validate(&flow(serde_json::json!({
+                "entity": "sensor", "rules": [{ "op": "eq", "value": 1 }] }))),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn time_between_errors() {
+        let reason = |params: serde_json::Value| match validate(&time_flow(params, time_edges())) {
+            Err(FlowError::BadOperand { node, reason }) if node == "t" => reason,
+            other => panic!("expected BadOperand on t, got {other:?}"),
+        };
+        assert_eq!(
+            reason(serde_json::json!({ "from": "7:00", "to": "08:00" })),
+            "from: `7:00` is not a HH:MM time"
+        );
+        assert_eq!(
+            reason(serde_json::json!({ "from": "07:00", "to": "24:00" })),
+            "to: `24:00` is not a HH:MM time"
+        );
+        assert_eq!(
+            reason(serde_json::json!({ "from": "07:00", "to": "07:00" })),
+            "from and to must differ"
+        );
+        let edges = serde_json::json!([{ "from": "m", "to": "t" }, { "from": "t", "to": "a" }]);
+        let err = validate(&time_flow(
+            serde_json::json!({ "from": "07:00", "to": "08:00" }),
+            edges,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            err,
+            FlowError::MissingPort {
+                node: "t".into(),
+                kind: "a time.between"
+            }
+        );
+    }
+
+    #[test]
+    fn time_between_after_schedule_is_fine() {
+        // time_flow starts from a schedule trigger and has no entity to name.
+        assert_eq!(
+            validate(&time_flow(
+                serde_json::json!({ "from": "07:00", "to": "08:00" }),
+                time_edges()
+            )),
+            Ok(())
         );
     }
 }

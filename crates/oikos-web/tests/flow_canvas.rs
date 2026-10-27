@@ -102,6 +102,7 @@ fn step(node: &str, detail: &str) -> StepView {
         at: 1,
         outcome: StepOutcome::Ok,
         detail: detail.into(),
+        ports: None,
     }
 }
 
@@ -1082,7 +1083,7 @@ async fn library_open_in_edit_mode() {
     let html = host.inner_html();
     assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
     assert_eq!(count(&host, ".flow-library"), 1, "{html}");
-    assert_eq!(count(&host, ".flow-library__item"), 7, "{html}");
+    assert_eq!(count(&host, ".flow-library__item"), 9, "{html}");
     assert_eq!(count(&host, ".flow-picker-wrap"), 0, "{html}");
 }
 

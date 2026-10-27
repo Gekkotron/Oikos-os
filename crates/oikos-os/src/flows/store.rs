@@ -290,6 +290,7 @@ impl FlowStore {
                 at,
                 outcome: StepOutcome::Skipped,
                 detail: reason.to_owned(),
+                ports: None,
             }],
         };
         self.push_run(flow_id, run.clone());
@@ -492,6 +493,7 @@ mod tests {
             at: 2,
             outcome: StepOutcome::Ok,
             detail: "sent".into(),
+            ports: None,
         };
         let updated = store.record_step("living", &run.id, step).unwrap();
         assert_eq!(updated.steps.len(), 1);
@@ -544,6 +546,7 @@ mod tests {
                         at: 5,
                         outcome: StepOutcome::Ok,
                         detail: String::new(),
+                        ports: None,
                     }
                 )
                 .is_some()

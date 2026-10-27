@@ -3,7 +3,10 @@
 //! write into the draft, one undo step per field change.
 
 use leptos::prelude::*;
-use oikos_core::flow::{IfParams, Missing, Node, NodeKind, Op};
+use oikos_core::flow::{
+    IfParams, MAX_SWITCH_RULES, Missing, Node, NodeKind, Op, RuleOp, Scalar, SwitchParams,
+    SwitchRule, TimeBetweenParams,
+};
 use oikos_core::model::Command;
 
 use super::Editor;
@@ -14,9 +17,11 @@ use super::value_field::IfValueField;
 use crate::command_form::{CommandFields, FieldStyle, entity_actions, retarget};
 use crate::entity_picker::needs::{is_commandable, is_signal, keep};
 use crate::entity_picker::{EntityPickField, Suggest};
-use crate::flow_edit::remove_node;
+use crate::flow_edit::{add_rule, delete_rule, move_rule, remove_node, set_otherwise};
 use crate::house::House;
-use crate::i18n::flows::{FlowText, flow_text, invalid_json, signal_chip_label, use_flow_text};
+use crate::i18n::flows::{
+    FlowText, flow_text, invalid_json, removed_wires, signal_chip_label, use_flow_text,
+};
 use crate::i18n::format::parse_decimal;
 use crate::i18n::picker::PickerText;
 use crate::i18n::{Lang, use_lang};
@@ -309,6 +314,8 @@ fn node_editor_body(
         NodeKind::Command(_) => FlowText::NodeCommand,
         NodeKind::FlowEnable(_) => FlowText::NodeFlowSwitch,
         NodeKind::Notify(_) => FlowText::Notify,
+        NodeKind::Switch(_) => FlowText::SwitchCard,
+        NodeKind::TimeBetween(_) => FlowText::TimeCard,
     };
     let id_display = id.clone();
     let close = move |_: web_sys::MouseEvent| selected.set(None);
@@ -989,6 +996,8 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
         }
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Notify(p) => notify_fields(form, id, p).into_any(),
+        NodeKind::Switch(p) => switch_fields(form, id, p).into_any(),
+        NodeKind::TimeBetween(p) => time_fields(form, id, p).into_any(),
         NodeKind::Delay(p) => {
             let for_id = id.clone();
             let for_write = Callback::new(move |value: Option<String>| {
@@ -1111,11 +1120,413 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
     }
 }
 
+const RULE_OPS: [RuleOp; 7] = [
+    RuleOp::Eq,
+    RuleOp::Ne,
+    RuleOp::Gt,
+    RuleOp::Lt,
+    RuleOp::Gte,
+    RuleOp::Lte,
+    RuleOp::Between,
+];
+
+fn rule_op_label(lang: Lang, op: RuleOp) -> &'static str {
+    match op {
+        RuleOp::Between => flow_text(lang, FlowText::OpBetween),
+        other => op_label(lang, other.wire_name()),
+    }
+}
+
+fn rule_op_from(s: &str) -> Option<RuleOp> {
+    RULE_OPS.into_iter().find(|o| o.wire_name() == s)
+}
+
+/// Gives `rule` a new operator: `between` starts with an upper bound equal to the lower one,
+/// every other operator has none.
+fn set_rule_op(rule: &mut SwitchRule, op: RuleOp) {
+    rule.op = op;
+    if op == RuleOp::Between {
+        if rule.to.is_none() {
+            rule.to = Some(rule.value.clone());
+        }
+    } else {
+        rule.to = None;
+    }
+}
+
+/// The rule "Add rule" appends: equal to the value the last rule tests, or `true`.
+fn next_rule(last: Option<&SwitchRule>) -> SwitchRule {
+    SwitchRule {
+        op: RuleOp::Eq,
+        value: last.map_or(serde_json::Value::Bool(true), |r| r.value.clone()),
+        to: None,
+        extra: Default::default(),
+    }
+}
+
+/// The rule at `index` of switch `id` in the draft.
+fn rule_at(form: Form, id: &str, index: usize) -> Option<SwitchRule> {
+    form.editor
+        .draft
+        .with_untracked(|f| match f.node(id).map(|n| &n.kind) {
+            Some(NodeKind::Switch(p)) => p.rules.get(index).cloned(),
+            _ => None,
+        })
+}
+
+/// Writes `mutate` into rule `index` of switch `id`.
+fn update_rule(form: Form, id: &str, index: usize, mutate: impl FnOnce(&mut SwitchRule)) {
+    form.update(id, |n| {
+        if let NodeKind::Switch(ref mut p) = n.kind
+            && let Some(r) = p.rules.get_mut(index)
+        {
+            mutate(r);
+        }
+    });
+}
+
+/// One rule of a switch: operator, value (and upper bound for `between`), move and delete.
+fn rule_row(
+    form: Form,
+    id: String,
+    index: usize,
+    count: usize,
+    compared: Memo<Option<oikos_api::EntityView>>,
+    bump: Callback<usize>,
+) -> impl IntoView {
+    let lang = use_lang();
+    let t = use_flow_text();
+    let rule = rule_at(form, &id, index).unwrap_or_else(|| next_rule(None));
+    let is_between = RwSignal::new(rule.op == RuleOp::Between);
+    let current_op = rule.op;
+    let draft = form.editor.draft;
+    let read = {
+        let id = id.clone();
+        move |pick: fn(&SwitchRule) -> Option<serde_json::Value>| {
+            draft.with(|f| match f.node(&id).map(|n| &n.kind) {
+                Some(NodeKind::Switch(p)) => p.rules.get(index).and_then(pick),
+                _ => None,
+            })
+        }
+    };
+    let value = Signal::derive({
+        let read = read.clone();
+        move || read(|r| Some(r.value.clone()))
+    });
+    let upper = {
+        let read = read.clone();
+        move || {
+            read(|r| r.to.clone())
+                .as_ref()
+                .and_then(serde_json::Value::as_f64)
+                .map(|n| n.to_string())
+                .unwrap_or_default()
+        }
+    };
+    let op_id = id.clone();
+    let on_op = move |ev: web_sys::Event| {
+        if let Some(op) = rule_op_from(&event_target_value(&ev)) {
+            is_between.set(op == RuleOp::Between);
+            update_rule(form, &op_id, index, |r| set_rule_op(r, op));
+        }
+    };
+    let value_id = id.clone();
+    let value_write = Callback::new(move |v: serde_json::Value| {
+        update_rule(form, &value_id, index, |r| r.value = v);
+    });
+    let to_id = id.clone();
+    let on_to = move |ev: web_sys::Event| {
+        if let Some(n) = parse_decimal(event_target_value(&ev).trim()) {
+            update_rule(form, &to_id, index, |r| {
+                r.to = Some(Scalar::Number(n).to_json())
+            });
+        }
+    };
+    let up_id = id.clone();
+    let up = move |_: web_sys::MouseEvent| {
+        form.editor.edit(|f| move_rule(f, &up_id, index, index - 1));
+        bump.run(0);
+    };
+    let down_id = id.clone();
+    let down = move |_: web_sys::MouseEvent| {
+        form.editor
+            .edit(|f| move_rule(f, &down_id, index, index + 1));
+        bump.run(0);
+    };
+    let delete_id = id;
+    let delete = move |_: web_sys::MouseEvent| {
+        let removed = form.editor.edit(|f| delete_rule(f, &delete_id, index));
+        bump.run(removed);
+    };
+    view! {
+        <fieldset class="rule-row">
+            <legend class="node-editor__label">
+                {move || format!("{} {}", t(FlowText::RuleLabel), index + 1)}
+            </legend>
+            <select class="field" on:change=on_op>
+                {RULE_OPS
+                    .into_iter()
+                    .map(|o| {
+                        view! {
+                            <option value=o.wire_name() selected=o == current_op>
+                                {move || rule_op_label(lang(), o)}
+                            </option>
+                        }
+                    })
+                    .collect_view()}
+            </select>
+            <IfValueField value=value entity=Signal::from(compared) write=value_write />
+            <Show when=move || is_between.get()>
+                <span class="command-field__number">
+                    <span class="command-field__unit">{move || t(FlowText::RuleAnd)}</span>
+                    <input
+                        type="number"
+                        class="field command-field__input"
+                        step="any"
+                        prop:value=upper.clone()
+                        on:change=on_to.clone()
+                    />
+                </span>
+            </Show>
+            <span class="rule-row__buttons">
+                <button
+                    type="button"
+                    class="btn btn--ghost"
+                    aria-label=move || t(FlowText::MoveRuleUp)
+                    disabled=index == 0
+                    on:click=up
+                >
+                    "↑"
+                </button>
+                <button
+                    type="button"
+                    class="btn btn--ghost"
+                    aria-label=move || t(FlowText::MoveRuleDown)
+                    disabled={index + 1 >= count}
+                    on:click=down
+                >
+                    "↓"
+                </button>
+                <button
+                    type="button"
+                    class="btn btn--ghost"
+                    aria-label=move || t(FlowText::DeleteRule)
+                    title=move || t(FlowText::DeleteRule)
+                    disabled={count <= 1}
+                    on:click=delete
+                >
+                    "✕"
+                </button>
+            </span>
+        </fieldset>
+    }
+}
+
+/// The `switch` editor: what it compares, then one row per rule, then the exits.
+fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
+    let t = use_flow_text();
+    let lang = use_lang();
+    let draft = form.editor.draft;
+    let house = expect_context::<House>();
+    let entity_value = Signal::derive({
+        let id = id.clone();
+        move || {
+            draft.with(|f| match f.node(&id).map(|n| &n.kind) {
+                Some(NodeKind::Switch(s)) => s.entity.clone().filter(|e| !e.is_empty()),
+                _ => None,
+            })
+        }
+    });
+    let resolved = {
+        let id = id.clone();
+        move |own: Option<String>| {
+            let target = own.or_else(|| draft.with(|f| upstream_trigger_entity(f, &id)))?;
+            house.entities.with(|m| m.get(&target).cloned())
+        }
+    };
+    let compared = Memo::new({
+        let resolved = resolved.clone();
+        move |_| resolved(entity_value.get())
+    });
+    let entity_id = id.clone();
+    let entity_write = Callback::new(move |value: Option<String>| {
+        let next = untrack(|| resolved(value.clone()));
+        let input = value_input(lang(), next.as_ref());
+        form.update(&entity_id, |n| {
+            if let NodeKind::Switch(ref mut s) = n.kind {
+                for r in &mut s.rules {
+                    if let Some(v) = after_entity_change(Some(&r.value), &input) {
+                        r.value = v;
+                    }
+                }
+                s.entity = value;
+            }
+        });
+    });
+    let average_id = id.clone();
+    let average_write = Callback::new(move |value: Option<String>| {
+        form.update(&average_id, |n| {
+            if let NodeKind::Switch(ref mut s) = n.kind {
+                s.average = value;
+            }
+        });
+    });
+    // Rows are rebuilt when the rules change in number or order, not on every value edit.
+    let version = RwSignal::new(0_u32);
+    let removed = RwSignal::new(0_usize);
+    let bump = Callback::new(move |n: usize| {
+        removed.set(n);
+        version.update(|v| *v += 1);
+    });
+    let count = Signal::derive({
+        let id = id.clone();
+        move || {
+            draft.with(|f| match f.node(&id).map(|n| &n.kind) {
+                Some(NodeKind::Switch(s)) => s.rules.len(),
+                _ => 0,
+            })
+        }
+    });
+    let rows = {
+        let id = id.clone();
+        move || {
+            version.track();
+            let n = count.get_untracked();
+            (0..n)
+                .map(|i| rule_row(form, id.clone(), i, n, compared, bump))
+                .collect_view()
+        }
+    };
+    let add_id = id.clone();
+    let add = move |_: web_sys::MouseEvent| {
+        let last = rule_at(form, &add_id, count.get_untracked().saturating_sub(1));
+        form.editor
+            .edit(|f| add_rule(f, &add_id, next_rule(last.as_ref())));
+        bump.run(0);
+    };
+    let otherwise_id = id.clone();
+    let on_otherwise = move |ev: web_sys::Event| {
+        let on = event_target_checked(&ev);
+        let removed_now = form.editor.edit(|f| set_otherwise(f, &otherwise_id, on));
+        removed.set(removed_now);
+    };
+    let all_id = id;
+    let on_all = move |ev: web_sys::Event| {
+        let on = event_target_checked(&ev);
+        form.update(&all_id, |n| {
+            if let NodeKind::Switch(ref mut s) = n.kind {
+                s.all = on;
+            }
+        });
+    };
+    let has_removed = move || removed.get() > 0;
+    view! {
+        <EntityPickField
+            label=word(FlowText::EntityDefaults)
+            value=entity_value
+            on_change=entity_write
+            pinned=Some(word(FlowText::TriggerValue))
+            compact=true
+            class=Some("node-editor__field".to_owned())
+        />
+        <TextField
+            label=word(FlowText::AverageOver)
+            initial=p.average.unwrap_or_default()
+            placeholder=word(FlowText::AverageHint)
+            optional=true
+            write=average_write
+        />
+        <div class="rule-list">{rows}</div>
+        <button
+            type="button"
+            class="btn btn--ghost"
+            disabled=move || { count.get() >= MAX_SWITCH_RULES }
+            on:click=add
+        >
+            {move || t(FlowText::AddRule)}
+        </button>
+        <label class="node-editor__check">
+            <input type="checkbox" prop:checked=p.otherwise on:change=on_otherwise />
+            <span>{move || t(FlowText::OtherwiseExit)}</span>
+        </label>
+        <label class="node-editor__check">
+            <input type="checkbox" prop:checked=p.all on:change=on_all />
+            <span>{move || t(FlowText::FireAll)}</span>
+        </label>
+        <Show when=has_removed>
+            <p class="node-editor__hint" role="status">
+                {move || removed_wires(lang(), removed.get())}
+            </p>
+        </Show>
+    }
+}
+
+/// The `time.between` editor: two `HH:MM` fields.
+fn time_fields(form: Form, id: String, p: TimeBetweenParams) -> impl IntoView {
+    let field = |label: FlowText, initial: String, to: bool| {
+        let id = id.clone();
+        let on_input = move |ev: web_sys::Event| {
+            let text = event_target_value(&ev);
+            if text.is_empty() {
+                return;
+            }
+            form.update(&id, |n| {
+                if let NodeKind::TimeBetween(ref mut t) = n.kind {
+                    if to {
+                        t.to = text;
+                    } else {
+                        t.from = text;
+                    }
+                }
+            });
+        };
+        view! {
+            <label class="node-editor__field">
+                <span class="node-editor__label">{word(label)}</span>
+                <input type="time" class="field" prop:value=initial on:input=on_input />
+            </label>
+        }
+    };
+    view! {
+        {field(FlowText::TimeFrom, p.from, false)}
+        {field(FlowText::TimeTo, p.to, true)}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn between_gains_an_upper_bound_and_others_lose_it() {
+        let mut r = next_rule(None);
+        r.value = json!(18);
+        set_rule_op(&mut r, RuleOp::Between);
+        assert_eq!(r.to, Some(json!(18)));
+        r.to = Some(json!(22));
+        set_rule_op(&mut r, RuleOp::Between);
+        assert_eq!(r.to, Some(json!(22)));
+        set_rule_op(&mut r, RuleOp::Gt);
+        assert_eq!((r.op, r.to), (RuleOp::Gt, None));
+    }
+
+    #[test]
+    fn a_new_rule_repeats_the_last_value() {
+        assert_eq!(next_rule(None).value, json!(true));
+        let mut last = next_rule(None);
+        last.value = json!("ON");
+        assert_eq!(next_rule(Some(&last)).value, json!("ON"));
+    }
+
+    #[test]
+    fn rule_ops_round_trip_their_names() {
+        for op in RULE_OPS {
+            assert_eq!(rule_op_from(op.wire_name()), Some(op));
+        }
+        assert_eq!(rule_op_from("is_dark"), None);
+    }
 
     #[test]
     fn json_fields_take_a_decimal_comma() {

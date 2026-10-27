@@ -93,7 +93,7 @@ See [Flow nodes](flow-nodes.md) for the document format.
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/v1/flows` | Every flow with its engine state: definition, why it is invalid, the active run and the recent runs. |
+| `GET /api/v1/flows` | Every flow with its engine state: definition, why it is invalid, the active run and the recent runs. Each step of a run has `node`, `at`, `outcome`, `detail` and, for a succeeded `if`, `switch` or `time.between` step, `ports`, the output ports it followed. |
 | `GET /api/v1/flows/{id}` | One flow; `404` for an unknown id. |
 | `PUT /api/v1/flows/{id}` | Creates or replaces a flow (`oikos/automation/<id>`). The path id wins: a body without `id` takes it, another one is `400 id mismatch`. Returns `{flow, warning}`; `warning` is `null`, or a message when the flow reads the sun while the house point is the Paris fallback. `422` for a flow that does not validate against the house, `503` while the broker link is down. |
 | `DELETE /api/v1/flows/{id}` | Removes the flow (`204`), or `404`. |

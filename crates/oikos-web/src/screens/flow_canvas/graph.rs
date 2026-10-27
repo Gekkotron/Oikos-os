@@ -18,8 +18,10 @@ use super::viewport::Camera;
 use super::{Editor, Fresh};
 use crate::components::now::Now;
 use crate::flow_edit::{EdgeKey, can_connect, can_insert, connect, insert_into_edge, remove_edge};
-use crate::flow_layout::{NODE_H, Pt, out_anchor, positions, route, routes_past, wire_under};
-use crate::flow_text::{Ctx, Role, role, subline, title};
+use crate::flow_layout::{
+    NODE_H, Pt, in_anchor, node_height, out_anchor, positions, route, routes_past, wire_under,
+};
+use crate::flow_text::{Ctx, Role, exit_label, role, subline, title};
 use crate::flows::{Highlight, orphans};
 use crate::house::House;
 use crate::i18n::flows::{FlowText, flow_text, time_left, use_flow_text};
@@ -83,6 +85,21 @@ fn port_top(kind: &NodeKind, port: Option<&str>) -> f64 {
     out_anchor(kind, Pt { x: 0.0, y: 0.0 }, port).y
 }
 
+/// The label beside an exit pin, worded against the house.
+fn exit_text(kind: &NodeKind, port: &str, lang: Lang, house: House) -> String {
+    house.entities.with(|entities| {
+        house.areas.with(|areas| {
+            let ctx = Ctx {
+                entities,
+                areas,
+                flows: &[],
+                lang,
+            };
+            exit_label(lang, kind, port, &ctx)
+        })
+    })
+}
+
 /// Unix seconds, for the countdown of a parked delay.
 fn unix_now() -> u64 {
     (js_sys::Date::now() / 1000.0) as u64
@@ -123,7 +140,7 @@ const DRAG_THRESHOLD: f64 = 3.0;
 #[derive(Clone, Debug, PartialEq)]
 struct Connecting {
     from: String,
-    port: Option<&'static str>,
+    port: Option<String>,
     to_world: Pt,
 }
 
@@ -158,7 +175,7 @@ struct Shared {
     /// The wire the dragged card would be spliced into if dropped now.
     drop_into: Memo<Option<EdgeKey>>,
     /// The `(from, port)` of the wire being dragged out, without the pointer position.
-    wiring: Memo<Option<(String, Option<&'static str>)>>,
+    wiring: Memo<Option<(String, Option<String>)>>,
     editor: Option<Editor>,
     camera: Camera,
     layer: NodeRef<html::Div>,
@@ -203,7 +220,8 @@ pub fn Graph(
     let drop_into = Memo::new(move |_| {
         let id = loose.get()?;
         let at = placed.with(|p| p.get(&id).copied())?;
-        let key = wires.with(|w| wire_under(w, at))?;
+        let height = flow.with(|f| f.node(&id).map(|n| node_height(&n.kind)))?;
+        let key = wires.with(|w| wire_under(w, at, height))?;
         flow.with(|f| can_insert(f, &key, &id).is_ok())
             .then_some(key)
     });
@@ -259,7 +277,7 @@ pub fn Graph(
         connecting,
         drop_into,
         wiring: Memo::new(move |_| {
-            connecting.with(|w| w.as_ref().map(|w| (w.from.clone(), w.port)))
+            connecting.with(|w| w.as_ref().map(|w| (w.from.clone(), w.port.clone())))
         }),
         editor,
         camera: expect_context::<Camera>(),
@@ -324,7 +342,7 @@ pub fn Graph(
         let from = flow.with(|f| {
             let node = f.node(&wire.from)?;
             let at = placed.with(|p| p.get(&wire.from).copied())?;
-            Some(out_anchor(&node.kind, at, wire.port))
+            Some(out_anchor(&node.kind, at, wire.port.as_deref()))
         })?;
         let d = route(from, wire.to_world, &[]).d;
         Some(view! { <path class="flow-wire-preview" d=d /> })
@@ -431,6 +449,13 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         kind.with(|k| {
             k.as_ref().map_or_else(String::new, |k| {
                 let mut class = format!("{NODE_CLASS} {}", role_class(role(k)));
+                if matches!(k, NodeKind::Switch(_) | NodeKind::TimeBetween(_)) {
+                    class.push_str(" flow-node--exits");
+                }
+                // Cards with room to spare wrap their title to two lines before cutting it.
+                if matches!(k, NodeKind::TimeBetween(_)) || node_height(k) >= 74.0 {
+                    class.push_str(" flow-node--wrap");
+                }
                 if c.mode == Mode::Edit {
                     class.push_str(" flow-node--editing");
                 }
@@ -459,7 +484,13 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
     let style = move || {
         c.placed.with(|p| {
             p.get(&node_id)
-                .map(|at| format!("left:{}px;top:{}px", at.x, at.y))
+                .map(|at| {
+                    let height = kind.with(|k| k.as_ref().map(node_height));
+                    match height.filter(|h| *h != NODE_H) {
+                        Some(h) => format!("left:{}px;top:{}px;height:{h}px", at.x, at.y),
+                        None => format!("left:{}px;top:{}px", at.x, at.y),
+                    }
+                })
                 .unwrap_or_default()
         })
     };
@@ -468,16 +499,26 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
     let pins = move || {
         kind.get().map(|k| {
             let input = (role(&k) != Role::Trigger).then(|| {
-                view! { <span class="flow-node__in" style=format!("top:{}px", NODE_H / 2.0)></span> }
+                let top = in_anchor(Pt { x: 0.0, y: 0.0 }, node_height(&k)).y;
+                view! { <span class="flow-node__in" style=format!("top:{top}px")></span> }
             });
-            let ports: &[Option<&'static str>] = if matches!(k, NodeKind::If(_)) {
-                &[Some("true"), Some("false")]
+            // An `if`, a switch and a time card have named exits; every other card one plain pin.
+            let named = k.ports();
+            let ports: Vec<Option<String>> = if named.is_empty() {
+                vec![None]
             } else {
-                &[None]
+                named.into_iter().map(Some).collect()
             };
             let outputs = ports
-                .iter()
-                .map(|port| out_pin(pins_id.clone(), *port, port_top(&k, *port), c))
+                .into_iter()
+                .map(|port| {
+                    let top = port_top(&k, port.as_deref());
+                    let label = port
+                        .as_deref()
+                        .map(|p| exit_text(&k, p, lang(), house))
+                        .unwrap_or_default();
+                    out_pin(pins_id.clone(), port, top, label, c)
+                })
                 .collect_view();
             view! {
                 {input}
@@ -512,7 +553,7 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
             || c.wiring.with(|w| {
                 w.as_ref().is_some_and(|(from, port)| {
                     c.flow
-                        .with(|f| can_connect(f, from, *port, &target_id).is_ok())
+                        .with(|f| can_connect(f, from, port.as_deref(), &target_id).is_ok())
                 })
             })
     };
@@ -664,7 +705,8 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
 
 /// An output pin. In edit mode a drag from it draws a wire that follows the pointer, and the
 /// drop connects to the card under the pointer when the editor allows it (else nothing).
-fn out_pin(id: String, port: Option<&'static str>, top: f64, c: Shared) -> impl IntoView {
+fn out_pin(id: String, port: Option<String>, top: f64, label: String, c: Shared) -> impl IntoView {
+    let data_port = port.clone();
     let down = move |ev: web_sys::PointerEvent| {
         if c.mode != Mode::Edit || (ev.button() != 0 && ev.pointer_type() == "mouse") {
             return;
@@ -678,7 +720,7 @@ fn out_pin(id: String, port: Option<&'static str>, top: f64, c: Shared) -> impl 
         capture(&ev);
         c.connecting.set(Some(Connecting {
             from: id.clone(),
-            port,
+            port: port.clone(),
             to_world,
         }));
     };
@@ -707,21 +749,23 @@ fn out_pin(id: String, port: Option<&'static str>, top: f64, c: Shared) -> impl 
         if let (Some(to), Some(editor)) = (to, c.editor)
             && editor
                 .draft
-                .with_untracked(|f| can_connect(f, &wire.from, wire.port, &to).is_ok())
+                .with_untracked(|f| can_connect(f, &wire.from, wire.port.as_deref(), &to).is_ok())
         {
-            let _ = editor.edit(|f| connect(f, &wire.from, wire.port, &to));
+            let _ = editor.edit(|f| connect(f, &wire.from, wire.port.as_deref(), &to));
         }
     };
     let cancel = move |_: web_sys::PointerEvent| c.connecting.set(None);
     view! {
         <span
             class="flow-node__out"
-            data-port=port
+            data-port=data_port
             style=format!("top:{top}px")
             on:pointerdown=down
             on:pointermove=moved
             on:pointerup=up
             on:pointercancel=cancel
-        ></span>
+        >
+            {(!label.is_empty()).then(|| view! { <span class="flow-node__exit">{label}</span> })}
+        </span>
     }
 }

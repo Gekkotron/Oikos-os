@@ -358,6 +358,7 @@ impl Hub {
                 NodeKind::TriggerState(params) => Some(&params.entity),
                 NodeKind::TriggerSignal(params) => Some(&params.entity),
                 NodeKind::If(params) => params.entity.as_ref(),
+                NodeKind::Switch(params) => params.entity.as_ref(),
                 NodeKind::Command(params) => Some(&params.entity),
                 NodeKind::FlowEnable(params) => {
                     if let Some(target) = &params.flow
@@ -373,6 +374,7 @@ impl Hub {
                 }
                 NodeKind::Delay(_)
                 | NodeKind::Notify(_)
+                | NodeKind::TimeBetween(_)
                 | NodeKind::TriggerSchedule(_)
                 | NodeKind::TriggerSun(_) => None,
             };

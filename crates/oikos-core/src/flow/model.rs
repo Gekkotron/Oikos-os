@@ -164,6 +164,12 @@ pub enum NodeKind {
     /// Sends a phone push notification.
     #[serde(rename = "notify")]
     Notify(NotifyParams),
+    /// Branches on the first matching rule (or every matching rule) over an entity's value.
+    #[serde(rename = "switch")]
+    Switch(SwitchParams),
+    /// Branches on whether the house clock is inside a daily time range.
+    #[serde(rename = "time.between")]
+    TimeBetween(TimeBetweenParams),
 }
 
 impl NodeKind {
@@ -179,6 +185,8 @@ impl NodeKind {
             NodeKind::Command(_) => "command",
             NodeKind::FlowEnable(_) => "flow.enable",
             NodeKind::Notify(_) => "notify",
+            NodeKind::Switch(_) => "switch",
+            NodeKind::TimeBetween(_) => "time.between",
         }
     }
 
@@ -193,12 +201,21 @@ impl NodeKind {
         )
     }
 
-    /// The named output ports: `true` and `false` for `if`, none for the others (which have one
+    /// The named output ports: `true` and `false` for `if`; `1` to `n` (then `otherwise` when
+    /// set) for `switch`; `in` and `out` for `time.between`; none for the others (which have one
     /// unnamed output).
-    pub fn ports(&self) -> &'static [&'static str] {
+    pub fn ports(&self) -> Vec<String> {
         match self {
-            NodeKind::If(_) => &["true", "false"],
-            _ => &[],
+            NodeKind::If(_) => vec!["true".into(), "false".into()],
+            NodeKind::Switch(p) => {
+                let mut ports: Vec<String> = (1..=p.rules.len()).map(|i| i.to_string()).collect();
+                if p.otherwise {
+                    ports.push("otherwise".into());
+                }
+                ports
+            }
+            NodeKind::TimeBetween(_) => vec!["in".into(), "out".into()],
+            _ => Vec::new(),
         }
     }
 }
@@ -306,6 +323,92 @@ impl IfParams {
     pub fn dark_offset(&self) -> i32 {
         self.offset_minutes.unwrap_or(0)
     }
+}
+
+/// The most rules a `switch` accepts.
+pub const MAX_SWITCH_RULES: usize = 10;
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Comparison operators of a `switch` rule: those of `if`, plus `between`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RuleOp {
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Gte,
+    Lte,
+    /// `value <= x <= to`, both bounds included.
+    Between,
+}
+
+impl RuleOp {
+    /// The lowercase name this operator carries in the flow JSON.
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            RuleOp::Eq => "eq",
+            RuleOp::Ne => "ne",
+            RuleOp::Gt => "gt",
+            RuleOp::Lt => "lt",
+            RuleOp::Gte => "gte",
+            RuleOp::Lte => "lte",
+            RuleOp::Between => "between",
+        }
+    }
+}
+
+/// One rule of a `switch`; its output port is its 1-based position.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct SwitchRule {
+    /// How the value is compared.
+    pub op: RuleOp,
+    /// The constant compared with (the lower bound for `between`).
+    pub value: Value,
+    /// The upper bound, with `op: between` only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<Value>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `switch`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct SwitchParams {
+    /// The entity whose current value is read; when absent the value that fired the trigger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity: Option<String>,
+    /// Compare the mean of the entity's readings over this window (`15m`, `1h`) instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub average: Option<String>,
+    /// The rules, 1 to 10, tried in order.
+    pub rules: Vec<SwitchRule>,
+    /// Add an `otherwise` port taken when no rule matches.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub otherwise: bool,
+    /// Take every matching rule instead of the first one only.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub all: bool,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `time.between`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct TimeBetweenParams {
+    /// Start of the range, `HH:MM` 24-hour, included.
+    pub from: String,
+    /// End of the range, `HH:MM` 24-hour, excluded; earlier than `from` crosses midnight.
+    pub to: String,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
 }
 
 /// The longest `average` window an `if` accepts, in seconds.
@@ -749,11 +852,31 @@ mod tests {
     #[test]
     fn ports_of_if_are_true_false_and_others_have_none() {
         let flow = Flow::decode(REFERENCE.as_bytes()).unwrap();
-        assert_eq!(flow.nodes[1].kind.ports(), &["true", "false"]);
+        assert_eq!(flow.nodes[1].kind.ports(), vec!["true", "false"]);
         assert_eq!(flow.nodes[1].kind.type_name(), "if");
         for i in [0, 2, 3, 4] {
             assert!(flow.nodes[i].kind.ports().is_empty());
         }
         assert_eq!(flow.nodes[0].kind.type_name(), "trigger.state");
+    }
+
+    #[test]
+    fn switch_round_trips_and_lists_ports() {
+        let node: Node = serde_json::from_value(json!({ "id": "s", "type": "switch", "params": {
+            "entity": "t", "rules": [{ "op": "lt", "value": 18 }, { "op": "between", "value": 18, "to": 22, "x": 1 }],
+            "otherwise": true } })).unwrap();
+        assert_eq!(node.kind.ports(), vec!["1", "2", "otherwise"]);
+        let back = serde_json::to_value(&node).unwrap();
+        assert_eq!(back["params"]["rules"][1]["x"], 1);
+        assert!(back["params"].get("all").is_none());
+    }
+
+    #[test]
+    fn time_between_ports() {
+        let node: Node = serde_json::from_value(json!({ "id": "t", "type": "time.between",
+            "params": { "from": "07:00", "to": "22:30" } }))
+        .unwrap();
+        assert_eq!(node.kind.ports(), vec!["in", "out"]);
+        assert_eq!(node.kind.type_name(), "time.between");
     }
 }

@@ -4040,6 +4040,34 @@ html:has(.flow-canvas-screen) {
   left: 100%;
 }
 
+/* Switch and time cards name each exit beside its pin, inside the card's right edge. */
+.flow-node--exits {
+  padding-right: 86px;
+}
+
+/* The time card and the tall switch cards wrap their title to two lines before cutting it. */
+.flow-node--wrap .flow-node__title {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.flow-node__exit {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  max-width: 72px;
+  overflow: hidden;
+  font: 500 10px/12px var(--font-body);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 .flow-node__out[data-port="true"] {
   border-color: var(--wire-yes);
 }
@@ -7853,4 +7881,38 @@ html:has(.flow-canvas-screen) {
 .override__alarm {
   margin: 0 0 12px;
   font: var(--type-label);
+}
+
+/* The switch editor: one bordered row per rule. */
+.rule-list {
+  display: grid;
+  gap: 8px;
+}
+
+.rule-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-radius: 8px;
+}
+
+.rule-row > .command-field__number,
+.rule-row__buttons {
+  grid-column: 1 / -1;
+}
+
+.rule-row__buttons {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.node-editor__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }

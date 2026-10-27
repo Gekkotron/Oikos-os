@@ -3,7 +3,8 @@
 use oikos_core::flow::TriggerSignalParams;
 use oikos_core::flow::{
     CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, NotifyParams, Op,
-    Scalar, SunWhich, TriggerScheduleParams, TriggerStateParams,
+    RuleOp, Scalar, SunWhich, SwitchParams, SwitchRule, TimeBetweenParams, TriggerScheduleParams,
+    TriggerStateParams,
 };
 use oikos_core::model::Command;
 use serde_json::Value;
@@ -105,6 +106,31 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             }),
             Some(FlowText::WhenDark),
             FlowText::WhenDarkSub,
+        ),
+        (
+            Group::And,
+            NodeKind::Switch(SwitchParams {
+                rules: vec![SwitchRule {
+                    op: RuleOp::Eq,
+                    value: Value::Bool(true),
+                    to: None,
+                    extra: Default::default(),
+                }],
+                otherwise: true,
+                ..Default::default()
+            }),
+            Some(FlowText::SwitchCard),
+            FlowText::SwitchSub,
+        ),
+        (
+            Group::And,
+            NodeKind::TimeBetween(TimeBetweenParams {
+                from: "07:00".into(),
+                to: "22:00".into(),
+                extra: Default::default(),
+            }),
+            Some(FlowText::TimeCard),
+            FlowText::TimeSub,
         ),
         (
             Group::Wait,
@@ -218,6 +244,21 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                     average: None,
                     offset_minutes: None,
                     extra: Default::default(),
+                }),
+                ctx,
+            ));
+            out.push(entry(
+                Group::And,
+                NodeKind::Switch(SwitchParams {
+                    entity: Some(e.id.clone()),
+                    rules: vec![SwitchRule {
+                        op: RuleOp::Eq,
+                        value: current.as_ref().map_or(Value::Bool(true), Scalar::to_json),
+                        to: None,
+                        extra: Default::default(),
+                    }],
+                    otherwise: true,
+                    ..Default::default()
                 }),
                 ctx,
             ));
@@ -346,7 +387,7 @@ mod tests {
         assert_eq!(labels[0], "Programmation");
         assert!(labels.contains(&"Quand il fait nuit"));
         assert!(
-            matches!(&fr[3].kind, NodeKind::Notify(p) if p.title == "Notification"),
+            matches!(&fr[5].kind, NodeKind::Notify(p) if p.title == "Notification"),
             "the stored default follows the language at creation"
         );
         // The English word finds the card on the French UI, and the French word on the English UI.
@@ -391,6 +432,8 @@ mod tests {
                 (Group::When, "Schedule"),
                 (Group::When, "Sun event"),
                 (Group::And, "When it's dark"),
+                (Group::And, "Switch"),
+                (Group::And, "Time of day"),
                 (Group::Then, "Notify"),
                 (Group::Wait, "Wait"),
                 (Group::Flow, "Disable this flow"),
@@ -404,6 +447,8 @@ mod tests {
                 Some("At a set time, or on a repeat"),
                 Some("Sunrise, sunset, dusk or dawn"),
                 Some("Between dusk and dawn"),
+                Some("Several exits, one per rule"),
+                Some("Inside or outside two times"),
                 Some("A push to your phone"),
                 Some("A fixed or random delay"),
                 Some("Stops it from running again"),
@@ -414,8 +459,70 @@ mod tests {
             &got[0].kind,
             NodeKind::TriggerSchedule(p) if p.cron == "0 * * * *"
         ));
-        assert!(matches!(&got[3].kind, NodeKind::Notify(p) if p.title == "Notification"));
-        assert!(matches!(&got[4].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+        assert!(matches!(&got[5].kind, NodeKind::Notify(p) if p.title == "Notification"));
+        assert!(matches!(&got[6].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+        assert!(matches!(
+            &got[3].kind,
+            NodeKind::Switch(p) if p.otherwise && p.entity.is_none()
+                && p.rules.len() == 1 && p.rules[0].op == RuleOp::Eq
+                && p.rules[0].value == Value::Bool(true)
+        ));
+        assert!(matches!(
+            &got[4].kind,
+            NodeKind::TimeBetween(p) if p.from == "07:00" && p.to == "22:00"
+        ));
+    }
+
+    #[test]
+    fn library_lists_switch_and_time() {
+        let entities = BTreeMap::new();
+        let areas: Vec<AreaView> = Vec::new();
+        let ctx = |lang| Ctx {
+            entities: &entities,
+            areas: &areas,
+            flows: &[],
+            lang,
+        };
+        let fr = entries("", &ctx(crate::i18n::Lang::Fr));
+        let labels: Vec<_> = fr.iter().map(|e| e.label.as_str()).collect();
+        assert!(labels.contains(&"Commuter") && labels.contains(&"Plage horaire"));
+        let sub = |label: &str| {
+            fr.iter()
+                .find(|e| e.label == label)
+                .and_then(|e| e.sub.clone())
+        };
+        assert_eq!(
+            sub("Commuter").as_deref(),
+            Some("Plusieurs sorties, une par règle")
+        );
+        assert_eq!(
+            sub("Plage horaire").as_deref(),
+            Some("Dans ou hors d'une plage horaire")
+        );
+        // Either language's word finds the card.
+        let found = entries("plage", &ctx(crate::i18n::Lang::En));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].label, "Time of day");
+        assert_eq!(
+            entries("commuter", &ctx(crate::i18n::Lang::En))[0].label,
+            "Switch"
+        );
+    }
+
+    #[test]
+    fn an_entity_gets_a_switch_card_next_to_its_if() {
+        let entities = house(vec![ent("l1", "Lumière table", Kind::Light)]);
+        let got = run("table", &entities);
+        let switch = got
+            .iter()
+            .find(|e| matches!(&e.kind, NodeKind::Switch(_)))
+            .expect("a switch entry");
+        assert_eq!(switch.group, Group::And);
+        assert_eq!(switch.label, "Switch on Lumière table");
+        assert!(matches!(
+            &switch.kind,
+            NodeKind::Switch(p) if p.entity.as_deref() == Some("l1") && p.otherwise && p.rules.len() == 1
+        ));
     }
 
     #[test]
@@ -550,7 +657,8 @@ mod tests {
         let entities = house(vec![light, ent("l2", "Bedroom", Kind::Light)]);
         let got = run("table", &entities);
         assert_eq!(count(&got, Group::When), 1);
-        assert_eq!(count(&got, Group::And), 1);
+        // An `if` and a switch on the entity.
+        assert_eq!(count(&got, Group::And), 2);
         assert_eq!(count(&got, Group::Then), 3);
         let label = |g| got.iter().find(|e| e.group == g).unwrap().label.clone();
         assert_eq!(label(Group::When), "When Lumière table changes");
@@ -678,7 +786,7 @@ mod tests {
         let entities = house(vec![ent("s1", "Entrée", Kind::Sensor)]);
         let got = run("entree", &entities);
         assert_eq!(count(&got, Group::When), 1);
-        assert_eq!(count(&got, Group::And), 1);
+        assert_eq!(count(&got, Group::And), 2);
         assert_eq!(count(&got, Group::Then), 0);
     }
 

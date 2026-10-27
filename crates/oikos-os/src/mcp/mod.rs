@@ -148,7 +148,7 @@ fn instructions() -> String {
          the first run is at the next tick), `flow.enable` (sets another flow's `enabled`, or its own flow when `flow` is absent; a flow \
          that disables itself still finishes the current run), `if` (compares a value; edges \
          leaving it name the port `true` or `false`; `missing` is `fail` (the default), `true` \
-         or `false` and picks that port when the value is unknown; `average` (`15m`, at most `24h`) compares the mean of the entity's readings over that window, the newest included, instead of its current value; `value` must be a number), `delay` (`for`: `5m`, `1h30m`; \
+         or `false` and picks that port when the value is unknown; `average` (`15m`, at most `24h`) compares the mean of the entity's readings over that window, the newest included, instead of its current value; `value` must be a number), `switch` (1 to 10 ordered `rules` of `op` `eq`, `ne`, `gt`, `lt`, `gte`, `lte` or `between` (`value` to `to`, both included) on `entity` or the triggering value, with optional `average` as for `if`; edges leaving it name the port `\"1\"` to `\"n\"` (the rule's position) or `\"otherwise\"`; `otherwise: true` adds that port, `all: true` takes every matching rule), `time.between` (`from` included, `to` excluded, `HH:MM` in the house local time; ports `in` and `out`), `delay` (`for`: `5m`, `1h30m`; \
          with `up_to` it waits a random time between the two), \
          `command` (the same JSON as `send_command`) and `notify` (a phone push: `title`, optional `body`, `channel`, `severity`, `entity_id`, \
          `image_url`, `silent`, `id`, `lang`). Its `title` and `body` take placeholders filled at \
@@ -186,14 +186,14 @@ fn instructions() -> String {
          an alarm panel in `presence` that is armed away means nobody home, so every zone is in \
          eco. `get_weather` returns the outdoor weather when \
          `[weather] enabled`. `get_solar` returns the Solcast solar forecast (today, tomorrow, the \
-next days, the request budget) when `[solcast] enabled`; its `solar_…` entities carry the same \
-numbers. `get_home_settings` and `set_home_settings` read and replace the whole \
-home settings document: `eco_setpoint` (°C), `mode_entity` (a select), `indoor_entity` (a \
-temperature sensor), `cold_below` and `hot_above` (°C, the web reads cold below 15 and warm \
-above 26 when unset). The native alarm is optional (`enabled` in its settings): \
-`alarm_status` reads the settings and the panel state, `set_alarm_settings` replaces the \
-whole document (read it first). Arm and disarm with `send_command` on `oikos_alarm_house`, \
-`{{\"type\":\"arm\",\"mode\":\"away\"}}` or `{{\"type\":\"disarm\"}}`; there are no codes.",
+    next days, the request budget) when `[solcast] enabled`; its `solar_…` entities carry the same \
+    numbers. `get_home_settings` and `set_home_settings` read and replace the whole \
+    home settings document: `eco_setpoint` (°C), `mode_entity` (a select), `indoor_entity` (a \
+    temperature sensor), `cold_below` and `hot_above` (°C, the web reads cold below 15 and warm \
+    above 26 when unset). The native alarm is optional (`enabled` in its settings): \
+    `alarm_status` reads the settings and the panel state, `set_alarm_settings` replaces the \
+    whole document (read it first). Arm and disarm with `send_command` on `oikos_alarm_house`, \
+    `{{\"type\":\"arm\",\"mode\":\"away\"}}` or `{{\"type\":\"disarm\"}}`; there are no codes.",
         fields = UiOverride::FIELDS.join(", ")
     )
 }

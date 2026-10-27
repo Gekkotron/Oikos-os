@@ -187,7 +187,7 @@ pub struct SetFlowParams {
     /// final action only happens once the events stop.
     ///
     /// Each node is `{"id": "<unique in the flow>", "type": "<type>", "params": {...}}` with an
-    /// optional `name` label. The four types:
+    /// optional `name` label. The types described here:
     ///
     /// - `trigger.state` starts a run when an entity's state changes. params: `entity` (an id
     ///   from `search` or `list_entities`), optional `to` (only when the new value equals it)
@@ -198,6 +198,15 @@ pub struct SetFlowParams {
     ///   `value` (the constant to compare with) and optional `entity`. Without `entity` it
     ///   compares the triggering entity's live value, the one that fired the run; with it, that
     ///   entity's current value. It has two output ports, `true` and `false`.
+    /// - `switch` branches on one value with 1 to 10 ordered rules. params: `rules`, a list of
+    ///   `{"op": "eq"|"ne"|"gt"|"lt"|"gte"|"lte"|"between", "value": ..., "to": ...}` (`to` only
+    ///   for `between`, which includes both ends), optional `entity` and `average` as for `if`,
+    ///   `otherwise` (`true` adds an `otherwise` port taken when no rule matches or the value is
+    ///   unknown) and `all` (`true` takes every matching rule, not only the first). Its output
+    ///   ports are `"1"` to `"n"` (the rule's 1-based position) and `"otherwise"`.
+    /// - `time.between` branches on the house-local time of day. params: `from` (included) and
+    ///   `to` (excluded), both `HH:MM` 24-hour and different; `to` earlier than `from` crosses
+    ///   midnight. Its output ports are `in` and `out`.
     /// - `delay` waits. params: `for`, a duration such as `90s`, `5m` or `1h30m` (units `s`, `m`,
     ///   `h`, combined without spaces), and optional `up_to` (same format, not shorter than
     ///   `for`): each run then waits a random duration between `for` and `up_to`.
@@ -206,9 +215,10 @@ pub struct SetFlowParams {
     ///   `{"type": "turn_off"}`. The entity must exist and support the command.
     ///
     /// `edges` is a list of `{"from": "<node id>", "to": "<node id>"}` followed from a trigger.
-    /// An edge leaving an `if` must also carry `"port": "true"` or `"port": "false"` (the branch
-    /// it belongs to; omit a branch to do nothing there); edges leaving any other node have no
-    /// `port`.
+    /// An edge leaving an `if` must also carry `"port": "true"` or `"port": "false"`, one leaving
+    /// a `switch` a port `"1"` to `"n"` or `"otherwise"`, one leaving a `time.between` `"in"` or
+    /// `"out"` (the branch it belongs to; omit a branch to do nothing there); edges leaving any
+    /// other node have no `port`.
     ///
     /// Example, LED on at motion and off five minutes after the last motion: `mode: "restart"`,
     /// nodes `motion` (`trigger.state`, entity the sensor), `moving` (`if`, `op: "eq"`,

@@ -11,12 +11,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use chrono::Timelike;
+
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
 use oikos_core::flow::sun::is_dark_with_offset;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
     Flow, Missing, Node, NodeKind, Op, Reading, Scalar, Schedule, compare, format_duration,
-    parse_duration, pick_duration,
+    in_time_range, parse_clock, parse_duration, pick_duration, switch_exits,
 };
 use oikos_core::history::buckets::{Sample, readings_mean};
 use serde_json::Value;
@@ -662,7 +664,12 @@ impl Engine {
                     && let Some(active) = self.active.remove(&flow_id)
                 {
                     self.keep.retain(|(flow, _)| *flow != flow_id);
-                    let failure = step("engine", StepOutcome::Failed, "run panicked".to_owned());
+                    let failure = step(
+                        "engine",
+                        StepOutcome::Failed,
+                        "run panicked".to_owned(),
+                        None,
+                    );
                     self.hub.record_step(&flow_id, &active.run_id, failure);
                     self.hub
                         .end_run(&flow_id, &active.run_id, RunStatus::Failed);
@@ -697,36 +704,47 @@ pub(super) async fn execute(
     let mut stack = vec![start];
     while let Some(id) = stack.pop() {
         let Some(node) = flow.node(&id) else {
-            let step = step(&id, StepOutcome::Failed, "unknown node".to_owned());
+            let step = step(&id, StepOutcome::Failed, "unknown node".to_owned(), None);
             if !hub.record_step(&flow.id, &run_id, step) {
                 return RunStatus::Cancelled;
             }
             return RunStatus::Failed;
         };
-        let (outcome, detail, port) =
+        let (outcome, detail, ports) =
             run_node(&hub, &now, &flow.id, &run_id, node, trigger.as_ref()).await;
-        if !hub.record_step(&flow.id, &run_id, step(&node.id, outcome, detail)) {
+        let branching = matches!(
+            node.kind,
+            NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_)
+        );
+        let shown = (branching && outcome == StepOutcome::Ok).then(|| ports.clone());
+        if !hub.record_step(&flow.id, &run_id, step(&node.id, outcome, detail, shown)) {
             return RunStatus::Cancelled;
         }
         if outcome == StepOutcome::Failed {
             return RunStatus::Failed;
         }
-        stack.extend(
-            flow.successors(&node.id, port)
-                .into_iter()
-                .rev()
-                .map(|next| next.id.clone()),
-        );
+        // A node with no port to follow continues on its port-less edges; a branching node
+        // that fired nothing follows nothing (its edges all carry a port).
+        let next: Vec<&Node> = if branching {
+            ports
+                .iter()
+                .flat_map(|port| flow.successors(&node.id, Some(port.as_str())))
+                .collect()
+        } else {
+            flow.successors(&node.id, None)
+        };
+        stack.extend(next.into_iter().rev().map(|next| next.id.clone()));
     }
     RunStatus::Done
 }
 
-fn step(node: &str, outcome: StepOutcome, detail: String) -> StepView {
+fn step(node: &str, outcome: StepOutcome, detail: String, ports: Option<Vec<String>>) -> StepView {
     StepView {
         node: node.to_owned(),
         at: clock::now(),
         outcome,
         detail,
+        ports,
     }
 }
 
@@ -738,26 +756,28 @@ async fn run_node(
     run_id: &str,
     node: &Node,
     trigger: Option<&TriggerInfo>,
-) -> (StepOutcome, String, Option<&'static str>) {
-    let failed = |detail: String| (StepOutcome::Failed, detail, None);
+) -> (StepOutcome, String, Vec<String>) {
+    let failed = |detail: String| (StepOutcome::Failed, detail, Vec::new());
     match &node.kind {
         NodeKind::TriggerState(params) => {
             let detail = match trigger {
                 Some(trigger) => format!("{} = {}", params.entity, trigger.value),
                 None => "manual".to_owned(),
             };
-            (StepOutcome::Ok, detail, None)
+            (StepOutcome::Ok, detail, Vec::new())
         }
         NodeKind::TriggerSignal(params) => {
             let detail = match trigger {
                 Some(trigger) => format!("{} sent {}", params.entity, trigger.value),
                 None => "manual".to_owned(),
             };
-            (StepOutcome::Ok, detail, None)
+            (StepOutcome::Ok, detail, Vec::new())
         }
-        NodeKind::TriggerSchedule(params) => {
-            (StepOutcome::Ok, format!("schedule {}", params.cron), None)
-        }
+        NodeKind::TriggerSchedule(params) => (
+            StepOutcome::Ok,
+            format!("schedule {}", params.cron),
+            Vec::new(),
+        ),
         NodeKind::TriggerSun(params) => (
             StepOutcome::Ok,
             format!(
@@ -765,7 +785,7 @@ async fn run_node(
                 format!("{:?}", params.which).to_lowercase(),
                 params.offset()
             ),
-            None,
+            Vec::new(),
         ),
         NodeKind::FlowEnable(params) => {
             let target = params.flow.as_deref().unwrap_or(flow_id);
@@ -785,10 +805,58 @@ async fn run_node(
                     } else {
                         "disabled"
                     };
-                    (StepOutcome::Ok, format!("{verb} {target}"), None)
+                    (StepOutcome::Ok, format!("{verb} {target}"), Vec::new())
                 }
                 Err(err) => failed(err.to_string()),
             }
+        }
+        NodeKind::TimeBetween(params) => {
+            let (Ok(from), Ok(to)) = (parse_clock(&params.from), parse_clock(&params.to)) else {
+                return failed("time is not HH:MM".to_owned());
+            };
+            let local = now().with_timezone(&hub.zone());
+            let minute = u16::try_from(local.hour() * 60 + local.minute()).unwrap_or(0);
+            let port = if in_time_range(from, to, minute) {
+                "in"
+            } else {
+                "out"
+            };
+            (
+                StepOutcome::Ok,
+                format!("{:02}:{:02} → {port}", local.hour(), local.minute()),
+                vec![port.to_owned()],
+            )
+        }
+        NodeKind::Switch(params) => {
+            let left = match node_left(
+                hub,
+                now,
+                params.entity.as_deref(),
+                params.average.as_deref(),
+                trigger,
+            )
+            .await
+            {
+                Ok(left) => left,
+                Err(reason) => return failed(reason),
+            };
+            let exits = match switch_exits(params, left.as_ref()) {
+                Ok(exits) => exits,
+                Err(err) => return failed(err.to_string()),
+            };
+            let taken = if exits.is_empty() {
+                "none".to_owned()
+            } else {
+                exits.join(",")
+            };
+            let detail = match (&left, params.average.as_deref()) {
+                (None, _) => format!("unknown → {taken}"),
+                (Some(Scalar::Number(mean)), Some(window)) => {
+                    format!("average {window} = {mean:.1} → {taken}")
+                }
+                (Some(value), _) => format!("{} → {taken}", scalar_text(value)),
+            };
+            (StepOutcome::Ok, detail, exits)
         }
         NodeKind::Notify(params) => {
             let lang = params.lang.unwrap_or_default();
@@ -832,7 +900,7 @@ async fn run_node(
                 alert["silent"] = Value::Bool(silent);
             }
             match hub.notify("flow", &alert) {
-                Ok(id) => (StepOutcome::Ok, format!("sent {id}: {title}"), None),
+                Ok(id) => (StepOutcome::Ok, format!("sent {id}: {title}"), Vec::new()),
                 Err(rejected) => failed(rejected.reason),
             }
         }
@@ -841,29 +909,42 @@ async fn run_node(
                 let (lat, lon) = hub.house_point();
                 let dark = is_dark_with_offset(lat, lon, now(), params.dark_offset());
                 let port = if dark { "true" } else { "false" };
-                return (StepOutcome::Ok, format!("is_dark → {dark}"), Some(port));
+                return (
+                    StepOutcome::Ok,
+                    format!("is_dark → {dark}"),
+                    vec![port.to_owned()],
+                );
             }
             let Some(right) = Scalar::from_json(params.value.as_ref().unwrap_or(&Value::Null))
             else {
                 return failed("value is not a scalar".to_owned());
             };
-            let entity = match (&params.entity, trigger) {
-                (Some(entity), _) => entity.as_str(),
-                (None, Some(trigger)) => trigger.entity.as_str(),
-                (None, None) => return failed("no triggering entity".to_owned()),
-            };
-            let left = match params.average.as_deref() {
-                Some(window) => window_average(hub, entity, window, now())
-                    .await
-                    .map(Scalar::Number),
-                None => hub.entity_scalar(entity),
+            let left = match node_left(
+                hub,
+                now,
+                params.entity.as_deref(),
+                params.average.as_deref(),
+                trigger,
+            )
+            .await
+            {
+                Ok(left) => left,
+                Err(reason) => return failed(reason),
             };
             match (&left, params.missing) {
                 (None, Some(Missing::True)) => {
-                    return (StepOutcome::Ok, "missing → true".to_owned(), Some("true"));
+                    return (
+                        StepOutcome::Ok,
+                        "missing → true".to_owned(),
+                        vec!["true".to_owned()],
+                    );
                 }
                 (None, Some(Missing::False)) => {
-                    return (StepOutcome::Ok, "missing → false".to_owned(), Some("false"));
+                    return (
+                        StepOutcome::Ok,
+                        "missing → false".to_owned(),
+                        vec!["false".to_owned()],
+                    );
                 }
                 _ => {}
             }
@@ -874,15 +955,19 @@ async fn run_node(
                 _ => outcome.to_string(),
             };
             match compare(left.as_ref(), params.op, &right) {
-                Ok(true) => (StepOutcome::Ok, shown(true), Some("true")),
-                Ok(false) => (StepOutcome::Ok, shown(false), Some("false")),
+                Ok(true) => (StepOutcome::Ok, shown(true), vec!["true".to_owned()]),
+                Ok(false) => (StepOutcome::Ok, shown(false), vec!["false".to_owned()]),
                 Err(err) => failed(err.to_string()),
             }
         }
         NodeKind::Delay(params) => match params.bounds() {
             Ok((low, None)) => {
                 tokio::time::sleep(low).await;
-                (StepOutcome::Ok, format!("waited {}", params.for_), None)
+                (
+                    StepOutcome::Ok,
+                    format!("waited {}", params.for_),
+                    Vec::new(),
+                )
             }
             Ok((low, Some(high))) => {
                 let duration = pick_duration(low, Some(high), clock::random_roll());
@@ -893,7 +978,7 @@ async fn run_node(
                     params.for_,
                     params.up_to.as_deref().unwrap_or_default()
                 );
-                (StepOutcome::Ok, detail, None)
+                (StepOutcome::Ok, detail, Vec::new())
             }
             Err(reason) => failed(reason),
         },
@@ -902,7 +987,9 @@ async fn run_node(
                 .send_command(&params.entity, params.command.clone())
                 .await
             {
-                Ok(response) if response.accepted => (StepOutcome::Ok, "accepted".to_owned(), None),
+                Ok(response) if response.accepted => {
+                    (StepOutcome::Ok, "accepted".to_owned(), Vec::new())
+                }
                 Ok(response) => failed(
                     response
                         .reason
@@ -914,8 +1001,40 @@ async fn run_node(
     }
 }
 
-/// The entities the `if` nodes of `flows` average, each with its longest window in
-/// microseconds. An `if` without `entity` averages the entities its flow's triggers watch.
+/// A scalar as shown in a step detail.
+fn scalar_text(value: &Scalar) -> String {
+    match value {
+        Scalar::Bool(b) => b.to_string(),
+        Scalar::Number(n) => n.to_string(),
+        Scalar::Text(t) => t.clone(),
+    }
+}
+
+/// The value an `if` or `switch` node compares: `entity` (else the one that fired the trigger),
+/// as its current value or, with `average`, the mean of its readings over that window.
+/// `Ok(None)` when the value is unknown; `Err` carries the failure reason.
+async fn node_left(
+    hub: &Hub,
+    now: &Now,
+    entity: Option<&str>,
+    average: Option<&str>,
+    trigger: Option<&TriggerInfo>,
+) -> Result<Option<Scalar>, String> {
+    let entity = match (entity, trigger) {
+        (Some(entity), _) => entity,
+        (None, Some(trigger)) => trigger.entity.as_str(),
+        (None, None) => return Err("no triggering entity".to_owned()),
+    };
+    Ok(match average {
+        Some(window) => window_average(hub, entity, window, now())
+            .await
+            .map(Scalar::Number),
+        None => hub.entity_scalar(entity),
+    })
+}
+
+/// The entities the `if` and `switch` nodes of `flows` average, each with its longest window in
+/// microseconds. A node without `entity` averages the entities its flow's triggers watch.
 fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
     let mut windows = BTreeMap::new();
     for flow in flows {
@@ -928,18 +1047,16 @@ fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
             })
             .collect();
         for node in &flow.nodes {
-            let NodeKind::If(params) = &node.kind else {
-                continue;
+            let (entity, average) = match &node.kind {
+                NodeKind::If(params) => (&params.entity, &params.average),
+                NodeKind::Switch(params) => (&params.entity, &params.average),
+                _ => continue,
             };
-            let Some(window) = params
-                .average
-                .as_deref()
-                .and_then(|w| parse_duration(w).ok())
-            else {
+            let Some(window) = average.as_deref().and_then(|w| parse_duration(w).ok()) else {
                 continue;
             };
             let micros = i64::try_from(window.as_micros()).unwrap_or(i64::MAX);
-            let entities = match &params.entity {
+            let entities = match entity {
                 Some(entity) => vec![entity],
                 None => triggers.clone(),
             };
@@ -973,7 +1090,7 @@ async fn window_average(
         Some(Ok(db)) => match db.samples(start, end + 1, Some(entity)).await {
             Ok(rows) => rows.into_iter().map(|(_, sample)| sample).collect(),
             Err(err) => {
-                tracing::warn!(%entity, %err, "if average: history read failed");
+                tracing::warn!(%entity, %err, "average: history read failed");
                 Vec::new()
             }
         },
@@ -1050,9 +1167,7 @@ mod tests {
     }
 
     /// Runs one `if` node with `average` on an engine hub that has no history.
-    async fn run_if_average(
-        extra: serde_json::Value,
-    ) -> (StepOutcome, String, Option<&'static str>) {
+    async fn run_if_average(extra: serde_json::Value) -> (StepOutcome, String, Vec<String>) {
         let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
         let mut params = serde_json::json!({
             "op": "lte", "value": 19, "average": "30m", "entity": "sensor_temperature"
@@ -1074,17 +1189,17 @@ mod tests {
             run_if_average(serde_json::json!({ "missing": "false" })).await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(detail, "missing → false");
-        assert_eq!(port, Some("false"));
+        assert_eq!(port, ["false"]);
         let (_, detail, port) = run_if_average(serde_json::json!({ "missing": "true" })).await;
         assert_eq!(detail, "missing → true");
-        assert_eq!(port, Some("true"));
+        assert_eq!(port, ["true"]);
     }
 
     #[tokio::test]
     async fn if_average_without_history_and_default_missing_compares_nothing() {
         let (outcome, _, port) = run_if_average(serde_json::json!({})).await;
         assert_eq!(outcome, StepOutcome::Ok);
-        assert_eq!(port, Some("false"));
+        assert_eq!(port, ["false"]);
     }
 
     #[tokio::test]
@@ -1123,6 +1238,263 @@ mod tests {
             run_node(&engine.hub, &engine.now, "avg", "r", &node, Some(&trigger)).await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(detail, "average 30m = 19.0 → true");
-        assert_eq!(port, Some("true"));
+        assert_eq!(port, ["true"]);
+    }
+
+    #[tokio::test]
+    async fn switch_average_counts_every_reading_including_the_newest() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let entity = add_sensor(&engine, None);
+        let flow = serde_json::json!({
+            "id": "swavg", "name": "swavg", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "s", "type": "switch", "params": { "average": "30m",
+                    "rules": [{ "op": "lte", "value": 18 }, { "op": "lte", "value": 19 }] } }
+            ],
+            "edges": [{ "from": "t", "to": "s" }]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/swavg", flow.to_string().as_bytes());
+        engine.reload();
+        // Only a switch registers the entity: its readings must be buffered.
+        for t in [20, 20, 17] {
+            engine
+                .hub
+                .ingest("test/room", format!(r#"{{"temperature":{t}}}"#).as_bytes());
+        }
+        let node = engine.flows[0].nodes[1].clone();
+        let trigger = TriggerInfo {
+            entity: entity.clone(),
+            value: serde_json::json!(17),
+            previous: serde_json::json!(20),
+        };
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "swavg",
+            "r",
+            &node,
+            Some(&trigger),
+        )
+        .await;
+        assert_eq!(outcome, StepOutcome::Ok);
+        // The mean is 19, not the current 17 (which would take rule 1).
+        assert_eq!(detail, "average 30m = 19.0 → 2");
+        assert_eq!(ports, ["2"]);
+    }
+
+    /// Reports a numeric sensor and returns its entity id.
+    fn add_sensor(engine: &Engine, value: Option<f64>) -> String {
+        engine.hub.ingest(
+            "oikos/sensor/room/temperature/config",
+            br#"{"unique_id":"room_temperature","state_topic":"test/room","value_template":"{{ value_json.temperature }}","unit_of_measurement":"\u00b0C"}"#,
+        );
+        if let Some(value) = value {
+            engine.hub.ingest(
+                "test/room",
+                format!(r#"{{"temperature":{value}}}"#).as_bytes(),
+            );
+        }
+        engine.hub.snapshot().entities[0].id.clone()
+    }
+
+    fn node(value: serde_json::Value) -> Node {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn switch_takes_first_matching_exit() {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let entity = add_sensor(&engine, Some(20.0));
+        let node = node(serde_json::json!({
+            "id": "s", "type": "switch", "params": { "entity": entity, "rules": [
+                { "op": "lt", "value": 18 },
+                { "op": "between", "value": 18, "to": 22 },
+                { "op": "gt", "value": 22 } ] }
+        }));
+        let (outcome, detail, ports) =
+            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        assert_eq!(outcome, StepOutcome::Ok);
+        assert_eq!(ports, ["2"]);
+        assert!(detail.ends_with("→ 2"), "{detail}");
+    }
+
+    #[tokio::test]
+    async fn switch_unknown_value_takes_otherwise() {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let node = node(serde_json::json!({
+            "id": "s", "type": "switch", "params": {
+                "entity": "nobody", "otherwise": true,
+                "rules": [{ "op": "gt", "value": 1 }] }
+        }));
+        let (outcome, detail, ports) =
+            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        assert_eq!(outcome, StepOutcome::Ok);
+        assert_eq!(ports, ["otherwise"]);
+        assert_eq!(detail, "unknown → otherwise");
+    }
+
+    #[tokio::test]
+    async fn switch_nothing_fired_reads_none() {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let entity = add_sensor(&engine, Some(20.0));
+        let node = node(serde_json::json!({
+            "id": "s", "type": "switch", "params": {
+                "entity": entity, "rules": [{ "op": "gt", "value": 99 }] }
+        }));
+        let (_, detail, ports) = run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        assert!(ports.is_empty());
+        assert_eq!(detail, "20 → none");
+    }
+
+    /// The ids of the steps a run recorded, in order.
+    fn recorded(hub: &Hub, flow: &str) -> Vec<String> {
+        hub.flow(flow).unwrap().runs[0]
+            .steps
+            .iter()
+            .map(|s| s.node.clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn switch_all_runs_exits_in_rule_order() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let entity = add_sensor(&engine, Some(20.0));
+        let flow = serde_json::json!({
+            "id": "sw", "name": "sw", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "s", "type": "switch", "params": { "entity": entity, "all": true,
+                    "rules": [{ "op": "gte", "value": 10 }, { "op": "lte", "value": 30 }] } },
+                { "id": "a", "type": "notify", "params": { "title": "x" } },
+                { "id": "a2", "type": "notify", "params": { "title": "x" } },
+                { "id": "b", "type": "notify", "params": { "title": "x" } }
+            ],
+            "edges": [
+                { "from": "t", "to": "s" },
+                { "from": "s", "to": "b", "port": "2" },
+                { "from": "s", "to": "a", "port": "1" },
+                { "from": "a", "to": "a2" }
+            ]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/sw", flow.to_string().as_bytes());
+        engine.reload();
+        let flow = engine.flows[0].clone();
+        let run = engine.hub.begin_run("sw", None).unwrap();
+        execute(
+            engine.hub.clone(),
+            engine.now.clone(),
+            flow,
+            run.id,
+            "t".to_owned(),
+            None,
+        )
+        .await;
+        // Exit 1 runs before exit 2 whatever the edge order, depth first.
+        assert_eq!(recorded(&engine.hub, "sw"), ["t", "s", "a", "a2", "b"]);
+    }
+
+    /// Runs a `time.between` node with the clock at `utc`.
+    async fn run_time(utc: (i32, u32, u32, u32, u32), from: &str, to: &str) -> Vec<String> {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let at = chrono::Utc
+            .with_ymd_and_hms(utc.0, utc.1, utc.2, utc.3, utc.4, 0)
+            .unwrap();
+        engine.now = Arc::new(move || at);
+        let node = node(serde_json::json!({
+            "id": "tm", "type": "time.between", "params": { "from": from, "to": to }
+        }));
+        run_node(&engine.hub, &engine.now, "f", "r", &node, None)
+            .await
+            .2
+    }
+
+    #[tokio::test]
+    async fn time_between_uses_house_zone() {
+        // 21:40 UTC is 22:40 in Paris (CET is UTC+1 only in winter; this is CET after 25 Oct).
+        let now = (2026, 10, 27, 21, 40);
+        assert_eq!(run_time(now, "07:00", "22:30").await, ["out"]);
+        assert_eq!(run_time(now, "22:00", "06:00").await, ["in"]);
+    }
+
+    #[tokio::test]
+    async fn time_between_wall_clock_on_dst_day() {
+        // 06:30 UTC on 2026-10-25 is 07:30 in Paris, after the clocks went back.
+        assert_eq!(
+            run_time((2026, 10, 25, 6, 30), "07:00", "08:00").await,
+            ["in"]
+        );
+    }
+
+    #[tokio::test]
+    async fn step_view_records_ports_for_branching_nodes_only() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let entity = add_sensor(&engine, Some(20.0));
+        let flow = serde_json::json!({
+            "id": "pv", "name": "pv", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "tm", "type": "time.between", "params": { "from": "00:00", "to": "23:59" } },
+                { "id": "c", "type": "notify", "params": { "title": "x" } }
+            ],
+            "edges": [{ "from": "t", "to": "tm" }, { "from": "tm", "to": "c", "port": "in" }]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/pv", flow.to_string().as_bytes());
+        engine.reload();
+        let flow = engine.flows[0].clone();
+        let run = engine.hub.begin_run("pv", None).unwrap();
+        execute(
+            engine.hub.clone(),
+            engine.now.clone(),
+            flow,
+            run.id,
+            "t".to_owned(),
+            None,
+        )
+        .await;
+        let steps = engine.hub.flow("pv").unwrap().runs[0].steps.clone();
+        assert_eq!(steps[0].ports, None);
+        assert_eq!(steps[1].ports, Some(vec!["in".to_owned()]));
+        assert_eq!(steps[2].node, "c");
+        assert_eq!(steps[2].ports, None);
+    }
+
+    #[tokio::test]
+    async fn step_view_records_no_ports_for_a_failed_branching_step() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let entity = add_sensor(&engine, Some(20.0));
+        let flow = serde_json::json!({
+            "id": "pf", "name": "pf", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "tm", "type": "switch", "params": { "rules": [{ "op": "gt", "value": 1 }] } }
+            ],
+            "edges": [{ "from": "t", "to": "tm" }]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/pf", flow.to_string().as_bytes());
+        engine.reload();
+        let flow = engine.flows[0].clone();
+        let run = engine.hub.begin_run("pf", None).unwrap();
+        execute(
+            engine.hub.clone(),
+            engine.now.clone(),
+            flow,
+            run.id,
+            "t".to_owned(),
+            None,
+        )
+        .await;
+        let steps = engine.hub.flow("pf").unwrap().runs[0].steps.clone();
+        assert_eq!(steps[1].node, "tm");
+        assert_eq!(steps[1].outcome, StepOutcome::Failed);
+        assert_eq!(steps[1].ports, None);
     }
 }

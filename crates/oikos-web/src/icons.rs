@@ -296,9 +296,10 @@ pub fn consumer_icon(icon: Option<oikos_core::energy::ConsumerIcon>) -> &'static
     consumer_glyph(icon.map(oikos_core::energy::ConsumerIcon::key))
 }
 
-/// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, a
-/// clock for a schedule, a sun for a solar event, a moon for an `if` on darkness, an hourglass for a delay, a play triangle for a command, a toggle
-/// for a flow switch and a bell for a notification.
+/// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if` or a
+/// switch, a clock for a schedule or a time-of-day check, a sun for a solar event, a moon for an
+/// `if` on darkness, an hourglass for a delay, a play triangle for a command, a toggle for a
+/// flow switch and a bell for a notification.
 pub fn node_icon(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::TriggerState(_) => NODE_BOLT,
@@ -306,7 +307,8 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::TriggerSun(_) => SUN,
         NodeKind::TriggerSignal(_) => NODE_BOLT,
         NodeKind::If(p) if p.op == oikos_core::flow::Op::IsDark => NODE_MOON,
-        NodeKind::If(_) => NODE_FORK,
+        NodeKind::If(_) | NodeKind::Switch(_) => NODE_FORK,
+        NodeKind::TimeBetween(_) => NODE_CLOCK,
         NodeKind::Delay(_) => NODE_HOURGLASS,
         NodeKind::Command(_) => NODE_PLAY,
         NodeKind::FlowEnable(_) => NODE_SWITCH,

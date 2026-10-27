@@ -49,12 +49,12 @@ Each node is `{"id", "type", "params", "name"?, "position"?}`:
 - `name`: an optional label shown on the canvas.
 - `position`: optional `{x, y}` canvas coordinates. The hub ignores it.
 
-Each edge is `{"from", "to", "port"?}`. An edge leaving an `if` must carry `"port": "true"` or `"port": "false"`; omit a branch to do nothing there. An edge leaving any other node has no `port`.
+Each edge is `{"from", "to", "port"?}`. An edge leaving a branching node must carry one of its ports: `"true"` or `"false"` for an `if`, `"1"` to `"10"` or `"otherwise"` for a `switch`, `"in"` or `"out"` for a `time.between`. Omit a port to do nothing there. An edge leaving any other node has no `port`.
 
 A flow is refused when:
 
 - an id is malformed or a node id is used twice;
-- an edge names a missing node, a port that does not exist, or lacks the port an `if` needs;
+- an edge names a missing node, a port that does not exist, or lacks the port a branching node (`if`, `switch`, `time.between`) needs;
 - there is no trigger node;
 - the graph has a cycle (the error names the path);
 - a node's params are invalid (see each node below).
@@ -63,7 +63,7 @@ On save the hub also checks the house: every entity a node names must exist, a `
 
 ### How a run goes
 
-A run follows the graph from the trigger that fired, depth first. A failing node ends the run as `failed` at that step. A non-trigger node with no incoming edge never runs. A run that is skipped (because of `single` mode, or because the broker link is offline when a schedule or sun trigger fires) is recorded as a skipped run.
+A run follows the graph from the trigger that fired, depth first. A failing node ends the run as `failed` at that step. A branching step (`if`, `switch`, `time.between`) that succeeds records the `ports` it followed, which can be none (a `switch` whose rules all missed); the web UI uses them to light the right wires. Other steps carry no `ports`. A non-trigger node with no incoming edge never runs. A run that is skipped (because of `single` mode, or because the broker link is offline when a schedule or sun trigger fires) is recorded as a skipped run.
 
 The **scalar** is the one value of a state that triggers and `if` compare: the on/off bool, the number, the text, a light's `on`, a cover's `state`.
 
@@ -112,7 +112,7 @@ Starts a run at each wall-clock tick while the flow is enabled.
 
 Outputs: one. The cron runs in `[flows] timezone` (the system zone when unset). The first run is at the next tick. Ticks missed while the hub was busy or down are never replayed. `GET /api/v1/schedule?cron=…` previews the next ticks.
 
-An `if` reachable from a schedule trigger (or a sun trigger) must name an `entity`, because these triggers carry no value; the exception is `op: is_dark`.
+An `if` or a `switch` reachable from a schedule trigger (or a sun trigger) must name an `entity`, because these triggers carry no value; the exception is an `if` with `op: is_dark`. A `time.between` reads the clock and needs none.
 
 ## `trigger.sun`
 
@@ -157,6 +157,77 @@ Example: a temperature sensor averaging 19 or less over 30 minutes takes `true`,
 ```json
 { "id": "low", "type": "if", "params": { "entity": "sensor_temperature", "op": "lte", "value": 19, "average": "30m", "missing": "false" } }
 ```
+
+## `switch`
+
+Branches on several values at once: one output per rule, tried in order. It is an `if` with many comparisons.
+
+| Param | Type | Description |
+| --- | --- | --- |
+| `rules` | array of rules | 1 to 10 rules. Required. See below. |
+| `entity` | string, optional | The entity whose current scalar is read, live. Absent: the entity that triggered the run. |
+| `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window, as for the [`if`](#if) `average`. Every rule `value` (and `to`) must then be a number. |
+| `otherwise` | bool, default `false` | Adds an `otherwise` port, taken when no rule matches. |
+| `all` | bool, default `false` | Take every matching rule instead of the first one only. |
+
+A rule is `{"op", "value", "to"?}`:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `op` | `eq`, `ne`, `gt`, `lt`, `gte`, `lte` or `between` | The comparison. |
+| `value` | bool, number or string | The constant compared with. With `between` it is the lower bound. |
+| `to` | number | The upper bound. Required with `between`, refused with every other op. |
+
+Outputs: one port per rule, named by its 1-based position (`1`, `2`, ...), plus `otherwise` when set. Every edge leaving a `switch` names one.
+
+- Rules are tried from the first. Without `all`, the first match is the only port taken. With `all`, every matching rule's port is taken, in rule order.
+- `between` includes both bounds: `value <= x <= to`. It needs numbers, and `to` must be at least `value`.
+- The operators compare as in an `if`: `eq` and `ne` are typed, the ordering ops and `between` need numbers.
+- An unknown value (unknown or unavailable entity, or an `average` with a non-numeric reading) matches nothing except an `ne` rule, so `otherwise` is taken when no `ne` rule matches. A known value that is not a number, tested with an ordering op or `between`, fails the node.
+- When nothing matches and `otherwise` is off, no port is taken and the branch ends there.
+- The step detail shows the value and the ports taken, for example `20 → 2`, `unknown → otherwise`, `20 → none`, or `average 30m = 18.6 → 1`.
+
+The ports follow the rule positions: when you add or remove a rule in the middle, the later rules change port number, and the edges leaving them have to follow. The web editor renumbers them for you.
+
+Example: three bands of temperature, with a fallback.
+
+```json
+{ "id": "band", "type": "switch", "params": {
+    "entity": "sensor_temperature",
+    "rules": [
+      { "op": "lt", "value": 18 },
+      { "op": "between", "value": 18, "to": 22 },
+      { "op": "gt", "value": 22 }
+    ],
+    "otherwise": true } }
+```
+
+Edges leave it with `"port": "1"`, `"2"`, `"3"` or `"otherwise"`. A reading of 22 takes port `2`; a reading of 22.5 takes port `3`; an unknown reading takes `otherwise`.
+
+A `switch` refuses to save when `rules` is empty or has more than 10 entries, a rule has a `value` that is not a bool, number or string, `to` is missing with `between` or present with another op, `between` is given non-numbers or `to` is less than `value`, or `average` is badly formed, over `24h`, or used with a non-numeric rule value.
+
+## `time.between`
+
+Branches on the time of day: in or out of a daily range.
+
+| Param | Type | Description |
+| --- | --- | --- |
+| `from` | string | Start of the range, `HH:MM`, 24-hour (`00:00` to `23:59`). Included. |
+| `to` | string | End of the range, same format. Excluded. |
+
+Outputs: two ports, `in` and `out`. Every edge leaving a `time.between` names one.
+
+- The range is `from <= time < to`. A `to` earlier than `from` crosses midnight: `22:00` to `06:00` is in from 22:00 up to 05:59.
+- `from` and `to` must differ. Times need two digits each (`07:00`, not `7:00`).
+- It reads the clock of the house zone (`[flows] timezone`, the system zone when unset), by wall-clock time: on a day the clocks change, `07:00` still means 07:00 on the wall.
+- It needs no entity and no trigger value, so it works after any trigger, schedule and sun triggers included.
+- The step detail shows the time read and the port, for example `22:40 → out`.
+
+```json
+{ "id": "daytime", "type": "time.between", "params": { "from": "07:00", "to": "22:30" } }
+```
+
+A `time.between` refuses to save when `from` or `to` is not a `HH:MM` time (the reason reads ``from: `7:00` is not a HH:MM time``), or when `from` and `to` are equal (`from and to must differ`).
 
 ## `delay`
 
