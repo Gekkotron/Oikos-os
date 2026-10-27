@@ -104,6 +104,10 @@ pub const PENCIL: &str =
 pub const CHECK: &str = svg!(r#"<path d="m5 12 5 5 9-11"/>"#);
 /// Cancel / close (X).
 pub const X_MARK: &str = svg!(r#"<path d="M6 6l12 12"/><path d="M18 6 6 18"/>"#);
+/// Drag handle: two columns of three dots.
+pub const GRIP: &str = svg!(
+    r#"<circle cx="9" cy="6" r=".9"/><circle cx="15" cy="6" r=".9"/><circle cx="9" cy="12" r=".9"/><circle cx="15" cy="12" r=".9"/><circle cx="9" cy="18" r=".9"/><circle cx="15" cy="18" r=".9"/>"#
+);
 
 const NODE_BOLT: &str = svg!(r#"<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>"#);
 const NODE_FORK: &str = svg!(

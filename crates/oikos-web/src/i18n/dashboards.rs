@@ -73,8 +73,7 @@ pub enum DashText {
     Discard,
     Save,
     // Tile tools.
-    MoveEarlier,
-    MoveLater,
+    Move,
     Resize,
     // Widget sheet.
     Title,
@@ -127,8 +126,10 @@ pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
         T::DashboardSettings => ("Dashboard settings", "Réglages du tableau de bord"),
         T::Discard => ("Discard", "Annuler"),
         T::Save => ("Save", "Enregistrer"),
-        T::MoveEarlier => ("Move earlier", "Déplacer avant"),
-        T::MoveLater => ("Move later", "Déplacer après"),
+        T::Move => (
+            "Move: drag, or use the arrow keys",
+            "Déplacer : glisser, ou utiliser les flèches",
+        ),
         T::Resize => ("Resize", "Redimensionner"),
         T::Title => ("Title", "Titre"),
         T::Size => ("Size", "Taille"),
@@ -301,8 +302,7 @@ mod tests {
             T::DashboardSettings,
             T::Discard,
             T::Save,
-            T::MoveEarlier,
-            T::MoveLater,
+            T::Move,
             T::Resize,
             T::Title,
             T::Size,
