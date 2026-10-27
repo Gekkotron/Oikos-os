@@ -115,9 +115,8 @@ fn lower_first(lang: Lang, s: &str) -> String {
 /// `actions`, with `current` first when none of them is the same choice, so a saved command
 /// the device does not list stays selected rather than replaced.
 pub fn command_options(current: &Command, actions: &[Action]) -> Vec<Action> {
-    let key = command_key(current);
     let mut list = actions.to_vec();
-    if !list.iter().any(|a| command_key(&a.command) == key) {
+    if matching_action(current, actions).is_none() {
         list.insert(
             0,
             Action {
@@ -130,10 +129,32 @@ pub fn command_options(current: &Command, actions: &[Action]) -> Vec<Action> {
 }
 
 /// `current` when the entity offers it, else the entity's first action, else `current`.
-pub fn retarget(current: &Command, actions: &[Action]) -> Command {
+/// The action `current` is: the same choice, or, for a control whose value is typed, the
+/// action of that control.
+pub fn matching_action<'a>(current: &Command, actions: &'a [Action]) -> Option<&'a Action> {
     let key = command_key(current);
-    if actions.iter().any(|a| command_key(&a.command) == key) {
-        return current.clone();
+    actions
+        .iter()
+        .find(|a| command_key(&a.command) == key)
+        .or_else(|| match current {
+            Command::Control { control, .. } => actions.iter().find(|a| {
+                matches!(&a.command, Command::Control { control: c, .. } if c == control)
+                    && a.params.iter().any(|p| p.key() == "value")
+            }),
+            _ => None,
+        })
+}
+
+/// `current` when the entity offers it, else the entity's first action, else `current`.
+pub fn retarget(current: &Command, actions: &[Action]) -> Command {
+    // The new entity's own template, carrying over only the inputs it takes.
+    if let Some(action) = matching_action(current, actions) {
+        return action.params.iter().fold(action.command.clone(), |c, p| {
+            match param_value(current, p.key()) {
+                Some(v) => with_param(&c, p.key(), Some(v)),
+                None => c,
+            }
+        });
     }
     actions
         .first()
@@ -165,6 +186,11 @@ pub fn with_param(c: &Command, key: &str, value: Option<Value>) -> Command {
 /// The stored JSON of a number shown as `shown`: scaled by `factor` and rounded when scaled,
 /// and an integer when `step` and the result are whole (whole-number fields refuse `40.0`).
 pub fn number_json(shown: f64, factor: f64, step: f64) -> Value {
+    let shown = if step > 0.0 {
+        (shown / step).round() * step
+    } else {
+        shown
+    };
     let stored = if factor == 1.0 {
         shown
     } else {
@@ -249,12 +275,12 @@ pub fn CommandFields(
     let has_advanced = advanced.is_some();
     let advanced_open = RwSignal::new(false);
     let current_params = Memo::new(move |_| {
-        let key = command.with(command_key);
-        options.with(|list| {
-            list.iter()
-                .find(|a| command_key(&a.command) == key)
-                .map(|a| a.params.clone())
-                .unwrap_or_default()
+        command.with(|c| {
+            options.with(|list| {
+                matching_action(c, list)
+                    .map(|a| a.params.clone())
+                    .unwrap_or_default()
+            })
         })
     });
     let on_action = move |ev: web_sys::Event| {
@@ -448,14 +474,16 @@ pub fn CommandFields(
             <span class=caption>{move || flow_text(lang(), FlowText::Action)}</span>
             <select class=format!("{select} command-field__action {action_class}") on:change=on_action>
                 {move || {
-                    let key = command.with(command_key);
+                    let key = command.with(|c| {
+                        options.with(|l| matching_action(c, l).map(|a| command_key(&a.command)))
+                    });
                     let open = advanced_open.get();
                     options
                         .get()
                         .into_iter()
                         .enumerate()
                         .map(|(i, a)| {
-                            let selected = !open && command_key(&a.command) == key;
+                            let selected = !open && key.as_deref() == Some(command_key(&a.command).as_str());
                             view! {
                                 <option value=i.to_string() selected=selected>
                                     {command_label(lang(), &a.command)}
@@ -507,6 +535,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use oikos_core::vocabulary::Param;
 
     fn entity(kind: Kind, caps: Capabilities) -> EntityView {
         EntityView {
@@ -639,6 +668,74 @@ mod tests {
         assert_eq!(retarget(&Command::Close, &cover), Command::Close);
         assert_eq!(retarget(&Command::TurnOff, &cover), Command::Open);
         assert_eq!(retarget(&Command::TurnOff, &[]), Command::TurnOff);
+    }
+
+    fn text_action() -> Action {
+        Action {
+            command: Command::Control {
+                control: "value".into(),
+                value: Some(json!("")),
+            },
+            params: vec![Param::Text {
+                key: "value".into(),
+                secret: false,
+                optional: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_typed_text_control_keeps_its_input() {
+        let actions = vec![text_action()];
+        let typed = Command::Control {
+            control: "value".into(),
+            value: Some(json!("h")),
+        };
+        assert_eq!(command_options(&typed, &actions).len(), 1);
+        assert_eq!(
+            matching_action(&typed, &actions).map(|a| a.params.len()),
+            Some(1)
+        );
+        assert_eq!(retarget(&typed, &actions), typed);
+    }
+
+    #[test]
+    fn retarget_drops_inputs_the_new_entity_lacks() {
+        let on = Command::TurnOn {
+            brightness: Some(100),
+            color: Some(SWATCHES[1].1),
+            effect: Some("blink".into()),
+        };
+        let dimmer = vec![Action {
+            command: Command::TurnOn {
+                brightness: None,
+                color: None,
+                effect: None,
+            },
+            params: vec![Param::Number {
+                key: "brightness".into(),
+                min: 1.0,
+                max: 100.0,
+                step: 1.0,
+                unit: Some("%".into()),
+                factor: 2.55,
+                optional: true,
+            }],
+        }];
+        assert_eq!(
+            retarget(&on, &dimmer),
+            Command::TurnOn {
+                brightness: Some(100),
+                color: None,
+                effect: None
+            }
+        );
+    }
+
+    #[test]
+    fn a_number_is_kept_on_its_step() {
+        assert_eq!(number_json(40.4, 1.0, 1.0), json!(40));
+        assert_eq!(number_json(19.3, 1.0, 0.5), json!(19.5));
     }
 
     #[test]

@@ -1833,3 +1833,40 @@ async fn the_mode_select_saves_the_other_mode() {
     let sent: serde_json::Value = serde_json::from_str(&requests[0].2).unwrap();
     assert_eq!(sent["mode"], want);
 }
+
+/// An `if` with no value yet shows an empty entry, not the list's first value it never stored.
+#[wasm_bindgen_test]
+async fn if_value_without_a_value_shows_no_choice() {
+    use oikos_core::model::Kind;
+    const UNSET: &str = r#"{
+      "id": "living_led_motion", "name": "Unset", "enabled": true, "mode": "single",
+      "nodes": [
+        { "id": "shutter", "type": "trigger.state", "params": { "entity": "cover.living" } },
+        { "id": "check", "type": "if", "params": { "op": "eq" } }
+      ],
+      "edges": [ { "from": "shutter", "to": "check" } ]
+    }"#;
+    let view = FlowView {
+        definition: Flow::decode(UNSET.as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let (host, _mounted, house) = editing(view).await;
+    let mut cover = table_lamp();
+    cover.id = "cover.living".into();
+    cover.kind = Kind::Cover;
+    cover.protocol_kind = Kind::Cover;
+    cover.component = "cover".into();
+    house.entities.update(|m| {
+        m.insert(cover.id.clone(), cover);
+    });
+    select_card(&host, "check").await;
+    let select: web_sys::HtmlSelectElement = host
+        .query_selector(".flow-drawer select:has(option[value='other'])")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no value list: {}", host.inner_html()))
+        .unchecked_into();
+    assert_eq!(select.value(), "", "{}", host.inner_html());
+    settle_history().await;
+}

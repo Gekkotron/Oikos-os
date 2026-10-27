@@ -74,6 +74,11 @@ pub fn IfValueField(
                     }
                 }
             >
+                {move || value.with(Option::is_none).then(|| view! {
+                    <option value="" disabled=true selected=true>
+                        {move || flow_text(lang(), FlowText::ChooseValue)}
+                    </option>
+                })}
                 {move || {
                     let current = value.get();
                     choices
