@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use oikos_api::{EntityView, RunStatus, RunView, StepOutcome};
+use oikos_api::{EntityView, RunStatus, RunView, StepOutcome, StepView};
 use oikos_core::command::command_name;
 use oikos_core::flow::{Flow, Node, NodeKind, parse_duration};
 
@@ -192,11 +192,31 @@ pub fn parked_node(flow: &Flow, run: &RunView) -> Option<(String, u64)> {
     }
     let step = run.steps.last()?;
     let node = flow.node(&step.node)?;
-    let port = matches!(node.kind, NodeKind::If(_)).then_some(step.detail.as_str());
-    flow.successors(&step.node, port)
-        .into_iter()
+    let next: Vec<_> = match taken_ports(node, step) {
+        Some(ports) => ports
+            .iter()
+            .flat_map(|p| flow.successors(&step.node, Some(p)))
+            .collect(),
+        None if node.kind.ports().is_empty() => flow.successors(&step.node, None),
+        None => Vec::new(),
+    };
+    next.into_iter()
         .find(|n| matches!(n.kind, NodeKind::Delay(_)))
         .map(|n| (n.id.clone(), step.at))
+}
+
+/// The ports a step of a branching node (`if`, `switch`, `time.between`) took, or `None` for
+/// a node without ports. The hub records them in `ports`; an older hub did not, and an `if`
+/// then named its branch in `detail`. A branching step with neither took no port.
+fn taken_ports(node: &Node, step: &StepView) -> Option<Vec<String>> {
+    if node.kind.ports().is_empty() {
+        return None;
+    }
+    Some(match (&step.ports, &node.kind) {
+        (Some(ports), _) => ports.clone(),
+        (None, NodeKind::If(_)) => vec![step.detail.clone()],
+        (None, _) => Vec::new(),
+    })
 }
 
 /// The second a parked delay ends at: `since` plus the delay's duration. A random delay's
@@ -218,15 +238,16 @@ pub struct Highlight {
 }
 
 /// The highlight of `run` on `flow`. An edge is lit when both ends were visited (or its end is
-/// the delay the run is parked on) and, for an `if`, its port is the branch the latest step of
-/// that `if` took (its `detail`).
+/// the delay the run is parked on) and, from a branching node, its port is one the latest step
+/// of that node took (`ports`; for an `if` from an older hub, its `detail`).
 pub fn highlight(flow: &Flow, run: Option<&RunView>) -> Highlight {
     let mut out = Highlight::default();
     let Some(run) = run else { return out };
-    let mut details: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut taken: BTreeMap<&str, Option<Vec<String>>> = BTreeMap::new();
     for step in &run.steps {
         out.nodes.insert(step.node.clone(), step.outcome);
-        details.insert(&step.node, &step.detail);
+        let ports = flow.node(&step.node).and_then(|n| taken_ports(n, step));
+        taken.insert(&step.node, ports);
     }
     let parked = parked_node(flow, run).map(|(id, _)| id);
     for edge in &flow.edges {
@@ -234,11 +255,21 @@ pub fn highlight(flow: &Flow, run: Option<&RunView>) -> Highlight {
         if !out.nodes.contains_key(&edge.from) || !(out.nodes.contains_key(&edge.to) || to_parked) {
             continue;
         }
-        let from_is_if = flow
+        let branching = flow
             .node(&edge.from)
-            .is_some_and(|n| matches!(n.kind, NodeKind::If(_)));
-        if from_is_if && details.get(edge.from.as_str()).copied() != edge.port.as_deref() {
-            continue;
+            .is_some_and(|n| !n.kind.ports().is_empty());
+        if branching {
+            let took = taken
+                .get(edge.from.as_str())
+                .and_then(Option::as_ref)
+                .is_some_and(|ports| {
+                    ports
+                        .iter()
+                        .any(|p| Some(p.as_str()) == edge.port.as_deref())
+                });
+            if !took {
+                continue;
+            }
         }
         out.edges
             .insert((edge.from.clone(), edge.port.clone(), edge.to.clone()));
@@ -279,7 +310,37 @@ pub fn status_class(status: RunStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oikos_api::{StepView, TriggerInfo};
+    use oikos_api::TriggerInfo;
+
+    fn ported(mut s: StepView, ports: &[&str]) -> StepView {
+        s.ports = Some(ports.iter().map(|p| (*p).to_owned()).collect());
+        s
+    }
+
+    fn switch_flow() -> Flow {
+        Flow::decode(
+            br#"{
+      "id": "f", "name": "F", "mode": "restart",
+      "nodes": [
+        { "id": "t", "type": "trigger.state", "name": "T", "params": { "entity": "m" } },
+        { "id": "sw", "type": "switch", "params": { "entity": "m", "rules": [
+          { "op": "eq", "value": 1 }, { "op": "eq", "value": 2 }, { "op": "eq", "value": 3 } ] } },
+        { "id": "a", "type": "command", "params": { "entity": "l", "command": { "type": "turn_on" } } },
+        { "id": "wait", "type": "delay", "params": { "for": "5m" } },
+        { "id": "c", "type": "command", "params": { "entity": "l", "command": { "type": "turn_off" } } },
+        { "id": "d", "type": "command", "params": { "entity": "l", "command": { "type": "turn_off" } } }
+      ],
+      "edges": [
+        { "from": "t", "to": "sw" },
+        { "from": "sw", "port": "1", "to": "a" },
+        { "from": "sw", "port": "2", "to": "wait" },
+        { "from": "sw", "port": "3", "to": "c" },
+        { "from": "sw", "port": "otherwise", "to": "d" }
+      ]
+    }"#,
+        )
+        .unwrap()
+    }
 
     fn reference() -> Flow {
         Flow::decode(
@@ -606,5 +667,73 @@ mod tests {
             Some("2\u{a0}min 10\u{a0}s".into())
         );
         assert_eq!(run_duration(1_000, None), None);
+    }
+
+    #[test]
+    fn highlight_reads_step_ports() {
+        let run = running(vec![
+            step("motion", StepOutcome::Ok, ""),
+            ported(
+                step("moving", StepOutcome::Ok, "average 30m = 18.6 → true"),
+                &["true"],
+            ),
+            step("on", StepOutcome::Ok, ""),
+        ]);
+        let h = highlight(&reference(), Some(&run));
+        let edge = |p: &str, t: &str| ("moving".to_owned(), Some(p.to_owned()), t.to_owned());
+        assert!(h.edges.contains(&edge("true", "on")));
+        assert!(!h.edges.contains(&edge("false", "wait")));
+    }
+
+    #[test]
+    fn highlight_switch_all_exits() {
+        let run = running(vec![
+            step("t", StepOutcome::Ok, ""),
+            ported(step("sw", StepOutcome::Ok, ""), &["1", "3"]),
+            step("a", StepOutcome::Ok, ""),
+            step("c", StepOutcome::Ok, ""),
+        ]);
+        let h = highlight(&switch_flow(), Some(&run));
+        let lit: Vec<_> = h
+            .edges
+            .iter()
+            .filter(|(f, _, _)| f == "sw")
+            .map(|(_, p, _)| p.clone().unwrap())
+            .collect();
+        assert_eq!(lit, ["1", "3"]);
+    }
+
+    #[test]
+    fn parked_on_delay_behind_switch_exit() {
+        let mut sw = ported(step("sw", StepOutcome::Ok, ""), &["2"]);
+        sw.at = 50;
+        let run = running(vec![step("t", StepOutcome::Ok, ""), sw]);
+        assert_eq!(
+            parked_node(&switch_flow(), &run),
+            Some(("wait".to_owned(), 50))
+        );
+        // A switch that took exit 1 is not parked on the delay behind exit 2.
+        let run = running(vec![ported(step("sw", StepOutcome::Ok, ""), &["1"])]);
+        assert_eq!(parked_node(&switch_flow(), &run), None);
+    }
+
+    #[test]
+    fn highlight_if_without_ports_falls_back_to_detail() {
+        let run = running(vec![
+            step("motion", StepOutcome::Ok, ""),
+            step("moving", StepOutcome::Ok, "true"),
+            step("on", StepOutcome::Ok, ""),
+        ]);
+        let h = highlight(&reference(), Some(&run));
+        assert!(h.edges.contains(&(
+            "moving".to_owned(),
+            Some("true".to_owned()),
+            "on".to_owned()
+        )));
+        assert!(
+            !h.edges
+                .iter()
+                .any(|(_, p, _)| p.as_deref() == Some("false"))
+        );
     }
 }
