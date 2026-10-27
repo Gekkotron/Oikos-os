@@ -77,6 +77,9 @@ fn normalise(config: &Value, raw: f64) -> Option<u8> {
     util::to_u8_100((raw - closed) / range * 100.0)
 }
 
+/// The states a cover is kept in: a received `stopped` resolves to `open` or `closed`.
+pub(crate) const STATES: &[&str] = &["open", "closed", "opening", "closing"];
+
 fn open_or_closed(position: u8) -> &'static str {
     if position == 0 { "closed" } else { "open" }
 }

@@ -5,7 +5,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::flow::Scalar;
 use crate::model::{Capabilities, Command, Kind};
+use crate::state::{ALARM_STATES, COVER_STATES, VACUUM_STATES};
 use crate::types::{Shape, type_def};
 
 /// What an entity can be told: a command template plus the inputs it takes.
@@ -54,6 +56,115 @@ impl Param {
             | Param::Colour { key }
             | Param::Text { key, .. } => key,
         }
+    }
+}
+
+/// What an entity can report, as the flow engine compares it (`Scalar::of_state` /
+/// `Scalar::of_generic`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Reports {
+    Values {
+        values: Vec<Scalar>,
+    },
+    Number {
+        unit: Option<String>,
+        min: Option<f64>,
+        max: Option<f64>,
+    },
+    Text,
+    Nothing,
+}
+
+fn words<'a>(list: impl IntoIterator<Item = &'a String>) -> Reports {
+    Reports::Values {
+        values: list.into_iter().map(|w| Scalar::Text(w.clone())).collect(),
+    }
+}
+
+fn fixed_words(list: &[&str]) -> Reports {
+    Reports::Values {
+        values: list.iter().map(|w| Scalar::Text((*w).to_owned())).collect(),
+    }
+}
+
+fn on_off() -> Reports {
+    Reports::Values {
+        values: vec![Scalar::Bool(true), Scalar::Bool(false)],
+    }
+}
+
+/// What an entity of `kind` (discovery `component`) can report.
+pub fn reports(kind: Kind, component: &str, caps: &Capabilities, unit: Option<&str>) -> Reports {
+    match kind {
+        Kind::Light | Kind::Switch | Kind::BinarySensor => on_off(),
+        Kind::Cover => fixed_words(COVER_STATES),
+        Kind::Vacuum => fixed_words(VACUUM_STATES),
+        Kind::Climate | Kind::WaterHeater => words(&caps.hvac_modes),
+        Kind::Select => words(&caps.options),
+        Kind::AlarmPanel => {
+            let armed: Vec<String> = caps
+                .alarm_modes
+                .iter()
+                // The mode's serde name (`away`, `custom_bypass`) is the state's suffix.
+                .filter_map(|mode| serde_json::to_value(mode).ok())
+                .filter_map(|v| v.as_str().map(|m| format!("armed_{m}")))
+                .collect();
+            fixed_words(
+                &ALARM_STATES
+                    .iter()
+                    .copied()
+                    .filter(|s| !s.starts_with("armed_") || armed.iter().any(|a| a == s))
+                    .collect::<Vec<_>>(),
+            )
+        }
+        Kind::Number => Reports::Number {
+            unit: unit.map(str::to_owned),
+            min: caps.min,
+            max: caps.max,
+        },
+        Kind::Sensor => match unit {
+            Some(unit) => Reports::Number {
+                unit: Some(unit.to_owned()),
+                min: None,
+                max: None,
+            },
+            None => Reports::Text,
+        },
+        Kind::Generic => generic_reports(component, caps, unit),
+        Kind::Button => Reports::Nothing,
+    }
+}
+
+/// A type-table entity reports its primary field.
+fn generic_reports(component: &str, caps: &Capabilities, unit: Option<&str>) -> Reports {
+    let Some(def) = type_def(component) else {
+        return Reports::Nothing;
+    };
+    let Some((name, field)) = def
+        .primary
+        .as_deref()
+        .and_then(|name| def.fields.get(name).map(|f| (name, f)))
+    else {
+        return Reports::Nothing;
+    };
+    let generic = caps.generic.as_ref();
+    match field.shape {
+        Shape::OnOff => on_off(),
+        Shape::Choice => match generic.and_then(|g| g.options.get(name)) {
+            Some(options) => words(options),
+            None => words(field.values.iter().map(|w| &w.value)),
+        },
+        Shape::Number => {
+            let range = generic.and_then(|g| g.ranges.get(name));
+            Reports::Number {
+                unit: unit.map(str::to_owned),
+                min: range.map(|r| r.min),
+                max: range.map(|r| r.max),
+            }
+        }
+        Shape::Text => Reports::Text,
+        Shape::Picture | Shape::Version => Reports::Nothing,
     }
 }
 
@@ -298,6 +409,7 @@ fn generic(component: &str, caps: &Capabilities) -> Vec<Action> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flow::Scalar;
     use crate::model::AlarmMode;
 
     #[test]
@@ -369,5 +481,111 @@ mod tests {
     #[test]
     fn sensors_accept_nothing() {
         assert!(actions(Kind::Sensor, "sensor", &Capabilities::default()).is_empty());
+    }
+
+    #[test]
+    fn cover_reports_the_words_core_keeps() {
+        let Reports::Values { values } =
+            reports(Kind::Cover, "cover", &Capabilities::default(), None)
+        else {
+            panic!("cover reports words")
+        };
+        assert_eq!(
+            values,
+            ["open", "closed", "opening", "closing"].map(|w| Scalar::Text(w.into()))
+        );
+    }
+
+    #[test]
+    fn switch_reports_booleans() {
+        assert_eq!(
+            reports(Kind::Switch, "switch", &Capabilities::default(), None),
+            Reports::Values {
+                values: vec![Scalar::Bool(true), Scalar::Bool(false)]
+            }
+        );
+    }
+
+    #[test]
+    fn alarm_reports_only_announced_armed_states() {
+        let caps = Capabilities {
+            alarm_modes: [AlarmMode::Away].into(),
+            ..Default::default()
+        };
+        let Reports::Values { values } =
+            reports(Kind::AlarmPanel, "alarm_control_panel", &caps, None)
+        else {
+            panic!("alarm reports words")
+        };
+        assert!(values.contains(&Scalar::Text("disarmed".into())));
+        assert!(values.contains(&Scalar::Text("armed_away".into())));
+        assert!(values.contains(&Scalar::Text("triggered".into())));
+        assert!(!values.contains(&Scalar::Text("armed_home".into())));
+    }
+
+    #[test]
+    fn sensor_with_unit_is_a_number() {
+        assert_eq!(
+            reports(Kind::Sensor, "sensor", &Capabilities::default(), Some("°C")),
+            Reports::Number {
+                unit: Some("°C".into()),
+                min: None,
+                max: None
+            }
+        );
+        assert_eq!(
+            reports(Kind::Sensor, "sensor", &Capabilities::default(), None),
+            Reports::Text
+        );
+    }
+
+    #[test]
+    fn select_and_climate_report_their_announced_lists() {
+        let caps = Capabilities {
+            options: vec!["eco".into()],
+            hvac_modes: vec!["heat".into()],
+            ..Default::default()
+        };
+        assert_eq!(
+            reports(Kind::Select, "select", &caps, None),
+            Reports::Values {
+                values: vec![Scalar::Text("eco".into())]
+            }
+        );
+        assert_eq!(
+            reports(Kind::Climate, "climate", &caps, None),
+            Reports::Values {
+                values: vec![Scalar::Text("heat".into())]
+            }
+        );
+    }
+
+    #[test]
+    fn generic_lock_reports_its_primary_choice() {
+        let generic = crate::types::GenericCaps {
+            options: [("state".to_owned(), vec!["locked".into(), "unlocked".into()])].into(),
+            ..Default::default()
+        };
+        let caps = Capabilities {
+            generic: Some(generic),
+            ..Default::default()
+        };
+        assert_eq!(
+            reports(Kind::Generic, "lock", &caps, None),
+            Reports::Values {
+                values: vec![
+                    Scalar::Text("locked".into()),
+                    Scalar::Text("unlocked".into())
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn button_reports_nothing() {
+        assert_eq!(
+            reports(Kind::Button, "button", &Capabilities::default(), None),
+            Reports::Nothing
+        );
     }
 }
