@@ -52,5 +52,6 @@ pub use views::{
 };
 pub use virtual_entities::{VirtualKind, VirtualSpec};
 pub use weather::{
-    WeatherCondition, WeatherCurrent, WeatherDay, WeatherPlace, WeatherToday, WeatherView,
+    WEATHER_DEVICE_NAME, WeatherCondition, WeatherCurrent, WeatherDay, WeatherPlace, WeatherToday,
+    WeatherView, weather_entity_name,
 };

@@ -275,7 +275,7 @@ The **Home** page (**Maison** in French, `/settings/home`) holds the settings of
 
 Every field that asks for an entity (the climate and home settings, the alarm's sensors, sirens, remotes and trackers, a flow card's entity, a mood's device action, a power sensor's energy counter, a group's members) opens the same picker. The closed field shows the chosen entity with its device, its room and its current value.
 
-- **Search**: type part of a name, a device, a room or a type (`temperature`, `interrupteur`), in either language and without accents; the id works too.
+- **Search**: type part of a name, a device, a room or a type (`temperature`, `interrupteur`), in either language and without accents; the id works too. The weather entities answer to their French names too (`météo`, `pluie`).
 - **Chips**: a field that needs one kind of entity opens on it (thermometers for the outdoor temperature, for example); **All** lists everything the field accepts, and **+ Diagnostic** (a toggle) adds the diagnostic, configuration and hidden entities.
 - **Rows**: each row shows the entity, its device on the second line, and on the right its value and how long ago it changed, so two "Backlight mode" switches from two plugs are told apart.
 - **On a computer** it is a window with the rooms on the left, each with its number of matches, and the entities on the right. **On a phone** it fills the screen and groups the entities under room headings.

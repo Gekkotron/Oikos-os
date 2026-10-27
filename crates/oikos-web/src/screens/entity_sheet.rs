@@ -14,7 +14,7 @@ use crate::cards::light::has_colour;
 use crate::components::hs_wheel::HsWheel;
 
 use crate::components::card_place::InSheet;
-use crate::format::{area_name, list_label, title_suffix, type_word, wrap_id};
+use crate::format::{area_name, list_label, shown_name, title_suffix, type_word, wrap_id};
 use crate::house::House;
 use crate::i18n::devices::{
     DeviceText, availability_text, key_signal, text_signal, use_device_text,
@@ -258,8 +258,8 @@ pub fn SheetBody(id: String) -> impl IntoView {
             });
             let availability = e.state.availability;
             let title = match title_suffix(lang(), &e) {
-                Some(suffix) => format!("{} · {suffix}", e.name),
-                None => e.name.clone(),
+                Some(suffix) => format!("{} · {suffix}", shown_name(lang(), &e)),
+                None => shown_name(lang(), &e).to_owned(),
             };
             view! {
                 <span class="sheet__icon" inner_html=entity_icon(&e)></span>

@@ -10,7 +10,7 @@ use super::text::{decimal, freshness};
 use crate::components::card_frame::{CardFrame, open_entity};
 use crate::components::now::{Now, unix_now};
 use crate::components::sparkline::Sparkline;
-use crate::format::{display_value, short_name, value_class};
+use crate::format::{display_value, short_name, shown_device_name, shown_name, value_class};
 use crate::house::House;
 use crate::i18n::use_lang;
 use crate::icons::DROP;
@@ -203,16 +203,19 @@ pub fn SensorCard(entity: EntityView) -> impl IntoView {
         match entity.device_class.as_deref() {
             Some("temperature") => {
                 let house = expect_context::<House>();
+                let lang = use_lang();
                 let paired = house
                     .entities
                     .with_untracked(|m| partner(m.values(), entity.device_id.as_deref()).is_some());
                 let title = if paired {
-                    short_name(&entity.name, entity.device_name.as_deref())
+                    short_name(
+                        shown_name(lang(), &entity),
+                        shown_device_name(lang(), &entity),
+                    )
                 } else {
                     String::new()
                 };
                 let body = temperature_body(&entity, house);
-                let lang = use_lang();
                 let now = use_context::<Now>();
                 let last_update = entity.state.last_update;
                 let fresh = Signal::derive(move || {

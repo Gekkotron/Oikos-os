@@ -12,13 +12,10 @@ use serde_json::{Value, json};
 
 use crate::flow_edit::fold_accents;
 use crate::flow_text::{Ctx, sentence, subline};
-use crate::format::{entity_title, kind_search_words};
+use crate::format::{entity_title, kind_search_words, room_name};
 use crate::i18n::Lang;
 use crate::i18n::flows::{FlowText, flow_text};
 use crate::screens::flow_canvas::sun::sun_params_from_preset;
-
-/// Most entities a query lists, so the list stays short.
-const MAX_ENTITIES: usize = 8;
 
 /// The section of the picker an entry sits in, in display order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -156,8 +153,8 @@ fn generic_controls(entity: &EntityView) -> Vec<Command> {
 
 /// The picker entries for `query`, ordered by [`Group`] then entity title. An empty query gives
 /// only the generic cards; otherwise those whose label matches, plus When, And and Then cards for
-/// up to eight primary entities whose title or device name holds every word of the query
-/// (ignoring case and accents).
+/// every primary entity whose title, device name or room holds every word of the query
+/// (ignoring case and accents), sorted by title ignoring case and accents.
 pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
     let needle = fold_accents(query.trim());
     let generic = [
@@ -268,18 +265,18 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             .entities
             .values()
             .filter(|e| e.is_primary())
-            .map(|e| (entity_title(ctx.lang, e), e))
+            .map(|e| (fold_accents(&entity_title(ctx.lang, e)), e))
             .filter(|(title, e)| {
                 let [en, fr] = kind_search_words(e);
                 let hay = fold_accents(&format!(
-                    "{title} {} {en} {fr}",
-                    e.device_name.as_deref().unwrap_or_default()
+                    "{title} {} {} {en} {fr}",
+                    e.device_name.as_deref().unwrap_or_default(),
+                    room_name(ctx.areas, &e.area).unwrap_or_default()
                 ));
                 words.iter().all(|w| hay.contains(w))
             })
             .collect();
         matches.sort_by(|a, b| a.0.cmp(&b.0));
-        matches.truncate(MAX_ENTITIES);
         for (_, e) in matches {
             let first = out.len();
             let current = Scalar::of_state(&e.state.value);
@@ -673,13 +670,56 @@ mod tests {
     }
 
     #[test]
-    fn caps_at_eight_entities() {
+    fn lists_every_matching_entity() {
         let list = (0..12)
             .map(|i| ent(&format!("l{i}"), &format!("Lampe {i:02}"), Kind::Light))
             .collect();
         let got = run("lampe", &house(list));
-        assert_eq!(count(&got, Group::When), 8);
-        assert_eq!(count(&got, Group::Then), 24);
+        assert_eq!(count(&got, Group::When), 12);
+        assert_eq!(count(&got, Group::Then), 36);
+    }
+
+    #[test]
+    fn room_name_matches() {
+        let mut bedroom = ent("c1", "Shutter", Kind::Cover);
+        bedroom.area = "bedroom".into();
+        let entities = house(vec![bedroom, ent("c2", "Volet nord", Kind::Cover)]);
+        let areas = vec![AreaView {
+            id: "bedroom".into(),
+            name: "Chambre".into(),
+            icon: None,
+            order: None,
+            entity_count: 1,
+            primary_count: 1,
+            group_names: Default::default(),
+            group_favorites: Default::default(),
+        }];
+        let ctx = Ctx {
+            entities: &entities,
+            areas: &areas,
+            flows: &[],
+            lang: crate::i18n::Lang::En,
+        };
+        let got = entries("chambre volet", &ctx);
+        assert_eq!(count(&got, Group::When), 1);
+        assert!(got.iter().all(|e| !e.label.contains("Volet nord")));
+    }
+
+    #[test]
+    fn sorts_ignoring_case_and_accents() {
+        let entities = house(vec![
+            ent("l1", "lampe b", Kind::Light),
+            ent("l2", "Lampe C", Kind::Light),
+            ent("l3", "Lampé a", Kind::Light),
+        ]);
+        let order: Vec<_> = run("lampe", &entities)
+            .into_iter()
+            .filter_map(|e| match e.kind {
+                NodeKind::TriggerState(p) => Some(p.entity),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(order, ["l3", "l1", "l2"]);
     }
 
     #[test]

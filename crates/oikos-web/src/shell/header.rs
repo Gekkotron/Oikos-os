@@ -42,9 +42,11 @@ fn name_of(house: House, lang: Lang, lookup: Lookup) -> Option<String> {
                     .map_or_else(|| v.id.clone(), |a| a.name.clone())
             })
         }),
-        Lookup::Entity(id) => house
-            .entities
-            .with(|entities| entities.get(id).map(|e| e.name.clone())),
+        Lookup::Entity(id) => house.entities.with(|entities| {
+            entities
+                .get(id)
+                .map(|e| crate::format::shown_name(lang, e).to_owned())
+        }),
         Lookup::Alert(id) => house
             .alerts
             .with(|list| list.iter().find(|a| a.id == id).map(|a| a.title.clone())),

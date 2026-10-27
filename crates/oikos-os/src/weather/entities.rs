@@ -5,7 +5,7 @@
 //! enum text or `ON`/`OFF`) and the availability `P/weather/availability`. The `weather`
 //! sub-tree is reserved, so the state topics are never read as discovery.
 
-use oikos_api::{WeatherCondition, WeatherView};
+use oikos_api::{WEATHER_DEVICE_NAME, WeatherCondition, WeatherView, weather_entity_name};
 use serde_json::{Value, json};
 
 /// The entity keys, in the order of the spec.
@@ -40,69 +40,31 @@ pub const KEYS: [&str; 26] = [
 
 const DEVICE_ID: &str = "oikos_weather";
 
-/// Name, unit, device class and whether it is a "now" measurement, per key.
-fn describe(
-    key: &str,
-) -> (
-    &'static str,
-    Option<&'static str>,
-    Option<&'static str>,
-    bool,
-) {
+/// Unit, device class and whether it is a "now" measurement, per key.
+fn describe(key: &str) -> (Option<&'static str>, Option<&'static str>, bool) {
     match key {
-        "temperature" => ("Outdoor temperature", Some("°C"), Some("temperature"), true),
-        "apparent_temperature" => ("Feels like", Some("°C"), Some("temperature"), true),
-        "humidity" => ("Outdoor humidity", Some("%"), Some("humidity"), true),
-        "condition" => ("Condition", None, Some("enum"), false),
-        "daylight" => ("Daylight", None, None, false),
-        "cloud_cover" => ("Cloud cover", Some("%"), None, true),
-        "precipitation" => ("Precipitation", Some("mm"), Some("precipitation"), true),
-        "wind_speed" => ("Wind speed", Some("km/h"), Some("wind_speed"), true),
-        "wind_gusts" => ("Wind gusts", Some("km/h"), Some("wind_speed"), true),
-        "wind_direction" => ("Wind direction", Some("°"), None, true),
-        "pressure" => ("Pressure", Some("hPa"), Some("atmospheric_pressure"), true),
-        "uv_index" => ("UV index", None, None, true),
-        "today_min" => ("Today's minimum", Some("°C"), Some("temperature"), false),
-        "today_max" => ("Today's maximum", Some("°C"), Some("temperature"), false),
-        "today_precipitation" => (
-            "Today's precipitation",
-            Some("mm"),
-            Some("precipitation"),
-            false,
-        ),
-        "today_precipitation_probability" => {
-            ("Today's precipitation probability", Some("%"), None, false)
+        "temperature" | "apparent_temperature" => (Some("°C"), Some("temperature"), true),
+        "humidity" => (Some("%"), Some("humidity"), true),
+        "condition" | "tomorrow_condition" => (None, Some("enum"), false),
+        "daylight" | "tomorrow_uv_index_max" => (None, None, false),
+        "cloud_cover" => (Some("%"), None, true),
+        "precipitation" => (Some("mm"), Some("precipitation"), true),
+        "wind_speed" | "wind_gusts" => (Some("km/h"), Some("wind_speed"), true),
+        "wind_direction" => (Some("°"), None, true),
+        "pressure" => (Some("hPa"), Some("atmospheric_pressure"), true),
+        "uv_index" => (None, None, true),
+        "today_min" | "today_max" | "tonight_min" | "tomorrow_min" | "tomorrow_max" => {
+            (Some("°C"), Some("temperature"), false)
         }
-        "today_wind_gusts_max" => (
-            "Today's strongest gust",
-            Some("km/h"),
-            Some("wind_speed"),
-            false,
-        ),
-        "rain_next_hour" => ("Rain next hour", Some("mm"), Some("precipitation"), false),
-        "tonight_min" => ("Tonight's minimum", Some("°C"), Some("temperature"), false),
-        "tomorrow_condition" => ("Tomorrow's condition", None, Some("enum"), false),
-        "tomorrow_min" => ("Tomorrow's minimum", Some("°C"), Some("temperature"), false),
-        "tomorrow_max" => ("Tomorrow's maximum", Some("°C"), Some("temperature"), false),
-        "tomorrow_precipitation" => (
-            "Tomorrow's precipitation",
-            Some("mm"),
-            Some("precipitation"),
-            false,
-        ),
-        "tomorrow_precipitation_probability" => (
-            "Tomorrow's precipitation probability",
-            Some("%"),
-            None,
-            false,
-        ),
-        "tomorrow_wind_gusts_max" => (
-            "Tomorrow's strongest gust",
-            Some("km/h"),
-            Some("wind_speed"),
-            false,
-        ),
-        "tomorrow_uv_index_max" => ("Tomorrow's UV index", None, None, false),
+        "today_precipitation" | "rain_next_hour" | "tomorrow_precipitation" => {
+            (Some("mm"), Some("precipitation"), false)
+        }
+        "today_precipitation_probability" | "tomorrow_precipitation_probability" => {
+            (Some("%"), None, false)
+        }
+        "today_wind_gusts_max" | "tomorrow_wind_gusts_max" => {
+            (Some("km/h"), Some("wind_speed"), false)
+        }
         other => unreachable!("unknown weather key `{other}`"),
     }
 }
@@ -131,13 +93,14 @@ pub fn availability_topic(prefix: &str) -> String {
 }
 
 fn config(prefix: &str, key: &str) -> Value {
-    let (name, unit, class, measurement) = describe(key);
+    let (unit, class, measurement) = describe(key);
+    let [name, _] = weather_entity_name(key).expect("every key has a name");
     let mut config = json!({
         "name": name,
         "unique_id": format!("weather_{key}"),
         "state_topic": state_topic(prefix, key),
         "availability_topic": availability_topic(prefix),
-        "device": { "identifiers": [DEVICE_ID], "name": "Weather" },
+        "device": { "identifiers": [DEVICE_ID], "name": WEATHER_DEVICE_NAME[0] },
     });
     if let Some(unit) = unit {
         config["unit_of_measurement"] = json!(unit);

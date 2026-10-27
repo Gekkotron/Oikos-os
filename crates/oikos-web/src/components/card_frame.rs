@@ -87,7 +87,10 @@ pub fn CardFrame(
             }
         }
     };
-    let full_name = entity.name.clone();
+    let full_name = {
+        let entity = entity.clone();
+        move || crate::format::shown_name(lang(), &entity).to_owned()
+    };
     let offline = availability == Availability::Offline;
     // A group's entity spans like the derived group card and carries its `×N` badge.
     let group = entity.id.strip_prefix(GROUP_PREFIX).map(str::to_owned);

@@ -10,7 +10,7 @@ use oikos_core::energy::{EnergyMeters, EnergyUnits};
 
 use crate::components::history_chart::{Flavor, HistoryChart};
 use crate::energy::{energy_entities, energy_entity};
-use crate::format::{area_name, title_suffix, type_word, wrap_id};
+use crate::format::{area_name, shown_name, title_suffix, type_word, wrap_id};
 use crate::house::House;
 use crate::i18n::devices::availability_text;
 use crate::i18n::history::{HistoryText, history_text, range_chip};
@@ -104,8 +104,8 @@ pub fn HistoryDetailScreen() -> impl IntoView {
             });
             let availability = e.state.availability;
             let title = match title_suffix(lang(), &e) {
-                Some(suffix) => format!("{} · {suffix}", e.name),
-                None => e.name.clone(),
+                Some(suffix) => format!("{} · {suffix}", shown_name(lang(), &e)),
+                None => shown_name(lang(), &e).to_owned(),
             };
             view! {
                 <div class="sheet__titles">
