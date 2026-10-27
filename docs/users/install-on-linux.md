@@ -39,9 +39,10 @@ on the LAN.
 
 ```bash
 cd Oikos-os
-git pull
-docker compose up -d --build
+tools/update.sh
 ```
+
+The script runs `git pull --rebase`, then `docker compose up -d --build`.
 
 ## Install profiles
 
