@@ -29,6 +29,7 @@ pub mod house;
 pub mod house_state;
 pub mod i18n;
 pub mod icons;
+pub mod if_value;
 pub mod layout;
 pub mod nav;
 pub mod override_editor;
