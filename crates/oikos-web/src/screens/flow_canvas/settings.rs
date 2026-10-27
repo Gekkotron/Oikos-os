@@ -309,7 +309,8 @@ fn node_editor_body(
         NodeKind::Command(_) => FlowText::NodeCommand,
         NodeKind::FlowEnable(_) => FlowText::NodeFlowSwitch,
         NodeKind::Notify(_) => FlowText::Notify,
-        NodeKind::Switch(_) | NodeKind::TimeBetween(_) => FlowText::NodeIf,
+        NodeKind::Switch(_) => FlowText::SwitchCard,
+        NodeKind::TimeBetween(_) => FlowText::TimeCard,
     };
     let id_display = id.clone();
     let close = move |_: web_sys::MouseEvent| selected.set(None);

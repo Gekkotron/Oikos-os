@@ -4040,6 +4040,26 @@ html:has(.flow-canvas-screen) {
   left: 100%;
 }
 
+/* Switch and time cards name each exit beside its pin, inside the card's right edge. */
+.flow-node--exits {
+  padding-right: 74px;
+}
+
+.flow-node__exit {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  max-width: 56px;
+  overflow: hidden;
+  font: 500 10px/12px var(--font-body);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.7;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 .flow-node__out[data-port="true"] {
   border-color: var(--wire-yes);
 }

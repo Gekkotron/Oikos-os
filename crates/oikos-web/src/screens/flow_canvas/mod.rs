@@ -31,7 +31,7 @@ pub use viewport::{Camera, CanvasControls, Minimap, Viewport};
 
 use crate::flow_edit::{History, add_node, duplicate_node, remove_edge, remove_node};
 use crate::flow_layout::{
-    NODE_H, NODE_W, Pt, bounds, free_spot, positions, with_resolved_positions,
+    NODE_W, Pt, bounds, free_spot, node_height, positions, with_resolved_positions,
 };
 use crate::flow_viewport::{PANEL_RESERVE_PX, add_spot, free_area};
 use crate::flows::{highlight, parked_deadline, parked_node, step_offset};
@@ -196,8 +196,9 @@ fn FlowBody(
         let view = camera.view.get_untracked();
         let start = add_spot(&view, w, h, PANEL_RESERVE_PX);
         let area = free_area(&view, w, h, PANEL_RESERVE_PX);
+        let height = node_height(&kind);
         let id = editor.edit(|f| {
-            let at = free_spot(&positions(f), start, area);
+            let at = free_spot(f, &positions(f), start, area, height);
             add_node(f, kind, at)
         });
         flash(fresh, id);
@@ -244,7 +245,7 @@ fn FlowBody(
         });
         let at = Pt {
             x: pointer.x - NODE_W / 2.0,
-            y: pointer.y - NODE_H / 2.0,
+            y: pointer.y - node_height(&kind) / 2.0,
         };
         let id = editor.edit(|f| add_node(f, kind, at));
         flash(fresh, id);
@@ -333,7 +334,7 @@ fn FlowBody(
             flow.get()
         }
     });
-    let content = Memo::new(move |_| shown.with(|f| bounds(&positions(f))));
+    let content = Memo::new(move |_| shown.with(|f| bounds(f, &positions(f))));
     let find = move |id: Option<String>| {
         id.and_then(|id| runs.with(|r| r.iter().find(|r| r.id == id).cloned()))
     };

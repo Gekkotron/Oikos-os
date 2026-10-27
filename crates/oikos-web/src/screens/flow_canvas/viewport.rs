@@ -8,7 +8,7 @@ use leptos::prelude::*;
 use oikos_core::flow::Flow;
 use wasm_bindgen::JsCast;
 
-use crate::flow_layout::{NODE_H, NODE_W, Pt, Rect, bounds, positions};
+use crate::flow_layout::{NODE_W, Pt, Rect, bounds, node_height, positions};
 use crate::flow_text::{Role, role};
 use crate::flow_viewport::{
     Mini, View, ZOOM_STEP, centre_on, fit_beside, mini_to_world, minimap, visible_world,
@@ -322,7 +322,7 @@ pub fn Minimap(view: RwSignal<View>, flow: Signal<Flow>) -> impl IntoView {
     let camera = expect_context::<Camera>();
     let t = use_flow_text();
     let placed = Memo::new(move |_| flow.with(positions));
-    let content = Memo::new(move |_| placed.with(bounds));
+    let content = Memo::new(move |_| flow.with(|f| placed.with(|p| bounds(f, p))));
     let visible = Memo::new(move |_| {
         let (w, h) = camera.size.get();
         (w > 0.0 && h > 0.0).then(|| visible_world(&view.get(), w, h))
@@ -362,6 +362,7 @@ pub fn Minimap(view: RwSignal<View>, flow: Signal<Flow>) -> impl IntoView {
                     .iter()
                     .filter_map(|n| {
                         let at = p.get(&n.id)?;
+                        let height = node_height(&n.kind);
                         let class = format!(
                             "flow-minimap__node flow-minimap__node--{}",
                             role_word(role(&n.kind))
@@ -372,7 +373,7 @@ pub fn Minimap(view: RwSignal<View>, flow: Signal<Flow>) -> impl IntoView {
                                 x=(at.x - m.ox) * m.scale
                                 y=(at.y - m.oy) * m.scale
                                 width=NODE_W * m.scale
-                                height=NODE_H * m.scale
+                                height=height * m.scale
                                 rx="2"
                             />
                         })

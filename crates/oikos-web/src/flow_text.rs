@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use oikos_api::{AreaView, EntityView};
 use oikos_core::command::command_name;
-use oikos_core::flow::{Node, NodeKind, Op, SunWhich, parse_duration, template};
+use oikos_core::flow::{Node, NodeKind, Op, RuleOp, SunWhich, parse_duration, template};
 use oikos_core::model::{Command, Hs, Kind};
 use serde_json::Value;
 
@@ -299,7 +299,18 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             p.up_to.as_deref().map(duration_words).as_deref(),
         ),
         NodeKind::Command(p) => command_sentence(&p.command, &p.entity, ctx),
-        NodeKind::Switch(_) | NodeKind::TimeBetween(_) => node.kind.type_name().to_owned(),
+        NodeKind::Switch(p) => {
+            let e = match &p.entity {
+                Some(id) => entity_text(id, ctx),
+                None => flow_text(lang, FlowText::TriggerValue).to_owned(),
+            };
+            let e = match p.average.as_deref() {
+                Some(window) => t::average_of(lang, &e, &duration_words(window)),
+                None => e,
+            };
+            t::switch_on(lang, &e)
+        }
+        NodeKind::TimeBetween(p) => t::time_between(lang, &p.from, &p.to),
         NodeKind::Notify(p) => {
             // Placeholders show the entity's name; a text that does not parse shows as typed.
             let name = |id: &str| ctx.entities.get(id).map(|e| entity_title(lang, e));
@@ -321,6 +332,63 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
     }
 }
 
+/// The short label beside the pin `port` of a card: a switch rule as "< 18 lx", "18–22 lx" or
+/// "= on" (the unit and value words of the card's sentence), "otherwise" for the last exit, and
+/// a time card's "07:00–22:30" / "outside". Empty for the other cards, whose pins carry none.
+pub fn exit_label(lang: Lang, kind: &NodeKind, port: &str, ctx: &Ctx) -> String {
+    match kind {
+        NodeKind::Switch(p) => {
+            if port == "otherwise" {
+                return flow_text(lang, FlowText::Otherwise).to_owned();
+            }
+            let Some(rule) = port
+                .parse::<usize>()
+                .ok()
+                .and_then(|n| n.checked_sub(1))
+                .and_then(|i| p.rules.get(i))
+            else {
+                return String::new();
+            };
+            let entity = p.entity.as_deref().and_then(|id| ctx.entities.get(id));
+            let unit = p.entity.as_deref().and_then(|id| unit_of(id, ctx));
+            let words = |v: &Value| value_words(lang, v, unit, entity);
+            let sign = match rule.op {
+                RuleOp::Eq => "=",
+                RuleOp::Ne => "≠",
+                RuleOp::Gt => ">",
+                RuleOp::Lt => "<",
+                RuleOp::Gte => "≥",
+                RuleOp::Lte => "≤",
+                RuleOp::Between => {
+                    // The unit once, after the range: "18–22 °C".
+                    let num = |v: &Value| match v {
+                        Value::Number(n) => Some(
+                            n.as_f64()
+                                .map_or_else(|| n.to_string(), |f| number(lang, f)),
+                        ),
+                        _ => None,
+                    };
+                    return match (num(&rule.value), rule.to.as_ref().and_then(num)) {
+                        (Some(a), Some(b)) => with_unit(format!("{a}–{b}"), unit),
+                        _ => format!(
+                            "{}–{}",
+                            words(&rule.value),
+                            rule.to.as_ref().map(words).unwrap_or_default()
+                        ),
+                    };
+                }
+            };
+            format!("{sign} {}", words(&rule.value))
+        }
+        NodeKind::TimeBetween(p) => match port {
+            "in" => format!("{}–{}", p.from, p.to),
+            "out" => flow_text(lang, FlowText::Outside).to_owned(),
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
 fn named(node: &Node) -> Option<&str> {
     node.name.as_deref().filter(|n| !n.trim().is_empty())
 }
@@ -335,6 +403,7 @@ fn entity_id(node: &Node) -> Option<&str> {
         NodeKind::TriggerState(p) => Some(&p.entity),
         NodeKind::TriggerSignal(p) => Some(&p.entity),
         NodeKind::If(p) => p.entity.as_deref(),
+        NodeKind::Switch(p) => p.entity.as_deref(),
         NodeKind::Command(p) => Some(&p.entity),
         _ => None,
     }
@@ -509,6 +578,53 @@ mod tests {
         assert_eq!(fr(weekdays), "Du lundi au vendredi à 07:00");
         let enable = r#"{"id":"a","type":"flow.enable","params":{"enabled":false}}"#;
         assert_eq!(fr(enable), "Désactiver cette automatisation");
+    }
+
+    #[test]
+    fn switch_and_time_sentences_en_fr() {
+        let switch = r#"{"id":"s","type":"switch","params":{"entity":"lux","rules":[{"op":"lt","value":18}]}}"#;
+        assert_eq!(text(switch), "Switch on Entrée");
+        assert_eq!(text_in(Lang::Fr, switch), "Commuter selon Entrée");
+        let bare = r#"{"id":"s","type":"switch","params":{"rules":[{"op":"lt","value":18}]}}"#;
+        assert_eq!(text(bare), "Switch on Trigger value");
+        let time = r#"{"id":"t","type":"time.between","params":{"from":"07:00","to":"22:30"}}"#;
+        assert_eq!(text(time), "Between 07:00 and 22:30");
+        assert_eq!(text_in(Lang::Fr, time), "Entre 07:00 et 22:30");
+        assert_eq!(role(&node(switch).kind), Role::Check);
+        assert_eq!(role(&node(time).kind), Role::Check);
+    }
+
+    fn label(lang: Lang, json: &str, port: &str) -> String {
+        let entities = house();
+        let areas = areas();
+        let ctx = Ctx {
+            entities: &entities,
+            areas: &areas,
+            flows: &[],
+            lang,
+        };
+        exit_label(lang, &node(json).kind, port, &ctx)
+    }
+
+    #[test]
+    fn exit_labels() {
+        let switch = r#"{"id":"s","type":"switch","params":{"entity":"lux","otherwise":true,"rules":[
+            {"op":"lt","value":18},{"op":"between","value":18,"to":22},{"op":"eq","value":true}]}}"#;
+        assert_eq!(label(Lang::En, switch, "1"), "< 18\u{a0}lx");
+        assert_eq!(label(Lang::En, switch, "2"), "18–22\u{a0}lx");
+        assert_eq!(label(Lang::En, switch, "3"), "= on");
+        assert_eq!(label(Lang::En, switch, "otherwise"), "otherwise");
+        assert_eq!(label(Lang::Fr, switch, "otherwise"), "sinon");
+        assert_eq!(label(Lang::Fr, switch, "2"), "18–22\u{a0}lx");
+        assert_eq!(label(Lang::En, switch, "9"), "");
+        let light = r#"{"id":"s","type":"switch","params":{"entity":"l1","rules":[{"op":"eq","value":true}]}}"#;
+        assert_eq!(label(Lang::Fr, light, "1"), "= allumée");
+        let time = r#"{"id":"t","type":"time.between","params":{"from":"07:00","to":"22:30"}}"#;
+        assert_eq!(label(Lang::En, time, "in"), "07:00–22:30");
+        assert_eq!(label(Lang::En, time, "out"), "outside");
+        assert_eq!(label(Lang::Fr, time, "out"), "en dehors");
+        let ifnode = r#"{"id":"a","type":"if","params":{"entity":"l1","op":"eq","value":true}}"#;
+        assert_eq!(label(Lang::En, ifnode, "true"), "");
     }
 
     #[test]

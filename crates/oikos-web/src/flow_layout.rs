@@ -9,6 +9,10 @@ use oikos_core::flow::{Flow, NodeKind, Position};
 pub const NODE_W: f64 = 232.0;
 /// Height of a card (pill) on the canvas.
 pub const NODE_H: f64 = 52.0;
+/// Height each exit of a switch card needs, so its pins and their labels stay apart.
+const EXIT_H: f64 = 20.0;
+/// Padding a switch card adds around its exits.
+const EXIT_PAD: f64 = 14.0;
 /// Horizontal space between two columns.
 pub const COL_GAP: f64 = 96.0;
 /// Vertical space between two cards of a column.
@@ -58,21 +62,43 @@ const RAMP: f64 = COL_GAP * 0.75;
 /// at the pin's own height, so the two labels of an `if` stay as far apart as its two pins.
 const LABEL_DX: f64 = 24.0;
 
+/// The height of a card: [`NODE_H`], except a switch, which grows to give each exit a row.
+pub fn node_height(kind: &NodeKind) -> f64 {
+    match kind {
+        NodeKind::Switch(_) => NODE_H.max(EXIT_PAD + EXIT_H * kind.ports().len() as f64),
+        _ => NODE_H,
+    }
+}
+
+/// The height of the card `id` in `flow`; [`NODE_H`] for an id the flow does not have.
+fn height_of(flow: &Flow, id: &str) -> f64 {
+    flow.node(id).map_or(NODE_H, |n| node_height(&n.kind))
+}
+
 /// Where a new card goes so it overlaps none of the cards in `taken` (their top-left corners)
 /// and stays inside `area` (what is on screen): down the column from `start` in steps of one
-/// card and [`STACK_GAP`], then from the top of that column, then in the columns beside it,
+/// card (`height` tall, the new card's) and [`STACK_GAP`], then from the top of that column, then in the columns beside it,
 /// nearest first. `start` itself when nothing in `area` is free.
-pub fn free_spot(taken: &BTreeMap<String, Pt>, start: Pt, area: Rect) -> Pt {
+pub fn free_spot(
+    flow: &Flow,
+    taken: &BTreeMap<String, Pt>,
+    start: Pt,
+    area: Rect,
+    height: f64,
+) -> Pt {
     let free = |at: Pt| {
-        !taken.values().any(|p| {
-            at.x < p.x + NODE_W && p.x < at.x + NODE_W && at.y < p.y + NODE_H && p.y < at.y + NODE_H
+        !taken.iter().any(|(id, p)| {
+            at.x < p.x + NODE_W
+                && p.x < at.x + NODE_W
+                && at.y < p.y + height_of(flow, id)
+                && p.y < at.y + height
         })
     };
     let (right, bottom) = (area.x + area.w, area.y + area.h);
-    let (step_x, step_y) = (NODE_W + COL_GAP, NODE_H + STACK_GAP);
+    let (step_x, step_y) = (NODE_W + COL_GAP, height + STACK_GAP);
     let column = |x: f64| {
         let below = std::iter::successors(Some(start.y), move |y| Some(y + step_y))
-            .take_while(move |y| y + NODE_H <= bottom);
+            .take_while(move |y| y + height <= bottom);
         let above = std::iter::successors(Some(area.y), move |y| Some(y + step_y))
             .take_while(move |y| *y < start.y);
         below
@@ -124,9 +150,9 @@ pub fn auto_layout(flow: &Flow) -> BTreeMap<String, Pt> {
             let s = slots.len();
             slot_of.entry(id.clone()).or_insert(s);
             slots.push(Slot {
+                h: height_of(flow, &id),
                 node: Some(id),
                 col,
-                h: NODE_H,
             });
             column.push(s);
         }
@@ -261,18 +287,18 @@ pub fn with_resolved_positions(flow: &Flow) -> Flow {
     out
 }
 
-/// The rectangle a card at `at` covers.
-fn card(at: Pt) -> Rect {
+/// The rectangle a card `height` tall at `at` covers.
+fn card(at: Pt, height: f64) -> Rect {
     Rect {
         x: at.x,
         y: at.y,
         w: NODE_W,
-        h: NODE_H,
+        h: height,
     }
 }
 
 /// The smallest rectangle holding every card, with no margin; all zero when there is none.
-pub fn bounds(pos: &BTreeMap<String, Pt>) -> Rect {
+pub fn bounds(flow: &Flow, pos: &BTreeMap<String, Pt>) -> Rect {
     if pos.is_empty() {
         return Rect {
             x: 0.0,
@@ -283,11 +309,11 @@ pub fn bounds(pos: &BTreeMap<String, Pt>) -> Rect {
     }
     let (mut x0, mut y0) = (f64::INFINITY, f64::INFINITY);
     let (mut x1, mut y1) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-    for at in pos.values() {
+    for (id, at) in pos {
         x0 = x0.min(at.x);
         y0 = y0.min(at.y);
         x1 = x1.max(at.x + NODE_W);
-        y1 = y1.max(at.y + NODE_H);
+        y1 = y1.max(at.y + height_of(flow, id));
     }
     Rect {
         x: x0,
@@ -297,26 +323,34 @@ pub fn bounds(pos: &BTreeMap<String, Pt>) -> Rect {
     }
 }
 
-/// Where a wire leaves a card at `at`: its right edge, halfway down, or for an `if` 30 % down
-/// for `true` and 70 % down for `false`.
+/// Where a wire leaves a card at `at`: its right edge, halfway down; for an `if` 30 % down for
+/// `true` and 70 % down for `false`; for a switch, each exit evenly down the card; for a time
+/// card 30 % down for `in` and 70 % down for `out`.
 pub fn out_anchor(kind: &NodeKind, at: Pt, port: Option<&str>) -> Pt {
     let down = match (kind, port) {
-        (NodeKind::If(_), Some("true")) => 0.3,
-        (NodeKind::If(_), Some("false")) => 0.7,
+        (NodeKind::If(_), Some("true")) | (NodeKind::TimeBetween(_), Some("in")) => 0.3,
+        (NodeKind::If(_), Some("false")) | (NodeKind::TimeBetween(_), Some("out")) => 0.7,
+        (NodeKind::Switch(_), Some(port)) => {
+            let ports = kind.ports();
+            ports
+                .iter()
+                .position(|p| p == port)
+                .map_or(0.5, |i| (i as f64 + 0.5) / ports.len() as f64)
+        }
         _ => 0.5,
     };
     Pt {
         x: at.x + NODE_W,
-        y: at.y + NODE_H * down,
+        y: at.y + node_height(kind) * down,
     }
 }
 
-/// Where a wire enters a card at `at`: the input pin, on its left edge halfway down. Every
-/// wire into one card meets there, as the card has a single input.
-pub fn in_anchor(at: Pt) -> Pt {
+/// Where a wire enters a card at `at`, `height` tall: the input pin, on its left edge halfway
+/// down. Every wire into one card meets there, as the card has a single input.
+pub fn in_anchor(at: Pt, height: f64) -> Pt {
     Pt {
         x: at.x,
-        y: at.y + NODE_H / 2.0,
+        y: at.y + height / 2.0,
     }
 }
 
@@ -457,11 +491,11 @@ fn finish(from: Pt, path: &[Seg]) -> Route {
 
 /// The wire that passes under a card at `at`, the one closest to the card's centre when
 /// several do; `None` when none crosses it.
-pub fn wire_under(wires: &[(Key, Route)], at: Pt) -> Option<Key> {
-    let rect = card(at);
+pub fn wire_under(wires: &[(Key, Route)], at: Pt, height: f64) -> Option<Key> {
+    let rect = card(at, height);
     let centre = Pt {
         x: at.x + NODE_W / 2.0,
-        y: at.y + NODE_H / 2.0,
+        y: at.y + height / 2.0,
     };
     wires
         .iter()
@@ -500,13 +534,13 @@ pub fn routes_past(
             let from = flow.node(&edge.from)?;
             let start = out_anchor(&from.kind, *pos.get(&edge.from)?, edge.port.as_deref());
             let key = (edge.from.clone(), edge.port.clone(), edge.to.clone());
-            let end = in_anchor(*pos.get(&edge.to)?);
+            let end = in_anchor(*pos.get(&edge.to)?, height_of(flow, &edge.to));
             let obstacles: Vec<Rect> = pos
                 .iter()
                 .filter(|(id, _)| {
                     **id != edge.from && **id != edge.to && Some(id.as_str()) != loose
                 })
-                .map(|(_, at)| card(*at))
+                .map(|(id, at)| card(*at, height_of(flow, id)))
                 .collect();
             Some((key, route(start, end, &obstacles)))
         })
@@ -521,7 +555,13 @@ mod tests {
     fn free_spot_keeps_a_free_start() {
         let taken = BTreeMap::from([("a".to_owned(), Pt { x: 500.0, y: 500.0 })]);
         assert_eq!(
-            free_spot(&taken, Pt { x: 0.0, y: 0.0 }, WIDE),
+            free_spot(
+                &Flow::default(),
+                &taken,
+                Pt { x: 0.0, y: 0.0 },
+                WIDE,
+                NODE_H
+            ),
             Pt { x: 0.0, y: 0.0 }
         );
     }
@@ -540,7 +580,13 @@ mod tests {
         ]);
         // Two cards in the way: it lands two steps down.
         assert_eq!(
-            free_spot(&taken, Pt { x: 0.0, y: 0.0 }, WIDE),
+            free_spot(
+                &Flow::default(),
+                &taken,
+                Pt { x: 0.0, y: 0.0 },
+                WIDE,
+                NODE_H
+            ),
             Pt {
                 x: 0.0,
                 y: 2.0 * (NODE_H + STACK_GAP)
@@ -595,7 +641,13 @@ mod tests {
                 )
             })
             .collect();
-        let at = free_spot(&taken, Pt { x: 300.0, y: 150.0 }, area);
+        let at = free_spot(
+            &Flow::default(),
+            &taken,
+            Pt { x: 300.0, y: 150.0 },
+            area,
+            NODE_H,
+        );
         assert!(!overlaps_any(&taken, at), "{at:?}");
         assert!(at.x >= area.x && at.x + NODE_W <= area.x + area.w, "{at:?}");
         assert!(at.y >= area.y && at.y + NODE_H <= area.y + area.h, "{at:?}");
@@ -614,7 +666,10 @@ mod tests {
             ("b".to_owned(), Pt { x: 0.0, y: 50.0 }),
         ]);
         let start = Pt { x: 20.0, y: 20.0 };
-        assert_eq!(free_spot(&taken, start, area), start);
+        assert_eq!(
+            free_spot(&Flow::default(), &taken, start, area, NODE_H),
+            start
+        );
     }
 
     fn led() -> Flow {
@@ -707,7 +762,10 @@ mod tests {
         for (i, (a, pa)) in cards.iter().enumerate() {
             assert!(pa.x >= PAD && pa.y >= PAD, "{a} at {pa:?}");
             for (b, pb) in &cards[i + 1..] {
-                assert!(!intersects(card(**pa), card(**pb)), "{a} overlaps {b}");
+                assert!(
+                    !intersects(card(**pa, NODE_H), card(**pb, NODE_H)),
+                    "{a} overlaps {b}"
+                );
             }
         }
     }
@@ -725,7 +783,7 @@ mod tests {
                         continue;
                     }
                     assert!(
-                        !inside(p, card(*at)),
+                        !inside(p, card(*at, NODE_H)),
                         "{from} -{port:?}-> {to} crosses {id} at {p:?}: {}",
                         route.d
                     );
@@ -772,6 +830,98 @@ mod tests {
                 y: 20.0 + NODE_H / 2.0
             }
         );
+    }
+
+    fn switch_kind(rules: usize, otherwise: bool) -> NodeKind {
+        let node: oikos_core::flow::Node = serde_json::from_value(serde_json::json!({
+            "id": "s", "type": "switch",
+            "params": { "entity": "e", "otherwise": otherwise,
+                "rules": (0..rules).map(|i| serde_json::json!({ "op": "gt", "value": i })).collect::<Vec<_>>() }
+        }))
+        .unwrap();
+        node.kind
+    }
+
+    #[test]
+    fn switch_card_grows_with_exits() {
+        assert_eq!(node_height(&switch_kind(1, false)), NODE_H);
+        assert_eq!(node_height(&switch_kind(1, true)), 54.0);
+        assert_eq!(node_height(&switch_kind(5, true)), 134.0);
+        let kind = switch_kind(5, true);
+        let height = node_height(&kind);
+        let origin = Pt { x: 0.0, y: 0.0 };
+        let ports = kind.ports();
+        let ys: Vec<f64> = ports
+            .iter()
+            .map(|p| out_anchor(&kind, origin, Some(p)).y)
+            .collect();
+        assert!(ys.windows(2).all(|w| w[0] < w[1]), "{ys:?}");
+        assert!(ys.iter().all(|y| *y > 0.0 && *y < height), "{ys:?}");
+        // Other cards keep the standard height.
+        assert_eq!(node_height(&led().node("tv_on").unwrap().kind), NODE_H);
+    }
+
+    #[test]
+    fn time_card_pins_sit_at_30_and_70_percent() {
+        let node: oikos_core::flow::Node = serde_json::from_value(serde_json::json!({
+            "id": "t", "type": "time.between", "params": { "from": "07:00", "to": "22:00" }
+        }))
+        .unwrap();
+        let o = Pt { x: 0.0, y: 0.0 };
+        assert_eq!(out_anchor(&node.kind, o, Some("in")).y, NODE_H * 0.3);
+        assert_eq!(out_anchor(&node.kind, o, Some("out")).y, NODE_H * 0.7);
+    }
+
+    #[test]
+    fn switch_wires_end_on_their_pins() {
+        let flow = Flow::decode(
+            br#"{
+          "id": "f", "name": "F",
+          "nodes": [
+            { "id": "t", "type": "trigger.state", "params": { "entity": "e" } },
+            { "id": "s", "type": "switch", "params": { "entity": "e", "otherwise": true,
+              "rules": [ { "op": "gt", "value": 1 }, { "op": "gt", "value": 2 }, { "op": "gt", "value": 3 } ] } },
+            { "id": "a", "type": "delay", "params": { "for": "1m" } },
+            { "id": "b", "type": "delay", "params": { "for": "1m" } },
+            { "id": "c", "type": "delay", "params": { "for": "1m" } },
+            { "id": "d", "type": "delay", "params": { "for": "1m" } }
+          ],
+          "edges": [
+            { "from": "t", "to": "s" },
+            { "from": "s", "port": "1", "to": "a" },
+            { "from": "s", "port": "2", "to": "b" },
+            { "from": "s", "port": "3", "to": "c" },
+            { "from": "s", "port": "otherwise", "to": "d" }
+          ]
+        }"#,
+        )
+        .unwrap();
+        let pos = auto_layout(&flow);
+        let kind = &flow.node("s").unwrap().kind;
+        assert_eq!(node_height(kind), 94.0);
+        for ((from, port, to), route) in &routes(&flow, &pos) {
+            let samples = route_samples(&route.d, 48);
+            let (start, end) = (samples[0], *samples.last().unwrap());
+            let pin_out = out_anchor(&flow.node(from).unwrap().kind, pos[from], port.as_deref());
+            let pin_in = in_anchor(pos[to], height_of(&flow, to));
+            // The path text keeps one decimal.
+            let near = |a: Pt, b: Pt| (a.x - b.x).abs() < 0.06 && (a.y - b.y).abs() < 0.06;
+            assert!(
+                near(start, pin_out),
+                "{from} {port:?}: {start:?} vs {pin_out:?}"
+            );
+            assert!(near(end, pin_in), "{to}: {end:?} vs {pin_in:?}");
+        }
+        // No two cards of the laid-out flow overlap, the tall switch included.
+        let rects: Vec<Rect> = pos
+            .iter()
+            .map(|(id, at)| card(*at, height_of(&flow, id)))
+            .collect();
+        for (i, a) in rects.iter().enumerate() {
+            for b in &rects[i + 1..] {
+                assert!(!intersects(*a, *b), "{a:?} {b:?}");
+            }
+        }
     }
 
     fn placed(flow: &mut Flow) {
@@ -865,7 +1015,7 @@ mod tests {
             ("b".to_owned(), Pt { x: 400.0, y: 10.0 }),
         ]);
         assert_eq!(
-            bounds(&pos),
+            bounds(&Flow::default(), &pos),
             Rect {
                 x: 40.0,
                 y: 10.0,
@@ -874,7 +1024,7 @@ mod tests {
             }
         );
         assert_eq!(
-            bounds(&BTreeMap::new()),
+            bounds(&Flow::default(), &BTreeMap::new()),
             Rect {
                 x: 0.0,
                 y: 0.0,
@@ -984,10 +1134,10 @@ mod tests {
         let flow = wire_and_loose_card(90.0);
         let pos = positions(&flow);
         // Routed around it, the wire dodges the card; ignoring it, the wire runs straight under.
-        assert_eq!(wire_under(&routes(&flow, &pos), pos["n"]), None);
+        assert_eq!(wire_under(&routes(&flow, &pos), pos["n"], NODE_H), None);
         let wires = routes_past(&flow, &pos, Some("n"));
         assert_eq!(
-            wire_under(&wires, pos["n"]),
+            wire_under(&wires, pos["n"], NODE_H),
             Some(("t".into(), None, "d".into()))
         );
     }
@@ -997,7 +1147,7 @@ mod tests {
         let flow = wire_and_loose_card(300.0);
         let pos = positions(&flow);
         assert_eq!(
-            wire_under(&routes_past(&flow, &pos, Some("n")), pos["n"]),
+            wire_under(&routes_past(&flow, &pos, Some("n")), pos["n"], NODE_H),
             None
         );
     }

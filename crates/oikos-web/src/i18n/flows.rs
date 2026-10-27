@@ -54,6 +54,12 @@ pub enum FlowText {
     SunEventSub,
     WhenDark,
     WhenDarkSub,
+    SwitchCard,
+    SwitchSub,
+    TimeCard,
+    TimeSub,
+    Otherwise,
+    Outside,
     WaitCard,
     WaitSub,
     NotifySub,
@@ -277,6 +283,12 @@ impl FlowText {
         FlowText::SunEventSub,
         FlowText::WhenDark,
         FlowText::WhenDarkSub,
+        FlowText::SwitchCard,
+        FlowText::SwitchSub,
+        FlowText::TimeCard,
+        FlowText::TimeSub,
+        FlowText::Otherwise,
+        FlowText::Outside,
         FlowText::WaitCard,
         FlowText::WaitSub,
         FlowText::NotifySub,
@@ -507,6 +519,18 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         ),
         T::WhenDark => ("When it's dark", "Quand il fait nuit"),
         T::WhenDarkSub => ("Between dusk and dawn", "Entre le crépuscule et l'aube"),
+        T::SwitchCard => ("Switch", "Commuter"),
+        T::SwitchSub => (
+            "Several exits, one per rule",
+            "Plusieurs sorties, une par règle",
+        ),
+        T::TimeCard => ("Time of day", "Plage horaire"),
+        T::TimeSub => (
+            "Inside or outside two times",
+            "Dans ou hors d'une plage horaire",
+        ),
+        T::Otherwise => ("otherwise", "sinon"),
+        T::Outside => ("outside", "en dehors"),
         T::WaitCard => ("Wait", "Attente"),
         T::WaitSub => ("A fixed or random delay", "Une attente fixe ou aléatoire"),
         T::NotifySub => (
@@ -1074,6 +1098,24 @@ pub fn sun_sentence(lang: Lang, which: SunWhich, offset_minutes: i32) -> String 
     }
 }
 
+/// The `switch` card: "Switch on Temperature" / "Commuter selon Temperature".
+pub fn switch_on(lang: Lang, e: &str) -> String {
+    pick(
+        lang,
+        format!("Switch on {e}"),
+        format!("Commuter selon {e}"),
+    )
+}
+
+/// The `time.between` card: "Between 07:00 and 22:30" / "Entre 07:00 et 22:30".
+pub fn time_between(lang: Lang, from: &str, to: &str) -> String {
+    pick(
+        lang,
+        format!("Between {from} and {to}"),
+        format!("Entre {from} et {to}"),
+    )
+}
+
 /// The `is_dark` card: the plain question without a shift, else where the dark starts:
 /// "Is it dark? (from 30 min before civil dusk)" / "Fait-il nuit\u{A0}? (dès 30 min avant le
 /// crépuscule civil)".
@@ -1242,6 +1284,20 @@ mod tests {
         FlowText::SevInfo,
         FlowText::NodeAction,
     ];
+
+    #[test]
+    fn switch_and_time_sentences() {
+        assert_eq!(switch_on(Lang::En, "Lamp"), "Switch on Lamp");
+        assert_eq!(switch_on(Lang::Fr, "Lampe"), "Commuter selon Lampe");
+        assert_eq!(
+            time_between(Lang::En, "07:00", "22:30"),
+            "Between 07:00 and 22:30"
+        );
+        assert_eq!(
+            time_between(Lang::Fr, "07:00", "22:30"),
+            "Entre 07:00 et 22:30"
+        );
+    }
 
     #[test]
     fn every_word_has_both_languages() {

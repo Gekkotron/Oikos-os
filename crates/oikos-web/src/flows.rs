@@ -76,7 +76,8 @@ fn summary_label(lang: Lang, node: &Node) -> String {
         NodeKind::Command(p) => command_label(lang, command_name(&p.command)),
         NodeKind::FlowEnable(p) => flow_switch_text(lang, p),
         NodeKind::Notify(_) => flow_text(lang, FlowText::Notify).into(),
-        NodeKind::Switch(_) | NodeKind::TimeBetween(_) => node.kind.type_name().into(),
+        NodeKind::Switch(_) => flow_text(lang, FlowText::SwitchCard).into(),
+        NodeKind::TimeBetween(_) => flow_text(lang, FlowText::TimeCard).into(),
     }
 }
 

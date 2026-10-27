@@ -296,9 +296,10 @@ pub fn consumer_icon(icon: Option<oikos_core::energy::ConsumerIcon>) -> &'static
     consumer_glyph(icon.map(oikos_core::energy::ConsumerIcon::key))
 }
 
-/// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if`, a
-/// clock for a schedule, a sun for a solar event, a moon for an `if` on darkness, an hourglass for a delay, a play triangle for a command, a toggle
-/// for a flow switch and a bell for a notification.
+/// The glyph of a flow node on the canvas: a bolt for a trigger, a fork for an `if` or a
+/// switch, a clock for a schedule or a time-of-day check, a sun for a solar event, a moon for an
+/// `if` on darkness, an hourglass for a delay, a play triangle for a command, a toggle for a
+/// flow switch and a bell for a notification.
 pub fn node_icon(kind: &NodeKind) -> &'static str {
     match kind {
         NodeKind::TriggerState(_) => NODE_BOLT,
