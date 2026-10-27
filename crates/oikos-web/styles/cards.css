@@ -227,9 +227,20 @@
   min-width: 60px;
 }
 
+/* A value card's 24 h curve, under the value: it opens the history chart. */
+.value__spark {
+  display: block;
+  margin-top: 8px;
+}
+
 .spark-wrap {
   display: block;
   height: 28px;
+}
+
+.spark-wrap--empty,
+.value__spark:has(.spark-wrap--empty) {
+  display: none;
 }
 
 .spark {
