@@ -120,7 +120,7 @@ A `trigger.manual` card starts a run when you press its ▶ button, like Node-RE
 ```
 
 - A run started from a card with a value makes an `if` or `switch` that has no entity compare that value, and `{trigger}` in a notify text print it. An `if` or `switch` after a card with a value cannot use `average`, since there is no entity to average. After a card without a value, an `if` or `switch` must name an entity, as after a schedule or sun trigger.
-- The run is marked manual and the Runs drawer shows "▶ Manual · on" (or "▶ Manual" without a value). The step detail reads `manual` or `manual: <value>`.
+- The run is marked manual and the Runs drawer shows "▶ manual · on" (or "▶ manual" without a value). The step detail reads `manual` or `manual: <value>`.
 - A card press follows the flow's `mode` when a run is active: `single` refuses it ("a run is active"), `restart` cancels the active run and starts the new one. **Run now**, which names no card, is refused while a run is active in both modes.
 - A flow with several Manual cards can run from any of them: pass the card's id, as `{"node": "test_on"}` in the body of `POST /api/v1/flows/{id}/run` or as the `node` argument of the `run_flow` MCP tool. An id that is not a Manual card of that flow is refused. Without `node`, the run starts from the first trigger node, and carries its value if that node is a Manual card.
 - A disabled, invalid or unknown flow is refused, as for **Run now**.

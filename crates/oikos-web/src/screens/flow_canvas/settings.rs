@@ -1633,7 +1633,8 @@ fn manual_fields(form: Form, id: String, initial: Option<Scalar>) -> impl IntoVi
                 type="number"
                 class="field"
                 step="any"
-                prop:value=move || raw.get()
+                // Not reactive: mid-typing ("-", "2.") a number box reports "" and would be wiped.
+                prop:value=raw.get_untracked()
                 on:input=on_raw.clone()
             />
         </Show>

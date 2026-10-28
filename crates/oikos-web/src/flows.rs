@@ -178,15 +178,7 @@ pub fn trigger_line(
 pub fn orphans(flow: &Flow) -> BTreeSet<String> {
     flow.nodes
         .iter()
-        .filter(|n| {
-            !matches!(
-                n.kind,
-                NodeKind::TriggerState(_)
-                    | NodeKind::TriggerSchedule(_)
-                    | NodeKind::TriggerManual(_)
-                    | NodeKind::TriggerSignal(_)
-            )
-        })
+        .filter(|n| !n.kind.is_trigger())
         .filter(|n| !flow.edges.iter().any(|e| e.to == n.id))
         .map(|n| n.id.clone())
         .collect()

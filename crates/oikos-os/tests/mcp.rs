@@ -858,6 +858,7 @@ async fn run_flow_takes_a_manual_card() {
     );
     assert_eq!(run["flow_id"], "living");
     assert_eq!(run["status"], "running");
+    assert_eq!(run["trigger"]["value"], json!(true), "{run}");
 
     client.cancel().await.expect("close");
 }

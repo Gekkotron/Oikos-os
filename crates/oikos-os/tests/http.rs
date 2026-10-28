@@ -1572,6 +1572,7 @@ async fn post_flow_run_starts_from_a_manual_card() {
     assert_eq!(res.status(), StatusCode::ACCEPTED);
     let res: Value = res.json().await.expect("json");
     assert_eq!(res["status"], "running");
+    assert_eq!(res["trigger"]["value"], json!(true), "{res}");
 }
 
 #[tokio::test]
