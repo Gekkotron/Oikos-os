@@ -376,7 +376,8 @@ impl Hub {
                 | NodeKind::Notify(_)
                 | NodeKind::TimeBetween(_)
                 | NodeKind::TriggerSchedule(_)
-                | NodeKind::TriggerSun(_) => None,
+                | NodeKind::TriggerSun(_)
+                | NodeKind::TriggerManual(_) => None,
             };
             let Some(entity) = entity else { continue };
             let Some(found) = reg.entity(entity) else {

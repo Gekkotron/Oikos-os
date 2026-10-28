@@ -29,10 +29,16 @@ pub enum FlowError {
     BadValue { node: String },
     #[error("node `{node}`: {reason}")]
     BadCron { node: String, reason: String },
-    #[error("node `{node}`: an if after a schedule or sun trigger must name an entity")]
+    #[error(
+        "node `{node}`: an if after a schedule, sun or manual trigger without a value must name an entity"
+    )]
     IfNeedsEntity { node: String },
-    #[error("node `{node}`: a switch after a schedule or sun trigger must name an entity")]
+    #[error(
+        "node `{node}`: a switch after a schedule, sun or manual trigger without a value must name an entity"
+    )]
     SwitchNeedsEntity { node: String },
+    #[error("node `{node}`: an average after a manual trigger must name an entity")]
+    AverageNeedsEntity { node: String },
     #[error("node `{node}`: `{flow}` is not a valid flow id")]
     BadFlowTarget { node: String, flow: String },
     #[error("node `{node}`: offset_minutes {offset_minutes} is outside [-720, 720]")]
@@ -340,27 +346,24 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     check_ifs_after_valueless_triggers(flow)
 }
 
-/// A schedule or a sun event has no trigger value, so an `if` or a `switch` reachable from one
-/// must read an entity, unless the `if` is `op: is_dark`, which reads the sun. `time.between`
-/// reads the clock and needs none.
+/// A schedule, a sun event or a manual trigger without a value has no trigger value, so an `if`
+/// or a `switch` reachable from one must read an entity, unless the `if` is `op: is_dark`, which
+/// reads the sun. `time.between` reads the clock and needs none. A manual trigger with a value
+/// does carry one, but an average of the trigger value has no history, so an `if` or a `switch`
+/// with an `average` reachable from it must name an entity too.
 fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
     use super::{NodeKind, Op};
 
-    let mut seen = std::collections::HashSet::new();
-    let mut pending: Vec<&super::Node> = flow
+    let valueless = flow
         .nodes
         .iter()
-        .filter(|n| {
-            matches!(
-                n.kind,
-                NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_)
-            )
+        .filter(|n| match &n.kind {
+            NodeKind::TriggerSchedule(_) | NodeKind::TriggerSun(_) => true,
+            NodeKind::TriggerManual(p) => p.value.is_none(),
+            _ => false,
         })
         .collect();
-    while let Some(node) = pending.pop() {
-        if !seen.insert(node.id.as_str()) {
-            continue;
-        }
+    for node in reachable(flow, valueless) {
         if matches!(&node.kind, NodeKind::If(p) if p.entity.is_none() && p.op != Op::IsDark) {
             return Err(FlowError::IfNeedsEntity {
                 node: node.id.clone(),
@@ -371,6 +374,37 @@ fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
                 node: node.id.clone(),
             });
         }
+    }
+    let valued = flow
+        .nodes
+        .iter()
+        .filter(|n| matches!(&n.kind, NodeKind::TriggerManual(p) if p.value.is_some()))
+        .collect();
+    for node in reachable(flow, valued) {
+        let averaged = match &node.kind {
+            NodeKind::If(p) => p.entity.is_none() && p.average.is_some(),
+            NodeKind::Switch(p) => p.entity.is_none() && p.average.is_some(),
+            _ => false,
+        };
+        if averaged {
+            return Err(FlowError::AverageNeedsEntity {
+                node: node.id.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Every node reachable from `seeds` (the seeds included), following every port.
+fn reachable<'a>(flow: &'a Flow, seeds: Vec<&'a super::Node>) -> Vec<&'a super::Node> {
+    let mut seen = std::collections::HashSet::new();
+    let mut found = Vec::new();
+    let mut pending = seeds;
+    while let Some(node) = pending.pop() {
+        if !seen.insert(node.id.as_str()) {
+            continue;
+        }
+        found.push(node);
         let mut ports = node.kind.ports();
         if ports.is_empty() {
             ports.push(String::new());
@@ -379,7 +413,7 @@ fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
             pending.extend(flow.successors(&node.id, (!port.is_empty()).then_some(port.as_str())));
         }
     }
-    Ok(())
+    found
 }
 
 /// Iterative DFS with white/grey/black colouring over every edge, whatever its port. Returns the
@@ -770,7 +804,7 @@ mod tests {
         );
         assert_eq!(
             err.to_string(),
-            "node `check`: an if after a schedule or sun trigger must name an entity"
+            "node `check`: an if after a schedule, sun or manual trigger without a value must name an entity"
         );
     }
 
@@ -795,6 +829,164 @@ mod tests {
             "edges": edges,
         });
         Flow::decode(json.to_string().as_bytes()).unwrap()
+    }
+
+    fn manual_flow(manual_params: serde_json::Value, mid: serde_json::Value) -> Flow {
+        decode_flow(
+            serde_json::json!([
+                { "id": "m", "type": "trigger.manual", "params": manual_params },
+                mid,
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([
+                { "from": "m", "to": "mid" },
+                { "from": "mid", "to": "act", "port": "true" },
+            ]),
+        )
+    }
+
+    fn if_node(id: &str, params: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "id": id, "type": "if", "params": params })
+    }
+
+    #[test]
+    fn manual_alone_is_a_trigger() {
+        let flow = decode_flow(
+            serde_json::json!([
+                { "id": "m", "type": "trigger.manual", "params": {} },
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([{ "from": "m", "to": "act" }]),
+        );
+        assert_eq!(validate(&flow), Ok(()));
+    }
+
+    #[test]
+    fn manual_round_trips() {
+        let json = r#"{"id":"f","name":"t","nodes":[{"id":"m","type":"trigger.manual","params":{"value":21.5}}],"edges":[]}"#;
+        let flow = Flow::decode(json.as_bytes()).unwrap();
+        let encoded = flow.encode();
+        assert!(encoded.contains(r#""type":"trigger.manual""#), "{encoded}");
+        assert!(encoded.contains(r#""value":21.5"#), "{encoded}");
+        let flow = decode_flow(
+            serde_json::json!([{ "id": "m", "type": "trigger.manual", "params": { "value": null } }]),
+            serde_json::json!([]),
+        );
+        match &flow.nodes[0].kind {
+            NodeKind::TriggerManual(p) => assert_eq!(p.value, None),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn if_without_entity_after_valueless_manual_is_rejected() {
+        let flow = decode_flow(
+            serde_json::json!([
+                { "id": "m", "type": "trigger.manual", "params": {} },
+                if_node("check", serde_json::json!({ "op": "eq", "value": true })),
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([
+                { "from": "m", "to": "check" },
+                { "from": "check", "to": "act", "port": "true" },
+            ]),
+        );
+        let err = validate(&flow).unwrap_err();
+        assert_eq!(
+            err,
+            FlowError::IfNeedsEntity {
+                node: "check".into()
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "node `check`: an if after a schedule, sun or manual trigger without a value must name an entity"
+        );
+    }
+
+    #[test]
+    fn switch_without_entity_after_valueless_manual_is_rejected() {
+        let flow = decode_flow(
+            serde_json::json!([
+                { "id": "m", "type": "trigger.manual", "params": {} },
+                { "id": "s", "type": "switch", "params": { "rules": [{ "op": "eq", "value": 1 }] } },
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([
+                { "from": "m", "to": "s" },
+                { "from": "s", "to": "act", "port": "1" },
+            ]),
+        );
+        let err = validate(&flow).unwrap_err();
+        assert_eq!(err, FlowError::SwitchNeedsEntity { node: "s".into() });
+        assert_eq!(
+            err.to_string(),
+            "node `s`: a switch after a schedule, sun or manual trigger without a value must name an entity"
+        );
+    }
+
+    #[test]
+    fn if_without_entity_after_valued_manual_is_fine() {
+        let flow = manual_flow(
+            serde_json::json!({ "value": true }),
+            if_node("mid", serde_json::json!({ "op": "eq", "value": true })),
+        );
+        assert_eq!(validate(&flow), Ok(()));
+    }
+
+    #[test]
+    fn average_after_valued_manual_needs_entity() {
+        let flow = manual_flow(
+            serde_json::json!({ "value": 20 }),
+            if_node(
+                "mid",
+                serde_json::json!({ "op": "gt", "value": 19, "average": "15m" }),
+            ),
+        );
+        let err = validate(&flow).unwrap_err();
+        assert_eq!(err, FlowError::AverageNeedsEntity { node: "mid".into() });
+        assert_eq!(
+            err.to_string(),
+            "node `mid`: an average after a manual trigger must name an entity"
+        );
+    }
+
+    #[test]
+    fn average_with_entity_after_manual_is_fine() {
+        let flow = manual_flow(
+            serde_json::json!({ "value": 20 }),
+            if_node(
+                "mid",
+                serde_json::json!({ "op": "gt", "value": 19, "average": "15m", "entity": "t" }),
+            ),
+        );
+        assert_eq!(validate(&flow), Ok(()));
+    }
+
+    #[test]
+    fn mixed_paths_valueless_manual_and_state_is_rejected() {
+        let flow = decode_flow(
+            serde_json::json!([
+                { "id": "ev", "type": "trigger.state", "params": { "entity": "t" } },
+                { "id": "m", "type": "trigger.manual", "params": {} },
+                if_node("mid", serde_json::json!({ "op": "eq", "value": true })),
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([
+                { "from": "ev", "to": "mid" },
+                { "from": "m", "to": "mid" },
+                { "from": "mid", "to": "act", "port": "true" },
+            ]),
+        );
+        assert_eq!(
+            validate(&flow),
+            Err(FlowError::IfNeedsEntity { node: "mid".into() })
+        );
     }
 
     fn sun_flow(id: &str, which: crate::flow::model::SunWhich, offset: Option<i32>) -> Flow {
@@ -1130,7 +1322,7 @@ mod tests {
         assert_eq!(err, FlowError::SwitchNeedsEntity { node: "s".into() });
         assert_eq!(
             err.to_string(),
-            "node `s`: a switch after a schedule or sun trigger must name an entity"
+            "node `s`: a switch after a schedule, sun or manual trigger without a value must name an entity"
         );
         assert_eq!(
             validate(&flow(serde_json::json!({

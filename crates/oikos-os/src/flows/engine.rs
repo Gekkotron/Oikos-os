@@ -778,6 +778,7 @@ async fn run_node(
             format!("schedule {}", params.cron),
             Vec::new(),
         ),
+        NodeKind::TriggerManual(_) => (StepOutcome::Ok, "manual".to_owned(), Vec::new()),
         NodeKind::TriggerSun(params) => (
             StepOutcome::Ok,
             format!(
