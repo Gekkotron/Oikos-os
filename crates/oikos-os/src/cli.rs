@@ -42,6 +42,7 @@ pub enum Cli {
     },
     McpStdio {
         server: String,
+        data_dir: PathBuf,
     },
 }
 
@@ -64,7 +65,10 @@ impl Cli {
                 config: raw.config,
                 data_dir: raw.data_dir,
             },
-            Some(RawCommand::McpStdio { server }) => Cli::McpStdio { server },
+            Some(RawCommand::McpStdio { server }) => Cli::McpStdio {
+                server,
+                data_dir: raw.data_dir,
+            },
         }
     }
 }
@@ -139,12 +143,31 @@ mod tests {
     }
 
     #[test]
-    fn mcp_stdio_takes_server() {
-        assert_eq!(
-            Cli::try_parse_from(["oikos-os", "mcp-stdio", "--server", "http://h:1"]).unwrap(),
-            Cli::McpStdio {
-                server: "http://h:1".into()
-            }
-        );
+    fn mcp_stdio_takes_server_and_data() {
+        figment::Jail::expect_with(|_| {
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "mcp-stdio", "--server", "http://h:1"]).unwrap(),
+                Cli::McpStdio {
+                    server: "http://h:1".into(),
+                    data_dir: "./data".into(),
+                }
+            );
+            assert_eq!(
+                Cli::try_parse_from([
+                    "oikos-os",
+                    "--data",
+                    "d",
+                    "mcp-stdio",
+                    "--server",
+                    "http://h:1"
+                ])
+                .unwrap(),
+                Cli::McpStdio {
+                    server: "http://h:1".into(),
+                    data_dir: "d".into(),
+                }
+            );
+            Ok(())
+        });
     }
 }

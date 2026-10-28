@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -90,7 +90,8 @@ async fn main() -> anyhow::Result<ExitCode> {
             };
             cfg.validate_all()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
-            if setup_ctx.file.lock().await.pending_city.is_some() {
+            // Nothing leaves the LAN while weather is off.
+            if cfg.weather.enabled && setup_ctx.file.lock().await.pending_city.is_some() {
                 spawn_location_lookup(Arc::clone(&setup_ctx), Endpoints::default());
             }
             tracing::info!(host = %cfg.mqtt.host, port = cfg.mqtt.port, "starting oikos-os");
@@ -156,14 +157,13 @@ async fn main() -> anyhow::Result<ExitCode> {
             tracing::info!("stopped");
             Ok(ExitCode::SUCCESS)
         }
-        Cli::McpStdio { server } => {
-            let data_dir = std::env::var_os("OIKOS_DATA_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("./data"));
+        Cli::McpStdio { server, data_dir } => {
             let (log, load_err) = match HubFile::load(&data_dir) {
-                Ok(Some(file)) => (file.log, None),
-                Ok(None) => (LogConfig::default(), None),
-                Err(e) => (LogConfig::default(), Some(e)),
+                Ok(file) => match file.unwrap_or_default().with_bootstrap_env() {
+                    Ok(file) => (file.log, None),
+                    Err(e) => (LogConfig::default(), Some(e.to_string())),
+                },
+                Err(e) => (LogConfig::default(), Some(e.to_string())),
             };
             logging::init(&log);
             if let Some(e) = load_err {
