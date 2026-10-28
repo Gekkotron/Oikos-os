@@ -2,6 +2,7 @@
 
 pub mod fs;
 pub mod hub_file;
+pub mod import;
 pub mod sections;
 pub mod store;
 

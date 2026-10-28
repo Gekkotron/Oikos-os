@@ -44,23 +44,7 @@ async fn main() -> anyhow::Result<ExitCode> {
     match cli {
         Cli::Run { config } => {
             let cfg = Config::load(config.as_deref())?;
-            cfg.flows
-                .validate()
-                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
-            cfg.watchdog
-                .validate()
-                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
-            cfg.climate
-                .validate()
-                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
-            cfg.alarm
-                .validate()
-                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
-            cfg.weather
-                .validate()
-                .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
-            cfg.solcast
-                .validate()
+            cfg.validate_all()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
             logging::init(&cfg.log);
             tracing::info!(host = %cfg.mqtt.host, port = cfg.mqtt.port, "starting oikos-os");

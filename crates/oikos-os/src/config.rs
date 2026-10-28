@@ -816,6 +816,17 @@ pub const PUSH_KEY_FILE: &str = "secrets/firebase.json";
 pub const SOLCAST_KEY_FILE: &str = "secrets/solcast.key";
 
 impl Config {
+    /// Runs every section validator, first error wins.
+    pub fn validate_all(&self) -> Result<(), String> {
+        self.flows.validate()?;
+        self.watchdog.validate()?;
+        self.climate.validate()?;
+        self.alarm.validate()?;
+        self.weather.validate()?;
+        self.solcast.validate()?;
+        Ok(())
+    }
+
     /// The `OIKOS_*` env layer for non-string fields; string fields are
     /// excluded because figment would guess `123456` to be a number.
     pub fn env_provider() -> Env {
