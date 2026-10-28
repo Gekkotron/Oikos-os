@@ -9,6 +9,7 @@ use super::{Lang, format};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsText {
     HintHome,
+    HintLocation,
     HintAlarm,
     HintAppearance,
     HintZigbee,
@@ -73,6 +74,7 @@ pub enum SettingsText {
 impl SettingsText {
     pub const ALL: &'static [SettingsText] = &[
         SettingsText::HintHome,
+        SettingsText::HintLocation,
         SettingsText::HintAlarm,
         SettingsText::HintAppearance,
         SettingsText::HintZigbee,
@@ -142,6 +144,10 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
         T::HintHome => (
             "Eco setpoint, house mode, indoor temperature, off-peak hours",
             "Consigne éco, mode de la maison, température intérieure, heures creuses",
+        ),
+        T::HintLocation => (
+            "City, coordinates and time zone",
+            "Ville, coordonnées et fuseau horaire",
         ),
         T::HintAlarm => (
             "Sensors, sirens, remotes and presence",
@@ -317,7 +323,7 @@ mod tests {
     #[test]
     fn all_lists_every_variant() {
         // The match in `settings_text` is exhaustive, so a new variant only needs listing here.
-        assert_eq!(SettingsText::ALL.len(), 60);
+        assert_eq!(SettingsText::ALL.len(), 61);
     }
 
     #[test]

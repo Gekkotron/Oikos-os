@@ -53,3 +53,57 @@
 .shell--bare {
   display: block;
 }
+
+/* Welcome step and Settings > Location. */
+.setup__title {
+  margin: 0 0 8px;
+  font: var(--type-display);
+}
+
+.setup__lead {
+  margin: 0 0 20px;
+  color: var(--muted);
+}
+
+.loc__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+
+.loc__wide {
+  grid-column: 1 / -1;
+}
+
+.loc__results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.loc__details {
+  margin: 12px 0;
+}
+
+.loc__place {
+  margin: 8px 0;
+  color: var(--muted);
+}
+
+.loc__problem {
+  min-height: 1.2em;
+  margin: 8px 0;
+  color: var(--accent-amber);
+}
+
+.loc__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.loc__actions .btn {
+  flex: none;
+  min-width: 120px;
+}

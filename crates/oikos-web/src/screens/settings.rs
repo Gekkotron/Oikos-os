@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
-use oikos_api::{ConnectionStatus, DeviceView, UpdateView};
+use oikos_api::{ConnectionStatus, DeviceView, Location, UpdateView};
 use oikos_core::model::Availability;
 
 use crate::energy_view::{EnergyView, energy_view, set_energy_view};
@@ -20,6 +20,7 @@ use crate::nav::BackLink;
 use crate::screens::alarm_settings::{AlarmSettingsPage, settings_status};
 use crate::screens::entity_sheet::availability_class;
 use crate::screens::home_settings_panel::HomeSettingsPanel;
+use crate::setup::welcome::LocationForm;
 use crate::theme::Theme;
 
 const DASH: &str = "—";
@@ -186,6 +187,7 @@ fn EnergyViewSwitch() -> impl IntoView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsPage {
     Home,
+    Location,
     Alarm,
     Appearance,
     Zigbee2mqtt,
@@ -196,8 +198,9 @@ pub enum SettingsPage {
 
 impl SettingsPage {
     /// In the order the Settings list shows them.
-    pub const ALL: [SettingsPage; 7] = [
+    pub const ALL: [SettingsPage; 8] = [
         SettingsPage::Home,
+        SettingsPage::Location,
         SettingsPage::Alarm,
         SettingsPage::Appearance,
         SettingsPage::Zigbee2mqtt,
@@ -209,6 +212,7 @@ impl SettingsPage {
     pub fn slug(self) -> &'static str {
         match self {
             SettingsPage::Home => "home",
+            SettingsPage::Location => "location",
             SettingsPage::Alarm => "alarm",
             SettingsPage::Appearance => "appearance",
             SettingsPage::Zigbee2mqtt => "zigbee2mqtt",
@@ -226,6 +230,7 @@ impl SettingsPage {
     pub fn key(self) -> Key {
         match self {
             SettingsPage::Home => Key::HomeSection,
+            SettingsPage::Location => Key::Location,
             SettingsPage::Alarm => Key::Alarm,
             SettingsPage::Appearance => Key::Appearance,
             SettingsPage::Zigbee2mqtt => Key::Zigbee2mqtt,
@@ -244,6 +249,7 @@ impl SettingsPage {
             lang,
             match self {
                 SettingsPage::Home => T::HintHome,
+                SettingsPage::Location => T::HintLocation,
                 SettingsPage::Alarm => T::HintAlarm,
                 SettingsPage::Appearance => T::HintAppearance,
                 SettingsPage::Zigbee2mqtt => T::HintZigbee,
@@ -308,7 +314,7 @@ pub fn SettingsScreen() -> impl IntoView {
         });
     });
     let status = move |page: SettingsPage| match page {
-        SettingsPage::Home => String::new(),
+        SettingsPage::Home | SettingsPage::Location => String::new(),
         SettingsPage::Alarm => alarm
             .get()
             .map(|v| settings_status(&v, lang()))
@@ -386,6 +392,7 @@ pub fn SettingsPageScreen() -> impl IntoView {
             </header>
             {move || match page.get() {
                 Some(SettingsPage::Home) => view! { <HomeSettingsPanel /> }.into_any(),
+                Some(SettingsPage::Location) => view! { <LocationPage /> }.into_any(),
                 Some(SettingsPage::Alarm) => view! { <AlarmSettingsPage /> }.into_any(),
                 Some(SettingsPage::Appearance) => view! { <AppearancePage /> }.into_any(),
                 Some(SettingsPage::Zigbee2mqtt) => view! { <ZigbeePage /> }.into_any(),
@@ -403,6 +410,37 @@ pub fn SettingsPageScreen() -> impl IntoView {
                 }
             }}
         </div>
+    }
+}
+
+/// The home's place, edited with the wizard's form. A running hub restarts on every save, so
+/// the overlay reloads this page and `on_saved` has nothing to do.
+#[component]
+fn LocationPage() -> impl IntoView {
+    let initial = RwSignal::new(None::<Option<Location>>);
+    spawn_local(async move {
+        let location = crate::api::setup::get_setup()
+            .await
+            .ok()
+            .and_then(|s| s.location);
+        initial.try_set(Some(location));
+    });
+    view! {
+        <section class="sheet__panel">
+            {move || {
+                initial
+                    .get()
+                    .map(|initial| {
+                        view! {
+                            <LocationForm
+                                initial=initial
+                                applying_target="/settings/location".to_owned()
+                                on_saved=|_| {}
+                            />
+                        }
+                    })
+            }}
+        </section>
     }
 }
 

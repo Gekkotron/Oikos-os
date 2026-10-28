@@ -5,6 +5,7 @@ use leptos_router::hooks::use_query_map;
 use oikos_api::SetupStep;
 use serde_json::Value;
 
+use super::welcome::WelcomeStep;
 use super::{SetupState, opening_step};
 use crate::i18n::setup::{SetupText, use_setup_text};
 
@@ -92,7 +93,7 @@ pub fn SetupScreen() -> impl IntoView {
                         .collect_view()}
                 </ol>
                 {move || match step.get() {
-                    SetupStep::Welcome => view! { <div class="setup__body"></div> }.into_any(),
+                    SetupStep::Welcome => view! { <WelcomeStep /> }.into_any(),
                     SetupStep::Mqtt => view! { <div class="setup__body"></div> }.into_any(),
                     SetupStep::Database => view! { <div class="setup__body"></div> }.into_any(),
                     SetupStep::Devices => view! { <div class="setup__body"></div> }.into_any(),
