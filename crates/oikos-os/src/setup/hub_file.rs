@@ -1,7 +1,6 @@
 //! `hub.json`: the few values the hub needs before it can reach its database.
 
 use std::fmt;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use figment::Figment;
@@ -103,19 +102,8 @@ impl HubFile {
 
     /// Atomic (`*.tmp` then rename), mode 0600, creating `dir`.
     pub fn save(&self, dir: &Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(dir)?;
-        let path = Self::path(dir);
-        let tmp = dir.join(format!("{HUB_FILE}.tmp"));
         let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-        let mut file = opts.open(&tmp)?;
-        file.write_all(&json)?;
-        file.sync_all()?;
-        drop(file);
-        std::fs::rename(&tmp, &path)
+        crate::setup::fs::write_private_atomic(&Self::path(dir), &json)
     }
 
     pub fn is_complete(&self) -> bool {
