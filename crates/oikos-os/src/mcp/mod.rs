@@ -41,6 +41,14 @@ pub struct OikosMcp {
 }
 
 impl OikosMcp {
+    /// The setup context, or a tool error while the hub runs without one.
+    fn setup_ctx(&self) -> Result<&Arc<crate::setup::SetupCtx>, ToolError> {
+        self.hub
+            .setup
+            .get()
+            .ok_or_else(|| ToolError("the settings are not available on this hub".into()))
+    }
+
     pub fn new(hub: Arc<Hub>) -> Self {
         Self {
             hub,

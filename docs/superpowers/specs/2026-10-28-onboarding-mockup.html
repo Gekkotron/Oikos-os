@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oikos setup mockup</title>
+<style>
+@font-face { font-family: "Inter"; font-weight: 500; src: url("../../../crates/oikos-web/assets/fonts/Inter-Medium.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-weight: 600; src: url("../../../crates/oikos-web/assets/fonts/Inter-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Manrope"; font-weight: 700; src: url("../../../crates/oikos-web/assets/fonts/Manrope-Bold.woff2") format("woff2"); }
+
+/* Night Glass, copied from crates/oikos-web/styles/tokens.css */
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --bg-gradient: radial-gradient(120% 90% at 50% 0%, #1d2b55 0%, #0b1020 100%);
+  --ink: #e8ecff;
+  --muted: rgb(232 236 255 / 65%);
+  --card-bg: rgb(255 255 255 / 6%);
+  --card-border: rgb(255 255 255 / 9%);
+  --chip-border: rgb(255 255 255 / 14%);
+  --raised: rgb(255 255 255 / 4%);
+  --accent-amber: #ffc457;
+  --accent-soft: rgb(255 196 87 / 22%);
+  --accent-ring: rgb(255 196 87 / 55%);
+  --connected: #6ff0bf;
+  --connected-bg: rgb(80 230 170 / 15%);
+  --warning: #ffc457;
+  --warning-bg: rgb(255 196 87 / 15%);
+  --danger: #ff7a9a;
+  --btn-dark-bg: var(--ink);
+  --btn-dark-ink: var(--bg);
+  --shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  --radius-card: 20px;
+  --touch-min: 48px;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Manrope", "Inter", system-ui, sans-serif;
+}
+/* Ivoire */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f0e8;
+  --bg-gradient: linear-gradient(180deg, #f3f0e8 0%, #f3f0e8 100%);
+  --ink: #1f2420;
+  --muted: #5f665c;
+  --card-bg: #fffdf8;
+  --card-border: #ebe6da;
+  --chip-border: #d9d0c2;
+  --raised: #f7f5ef;
+  --accent-amber: #8f6613;
+  --accent-soft: #fbf0d4;
+  --accent-ring: rgb(201 151 61 / 45%);
+  --connected: #4f6b4a;
+  --connected-bg: #e3eadf;
+  --warning: #8a5f12;
+  --warning-bg: #fbf0d4;
+  --danger: #ac512b;
+  --shadow: 0 2px 6px rgb(60 50 20 / 6%), 0 10px 28px rgb(60 50 20 / 8%);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; background: var(--bg); background-image: var(--bg-gradient);
+  color: var(--ink); font: 500 14px/20px var(--font-body);
+}
+.mock-bar {
+  position: sticky; top: 0; z-index: 5; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  padding: 8px 16px; background: #000a; color: #fff; font-size: 12px;
+}
+.mock-bar button { font: inherit; padding: 4px 10px; border-radius: 8px; border: 1px solid #fff4; background: #fff1; color: #fff; cursor: pointer; }
+.mock-bar button.on { background: #ffc45744; border-color: #ffc457; }
+.mock-bar .sep { opacity: .4; }
+
+.shell { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; }
+.brand { display: flex; align-items: center; gap: 10px; font: 700 18px/24px var(--font-display); }
+.brand .logo { width: 32px; height: 32px; border-radius: 10px; background: var(--accent-soft); display: grid; place-items: center; }
+.steps { display: flex; gap: 6px; margin: 24px 0 20px; flex-wrap: wrap; }
+.steps .s {
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--chip-border); color: var(--muted); font-size: 12px; cursor: pointer;
+}
+.steps .s .n { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--raised); font-size: 11px; }
+.steps .s.done { color: var(--ink); }
+.steps .s.done .n { background: var(--connected-bg); color: var(--connected); }
+.steps .s.cur { color: var(--ink); background: var(--accent-soft); border-color: var(--accent-ring); }
+.steps .s.cur .n { background: var(--accent-amber); color: var(--bg); }
+
+.card {
+  background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius-card);
+  padding: 24px; box-shadow: var(--shadow);
+}
+h1 { font: 700 26px/32px var(--font-display); letter-spacing: -0.02em; margin: 0 0 6px; }
+.lead { color: var(--muted); margin: 0 0 20px; }
+h2 { font: 600 14px/20px var(--font-body); margin: 20px 0 8px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid .wide { grid-column: 1 / -1; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+input, select {
+  width: 100%; min-height: 44px; padding: 10px 12px; border-radius: 12px; font: inherit; color: var(--ink);
+  background: var(--raised); border: 1px solid var(--chip-border);
+}
+input:focus, select:focus { outline: 2px solid var(--accent-ring); outline-offset: 0; }
+.hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.seg { display: inline-flex; border: 1px solid var(--chip-border); border-radius: 12px; overflow: hidden; }
+.seg button { font: inherit; color: var(--ink); background: none; border: 0; padding: 10px 18px; cursor: pointer; }
+.seg button.on { background: var(--accent-soft); }
+
+.place {
+  display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: 14px;
+  background: var(--raised); border: 1px solid var(--chip-border); margin-top: 8px;
+}
+.place .pin { font-size: 20px; }
+.place .meta { color: var(--muted); font-size: 12px; }
+.place a { margin-left: auto; color: var(--accent-amber); font-size: 12px; text-decoration: none; }
+
+details { margin-top: 16px; border-top: 1px solid var(--card-border); padding-top: 12px; }
+summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+
+.result { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; margin-top: 16px; font-size: 13px; }
+.result.ok { background: var(--connected-bg); color: var(--connected); }
+.result.err { background: var(--warning-bg); color: var(--warning); }
+.result .t { color: var(--ink); }
+
+.actions { display: flex; gap: 10px; align-items: center; margin-top: 24px; }
+.actions .grow { flex: 1; }
+.btn {
+  font: 600 14px/20px var(--font-body); min-height: var(--touch-min); padding: 0 20px; border-radius: 14px; cursor: pointer;
+  border: 1px solid var(--chip-border); background: none; color: var(--ink);
+}
+.btn.primary { background: var(--btn-dark-bg); color: var(--btn-dark-ink); border-color: transparent; }
+.btn.primary[disabled] { opacity: .35; cursor: not-allowed; }
+.btn.quiet { border-color: transparent; color: var(--muted); }
+
+.count { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--connected-bg); color: var(--connected); font-size: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.4s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+.room { margin-top: 16px; }
+.room-h { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+.dev {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px;
+  background: var(--raised); border: 1px solid var(--card-border); margin-bottom: 6px;
+}
+.dev .ic { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--card-bg); }
+.dev .nm { flex: 1; }
+.dev .nm small { display: block; color: var(--muted); font-size: 11px; }
+.dev select { width: auto; min-height: 34px; padding: 4px 8px; font-size: 12px; }
+.dev.new { border-color: var(--accent-ring); }
+
+.svc { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 560px) { .svc { grid-template-columns: 1fr; } }
+.sc {
+  text-align: left; font: inherit; color: var(--ink); cursor: pointer; padding: 14px; border-radius: 16px;
+  background: var(--raised); border: 1px solid var(--card-border); display: flex; gap: 12px; align-items: flex-start;
+}
+.sc:hover { border-color: var(--chip-border); }
+.sc.open { grid-column: 1 / -1; border-color: var(--accent-ring); cursor: default; flex-direction: column; }
+.sc .top { display: flex; gap: 12px; width: 100%; align-items: flex-start; }
+.sc .ic { font-size: 22px; }
+.sc .tt { flex: 1; }
+.sc .tt b { display: block; font-weight: 600; }
+.sc .tt span { color: var(--muted); font-size: 12px; }
+.badge { font-size: 11px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--chip-border); color: var(--muted); white-space: nowrap; }
+.badge.set { background: var(--connected-bg); color: var(--connected); border-color: transparent; }
+.badge.skip { opacity: .7; }
+.sc .form { width: 100%; }
+.toggle { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; }
+.sw { width: 44px; height: 26px; border-radius: 999px; background: var(--chip-border); position: relative; cursor: pointer; border: 0; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: left .2s; }
+.sw.on { background: var(--accent-amber); }
+.sw.on::after { left: 21px; }
+.warn { font-size: 12px; color: var(--warning); background: var(--warning-bg); padding: 8px 10px; border-radius: 10px; margin-top: 8px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--chip-border); }
+.chip.on { background: var(--accent-soft); border-color: var(--accent-ring); }
+
+.summary li { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--card-border); list-style: none; }
+.summary { padding: 0; margin: 0; }
+.ok-t { color: var(--connected); }
+.mute-t { color: var(--muted); }
+.note { font-size: 12px; color: var(--muted); margin-top: 16px; padding: 10px 12px; border: 1px dashed var(--chip-border); border-radius: 12px; }
+.screen { display: none; }
+.screen.active { display: block; }
+.import-banner { display: none; }
+</style>
+</head>
+<body>
+
+<div class="mock-bar">
+  <b>Mockup</b><span class="sep">|</span>
+  Theme <button data-theme-btn="dark" class="on">Night Glass</button><button data-theme-btn="light">Ivoire</button>
+  <span class="sep">|</span>
+  MQTT test <button data-test="ok" class="on">succeeds</button><button data-test="err">fails</button>
+  <span class="sep">|</span>
+  Devices <button data-devs="some" class="on">found</button><button data-devs="none">none</button>
+</div>
+
+<div class="shell">
+  <div class="brand"><div class="logo">🏠</div>Oikos</div>
+
+  <div class="steps" id="steps"></div>
+
+  <!-- 1. Welcome -->
+  <section class="screen card" data-step="0">
+    <h1>Welcome to Oikos</h1>
+    <p class="lead">A few questions and your home is ready. Everything can be changed later in Settings.</p>
+
+    <h2>Language</h2>
+    <div class="seg"><button class="on">English</button><button>Français</button></div>
+    <div class="hint">Picked from your browser.</div>
+
+    <h2>Where is your home?</h2>
+    <div class="grid">
+      <div><label>City</label><input value="Bordeaux"></div>
+      <div><label>Country</label><input value="France"></div>
+    </div>
+    <div class="place">
+      <span class="pin">📍</span>
+      <div><div>Bordeaux, Nouvelle-Aquitaine, France</div>
+        <div class="meta">44.84° N, 0.58° W · Europe/Paris</div></div>
+      <a href="#" onclick="document.getElementById('coords').open = true; return false;">Correct</a>
+    </div>
+    <details id="coords"><summary>Coordinates and time zone</summary>
+      <div class="grid" style="margin-top:12px">
+        <div><label>Latitude</label><input value="44.8378"></div>
+        <div><label>Longitude</label><input value="-0.5792"></div>
+        <div class="wide"><label>Time zone</label><select><option>Europe/Paris</option></select></div>
+      </div>
+    </details>
+    <div class="hint" style="margin-top:12px">Used for sunrise and sunset in flows, and for the weather.</div>
+
+    <div class="actions"><span class="grow"></span><button class="btn primary" data-next>Next</button></div>
+  </section>
+
+  <!-- 2. MQTT -->
+  <section class="screen card" data-step="1">
+    <h1>Connect to your MQTT broker</h1>
+    <p class="lead">Oikos talks to your devices through MQTT. Filled in for the broker that came with Oikos.</p>
+    <div class="grid">
+      <div><label>Host</label><input value="localhost"></div>
+      <div><label>Port</label><input value="1883"></div>
+      <div><label>User</label><input value="oikos"></div>
+      <div><label>Password</label><input type="password" value="••••••••••"></div>
+    </div>
+    <details><summary>Advanced</summary>
+      <div class="grid" style="margin-top:12px">
+        <div><label>Client id</label><input value="oikos-hub"></div>
+        <div><label>Zigbee2MQTT base topic</label><input value="zigbee2mqtt"></div>
+      </div>
+    </details>
+    <div id="mqtt-result"></div>
+    <div class="actions">
+      <button class="btn quiet" data-back>Back</button><span class="grow"></span>
+      <button class="btn" id="mqtt-test">Test connection</button>
+      <button class="btn primary" data-next id="mqtt-next" disabled>Next</button>
+    </div>
+  </section>
+
+  <!-- 3. Database -->
+  <section class="screen card" data-step="2">
+    <h1>Connect to the database</h1>
+    <p class="lead">TimescaleDB keeps your history and settings. Filled in for the database that came with Oikos.</p>
+    <div class="grid">
+      <div><label>Host</label><input value="localhost"></div>
+      <div><label>Port</label><input value="5432"></div>
+      <div class="wide"><label>Database</label><input value="oikos"></div>
+      <div><label>User</label><input value="oikos"></div>
+      <div><label>Password</label><input type="password" value="••••••••••"></div>
+    </div>
+    <div id="db-result"></div>
+    <div class="actions">
+      <button class="btn quiet" data-back>Back</button><span class="grow"></span>
+      <button class="btn" id="db-test">Test connection</button>
+      <button class="btn primary" data-next id="db-next" disabled>Next</button>
+    </div>
+    <div class="note">No Skip here: the database is required.</div>
+  </section>
+
+  <!-- 4. Devices -->
+  <section class="screen card" data-step="3">
+    <h1>Your devices</h1>
+    <p class="lead">What Oikos found on the broker. Put them in rooms now, or later.</p>
+    <div id="devs-some">
+      <span class="count"><span class="dot"></span><span id="dev-count">14</span>&nbsp;devices found</span>
+      <div class="room">
+        <div class="room-h"><span>Living room</span><span>4</span></div>
+        <div class="dev"><div class="ic">💡</div><div class="nm">Ceiling light<small>light · Zigbee</small></div><select><option>Living room</option></select></div>
+        <div class="dev"><div class="ic">🌡️</div><div class="nm">Thermometer<small>temperature, humidity</small></div><select><option>Living room</option></select></div>
+        <div class="dev"><div class="ic">🪟</div><div class="nm">Shutter<small>cover</small></div><select><option>Living room</option></select></div>
+        <div class="dev"><div class="ic">🔌</div><div class="nm">TV plug<small>switch, power</small></div><select><option>Living room</option></select></div>
+      </div>
+      <div class="room">
+        <div class="room-h"><span>Kitchen</span><span>2</span></div>
+        <div class="dev"><div class="ic">💡</div><div class="nm">Spots<small>light · Zigbee</small></div><select><option>Kitchen</option></select></div>
+        <div class="dev"><div class="ic">🚪</div><div class="nm">Back door<small>contact</small></div><select><option>Kitchen</option></select></div>
+      </div>
+      <div class="room">
+        <div class="room-h"><span>No room</span><span>8</span></div>
+        <div class="dev new"><div class="ic">🏃</div><div class="nm">0x00158d0001a2b3c4<small>motion, illuminance · just found</small></div><select><option>Choose a room…</option><option>Living room</option><option>Kitchen</option><option>+ New room</option></select></div>
+        <div class="dev"><div class="ic">⚡</div><div class="nm">Linky meter<small>energy, power</small></div><select><option>Choose a room…</option></select></div>
+        <div class="dev"><div class="ic">🔘</div><div class="nm">Remote<small>action</small></div><select><option>Choose a room…</option></select></div>
+        <div class="hint">… and 5 more</div>
+      </div>
+    </div>
+    <div id="devs-none" style="display:none">
+      <div class="result err"><span>⚠️</span><div class="t">No devices yet. Check that Zigbee2MQTT publishes to this broker under <code>zigbee2mqtt</code>.
+        <br><a href="#" style="color:var(--accent-amber)" onclick="go(1);return false;">Back to MQTT settings</a></div></div>
+    </div>
+    <div class="actions">
+      <button class="btn quiet" data-back>Back</button><span class="grow"></span>
+      <button class="btn quiet" data-next>Skip</button>
+      <button class="btn primary" data-next>Next</button>
+    </div>
+  </section>
+
+  <!-- 5. Services -->
+  <section class="screen card" data-step="4">
+    <h1>Services</h1>
+    <p class="lead">All optional. Set up the ones you use; the rest can wait.</p>
+    <div class="svc" id="svc"></div>
+    <div class="actions">
+      <button class="btn quiet" data-back>Back</button><span class="grow"></span>
+      <button class="btn primary" data-next>Next</button>
+    </div>
+  </section>
+
+  <!-- 6. Done -->
+  <section class="screen card" data-step="5">
+    <h1>Your home is ready</h1>
+    <p class="lead">Here's what's set up. Everything stays editable in Settings.</p>
+    <ul class="summary" id="summary"></ul>
+    <div class="actions"><span class="grow"></span><button class="btn primary">Open my house</button></div>
+  </section>
+</div>
+
+<script>
+const STEPS = ["Welcome", "MQTT", "Database", "Devices", "Services", "Done"];
+let cur = 0, maxReached = 0, mqttMode = "ok";
+
+const SERVICES = [
+  { id: "weather", ic: "⛅", name: "Weather", desc: "Open-Meteo, for Bordeaux", state: "Set up",
+    form: `<div class="toggle"><span>Weather</span><button class="sw on"></button></div>
+      <div class="grid"><div><label>Refresh every (minutes)</label><input value="30"></div></div>
+      <div class="hint">Uses your home location from the Welcome step.</div>` },
+  { id: "solar", ic: "☀️", name: "Solar forecast", desc: "Solcast", state: "Not set up",
+    form: `<div class="grid"><div class="wide"><label>API key</label><input placeholder="Paste your Solcast key"></div>
+      <div class="wide"><label>Rooftop site ids</label><input placeholder="xxxx-xxxx-xxxx-xxxx"></div>
+      <div><label>Calls per day</label><input value="10"></div></div>
+      <div class="actions" style="margin-top:12px"><button class="btn">Test (uses 1 call)</button></div>` },
+  { id: "energy", ic: "⚡", name: "Energy", desc: "Grid meter, solar, off-peak hours", state: "Not set up",
+    form: `<div class="grid"><div><label>Grid bought</label><select><option>Linky meter · energy</option></select></div>
+      <div><label>Grid sold</label><select><option>None</option></select></div>
+      <div><label>Solar production</label><select><option>None</option></select></div>
+      <div><label>Off-peak hours</label><input value="22:00 – 06:00"></div></div>` },
+  { id: "cameras", ic: "📷", name: "Cameras", desc: "Frigate", state: "Not set up",
+    form: `<div class="grid"><div class="wide"><label>Frigate URL</label><input value="http://localhost:8971"></div>
+      <div><label>User</label><input value="admin"></div><div><label>Password</label><input type="password" value="••••••"></div>
+      <div class="wide"><label>Media URL for the phone</label><input placeholder="https://…"></div></div>
+      <div class="toggle"><span>Alerts</span><button class="sw on"></button></div>
+      <label>Alert on</label><div class="chips"><span class="chip on">person</span><span class="chip on">car</span><span class="chip">dog</span><span class="chip">cat</span></div>
+      <div class="toggle"><span>Live view</span><button class="sw"></button></div>
+      <div class="actions" style="margin-top:4px"><button class="btn">Test</button></div>
+      <div class="result ok" style="margin-top:8px"><span>✓</span><div class="t">Connected. Cameras: entrance, garden, garage</div></div>` },
+  { id: "push", ic: "🔔", name: "Push notifications", desc: "Firebase, for the phone app", state: "Not set up",
+    form: `<label>Firebase service account</label>
+      <div class="place" style="justify-content:center;border-style:dashed;cursor:pointer">Drop the JSON file here, or choose a file</div>
+      <div class="hint">Never shown again once stored; the card shows its project id.</div>` },
+  { id: "climate", ic: "🌡️", name: "Climate engine", desc: "Heating schedules per room", state: "Not set up",
+    form: `<div class="toggle"><span>Climate engine</span><button class="sw"></button></div>
+      <div class="warn">Beta: it drives your heating. Check your schedules before turning it on.</div>` },
+  { id: "alarm", ic: "🛡️", name: "Alarm", desc: "Modes, sensors, sirens", state: "Not set up",
+    form: `<div class="toggle"><span>Alarm</span><button class="sw"></button></div>
+      <div class="hint">Sensors and modes live on the <a href="#" style="color:var(--accent-amber)">Alarm settings page</a>.</div>` },
+];
+let openSvc = null;
+
+function renderSteps() {
+  document.getElementById("steps").innerHTML = STEPS.map((s, i) =>
+    `<div class="s ${i === cur ? "cur" : i < maxReached || (i < cur) ? "done" : ""}" onclick="if(${i}<=maxReached)go(${i})">
+      <span class="n">${i < cur ? "✓" : i + 1}</span>${s}</div>`).join("");
+}
+function go(i) {
+  cur = i; maxReached = Math.max(maxReached, i);
+  document.querySelectorAll(".screen").forEach(el => el.classList.toggle("active", +el.dataset.step === i));
+  renderSteps(); if (i === 4) renderSvc(); if (i === 5) renderSummary();
+  window.scrollTo(0, 0);
+}
+function renderSvc() {
+  document.getElementById("svc").innerHTML = SERVICES.map(s => {
+    const badge = `<span class="badge ${s.state === "Set up" ? "set" : s.state === "Skipped" ? "skip" : ""}">${s.state}</span>`;
+    if (openSvc === s.id) return `<div class="sc open"><div class="top"><span class="ic">${s.ic}</span>
+        <div class="tt"><b>${s.name}</b><span>${s.desc}</span></div>${badge}</div>
+        <div class="form">${s.form}
+          <div class="actions" style="margin-top:16px"><button class="btn quiet" onclick="setSvc('${s.id}','Skipped')">Skip</button>
+          <span class="grow"></span><button class="btn quiet" onclick="openSvc=null;renderSvc()">Cancel</button>
+          <button class="btn primary" onclick="setSvc('${s.id}','Set up')">Save</button></div></div></div>`;
+    return `<button class="sc" onclick="openSvc='${s.id}';renderSvc()"><span class="ic">${s.ic}</span>
+      <div class="tt"><b>${s.name}</b><span>${s.desc}</span></div>${badge}</button>`;
+  }).join("");
+  document.querySelectorAll(".sw").forEach(b => b.onclick = () => b.classList.toggle("on"));
+  document.querySelectorAll(".chip").forEach(b => b.onclick = () => b.classList.toggle("on"));
+}
+function setSvc(id, st) { SERVICES.find(s => s.id === id).state = st; openSvc = null; renderSvc(); }
+function renderSummary() {
+  const rows = [["Location", "Bordeaux, France · Europe/Paris", 1], ["MQTT broker", "localhost:1883", 1],
+    ["Database", "localhost:5432 / oikos", 1], ["Devices", "14 found, 6 in rooms", 1],
+    ...SERVICES.map(s => [s.name, s.state, s.state === "Set up"])];
+  document.getElementById("summary").innerHTML = rows.map(([k, v, ok]) =>
+    `<li><span>${k}</span><span class="${ok ? "ok-t" : "mute-t"}">${ok ? "✓ " : ""}${v}</span></li>`).join("");
+}
+function runTest(resultId, nextId, okText, errText, mode) {
+  const r = document.getElementById(resultId);
+  r.innerHTML = `<div class="result" style="color:var(--muted)">Testing…</div>`;
+  setTimeout(() => {
+    const ok = mode === "ok";
+    r.innerHTML = ok ? `<div class="result ok"><span>✓</span><div class="t">${okText}</div></div>`
+                     : `<div class="result err"><span>⚠️</span><div class="t">${errText}</div></div>`;
+    document.getElementById(nextId).disabled = !ok;
+  }, 700);
+}
+document.getElementById("mqtt-test").onclick = () => runTest("mqtt-result", "mqtt-next",
+  "Connected to localhost:1883 as oikos.", "The broker refused the connection: bad user name or password.", mqttMode);
+document.getElementById("db-test").onclick = () => runTest("db-result", "db-next",
+  "Connected. TimescaleDB 2.17 is available; tables are ready.<br><span class='mute-t'>This database already holds Oikos history since 15 Jan 2026.</span>",
+  "Can't reach localhost:5432 (connection refused).", "ok");
+
+document.querySelectorAll("[data-next]").forEach(b => b.addEventListener("click", () => !b.disabled && go(cur + 1)));
+document.querySelectorAll("[data-back]").forEach(b => b.addEventListener("click", () => go(cur - 1)));
+document.querySelectorAll("[data-theme-btn]").forEach(b => b.onclick = () => {
+  document.documentElement.dataset.theme = b.dataset.themeBtn;
+  document.querySelectorAll("[data-theme-btn]").forEach(x => x.classList.toggle("on", x === b));
+});
+document.querySelectorAll("[data-test]").forEach(b => b.onclick = () => {
+  mqttMode = b.dataset.test; document.querySelectorAll("[data-test]").forEach(x => x.classList.toggle("on", x === b));
+  document.getElementById("mqtt-result").innerHTML = ""; document.getElementById("mqtt-next").disabled = true;
+});
+document.querySelectorAll("[data-devs]").forEach(b => b.onclick = () => {
+  const some = b.dataset.devs === "some";
+  document.getElementById("devs-some").style.display = some ? "" : "none";
+  document.getElementById("devs-none").style.display = some ? "none" : "";
+  document.querySelectorAll("[data-devs]").forEach(x => x.classList.toggle("on", x === b)); go(3);
+});
+setInterval(() => { const c = document.getElementById("dev-count"); if (+c.textContent < 17) c.textContent = +c.textContent + 1; }, 4000);
+go(0);
+</script>
+</body>
+</html>

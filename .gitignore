@@ -11,3 +11,4 @@ secrets/*
 *.pem
 *.key
 
+/data/

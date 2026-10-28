@@ -22,8 +22,8 @@ use super::db::Db;
 /// streams; this covers busy ones.
 const BATCH_THRESHOLD: usize = 500;
 const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
-const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
-const MAX_BACKOFF: Duration = Duration::from_secs(30);
+pub(crate) const INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+pub(crate) const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 pub async fn run(
     db: Db,

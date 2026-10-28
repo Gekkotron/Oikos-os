@@ -1,0 +1,6 @@
+-- The settings the browser wizard edits: one JSON row per section.
+CREATE TABLE settings (
+    key        text PRIMARY KEY,
+    value      jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);

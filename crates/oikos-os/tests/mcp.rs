@@ -32,6 +32,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "bridge_info",
     "get_home_settings",
     "set_home_settings",
+    "get_settings",
+    "set_settings",
     "list_areas",
     "set_areas",
     "list_devices",
@@ -123,7 +125,13 @@ impl Server {
         hub.ingest(LINKQUALITY_TOPIC, &fixture(LINKQUALITY_FIXTURE));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
-        tokio::spawn(axum::serve(listener, router(Arc::clone(&hub))).into_future());
+        tokio::spawn(
+            axum::serve(
+                listener,
+                router(Arc::clone(&hub), oikos_os::setup::SetupCtx::inert()),
+            )
+            .into_future(),
+        );
         Server {
             hub,
             publisher,
@@ -144,6 +152,21 @@ impl Server {
     /// Marks the broker link up, so the hub's writers publish.
     fn online(&self) {
         self.hub.set_connection(ConnectionStatus::Online);
+    }
+
+    /// [`Server::start`] with `ctx` as the hub's setup context, so the settings tools work.
+    async fn start_with_setup(ctx: Arc<oikos_os::setup::SetupCtx>) -> Server {
+        let (tx, publisher) = mpsc::channel(64);
+        let hub = Hub::new(&config(), tx);
+        hub.set_setup(Arc::clone(&ctx));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(axum::serve(listener, router(Arc::clone(&hub), ctx)).into_future());
+        Server {
+            hub,
+            publisher,
+            addr,
+        }
     }
 
     /// An initialized MCP client session against `/mcp`.
@@ -1468,4 +1491,114 @@ async fn alarm_tools_read_and_replace_settings() {
     .await;
     assert_eq!(bad.is_error, Some(true));
     assert!(text_of(&bad).starts_with("rejected:"), "{}", text_of(&bad));
+}
+
+const FRIGATE_PASS: &str = "frigate-secret-pass";
+
+/// A Run-mode setup context holding a Frigate password, with a lazy (unreachable) database.
+fn settings_ctx(mode: oikos_os::setup::Mode) -> Arc<oikos_os::setup::SetupCtx> {
+    use oikos_os::setup::{HubFile, RestartHook, SetupCtx, sections::Sections};
+    let mut sections = Sections::default();
+    sections.frigate.url = Some("http://192.0.2.9:5000".into());
+    sections.frigate.user = Some("u".into());
+    sections.frigate.password = Some(FRIGATE_PASS.into());
+    Arc::new(SetupCtx::new(
+        std::env::temp_dir().join(format!("oikos-mcp-settings-{}", std::process::id())),
+        mode,
+        HubFile::default(),
+        Some(oikos_os::history::db::Db::connect_lazy("postgres://u:p@127.0.0.1:1/x").unwrap()),
+        sections,
+        RestartHook::Record(Arc::default()),
+    ))
+}
+
+#[tokio::test]
+async fn mcp_get_settings_hides_secrets() {
+    let server = Server::start_with_setup(settings_ctx(oikos_os::setup::Mode::Run)).await;
+    let client = server.client().await;
+    let result = call(&client, "get_settings", json!({"section": "frigate"})).await;
+    assert!(
+        !text_of(&result).contains(FRIGATE_PASS),
+        "{}",
+        text_of(&result)
+    );
+    let view = json_of("get_settings", &result);
+    assert_eq!(view["password"], json!({"set": true}));
+    assert_eq!(view["user"], "u");
+    assert_eq!(view["url"], "http://192.0.2.9:5000");
+    assert!(!view.to_string().contains(FRIGATE_PASS));
+}
+
+#[tokio::test]
+async fn mcp_set_settings_refuses_new_frigate_url_without_password() {
+    let server = Server::start_with_setup(settings_ctx(oikos_os::setup::Mode::Run)).await;
+    let client = server.client().await;
+    let result = call(
+        &client,
+        "set_settings",
+        json!({"section": "frigate", "value": {"url": "http://frigate.example.com:5000"}}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(text_of(&result), "Enter the password for the new address");
+}
+
+#[tokio::test]
+async fn mcp_settings_unknown_section_is_an_error() {
+    let server = Server::start_with_setup(settings_ctx(oikos_os::setup::Mode::Run)).await;
+    let client = server.client().await;
+    let got = call(&client, "get_settings", json!({"section": "nope"})).await;
+    assert_eq!(got.is_error, Some(true));
+    assert_eq!(text_of(&got), "unknown section");
+    let put = call(
+        &client,
+        "set_settings",
+        json!({"section": "nope", "value": {}}),
+    )
+    .await;
+    assert_eq!(put.is_error, Some(true));
+}
+
+#[tokio::test]
+async fn mcp_set_settings_refuses_in_setup_mode() {
+    let server = Server::start_with_setup(settings_ctx(oikos_os::setup::Mode::Setup)).await;
+    let client = server.client().await;
+    let result = call(
+        &client,
+        "set_settings",
+        json!({"section": "climate", "value": {}}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true));
+    assert_eq!(text_of(&result), "finish MQTT and database setup first");
+}
+
+#[tokio::test]
+async fn mcp_settings_without_a_setup_context_is_an_error() {
+    let server = Server::start().await;
+    let client = server.client().await;
+    let result = call(&client, "get_settings", json!({"section": "climate"})).await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(text_of(&result).contains("settings are not available"));
+}
+
+#[tokio::test]
+async fn mcp_set_settings_error_never_echoes_a_secret() {
+    let server = Server::start_with_setup(settings_ctx(oikos_os::setup::Mode::Run)).await;
+    let client = server.client().await;
+    // Solcast on with no site fails validation; the key rides along in the body.
+    let result = call(
+        &client,
+        "set_settings",
+        json!({"section": "solcast",
+               "value": {"enabled": true, "sites": [], "api_key": "sk-test-123"}}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true), "{}", text_of(&result));
+    assert!(
+        !text_of(&result).contains("sk-test-123"),
+        "{}",
+        text_of(&result)
+    );
+    assert!(!format!("{result:?}").contains("sk-test-123"));
 }

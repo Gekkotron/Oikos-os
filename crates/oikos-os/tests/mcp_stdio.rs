@@ -27,6 +27,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "bridge_info",
     "get_home_settings",
     "set_home_settings",
+    "get_settings",
+    "set_settings",
     "list_areas",
     "set_areas",
     "list_devices",
@@ -105,7 +107,13 @@ impl Server {
         hub.ingest(LINKQUALITY_TOPIC, &fixture(LINKQUALITY_FIXTURE));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
-        tokio::spawn(axum::serve(listener, router(Arc::clone(&hub))).into_future());
+        tokio::spawn(
+            axum::serve(
+                listener,
+                router(Arc::clone(&hub), oikos_os::setup::SetupCtx::inert()),
+            )
+            .into_future(),
+        );
         Server { _hub: hub, addr }
     }
 }
