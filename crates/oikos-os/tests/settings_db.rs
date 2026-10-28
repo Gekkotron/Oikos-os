@@ -180,6 +180,7 @@ mod put {
         ));
         let (tx, _rx) = tokio::sync::mpsc::channel(8);
         let hub = Hub::new(&Config::default(), tx);
+        hub.set_setup(Arc::clone(&ctx));
         let app = oikos_os::http::router_with(hub, Arc::clone(&ctx), Endpoints::default());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -190,6 +191,37 @@ mod put {
             ctx,
             restarts,
         }
+    }
+
+    #[tokio::test]
+    async fn mcp_set_settings_saves_and_restarts() {
+        use rmcp::ServiceExt;
+        use rmcp::model::CallToolRequestParams;
+        use rmcp::transport::StreamableHttpClientTransport;
+        let Some(tdb) = fresh_db().await else { return };
+        let s = serve(&tdb.url, sample()).await;
+        let client = ()
+            .serve(StreamableHttpClientTransport::from_uri(format!(
+                "http://{}/mcp",
+                s.addr
+            )))
+            .await
+            .unwrap();
+        let args = json!({"section": "solcast",
+            "value": {"enabled": true, "sites": ["site-1"], "daily_limit": 5}});
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new("set_settings")
+                    .with_arguments(args.as_object().unwrap().clone()),
+            )
+            .await
+            .unwrap();
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        assert_eq!(result.structured_content, Some(json!({"restarting": true})));
+        assert_eq!(s.restarts.load(Ordering::SeqCst), 1);
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert_eq!(stored.solcast.sites, ["site-1"]);
+        assert_eq!(stored.solcast.api_key.as_deref(), Some("solcast-key"));
     }
 
     #[tokio::test]

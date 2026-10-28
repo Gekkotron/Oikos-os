@@ -1581,3 +1581,24 @@ async fn mcp_settings_without_a_setup_context_is_an_error() {
     assert_eq!(result.is_error, Some(true));
     assert!(text_of(&result).contains("settings are not available"));
 }
+
+#[tokio::test]
+async fn mcp_set_settings_error_never_echoes_a_secret() {
+    let server = Server::start_with_setup(settings_ctx(oikos_os::setup::Mode::Run)).await;
+    let client = server.client().await;
+    // Solcast on with no site fails validation; the key rides along in the body.
+    let result = call(
+        &client,
+        "set_settings",
+        json!({"section": "solcast",
+               "value": {"enabled": true, "sites": [], "api_key": "sk-test-123"}}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true), "{}", text_of(&result));
+    assert!(
+        !text_of(&result).contains("sk-test-123"),
+        "{}",
+        text_of(&result)
+    );
+    assert!(!format!("{result:?}").contains("sk-test-123"));
+}
