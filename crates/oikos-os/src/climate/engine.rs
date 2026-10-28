@@ -23,8 +23,8 @@ use tokio::task::JoinHandle;
 
 use super::hub::valid_zone_id;
 use super::inputs::{
-    OUTDOOR_CACHE_S, OwnedZoneInputs, local_time, outdoor_mean, outdoor_reading, presence_home_now,
-    room_sensor, step_from, step_of, zone_entity_ids, zone_inputs_owned,
+    HomeNow, OUTDOOR_CACHE_S, OwnedZoneInputs, local_time, outdoor_mean, outdoor_reading,
+    presence_home_now, room_sensor, step_from, step_of, zone_entity_ids, zone_inputs_owned,
 };
 use super::{GROUP_PREFIX, alerts, learning};
 use crate::clock;
@@ -409,6 +409,8 @@ impl Hub {
         let house = self.climate_store().house.clone();
         let home_now = presence_home_now(self, &house);
         let mut watched: BTreeSet<String> = house.presence.iter().cloned().collect();
+        // The hub's own alarm sends the house away when armed away, listed or not.
+        watched.insert(crate::alarm::ALARM_ENTITY_ID.to_owned());
         watched.extend(house.holiday_entity.clone());
         watched.extend(house.outdoor_entity.clone());
         for zone in self.climate_zone_ids() {
@@ -425,7 +427,7 @@ impl Hub {
         }
         let outdoor = outdoor_mean(self, now);
         let mut rt = self.climate_runtime();
-        if home_now || rt.last_home_at.is_none() {
+        if home_now == HomeNow::Home || rt.last_home_at.is_none() {
             rt.last_home_at = Some(now);
         }
         if let Some(mode) = oikos_climate::schedule::season_mode(&house, outdoor, rt.previous_mode)

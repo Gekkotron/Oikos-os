@@ -12,6 +12,7 @@ use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind,
 
 use super::GROUP_PREFIX;
 use super::hub::zone_devices;
+use crate::alarm::ALARM_ENTITY_ID;
 use crate::hub::Hub;
 
 /// Step assumed for a device that does not advertise one; the same as the decision tree's.
@@ -161,34 +162,62 @@ fn alarm_home(state: &str) -> Option<bool> {
     }
 }
 
-/// Whether the house is home right now: some presence entity says so, or none says anything
-/// definite (an unknown tracker never sends the house away). No presence entity means home.
-/// An entity that says nothing now keeps its last definite answer, so a triggered alarm or an
-/// entry delay does not bring the heating back.
-pub(crate) fn presence_home_now(hub: &Hub, house: &HouseSettings) -> bool {
-    if house.presence.is_empty() {
-        return true;
-    }
-    let now: Vec<(String, Option<bool>)> = {
+/// Who is home right now, as the presence entities say.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HomeNow {
+    Home,
+    /// Every presence entity with an answer says away: the house waits `away_grace` first.
+    Away,
+    /// An alarm panel is armed away: a definite answer, eco right away.
+    AlarmAway,
+}
+
+/// Who is home right now. An alarm panel armed away (the hub's own, or one in the presence
+/// list) is nobody home, whatever a tracker says. Otherwise some presence entity says home, or
+/// none says anything definite (an unknown tracker never sends the house away); no presence
+/// entity means home. An entity that says nothing now keeps its last definite answer, so a
+/// triggered alarm or an entry delay does not bring the heating back. The hub's own alarm, when
+/// not in the list, only ever says away: disarmed, it leaves the trackers in charge.
+pub(crate) fn presence_home_now(hub: &Hub, house: &HouseSettings) -> HomeNow {
+    let native_unlisted = !house.presence.iter().any(|id| id == ALARM_ENTITY_ID);
+    let now: Vec<(String, Option<bool>, bool)> = {
         let reg = hub.read();
         house
             .presence
             .iter()
-            .map(|id| (id.clone(), reg.state(id).and_then(home_of)))
+            .map(String::as_str)
+            .chain(native_unlisted.then_some(ALARM_ENTITY_ID))
+            .map(|id| {
+                (
+                    id.to_owned(),
+                    reg.state(id).and_then(home_of),
+                    reg.entity(id).is_some_and(|e| e.kind == Kind::AlarmPanel),
+                )
+            })
             .collect()
     };
     let mut rt = hub.climate_runtime();
-    let known: Vec<bool> = now
-        .into_iter()
-        .filter_map(|(id, answer)| match answer {
-            Some(home) => {
-                rt.presence_last.insert(id, home);
-                Some(home)
-            }
-            None => rt.presence_last.get(&id).copied(),
-        })
-        .collect();
-    known.is_empty() || known.contains(&true)
+    let mut alarm_away = false;
+    let mut listed = Vec::new();
+    for (id, answer, alarm) in now {
+        if let Some(home) = answer {
+            rt.presence_last.insert(id.clone(), home);
+        }
+        let Some(home) = answer.or_else(|| rt.presence_last.get(&id).copied()) else {
+            continue;
+        };
+        alarm_away |= alarm && !home;
+        if !(native_unlisted && id == ALARM_ENTITY_ID) {
+            listed.push(home);
+        }
+    }
+    if alarm_away {
+        HomeNow::AlarmAway
+    } else if listed.is_empty() || listed.contains(&true) {
+        HomeNow::Home
+    } else {
+        HomeNow::Away
+    }
 }
 
 fn holiday_now(hub: &Hub, house: &HouseSettings) -> bool {
@@ -379,7 +408,11 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
             .is_some_and(|at| now.saturating_sub(at) <= grace_s);
         (
             season_mode(&house, outdoor_mean, rt.previous_mode),
-            home_now || recently_home,
+            match home_now {
+                HomeNow::Home => true,
+                HomeNow::Away => recently_home,
+                HomeNow::AlarmAway => false,
+            },
             rt.safety_memory.get(zone).cloned(),
         )
     };
