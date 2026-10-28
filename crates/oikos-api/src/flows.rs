@@ -80,7 +80,9 @@ pub enum RunStatus {
 /// The state change that fired a run.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TriggerInfo {
-    pub entity: String,
+    /// `None` for a run started from a Manual card that carries a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity: Option<String>,
     pub value: Value,
     pub previous: Value,
 }
@@ -129,7 +131,7 @@ mod tests {
             started_at: 10,
             ended_at: None,
             trigger: Some(TriggerInfo {
-                entity: "motion".into(),
+                entity: Some("motion".into()),
                 value: json!(true),
                 previous: json!(false),
             }),
@@ -152,5 +154,18 @@ mod tests {
         assert_eq!(value["run"]["steps"][0]["outcome"], "ok");
         let back: WsEvent = serde_json::from_value(value).unwrap();
         assert_eq!(back, event);
+    }
+
+    #[test]
+    fn trigger_info_entity_is_optional() {
+        let with: TriggerInfo =
+            serde_json::from_value(json!({"entity": "x", "value": true, "previous": false}))
+                .unwrap();
+        assert_eq!(with.entity.as_deref(), Some("x"));
+        let without: TriggerInfo =
+            serde_json::from_value(json!({"value": true, "previous": null})).unwrap();
+        assert_eq!(without.entity, None);
+        let out = serde_json::to_value(&without).unwrap();
+        assert!(out.get("entity").is_none());
     }
 }

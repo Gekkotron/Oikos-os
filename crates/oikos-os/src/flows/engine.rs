@@ -466,7 +466,7 @@ impl Engine {
             }
         }
         let trigger = TriggerInfo {
-            entity: id.to_owned(),
+            entity: Some(id.to_owned()),
             value: Value::String("PRESS".to_owned()),
             previous: Value::Null,
         };
@@ -492,7 +492,7 @@ impl Engine {
             }
         }
         let trigger = TriggerInfo {
-            entity: id.to_owned(),
+            entity: Some(id.to_owned()),
             value: Value::String(signal.to_owned()),
             previous: Value::Null,
         };
@@ -553,7 +553,7 @@ impl Engine {
             }
         }
         let trigger = TriggerInfo {
-            entity: id.to_owned(),
+            entity: Some(id.to_owned()),
             value: next.to_json(),
             previous: previous.to_json(),
         };
@@ -865,11 +865,15 @@ async fn run_node(
             // The value the trigger carried, with the unit and words of its entity.
             let trigger = trigger.and_then(|t| {
                 let value = Scalar::from_json(&t.value)?;
-                let mut reading = hub.reading(&t.entity).unwrap_or(Reading {
-                    value: value.clone(),
-                    unit: None,
-                    device_class: None,
-                });
+                let mut reading = t
+                    .entity
+                    .as_deref()
+                    .and_then(|id| hub.reading(id))
+                    .unwrap_or(Reading {
+                        value: value.clone(),
+                        unit: None,
+                        device_class: None,
+                    });
                 reading.value = value;
                 Some(reading)
             });
@@ -1023,7 +1027,12 @@ async fn node_left(
 ) -> Result<Option<Scalar>, String> {
     let entity = match (entity, trigger) {
         (Some(entity), _) => entity,
-        (None, Some(trigger)) => trigger.entity.as_str(),
+        (None, Some(trigger)) => match trigger.entity.as_deref() {
+            Some(entity) => entity,
+            // A Manual card's value: nothing to read, nothing to average.
+            None if average.is_some() => return Err("no entity to average".to_owned()),
+            None => return Ok(Scalar::from_json(&trigger.value)),
+        },
         (None, None) => return Err("no triggering entity".to_owned()),
     };
     Ok(match average {
@@ -1231,7 +1240,7 @@ mod tests {
         }
         let node = engine.flows[0].nodes[1].clone();
         let trigger = TriggerInfo {
-            entity: entity.clone(),
+            entity: Some(entity.clone()),
             value: serde_json::json!(17),
             previous: serde_json::json!(20),
         };
@@ -1267,7 +1276,7 @@ mod tests {
         }
         let node = engine.flows[0].nodes[1].clone();
         let trigger = TriggerInfo {
-            entity: entity.clone(),
+            entity: Some(entity.clone()),
             value: serde_json::json!(17),
             previous: serde_json::json!(20),
         };
