@@ -57,8 +57,8 @@ pub enum CameraLayout {
 pub fn camera_layout(span: Span, count: usize) -> CameraLayout {
     match (span, count) {
         (_, 0 | 1) => CameraLayout::Single,
-        (Span::X2x2, 2) => CameraLayout::Stack,
-        (Span::X2x2, _) => CameraLayout::Grid,
+        (Span::X2x2 | Span::X4x2 | Span::X6x3, 2) => CameraLayout::Stack,
+        (Span::X2x2 | Span::X4x2 | Span::X6x3, _) => CameraLayout::Grid,
         _ => CameraLayout::Carousel,
     }
 }
@@ -201,6 +201,11 @@ mod tests {
         assert_eq!(camera_layout(Span::X2x2, 2), Stack);
         assert_eq!(camera_layout(Span::X2x2, 3), Grid);
         assert_eq!(camera_layout(Span::X2x2, 4), Grid);
+        for big in [Span::X4x2, Span::X6x3] {
+            assert_eq!(camera_layout(big, 1), Single);
+            assert_eq!(camera_layout(big, 2), Stack);
+            assert_eq!(camera_layout(big, 3), Grid);
+        }
         assert_eq!(camera_layout(Span::X1x1, 1), Single);
         assert_eq!(camera_layout(Span::X1x1, 3), Carousel);
         assert_eq!(camera_layout(Span::X2x2, 0), Single);

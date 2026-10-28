@@ -52,6 +52,12 @@ pub enum Span {
     X2x2,
     #[serde(rename = "1x2")]
     X1x2,
+    /// Wide: four columns, two rows (full width on a phone).
+    #[serde(rename = "4x2")]
+    X4x2,
+    /// Full width: six columns, three rows (four on a tablet, two on a phone).
+    #[serde(rename = "6x3")]
+    X6x3,
 }
 
 impl Span {
@@ -61,6 +67,8 @@ impl Span {
             Span::X2x1 => "2x1",
             Span::X2x2 => "2x2",
             Span::X1x2 => "1x2",
+            Span::X4x2 => "4x2",
+            Span::X6x3 => "6x3",
         }
     }
 }
@@ -134,7 +142,8 @@ pub fn allowed_spans(kind: WidgetKind) -> &'static [Span] {
         | WidgetKind::WaterHeater
         | WidgetKind::EnergyStat => &[X1x1, X2x1],
         WidgetKind::RoomGroup => &[X1x1, X2x1, X2x2],
-        WidgetKind::HistoryChart | WidgetKind::Camera => &[X2x1, X2x2, X1x2],
+        WidgetKind::HistoryChart => &[X2x1, X2x2, X1x2],
+        WidgetKind::Camera => &[X2x1, X2x2, X1x2, X4x2, X6x3],
     }
 }
 
@@ -158,6 +167,8 @@ mod tests {
             (Span::X2x1, "2x1"),
             (Span::X2x2, "2x2"),
             (Span::X1x2, "1x2"),
+            (Span::X4x2, "4x2"),
+            (Span::X6x3, "6x3"),
         ] {
             assert_eq!(s.as_str(), w);
             assert_eq!(serde_json::to_string(&s).unwrap(), format!("\"{w}\""));
@@ -181,7 +192,7 @@ mod tests {
         );
         assert_eq!(
             allowed_spans(WidgetKind::Camera),
-            &[Span::X2x1, Span::X2x2, Span::X1x2]
+            &[Span::X2x1, Span::X2x2, Span::X1x2, Span::X4x2, Span::X6x3]
         );
     }
 
