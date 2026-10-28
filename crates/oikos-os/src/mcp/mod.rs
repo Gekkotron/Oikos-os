@@ -183,8 +183,9 @@ fn instructions() -> String {
          change, at most `manual_hold_max_min`. Eco: `set_climate_settings` holds `eco` (`heat`, \
          `cool`, `actions` such as `{{\"fan_mode\":\"low\"}}`), never above a zone's schedule; \
          `set_climate_eco` puts one zone in eco until a Unix time and `clear_climate_eco` ends it; \
-         an alarm panel in `presence` that is armed away means nobody home, so every zone is in \
-         eco. `get_weather` returns the outdoor weather when \
+         the hub's alarm (`oikos_alarm_house`, listed in `presence` or not) or an alarm panel in \
+         `presence` that is armed away means nobody home, whatever a tracker says and with no \
+         `away_grace`, so every zone is in eco. `get_weather` returns the outdoor weather when \
          `[weather] enabled`. `get_solar` returns the Solcast solar forecast (today, tomorrow, the \
     next days, the request budget) when `[solcast] enabled`; its `solar_…` entities carry the same \
     numbers. `get_home_settings` and `set_home_settings` read and replace the whole \

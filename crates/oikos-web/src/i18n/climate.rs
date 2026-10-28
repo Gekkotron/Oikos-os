@@ -369,8 +369,8 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
         T::FanSpeed => ("Fan speed", "Vitesse du ventilateur"),
         T::DontChange => ("Don't change", "Ne pas changer"),
         T::PresenceAlarmHint => (
-            "An alarm panel can be added: armed away means nobody home",
-            "Une alarme peut être ajoutée\u{A0}: armée absent veut dire personne à la maison",
+            "The hub's alarm armed away always means nobody home; another alarm panel can be added",
+            "L'alarme du hub armée absent veut toujours dire personne à la maison\u{A0}; une autre alarme peut être ajoutée",
         ),
         T::EcoUntilButton => ("Eco until…", "Éco jusqu'au…"),
         T::EcoUntilDate => ("Until", "Jusqu'au"),
