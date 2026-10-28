@@ -1,12 +1,166 @@
 //! The onboarding wizard: shared state and the rules for when to send the browser to it.
 
+pub mod wizard;
+
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
+use leptos_router::NavigateOptions;
+use leptos_router::components::{Route, Router, Routes};
+use leptos_router::hooks::use_navigate;
+use leptos_router::path;
 use oikos_api::{SetupStatus, SetupStep};
+
+use crate::api::setup::get_setup;
+use crate::components::toast::{ToastQueue, Toasts};
+use crate::i18n::Lang;
+use crate::i18n::setup::{SetupText, use_setup_text};
+use crate::theme::install_theme;
+use wizard::SetupScreen;
 
 /// What `GET /api/v1/setup` last said. `None` means the hub has no setup API (an older hub) or
 /// the call failed; nothing redirects then.
 #[derive(Clone, Copy)]
 pub struct SetupState(pub RwSignal<Option<SetupStatus>>);
+
+/// The "Applying…" overlay's state: a save that restarts the hub calls `start` with the path to
+/// reload into once the hub answers again.
+#[derive(Clone, Copy)]
+pub struct Applying {
+    /// The path to reload into; `Some` while the overlay shows.
+    pub target: RwSignal<Option<String>>,
+    /// The hub did not come back in time.
+    pub failed: RwSignal<bool>,
+    reload: fn(&str),
+}
+
+impl Applying {
+    /// `reload` navigates the page (a function so a test can record it instead).
+    pub fn new(reload: fn(&str)) -> Self {
+        Self {
+            target: RwSignal::new(None),
+            failed: RwSignal::new(false),
+            reload,
+        }
+    }
+
+    /// Shows the overlay and reloads into `target` once the hub is back.
+    pub fn start(&self, target: &str) {
+        self.failed.set(false);
+        self.target.set(Some(target.to_owned()));
+    }
+}
+
+/// Reloads the page at `target`, which re-reads the hub's mode.
+pub fn reload_to(target: &str) {
+    if let Some(window) = web_sys::window() {
+        let _ = window.location().assign(target);
+    }
+}
+
+/// Waits for a restarting hub. It sleeps `interval_ms` first so a hub about to restart is not
+/// caught still answering, then polls `GET /api/v1/setup` every `interval_ms`, ignoring errors,
+/// and returns the first reply that is not `restarting`. `None` after `attempts` polls.
+pub async fn wait_for_hub(interval_ms: u32, attempts: u32) -> Option<SetupStatus> {
+    TimeoutFuture::new(interval_ms).await;
+    for attempt in 0..attempts {
+        if let Ok(status) = get_setup().await
+            && !status.restarting
+        {
+            return Some(status);
+        }
+        if attempt + 1 < attempts {
+            TimeoutFuture::new(interval_ms).await;
+        }
+    }
+    None
+}
+
+/// Poll interval and count for the overlay: about 90 s, longer than a hub restart.
+const OVERLAY_INTERVAL_MS: u32 = 1_000;
+const OVERLAY_ATTEMPTS: u32 = 90;
+
+/// Waits for the hub, then reloads into the target; on a timeout sets `failed`.
+fn wait_then_reload(applying: Applying, target: String) {
+    leptos::task::spawn_local(async move {
+        match wait_for_hub(OVERLAY_INTERVAL_MS, OVERLAY_ATTEMPTS).await {
+            Some(_) => (applying.reload)(&target),
+            None => {
+                applying.failed.try_set(true);
+            }
+        }
+    });
+}
+
+/// A full-screen layer while the hub restarts. Needs [`Applying`] in context.
+#[component]
+pub fn ApplyingOverlay() -> impl IntoView {
+    let applying = expect_context::<Applying>();
+    let t = use_setup_text();
+    Effect::new(move |_| {
+        if let Some(target) = applying.target.get() {
+            wait_then_reload(applying, target);
+        }
+    });
+    let retry = move |_| {
+        if let Some(target) = applying.target.get_untracked() {
+            applying.failed.set(false);
+            wait_then_reload(applying, target);
+        }
+    };
+    view! {
+        <Show when=move || applying.target.with(Option::is_some)>
+            <div class="applying" role="status" aria-live="polite">
+                <Show
+                    when=move || applying.failed.get()
+                    fallback=move || {
+                        view! {
+                            <div class="boot__spinner"></div>
+                            <p class="applying__text">{move || t(SetupText::Applying)}</p>
+                        }
+                    }
+                >
+                    <p class="applying__text">{move || t(SetupText::ApplyFailed)}</p>
+                    <button type="button" class="btn" on:click=retry>
+                        {move || t(SetupText::Retry)}
+                    </button>
+                </Show>
+            </div>
+        </Show>
+    }
+}
+
+/// Sends any path but `/setup` to `/setup`.
+#[component]
+fn ToSetup() -> impl IntoView {
+    let navigate = use_navigate();
+    Effect::new(move |_| {
+        navigate(
+            "/setup",
+            NavigateOptions {
+                replace: true,
+                ..Default::default()
+            },
+        );
+    });
+}
+
+/// The app while the hub is in setup mode: only `/setup`, with no house, no socket and no shell.
+#[component]
+pub fn SetupApp() -> impl IntoView {
+    let lang = use_context::<RwSignal<Lang>>().unwrap_or_else(crate::i18n::install_lang);
+    provide_context(lang);
+    let theme = install_theme();
+    provide_context(theme);
+    provide_context(Toasts::new());
+    view! {
+        <Router>
+            <Routes fallback=ToSetup>
+                <Route path=path!("/setup") view=SetupScreen />
+            </Routes>
+            <ToastQueue />
+        </Router>
+    }
+}
 
 /// Whether `path` must be replaced by `/setup`: any path while the hub is in setup mode, and
 /// the landing page until setup is finished.
