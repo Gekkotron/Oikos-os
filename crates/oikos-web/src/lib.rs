@@ -14,6 +14,7 @@ pub mod components;
 pub mod dashboards;
 pub mod energy;
 pub mod energy_day;
+pub mod energy_sankey;
 pub mod energy_view;
 pub mod entity_picker;
 pub mod flow_edit;
