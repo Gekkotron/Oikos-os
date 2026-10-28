@@ -64,6 +64,7 @@ fn summary_label(lang: Lang, node: &Node) -> String {
         NodeKind::TriggerState(_) => flow_text(lang, FlowText::NodeTrigger).into(),
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(_) => flow_text(lang, FlowText::NodeSun).into(),
+        NodeKind::TriggerManual(_) => flow_text(lang, FlowText::NodeManual).into(),
         NodeKind::TriggerSignal(_) => flow_text(lang, FlowText::NodeSignal).into(),
         NodeKind::If(_) => flow_text(lang, FlowText::NodeIf).into(),
         NodeKind::Delay(p) => {
@@ -96,6 +97,7 @@ pub fn trigger_summary(lang: Lang, flow: &Flow, entities: &BTreeMap<String, Enti
             )),
             NodeKind::TriggerSchedule(p) => Some(describe(lang, &p.cron)),
             NodeKind::TriggerSun(p) => Some(sun_summary(lang, p.which, p.offset())),
+            NodeKind::TriggerManual(_) => Some(flow_text(lang, FlowText::NodeManual).into()),
             _ => None,
         })
         .collect();
@@ -141,19 +143,26 @@ pub fn trigger_line(
     entities: &BTreeMap<String, EntityView>,
 ) -> String {
     if run.manual {
-        return flow_text(lang, FlowText::ManualRun).to_owned();
+        let head = flow_text(lang, FlowText::ManualRun);
+        // A card with a value starts the run with it: "manual · on".
+        return match run.trigger.as_ref().filter(|t| t.entity.is_none()) {
+            Some(t) => format!("{head} · {}", value_words(lang, &t.value, None, None)),
+            None => head.to_owned(),
+        };
     }
-    if let Some(trigger) = &run.trigger {
+    if let Some((trigger, id)) = run
+        .trigger
+        .as_ref()
+        .and_then(|t| t.entity.as_deref().map(|id| (t, id)))
+    {
         return format!(
             "{} = {}",
-            entity_label(lang, &trigger.entity, entities),
+            entity_label(lang, id, entities),
             value_words(
                 lang,
                 &trigger.value,
-                entities
-                    .get(&trigger.entity)
-                    .and_then(|e| e.unit.as_deref()),
-                entities.get(&trigger.entity),
+                entities.get(id).and_then(|e| e.unit.as_deref()),
+                entities.get(id),
             )
         );
     }
@@ -169,14 +178,7 @@ pub fn trigger_line(
 pub fn orphans(flow: &Flow) -> BTreeSet<String> {
     flow.nodes
         .iter()
-        .filter(|n| {
-            !matches!(
-                n.kind,
-                NodeKind::TriggerState(_)
-                    | NodeKind::TriggerSchedule(_)
-                    | NodeKind::TriggerSignal(_)
-            )
-        })
+        .filter(|n| !n.kind.is_trigger())
         .filter(|n| !flow.edges.iter().any(|e| e.to == n.id))
         .map(|n| n.id.clone())
         .collect()
@@ -511,7 +513,7 @@ mod tests {
         let none = BTreeMap::new();
         let mut run = running(vec![step("motion", StepOutcome::Ok, "")]);
         run.trigger = Some(TriggerInfo {
-            entity: "m".into(),
+            entity: Some("m".into()),
             value: serde_json::json!(true),
             previous: serde_json::json!(false),
         });
@@ -519,7 +521,7 @@ mod tests {
         let lamp = lamp("m");
         let lamps: BTreeMap<_, _> = [("m".to_owned(), lamp)].into();
         run.trigger = Some(TriggerInfo {
-            entity: "m".into(),
+            entity: Some("m".into()),
             value: serde_json::json!(true),
             previous: serde_json::json!(false),
         });
@@ -532,6 +534,17 @@ mod tests {
         run.trigger = None;
         run.manual = true;
         assert_eq!(trigger_line(Lang::En, &run, &reference(), &none), "manual");
+        // A press on a Manual card with a value starts the run with it, with no entity.
+        run.trigger = Some(TriggerInfo {
+            entity: None,
+            value: serde_json::json!(true),
+            previous: serde_json::Value::Null,
+        });
+        assert_eq!(
+            trigger_line(Lang::En, &run, &reference(), &none),
+            "manual · on"
+        );
+        run.trigger = None;
         // A timed run carries no trigger; its first step names the trigger node.
         let mut timed = reference();
         let motion = timed.nodes.iter_mut().find(|n| n.id == "motion").unwrap();

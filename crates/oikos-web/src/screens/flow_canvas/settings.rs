@@ -7,7 +7,7 @@ use oikos_core::flow::{
     IfParams, MAX_SWITCH_RULES, Missing, Node, NodeKind, Op, RuleOp, Scalar, SwitchParams,
     SwitchRule, TimeBetweenParams,
 };
-use oikos_core::model::Command;
+use oikos_core::model::{Command, Kind};
 
 use super::Editor;
 use super::graph::Selection;
@@ -24,8 +24,12 @@ use crate::i18n::flows::{
 };
 use crate::i18n::format::parse_decimal;
 use crate::i18n::picker::PickerText;
+use crate::i18n::states::{kind_word, on_off};
 use crate::i18n::{Lang, use_lang};
-use crate::if_value::{after_entity_change, upstream_trigger_entity, value_input};
+use crate::if_value::{
+    ValueInput, after_entity_change, compared_input, manual_value_input, upstream_manual_value,
+    upstream_trigger_entity,
+};
 use crate::screens::flow_schedule::ScheduleField;
 
 /// A fixed word as a signal that follows the language, for a field's label or placeholder.
@@ -308,6 +312,7 @@ fn node_editor_body(
         NodeKind::TriggerState(_) => FlowText::NodeTrigger,
         NodeKind::TriggerSchedule(_) => FlowText::Schedule,
         NodeKind::TriggerSun(_) => FlowText::NodeSun,
+        NodeKind::TriggerManual(_) => FlowText::NodeManual,
         NodeKind::TriggerSignal(_) => FlowText::NodeSignal,
         NodeKind::If(_) => FlowText::NodeIf,
         NodeKind::Delay(_) => FlowText::NodeDelay,
@@ -842,10 +847,19 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 let resolved = resolved.clone();
                 move |_| resolved(entity_value.get())
             });
+            let manual = manual_input(draft, id.clone());
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
                 let next = untrack(|| resolved(value.clone()));
-                let input = value_input(lang(), next.as_ref());
+                let input = untrack(|| {
+                    compared_input(
+                        lang(),
+                        next.as_ref(),
+                        draft
+                            .with(|f| upstream_manual_value(f, &entity_id))
+                            .as_ref(),
+                    )
+                });
                 form.update(&entity_id, |n| {
                     if let NodeKind::If(ref mut i) = n.kind {
                         i.value = after_entity_change(i.value.as_ref(), &input);
@@ -926,6 +940,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         value=stored_value
                         entity=Signal::from(compared)
                         write=Callback::new(move |v| value_write.run(Some(v)))
+                        fallback=manual
                     />
                     <EntityPickField
                         label=word(FlowText::EntityDefaults)
@@ -994,6 +1009,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             let cfg = Signal::from(expect_context::<House>().flows_config);
             sun_sheet(node, cfg).into_any()
         }
+        NodeKind::TriggerManual(p) => manual_fields(form, id, p.value).into_any(),
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Notify(p) => notify_fields(form, id, p).into_any(),
         NodeKind::Switch(p) => switch_fields(form, id, p).into_any(),
@@ -1192,6 +1208,7 @@ fn rule_row(
     index: usize,
     count: usize,
     compared: Memo<Option<oikos_api::EntityView>>,
+    manual: Signal<Option<ValueInput>>,
     bump: Callback<usize>,
 ) -> impl IntoView {
     let lang = use_lang();
@@ -1275,7 +1292,12 @@ fn rule_row(
                     })
                     .collect_view()}
             </select>
-            <IfValueField value=value entity=Signal::from(compared) write=value_write />
+            <IfValueField
+                value=value
+                entity=Signal::from(compared)
+                write=value_write
+                fallback=manual
+            />
             <Show when=move || is_between.get()>
                 <span class="command-field__number">
                     <span class="command-field__unit">{move || t(FlowText::RuleAnd)}</span>
@@ -1322,6 +1344,16 @@ fn rule_row(
     }
 }
 
+/// The input a Manual card upstream of `id` calls for, read from the draft as it changes.
+fn manual_input(draft: RwSignal<oikos_core::flow::Flow>, id: String) -> Signal<Option<ValueInput>> {
+    let lang = use_lang();
+    Signal::derive(move || {
+        draft
+            .with(|f| upstream_manual_value(f, &id))
+            .map(|v| manual_value_input(lang(), &v))
+    })
+}
+
 /// The `switch` editor: what it compares, then one row per rule, then the exits.
 fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
     let t = use_flow_text();
@@ -1348,10 +1380,19 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
         let resolved = resolved.clone();
         move |_| resolved(entity_value.get())
     });
+    let manual = manual_input(draft, id.clone());
     let entity_id = id.clone();
     let entity_write = Callback::new(move |value: Option<String>| {
         let next = untrack(|| resolved(value.clone()));
-        let input = value_input(lang(), next.as_ref());
+        let input = untrack(|| {
+            compared_input(
+                lang(),
+                next.as_ref(),
+                draft
+                    .with(|f| upstream_manual_value(f, &entity_id))
+                    .as_ref(),
+            )
+        });
         form.update(&entity_id, |n| {
             if let NodeKind::Switch(ref mut s) = n.kind {
                 for r in &mut s.rules {
@@ -1393,7 +1434,7 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
             version.track();
             let n = count.get_untracked();
             (0..n)
-                .map(|i| rule_row(form, id.clone(), i, n, compared, bump))
+                .map(|i| rule_row(form, id.clone(), i, n, compared, manual, bump))
                 .collect_view()
         }
     };
@@ -1461,6 +1502,155 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
     }
 }
 
+/// Which kind of value a Manual card carries, as the select offers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ManualKind {
+    Nothing,
+    On,
+    Off,
+    Number,
+    Text,
+}
+
+const MANUAL_KINDS: [ManualKind; 5] = [
+    ManualKind::Nothing,
+    ManualKind::On,
+    ManualKind::Off,
+    ManualKind::Number,
+    ManualKind::Text,
+];
+
+impl ManualKind {
+    fn of(value: Option<&Scalar>) -> Self {
+        match value {
+            None => Self::Nothing,
+            Some(Scalar::Bool(true)) => Self::On,
+            Some(Scalar::Bool(false)) => Self::Off,
+            Some(Scalar::Number(_)) => Self::Number,
+            Some(Scalar::Text(_)) => Self::Text,
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Nothing => "none",
+            Self::On => "on",
+            Self::Off => "off",
+            Self::Number => "number",
+            Self::Text => "text",
+        }
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        MANUAL_KINDS.into_iter().find(|k| k.key() == key)
+    }
+
+    fn has_box(self) -> bool {
+        matches!(self, Self::Number | Self::Text)
+    }
+
+    /// The value for this kind with `raw` typed in the box; a number box that does not read as
+    /// a number gives no value, so the draft always matches the kind shown.
+    fn value(self, raw: &str) -> Option<Option<Scalar>> {
+        match self {
+            Self::Nothing => Some(None),
+            Self::On => Some(Some(Scalar::Bool(true))),
+            Self::Off => Some(Some(Scalar::Bool(false))),
+            Self::Number => Some(parse_decimal(raw.trim()).map(Scalar::Number)),
+            Self::Text => Some(Some(Scalar::Text(raw.to_owned()))),
+        }
+    }
+}
+
+/// The word of a manual value kind in the select.
+fn manual_kind_label(lang: Lang, kind: ManualKind) -> String {
+    match kind {
+        ManualKind::Nothing => flow_text(lang, FlowText::ManualNoValue).to_owned(),
+        ManualKind::On => on_off(lang, false, true).to_owned(),
+        ManualKind::Off => on_off(lang, false, false).to_owned(),
+        ManualKind::Number => kind_word(lang, Kind::Number).to_owned(),
+        ManualKind::Text => flow_text(lang, FlowText::ManualText).to_owned(),
+    }
+}
+
+/// The Manual card editor: one optional value, none, on/off, a number or text.
+fn manual_fields(form: Form, id: String, initial: Option<Scalar>) -> impl IntoView {
+    let lang = use_lang();
+    let kind = RwSignal::new(ManualKind::of(initial.as_ref()));
+    let raw = RwSignal::new(match &initial {
+        Some(Scalar::Number(n)) => n.to_string(),
+        Some(Scalar::Text(s)) => s.clone(),
+        _ => String::new(),
+    });
+    let write = move |value: Option<Scalar>| {
+        form.update(&id, |n| {
+            if let NodeKind::TriggerManual(ref mut m) = n.kind {
+                m.value = value;
+            }
+        });
+    };
+    let on_kind = {
+        let write = write.clone();
+        move |ev: web_sys::Event| {
+            let Some(next) = ManualKind::from_key(&event_target_value(&ev)) else {
+                return;
+            };
+            kind.set(next);
+            if !next.has_box() {
+                raw.set(String::new());
+            }
+            if let Some(v) = next.value(&raw.get_untracked()) {
+                write(v);
+            }
+        }
+    };
+    let on_raw = move |ev: web_sys::Event| {
+        let text = event_target_value(&ev);
+        raw.set(text.clone());
+        if let Some(v) = kind.get_untracked().value(&text) {
+            write(v);
+        }
+    };
+    let on_text = on_raw.clone();
+    view! {
+        <label class="node-editor__field">
+            <span class="node-editor__label">{move || flow_text(lang(), FlowText::ManualValue)}</span>
+            <select class="field" on:change=on_kind>
+                {MANUAL_KINDS
+                    .into_iter()
+                    .map(|k| {
+                        view! {
+                            <option value=k.key() selected=k == kind.get_untracked()>
+                                {move || manual_kind_label(lang(), k)}
+                            </option>
+                        }
+                    })
+                    .collect_view()}
+            </select>
+        </label>
+        <Show when=move || kind.get() == ManualKind::Number>
+            <input
+                type="number"
+                class="field"
+                step="any"
+                // Not reactive: mid-typing ("-", "2.") a number box reports "" and would be wiped.
+                prop:value=raw.get_untracked()
+                on:input=on_raw.clone()
+            />
+        </Show>
+        <Show when=move || kind.get() == ManualKind::Text>
+            <input
+                type="text"
+                class="field"
+                spellcheck="false"
+                autocomplete="off"
+                prop:value=move || raw.get()
+                on:input=on_text.clone()
+            />
+        </Show>
+    }
+}
+
 /// The `time.between` editor: two `HH:MM` fields.
 fn time_fields(form: Form, id: String, p: TimeBetweenParams) -> impl IntoView {
     let field = |label: FlowText, initial: String, to: bool| {
@@ -1498,6 +1688,32 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn manual_kind_round_trips_its_value() {
+        for (value, kind) in [
+            (None, ManualKind::Nothing),
+            (Some(Scalar::Bool(true)), ManualKind::On),
+            (Some(Scalar::Bool(false)), ManualKind::Off),
+            (Some(Scalar::Number(21.5)), ManualKind::Number),
+            (Some(Scalar::Text("hi".into())), ManualKind::Text),
+        ] {
+            assert_eq!(ManualKind::of(value.as_ref()), kind);
+            assert_eq!(ManualKind::from_key(kind.key()), Some(kind));
+        }
+        assert_eq!(
+            ManualKind::Number.value("21,5"),
+            Some(Some(Scalar::Number(21.5)))
+        );
+        // An empty or unreadable number box holds no value, never the previous one.
+        assert_eq!(ManualKind::Number.value("abc"), Some(None));
+        assert_eq!(ManualKind::Number.value(""), Some(None));
+        assert_eq!(
+            ManualKind::On.value("ignored"),
+            Some(Some(Scalar::Bool(true)))
+        );
+        assert_eq!(ManualKind::Nothing.value("x"), Some(None));
+    }
 
     #[test]
     fn between_gains_an_upper_bound_and_others_lose_it() {

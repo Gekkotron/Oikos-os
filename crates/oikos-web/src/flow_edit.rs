@@ -321,6 +321,7 @@ pub fn next_node_id(flow: &Flow, kind: &NodeKind) -> String {
         NodeKind::TriggerState(_) => "trigger",
         NodeKind::TriggerSchedule(_) => "schedule",
         NodeKind::TriggerSun(_) => "sun",
+        NodeKind::TriggerManual(_) => "manual",
         NodeKind::TriggerSignal(_) => "signal",
         NodeKind::If(_) => "if",
         NodeKind::Delay(_) => "delay",
@@ -479,6 +480,13 @@ mod tests {
             nodes,
             ..Flow::default()
         }
+    }
+
+    #[test]
+    fn a_manual_card_gets_a_manual_id() {
+        let flow = Flow::default();
+        let kind = NodeKind::TriggerManual(Default::default());
+        assert_eq!(next_node_id(&flow, &kind), "manual_1");
     }
 
     #[test]

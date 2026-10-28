@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::scalar::Scalar;
 use super::template::Lang;
 use crate::model::Command;
 use crate::model::ui_override::strip_nulls;
@@ -146,6 +147,9 @@ pub enum NodeKind {
     /// Starts a run at a solar event (sunrise, sunset, dusk or dawn), with an optional offset.
     #[serde(rename = "trigger.sun")]
     TriggerSun(TriggerSunParams),
+    /// Starts a run when its card is pressed, optionally carrying a fixed value.
+    #[serde(rename = "trigger.manual")]
+    TriggerManual(TriggerManualParams),
     /// Starts a run when a remote, an event entity or a tag scanner sends a signal.
     #[serde(rename = "trigger.signal")]
     TriggerSignal(TriggerSignalParams),
@@ -179,6 +183,7 @@ impl NodeKind {
             NodeKind::TriggerState(_) => "trigger.state",
             NodeKind::TriggerSchedule(_) => "trigger.schedule",
             NodeKind::TriggerSun(_) => "trigger.sun",
+            NodeKind::TriggerManual(_) => "trigger.manual",
             NodeKind::TriggerSignal(_) => "trigger.signal",
             NodeKind::If(_) => "if",
             NodeKind::Delay(_) => "delay",
@@ -197,6 +202,7 @@ impl NodeKind {
             NodeKind::TriggerState(_)
                 | NodeKind::TriggerSchedule(_)
                 | NodeKind::TriggerSun(_)
+                | NodeKind::TriggerManual(_)
                 | NodeKind::TriggerSignal(_)
         )
     }
@@ -255,6 +261,17 @@ pub struct TriggerSignalParams {
 pub struct TriggerScheduleParams {
     /// Five-field cron expression: minute hour day-of-month month day-of-week.
     pub cron: String,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `trigger.manual`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct TriggerManualParams {
+    /// The trigger value the run carries; absent means a run without a value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Scalar>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }

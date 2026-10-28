@@ -704,12 +704,26 @@ async fn set_flow_area(
     Ok(Json(hub.set_flow_area(&id, area).await?))
 }
 
-/// Starts a run by hand; `202` with the run, `422` when the flow is disabled, invalid or busy.
+/// The optional body of a run request: the `trigger.manual` card to start from.
+#[derive(serde::Deserialize)]
+struct RunBody {
+    #[serde(default)]
+    node: Option<String>,
+}
+
+/// Starts a run by hand, from the Manual card named in the body or else the first trigger;
+/// `202` with the run, `422` when the flow is disabled, invalid or busy, or the card is not a
+/// manual trigger of it.
 async fn run_flow(
     State(hub): HubState,
     Path(id): Path<String>,
+    body: Option<Json<RunBody>>,
 ) -> Result<(StatusCode, Json<RunView>), HttpError> {
-    Ok((StatusCode::ACCEPTED, Json(hub.run_flow(&id)?)))
+    let node = body.and_then(|Json(body)| body.node);
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(hub.run_flow_from(&id, node.as_deref())?),
+    ))
 }
 
 #[derive(serde::Deserialize)]

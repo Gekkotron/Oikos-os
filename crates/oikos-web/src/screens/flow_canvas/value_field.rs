@@ -36,10 +36,20 @@ pub fn IfValueField(
     value: Signal<Option<Value>>,
     entity: Signal<Option<EntityView>>,
     write: Callback<Value>,
+    /// The input to use when there is no entity: what a Manual card upstream carries.
+    #[prop(optional, into)]
+    fallback: Option<Signal<Option<ValueInput>>>,
 ) -> impl IntoView {
     let lang = use_lang();
     let other = RwSignal::new(false);
-    let input = Memo::new(move |_| entity.with(|e| value_input(lang(), e.as_ref())));
+    let input = Memo::new(move |_| {
+        entity.with(|e| match e {
+            Some(_) => value_input(lang(), e.as_ref()),
+            None => fallback
+                .and_then(|f| f.get())
+                .unwrap_or_else(|| value_input(lang(), None)),
+        })
+    });
     let mode = Memo::new(move |_| match input.get() {
         ValueInput::List(_) if other.get() => Mode::Typed { back: true },
         ValueInput::List(_) => Mode::List,

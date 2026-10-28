@@ -127,6 +127,20 @@ Outputs: one.
 
 The hub arms the next event within the coming week, in the house zone. Events missed while the hub was busy are never replayed: the next one is searched from now. Where the sun never crosses the threshold (polar night, midnight sun) nothing is armed. While the broker link is offline when the event is due, the run is recorded as skipped.
 
+## `trigger.manual`
+
+Starts a run when someone presses its button on the card, from the web UI, `POST /api/v1/flows/{id}/run` or the `run_flow` MCP tool. It never fires on its own.
+
+| Param | Type | Description |
+| --- | --- | --- |
+| `value` | boolean, number or string, optional | The value the run carries. |
+
+Outputs: one. No input.
+
+- Without a `value`, it is a valueless trigger like `trigger.schedule`: an `if` or `switch` reachable from it must name an `entity` (`op: is_dark` excepted), or the flow is refused with "node `x`: an if after a schedule, sun or manual trigger without a value must name an entity" (a `switch` reads "a switch after ...").
+- With a `value`, an `if` or `switch` without an `entity` compares that value, and `{trigger}` in a notify text prints it. Such an `if` or `switch` cannot use `average`: "node `x`: an average after a manual trigger must name an entity".
+- The run's step detail reads `manual`, or `manual: <json value>` when the card has a value.
+
 ## `if`
 
 Branches on a comparison.

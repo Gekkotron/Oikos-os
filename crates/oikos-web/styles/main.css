@@ -3974,6 +3974,28 @@ html:has(.flow-canvas-screen) {
   opacity: 0.6;
 }
 
+/* The run button of a manual card, at the right end of the pill. */
+.flow-node__run {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0 0 0 2px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--node-accent);
+  color: var(--bg);
+  font: 700 11px/1 var(--font-body);
+  cursor: pointer;
+}
+
+.flow-node__run:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* Step time of a replayed run, or the countdown of a parked delay, on the top edge. */
 .flow-node__step {
   position: absolute;

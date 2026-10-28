@@ -76,11 +76,15 @@ impl OikosMcp {
 
     /// Starts a manual run of a flow, without waiting for its trigger, and returns the run as
     /// it starts; read its outcome with `get_flow`. Refused when the flow is
-    /// disabled, invalid or already running.
+    /// disabled, invalid or already running; a card press (`node`) on a `restart` flow replaces
+    /// the active run instead. `node` names a `trigger.manual` card to start from (the run
+    /// carries its value); refused when it is not one.
     #[tool(name = "run_flow")]
     async fn run_flow(&self, Parameters(params): Parameters<RunFlowParams>) -> ToolResult<RunView> {
         log_write("run_flow", &params);
-        Ok(Json(self.hub.run_flow(&params.id)?))
+        Ok(Json(
+            self.hub.run_flow_from(&params.id, params.node.as_deref())?,
+        ))
     }
 }
 

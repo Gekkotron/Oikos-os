@@ -140,41 +140,100 @@ pub fn after_entity_change(current: Option<&Value>, input: &ValueInput) -> Optio
     }
 }
 
-/// The entity whose value reaches `node_id`: the one state trigger every path back from the
-/// node starts at. `None` when the paths start at several entities or at another trigger.
-pub fn upstream_trigger_entity(flow: &Flow, node_id: &str) -> Option<String> {
+/// The trigger nodes every path back from `node_id` starts at.
+fn upstream_triggers<'a>(flow: &'a Flow, node_id: &str) -> Vec<&'a NodeKind> {
     let mut seen = BTreeSet::from([node_id.to_owned()]);
     let mut queue = vec![node_id.to_owned()];
-    let mut entities = BTreeSet::new();
+    let mut triggers = Vec::new();
     while let Some(id) = queue.pop() {
         for edge in flow.edges.iter().filter(|e| e.to == id) {
             if !seen.insert(edge.from.clone()) {
                 continue;
             }
             match flow.node(&edge.from).map(|n| &n.kind) {
-                Some(NodeKind::TriggerState(t)) => {
-                    entities.insert(Some(t.entity.clone()));
-                }
                 Some(
-                    NodeKind::TriggerSchedule(_)
+                    kind @ (NodeKind::TriggerState(_)
+                    | NodeKind::TriggerSchedule(_)
                     | NodeKind::TriggerSun(_)
-                    | NodeKind::TriggerSignal(_),
-                ) => {
-                    entities.insert(None);
-                }
+                    | NodeKind::TriggerManual(_)
+                    | NodeKind::TriggerSignal(_)),
+                ) => triggers.push(kind),
                 _ => queue.push(edge.from.clone()),
             }
         }
     }
+    triggers
+}
+
+/// The entity whose value reaches `node_id`: the one state trigger every path back from the
+/// node starts at. `None` when the paths start at several entities or at another trigger.
+pub fn upstream_trigger_entity(flow: &Flow, node_id: &str) -> Option<String> {
+    let entities: BTreeSet<Option<String>> = upstream_triggers(flow, node_id)
+        .into_iter()
+        .map(|kind| match kind {
+            NodeKind::TriggerState(t) => Some(t.entity.clone()),
+            _ => None,
+        })
+        .collect();
     match entities.len() {
         1 => entities.into_iter().next().flatten(),
         _ => None,
     }
 }
 
+/// The value a run carries to `node_id` when every path back from it starts at a Manual card
+/// with a value of the same kind (on/off, number or text): the first card's value. `None` when a
+/// path starts at another trigger, or at a card with no value or another kind of value.
+pub fn upstream_manual_value(flow: &Flow, node_id: &str) -> Option<Scalar> {
+    let mut values = Vec::new();
+    for kind in upstream_triggers(flow, node_id) {
+        match kind {
+            NodeKind::TriggerManual(p) => values.push(p.value.clone()?),
+            _ => return None,
+        }
+    }
+    let first = values.first()?.clone();
+    values
+        .iter()
+        .all(|v| std::mem::discriminant(v) == std::mem::discriminant(&first))
+        .then_some(first)
+}
+
+/// The input for comparing `e`, or for the value a Manual card carries when there is no entity.
+pub fn compared_input(lang: Lang, e: Option<&EntityView>, manual: Option<&Scalar>) -> ValueInput {
+    match (e, manual) {
+        (None, Some(m)) => manual_value_input(lang, m),
+        _ => value_input(lang, e),
+    }
+}
+
+/// The input for a value that comes from a Manual card: on/off as for a binary sensor, a number
+/// box, or a text box.
+pub fn manual_value_input(lang: Lang, value: &Scalar) -> ValueInput {
+    match value {
+        Scalar::Bool(_) => ValueInput::List(
+            [true, false]
+                .into_iter()
+                .map(|on| Choice {
+                    value: Value::Bool(on),
+                    label: state_word(
+                        lang,
+                        StateCtx::BinarySensor(None),
+                        if on { "on" } else { "off" },
+                    ),
+                })
+                .collect(),
+        ),
+        Scalar::Number(_) => ValueInput::Number { unit: None },
+        Scalar::Text(_) => ValueInput::Text,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use oikos_core::flow::{Edge, Node, NodeKind, TriggerScheduleParams, TriggerStateParams};
+    use oikos_core::flow::{
+        Edge, Node, NodeKind, TriggerManualParams, TriggerScheduleParams, TriggerStateParams,
+    };
     use oikos_core::model::{
         Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride,
     };
@@ -400,5 +459,76 @@ mod tests {
             vec![edge("t1", "x"), edge("x", "if1"), edge("if1", "x")],
         );
         assert_eq!(upstream_trigger_entity(&looped, "if1"), Some("a".into()));
+    }
+
+    fn manual(id: &str, value: Option<Scalar>) -> Node {
+        node(
+            id,
+            NodeKind::TriggerManual(TriggerManualParams {
+                value,
+                ..Default::default()
+            }),
+        )
+    }
+
+    #[test]
+    fn manual_value_reaches_an_if_behind_one_card() {
+        let f = flow(
+            vec![manual("m", Some(Scalar::Bool(true))), plain("i")],
+            vec![edge("m", "i")],
+        );
+        assert_eq!(upstream_manual_value(&f, "i"), Some(Scalar::Bool(true)));
+        assert_eq!(upstream_trigger_entity(&f, "i"), None);
+    }
+
+    #[test]
+    fn manual_value_needs_one_card_with_a_value() {
+        let valueless = flow(vec![manual("m", None), plain("i")], vec![edge("m", "i")]);
+        assert_eq!(upstream_manual_value(&valueless, "i"), None);
+        let mixed = flow(
+            vec![
+                manual("m", Some(Scalar::Bool(true))),
+                state("s", "e"),
+                plain("i"),
+            ],
+            vec![edge("m", "i"), edge("s", "i")],
+        );
+        assert_eq!(upstream_manual_value(&mixed, "i"), None);
+        let two = flow(
+            vec![
+                manual("a", Some(Scalar::Bool(true))),
+                manual("b", Some(Scalar::Number(21.5))),
+                plain("i"),
+            ],
+            vec![edge("a", "i"), edge("b", "i")],
+        );
+        assert_eq!(upstream_manual_value(&two, "i"), None);
+        let same = flow(
+            vec![
+                manual("a", Some(Scalar::Number(1.0))),
+                manual("b", Some(Scalar::Number(2.0))),
+                plain("i"),
+            ],
+            vec![edge("a", "i"), edge("b", "i")],
+        );
+        assert!(upstream_manual_value(&same, "i").is_some());
+    }
+
+    #[test]
+    fn manual_value_input_follows_the_value_kind() {
+        assert_eq!(
+            manual_value_input(Lang::En, &Scalar::Number(1.0)),
+            ValueInput::Number { unit: None }
+        );
+        assert_eq!(
+            manual_value_input(Lang::En, &Scalar::Text("x".into())),
+            ValueInput::Text
+        );
+        let l = list(manual_value_input(Lang::En, &Scalar::Bool(true)));
+        assert_eq!(l.len(), 2);
+        assert_eq!(
+            (l[0].value.clone(), l[1].value.clone()),
+            (json!(true), json!(false))
+        );
     }
 }

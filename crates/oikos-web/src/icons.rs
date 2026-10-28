@@ -120,6 +120,8 @@ const NODE_CLOCK: &str = svg!(r#"<circle cx="12" cy="12" r="9"/><path d="M12 7v5
 const NODE_MOON: &str = svg!(r#"<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>"#);
 const NODE_SWITCH: &str =
     svg!(r#"<rect x="3" y="8" width="18" height="8" rx="4"/><circle cx="16" cy="12" r="2"/>"#);
+const NODE_PLAY_CIRCLE: &str =
+    svg!(r#"<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/>"#);
 const NODE_PLAY: &str = svg!(r#"<path d="M7 4.5v15l12-7.5z"/>"#);
 
 // Energy and Security glyphs.
@@ -306,6 +308,7 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::TriggerSchedule(_) => NODE_CLOCK,
         NodeKind::TriggerSun(_) => SUN,
         NodeKind::TriggerSignal(_) => NODE_BOLT,
+        NodeKind::TriggerManual(_) => NODE_PLAY_CIRCLE,
         NodeKind::If(p) if p.op == oikos_core::flow::Op::IsDark => NODE_MOON,
         NodeKind::If(_) | NodeKind::Switch(_) => NODE_FORK,
         NodeKind::TimeBetween(_) => NODE_CLOCK,
@@ -328,7 +331,7 @@ pub fn trigger_icon(kind: crate::flow_list::TriggerKind) -> &'static str {
         TriggerKind::Schedule => NODE_CLOCK,
         TriggerKind::Sun => SUN,
         TriggerKind::Signal => NODE_SIGNAL,
-        TriggerKind::Manual => NODE_PLAY,
+        TriggerKind::Manual => NODE_PLAY_CIRCLE,
     }
 }
 

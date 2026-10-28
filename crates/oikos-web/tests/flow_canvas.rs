@@ -1083,7 +1083,7 @@ async fn library_open_in_edit_mode() {
     let html = host.inner_html();
     assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
     assert_eq!(count(&host, ".flow-library"), 1, "{html}");
-    assert_eq!(count(&host, ".flow-library__item"), 9, "{html}");
+    assert_eq!(count(&host, ".flow-library__item"), 10, "{html}");
     assert_eq!(count(&host, ".flow-picker-wrap"), 0, "{html}");
 }
 
@@ -1872,4 +1872,136 @@ async fn if_value_without_a_value_shows_no_choice() {
         .unchecked_into();
     assert_eq!(select.value(), "", "{}", host.inner_html());
     settle_history().await;
+}
+
+// ---- Manual card ----------------------------------------------------------------------------
+
+/// The reference flow with a manual card `go` wired into `moving`.
+fn manual_view() -> FlowView {
+    let mut view = reference_view(None, vec![]);
+    let go: oikos_core::flow::Node =
+        serde_json::from_str(r#"{"id":"go","type":"trigger.manual","params":{"value":true}}"#)
+            .unwrap();
+    view.definition.nodes.push(go);
+    view.definition.edges.push(oikos_core::flow::Edge {
+        from: "go".into(),
+        port: None,
+        to: "moving".into(),
+    });
+    view
+}
+
+fn runs(fetch: &FakeFetch) -> Vec<(String, String, String)> {
+    fetch
+        .requests()
+        .into_iter()
+        .filter(|(method, path, _)| method == "POST" && path.ends_with("/run"))
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn manual_card_shows_run_button() {
+    let host = host();
+    let _mounted = mount(&host, vec![manual_view()], "/flows/living_led_motion");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-node__run"), 1, "{html}");
+    assert_eq!(count(&host, "[data-node=go] .flow-node__run"), 1, "{html}");
+    assert!(
+        !element(&host, ".flow-node__run")
+            .unchecked_into::<web_sys::HtmlButtonElement>()
+            .disabled()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn manual_button_posts_the_card() {
+    let host = host();
+    let _mounted = mount(&host, vec![manual_view()], "/flows/living_led_motion");
+    tick().await;
+    let fetch = FakeFetch::answer(&serde_json::to_string(&done_run()).unwrap());
+    let button = element(&host, ".flow-node__run");
+    let at = centre(&button);
+    pointer_at(&button, "pointerdown", at);
+    pointer_at(&button, "pointerup", at);
+    click(&host, ".flow-node__run");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let sent = runs(&fetch);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].1, "/api/v1/flows/living_led_motion/run");
+    let body: serde_json::Value = serde_json::from_str(&sent[0].2).unwrap();
+    assert_eq!(body, serde_json::json!({ "node": "go" }));
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-node--selected"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-graph--editing"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn manual_button_is_inert_in_edit_mode() {
+    let (host, _mounted, _) = editing(manual_view()).await;
+    let button = element(&host, ".flow-node__run").unchecked_into::<web_sys::HtmlButtonElement>();
+    assert!(button.disabled());
+    let fetch = FakeFetch::answer(&serde_json::to_string(&done_run()).unwrap());
+    button.click();
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert!(runs(&fetch).is_empty());
+}
+
+/// The manual card's number box keeps a decimal or negative number being typed. Mid-typing ("-",
+/// "2.") a number box reports "" (bad input); the editor must not write that back over the text.
+#[wasm_bindgen_test]
+async fn manual_number_box_keeps_what_is_typed() {
+    let mut view = manual_view();
+    let go: oikos_core::flow::Node =
+        serde_json::from_str(r#"{"id":"go","type":"trigger.manual","params":{"value":1}}"#)
+            .unwrap();
+    view.definition.nodes.retain(|n| n.id != "go");
+    view.definition.nodes.push(go);
+    let saved = view.clone();
+    let (host, _mounted, _) = editing(view).await;
+    select_card(&host, "go").await;
+    let input: web_sys::HtmlInputElement =
+        element(&host, ".flow-drawer input[type=number]").unchecked_into();
+    input.focus().unwrap();
+    for step in ["-", "-1", "-1.", "-1.5"] {
+        // `set_value` sanitises a half-typed number to "", as the browser reports it.
+        type_into(&input, step, "input");
+        gloo_timers::future::TimeoutFuture::new(10).await;
+    }
+    assert_eq!(input.value(), "-1.5");
+    // Chrome reports "" while "-1.5" is half-typed; record any write the editor makes back.
+    let spy = js_sys::Function::new_with_args(
+        "el",
+        "el.__writes = []; Object.defineProperty(el, 'value', { configurable: true, \
+         get() { return ''; }, set(v) { el.__writes.push(v); } });",
+    );
+    spy.call1(&wasm_bindgen::JsValue::NULL, &input).unwrap();
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    input
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict("input", &init).unwrap())
+        .unwrap();
+    gloo_timers::future::TimeoutFuture::new(10).await;
+    let writes = js_sys::Reflect::get(&input, &"__writes".into()).unwrap();
+    assert_eq!(
+        js_sys::Array::from(&writes).length(),
+        0,
+        "the editor rewrote the box: {:?}",
+        js_sys::JSON::stringify(&writes)
+    );
+    js_sys::Reflect::delete_property(&input, &"value".into()).unwrap();
+    type_into(&input, "-1.5", "input");
+    let fetch = FakeFetch::answer(&write_outcome(&saved));
+    click(&host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let sent = puts(&fetch);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    let body: serde_json::Value = serde_json::from_str(&sent[0].2).unwrap();
+    let go = body["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == "go")
+        .unwrap_or_else(|| panic!("{body}"));
+    assert_eq!(go["params"]["value"], serde_json::json!(-1.5), "{body}");
 }

@@ -223,8 +223,13 @@ impl FlowStore {
     }
 
     /// [`Self::begin_run`] for a run started by hand, marked `manual`.
-    pub fn begin_manual_run(&mut self, flow_id: &str, at: u64) -> Option<RunView> {
-        self.start_run(flow_id, None, true, at)
+    pub fn begin_manual_run(
+        &mut self,
+        flow_id: &str,
+        trigger: Option<TriggerInfo>,
+        at: u64,
+    ) -> Option<RunView> {
+        self.start_run(flow_id, trigger, true, at)
     }
 
     fn start_run(

@@ -15,8 +15,13 @@ pub use store::{FlowStore, StoreApplied};
 pub enum EngineRequest {
     /// The definitions changed: re-read them and re-arm.
     Reload,
-    /// Execute a run the hub already created (a manual run).
-    Run { flow_id: String, run_id: String },
+    /// Execute a run the hub already created (a manual run), from the Manual card `node` or,
+    /// without one, from the flow's first trigger.
+    Run {
+        flow_id: String,
+        run_id: String,
+        node: Option<String>,
+    },
     /// The run is about to disable its own flow (a `flow.enable` node): let it survive the
     /// reload that follows and finish its remaining steps.
     KeepRun { flow_id: String, run_id: String },

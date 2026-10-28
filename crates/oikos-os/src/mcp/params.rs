@@ -246,6 +246,10 @@ pub struct SetFlowEnabledParams {
 pub struct RunFlowParams {
     /// The flow id, as `list_flows` returns it.
     pub id: String,
+    /// The id of a `trigger.manual` card to start from; the run carries its value. Absent: start
+    /// at the first trigger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
 }
 
 /// The flows, one summary each; `get_flow` has the definition and the run history.

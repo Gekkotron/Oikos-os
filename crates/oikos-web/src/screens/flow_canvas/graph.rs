@@ -13,6 +13,7 @@ use oikos_api::StepOutcome;
 use oikos_core::flow::{Flow, NodeKind, Op, Position};
 use wasm_bindgen::JsCast;
 
+use super::manual::ManualRunButton;
 use super::sun::fallback_badge_visible;
 use super::viewport::Camera;
 use super::{Editor, Fresh};
@@ -527,6 +528,33 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
         })
     };
 
+    // A manual card carries the button that starts the flow from it; saved flows only.
+    let t = use_flow_text();
+    let manual_id = id.clone();
+    let manual_run = move || {
+        kind.with(|k| matches!(k, Some(NodeKind::TriggerManual(_))))
+            .then(|| {
+                let edit = c.mode == Mode::Edit;
+                let disabled = Signal::derive(move || edit || !c.flow.with(|f| f.enabled));
+                let label = Signal::derive(move || {
+                    t(if edit {
+                        FlowText::ManualSaveFirst
+                    } else {
+                        FlowText::ManualPress
+                    })
+                });
+                let flow_id = Signal::derive(move || c.flow.with(|f| f.id.clone()));
+                view! {
+                    <ManualRunButton
+                        flow_id=flow_id
+                        node_id=manual_id.clone()
+                        disabled=disabled
+                        title=label
+                    />
+                }
+            })
+    };
+
     let outcome_id = id.clone();
     let outcome = Memo::new(move |_| c.lit.with(|l| l.nodes.get(&outcome_id).copied()));
     let is_lit = move || outcome.get().is_some_and(|o| o != StepOutcome::Failed);
@@ -692,6 +720,7 @@ fn card(id: String, c: Shared, house: House) -> impl IntoView {
                 <span class="flow-node__title">{title_text}</span>
                 {move || sub_text().map(|s| view! { <span class="flow-node__sub">{s}</span> })}
             </span>
+            {manual_run}
             <span class="flow-node__step">{step}</span>
             <Show when=move || fallback.get()>
                 <span class="flow-node__fallback">

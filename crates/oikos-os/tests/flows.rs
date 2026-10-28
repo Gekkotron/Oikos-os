@@ -291,7 +291,9 @@ async fn run_flow_rejects_disabled_invalid_unknown_and_active() {
     ));
     let mut saw_run = false;
     while let Ok(request) = requests.try_recv() {
-        if let oikos_os::hub::EngineRequest::Run { flow_id, run_id } = request
+        if let oikos_os::hub::EngineRequest::Run {
+            flow_id, run_id, ..
+        } = request
             && flow_id == "living"
             && run_id == run.id
         {
@@ -1838,4 +1840,244 @@ async fn notify_with_fixed_id_replaces_previous() {
         .filter(|a| a["id"] == "washer")
         .collect();
     assert_eq!(same.len(), 1, "{list}");
+}
+
+/// The reference flow plus a Manual card `test_on` (`params`) wired to `target`.
+fn with_card(mode: &str, params: serde_json::Value, target: &str) -> String {
+    tweaked(|v| {
+        v["mode"] = mode.into();
+        v["nodes"].as_array_mut().expect("nodes").push(
+            serde_json::json!({ "id": "test_on", "type": "trigger.manual", "params": params }),
+        );
+        v["edges"]
+            .as_array_mut()
+            .expect("edges")
+            .push(serde_json::json!({ "from": "test_on", "to": target }));
+    })
+}
+
+#[tokio::test]
+async fn card_press_runs_from_the_card_with_its_value() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    hub.ingest(
+        FLOW_TOPIC,
+        with_card("restart", serde_json::json!({ "value": true }), "moving").as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+
+    hub.run_flow_from("living", Some("test_on")).expect("run");
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert!(run.manual);
+    assert_eq!(step_nodes(&run), ["test_on", "moving", "on"]);
+    let trigger = run.trigger.as_ref().expect("trigger");
+    assert_eq!(trigger.value, serde_json::json!(true));
+    assert_eq!(trigger.entity, None);
+    assert_eq!(run.steps[0].detail, "manual: true");
+}
+
+#[tokio::test(start_paused = true)]
+async fn run_now_carries_the_first_manual_card_value() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    let flow = tweaked(|v| {
+        v["nodes"] = serde_json::json!([
+            { "id": "go", "type": "trigger.manual", "params": { "value": false } },
+            { "id": "moving", "type": "if", "params": { "op": "eq", "value": true } },
+            { "id": "on", "type": "command",
+              "params": { "entity": LED_ID, "command": { "type": "turn_on" } } },
+            { "id": "wait", "type": "delay", "params": { "for": "5m" } }
+        ]);
+        v["edges"] = serde_json::json!([
+            { "from": "go", "to": "moving" },
+            { "from": "moving", "port": "true", "to": "on" },
+            { "from": "moving", "port": "false", "to": "wait" }
+        ]);
+    });
+    hub.ingest(
+        "oikos/automation/x",
+        flow.replace("\"living\"", "\"x\"").as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+
+    hub.run_flow("x").expect("run");
+    next_run(&mut events, |r| r.steps.len() == 2).await;
+    settle().await;
+    tokio::time::advance(Duration::from_secs(5 * 60 + 1)).await;
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(step_nodes(&run), ["go", "moving", "wait"]);
+    assert_eq!(run.steps[0].detail, "manual: false");
+}
+
+#[tokio::test]
+async fn valueless_card_step_detail_is_manual() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    let flow = tweaked(|v| {
+        v["nodes"] = serde_json::json!([
+            { "id": "go", "type": "trigger.manual", "params": {} },
+            { "id": "on", "type": "command",
+              "params": { "entity": LED_ID, "command": { "type": "turn_on" } } }
+        ]);
+        v["edges"] = serde_json::json!([{ "from": "go", "to": "on" }]);
+    });
+    hub.ingest(FLOW_TOPIC, flow.as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+
+    hub.run_flow("living").expect("run");
+    let run = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(run.steps[0].detail, "manual");
+    assert!(run.trigger.is_none());
+}
+
+#[tokio::test]
+async fn run_flow_from_rejects_a_card_that_is_not_manual() {
+    let (hub, _publisher, _engine) = engine_hub();
+    hub.ingest(
+        FLOW_TOPIC,
+        with_card("restart", serde_json::json!({ "value": true }), "moving").as_bytes(),
+    );
+    settle().await;
+    for node in ["motion", "ghost"] {
+        assert_eq!(
+            hub.run_flow_from("living", Some(node)),
+            Err(HubError::Rejected(format!(
+                "`{node}` is not a manual trigger of this flow"
+            )))
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn card_press_restarts_an_active_restart_flow() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    hub.ingest(
+        FLOW_TOPIC,
+        with_card("restart", serde_json::json!({ "value": false }), "moving").as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+
+    let first = hub.run_flow_from("living", Some("test_on")).expect("press");
+    next_run(&mut events, |r| r.id == first.id && r.steps.len() == 2).await;
+    settle().await;
+    let second = hub.run_flow_from("living", Some("test_on")).expect("press");
+    assert_ne!(first.id, second.id);
+    let cancelled = next_run_event(&mut events, RunStatus::Cancelled).await;
+    assert_eq!(cancelled.id, first.id);
+    let parked = next_run(&mut events, |r| r.id == second.id && r.steps.len() == 2).await;
+    assert_eq!(step_nodes(&parked), ["test_on", "moving"]);
+    settle().await;
+
+    let view = hub.flow("living").expect("flow");
+    assert_eq!(view.active_run.as_deref(), Some(second.id.as_str()));
+    let status = |id: &str| view.runs.iter().find(|r| r.id == id).expect("run").status;
+    assert_eq!(status(&first.id), RunStatus::Cancelled);
+    assert_eq!(status(&second.id), RunStatus::Running);
+    assert_eq!(view.runs.len(), 2);
+
+    // The aborted task finishing must not end the new run: it still completes on its own.
+    tokio::time::advance(Duration::from_secs(5 * 60 + 1)).await;
+    let done = next_run_event(&mut events, RunStatus::Done).await;
+    assert_eq!(done.id, second.id);
+}
+
+#[tokio::test(start_paused = true)]
+async fn card_press_refused_while_single_flow_is_active() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    hub.ingest(
+        FLOW_TOPIC,
+        with_card("single", serde_json::json!({ "value": false }), "moving").as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+
+    let first = hub.run_flow_from("living", Some("test_on")).expect("press");
+    next_run(&mut events, |r| r.steps.len() == 2).await;
+    settle().await;
+    assert_eq!(
+        hub.run_flow_from("living", Some("test_on")),
+        Err(HubError::Rejected("a run is active".to_owned()))
+    );
+    let view = hub.flow("living").expect("flow");
+    assert_eq!(view.runs.len(), 1);
+    assert_eq!(view.active_run.as_deref(), Some(first.id.as_str()));
+}
+
+#[tokio::test(start_paused = true)]
+async fn run_now_still_refused_while_restart_flow_is_active() {
+    let (hub, publisher, _engine) = engine_hub();
+    let _log = echo(publisher, Arc::clone(&hub));
+    hub.ingest(
+        FLOW_TOPIC,
+        with_card("restart", serde_json::json!({ "value": false }), "moving").as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+
+    hub.run_flow_from("living", Some("test_on")).expect("press");
+    next_run(&mut events, |r| r.steps.len() == 2).await;
+    settle().await;
+    assert_eq!(
+        hub.run_flow("living"),
+        Err(HubError::Rejected("a run is active".to_owned()))
+    );
+}
+
+/// Runs a flow whose only trigger is a Manual card (`params`) into a notify titled
+/// `{trigger}`, and returns the published title.
+async fn manual_notify_title(
+    hub: &Arc<Hub>,
+    publisher: &mut mpsc::Receiver<Publish>,
+    id: &str,
+    params: serde_json::Value,
+) -> String {
+    let flow = serde_json::json!({
+        "id": id, "name": id, "enabled": true, "mode": "single",
+        "nodes": [
+            { "id": "go", "type": "trigger.manual", "params": params },
+            { "id": "n", "type": "notify", "params": { "title": "{trigger}" } }
+        ],
+        "edges": [{ "from": "go", "to": "n" }]
+    });
+    hub.ingest(
+        &format!("oikos/automation/{id}"),
+        flow.to_string().as_bytes(),
+    );
+    settle().await;
+    let mut events = hub.subscribe();
+    hub.run_flow_from(id, Some("go")).expect("run");
+    next_run_event(&mut events, RunStatus::Done).await;
+    settle().await;
+    let mut last = None;
+    while let Ok(publish) = publisher.try_recv() {
+        if publish.topic == "oikos/push/history" {
+            last = Some(publish);
+        }
+    }
+    let list: serde_json::Value =
+        serde_json::from_str(&last.expect("a history publish").payload).expect("history json");
+    list[0]["title"].as_str().expect("title").to_owned()
+}
+
+#[tokio::test(start_paused = true)]
+async fn manual_value_reaches_notify_text() {
+    let (hub, mut publisher, _engine) = engine_hub();
+    push_ready(&hub).await;
+    let title = manual_notify_title(
+        &hub,
+        &mut publisher,
+        "hi",
+        serde_json::json!({ "value": "hello" }),
+    )
+    .await;
+    // The template renderer capitalises the first letter of what it renders.
+    assert_eq!(title, "Hello");
+    let title = manual_notify_title(&hub, &mut publisher, "bare", serde_json::json!({})).await;
+    assert_eq!(title, "?");
 }
