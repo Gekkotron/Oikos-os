@@ -309,6 +309,8 @@ fn parse_span(s: &str) -> Option<Span> {
         "2x1" => Some(Span::X2x1),
         "2x2" => Some(Span::X2x2),
         "1x2" => Some(Span::X1x2),
+        "4x2" => Some(Span::X4x2),
+        "6x3" => Some(Span::X6x3),
         _ => None,
     }
 }
