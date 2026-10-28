@@ -1,5 +1,5 @@
 //! The live energy flow as a balanced Sankey: nodes in three columns (sources, the house and its
-//! sinks, consumers) and the links between them. Pure; `energy_view` draws it.
+//! sinks, consumers) and the links between them. Pure; `screens::energy_flux` draws it.
 
 use oikos_core::energy::{EnergyNode, EnergyUi, Flow, IDLE_W, NodeStatus};
 

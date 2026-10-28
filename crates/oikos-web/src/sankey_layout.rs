@@ -1,5 +1,5 @@
 //! Geometry of the Sankey model: where each bar, band and label sits in an SVG frame, horizontal
-//! on wide screens and vertical on phones. Pure; `energy_view` draws it.
+//! on wide screens and vertical on phones. Pure; `screens::energy_flux` draws it.
 
 use std::collections::HashMap;
 
