@@ -817,6 +817,52 @@ async fn set_flow_enabled_and_run_flow() {
 }
 
 #[tokio::test]
+async fn run_flow_takes_a_manual_card() {
+    let server = Server::start_with_flows().await;
+    let client = server.client().await;
+    let mut flow = reference_flow();
+    flow["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "id": "test_on", "type": "trigger.manual", "params": { "value": true } }));
+    flow["edges"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "from": "test_on", "to": "on" }));
+    json_of(
+        "set_flow",
+        &call(&client, "set_flow", json!({ "flow": flow })).await,
+    );
+
+    let refused = call(
+        &client,
+        "run_flow",
+        json!({ "id": "living", "node": "motion" }),
+    )
+    .await;
+    assert_eq!(refused.is_error, Some(true));
+    assert!(
+        text_of(&refused).contains("not a manual trigger"),
+        "{}",
+        text_of(&refused)
+    );
+
+    let run = json_of(
+        "run_flow",
+        &call(
+            &client,
+            "run_flow",
+            json!({ "id": "living", "node": "test_on" }),
+        )
+        .await,
+    );
+    assert_eq!(run["flow_id"], "living");
+    assert_eq!(run["status"], "running");
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
 async fn delete_flow() {
     let mut server = Server::start_with_flows().await;
     let client = server.client().await;

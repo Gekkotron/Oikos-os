@@ -162,7 +162,9 @@ fn instructions() -> String {
          motion\" use `mode: restart`, so \
          every new trigger restarts the wait; the default `single` ignores triggers while a \
          run is active. Sun events use `trigger.sun` with `which` one of `sunrise`, `sunset`, \
-         `dusk` (civil), `dawn` (civil), and an optional `offset_minutes` in [-720, 720]. `if` \
+         `dusk` (civil), `dawn` (civil), and an optional `offset_minutes` in [-720, 720]. A \
+         `trigger.manual` card (optional `value`: a bool, number or string the run carries as its \
+         trigger value) starts a run only by hand: `run_flow` with its id as `node`. `if` \
          with `op: is_dark` is true between civil dusk and civil dawn at the configured point; its \
          optional `offset_minutes` in [-720, 720] moves dusk by that much and dawn by the \
          opposite (`-30`: dark 30 minutes earlier in the evening and until 30 minutes later in \

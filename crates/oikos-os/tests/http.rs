@@ -1530,6 +1530,70 @@ async fn enabled_and_run_endpoints() {
 }
 
 #[tokio::test]
+async fn post_flow_run_starts_from_a_manual_card() {
+    let server = Server::start_with_flows().await;
+    let mut flow = reference_flow();
+    flow["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "id": "test_on", "type": "trigger.manual", "params": { "value": true } }));
+    flow["edges"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({ "from": "test_on", "to": "on" }));
+    let res = server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&flow)
+        .send()
+        .await
+        .expect("PUT");
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let post = |body: Value| {
+        let req = server
+            .client
+            .post(server.url("/api/v1/flows/living/run"))
+            .json(&body);
+        async move { req.send().await.expect("POST") }
+    };
+
+    let res = post(json!({ "node": "motion" })).await;
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let res: Value = res.json().await.expect("json");
+    assert!(
+        res["error"]
+            .as_str()
+            .unwrap()
+            .contains("not a manual trigger")
+    );
+
+    let res = post(json!({ "node": "test_on" })).await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let res: Value = res.json().await.expect("json");
+    assert_eq!(res["status"], "running");
+}
+
+#[tokio::test]
+async fn post_flow_run_accepts_an_empty_or_missing_body() {
+    let server = Server::start_with_flows().await;
+    server
+        .client
+        .put(server.url("/api/v1/flows/living"))
+        .json(&reference_flow())
+        .send()
+        .await
+        .expect("PUT");
+    let res = server
+        .client
+        .post(server.url("/api/v1/flows/living/run"))
+        .send()
+        .await
+        .expect("POST");
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+}
+
+#[tokio::test]
 async fn post_flow_area_sets_clears_and_rejects() {
     let server = Server::start_with_flows().await;
     server

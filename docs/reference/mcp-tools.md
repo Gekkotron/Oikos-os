@@ -55,10 +55,10 @@ See [Flow nodes](flow-nodes.md) for the document format.
 | `set_flow` | Creates or replaces a flow, validated against the house and saved retained on `oikos/automation/<id>`. Args: `flow` (the whole document). Returns `{flow, warning}`; `warning` is set when the flow reads the sun against the Paris fallback. |
 | `delete_flow` | Removes a flow, valid or not. Args: `id`. |
 | `set_flow_enabled` | Turns a flow on or off without touching its definition. Args: `id`, `enabled`. |
-| `run_flow` | Starts a manual run and returns the run as it starts. Refused when the flow is disabled, invalid or already running. Args: `id`. |
+| `run_flow` | Starts a manual run and returns the run as it starts. Refused when the flow is disabled, invalid or already running. Args: `id`, optional `node` (the id of a `trigger.manual` card to start from; the run carries its value, and a card that is not a manual trigger of the flow is refused). |
 
 :::note
-The argument schema of `set_flow` that the server advertises still describes four node types (`trigger.state`, `if`, `delay`, `command`). The server accepts all nine; the server instructions it sends name the others (`trigger.schedule`, `trigger.sun`, `trigger.signal`, `flow.enable`, `notify`).
+The argument schema of `set_flow` that the server advertises still describes four node types (`trigger.state`, `if`, `delay`, `command`). The server accepts all nine; the server instructions it sends name the others (`trigger.schedule`, `trigger.sun`, `trigger.signal`, `trigger.manual`, `flow.enable`, `notify`).
 :::
 
 ## Groups
