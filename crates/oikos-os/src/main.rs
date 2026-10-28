@@ -10,7 +10,7 @@ use oikos_os::config::{AclSource, Config, LogConfig};
 use oikos_os::history::History;
 use oikos_os::hub::Hub;
 use oikos_os::setup::boot::{Boot, resolve, spawn_location_lookup};
-use oikos_os::setup::{HubFile, SetupCtx, import};
+use oikos_os::setup::{HubFile, SetupCtx, banner, import};
 use oikos_os::weather::open_meteo::Endpoints;
 use oikos_os::{http, logging, mcp, mqtt};
 use tokio::sync::mpsc;
@@ -65,7 +65,9 @@ fn early_log_config(data_dir: &Path, config_flag: Option<&Path>) -> LogConfig {
 async fn run_setup(ctx: Arc<SetupCtx>) -> anyhow::Result<ExitCode> {
     let http_cfg = ctx.file.lock().await.http.clone();
     tracing::info!("setup mode: the hub is not configured yet; MQTT and the engine are off");
+    let finished = ctx.file.lock().await.finished;
     let http_task = http::serve(&http_cfg, http::setup_router(ctx)).await?;
+    banner::log_banner(&http_cfg.bind, finished);
     tokio::signal::ctrl_c().await?;
     tracing::info!("shutting down");
     http_task.abort();
@@ -117,8 +119,10 @@ async fn main() -> anyhow::Result<ExitCode> {
             let weather = hub.start_weather();
             let solar = hub.start_solar();
             tokio::spawn(oikos_os::groups::migrate::spawn(Arc::clone(&hub)));
+            let finished = setup_ctx.file.lock().await.finished;
             let http_task =
                 http::serve(&cfg.http, http::router(Arc::clone(&hub), setup_ctx)).await?;
+            banner::log_banner(&cfg.http.bind, finished);
 
             tokio::signal::ctrl_c().await?;
             tracing::info!("shutting down");

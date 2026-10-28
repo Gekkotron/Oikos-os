@@ -1,5 +1,6 @@
 //! Onboarding: the bootstrap file, the settings the wizard edits, and how the hub boots from them.
 
+pub mod banner;
 pub mod boot;
 pub mod bundled;
 pub mod fs;
