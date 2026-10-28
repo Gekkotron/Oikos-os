@@ -36,6 +36,7 @@ pub fn role(kind: &NodeKind) -> Role {
         NodeKind::TriggerState(_)
         | NodeKind::TriggerSchedule(_)
         | NodeKind::TriggerSun(_)
+        | NodeKind::TriggerManual(_)
         | NodeKind::TriggerSignal(_) => Role::Trigger,
         NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_) => Role::Check,
         NodeKind::Command(_) | NodeKind::FlowEnable(_) | NodeKind::Notify(_) => Role::Action,
@@ -272,6 +273,13 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         }
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(p) => sun_summary(lang, p.which, p.offset()),
+        NodeKind::TriggerManual(p) => {
+            let head = flow_text(lang, FlowText::NodeManual);
+            match &p.value {
+                Some(v) => format!("{head} · {}", value_words(lang, &v.to_json(), None, None)),
+                None => head.to_owned(),
+            }
+        }
         NodeKind::If(p) if p.op == Op::IsDark => t::is_dark_sentence(lang, p.dark_offset()),
         NodeKind::If(p) => {
             let (e, unit, entity) = match &p.entity {

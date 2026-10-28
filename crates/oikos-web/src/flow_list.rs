@@ -20,7 +20,7 @@ use crate::i18n::flows::{FlowText, flow_text};
 /// The key of the section holding flows with no (known) room.
 pub const NO_ROOM_KEY: &str = "__no_room__";
 
-/// What starts a flow; one chip each in the top bar. `Manual` is a flow with no trigger node.
+/// What starts a flow; one chip each in the top bar. `Manual` is a flow with a Manual card.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerKind {
@@ -138,14 +138,12 @@ pub fn needs_attention(view: &FlowView) -> bool {
             .is_some_and(|r| r.status == RunStatus::Failed)
 }
 
-/// The kinds of trigger a flow has: one per trigger node type, `Manual` for a valid flow with
-/// none, nothing for an invalid flow (its stub has no nodes to read).
+/// The kinds of trigger a flow has: one per trigger node type, nothing for an invalid flow (its stub has no nodes to read).
 pub fn trigger_kinds(view: &FlowView) -> BTreeSet<TriggerKind> {
     if view.invalid.is_some() {
         return BTreeSet::new();
     }
-    let mut kinds: BTreeSet<TriggerKind> = view
-        .definition
+    view.definition
         .nodes
         .iter()
         .filter_map(|n| match n.kind {
@@ -153,13 +151,10 @@ pub fn trigger_kinds(view: &FlowView) -> BTreeSet<TriggerKind> {
             NodeKind::TriggerSchedule(_) => Some(TriggerKind::Schedule),
             NodeKind::TriggerSun(_) => Some(TriggerKind::Sun),
             NodeKind::TriggerSignal(_) => Some(TriggerKind::Signal),
+            NodeKind::TriggerManual(_) => Some(TriggerKind::Manual),
             _ => None,
         })
-        .collect();
-    if kinds.is_empty() {
-        kinds.insert(TriggerKind::Manual);
-    }
-    kinds
+        .collect()
 }
 
 /// The rows for `flows`, in the given order. A flow whose area is unknown (or `Unassigned`)
@@ -376,6 +371,7 @@ mod tests {
                     "trigger.state" => r#"{ "entity": "m" }"#,
                     "trigger.schedule" => r#"{ "cron": "* * * * *" }"#,
                     "trigger.sun" => r#"{ "which": "sunset" }"#,
+                    "trigger.manual" => "{}",
                     _ => r#"{ "entity": "r" }"#,
                 };
                 format!(r#"{{ "id": "t{i}", "type": "{t}", "params": {params} }}"#)
@@ -520,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn kinds_per_trigger_type_manual_and_invalid() {
+    fn kinds_per_trigger_type_and_invalid() {
         let v = view("f", "F", &["trigger.state", "trigger.schedule"]);
         assert_eq!(
             trigger_kinds(&v),
@@ -535,11 +531,19 @@ mod tests {
             trigger_kinds(&all),
             BTreeSet::from([TriggerKind::Sun, TriggerKind::Signal, TriggerKind::State])
         );
-        assert_eq!(
-            trigger_kinds(&view("f", "F", &[])),
-            BTreeSet::from([TriggerKind::Manual])
-        );
         assert!(trigger_kinds(&invalid("x")).is_empty());
+    }
+
+    #[test]
+    fn kinds_manual_card_is_manual() {
+        let only = view("f", "F", &["trigger.manual"]);
+        assert_eq!(trigger_kinds(&only), BTreeSet::from([TriggerKind::Manual]));
+        let both = view("f", "F", &["trigger.state", "trigger.manual"]);
+        assert_eq!(
+            trigger_kinds(&both),
+            BTreeSet::from([TriggerKind::State, TriggerKind::Manual])
+        );
+        assert!(trigger_kinds(&view("f", "F", &[])).is_empty());
     }
 
     #[test]

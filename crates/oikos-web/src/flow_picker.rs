@@ -3,8 +3,8 @@
 use oikos_core::flow::TriggerSignalParams;
 use oikos_core::flow::{
     CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, NotifyParams, Op,
-    RuleOp, Scalar, SunWhich, SwitchParams, SwitchRule, TimeBetweenParams, TriggerScheduleParams,
-    TriggerStateParams,
+    RuleOp, Scalar, SunWhich, SwitchParams, SwitchRule, TimeBetweenParams, TriggerManualParams,
+    TriggerScheduleParams, TriggerStateParams,
 };
 use oikos_core::model::Command;
 use serde_json::Value;
@@ -71,6 +71,14 @@ fn command(entity: &str, command: Command) -> NodeKind {
     })
 }
 
+/// Extra words that find a generic card, in both languages: what other tools call a Manual card.
+fn card_search_words(kind: &NodeKind) -> &'static str {
+    match kind {
+        NodeKind::TriggerManual(_) => "inject injecter button bouton",
+        _ => "",
+    }
+}
+
 /// The picker entries for `query`, ordered by [`Group`] then entity title. An empty query gives
 /// only the generic cards; otherwise those whose label matches, plus When, And and Then cards for
 /// every primary entity whose title, device name or room holds every word of the query
@@ -92,6 +100,12 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             NodeKind::TriggerSun(sun_params_from_preset(SunWhich::Sunset, None)),
             Some(FlowText::SunEvent),
             FlowText::SunEventSub,
+        ),
+        (
+            Group::When,
+            NodeKind::TriggerManual(TriggerManualParams::default()),
+            Some(FlowText::NodeManual),
+            FlowText::ManualSub,
         ),
         (
             Group::And,
@@ -194,6 +208,9 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 || [Lang::En, Lang::Fr]
                     .into_iter()
                     .any(|l| fold_accents(&label_in(l, kind, *label)).contains(&needle))
+                || card_search_words(kind)
+                    .split(' ')
+                    .any(|w| w.contains(&needle))
         })
         .map(|(group, kind, label, sub)| {
             let mut e = entry(group, kind, ctx);
@@ -387,7 +404,7 @@ mod tests {
         assert_eq!(labels[0], "Programmation");
         assert!(labels.contains(&"Quand il fait nuit"));
         assert!(
-            matches!(&fr[5].kind, NodeKind::Notify(p) if p.title == "Notification"),
+            matches!(&fr[6].kind, NodeKind::Notify(p) if p.title == "Notification"),
             "the stored default follows the language at creation"
         );
         // The English word finds the card on the French UI, and the French word on the English UI.
@@ -431,6 +448,7 @@ mod tests {
             [
                 (Group::When, "Schedule"),
                 (Group::When, "Sun event"),
+                (Group::When, "Manual"),
                 (Group::And, "When it's dark"),
                 (Group::And, "Switch"),
                 (Group::And, "Time of day"),
@@ -446,6 +464,7 @@ mod tests {
             [
                 Some("At a set time, or on a repeat"),
                 Some("Sunrise, sunset, dusk or dawn"),
+                Some("Start by hand from the ▶ button"),
                 Some("Between dusk and dawn"),
                 Some("Several exits, one per rule"),
                 Some("Inside or outside two times"),
@@ -459,18 +478,35 @@ mod tests {
             &got[0].kind,
             NodeKind::TriggerSchedule(p) if p.cron == "0 * * * *"
         ));
-        assert!(matches!(&got[5].kind, NodeKind::Notify(p) if p.title == "Notification"));
-        assert!(matches!(&got[6].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+        assert!(matches!(&got[6].kind, NodeKind::Notify(p) if p.title == "Notification"));
+        assert!(matches!(&got[7].kind, NodeKind::Delay(p) if p.for_ == "5m"));
         assert!(matches!(
-            &got[3].kind,
+            &got[4].kind,
             NodeKind::Switch(p) if p.otherwise && p.entity.is_none()
                 && p.rules.len() == 1 && p.rules[0].op == RuleOp::Eq
                 && p.rules[0].value == Value::Bool(true)
         ));
         assert!(matches!(
-            &got[4].kind,
+            &got[5].kind,
             NodeKind::TimeBetween(p) if p.from == "07:00" && p.to == "22:00"
         ));
+    }
+
+    #[test]
+    fn manual_card_is_found_by_its_names_in_either_language() {
+        let entities = BTreeMap::new();
+        for query in ["manual", "inject", "button", "manuel", "bouton"] {
+            let got = run(query, &entities);
+            assert_eq!(got.len(), 1, "{query}: {got:?}");
+            assert_eq!(got[0].group, Group::When);
+            assert!(matches!(&got[0].kind, NodeKind::TriggerManual(p) if p.value.is_none()));
+        }
+        let empty = run("", &entities);
+        assert!(
+            empty
+                .iter()
+                .any(|e| e.group == Group::When && matches!(e.kind, NodeKind::TriggerManual(_)))
+        );
     }
 
     #[test]
