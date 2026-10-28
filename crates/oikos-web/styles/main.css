@@ -4691,6 +4691,13 @@ html:has(.flow-canvas-screen) {
 /* The Flux (Sankey) view: bands between bars, glides when a reading changes. */
 .energy-flux {
   width: 100%;
+  /* Consumers never reuse a source colour (solar amber, grid violet, battery/export mint). */
+  --flux-c0: var(--accent-cyan);
+  --flux-c1: var(--accent-rose);
+  --flux-c2: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-violet));
+  --flux-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
+  --flux-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
+  --flux-muted: color-mix(in srgb, var(--ink) 35%, transparent);
 }
 
 .energy-flux__chips {
@@ -4781,32 +4788,41 @@ html:has(.flow-canvas-screen) {
 
 .energy-flux__bar--unitemised,
 .energy-flux__bar--others {
-  fill: color-mix(in srgb, var(--ink) 45%, transparent);
+  fill: var(--flux-muted);
 }
 
 .energy-flux__bar--c0 {
-  fill: var(--accent-cyan);
+  fill: var(--flux-c0);
 }
 
 .energy-flux__bar--c1 {
-  fill: var(--accent-violet);
+  fill: var(--flux-c1);
 }
 
 .energy-flux__bar--c2 {
-  fill: var(--accent-mint);
+  fill: var(--flux-c2);
 }
 
 .energy-flux__bar--c3 {
-  fill: var(--accent-rose);
+  fill: var(--flux-c3);
 }
 
 .energy-flux__bar--c4 {
-  fill: var(--accent-amber);
+  fill: var(--flux-c4);
 }
 
 .energy-flux__label {
   font-size: 12px;
+  /* A halo keeps the text readable where it crosses a band. */
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
   transition: transform 0.9s var(--ease);
+}
+
+.energy-flux--narrow .energy-flux__label {
+  font-size: 11px;
 }
 
 .energy-flux__value {

@@ -25,6 +25,10 @@ pub const NARROW: Frame = Frame {
 };
 /// Bar thickness across the main axis.
 pub const BAR: f64 = 16.0;
+/// Line height of a two-line narrow label (value, then name).
+pub const LINE: f64 = 14.0;
+/// Half the widest narrow label (12 characters at ~7 px), so one centred on a bar stays inside.
+pub const LABEL_HALF: f64 = 44.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Anchor {
@@ -75,7 +79,7 @@ pub struct Placed {
 /// Where a column sits along the main axis, as a share of it.
 fn column_share(column: u8, vertical: bool) -> f64 {
     let shares = if vertical {
-        [0.06, 0.42, 0.78]
+        [0.10, 0.44, 0.78]
     } else {
         [0.17, 0.49, 0.79]
     };
@@ -155,11 +159,20 @@ pub fn place(s: &Sankey, frame: Frame) -> Placed {
 
         let house = nd.role == SankeyRole::House;
         let (lx, ly, anchor) = if v {
+            // Two lines. Sources and the house read above their bar, sinks below.
             let cx = x + w / 2.0;
-            if house {
-                (cx, y - 12.0, Anchor::Middle)
+            let ly = if house || nd.column == 0 {
+                y - 8.0 - LINE
             } else {
-                (cx, y + h + 18.0, Anchor::Middle)
+                y + h + 16.0
+            };
+            // Near an edge the label hangs inward rather than being clipped.
+            if cx - LABEL_HALF < 0.0 {
+                (x, ly, Anchor::Start)
+            } else if cx + LABEL_HALF > frame.w {
+                (x + w, ly, Anchor::End)
+            } else {
+                (cx, ly, Anchor::Middle)
             }
         } else if house {
             (x + w / 2.0, y - 12.0, Anchor::Middle)
@@ -385,10 +398,49 @@ mod tests {
         assert_eq!(l.anchor, Anchor::Start);
 
         let p = place(&sample(), NARROW);
-        assert!(p.labels.iter().all(|l| l.anchor == Anchor::Middle));
+        assert_eq!(label(&p, "oven").anchor, Anchor::Middle);
+        assert_eq!(label(&p, "house").anchor, Anchor::Middle);
         let (oven, l) = (bar(&p, "oven"), label(&p, "oven"));
         assert!(l.y > oven.y + oven.h);
         assert!(label(&p, "house").y < bar(&p, "house").y);
+        // Sources read above their bar, clear of the bands below it.
+        for id in ["solar", "grid"] {
+            assert!(label(&p, id).y + LINE < bar(&p, id).y, "{id}");
+        }
+        assert!(label(&p, "export").y > bar(&p, "export").y + BAR);
+        assert!(label(&p, "solar").y > 0.0);
+    }
+
+    #[test]
+    fn narrow_labels_stay_inside_the_frame() {
+        // A tiny consumer first in its column, one last, a big one between: the column fills
+        // the frame, so the tiny ones sit at its edges.
+        let s = Sankey {
+            nodes: vec![
+                node("house", SankeyRole::House, 1, 1000.0),
+                node("tiny", SankeyRole::Consumer, 2, 2.0),
+                node("oven", SankeyRole::Consumer, 2, 1000.0),
+                node("tiny2", SankeyRole::Consumer, 2, 2.0),
+            ],
+            links: vec![
+                link("house", "tiny", 2.0),
+                link("house", "oven", 1000.0),
+                link("house", "tiny2", 2.0),
+            ],
+            ..Sankey::default()
+        };
+        let p = place(&s, NARROW);
+        for l in &p.labels {
+            let width = 2.0 * LABEL_HALF;
+            let (from, to) = match l.anchor {
+                Anchor::Start => (l.x, l.x + width),
+                Anchor::Middle => (l.x - width / 2.0, l.x + width / 2.0),
+                Anchor::End => (l.x - width, l.x),
+            };
+            assert!(from >= 0.0 && to <= NARROW.w, "{} {from}..{to}", l.id);
+        }
+        assert_eq!(label(&p, "tiny").anchor, Anchor::Start);
+        assert_eq!(label(&p, "tiny2").anchor, Anchor::End);
     }
 
     #[test]

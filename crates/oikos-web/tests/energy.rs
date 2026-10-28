@@ -434,3 +434,99 @@ async fn flux_updates_in_place() {
     assert!(before.is_same_node(Some(&after)));
     assert_ne!(after.get_attribute("style").unwrap(), height);
 }
+
+fn mount_flux_narrow(entities: Vec<EntityView>) -> Element {
+    let map: std::collections::BTreeMap<String, EntityView> =
+        entities.into_iter().map(|e| (e.id.clone(), e)).collect();
+    let ui = Memo::new(move |_| {
+        oikos_core::energy::EnergyFlow::build(&oikos_web::energy::energy_entities(&map), 0, None)
+    });
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    host.set_attribute("style", "width: 390px").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(RwSignal::new(Lang::En));
+            view! {
+                <oikos_web::screens::energy_flux::FluxDiagram
+                    ui=ui
+                    narrow=true
+                    open=Callback::new(|_: String| {})
+                    expanded=RwSignal::new(false)
+                />
+            }
+        },
+    ));
+    host
+}
+
+#[wasm_bindgen_test]
+async fn flux_narrow_runs_top_to_bottom() {
+    let mut entities = vec![
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("grid", "Grid power", "W", 600.0, role("grid")),
+    ];
+    for (i, (name, w)) in [
+        ("Oven", 900.0),
+        ("Heat pump", 800.0),
+        ("Air conditioning unit", 500.0),
+        ("Kettle", 300.0),
+        ("Dryer", 200.0),
+        ("Fridge", 100.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        entities.push(sensor(&format!("c{i}"), name, "W", w, role("consumer")));
+    }
+    let host = mount_flux_narrow(entities);
+    tick().await;
+    let svg = host.query_selector(".energy-flux__svg").unwrap().unwrap();
+    assert_eq!(svg.get_attribute("viewBox").unwrap(), "0 0 360 620");
+    let rect = |e: &Element| e.get_bounding_client_rect();
+    let house = rect(&bar(&host, "house"));
+    assert!(house.width() > house.height());
+    assert_eq!(
+        count(
+            &host,
+            ".energy-flux__bar--c0, .energy-flux__bar--c1, .energy-flux__bar--c2"
+        ),
+        3
+    );
+    assert_eq!(count(&host, ".energy-flux__bar--others"), 1);
+    // Every bar and label stays inside the svg.
+    let frame = rect(&svg);
+    let inside = |r: &web_sys::DomRect, what: &str| {
+        assert!(
+            r.left() >= frame.left() - 1.0
+                && r.right() <= frame.right() + 1.0
+                && r.top() >= frame.top() - 1.0
+                && r.bottom() <= frame.bottom() + 1.0,
+            "{what} overflows: {} {} {} {}",
+            r.left(),
+            r.top(),
+            r.right(),
+            r.bottom()
+        );
+    };
+    let bars = host.query_selector_all(".energy-flux__bar").unwrap();
+    for i in 0..bars.length() {
+        let el: Element = bars.item(i).unwrap().unchecked_into();
+        inside(&rect(&el), "bar");
+    }
+    let labels = host.query_selector_all(".energy-flux__label").unwrap();
+    assert!(labels.length() >= 6);
+    let mut names = String::new();
+    for i in 0..labels.length() {
+        let el: Element = labels.item(i).unwrap().unchecked_into();
+        inside(&rect(&el), "label");
+        names.push_str(&el.text_content().unwrap_or_default());
+        // Two lines: value then name.
+        assert_eq!(el.query_selector_all("tspan").unwrap().length(), 2);
+    }
+    // Names are cut at Classic's length.
+    assert!(names.contains("Heat pump"), "{names}");
+    assert!(!names.contains("Air conditioning unit"));
+}

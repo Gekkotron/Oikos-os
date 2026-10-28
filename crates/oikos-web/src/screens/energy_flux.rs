@@ -11,7 +11,7 @@ use crate::energy::{aria_sentence, power_text};
 use crate::energy_sankey::{FOLD_NARROW, FOLD_WIDE, Sankey, SankeyRole, build};
 use crate::i18n::energy::{EnergyText, energy_text as word, others};
 use crate::i18n::{Key, Lang, text, use_lang};
-use crate::sankey_layout::{Anchor, NARROW, Placed, WIDE, place};
+use crate::sankey_layout::{Anchor, LINE, NARROW, Placed, WIDE, place};
 use crate::screens::energy::short;
 
 fn fold_at(narrow: bool) -> usize {
@@ -36,13 +36,15 @@ fn color_var(role: SankeyRole, slot: usize) -> &'static str {
         SankeyRole::Solar => "--solar",
         SankeyRole::Grid => "--accent-violet",
         SankeyRole::Battery | SankeyRole::Export | SankeyRole::BatteryCharge => "--accent-mint",
-        SankeyRole::House | SankeyRole::Unitemised | SankeyRole::Others => "--ink",
+        SankeyRole::House => "--ink",
+        SankeyRole::Unitemised | SankeyRole::Others => "--flux-muted",
+        // Consumer colours are defined in `.energy-flux` and never reuse a source colour.
         SankeyRole::Consumer => [
-            "--accent-cyan",
-            "--accent-violet",
-            "--accent-mint",
-            "--accent-rose",
-            "--accent-amber",
+            "--flux-c0",
+            "--flux-c1",
+            "--flux-c2",
+            "--flux-c3",
+            "--flux-c4",
         ][slot % 5],
     }
 }
@@ -62,12 +64,13 @@ fn role_class(role: SankeyRole, slot: usize) -> String {
     name.to_string()
 }
 
-/// The words of a node: its name, from the UI words for everything but a consumer.
-fn node_name(lang: Lang, model: &Sankey, id: &str) -> String {
+/// The words of a node: its name, from the UI words for everything but a consumer; cut short on
+/// phones (Classic's `LABEL_CHARS`).
+fn node_name(lang: Lang, model: &Sankey, id: &str, narrow: bool) -> String {
     let Some(n) = model.nodes.iter().find(|n| n.id == id) else {
         return String::new();
     };
-    match n.role {
+    let name = match n.role {
         SankeyRole::Solar => text(lang, Key::Solar).to_string(),
         SankeyRole::Grid => word(lang, EnergyText::NodeGrid).to_string(),
         SankeyRole::Battery => text(lang, Key::Battery).to_string(),
@@ -76,8 +79,10 @@ fn node_name(lang: Lang, model: &Sankey, id: &str) -> String {
         SankeyRole::BatteryCharge => word(lang, EnergyText::BatteryCharging).to_string(),
         SankeyRole::Unitemised => word(lang, EnergyText::Unitemised).to_string(),
         SankeyRole::Others => others(lang, n.count),
-        SankeyRole::Consumer => short(n.name.clone().unwrap_or_default()),
-    }
+        SankeyRole::Consumer => n.name.clone().unwrap_or_default(),
+    };
+    // Only a phone is short of room.
+    if narrow { short(name) } else { name }
 }
 
 fn node_value(lang: Lang, model: &Sankey, id: &str) -> String {
@@ -156,6 +161,7 @@ fn FluxBar(
 #[component]
 fn FluxLabel(
     id: String,
+    narrow: bool,
     model: Memo<Sankey>,
     placed: Memo<Placed>,
     open: Callback<String>,
@@ -188,11 +194,31 @@ fn FluxLabel(
         Some(Anchor::End) => "end",
     };
     let content = move || {
-        let (name, value) = model.with(|m| (node_name(lang(), m, &id), node_value(lang(), m, &id)));
-        let name = view! { <tspan class="energy-flux__name">{name}</tspan> };
+        let (name, value) = model.with(|m| {
+            (
+                node_name(lang(), m, &id, narrow),
+                node_value(lang(), m, &id),
+            )
+        });
+        let name = view! {
+            <tspan
+                class="energy-flux__name"
+                x=narrow.then_some("0")
+                dy=narrow.then(|| LINE.to_string())
+            >
+                {name}
+            </tspan>
+        };
         let value = view! { <tspan class="energy-flux__value">{value}</tspan> };
-        // The name sits on the outer side: first when the label ends at the bar.
-        if label.get().map(|l| l.anchor) == Some(Anchor::End) {
+        if narrow {
+            // Two lines: the value, then the name under it.
+            view! {
+                {value}
+                {name}
+            }
+            .into_any()
+        } else if label.get().map(|l| l.anchor) == Some(Anchor::End) {
+            // The name sits on the outer side: first when the label ends at the bar.
             view! { {name}" "{value} }.into_any()
         } else {
             view! { {value}" "{name} }.into_any()
@@ -417,8 +443,8 @@ pub fn FluxDiagram(
                             gradientUnits="userSpaceOnUse"
                             x1="0"
                             y1="0"
-                            x2="260"
-                            y2="0"
+                            x2=if narrow { "0" } else { "260" }
+                            y2=if narrow { "260" } else { "0" }
                         >
                             <stop offset="0" style="stop-color: var(--ink); stop-opacity: 0" />
                             <stop offset=".5" style="stop-color: var(--ink); stop-opacity: .22" />
@@ -426,8 +452,12 @@ pub fn FluxDiagram(
                             <animateTransform
                                 attributeName="gradientTransform"
                                 type="translate"
-                                from="-260 0"
-                                to=format!("{} 0", frame.w)
+                                from=if narrow { "0 -260" } else { "-260 0" }
+                                to=if narrow {
+                                    format!("0 {}", frame.h)
+                                } else {
+                                    format!("{} 0", frame.w)
+                                }
                                 dur="3.2s"
                                 repeatCount="indefinite"
                             />
@@ -465,6 +495,7 @@ pub fn FluxDiagram(
                             view! {
                                 <FluxLabel
                                     id=id
+                                    narrow=narrow
                                     model=model
                                     placed=placed
                                     open=open
