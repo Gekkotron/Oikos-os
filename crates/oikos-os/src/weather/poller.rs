@@ -58,8 +58,23 @@ pub async fn run(hub: Arc<Hub>, endpoints: Endpoints) {
     hub.publish_weather_configs();
 
     let city = hub.weather_city();
-    let Some(place) = resolve(&client, &endpoints, &city, hub.weather_country()).await else {
-        return;
+    let place = match hub.weather_coordinates() {
+        // The house's location is known: no geocoding request.
+        Some((latitude, longitude)) => Place {
+            name: city,
+            admin: None,
+            country: hub.weather_country(),
+            latitude,
+            longitude,
+            timezone: None,
+        },
+        None => {
+            let Some(place) = resolve(&client, &endpoints, &city, hub.weather_country()).await
+            else {
+                return;
+            };
+            place
+        }
     };
 
     let mut last_success: Option<u64> = None;

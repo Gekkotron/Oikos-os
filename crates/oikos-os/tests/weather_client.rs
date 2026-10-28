@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use oikos_api::WeatherCondition;
 use oikos_os::weather::open_meteo::{
-    Endpoints, FetchError, Forecast, Place, build_view, client, forecast, geocode,
+    Endpoints, FetchError, Forecast, Place, build_view, client, forecast, geocode, geocode_many,
 };
 
 const GEOCODING: &str = include_str!("fixtures/weather/geocoding_paris.json");
@@ -67,6 +67,7 @@ fn paris() -> Place {
         country: Some("FR".into()),
         latitude: 48.85341,
         longitude: 2.3488,
+        timezone: Some("Europe/Paris".into()),
     }
 }
 
@@ -94,6 +95,33 @@ async fn geocode_picks_the_first_result_and_sends_country() {
     assert_eq!(q["countryCode"], "FR");
     assert_eq!(q["count"], "10");
     assert_eq!(q["format"], "json");
+}
+
+#[tokio::test]
+async fn geocode_reads_the_timezone() {
+    let (ep, _) = stub(200, GEOCODING).await;
+    let place = geocode(&client().unwrap(), &ep, "Paris", None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(place.timezone.as_deref(), Some("Europe/Paris"));
+    assert_eq!(place, paris());
+}
+
+#[tokio::test]
+async fn geocode_many_sends_the_count_and_returns_every_place() {
+    let two = r#"{"results":[
+      {"name":"Lyon","latitude":45.74,"longitude":4.84,"country_code":"FR","admin1":"Auvergne-Rhone-Alpes","timezone":"Europe/Paris"},
+      {"name":"Lyon","latitude":42.0,"longitude":-71.0,"country_code":"US"}]}"#;
+    let (ep, seen) = stub(200, two).await;
+    let places = geocode_many(&client().unwrap(), &ep, "Lyon", None, 5)
+        .await
+        .unwrap();
+    assert_eq!(places.len(), 2);
+    assert_eq!(places[0].timezone.as_deref(), Some("Europe/Paris"));
+    assert_eq!(places[1].timezone, None);
+    assert_eq!(places[1].country.as_deref(), Some("US"));
+    assert_eq!(seen.lock().unwrap()[0]["count"], "5");
 }
 
 #[tokio::test]

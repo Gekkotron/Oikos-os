@@ -228,6 +228,7 @@ pub struct Hub {
     pub(crate) weather_refresh_minutes: u64,
     pub(crate) weather_city: String,
     pub(crate) weather_country: Option<String>,
+    pub(crate) weather_coordinates: Option<(f64, f64)>,
     pub(crate) weather: Mutex<crate::weather::hub::WeatherSlot>,
     /// `[solcast]`: `enabled`, `sites`, `daily_limit` and `api_key_file`.
     pub(crate) solar_enabled: bool,
@@ -369,6 +370,7 @@ impl Hub {
             weather_refresh_minutes: cfg.weather.refresh_minutes,
             weather_city: cfg.weather.city.trim().to_owned(),
             weather_country: cfg.weather.country.clone(),
+            weather_coordinates: cfg.weather.latitude.zip(cfg.weather.longitude),
             weather: Mutex::default(),
             solar_enabled: cfg.solcast.enabled,
             solar_sites: cfg.solcast.sites.clone(),

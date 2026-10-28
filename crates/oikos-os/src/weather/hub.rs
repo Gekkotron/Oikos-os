@@ -45,6 +45,11 @@ impl Hub {
         self.weather_city.clone()
     }
 
+    /// The configured coordinates, when both latitude and longitude are set.
+    pub fn weather_coordinates(&self) -> Option<(f64, f64)> {
+        self.weather_coordinates
+    }
+
     /// The configured country filter.
     pub fn weather_country(&self) -> Option<String> {
         self.weather_country

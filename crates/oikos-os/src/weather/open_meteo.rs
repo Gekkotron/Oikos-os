@@ -41,6 +41,8 @@ pub struct Place {
     pub country: Option<String>,
     pub latitude: f64,
     pub longitude: f64,
+    /// The IANA time zone, such as `Europe/Paris`.
+    pub timezone: Option<String>,
 }
 
 impl Place {
@@ -88,6 +90,7 @@ struct GeoResult {
     longitude: f64,
     country_code: Option<String>,
     admin1: Option<String>,
+    timezone: Option<String>,
 }
 
 /// Looks `city` up, optionally within an ISO `country` code. `Ok(None)` means nothing matched.
@@ -97,18 +100,54 @@ pub async fn geocode(
     city: &str,
     country: Option<&str>,
 ) -> Result<Option<Place>, FetchError> {
-    let mut query = vec![("name", city), ("count", "10"), ("format", "json")];
+    Ok(search(client, ep, city, country, 10)
+        .await?
+        .into_iter()
+        .next())
+}
+
+/// Looks `city` up and returns up to `count` places, best match first.
+pub async fn geocode_many(
+    client: &reqwest::Client,
+    ep: &Endpoints,
+    city: &str,
+    country: Option<&str>,
+    count: u8,
+) -> Result<Vec<Place>, FetchError> {
+    let mut places = search(client, ep, city, country, count).await?;
+    places.truncate(usize::from(count));
+    Ok(places)
+}
+
+async fn search(
+    client: &reqwest::Client,
+    ep: &Endpoints,
+    city: &str,
+    country: Option<&str>,
+    count: u8,
+) -> Result<Vec<Place>, FetchError> {
+    let count = count.to_string();
+    let mut query = vec![
+        ("name", city),
+        ("count", count.as_str()),
+        ("format", "json"),
+    ];
     if let Some(code) = country {
         query.push(("countryCode", code));
     }
     let found: Geocoding = get_json(client.get(&ep.geocoding).query(&query)).await?;
-    Ok(found.results.into_iter().next().map(|r| Place {
-        name: r.name,
-        admin: r.admin1,
-        country: r.country_code,
-        latitude: r.latitude,
-        longitude: r.longitude,
-    }))
+    Ok(found
+        .results
+        .into_iter()
+        .map(|r| Place {
+            name: r.name,
+            admin: r.admin1,
+            country: r.country_code,
+            latitude: r.latitude,
+            longitude: r.longitude,
+            timezone: r.timezone,
+        })
+        .collect())
 }
 
 /// The forecast response, as far as the view needs it. Missing numbers are `None`.
