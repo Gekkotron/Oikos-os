@@ -8,9 +8,6 @@
 // The `Err` side is an axum `Response`, built at most once per request.
 #![allow(clippy::result_large_err)]
 
-use std::sync::atomic::Ordering;
-use std::time::Duration;
-
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -22,16 +19,15 @@ use oikos_api::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
+use std::sync::atomic::Ordering;
 
 use crate::config::FrigateConfig;
-use crate::setup::routes::{RouteState, error, restarting};
+use crate::setup::routes::{RESTART_DELAY, RouteState, error, restarting};
 use crate::setup::sections::{
     AdvancedSection, PushSection, SECTION_KEYS, Sections, SolcastSection, WeatherSection, assemble,
 };
 use crate::setup::store::{save_sections, write_cache};
 use crate::setup::{HubFile, Mode, probe, restart, secret};
-
-const RESTART_DELAY: Duration = Duration::from_millis(500);
 
 pub(super) fn routes() -> Router<RouteState> {
     Router::new()
@@ -137,10 +133,20 @@ fn frigate_candidate(old: &FrigateConfig, input: FrigateInput) -> Result<Frigate
             return Err(unprocessable("The Frigate address is not valid"));
         }
         let old_address = old.url.as_deref().map(address_of);
-        secret::require_for_new_address(old_address.as_deref(), &address_of(url), &input.password)
-            .map_err(unprocessable)?;
+        secret::require_for_new_address(
+            old_address.as_deref(),
+            &address_of(url),
+            &input.password,
+            old.password.is_some(),
+        )
+        .map_err(unprocessable)?;
     }
-    let mut cfg = old.clone();
+    // The whole section is replaced: what is left out takes its default, except the connection
+    // timeout, which no form sets.
+    let mut cfg = FrigateConfig {
+        connect_timeout_ms: old.connect_timeout_ms,
+        ..FrigateConfig::default()
+    };
     cfg.url = url;
     cfg.user = clean(input.user);
     cfg.password = secret::apply(old.password.clone(), input.password);
@@ -177,12 +183,12 @@ fn merge(section: &str, body: Value, next: &mut Sections, file: &HubFile) -> Res
         }
         "solcast" => {
             let input: SolcastInput = parse(body, section)?;
-            let old = &next.solcast;
+            let default = SolcastSection::default();
             next.solcast = SolcastSection {
                 enabled: input.enabled,
                 sites: input.sites.iter().map(|s| s.trim().to_owned()).collect(),
-                daily_limit: input.daily_limit.unwrap_or(old.daily_limit),
-                api_key: secret::apply(old.api_key.clone(), input.api_key),
+                daily_limit: input.daily_limit.unwrap_or(default.daily_limit),
+                api_key: secret::apply(next.solcast.api_key.clone(), input.api_key),
             };
         }
         "frigate" => next.frigate = frigate_candidate(&next.frigate, parse(body, section)?)?,
@@ -193,17 +199,18 @@ fn merge(section: &str, body: Value, next: &mut Sections, file: &HubFile) -> Res
             {
                 return Err(unprocessable("The service account key is not valid"));
             }
-            let old = &next.push;
+            let default = PushSection::default();
             next.push = PushSection {
-                service_account: secret::apply(old.service_account.clone(), input.service_account),
-                prefix: input.prefix.unwrap_or_else(|| old.prefix.clone()),
-                legacy_prefix: input
-                    .legacy_prefix
-                    .unwrap_or_else(|| old.legacy_prefix.clone()),
-                retry_interval: input.retry_interval.unwrap_or(old.retry_interval),
-                max_retries: input.max_retries.unwrap_or(old.max_retries),
-                history_size: input.history_size.unwrap_or(old.history_size),
-                history_days: input.history_days.unwrap_or(old.history_days),
+                service_account: secret::apply(
+                    next.push.service_account.clone(),
+                    input.service_account,
+                ),
+                prefix: input.prefix.unwrap_or(default.prefix),
+                legacy_prefix: input.legacy_prefix.unwrap_or(default.legacy_prefix),
+                retry_interval: input.retry_interval.unwrap_or(default.retry_interval),
+                max_retries: input.max_retries.unwrap_or(default.max_retries),
+                history_size: input.history_size.unwrap_or(default.history_size),
+                history_days: input.history_days.unwrap_or(default.history_days),
             };
         }
         "climate" => next.climate = parse(body, section)?,
@@ -248,8 +255,17 @@ async fn put_section(
         return self::error(StatusCode::SERVICE_UNAVAILABLE, "database unreachable");
     }
     if let Err(error) = write_cache(&s.ctx.data_dir, &next) {
-        // The database holds the change; the next save refreshes the cache.
+        // Boot reads the cache until the import copy is done, so a change the cache lacks
+        // could come back reverted: report the failure, keep the old settings, and put the
+        // table back as it was (best effort).
         tracing::error!(error = %error.kind(), "settings: cannot write the settings cache");
+        if let Err(error) = save_sections(db, &held).await {
+            tracing::warn!(%error, "settings: cannot restore the database after a cache failure");
+        }
+        return self::error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "could not save the settings cache",
+        );
     }
     *held = next;
     restart::schedule_restart(&s.ctx, RESTART_DELAY);
@@ -265,7 +281,11 @@ fn failed(message: &str) -> Response {
     .into_response()
 }
 
-async fn test_solcast(State(s): State<RouteState>, Json(input): Json<SolcastInput>) -> Response {
+async fn test_solcast(State(s): State<RouteState>, Json(body): Json<Value>) -> Response {
+    let input: SolcastInput = match parse(body, "solcast") {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
     let stored = s.ctx.sections.lock().await.solcast.api_key.clone();
     let key = secret::apply(stored, input.api_key).filter(|k| !k.trim().is_empty());
     let Some(key) = key else {
@@ -274,7 +294,11 @@ async fn test_solcast(State(s): State<RouteState>, Json(input): Json<SolcastInpu
     Json(probe::solcast(&s.solcast_base, &key).await).into_response()
 }
 
-async fn test_frigate(State(s): State<RouteState>, Json(input): Json<FrigateInput>) -> Response {
+async fn test_frigate(State(s): State<RouteState>, Json(body): Json<Value>) -> Response {
+    let input: FrigateInput = match parse(body, "frigate") {
+        Ok(i) => i,
+        Err(r) => return r,
+    };
     let old = s.ctx.sections.lock().await.frigate.clone();
     let cfg = match frigate_candidate(&old, input) {
         Ok(cfg) => cfg,

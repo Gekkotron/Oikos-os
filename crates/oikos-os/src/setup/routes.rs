@@ -28,7 +28,7 @@ use crate::setup::bundled::{self, Bundled};
 use crate::setup::{HubFile, Mode, SetupCtx, probe, secret};
 use crate::weather::open_meteo::{self, Endpoints};
 
-const RESTART_DELAY: Duration = Duration::from_millis(500);
+pub(super) const RESTART_DELAY: Duration = Duration::from_millis(500);
 const GEOCODE_LIMIT: u8 = 5;
 /// Where the compose file's own broker and database listen (host networking).
 const BUNDLED_HOST: &str = "localhost";
@@ -265,8 +265,13 @@ async fn stored_mqtt(ctx: &SetupCtx) -> (Option<MqttConfig>, Option<String>, Opt
 async fn mqtt_candidate(ctx: &SetupCtx, input: &MqttInput) -> Result<MqttConfig, Response> {
     let (stored, old_addr, stored_pw) = stored_mqtt(ctx).await;
     let new_addr = format!("{}:{}", input.host.trim(), input.port);
-    secret::require_for_new_address(old_addr.as_deref(), &new_addr, &input.password)
-        .map_err(|m| error(StatusCode::UNPROCESSABLE_ENTITY, m))?;
+    secret::require_for_new_address(
+        old_addr.as_deref(),
+        &new_addr,
+        &input.password,
+        stored_pw.is_some(),
+    )
+    .map_err(|m| error(StatusCode::UNPROCESSABLE_ENTITY, m))?;
     let mut cfg = stored.unwrap_or_default();
     cfg.host = input.host.trim().to_owned();
     cfg.port = input.port;
@@ -333,8 +338,17 @@ async fn database_candidate(ctx: &SetupCtx, input: &DatabaseInput) -> Result<Str
         (None, None) => None,
     };
     let new_addr = format!("{}:{}", input.host.trim(), input.port);
-    secret::require_for_new_address(old_addr.as_deref(), &new_addr, &input.password)
-        .map_err(|m| error(StatusCode::UNPROCESSABLE_ENTITY, m))?;
+    let stored_secret = match (&stored, &bundled) {
+        (Some(u), _) => u.password().is_some(),
+        (None, b) => b.is_some(),
+    };
+    secret::require_for_new_address(
+        old_addr.as_deref(),
+        &new_addr,
+        &input.password,
+        stored_secret,
+    )
+    .map_err(|m| error(StatusCode::UNPROCESSABLE_ENTITY, m))?;
     build_database_url(
         stored,
         bundled.as_ref().map(|b| b.db_password.as_str()),

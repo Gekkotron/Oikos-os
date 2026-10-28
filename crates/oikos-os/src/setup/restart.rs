@@ -29,9 +29,11 @@ pub fn schedule_restart(ctx: &Arc<SetupCtx>, after: Duration) {
             let ctx = Arc::clone(ctx);
             tokio::spawn(async move {
                 tokio::time::sleep(after).await;
-                // Never exec in the middle of an `update_file`: wait for the file lock, and keep
-                // it until the process image is replaced.
-                let _held = ctx.file.lock().await;
+                // Never exec in the middle of a write: wait for the settings lock (a
+                // `PUT /settings`), then the file lock (`update_file`), in the order every
+                // writer takes them, and keep both until the process image is replaced.
+                let _sections = ctx.sections.lock().await;
+                let _file = ctx.file.lock().await;
                 exec_self();
             });
         }

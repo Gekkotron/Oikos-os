@@ -1131,3 +1131,106 @@ async fn frigate_test_lists_the_cameras() {
     // Nothing was saved by any of it.
     assert!(!s.dir.path().join("settings-cache.json").exists());
 }
+
+/// A server that counts every request it gets (nothing should reach it).
+async fn counting_server() -> (String, Arc<AtomicUsize>) {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&hits);
+    let app = Router::new().fallback(move || {
+        let seen = Arc::clone(&seen);
+        async move {
+            seen.fetch_add(1, Ordering::SeqCst);
+            StatusCode::UNAUTHORIZED
+        }
+    });
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(axum::serve(listener, app).into_future());
+    (format!("http://{addr}"), hits)
+}
+
+#[tokio::test]
+async fn a_stored_frigate_password_with_no_url_is_not_sent_to_a_new_address() {
+    let (attacker, hits) = counting_server().await;
+    let mut sections = Sections::default();
+    sections.frigate.password = Some(FRIGATE_PASS.into());
+    let s = serve_settings(Mode::Run, located(), sections, Some(DEAD_DB), None).await;
+    let (code, body) = s
+        .post("/test/frigate", json!({"url": attacker, "user": "u"}))
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"], "Enter the password for the new address");
+    let (code, body) = s
+        .sput("/frigate", json!({"url": attacker, "user": "u"}))
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"], "Enter the password for the new address");
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        0,
+        "the fake server was reached"
+    );
+    // Entering the password again is allowed (it fails later, at the dead database).
+    let (code, _) = s
+        .sput(
+            "/frigate",
+            json!({"url": attacker, "user": "u", "password": "p"}),
+        )
+        .await;
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+    // With no stored password there is nothing to protect.
+    let bare = serve_settings(
+        Mode::Run,
+        located(),
+        Sections::default(),
+        Some(DEAD_DB),
+        None,
+    )
+    .await;
+    let (code, _) = bare.sput("/frigate", json!({"url": attacker})).await;
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn a_malformed_test_body_is_refused_without_echoing_it() {
+    let s = serve_settings(Mode::Run, located(), Sections::default(), None, None).await;
+    let (code, body) = s.post("/test/solcast", json!({"api_key": 4242424})).await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(!body.to_string().contains("4242424"), "{body}");
+    let (code, body) = s.post("/test/frigate", json!({"url": 4242424})).await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(!body.to_string().contains("4242424"), "{body}");
+}
+
+#[tokio::test]
+async fn a_restart_that_lands_while_a_put_waits_for_the_lock_wins() {
+    let s = serve_settings(
+        Mode::Run,
+        located(),
+        Sections::default(),
+        Some(DEAD_DB),
+        None,
+    )
+    .await;
+    // Hold the settings lock: the PUT passes the early check, then waits here.
+    let guard = s.ctx.sections.lock().await;
+    let client = s.client.clone();
+    let url = s.surl("/weather");
+    let put = tokio::spawn(async move {
+        let r = client
+            .put(url)
+            .json(&json!({"enabled": false}))
+            .send()
+            .await
+            .unwrap();
+        (r.status(), r.json::<Value>().await.unwrap())
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    s.ctx.restarting.store(true, Ordering::SeqCst);
+    drop(guard);
+    let (code, body) = put.await.unwrap();
+    // The re-check under the lock answers; the database was never tried.
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body, json!({"error": "restarting"}));
+    assert!(!s.dir.path().join("settings-cache.json").exists());
+}

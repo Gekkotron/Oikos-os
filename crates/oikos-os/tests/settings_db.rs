@@ -287,6 +287,66 @@ mod put {
     }
 
     #[tokio::test]
+    async fn a_failed_cache_write_is_a_500_and_changes_nothing() {
+        let Some(tdb) = fresh_db().await else { return };
+        save_sections(&tdb.db, &sample()).await.unwrap();
+        let s = serve(&tdb.url, sample()).await;
+        // A directory where the cache file goes makes the write fail.
+        std::fs::create_dir(s.dir.path().join("settings-cache.json")).unwrap();
+        let (code, body) = s
+            .put("weather", json!({"enabled": true, "refresh_minutes": 45}))
+            .await;
+        assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(body, json!({"error": "could not save the settings cache"}));
+        assert_eq!(s.restarts.load(Ordering::SeqCst), 0);
+        assert_eq!(*s.ctx.sections.lock().await, sample());
+        assert_eq!(load_sections(&tdb.db).await.unwrap(), sample());
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn a_read_can_be_sent_back_as_it_is() {
+        let Some(tdb) = fresh_db().await else { return };
+        let mut sections = sample();
+        sections.push.service_account =
+            Some(r#"{"project_id":"proj-1","private_key":"pem"}"#.into());
+        let s = serve(&tdb.url, sections).await;
+        let frigate = s.get("frigate").await;
+        let (code, body) = s.put("frigate", frigate).await;
+        assert_eq!(code, StatusCode::OK, "{body}");
+        let push = s.get("push").await;
+        assert_eq!(push["service_account"], json!({"set": true}));
+        let solcast = s.get("solcast").await;
+        assert_eq!(s.put("solcast", solcast).await.0, StatusCode::OK);
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert_eq!(stored.frigate.password.as_deref(), Some("frigate-pass"));
+        assert_eq!(stored.solcast.api_key.as_deref(), Some("solcast-key"));
+        // The push view, project id and all, goes back too.
+        assert_eq!(s.put("push", push).await.0, StatusCode::OK);
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert!(stored.push.service_account.unwrap().contains("pem"));
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn a_put_replaces_the_whole_section() {
+        let Some(tdb) = fresh_db().await else { return };
+        let mut sections = sample();
+        sections.frigate.cooldown = 99;
+        sections.frigate.topic_prefix = "cams".into();
+        let s = serve(&tdb.url, sections).await;
+        let (code, _) = s
+            .put("frigate", json!({"url": "http://192.0.2.9:5000"}))
+            .await;
+        assert_eq!(code, StatusCode::OK);
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert_eq!(stored.frigate.cooldown, 0);
+        assert_eq!(stored.frigate.topic_prefix, "frigate");
+        assert_eq!(stored.frigate.password.as_deref(), Some("frigate-pass"));
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
     async fn a_put_and_the_import_copy_do_not_overwrite_each_other() {
         use oikos_os::setup::boot::spawn_import_copy;
         let Some(tdb) = fresh_db().await else { return };

@@ -3,13 +3,18 @@
 use oikos_api::Secret;
 
 /// A new address (`host:port`) needs the secret again: otherwise anyone on the LAN could point a service at
-/// their own machine and collect the stored password.
+/// their own machine and collect the stored password. With no stored address, any address is
+/// new as long as `stored_secret` says a secret is stored (it would be sent there).
 pub fn require_for_new_address(
     old: Option<&str>,
     new: &str,
     secret: &Secret,
+    stored_secret: bool,
 ) -> Result<(), &'static str> {
-    let moved = old.is_some_and(|old| !old.eq_ignore_ascii_case(new));
+    let moved = match old {
+        Some(old) => !old.eq_ignore_ascii_case(new),
+        None => stored_secret,
+    };
     if moved && *secret == Secret::Keep {
         return Err("Enter the password for the new address");
     }
@@ -61,21 +66,30 @@ mod tests {
 
     #[test]
     fn new_host_without_password_is_refused() {
-        let err = require_for_new_address(Some("a.example.com"), "b.example.com", &Secret::Keep);
+        let err =
+            require_for_new_address(Some("a.example.com"), "b.example.com", &Secret::Keep, true);
         assert_eq!(err, Err("Enter the password for the new address"));
-        assert!(require_for_new_address(Some("a"), "b", &Secret::Set("p".into())).is_ok());
-        assert!(require_for_new_address(Some("a"), "b", &Secret::Clear).is_ok());
+        assert!(require_for_new_address(Some("a"), "b", &Secret::Set("p".into()), true).is_ok());
+        assert!(require_for_new_address(Some("a"), "b", &Secret::Clear, true).is_ok());
     }
 
     #[test]
     fn same_host_other_port_is_a_new_address() {
-        let err = require_for_new_address(Some("h:1883"), "h:1884", &Secret::Keep);
+        let err = require_for_new_address(Some("h:1883"), "h:1884", &Secret::Keep, true);
         assert!(err.is_err());
     }
 
     #[test]
     fn same_host_keeps_password() {
-        assert!(require_for_new_address(Some("a"), "a", &Secret::Keep).is_ok());
-        assert!(require_for_new_address(None, "b", &Secret::Keep).is_ok());
+        assert!(require_for_new_address(Some("a"), "a", &Secret::Keep, true).is_ok());
+        assert!(require_for_new_address(None, "b", &Secret::Keep, false).is_ok());
+    }
+
+    #[test]
+    fn a_stored_secret_with_no_stored_address_follows_no_new_address() {
+        let err = require_for_new_address(None, "b", &Secret::Keep, true);
+        assert_eq!(err, Err("Enter the password for the new address"));
+        assert!(require_for_new_address(None, "b", &Secret::Set("p".into()), true).is_ok());
+        assert!(require_for_new_address(None, "b", &Secret::Clear, true).is_ok());
     }
 }

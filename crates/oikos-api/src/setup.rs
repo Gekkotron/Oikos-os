@@ -56,12 +56,24 @@ impl fmt::Debug for Secret {
     }
 }
 
-/// Absent fields are `Keep` through `#[serde(default)]` on the field; `null` is `Clear`.
+/// Absent fields are `Keep` through `#[serde(default)]` on the field; `null` is `Clear`; a
+/// string is `Set`. The `{"set": bool}` object a read returns is `Keep`, so a read can be
+/// edited and sent back as it is.
 impl<'de> Deserialize<'de> for Secret {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Secret, D::Error> {
-        Ok(match Option::<String>::deserialize(d)? {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Text(String),
+            View {
+                #[allow(dead_code)]
+                set: bool,
+            },
+        }
+        Ok(match Option::<Raw>::deserialize(d)? {
             None => Secret::Clear,
-            Some(s) => Secret::Set(s),
+            Some(Raw::Text(s)) => Secret::Set(s),
+            Some(Raw::View { .. }) => Secret::Keep,
         })
     }
 }
@@ -137,7 +149,8 @@ pub struct SolcastView {
     pub api_key: SecretView,
 }
 
-/// The Solcast section in a `PUT` or a test. A left-out `daily_limit` keeps the stored one.
+/// The Solcast section in a `PUT` or a test. A `PUT` replaces the whole section: a left-out
+/// field takes its default (a secret keeps, clears or sets as `Secret` says).
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SolcastInput {
     #[serde(default)]
@@ -168,9 +181,9 @@ pub struct FrigateView {
     pub live: bool,
 }
 
-/// The Frigate section in a `PUT` or a test. `url`, `user`, `media_url`, the flags and the
-/// lists are replaced by what is sent (left out means unset or empty); `cooldown`, `severity`,
-/// `ttl` and `topic_prefix` keep the stored value when left out.
+/// The Frigate section in a `PUT` or a test. A `PUT` replaces the whole section: a left-out
+/// field takes its default (unset, false, empty, or the default cooldown, severity, ttl and
+/// topic prefix). Only the password follows `Secret`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct FrigateInput {
     #[serde(default)]
@@ -215,7 +228,8 @@ pub struct PushView {
     pub history_days: u64,
 }
 
-/// The push section in a `PUT`. A left-out field keeps the stored value.
+/// The push section in a `PUT`. A `PUT` replaces the whole section: a left-out field takes its
+/// default. Only the service-account key follows `Secret`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct PushInput {
     #[serde(default)]
@@ -265,5 +279,8 @@ mod tests {
             serde_json::from_value(json!({"host":"h","port":1,"password":"pw-1"})).unwrap();
         assert_eq!(set.password, Secret::Set("pw-1".into()));
         assert!(!format!("{set:?}").contains("pw-1"));
+        let view: MqttInput =
+            serde_json::from_value(json!({"host":"h","port":1,"password":{"set":true}})).unwrap();
+        assert_eq!(view.password, Secret::Keep);
     }
 }
