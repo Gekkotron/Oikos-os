@@ -1192,3 +1192,22 @@ fn text_longer_than_max_is_refused() {
     );
     assert!(matches!(e, CommandError::OutOfRange(_)), "{e:?}");
 }
+
+#[test]
+fn inverted_switch_sends_the_opposite_word() {
+    // A relay wired the other way round: `invert` swaps payload_on and payload_off, and a
+    // toggle reads the (already inverted) state.
+    let mut relay = common::parse_fixture("switch__0x847127fffe24e322__switch");
+    relay.ui.invert = true;
+    let topic = "zigbee2mqtt/rooms/stair/light/set";
+    assert_eq!(
+        ok(&relay, &turn_on(None, None, None)),
+        vec![publish(topic, "OFF")]
+    );
+    assert_eq!(ok(&relay, &Command::TurnOff), vec![publish(topic, "ON")]);
+    let on = with_value(StateValue::OnOff(true));
+    assert_eq!(
+        map(&relay, &on, &Command::Toggle).expect("toggle"),
+        vec![publish(topic, "ON")]
+    );
+}

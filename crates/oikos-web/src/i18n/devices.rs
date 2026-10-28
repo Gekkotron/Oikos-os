@@ -119,6 +119,7 @@ pub enum DeviceText {
     EnergyRole,
     NeedsPowerUnit,
     InvertSign,
+    Inverted,
     Icon,
     TargetPresets,
     PresetsHint,
@@ -231,6 +232,7 @@ impl DeviceText {
         DeviceText::EnergyRole,
         DeviceText::NeedsPowerUnit,
         DeviceText::InvertSign,
+        DeviceText::Inverted,
         DeviceText::Icon,
         DeviceText::TargetPresets,
         DeviceText::PresetsHint,
@@ -373,6 +375,10 @@ pub fn device_text(lang: Lang, k: DeviceText) -> &'static str {
             "Nécessite une unité de puissance (W, kW)",
         ),
         T::InvertSign => ("Invert sign", "Inverser le signe"),
+        T::Inverted => (
+            "Inverted (on and off swapped)",
+            "Inversé (marche et arrêt échangés)",
+        ),
         T::Icon => ("Icon", "Icône"),
         T::TargetPresets => ("Target presets (°C)", "Consignes prédéfinies (°C)"),
         T::PresetsHint => (

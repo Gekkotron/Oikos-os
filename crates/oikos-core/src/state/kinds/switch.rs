@@ -1,5 +1,5 @@
 //! Switch: like a binary sensor, with `state_on` / `state_off` falling back to
-//! `payload_on` / `payload_off`.
+//! `payload_on` / `payload_off`, swapped when the override says the switch is inverted.
 
 use super::binary_sensor::apply_on_off;
 use crate::model::{Entity, EntityState};
@@ -25,5 +25,9 @@ pub(super) fn apply(
         topic,
         payload,
     };
-    apply_on_off(&message, state, &on, &off)
+    if entity.ui.invert {
+        apply_on_off(&message, state, &off, &on)
+    } else {
+        apply_on_off(&message, state, &on, &off)
+    }
 }

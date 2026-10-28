@@ -1002,3 +1002,57 @@ fn seeded_action_is_a_signal() {
     assert_eq!(of(REMOTE_ACTION_TOPIC, b"1_hold"), None);
     assert_eq!(of("zigbee2mqtt/other/action", b"1_double"), None);
 }
+
+#[test]
+fn invert_flips_the_switch_state_both_ways() {
+    let mut registry = load_house();
+    let state = |r: &Registry| r.state(STAIR_LIGHT).expect("state").value.clone();
+    let relay = |r: &mut Registry, word: &str| {
+        feed(
+            r,
+            "zigbee2mqtt/rooms/stair/light",
+            format!(r#"{{"state":"{word}"}}"#).into_bytes(),
+        )
+    };
+    relay(&mut registry, "ON");
+    assert_eq!(state(&registry), StateValue::OnOff(true));
+
+    // Turning `invert` on flips the stored value at once, without waiting for a report.
+    let changes = registry.apply(override_payload(STAIR_LIGHT, r#"{"invert":true}"#));
+    assert!(
+        changes.contains(&Change::StateChanged(STAIR_LIGHT.to_owned())),
+        "{changes:?}"
+    );
+    assert_eq!(state(&registry), StateValue::OnOff(false));
+    assert!(registry.entity(STAIR_LIGHT).expect("entity").ui.invert);
+
+    // Reports decode inverted.
+    relay(&mut registry, "OFF");
+    assert_eq!(state(&registry), StateValue::OnOff(true));
+
+    // A re-announce rebuilds the entity; the stored value must not flip again.
+    let mut config: serde_json::Value = serde_json::from_str(&common::fixture(
+        "discovery/switch__0x847127fffe24e322__switch.json",
+    ))
+    .expect("json");
+    config["name"] = json!("renamed");
+    feed(
+        &mut registry,
+        STAIR_LIGHT_TOPIC,
+        config.to_string().into_bytes(),
+    );
+    assert_eq!(state(&registry), StateValue::OnOff(true));
+
+    // Clearing the override flips back.
+    registry.apply(override_payload(STAIR_LIGHT, ""));
+    assert_eq!(state(&registry), StateValue::OnOff(false));
+}
+
+#[test]
+fn invert_is_ignored_on_a_non_switch() {
+    let mut registry = load_house();
+    let before = registry.state(SHUTTER_COVER).expect("state").value.clone();
+    let changes = registry.apply(override_payload(SHUTTER_COVER, r#"{"invert":true}"#));
+    assert!(!changes.contains(&Change::StateChanged(SHUTTER_COVER.to_owned())));
+    assert_eq!(registry.state(SHUTTER_COVER).expect("state").value, before);
+}

@@ -148,11 +148,12 @@ fn is_default_after_clearing_everything() {
 }
 
 #[test]
-fn fields_lists_the_twenty_app_fields() {
-    assert_eq!(UiOverride::FIELDS.len(), 20);
+fn fields_lists_the_twenty_one_fields() {
+    assert_eq!(UiOverride::FIELDS.len(), 21);
     assert_eq!(UiOverride::FIELDS[0], "name");
     assert!(UiOverride::FIELDS.contains(&"climatePresets"));
     assert!(UiOverride::FIELDS.contains(&"mainControl"));
+    assert!(UiOverride::FIELDS.contains(&"invert"));
 }
 
 #[test]

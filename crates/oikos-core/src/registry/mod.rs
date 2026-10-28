@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::discovery::DiscoveryTopic;
 use crate::model::{
-    Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, GenericState, GenericValue,
+    Area, AreasDocument, BridgeInfo, Device, Entity, EntityState, GenericState, GenericValue, Kind,
     StateValue, SwitchType, UNASSIGNED_AREA, UiOverride,
 };
 use crate::state::{Applied, StateError, apply_parts};
@@ -321,6 +321,7 @@ impl Registry {
         if self.last_override.get(&unique_id) == Some(&payload) {
             return;
         }
+        let was_inverted = self.overrides.get(&unique_id).is_some_and(|ui| ui.invert);
         if payload.is_empty() {
             self.overrides.remove(&unique_id);
             self.last_override.remove(&unique_id);
@@ -329,9 +330,29 @@ impl Registry {
                 return;
             };
             self.overrides.insert(unique_id.clone(), ui);
-            self.last_override.insert(unique_id, payload);
+            self.last_override.insert(unique_id.clone(), payload);
+        }
+        if self.overrides.get(&unique_id).is_some_and(|ui| ui.invert) != was_inverted {
+            self.flip_switch(&unique_id, changes);
         }
         self.recompute(changes);
+    }
+
+    /// Flips a switch's stored on/off when its `invert` override changes, so the value reads
+    /// right before the next report. Only here: a re-announce keeps the override, and a
+    /// flip on every recompute would invert the value twice.
+    fn flip_switch(&mut self, unique_id: &str, changes: &mut Vec<Change>) {
+        let is_switch = self
+            .entities
+            .get(unique_id)
+            .is_some_and(|e| e.protocol_kind == Kind::Switch);
+        if let Some(state) = self.states.get_mut(unique_id)
+            && is_switch
+            && let StateValue::OnOff(on) = state.value
+        {
+            state.value = StateValue::OnOff(!on);
+            changes.push(Change::StateChanged(unique_id.to_owned()));
+        }
     }
 
     fn apply_areas(&mut self, payload: &[u8], changes: &mut Vec<Change>) {
