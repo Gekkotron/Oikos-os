@@ -698,21 +698,25 @@ impl HistoryConfig {
     }
 }
 
+/// `url` with its password replaced by `***`, for `Debug` output.
+pub(crate) fn mask_url_password(url: &str) -> String {
+    if url.is_empty() {
+        return String::new();
+    }
+    match url::Url::parse(url) {
+        Ok(mut u) => {
+            if u.password().is_some() {
+                let _ = u.set_password(Some("***"));
+            }
+            u.to_string()
+        }
+        Err(_) => "<unparsable>".to_string(),
+    }
+}
+
 impl fmt::Debug for HistoryConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let masked = if self.url.is_empty() {
-            String::new()
-        } else {
-            match url::Url::parse(&self.url) {
-                Ok(mut u) => {
-                    if u.password().is_some() {
-                        let _ = u.set_password(Some("***"));
-                    }
-                    u.to_string()
-                }
-                Err(_) => "<unparsable>".to_string(),
-            }
-        };
+        let masked = mask_url_password(&self.url);
         f.debug_struct("HistoryConfig")
             .field("url", &masked)
             .field("buffer_rows", &self.buffer_rows)
@@ -754,6 +758,9 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "weather.country",
     "solcast.api_key_file",
 ];
+
+/// The only keys `OIKOS_*` env vars may override once the hub boots from `hub.json`.
+pub const BOOTSTRAP_ENV_PREFIXES: &[&str] = &["mqtt.", "history.url", "http.", "log."];
 
 /// The push key `load` falls back to, relative to the config file's folder (git-ignored).
 pub const PUSH_KEY_FILE: &str = "secrets/firebase.json";

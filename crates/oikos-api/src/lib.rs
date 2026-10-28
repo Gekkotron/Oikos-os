@@ -12,6 +12,7 @@ mod flows;
 mod groups;
 mod history;
 mod home;
+mod setup;
 mod snapshot;
 mod solar;
 mod views;
@@ -42,6 +43,7 @@ pub use history::{
     HistoryToday, LastChange, LastChangeItem,
 };
 pub use home::{HomeSettings, OffPeakEntry, OffPeakWindow};
+pub use setup::{Location, SetupStep};
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use solar::{
     SolarDay, SolarForecastDay, SolarHistory, SolarNow, SolarPeak, SolarPeriod, SolarSite,
