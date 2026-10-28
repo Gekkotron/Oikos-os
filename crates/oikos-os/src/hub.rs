@@ -90,6 +90,23 @@ const FCM_BASE: &str = "https://fcm.googleapis.com/";
 /// The FCM sender for `[push] credentials`, or `None` (history only) with one warning: no
 /// credentials configured, or a key file that cannot be read. Only the path is ever logged.
 fn push_transport(cfg: &crate::config::PushConfig) -> Option<Arc<dyn FcmTransport>> {
+    if let Some(raw) = cfg.service_account.as_deref() {
+        return match ServiceAccount::from_json(raw) {
+            Ok(account) => {
+                let base = url::Url::parse(FCM_BASE).expect("FCM base URL parses");
+                Some(Arc::new(HttpFcm::new(account, base)))
+            }
+            Err(source) => {
+                // Only the position: a serde message could quote part of the key.
+                tracing::warn!(
+                    line = source.line(),
+                    column = source.column(),
+                    "push sending is off: the stored service account is not a service-account key; alerts are kept in the history only"
+                );
+                None
+            }
+        };
+    }
     let Some(path) = cfg.credentials.as_deref() else {
         tracing::warn!(
             "push sending is off: no [push] credentials and no secrets/firebase.json next to the config; alerts are kept in the history only"
@@ -217,6 +234,8 @@ pub struct Hub {
     pub(crate) solar_sites: Vec<String>,
     pub(crate) solar_daily_limit: u32,
     pub(crate) solar_key_file: Option<std::path::PathBuf>,
+    /// The API key itself, when set from the browser; never logged.
+    pub(crate) solar_api_key: Option<String>,
     pub(crate) solar: Mutex<crate::solar::hub::SolarSlot>,
     /// Set once the broker acknowledged the on-connect subscription: the retained solar cache
     /// has been requested, and the poller may read the ledger.
@@ -355,6 +374,7 @@ impl Hub {
             solar_sites: cfg.solcast.sites.clone(),
             solar_daily_limit: cfg.solcast.daily_limit,
             solar_key_file: cfg.solcast.api_key_file.clone(),
+            solar_api_key: cfg.solcast.api_key.clone(),
             solar: Mutex::default(),
             solar_subscribed: tokio::sync::watch::channel(false).0,
             dashboard_store: Mutex::new(DashboardStore::new()),

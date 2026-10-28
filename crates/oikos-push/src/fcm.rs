@@ -52,6 +52,11 @@ impl fmt::Debug for ServiceAccount {
 }
 
 impl ServiceAccount {
+    /// Parses the key JSON itself (not a path).
+    pub fn from_json(raw: &str) -> Result<ServiceAccount, serde_json::Error> {
+        serde_json::from_str(raw)
+    }
+
     pub fn load(path: &Path) -> Result<ServiceAccount, FcmError> {
         let shown = path.display().to_string();
         let raw = std::fs::read_to_string(path).map_err(|source| FcmError::Read {

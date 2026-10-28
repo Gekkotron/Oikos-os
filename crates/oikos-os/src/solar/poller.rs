@@ -61,6 +61,9 @@ enum Round {
 /// stops the calls.
 pub async fn run(hub: Arc<Hub>, base_url: String, cache_grace: Duration) {
     let key = match hub.solar_key_file() {
+        _ if hub.solar_api_key().is_some_and(|k| !k.trim().is_empty()) => {
+            hub.solar_api_key().unwrap_or_default().trim().to_owned()
+        }
         None => {
             tracing::error!("solar: no API key file is configured");
             return;
