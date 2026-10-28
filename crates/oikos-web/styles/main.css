@@ -1061,9 +1061,28 @@ a.chip {
   flex: none;
   width: 44px;
   height: 26px;
+  padding: 0;
+  border: 0;
   border-radius: 13px;
   background: color-mix(in srgb, currentcolor 18%, transparent);
+  color: inherit;
   transition: background var(--motion-short) var(--ease);
+}
+
+/* Most switches are buttons; drop the UA button chrome and keep the focus ring. */
+button.switch {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.switch:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 2px;
+}
+
+button.switch:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 .switch__knob {
@@ -1222,7 +1241,7 @@ a.chip {
 
 .btn:focus-visible,
 .select:focus-visible,
-.field:focus-visible {
+.field:where(input, select, textarea):focus-visible {
   outline: 2px solid var(--accent-mint);
   outline-offset: 2px;
 }
@@ -1725,8 +1744,10 @@ a.chip {
   transition: width 0.3s ease;
 }
 
+/* A bare `.field` control. `label.field` is the captioned wrapper (see the wizard's `.field`),
+   so the pill only goes on form controls; `:where` keeps the specificity at one class. */
 .select,
-.field {
+.field:where(input, select, textarea) {
   flex: 1 1 100%;
   width: 100%;
   min-width: 0;
@@ -2222,19 +2243,6 @@ a.chip {
   opacity: 0.8;
 }
 
-.override__flag .switch {
-  padding: 0;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-
-.override__flag .switch:focus-visible {
-  outline: 2px solid var(--accent-mint);
-  outline-offset: 2px;
-}
-
 .override__flag {
   display: flex;
   align-items: center;
@@ -2594,8 +2602,10 @@ p.override__hint {
   align-self: flex-start;
 }
 
+/* Wraps rather than overflowing: the sun trigger's four French events don't fit the 360 px drawer. */
 .segmented {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
