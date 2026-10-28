@@ -89,7 +89,7 @@ pub fn set_type(draft: &mut UiOverride, t: SwitchType) {
 pub fn other_saved(draft: &UiOverride, shown: &Shown) -> Vec<(&'static str, String)> {
     let default = UiOverride::default();
     let text = |o: &Option<String>| o.clone().unwrap_or_default();
-    let candidates: [(&'static str, bool, bool, String); 14] = [
+    let candidates: [(&'static str, bool, bool, String); 15] = [
         (
             "cardStyle",
             shown.card_style,
@@ -177,6 +177,12 @@ pub fn other_saved(draft: &UiOverride, shown: &Shown) -> Vec<(&'static str, Stri
             draft.main_control != default.main_control,
             text(&draft.main_control),
         ),
+        (
+            "invert",
+            shown.show_as,
+            draft.invert != default.invert,
+            draft.invert.to_string(),
+        ),
     ];
     candidates
         .into_iter()
@@ -203,6 +209,7 @@ pub fn clear_field(draft: &mut UiOverride, key: &str) {
         "lightOnBrightness" => draft.light_on_brightness = None,
         "climatePresets" => draft.climate_presets = None,
         "mainControl" => draft.main_control = None,
+        "invert" => draft.invert = default.invert,
         _ => {}
     }
 }
@@ -336,6 +343,31 @@ mod tests {
         let s = shown(&switch, &d);
         assert!(!s.group_with_room && s.show_as);
         assert!(!s.security_action && !s.security_ask);
+    }
+
+    #[test]
+    fn invert_is_patched_and_cleared() {
+        let stored = UiOverride::default();
+        let d = UiOverride {
+            invert: true,
+            ..UiOverride::default()
+        };
+        assert_eq!(
+            dirty_patch(&stored, &d),
+            serde_json::json!({"invert": true})
+                .as_object()
+                .cloned()
+                .unwrap()
+        );
+        // Saved on an entity that is no longer a switch: listed so it can be cleared.
+        let light = entity(Kind::Light, None, None);
+        assert_eq!(
+            other_saved(&d, &shown(&light, &d)),
+            vec![("invert", "true".to_owned())]
+        );
+        let mut cleared = d.clone();
+        clear_field(&mut cleared, "invert");
+        assert!(!cleared.invert);
     }
 
     #[test]

@@ -112,6 +112,7 @@ An override is a retained JSON document at `<ui_prefix>/<entity id>` that change
 | `lightOnBrightness` | integer | 1 to 255: the brightness a light takes when switched on. |
 | `climatePresets` | string | Preset buttons of a climate entity's card in the app. |
 | `mainControl` | string | A generic entity's main control: one of its announced controls, or `none`. |
+| `invert` | bool | A switch wired the other way round (relay on = device off). The hub swaps on and off in the state it decodes and the commands it sends, so the web UI, flows, ambiances, history and MCP all see the device's real state. Only read on a switch. |
 
 A newer app's unknown fields survive a read-modify-write. For compatibility with an app that only knows the retired `asLight` flag, the hub writes `asLight: true` next to `showAs: "light"`, and reads a stored `asLight` as `showAs: "light"`.
 

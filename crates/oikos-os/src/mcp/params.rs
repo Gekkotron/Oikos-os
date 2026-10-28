@@ -80,7 +80,8 @@ pub struct SetOverrideParams {
     /// `showAs` (light, door, siren, chime, plug), `lightOnPreset` (white, warm, red, green,
     /// blue), `lightOnBrightness` (1 to
     /// 255), `climatePresets`, `mainControl` (one of the entity's announced controls, or `none`
-    /// to hide it).
+    /// to hide it), `invert` (a switch wired the other way round: the hub swaps on and off in
+    /// its state and its commands).
     pub patch: OverridePatch,
 }
 

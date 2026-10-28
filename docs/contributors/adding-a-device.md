@@ -222,7 +222,7 @@ Before opening the PR, run the commands in [Development](development.md#checks):
 
 ## Overrides
 
-The override has twenty fields (`name`, `area`, `hidden`, `order`, `cardStyle`, `favorite`, `energyRole`, `energyInvert`, `securityHidden`, `energyIcon`, `energyMeter`, `homePinned`, `securityAction`, `securityAsk`, `ungrouped`, `showAs`, `lightOnPreset`, `lightOnBrightness`, `climatePresets`, `mainControl`). `showAs` makes a switch show as a light, door, siren, chime or plug; `mainControl` is the name of an announced control, or `"none"` to hide the main control. [Entity types](../reference/entity-types.md#overrides) lists every field with its values.
+The override has twenty-one fields (`name`, `area`, `hidden`, `order`, `cardStyle`, `favorite`, `energyRole`, `energyInvert`, `securityHidden`, `energyIcon`, `energyMeter`, `homePinned`, `securityAction`, `securityAsk`, `ungrouped`, `showAs`, `lightOnPreset`, `lightOnBrightness`, `climatePresets`, `mainControl`, `invert`). `showAs` makes a switch show as a light, door, siren, chime or plug; `mainControl` is the name of an announced control, or `"none"` to hide the main control; `invert` swaps on and off for a switch wired the other way round. [Entity types](../reference/entity-types.md#overrides) lists every field with its values.
 
 Overrides are retained messages under `oikos/ui/<entity id>`. Set them from the web device sheet, `PATCH /api/v1/entities/{id}/override`, or MCP `set_override`.
 

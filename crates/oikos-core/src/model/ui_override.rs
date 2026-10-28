@@ -82,6 +82,10 @@ pub struct UiOverride {
     /// A generic entity's main control: one of its announced controls, or `"none"` to hide it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub main_control: Option<String>,
+    /// A switch wired the other way round (relay on = device off): the hub swaps on and off
+    /// in the state it decodes and the commands it sends. Only read on a switch.
+    #[serde(skip_serializing_if = "is_false")]
+    pub invert: bool,
     /// Fields written by a newer app, preserved verbatim.
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
@@ -110,6 +114,7 @@ impl Default for UiOverride {
             light_on_brightness: None,
             climate_presets: None,
             main_control: None,
+            invert: false,
             extra: BTreeMap::new(),
         }
     }
@@ -188,10 +193,11 @@ const FIELD_TYPES: &[(&str, FieldType)] = &[
     ("lightOnBrightness", FieldType::Brightness),
     ("climatePresets", FieldType::Text),
     ("mainControl", FieldType::Text),
+    ("invert", FieldType::Flag),
 ];
 
 impl UiOverride {
-    /// The 20 camelCase field names the app knows, in the app's order.
+    /// The 21 camelCase field names, in the app's order; `invert` is hub-only so far.
     pub const FIELDS: &[&str] = &[
         "name",
         "area",
@@ -213,6 +219,7 @@ impl UiOverride {
         "lightOnBrightness",
         "climatePresets",
         "mainControl",
+        "invert",
     ];
 
     /// Decodes a retained payload leniently; `None` when it is not a JSON object or a known

@@ -54,11 +54,17 @@ fn resolve_on_off<'a>(m: &Mapper<'a>) -> &'a Command {
     }
 }
 
+/// An inverted switch (see `UiOverride::invert`) sends the off word to turn on.
 fn switch(m: &Mapper<'_>) -> Result<Vec<Publish>, CommandError> {
-    let word = match resolve_on_off(m) {
-        Command::TurnOn { .. } => m.word("payload_on", "ON"),
-        Command::TurnOff => m.word("payload_off", "OFF"),
+    let on = match resolve_on_off(m) {
+        Command::TurnOn { .. } => true,
+        Command::TurnOff => false,
         _ => return Err(m.unsupported()),
+    };
+    let word = if on != m.entity.ui.invert {
+        m.word("payload_on", "ON")
+    } else {
+        m.word("payload_off", "OFF")
     };
     Ok(vec![m.publish(
         "command_topic",

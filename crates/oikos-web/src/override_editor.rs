@@ -61,6 +61,7 @@ pub fn dirty_patch(before: &UiOverride, after: &UiOverride) -> OverridePatch {
         light_on_brightness => "lightOnBrightness",
         climate_presets => "climatePresets",
         main_control => "mainControl",
+        invert => "invert",
     }
     patch
 }
@@ -762,6 +763,12 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                         set_type(d, t);
                     }
                 />
+                <FlagField
+                    label=tt(DeviceText::Inverted)
+                    draft=draft
+                    get=|d| d.invert
+                    set=|d, v| d.invert = v
+                />
             </Section>
             <Section title=tt(DeviceText::MainControl) when=on(|s| s.main_control)>
                 <ChipField
@@ -999,6 +1006,7 @@ mod tests {
             light_on_brightness: Some(9),
             climate_presets: Some("p".into()),
             main_control: Some("locked".into()),
+            invert: true,
             ..UiOverride::default()
         };
         let patch = dirty_patch(&UiOverride::default(), &after);
