@@ -1,14 +1,19 @@
 //! Onboarding: the bootstrap file, the settings the wizard edits, and how the hub boots from them.
 
 pub mod boot;
+pub mod bundled;
 pub mod fs;
 pub mod hub_file;
 pub mod import;
+pub mod probe;
 pub mod restart;
+pub mod routes;
+pub mod secret;
 pub mod sections;
 pub mod store;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use tokio::sync::Mutex;
@@ -57,6 +62,20 @@ impl SetupCtx {
             restarting: AtomicBool::new(false),
             restart,
         }
+    }
+
+    /// A Run-mode context over an empty `hub.json` that never restarts, for tests and tools
+    /// that need a router but not the setup. Its directory is only written if a setup write
+    /// route is called.
+    pub fn inert() -> Arc<SetupCtx> {
+        Arc::new(SetupCtx::new(
+            std::env::temp_dir().join("oikos-os-inert"),
+            Mode::Run,
+            HubFile::default(),
+            None,
+            Sections::default(),
+            RestartHook::Record(Arc::default()),
+        ))
     }
 
     /// Edits `hub.json` under the lock: changes a copy, saves the copy, and only then replaces

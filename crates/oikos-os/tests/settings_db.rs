@@ -87,3 +87,33 @@ async fn import_copy_fills_the_table_and_sets_the_flag() {
     );
     tdb.drop_db().await;
 }
+
+#[tokio::test]
+async fn database_probe_reports_timescale_and_history_since() {
+    use oikos_os::setup::probe;
+
+    let Some(tdb) = fresh_db().await else { return };
+    let result = probe::database(&tdb.url).await;
+    assert!(result.ok, "{}", result.message);
+    let detail = result.detail.expect("detail");
+    assert!(
+        detail["history_since"].is_null(),
+        "an empty database has no history"
+    );
+
+    sqlx::query(
+        "INSERT INTO entity_state (time, entity_id, value) \
+         VALUES ('2026-01-02T03:04:05Z', 'e', '1'::jsonb)",
+    )
+    .execute(tdb.db.pool())
+    .await
+    .unwrap();
+    let result = probe::database(&tdb.url).await;
+    assert!(result.ok, "{}", result.message);
+    let since = result.detail.unwrap()["history_since"]
+        .as_str()
+        .map(str::to_owned)
+        .expect("history_since");
+    assert!(since.starts_with("2026-01-02T03:04:05"), "{since}");
+    tdb.drop_db().await;
+}

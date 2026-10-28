@@ -132,7 +132,13 @@ async fn app_at(enabled: bool, coordinates: Option<(f64, f64)>) -> App {
     }
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(axum::serve(listener, router(Arc::clone(&hub))).into_future());
+    tokio::spawn(
+        axum::serve(
+            listener,
+            router(Arc::clone(&hub), oikos_os::setup::SetupCtx::inert()),
+        )
+        .into_future(),
+    );
     App {
         hub,
         addr,

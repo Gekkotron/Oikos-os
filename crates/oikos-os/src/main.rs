@@ -61,16 +61,11 @@ fn early_log_config(data_dir: &Path, config_flag: Option<&Path>) -> LogConfig {
         .unwrap_or_default()
 }
 
-/// Setup mode: only HTTP. The setup router is mounted here by the setup API.
+/// Setup mode: only HTTP, serving the setup API and the web UI.
 async fn run_setup(ctx: Arc<SetupCtx>) -> anyhow::Result<ExitCode> {
     let http_cfg = ctx.file.lock().await.http.clone();
     tracing::info!("setup mode: the hub is not configured yet; MQTT and the engine are off");
-    // Hook: the setup router (routes under `/setup`, `/api/v1/setup`) is merged here.
-    let router = axum::Router::new().route(
-        "/health",
-        axum::routing::get(|| async { axum::Json(serde_json::json!({"status": "setup"})) }),
-    );
-    let http_task = http::serve(&http_cfg, router).await?;
+    let http_task = http::serve(&http_cfg, http::setup_router(ctx)).await?;
     tokio::signal::ctrl_c().await?;
     tracing::info!("shutting down");
     http_task.abort();
@@ -121,9 +116,8 @@ async fn main() -> anyhow::Result<ExitCode> {
             let weather = hub.start_weather();
             let solar = hub.start_solar();
             tokio::spawn(oikos_os::groups::migrate::spawn(Arc::clone(&hub)));
-            let http_task = http::serve(&cfg.http, http::router(Arc::clone(&hub))).await?;
-            // Task 7 hands this to the setup routes.
-            let _setup_ctx = setup_ctx;
+            let http_task =
+                http::serve(&cfg.http, http::router(Arc::clone(&hub), setup_ctx)).await?;
 
             tokio::signal::ctrl_c().await?;
             tracing::info!("shutting down");

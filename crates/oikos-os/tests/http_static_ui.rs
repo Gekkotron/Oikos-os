@@ -34,7 +34,9 @@ async fn fetch_bytes(
     let hub = Hub::new(&Config::default(), tx);
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
-    tokio::spawn(axum::serve(listener, router(hub)).into_future());
+    tokio::spawn(
+        axum::serve(listener, router(hub, oikos_os::setup::SetupCtx::inert())).into_future(),
+    );
     let mut request = reqwest::Client::new().get(format!("http://{addr}{path}"));
     if let Some(accept) = accept_encoding {
         request = request.header(ACCEPT_ENCODING, accept);
