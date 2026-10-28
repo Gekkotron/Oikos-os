@@ -7,5 +7,6 @@ mod core;
 pub mod history;
 pub mod home;
 pub mod series_cache;
+pub mod setup;
 
 pub use core::*;

@@ -17,6 +17,7 @@ mod home;
 pub mod picker;
 pub mod security;
 pub mod settings;
+pub mod setup;
 mod solar;
 pub mod states;
 mod weather;
