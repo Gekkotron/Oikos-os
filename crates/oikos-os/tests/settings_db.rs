@@ -51,3 +51,39 @@ async fn save_twice_overwrites() {
     assert_eq!(n as usize, oikos_os::setup::sections::SECTION_KEYS.len());
     tdb.drop_db().await;
 }
+
+#[tokio::test]
+async fn import_copy_fills_the_table_and_sets_the_flag() {
+    use std::sync::Arc;
+
+    use oikos_os::history::db::Db;
+    use oikos_os::setup::boot::spawn_import_copy;
+    use oikos_os::setup::{HubFile, Mode, RestartHook, SetupCtx};
+
+    let Some(tdb) = fresh_db().await else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let file = HubFile {
+        database_url: Some(tdb.url.clone()),
+        ..HubFile::default()
+    };
+    file.save(tmp.path()).unwrap();
+    let imported = sample();
+    let ctx = Arc::new(SetupCtx::new(
+        tmp.path().to_path_buf(),
+        Mode::Run,
+        file,
+        Some(Db::connect_lazy(&tdb.url).unwrap()),
+        imported.clone(),
+        RestartHook::Exec,
+    ));
+    spawn_import_copy(Arc::clone(&ctx)).await.unwrap();
+    assert_eq!(load_sections(&tdb.db).await.unwrap(), imported);
+    assert!(ctx.file.lock().await.settings_imported);
+    assert!(
+        HubFile::load(tmp.path())
+            .unwrap()
+            .unwrap()
+            .settings_imported
+    );
+    tdb.drop_db().await;
+}

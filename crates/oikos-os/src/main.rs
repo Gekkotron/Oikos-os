@@ -1,13 +1,17 @@
 #![forbid(unsafe_code)]
 
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
 use oikos_os::cli::Cli;
-use oikos_os::config::{AclSource, Config};
+use oikos_os::config::{AclSource, Config, LogConfig};
 use oikos_os::history::History;
 use oikos_os::hub::Hub;
+use oikos_os::setup::boot::{Boot, resolve, spawn_location_lookup};
+use oikos_os::setup::{HubFile, SetupCtx, import};
+use oikos_os::weather::open_meteo::Endpoints;
 use oikos_os::{http, logging, mcp, mqtt};
 use tokio::sync::mpsc;
 
@@ -38,15 +42,57 @@ fn spawn_acl_tail(cfg: &Config, hub: &Arc<Hub>) -> Vec<tokio::task::JoinHandle<(
     vec![tail, feed]
 }
 
+/// The log settings, read before anything else so the boot itself can log: `hub.json` when it
+/// exists, else the TOML about to be imported, else the defaults (plus `OIKOS_LOG__*`).
+fn early_log_config(data_dir: &Path, config_flag: Option<&Path>) -> LogConfig {
+    // A broken file is reported by `resolve`.
+    let file = HubFile::load(data_dir).unwrap_or_default();
+    if let Some(file) = file {
+        return file.with_bootstrap_env().map(|f| f.log).unwrap_or_default();
+    }
+    if let Some(path) = import::toml_candidate(data_dir, config_flag)
+        && let Ok(cfg) = Config::load(Some(&path))
+    {
+        return cfg.log;
+    }
+    HubFile::default()
+        .with_bootstrap_env()
+        .map(|f| f.log)
+        .unwrap_or_default()
+}
+
+/// Setup mode: only HTTP. The setup router is mounted here by the setup API.
+async fn run_setup(ctx: Arc<SetupCtx>) -> anyhow::Result<ExitCode> {
+    let http_cfg = ctx.file.lock().await.http.clone();
+    tracing::info!("setup mode: the hub is not configured yet; MQTT and the engine are off");
+    // Hook: the setup router (routes under `/setup`, `/api/v1/setup`) is merged here.
+    let router = axum::Router::new().route(
+        "/health",
+        axum::routing::get(|| async { axum::Json(serde_json::json!({"status": "setup"})) }),
+    );
+    let http_task = http::serve(&http_cfg, router).await?;
+    tokio::signal::ctrl_c().await?;
+    tracing::info!("shutting down");
+    http_task.abort();
+    tracing::info!("stopped");
+    Ok(ExitCode::SUCCESS)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<ExitCode> {
     let cli = Cli::parse_args();
     match cli {
-        Cli::Run { config } => {
-            let cfg = Config::load(config.as_deref())?;
+        Cli::Run { config, data_dir } => {
+            logging::init(&early_log_config(&data_dir, config.as_deref()));
+            let (cfg, setup_ctx) = match resolve(&data_dir, config.as_deref()).await? {
+                Boot::Setup(ctx) => return run_setup(ctx).await,
+                Boot::Run { cfg, ctx } => (*cfg, ctx),
+            };
             cfg.validate_all()
                 .map_err(|e| anyhow::anyhow!("invalid config: {e}"))?;
-            logging::init(&cfg.log);
+            if setup_ctx.file.lock().await.pending_city.is_some() {
+                spawn_location_lookup(Arc::clone(&setup_ctx), Endpoints::default());
+            }
             tracing::info!(host = %cfg.mqtt.host, port = cfg.mqtt.port, "starting oikos-os");
 
             let (publish_tx, publish_rx) = mpsc::channel(PUBLISH_QUEUE);
@@ -75,6 +121,8 @@ async fn main() -> anyhow::Result<ExitCode> {
             let solar = hub.start_solar();
             tokio::spawn(oikos_os::groups::migrate::spawn(Arc::clone(&hub)));
             let http_task = http::serve(&cfg.http, http::router(Arc::clone(&hub))).await?;
+            // Task 7 hands this to the setup routes.
+            let _setup_ctx = setup_ctx;
 
             tokio::signal::ctrl_c().await?;
             tracing::info!("shutting down");
@@ -109,13 +157,17 @@ async fn main() -> anyhow::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Cli::McpStdio { server } => {
-            let (cfg, load_err) = match Config::load(None) {
-                Ok(cfg) => (cfg, None),
-                Err(e) => (Config::default(), Some(e)),
+            let data_dir = std::env::var_os("OIKOS_DATA_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("./data"));
+            let (log, load_err) = match HubFile::load(&data_dir) {
+                Ok(Some(file)) => (file.log, None),
+                Ok(None) => (LogConfig::default(), None),
+                Err(e) => (LogConfig::default(), Some(e)),
             };
-            logging::init(&cfg.log);
+            logging::init(&log);
             if let Some(e) = load_err {
-                tracing::warn!(error = %e, "ignoring invalid config, using defaults for logging");
+                tracing::warn!(error = %e, "ignoring invalid hub.json, using defaults for logging");
             }
             mcp::run_stdio_proxy(server).await?;
             Ok(ExitCode::SUCCESS)

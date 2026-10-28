@@ -13,8 +13,8 @@ use crate::clock;
 use crate::hub::Hub;
 
 /// First wait after a failed geocoding; it doubles up to [`GEOCODE_BACKOFF_MAX`].
-const GEOCODE_BACKOFF_START: Duration = Duration::from_secs(30);
-const GEOCODE_BACKOFF_MAX: Duration = Duration::from_secs(15 * 60);
+pub(crate) const GEOCODE_BACKOFF_START: Duration = Duration::from_secs(30);
+pub(crate) const GEOCODE_BACKOFF_MAX: Duration = Duration::from_secs(15 * 60);
 
 /// The shortest sleep between two fetches. `[weather] refresh_minutes >= 10` is enforced only
 /// by `WeatherConfig::validate` at start; the poller takes whatever the hub holds, so tests

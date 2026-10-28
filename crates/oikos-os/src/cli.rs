@@ -10,6 +10,15 @@ struct RawCli {
     /// Config file used when no subcommand is given (same as `run --config`).
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
+    /// Folder holding `hub.json` and the settings cache.
+    #[arg(
+        long = "data",
+        global = true,
+        value_name = "DIR",
+        env = "OIKOS_DATA_DIR",
+        default_value = "./data"
+    )]
+    data_dir: PathBuf,
 }
 
 #[derive(Debug, Subcommand)]
@@ -27,8 +36,13 @@ enum RawCommand {
 /// Resolved command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cli {
-    Run { config: Option<PathBuf> },
-    McpStdio { server: String },
+    Run {
+        config: Option<PathBuf>,
+        data_dir: PathBuf,
+    },
+    McpStdio {
+        server: String,
+    },
 }
 
 impl Cli {
@@ -46,7 +60,10 @@ impl Cli {
 
     fn from_raw(raw: RawCli) -> Cli {
         match raw.command {
-            None | Some(RawCommand::Run) => Cli::Run { config: raw.config },
+            None | Some(RawCommand::Run) => Cli::Run {
+                config: raw.config,
+                data_dir: raw.data_dir,
+            },
             Some(RawCommand::McpStdio { server }) => Cli::McpStdio { server },
         }
     }
@@ -54,26 +71,71 @@ impl Cli {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::result_large_err)] // figment::Jail closures return figment::Error
+
     use super::*;
 
+    fn run(config: Option<&str>, data: &str) -> Cli {
+        Cli::Run {
+            config: config.map(Into::into),
+            data_dir: data.into(),
+        }
+    }
+
+    // Each parse runs inside a Jail, which serializes it with the tests that set env vars.
     #[test]
     fn run_is_default() {
-        assert_eq!(
-            Cli::try_parse_from(["oikos-os"]).unwrap(),
-            Cli::Run { config: None }
-        );
-        assert_eq!(
-            Cli::try_parse_from(["oikos-os", "run", "--config", "x.toml"]).unwrap(),
-            Cli::Run {
-                config: Some("x.toml".into())
-            }
-        );
-        assert_eq!(
-            Cli::try_parse_from(["oikos-os", "--config", "y.toml"]).unwrap(),
-            Cli::Run {
-                config: Some("y.toml".into())
-            }
-        );
+        figment::Jail::expect_with(|_| {
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os"]).unwrap(),
+                run(None, "./data")
+            );
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "run", "--config", "x.toml"]).unwrap(),
+                run(Some("x.toml"), "./data")
+            );
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "--config", "y.toml"]).unwrap(),
+                run(Some("y.toml"), "./data")
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn data_defaults_to_dot_data() {
+        figment::Jail::expect_with(|_| {
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os"]).unwrap(),
+                run(None, "./data")
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn data_flag_and_env() {
+        figment::Jail::expect_with(|jail| {
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "--data", "/srv/oikos"]).unwrap(),
+                run(None, "/srv/oikos")
+            );
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "run", "--data", "d"]).unwrap(),
+                run(None, "d")
+            );
+            jail.set_env("OIKOS_DATA_DIR", "/data");
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os"]).unwrap(),
+                run(None, "/data")
+            );
+            // The flag beats the environment.
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "--data", "x"]).unwrap(),
+                run(None, "x")
+            );
+            Ok(())
+        });
     }
 
     #[test]
