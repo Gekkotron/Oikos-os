@@ -8,6 +8,7 @@
 mod drawer;
 mod graph;
 mod library;
+mod manual;
 mod settings;
 pub(crate) mod sun;
 mod template_field;

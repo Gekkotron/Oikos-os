@@ -211,6 +211,15 @@ pub async fn run_flow(id: &str) -> Result<RunView, ApiError> {
     read_json(response).await
 }
 
+/// Starts flow `id` from its manual card `node`; the hub answers 202 with the new run, or 422
+/// when the flow cannot start (disabled, or a run is active in `single` mode).
+pub async fn run_flow_from(id: &str, node: &str) -> Result<RunView, ApiError> {
+    let url = format!("/api/v1/flows/{}/run", encode_id(id));
+    let body = serde_json::json!({ "node": node });
+    let response = check(Request::post(&url).json(&body), None).await?;
+    read_json(response).await
+}
+
 /// Renames area `id`; the hub answers with the area list it now has.
 pub async fn rename_area(id: &str, name: &str) -> Result<Vec<oikos_api::AreaView>, ApiError> {
     let url = format!("/api/v1/areas/{}", encode_id(id));

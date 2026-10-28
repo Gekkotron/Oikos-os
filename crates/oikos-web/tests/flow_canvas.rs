@@ -1083,7 +1083,7 @@ async fn library_open_in_edit_mode() {
     let html = host.inner_html();
     assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
     assert_eq!(count(&host, ".flow-library"), 1, "{html}");
-    assert_eq!(count(&host, ".flow-library__item"), 9, "{html}");
+    assert_eq!(count(&host, ".flow-library__item"), 10, "{html}");
     assert_eq!(count(&host, ".flow-picker-wrap"), 0, "{html}");
 }
 
@@ -1872,4 +1872,77 @@ async fn if_value_without_a_value_shows_no_choice() {
         .unchecked_into();
     assert_eq!(select.value(), "", "{}", host.inner_html());
     settle_history().await;
+}
+
+// ---- Manual card ----------------------------------------------------------------------------
+
+/// The reference flow with a manual card `go` wired into `moving`.
+fn manual_view() -> FlowView {
+    let mut view = reference_view(None, vec![]);
+    let go: oikos_core::flow::Node =
+        serde_json::from_str(r#"{"id":"go","type":"trigger.manual","params":{"value":true}}"#)
+            .unwrap();
+    view.definition.nodes.push(go);
+    view.definition.edges.push(oikos_core::flow::Edge {
+        from: "go".into(),
+        port: None,
+        to: "moving".into(),
+    });
+    view
+}
+
+fn runs(fetch: &FakeFetch) -> Vec<(String, String, String)> {
+    fetch
+        .requests()
+        .into_iter()
+        .filter(|(method, path, _)| method == "POST" && path.ends_with("/run"))
+        .collect()
+}
+
+#[wasm_bindgen_test]
+async fn manual_card_shows_run_button() {
+    let host = host();
+    let _mounted = mount(&host, vec![manual_view()], "/flows/living_led_motion");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-node__run"), 1, "{html}");
+    assert_eq!(count(&host, "[data-node=go] .flow-node__run"), 1, "{html}");
+    assert!(
+        !element(&host, ".flow-node__run")
+            .unchecked_into::<web_sys::HtmlButtonElement>()
+            .disabled()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn manual_button_posts_the_card() {
+    let host = host();
+    let _mounted = mount(&host, vec![manual_view()], "/flows/living_led_motion");
+    tick().await;
+    let fetch = FakeFetch::answer(&serde_json::to_string(&done_run()).unwrap());
+    let button = element(&host, ".flow-node__run");
+    let at = centre(&button);
+    pointer_at(&button, "pointerdown", at);
+    pointer_at(&button, "pointerup", at);
+    click(&host, ".flow-node__run");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let sent = runs(&fetch);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].1, "/api/v1/flows/living_led_motion/run");
+    let body: serde_json::Value = serde_json::from_str(&sent[0].2).unwrap();
+    assert_eq!(body, serde_json::json!({ "node": "go" }));
+    let html = host.inner_html();
+    assert_eq!(count(&host, ".flow-node--selected"), 0, "{html}");
+    assert_eq!(count(&host, ".flow-graph--editing"), 0, "{html}");
+}
+
+#[wasm_bindgen_test]
+async fn manual_button_is_inert_in_edit_mode() {
+    let (host, _mounted, _) = editing(manual_view()).await;
+    let button = element(&host, ".flow-node__run").unchecked_into::<web_sys::HtmlButtonElement>();
+    assert!(button.disabled());
+    let fetch = FakeFetch::answer(&serde_json::to_string(&done_run()).unwrap());
+    button.click();
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert!(runs(&fetch).is_empty());
 }
