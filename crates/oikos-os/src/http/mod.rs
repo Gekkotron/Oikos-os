@@ -29,8 +29,22 @@ pub fn router(hub: Arc<Hub>, ctx: Arc<SetupCtx>) -> Router {
 
 /// [`router`] with the geocoding endpoint the setup lookups use (tests point it at a stub).
 pub fn router_with(hub: Arc<Hub>, ctx: Arc<SetupCtx>, geocoding: Endpoints) -> Router {
+    router_with_solcast(hub, ctx, geocoding, oikos_solcast::BASE_URL)
+}
+
+/// [`router_with`] with the Solcast API address the setup's key test calls too.
+pub fn router_with_solcast(
+    hub: Arc<Hub>,
+    ctx: Arc<SetupCtx>,
+    geocoding: Endpoints,
+    solcast_base: &str,
+) -> Router {
     Router::new()
-        .merge(setup_routes::router(ctx, geocoding))
+        .merge(setup_routes::router_with_solcast(
+            ctx,
+            geocoding,
+            solcast_base,
+        ))
         .route("/health", get(api::health))
         .nest("/api/v1", api::routes())
         .route("/api/{*rest}", any(api::not_found))
@@ -48,12 +62,25 @@ pub fn setup_router(ctx: Arc<SetupCtx>) -> Router {
 
 /// [`setup_router`] with its own geocoding endpoint.
 pub fn setup_router_with(ctx: Arc<SetupCtx>, geocoding: Endpoints) -> Router {
+    setup_router_with_solcast(ctx, geocoding, oikos_solcast::BASE_URL)
+}
+
+/// [`setup_router_with`] with the Solcast API address the key test calls.
+pub fn setup_router_with_solcast(
+    ctx: Arc<SetupCtx>,
+    geocoding: Endpoints,
+    solcast_base: &str,
+) -> Router {
     Router::new()
         .route(
             "/health",
             get(|| async { axum::Json(serde_json::json!({"status": "setup"})) }),
         )
-        .merge(setup_routes::router(ctx, geocoding))
+        .merge(setup_routes::router_with_solcast(
+            ctx,
+            geocoding,
+            solcast_base,
+        ))
         .route("/api/{*rest}", any(api::not_found))
         .fallback(static_ui::index)
         .layer(CorsLayer::permissive())

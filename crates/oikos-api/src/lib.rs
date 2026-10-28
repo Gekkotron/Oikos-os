@@ -44,8 +44,9 @@ pub use history::{
 };
 pub use home::{HomeSettings, OffPeakEntry, OffPeakWindow};
 pub use setup::{
-    DatabaseInput, DatabaseView, GeoPlace, Location, MqttInput, MqttView, Secret, SecretView,
-    SetupStatus, SetupStep, TestResult,
+    DatabaseInput, DatabaseView, FrigateInput, FrigateView, GeoPlace, Location, MqttInput,
+    MqttView, PushInput, PushView, Secret, SecretView, SetupStatus, SetupStep, SolcastInput,
+    SolcastView, TestResult,
 };
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use solar::{

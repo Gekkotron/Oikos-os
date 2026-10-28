@@ -117,3 +117,191 @@ async fn database_probe_reports_timescale_and_history_since() {
     assert!(since.starts_with("2026-01-02T03:04:05"), "{since}");
     tdb.drop_db().await;
 }
+
+// ---- PUT /api/v1/settings/{section}, over a real database ------------------------------
+
+mod put {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use oikos_os::config::Config;
+    use oikos_os::history::db::Db;
+    use oikos_os::hub::Hub;
+    use oikos_os::setup::{HubFile, Mode, RestartHook, SetupCtx};
+    use oikos_os::weather::open_meteo::Endpoints;
+    use reqwest::StatusCode;
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    struct Served {
+        addr: std::net::SocketAddr,
+        dir: tempfile::TempDir,
+        ctx: Arc<SetupCtx>,
+        restarts: Arc<AtomicUsize>,
+    }
+
+    impl Served {
+        async fn put(&self, section: &str, body: Value) -> (StatusCode, Value) {
+            let r = reqwest::Client::new()
+                .put(format!("http://{}/api/v1/settings/{section}", self.addr))
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            (r.status(), r.json().await.unwrap_or(Value::Null))
+        }
+        async fn get(&self, section: &str) -> Value {
+            reqwest::get(format!("http://{}/api/v1/settings/{section}", self.addr))
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap()
+        }
+    }
+
+    async fn serve(url: &str, sections: Sections) -> Served {
+        let dir = tempfile::tempdir().unwrap();
+        let restarts = Arc::new(AtomicUsize::new(0));
+        let file = HubFile {
+            location: serde_json::from_value(json!({"city":"Paris","country":"FR",
+                "latitude":48.85,"longitude":2.35,"timezone":"Europe/Paris"}))
+            .unwrap(),
+            ..HubFile::default()
+        };
+        let ctx = Arc::new(SetupCtx::new(
+            dir.path().to_path_buf(),
+            Mode::Run,
+            file,
+            Some(Db::connect_lazy(url).unwrap()),
+            sections,
+            RestartHook::Record(Arc::clone(&restarts)),
+        ));
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let hub = Hub::new(&Config::default(), tx);
+        let app = oikos_os::http::router_with(hub, Arc::clone(&ctx), Endpoints::default());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(axum::serve(listener, app).into_future());
+        Served {
+            addr,
+            dir,
+            ctx,
+            restarts,
+        }
+    }
+
+    #[tokio::test]
+    async fn put_saves_db_and_cache_and_keeps_omitted_secret() {
+        let Some(tdb) = fresh_db().await else { return };
+        let s = serve(&tdb.url, sample()).await;
+        let (code, body) = s
+            .put(
+                "solcast",
+                json!({"enabled": true, "sites": ["site-1", "site-2"], "daily_limit": 5}),
+            )
+            .await;
+        assert_eq!(code, StatusCode::OK, "{body}");
+        assert_eq!(body, json!({"restarting": true}));
+        assert_eq!(s.restarts.load(Ordering::SeqCst), 1);
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert_eq!(stored.solcast.sites, ["site-1", "site-2"]);
+        assert_eq!(stored.solcast.daily_limit, 5);
+        assert_eq!(stored.solcast.api_key.as_deref(), Some("solcast-key"));
+        // The other sections are saved as they were.
+        assert_eq!(stored.frigate.password.as_deref(), Some("frigate-pass"));
+        let cached = oikos_os::setup::store::read_cache(s.dir.path()).unwrap();
+        assert_eq!(cached, stored);
+        // A GET before the restart already shows the new values, without the key.
+        let view = s.get("solcast").await;
+        assert_eq!(view["sites"], json!(["site-1", "site-2"]));
+        assert_eq!(view["api_key"], json!({"set": true}));
+        assert_eq!(s.ctx.sections.lock().await.solcast, stored.solcast);
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn null_clears_a_secret_and_a_string_sets_it() {
+        let Some(tdb) = fresh_db().await else { return };
+        let s = serve(&tdb.url, sample()).await;
+        let (code, _) = s
+            .put(
+                "solcast",
+                json!({"enabled": false, "sites": [], "api_key": null}),
+            )
+            .await;
+        assert_eq!(code, StatusCode::OK);
+        assert_eq!(load_sections(&tdb.db).await.unwrap().solcast.api_key, None);
+        tdb.drop_db().await;
+
+        let Some(tdb) = fresh_db().await else { return };
+        let s = serve(&tdb.url, sample()).await;
+        let (code, _) = s
+            .put(
+                "frigate",
+                json!({"url": "http://frigate.example.com:5000", "password": "new-pass"}),
+            )
+            .await;
+        assert_eq!(code, StatusCode::OK);
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert_eq!(stored.frigate.password.as_deref(), Some("new-pass"));
+        assert_eq!(
+            stored.frigate.url.as_deref(),
+            Some("http://frigate.example.com:5000")
+        );
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn frigate_path_only_change_keeps_the_password() {
+        let Some(tdb) = fresh_db().await else { return };
+        let s = serve(&tdb.url, sample()).await;
+        let (code, body) = s
+            .put("frigate", json!({"url": "http://192.0.2.9:5000/frigate"}))
+            .await;
+        assert_eq!(code, StatusCode::OK, "{body}");
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert_eq!(stored.frigate.password.as_deref(), Some("frigate-pass"));
+        assert_eq!(
+            stored.frigate.url.as_deref(),
+            Some("http://192.0.2.9:5000/frigate")
+        );
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn invalid_solcast_saves_nothing() {
+        let Some(tdb) = fresh_db().await else { return };
+        save_sections(&tdb.db, &sample()).await.unwrap();
+        let s = serve(&tdb.url, sample()).await;
+        let (code, body) = s
+            .put("solcast", json!({"enabled": true, "sites": []}))
+            .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body["error"].as_str().unwrap().contains("[solcast] sites"));
+        assert_eq!(load_sections(&tdb.db).await.unwrap(), sample());
+        assert!(!s.dir.path().join("settings-cache.json").exists());
+        assert_eq!(s.restarts.load(Ordering::SeqCst), 0);
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn a_put_and_the_import_copy_do_not_overwrite_each_other() {
+        use oikos_os::setup::boot::spawn_import_copy;
+        let Some(tdb) = fresh_db().await else { return };
+        let s = serve(&tdb.url, sample()).await;
+        let copy = spawn_import_copy(Arc::clone(&s.ctx));
+        let (code, _) = s
+            .put("weather", json!({"enabled": true, "refresh_minutes": 45}))
+            .await;
+        assert_eq!(code, StatusCode::OK);
+        copy.await.unwrap();
+        // Whichever ran last, the table holds the PUT's value: the copy snapshots the
+        // sections under the same lock the PUT replaces them under.
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert_eq!(stored.weather.refresh_minutes, 45);
+        assert_eq!(stored, *s.ctx.sections.lock().await);
+        tdb.drop_db().await;
+    }
+}

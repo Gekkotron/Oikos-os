@@ -163,9 +163,11 @@ pub fn spawn_import_copy(ctx: Arc<SetupCtx>) -> JoinHandle<()> {
         let Some(db) = ctx.db.as_ref() else { return };
         let mut backoff = INITIAL_BACKOFF;
         loop {
-            let sections = ctx.sections.lock().await.clone();
+            // The lock is held from the snapshot to the save (and released before any
+            // sleep), so a `PUT /settings` can never be overwritten by a stale copy.
             let copied = async {
                 db.migrate().await.map_err(anyhow::Error::from)?;
+                let sections = ctx.sections.lock().await;
                 save_sections(db, &sections)
                     .await
                     .map_err(anyhow::Error::from)

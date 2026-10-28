@@ -36,16 +36,27 @@ const BUNDLED_MQTT_PORT: u16 = 1883;
 const BUNDLED_DB_PORT: u16 = 5432;
 
 #[derive(Clone)]
-struct RouteState {
-    ctx: Arc<SetupCtx>,
+pub(super) struct RouteState {
+    pub(super) ctx: Arc<SetupCtx>,
     geocoding: Endpoints,
     client: reqwest::Client,
+    /// Where the Solcast key test calls.
+    pub(super) solcast_base: String,
 }
 
 /// The setup routes, with their own state. `geocoding` is where city lookups go.
 pub fn router<S: Clone + Send + Sync + 'static>(
     ctx: Arc<SetupCtx>,
     geocoding: Endpoints,
+) -> Router<S> {
+    router_with_solcast(ctx, geocoding, oikos_solcast::BASE_URL)
+}
+
+/// [`router`] with the Solcast API address the key test calls (tests point it at a stub).
+pub fn router_with_solcast<S: Clone + Send + Sync + 'static>(
+    ctx: Arc<SetupCtx>,
+    geocoding: Endpoints,
+    solcast_base: &str,
 ) -> Router<S> {
     let client = open_meteo::client().unwrap_or_default();
     Router::new()
@@ -58,18 +69,20 @@ pub fn router<S: Clone + Send + Sync + 'static>(
         .route("/api/v1/setup/database", put(put_database))
         .route("/api/v1/setup/step", put(put_step))
         .route("/api/v1/setup/finish", post(finish))
+        .merge(super::settings::routes())
         .with_state(RouteState {
             ctx,
             geocoding,
             client,
+            solcast_base: solcast_base.trim_end_matches('/').to_owned(),
         })
 }
 
-fn error(status: StatusCode, message: &str) -> Response {
+pub(super) fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
 }
 
-fn restarting(ctx: &SetupCtx) -> Option<Response> {
+pub(super) fn restarting(ctx: &SetupCtx) -> Option<Response> {
     ctx.restarting
         .load(Ordering::SeqCst)
         .then(|| error(StatusCode::SERVICE_UNAVAILABLE, "restarting"))

@@ -128,6 +128,112 @@ pub struct DatabaseView {
     pub password: SecretView,
 }
 
+/// The Solcast section as a read shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SolcastView {
+    pub enabled: bool,
+    pub sites: Vec<String>,
+    pub daily_limit: u32,
+    pub api_key: SecretView,
+}
+
+/// The Solcast section in a `PUT` or a test. A left-out `daily_limit` keeps the stored one.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SolcastInput {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub sites: Vec<String>,
+    #[serde(default)]
+    pub daily_limit: Option<u32>,
+    #[serde(default)]
+    pub api_key: Secret,
+}
+
+/// The Frigate section as a read shows it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FrigateView {
+    pub url: Option<String>,
+    pub user: Option<String>,
+    pub password: SecretView,
+    pub media_url: Option<String>,
+    pub bridge: bool,
+    pub labels: Vec<String>,
+    pub cameras: Vec<String>,
+    pub zones: Vec<String>,
+    pub cooldown: u64,
+    pub severity: String,
+    pub ttl: u32,
+    pub topic_prefix: String,
+    pub live: bool,
+}
+
+/// The Frigate section in a `PUT` or a test. `url`, `user`, `media_url`, the flags and the
+/// lists are replaced by what is sent (left out means unset or empty); `cooldown`, `severity`,
+/// `ttl` and `topic_prefix` keep the stored value when left out.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct FrigateInput {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub password: Secret,
+    #[serde(default)]
+    pub media_url: Option<String>,
+    #[serde(default)]
+    pub bridge: bool,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(default)]
+    pub cameras: Vec<String>,
+    #[serde(default)]
+    pub zones: Vec<String>,
+    #[serde(default)]
+    pub cooldown: Option<u64>,
+    #[serde(default)]
+    pub severity: Option<String>,
+    #[serde(default)]
+    pub ttl: Option<u32>,
+    #[serde(default)]
+    pub topic_prefix: Option<String>,
+    #[serde(default)]
+    pub live: bool,
+}
+
+/// The push section as a read shows it: the service-account key itself is never returned,
+/// only the project id it names.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PushView {
+    pub service_account: SecretView,
+    pub project_id: Option<String>,
+    pub prefix: String,
+    pub legacy_prefix: String,
+    pub retry_interval: u64,
+    pub max_retries: u32,
+    pub history_size: usize,
+    pub history_days: u64,
+}
+
+/// The push section in a `PUT`. A left-out field keeps the stored value.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PushInput {
+    #[serde(default)]
+    pub service_account: Secret,
+    #[serde(default)]
+    pub prefix: Option<String>,
+    #[serde(default)]
+    pub legacy_prefix: Option<String>,
+    #[serde(default)]
+    pub retry_interval: Option<u64>,
+    #[serde(default)]
+    pub max_retries: Option<u32>,
+    #[serde(default)]
+    pub history_size: Option<usize>,
+    #[serde(default)]
+    pub history_days: Option<u64>,
+}
+
 /// Where the setup stands, as `GET /api/v1/setup` reports it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SetupStatus {

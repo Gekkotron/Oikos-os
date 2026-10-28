@@ -702,3 +702,432 @@ async fn database_name_or_user_change_alone_is_not_a_new_address() {
     assert_eq!(code, StatusCode::OK, "{body}");
     assert_eq!(body["ok"], false, "the probe ran (and found no server)");
 }
+
+// ---- the settings API (services) -------------------------------------------------------
+
+const SOLCAST_KEY: &str = "solcast-secret-key";
+const FRIGATE_PASS: &str = "frigate-secret-pass";
+const PUSH_JSON: &str = r#"{"type":"service_account","project_id":"proj-42","private_key":"-----BEGIN PRIVATE KEY-----secret-pem"}"#;
+
+impl Server {
+    fn surl(&self, path: &str) -> String {
+        format!("http://{}/api/v1/settings{path}", self.addr)
+    }
+    async fn sget(&self, path: &str) -> (StatusCode, String) {
+        let r = self.client.get(self.surl(path)).send().await.unwrap();
+        (r.status(), r.text().await.unwrap())
+    }
+    async fn sput(&self, path: &str, body: Value) -> (StatusCode, Value) {
+        let r = self
+            .client
+            .put(self.surl(path))
+            .json(&body)
+            .send()
+            .await
+            .unwrap();
+        (r.status(), r.json().await.unwrap_or(Value::Null))
+    }
+}
+
+fn secret_sections() -> Sections {
+    let mut s = Sections::default();
+    s.solcast.api_key = Some(SOLCAST_KEY.into());
+    s.frigate.url = Some("http://192.0.2.9:5000/".into());
+    s.frigate.user = Some("u".into());
+    s.frigate.password = Some(FRIGATE_PASS.into());
+    s.push.service_account = Some(PUSH_JSON.into());
+    s
+}
+
+fn located() -> HubFile {
+    HubFile {
+        location: serde_json::from_value(paris()).unwrap(),
+        ..HubFile::default()
+    }
+}
+
+/// A server over a ready-made context. `db_url` gives the context a (lazy) database.
+async fn serve_settings(
+    mode: Mode,
+    file: HubFile,
+    sections: Sections,
+    db_url: Option<&str>,
+    solcast_base: Option<String>,
+) -> Server {
+    let dir = tempfile::tempdir().unwrap();
+    let restarts = Arc::new(AtomicUsize::new(0));
+    let ctx = Arc::new(SetupCtx::new(
+        dir.path().to_path_buf(),
+        mode,
+        file,
+        db_url.map(|u| oikos_os::history::db::Db::connect_lazy(u).unwrap()),
+        sections,
+        RestartHook::Record(Arc::clone(&restarts)),
+    ));
+    let (tx, _rx) = tokio::sync::mpsc::channel(8);
+    let hub = Hub::new(&oikos_os::config::Config::default(), tx);
+    let base = solcast_base.unwrap_or_else(|| "http://127.0.0.1:1".into());
+    let app =
+        oikos_os::http::router_with_solcast(hub, Arc::clone(&ctx), Endpoints::default(), &base);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(axum::serve(listener, app).into_future());
+    Server {
+        addr,
+        dir,
+        ctx,
+        restarts,
+        client: reqwest::Client::new(),
+    }
+}
+
+/// A database address nothing answers on.
+const DEAD_DB: &str = "postgres://u:p@127.0.0.1:1/oikos";
+
+#[tokio::test]
+async fn get_never_returns_secrets() {
+    let s = serve_settings(Mode::Run, located(), secret_sections(), None, None).await;
+    for key in ["solcast", "frigate", "push"] {
+        let (code, text) = s.sget(&format!("/{key}")).await;
+        assert_eq!(code, StatusCode::OK);
+        for secret in [SOLCAST_KEY, FRIGATE_PASS, "secret-pem", "private_key"] {
+            assert!(!text.contains(secret), "{key} leaks {secret}: {text}");
+        }
+    }
+    let solcast: Value = serde_json::from_str(&s.sget("/solcast").await.1).unwrap();
+    assert_eq!(solcast["api_key"], json!({"set": true}));
+    let frigate: Value = serde_json::from_str(&s.sget("/frigate").await.1).unwrap();
+    assert_eq!(frigate["password"], json!({"set": true}));
+    assert_eq!(frigate["user"], "u");
+    assert_eq!(frigate["topic_prefix"], "frigate");
+    let push: Value = serde_json::from_str(&s.sget("/push").await.1).unwrap();
+    assert_eq!(push["service_account"], json!({"set": true}));
+    let empty = serve_settings(Mode::Run, located(), Sections::default(), None, None).await;
+    let solcast: Value = serde_json::from_str(&empty.sget("/solcast").await.1).unwrap();
+    assert_eq!(solcast["api_key"], json!({"set": false}));
+}
+
+#[tokio::test]
+async fn get_works_in_setup_mode_and_for_plain_sections() {
+    let s = serve_settings(
+        Mode::Setup,
+        HubFile::default(),
+        Sections::default(),
+        None,
+        None,
+    )
+    .await;
+    for key in [
+        "weather", "solcast", "frigate", "push", "climate", "advanced",
+    ] {
+        assert_eq!(s.sget(&format!("/{key}")).await.0, StatusCode::OK, "{key}");
+    }
+    let weather: Value = serde_json::from_str(&s.sget("/weather").await.1).unwrap();
+    assert_eq!(weather["enabled"], false);
+    assert_eq!(weather["refresh_minutes"], 15);
+}
+
+#[tokio::test]
+async fn unknown_section_is_404() {
+    let s = serve_settings(Mode::Run, located(), Sections::default(), None, None).await;
+    assert_eq!(s.sget("/nope").await.0, StatusCode::NOT_FOUND);
+    assert_eq!(s.sput("/nope", json!({})).await.0, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn put_in_setup_mode_is_409() {
+    let s = serve_settings(
+        Mode::Setup,
+        HubFile::default(),
+        Sections::default(),
+        None,
+        None,
+    )
+    .await;
+    let (code, body) = s.sput("/weather", json!({"enabled": false})).await;
+    assert_eq!(code, StatusCode::CONFLICT);
+    assert_eq!(
+        body,
+        json!({"error": "finish MQTT and database setup first"})
+    );
+    assert!(!s.dir.path().join("settings-cache.json").exists());
+}
+
+#[tokio::test]
+async fn put_during_a_pending_restart_is_503() {
+    let s = serve_settings(
+        Mode::Run,
+        located(),
+        Sections::default(),
+        Some(DEAD_DB),
+        None,
+    )
+    .await;
+    s.ctx.restarting.store(true, Ordering::SeqCst);
+    let (code, body) = s.sput("/weather", json!({"enabled": false})).await;
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body, json!({"error": "restarting"}));
+    assert_eq!(s.restarts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn frigate_new_url_without_password_is_422() {
+    let s = serve_settings(Mode::Run, located(), secret_sections(), Some(DEAD_DB), None).await;
+    let (code, body) = s
+        .sput(
+            "/frigate",
+            json!({"url": "http://frigate.example.com:5000"}),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"], "Enter the password for the new address");
+    // A new port, or a new scheme, is a new address as well.
+    for url in ["http://192.0.2.9:5001", "https://192.0.2.9:5000"] {
+        let (code, _) = s.sput("/frigate", json!({ "url": url })).await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{url}");
+    }
+    assert!(!s.dir.path().join("settings-cache.json").exists());
+}
+
+#[tokio::test]
+async fn frigate_path_only_change_is_not_a_new_address() {
+    let s = serve_settings(Mode::Run, located(), secret_sections(), Some(DEAD_DB), None).await;
+    // It gets past the address rule and fails only at the (dead) database.
+    let (code, body) = s
+        .sput("/frigate", json!({"url": "http://192.0.2.9:5000/frigate/"}))
+        .await;
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body, json!({"error": "database unreachable"}));
+}
+
+#[tokio::test]
+async fn invalid_solcast_is_422_and_nothing_saved() {
+    let s = serve_settings(
+        Mode::Run,
+        located(),
+        Sections::default(),
+        Some(DEAD_DB),
+        None,
+    )
+    .await;
+    let (code, body) = s
+        .sput(
+            "/solcast",
+            json!({"enabled": true, "sites": [], "api_key": SOLCAST_KEY}),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        body["error"].as_str().unwrap().contains("[solcast] sites"),
+        "{body}"
+    );
+    assert!(!body.to_string().contains(SOLCAST_KEY));
+    assert!(!s.dir.path().join("settings-cache.json").exists());
+    assert_eq!(*s.ctx.sections.lock().await, Sections::default());
+    assert_eq!(s.restarts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn weather_without_location_is_422() {
+    let s = serve_settings(
+        Mode::Run,
+        HubFile::default(),
+        Sections::default(),
+        Some(DEAD_DB),
+        None,
+    )
+    .await;
+    let (code, body) = s.sput("/weather", json!({"enabled": true})).await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"], "Set the home location first");
+}
+
+#[tokio::test]
+async fn an_unreachable_database_is_503_and_nothing_is_saved() {
+    let s = serve_settings(
+        Mode::Run,
+        located(),
+        Sections::default(),
+        Some(DEAD_DB),
+        None,
+    )
+    .await;
+    let (code, body) = s
+        .sput("/weather", json!({"enabled": true, "refresh_minutes": 30}))
+        .await;
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body, json!({"error": "database unreachable"}));
+    assert!(!s.dir.path().join("settings-cache.json").exists());
+    assert_eq!(*s.ctx.sections.lock().await, Sections::default());
+    assert_eq!(s.restarts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn push_view_shows_project_id() {
+    let s = serve_settings(Mode::Run, located(), secret_sections(), None, None).await;
+    let push: Value = serde_json::from_str(&s.sget("/push").await.1).unwrap();
+    assert_eq!(push["project_id"], "proj-42");
+    assert_eq!(push["prefix"], "oikos/push");
+    // A key that is not JSON shows no project id and is never echoed.
+    let mut sections = Sections::default();
+    sections.push.service_account = Some("not json, secret-pem".into());
+    let s = serve_settings(Mode::Run, located(), sections, None, None).await;
+    let (code, text) = s.sget("/push").await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(!text.contains("secret-pem"));
+    let push: Value = serde_json::from_str(&text).unwrap();
+    assert!(push["project_id"].is_null());
+    assert_eq!(push["service_account"], json!({"set": true}));
+}
+
+#[tokio::test]
+async fn push_key_that_is_not_a_service_account_is_422() {
+    let s = serve_settings(
+        Mode::Run,
+        located(),
+        Sections::default(),
+        Some(DEAD_DB),
+        None,
+    )
+    .await;
+    let (code, body) = s
+        .sput("/push", json!({"service_account": "not json, secret-pem"}))
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(!body.to_string().contains("secret-pem"));
+}
+
+/// A Solcast stand-in: `/rooftop_sites` wants `Bearer <SOLCAST_KEY>`.
+async fn fake_solcast() -> String {
+    use axum::http::{HeaderMap, header};
+    async fn sites(headers: HeaderMap) -> (StatusCode, axum::Json<Value>) {
+        let ok = headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            == Some(&format!("Bearer {SOLCAST_KEY}")[..]);
+        if ok {
+            (
+                StatusCode::OK,
+                axum::Json(json!({"sites": [
+                    {"resource_id": "aaaa-1111", "name": "Roof south"},
+                    {"resource_id": "bbbb-2222", "name": "Roof west"}
+                ]})),
+            )
+        } else {
+            (StatusCode::UNAUTHORIZED, axum::Json(json!({})))
+        }
+    }
+    let app = Router::new().route("/rooftop_sites", get(sites));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(axum::serve(listener, app).into_future());
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn solcast_test_lists_the_sites() {
+    let base = fake_solcast().await;
+    let s = serve_settings(Mode::Run, located(), secret_sections(), None, Some(base)).await;
+    // The key in the body.
+    let (code, body) = s
+        .post("/test/solcast", json!({"api_key": SOLCAST_KEY}))
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(body["ok"], true, "{body}");
+    assert_eq!(body["detail"]["sites"][0]["name"], "Roof south");
+    assert_eq!(body["detail"]["sites"][1]["id"], "bbbb-2222");
+    // No key in the body: the stored one is used.
+    let (_, body) = s.post("/test/solcast", json!({})).await;
+    assert_eq!(body["ok"], true, "{body}");
+    // A wrong key is reported, not echoed.
+    let (code, body) = s
+        .post("/test/solcast", json!({"api_key": "wrong-key-7"}))
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["message"], "bad credentials");
+    assert!(!body.to_string().contains("wrong-key-7"));
+    // No key anywhere.
+    let empty = serve_settings(
+        Mode::Run,
+        located(),
+        Sections::default(),
+        None,
+        Some(fake_solcast().await),
+    )
+    .await;
+    let (_, body) = empty.post("/test/solcast", json!({})).await;
+    assert_eq!(body["ok"], false);
+}
+
+/// A Frigate stand-in on its login port: user `u` / password `p`, camera list behind the cookie.
+async fn fake_frigate() -> String {
+    use axum::http::{HeaderMap, header};
+    async fn login(axum::Json(body): axum::Json<Value>) -> axum::response::Response {
+        use axum::response::IntoResponse;
+        if body["user"] == "u" && body["password"] == "p" {
+            ([(header::SET_COOKIE, "frigate_token=tok1; Path=/")], "{}").into_response()
+        } else {
+            StatusCode::UNAUTHORIZED.into_response()
+        }
+    }
+    async fn config(headers: HeaderMap) -> axum::response::Response {
+        use axum::response::IntoResponse;
+        let cookie = headers.get(header::COOKIE).and_then(|v| v.to_str().ok());
+        if cookie != Some("frigate_token=tok1") {
+            return StatusCode::UNAUTHORIZED.into_response();
+        }
+        axum::Json(json!({"mqtt": {"password": "frigate-mqtt-secret"},
+            "cameras": {"front": {"enabled": true}, "garden": {}, "old": {"enabled": false}}}))
+        .into_response()
+    }
+    let app = Router::new()
+        .route("/api/login", axum::routing::post(login))
+        .route("/api/config", get(config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(axum::serve(listener, app).into_future());
+    format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn frigate_test_lists_the_cameras() {
+    let base = fake_frigate().await;
+    let mut sections = Sections::default();
+    sections.frigate.url = Some(base.clone());
+    sections.frigate.user = Some("u".into());
+    sections.frigate.password = Some("p".into());
+    let s = serve_settings(Mode::Run, located(), sections, None, None).await;
+    // The stored password, kept by leaving it out.
+    let (code, body) = s
+        .post("/test/frigate", json!({"url": base, "user": "u"}))
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(body["ok"], true, "{body}");
+    let mut cameras: Vec<String> =
+        serde_json::from_value(body["detail"]["cameras"].clone()).unwrap();
+    cameras.sort();
+    assert_eq!(cameras, ["front", "garden"]);
+    assert!(!body.to_string().contains("frigate-mqtt-secret"));
+    // A wrong password is reported as such.
+    let (_, body) = s
+        .post(
+            "/test/frigate",
+            json!({"url": base, "user": "u", "password": "wrong-pw-3"}),
+        )
+        .await;
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["message"], "bad credentials");
+    assert!(!body.to_string().contains("wrong-pw-3"));
+    // Another address needs the password again.
+    let (code, body) = s
+        .post(
+            "/test/frigate",
+            json!({"url": "http://frigate.example.com:8971", "user": "u"}),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"], "Enter the password for the new address");
+    // Nothing was saved by any of it.
+    assert!(!s.dir.path().join("settings-cache.json").exists());
+}

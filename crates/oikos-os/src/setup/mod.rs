@@ -10,6 +10,7 @@ pub mod restart;
 pub mod routes;
 pub mod secret;
 pub mod sections;
+mod settings;
 pub mod store;
 
 use std::path::PathBuf;
