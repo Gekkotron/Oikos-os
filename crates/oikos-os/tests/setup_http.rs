@@ -564,19 +564,20 @@ async fn fake_broker(code: u8) -> u16 {
     fake_broker_with(code, None).await
 }
 
-/// Like [`fake_broker`]; `flag` is set the moment a CONNECT arrives, before the answer.
-async fn fake_broker_with(code: u8, flag: Option<Arc<std::sync::atomic::AtomicBool>>) -> u16 {
+/// Like [`fake_broker`]; `on_connect` runs the moment a CONNECT arrives, before the answer is
+/// written, so whatever it does is ordered before the probe returns.
+async fn fake_broker_with(code: u8, on_connect: Option<Arc<dyn Fn() + Send + Sync>>) -> u16 {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         while let Ok((mut sock, _)) = listener.accept().await {
-            let flag = flag.clone();
+            let on_connect = on_connect.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 512];
                 let _ = sock.read(&mut buf).await;
-                if let Some(flag) = flag {
-                    flag.store(true, Ordering::SeqCst);
+                if let Some(f) = on_connect {
+                    f();
                 }
                 let _ = sock.write_all(&[0x20, 0x02, 0x00, code]).await;
                 let _ = sock.read(&mut buf).await;
@@ -663,21 +664,22 @@ async fn bad_broker_credentials_on_a_running_hub_are_never_saved() {
 
 #[tokio::test]
 async fn a_restart_scheduled_during_the_probe_refuses_the_save() {
-    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let port = fake_broker_with(0, Some(Arc::clone(&flag))).await;
+    let slot: Arc<std::sync::OnceLock<Arc<SetupCtx>>> = Arc::new(std::sync::OnceLock::new());
+    // The broker raises `restarting` (as a racing write would) after the gate, during the
+    // probe, and does so before it answers: no scheduling can let the save slip in first.
+    let hook = Arc::clone(&slot);
+    let port = fake_broker_with(
+        0,
+        Some(Arc::new(move || {
+            hook.get().unwrap().restarting.store(true, Ordering::SeqCst);
+        })),
+    )
+    .await;
     let s = serve(Mode::Setup, HubFile::default(), None, false).await;
-    // The broker raises `restarting` (as a racing write would) after the gate, during the probe.
-    let ctx_flag = Arc::clone(&s.ctx);
-    let watcher = tokio::spawn(async move {
-        while !flag.load(Ordering::SeqCst) {
-            tokio::task::yield_now().await;
-        }
-        ctx_flag.restarting.store(true, Ordering::SeqCst);
-    });
+    slot.set(Arc::clone(&s.ctx)).ok().unwrap();
     let (code, body) = s
         .put("/mqtt", json!({"host":"127.0.0.1","port":port}))
         .await;
-    watcher.await.unwrap();
     assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE, "{body}");
     assert_eq!(body, json!({"error":"restarting"}));
     assert!(s.hub_json().is_none(), "nothing saved");
