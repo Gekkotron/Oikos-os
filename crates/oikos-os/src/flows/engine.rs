@@ -17,8 +17,8 @@ use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
 use oikos_core::flow::sun::is_dark_with_offset;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
-    Flow, Missing, Node, NodeKind, Op, Reading, Scalar, Schedule, compare, format_duration,
-    in_time_range, parse_clock, parse_duration, pick_duration, switch_exits,
+    Flow, FlowMode, Missing, Node, NodeKind, Op, Reading, Scalar, Schedule, compare,
+    format_duration, in_time_range, parse_clock, parse_duration, pick_duration, switch_exits,
 };
 use oikos_core::history::buckets::{Sample, readings_mean};
 use serde_json::Value;
@@ -174,7 +174,11 @@ impl Engine {
     fn handle_request(&mut self, request: EngineRequest) {
         match request {
             EngineRequest::Reload => self.reload(),
-            EngineRequest::Run { flow_id, run_id } => self.run_manual(&flow_id, run_id),
+            EngineRequest::Run {
+                flow_id,
+                run_id,
+                node,
+            } => self.run_manual(&flow_id, run_id, node),
             EngineRequest::KeepRun { flow_id, run_id } => {
                 self.keep.insert((flow_id, run_id));
             }
@@ -583,17 +587,25 @@ impl Engine {
         self.spawn(flow, run.id, node_id, trigger);
     }
 
-    /// Executes a run the hub created for a manual request, from the flow's first trigger.
-    fn run_manual(&mut self, flow_id: &str, run_id: String) {
+    /// Executes a run the hub created for a manual request, from the Manual card `node` or the
+    /// flow's first trigger. A card press on a `restart` flow replaces the active run.
+    fn run_manual(&mut self, flow_id: &str, run_id: String, node: Option<String>) {
         let flow = self.flows.iter().find(|f| f.id == flow_id).cloned();
-        let start = flow
-            .as_ref()
-            .and_then(|f| f.triggers().first().map(|n| n.id.clone()));
+        let start = node
+            .clone()
+            .or_else(|| flow.as_ref()?.triggers().first().map(|n| n.id.clone()));
         match (flow, start) {
-            (Some(flow), Some(start)) if !self.active.contains_key(flow_id) => {
-                self.spawn(flow, run_id, start, None);
+            (Some(flow), Some(start)) => {
+                if self.active.contains_key(flow_id) {
+                    if node.is_none() || flow.mode != FlowMode::Restart {
+                        self.hub.end_run(flow_id, &run_id, RunStatus::Cancelled);
+                        return;
+                    }
+                    self.cancel(flow_id);
+                }
+                let trigger = manual_trigger(&flow, &start);
+                self.spawn(flow, run_id, start, trigger);
             }
-            (Some(_), Some(_)) => self.hub.end_run(flow_id, &run_id, RunStatus::Cancelled),
             _ => {
                 tracing::warn!(
                     flow = flow_id,
@@ -682,6 +694,20 @@ impl Engine {
 /// `eq` semantics of `compare`: the filter must be a scalar equal to the value, type included.
 fn filter_matches(filter: Option<&Value>, actual: &Scalar) -> bool {
     filter.is_none_or(|value| Scalar::from_json(value).as_ref() == Some(actual))
+}
+
+/// What a press of the Manual card `node` carries: its value, with no entity behind it. `None`
+/// when `node` is not a Manual card or has no value.
+pub(crate) fn manual_trigger(flow: &Flow, node: &str) -> Option<TriggerInfo> {
+    let node = flow.nodes.iter().find(|n| n.id == node)?;
+    let NodeKind::TriggerManual(params) = &node.kind else {
+        return None;
+    };
+    Some(TriggerInfo {
+        entity: None,
+        value: params.value.as_ref()?.to_json(),
+        previous: Value::Null,
+    })
 }
 
 /// Walks the flow depth-first from `start`, recording a step per node before following its
@@ -778,7 +804,13 @@ async fn run_node(
             format!("schedule {}", params.cron),
             Vec::new(),
         ),
-        NodeKind::TriggerManual(_) => (StepOutcome::Ok, "manual".to_owned(), Vec::new()),
+        NodeKind::TriggerManual(p) => {
+            let detail = match &p.value {
+                Some(value) => format!("manual: {}", value.to_json()),
+                None => "manual".to_owned(),
+            };
+            (StepOutcome::Ok, detail, Vec::new())
+        }
         NodeKind::TriggerSun(params) => (
             StepOutcome::Ok,
             format!(

@@ -12,10 +12,11 @@ use oikos_api::{
 };
 use oikos_core::command::{Publish, map_command};
 use oikos_core::flow::template::parse;
-use oikos_core::flow::{Flow, NodeKind, Reading, Scalar, uses_sun_or_is_dark, validate};
+use oikos_core::flow::{Flow, FlowMode, NodeKind, Reading, Scalar, uses_sun_or_is_dark, validate};
 use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
 use oikos_core::types::{Placement, type_def};
 
+use super::engine::manual_trigger;
 use super::{EngineRequest, StoreApplied};
 use crate::clock;
 use crate::hub::{Hub, HubError};
@@ -174,9 +175,16 @@ impl Hub {
         self.set_flow_enabled(id, enabled).await
     }
 
-    /// Starts a manual run: creates it and asks the engine to execute it. Refused while the broker
-    /// link is down, like the other writers: the run's commands could not be published.
+    /// Starts a manual run from the flow's first trigger ("Run now").
     pub fn run_flow(&self, id: &str) -> Result<RunView, HubError> {
+        self.run_flow_from(id, None)
+    }
+
+    /// Starts a manual run: creates it and asks the engine to execute it, from the Manual card
+    /// `node` or, without one, from the first trigger. Refused while the broker link is down,
+    /// like the other writers: the run's commands could not be published. A run already active
+    /// refuses it, except a card press on a `restart` flow, which replaces that run.
+    pub fn run_flow_from(&self, id: &str, node: Option<&str>) -> Result<RunView, HubError> {
         if !matches!(*self.connection().borrow(), ConnectionStatus::Online) {
             return Err(HubError::Publish("broker offline".to_owned()));
         }
@@ -188,20 +196,39 @@ impl Hub {
             if let Some(reason) = view.invalid {
                 return Err(HubError::InvalidFlow(reason));
             }
-            if !view.definition.enabled {
+            let definition = view.definition;
+            if !definition.enabled {
                 return Err(HubError::Rejected("flow is disabled".to_owned()));
             }
-            if store.active_run(id).is_some() {
+            if let Some(node) = node
+                && !definition
+                    .nodes
+                    .iter()
+                    .any(|n| n.id == node && matches!(n.kind, NodeKind::TriggerManual(_)))
+            {
+                return Err(HubError::Rejected(format!(
+                    "`{node}` is not a manual trigger of this flow"
+                )));
+            }
+            let replaces = node.is_some() && definition.mode == FlowMode::Restart;
+            if store.active_run(id).is_some() && !replaces {
                 return Err(HubError::Rejected("a run is active".to_owned()));
             }
+            let start = node
+                .map(str::to_owned)
+                .or_else(|| definition.triggers().first().map(|n| n.id.clone()));
+            let trigger = start
+                .as_deref()
+                .and_then(|start| manual_trigger(&definition, start));
             store
-                .begin_manual_run(id, clock::now())
+                .begin_manual_run(id, trigger, clock::now())
                 .ok_or_else(|| HubError::UnknownFlow(id.to_owned()))?
         };
         self.broadcast_run(id, &run);
         self.send_engine(EngineRequest::Run {
             flow_id: id.to_owned(),
             run_id: run.id.clone(),
+            node: node.map(str::to_owned),
         });
         Ok(run)
     }
