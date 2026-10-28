@@ -93,6 +93,7 @@ async fn main() -> anyhow::Result<ExitCode> {
 
             let (publish_tx, publish_rx) = mpsc::channel(PUBLISH_QUEUE);
             let hub = Hub::new(&cfg, publish_tx);
+            hub.set_setup(Arc::clone(&setup_ctx));
             if cfg.history.enabled() {
                 match History::start(&cfg.history, hub.zone()) {
                     Ok(history) => hub.set_history(history),

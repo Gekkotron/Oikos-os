@@ -27,6 +27,8 @@ const EXPECTED_TOOLS: &[&str] = &[
     "bridge_info",
     "get_home_settings",
     "set_home_settings",
+    "get_settings",
+    "set_settings",
     "list_areas",
     "set_areas",
     "list_devices",

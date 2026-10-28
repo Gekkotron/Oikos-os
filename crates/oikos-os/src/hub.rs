@@ -275,6 +275,8 @@ pub struct Hub {
     /// Set once at startup when `[history] url` is configured; receives one [`Incoming`]
     /// per `Change::StateChanged` emitted by [`Self::ingest`].
     history: OnceLock<Arc<History>>,
+    /// The setup context, set once at startup in Run mode; the settings MCP tools use it.
+    pub(crate) setup: OnceLock<Arc<crate::setup::SetupCtx>>,
 }
 
 impl Hub {
@@ -397,12 +399,18 @@ impl Hub {
             logged_failures: Mutex::new(BTreeSet::new()),
             logged_ignored: Mutex::new(BTreeSet::new()),
             history: OnceLock::new(),
+            setup: OnceLock::new(),
         })
     }
 
     /// Hands the recorder to the hub; the second call is a no-op.
     pub fn set_history(&self, history: Arc<History>) {
         let _ = self.history.set(history);
+    }
+
+    /// Hands the setup context to the hub; the second call is a no-op.
+    pub fn set_setup(&self, ctx: Arc<crate::setup::SetupCtx>) {
+        let _ = self.setup.set(ctx);
     }
 
     /// The recorder, when one is configured.

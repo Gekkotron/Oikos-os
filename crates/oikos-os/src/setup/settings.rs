@@ -5,9 +5,6 @@
 //! restarts the hub so every service picks the change up. No body, log line or error from here
 //! carries a secret: reads show `{"set": bool}` and failures use fixed text.
 
-// The `Err` side is an axum `Response`, built at most once per request.
-#![allow(clippy::result_large_err)]
-
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -19,10 +16,12 @@ use oikos_api::{
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crate::config::FrigateConfig;
-use crate::setup::routes::{RESTART_DELAY, RouteState, error, restarting};
+use crate::setup::SetupCtx;
+use crate::setup::routes::{RESTART_DELAY, RouteState, error};
 use crate::setup::sections::{
     AdvancedSection, PushSection, SECTION_KEYS, Sections, SolcastSection, WeatherSection, assemble,
 };
@@ -39,8 +38,31 @@ pub(super) fn routes() -> Router<RouteState> {
         .route("/api/v1/setup/test/frigate", post(test_frigate))
 }
 
-fn unprocessable(message: &str) -> Response {
-    error(StatusCode::UNPROCESSABLE_ENTITY, message)
+/// A refusal with a fixed message, shared by the HTTP handlers and the MCP tools. The message
+/// never carries a secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApiError {
+    pub status: StatusCode,
+    pub message: String,
+}
+
+impl ApiError {
+    fn new(status: StatusCode, message: &str) -> ApiError {
+        ApiError {
+            status,
+            message: message.to_owned(),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        error(self.status, &self.message)
+    }
+}
+
+fn unprocessable(message: &str) -> ApiError {
+    ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, message)
 }
 
 fn known(section: &str) -> bool {
@@ -105,16 +127,24 @@ fn view(section: &str, s: &Sections) -> Value {
     }
 }
 
-async fn get_section(State(s): State<RouteState>, Path(section): Path<String>) -> Response {
-    if !known(&section) {
-        return error(StatusCode::NOT_FOUND, "unknown section");
+/// The `section` as the API shows it: secrets are `{"set": bool}`.
+pub async fn read_section(ctx: &SetupCtx, section: &str) -> Result<Value, ApiError> {
+    if !known(section) {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "unknown section"));
     }
-    let sections = s.ctx.sections.lock().await.clone();
-    Json(view(&section, &sections)).into_response()
+    let sections = ctx.sections.lock().await.clone();
+    Ok(view(section, &sections))
+}
+
+async fn get_section(State(s): State<RouteState>, Path(section): Path<String>) -> Response {
+    match read_section(&s.ctx, &section).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 /// The body as `T`, or a fixed refusal (a serde error could quote the value).
-fn parse<T: DeserializeOwned>(body: Value, section: &str) -> Result<T, Response> {
+fn parse<T: DeserializeOwned>(body: Value, section: &str) -> Result<T, ApiError> {
     serde_json::from_value(body)
         .map_err(|_| unprocessable(&format!("The {section} settings are not valid")))
 }
@@ -125,7 +155,7 @@ fn address_of(url: &str) -> String {
 }
 
 /// The Frigate config a request would save, on top of the stored one.
-fn frigate_candidate(old: &FrigateConfig, input: FrigateInput) -> Result<FrigateConfig, Response> {
+fn frigate_candidate(old: &FrigateConfig, input: FrigateInput) -> Result<FrigateConfig, ApiError> {
     let clean = |v: Option<String>| v.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
     let url = clean(input.url).map(|u| u.trim_end_matches('/').to_owned());
     if let Some(url) = &url {
@@ -172,7 +202,7 @@ fn frigate_candidate(old: &FrigateConfig, input: FrigateInput) -> Result<Frigate
 }
 
 /// Applies `body` to the `section` of `next`.
-fn merge(section: &str, body: Value, next: &mut Sections, file: &HubFile) -> Result<(), Response> {
+fn merge(section: &str, body: Value, next: &mut Sections, file: &HubFile) -> Result<(), ApiError> {
     match section {
         "weather" => {
             let weather: WeatherSection = parse(body, section)?;
@@ -219,42 +249,46 @@ fn merge(section: &str, body: Value, next: &mut Sections, file: &HubFile) -> Res
     Ok(())
 }
 
-async fn put_section(
-    State(s): State<RouteState>,
-    Path(section): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    if !known(&section) {
-        return error(StatusCode::NOT_FOUND, "unknown section");
+/// Replaces the `section` with `body`: validates, saves to the database and the cache, then
+/// schedules the restart. Returns `{"restarting": true}`.
+pub async fn write_section(
+    ctx: &Arc<SetupCtx>,
+    section: &str,
+    body: Value,
+) -> Result<Value, ApiError> {
+    let unavailable = |m: &str| ApiError::new(StatusCode::SERVICE_UNAVAILABLE, m);
+    if !known(section) {
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "unknown section"));
     }
-    if let Some(r) = restarting(&s.ctx) {
-        return r;
+    if ctx.restarting.load(Ordering::SeqCst) {
+        return Err(unavailable("restarting"));
     }
-    if s.ctx.mode != Mode::Run {
-        return error(StatusCode::CONFLICT, "finish MQTT and database setup first");
+    if ctx.mode != Mode::Run {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "finish MQTT and database setup first",
+        ));
     }
-    let Some(db) = s.ctx.db.as_ref() else {
-        return error(StatusCode::SERVICE_UNAVAILABLE, "database unreachable");
+    let Some(db) = ctx.db.as_ref() else {
+        return Err(unavailable("database unreachable"));
     };
     // Held from the snapshot to the replacement, so this save and the import copy never
     // overwrite each other with a stale copy.
-    let mut held = s.ctx.sections.lock().await;
-    if s.ctx.restarting.load(Ordering::SeqCst) {
-        return error(StatusCode::SERVICE_UNAVAILABLE, "restarting");
+    let mut held = ctx.sections.lock().await;
+    if ctx.restarting.load(Ordering::SeqCst) {
+        return Err(unavailable("restarting"));
     }
-    let file = s.ctx.file.lock().await.clone();
+    let file = ctx.file.lock().await.clone();
     let mut next = held.clone();
-    if let Err(r) = merge(&section, body, &mut next, &file) {
-        return r;
-    }
-    if let Err(message) = assemble(&file, &next).validate_all() {
-        return unprocessable(&message);
-    }
+    merge(section, body, &mut next, &file)?;
+    assemble(&file, &next)
+        .validate_all()
+        .map_err(|message| unprocessable(&message))?;
     if let Err(error) = save_sections(db, &next).await {
         tracing::warn!(%error, "settings: cannot save to the database");
-        return self::error(StatusCode::SERVICE_UNAVAILABLE, "database unreachable");
+        return Err(unavailable("database unreachable"));
     }
-    if let Err(error) = write_cache(&s.ctx.data_dir, &next) {
+    if let Err(error) = write_cache(&ctx.data_dir, &next) {
         // Boot reads the cache until the import copy is done, so a change the cache lacks
         // could come back reverted: report the failure, keep the old settings, and put the
         // table back as it was (best effort).
@@ -262,14 +296,25 @@ async fn put_section(
         if let Err(error) = save_sections(db, &held).await {
             tracing::warn!(%error, "settings: cannot restore the database after a cache failure");
         }
-        return self::error(
+        return Err(ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "could not save the settings cache",
-        );
+        ));
     }
     *held = next;
-    restart::schedule_restart(&s.ctx, RESTART_DELAY);
-    Json(json!({ "restarting": true })).into_response()
+    restart::schedule_restart(ctx, RESTART_DELAY);
+    Ok(json!({ "restarting": true }))
+}
+
+async fn put_section(
+    State(s): State<RouteState>,
+    Path(section): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    match write_section(&s.ctx, &section, body).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 fn failed(message: &str) -> Response {
@@ -284,7 +329,7 @@ fn failed(message: &str) -> Response {
 async fn test_solcast(State(s): State<RouteState>, Json(body): Json<Value>) -> Response {
     let input: SolcastInput = match parse(body, "solcast") {
         Ok(i) => i,
-        Err(r) => return r,
+        Err(e) => return e.into_response(),
     };
     let stored = s.ctx.sections.lock().await.solcast.api_key.clone();
     let key = secret::apply(stored, input.api_key).filter(|k| !k.trim().is_empty());
@@ -297,12 +342,12 @@ async fn test_solcast(State(s): State<RouteState>, Json(body): Json<Value>) -> R
 async fn test_frigate(State(s): State<RouteState>, Json(body): Json<Value>) -> Response {
     let input: FrigateInput = match parse(body, "frigate") {
         Ok(i) => i,
-        Err(r) => return r,
+        Err(e) => return e.into_response(),
     };
     let old = s.ctx.sections.lock().await.frigate.clone();
     let cfg = match frigate_candidate(&old, input) {
         Ok(cfg) => cfg,
-        Err(r) => return r,
+        Err(e) => return e.into_response(),
     };
     if cfg.url.is_none() {
         return failed("Enter the Frigate address");
