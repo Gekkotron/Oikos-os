@@ -36,6 +36,7 @@ pub mod layout;
 pub mod nav;
 pub mod override_editor;
 pub mod rooms;
+pub mod sankey_layout;
 pub mod schedule;
 pub mod screens;
 pub mod security;
