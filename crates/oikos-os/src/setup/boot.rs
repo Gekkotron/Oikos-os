@@ -229,7 +229,7 @@ pub fn spawn_import_copy(ctx: Arc<SetupCtx>) -> JoinHandle<()> {
 
 /// Geocodes `pending_city` into `location` (the setup's weather place), then restarts so the
 /// hub boots with it. Until then the old fallback place applies. A city that matches nothing
-/// is dropped with a warning.
+/// is kept (weather still uses it) with a warning, and looked up again at the next boot.
 pub fn spawn_location_lookup(ctx: Arc<SetupCtx>, endpoints: Endpoints) -> JoinHandle<()> {
     tokio::spawn(async move {
         let Some((city, country)) = ctx.file.lock().await.pending_city.clone() else {
@@ -255,13 +255,12 @@ pub fn spawn_location_lookup(ctx: Arc<SetupCtx>, endpoints: Endpoints) -> JoinHa
             }
         };
         let Some(place) = place else {
+            // The pending city is what weather falls back on while there is no location, so
+            // it stays: the poller geocodes it itself and the next boot looks it up again.
             tracing::warn!(
                 city,
-                "settings: the imported city was not found; no location set"
+                "settings: the imported city was not found; keeping it for the weather poller"
             );
-            if let Err(error) = ctx.update_file(|f| f.pending_city = None).await {
-                tracing::error!(%error, "settings: cannot save hub.json");
-            }
             return;
         };
         let mut applied = false;
@@ -677,21 +676,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_match_clears_the_pending_city_without_restarting() {
+    async fn no_match_keeps_the_pending_city_without_restarting() {
         let tmp = tempfile::tempdir().unwrap();
+        pending(None).save(tmp.path()).unwrap();
         let (ctx, count) = ctx_with(pending(None), tmp.path());
         let ep = geocoder("{}").await;
         let task = spawn_location_lookup(Arc::clone(&ctx), ep);
         task.await.unwrap();
         let file = ctx.file.lock().await.clone();
-        assert!(file.pending_city.is_none() && file.location.is_none());
+        assert!(file.pending_city.is_some() && file.location.is_none());
         assert_eq!(count.load(Ordering::SeqCst), 0);
-        assert!(
-            HubFile::load(tmp.path())
-                .unwrap()
-                .unwrap()
-                .pending_city
-                .is_none()
+        let disk = HubFile::load(tmp.path()).unwrap().unwrap();
+        assert!(disk.pending_city.is_some() && disk.location.is_none());
+        // The kept city is what lets weather boot: the config still validates.
+        let mut sections = Sections::default();
+        sections.weather.enabled = true;
+        assert_eq!(
+            crate::setup::sections::assemble(&file, &sections).validate_all(),
+            Ok(())
         );
     }
 
