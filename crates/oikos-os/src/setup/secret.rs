@@ -2,7 +2,7 @@
 
 use oikos_api::Secret;
 
-/// A new address needs the secret again: otherwise anyone on the LAN could point a service at
+/// A new address (`host:port`) needs the secret again: otherwise anyone on the LAN could point a service at
 /// their own machine and collect the stored password.
 pub fn require_for_new_address(
     old: Option<&str>,
@@ -65,6 +65,12 @@ mod tests {
         assert_eq!(err, Err("Enter the password for the new address"));
         assert!(require_for_new_address(Some("a"), "b", &Secret::Set("p".into())).is_ok());
         assert!(require_for_new_address(Some("a"), "b", &Secret::Clear).is_ok());
+    }
+
+    #[test]
+    fn same_host_other_port_is_a_new_address() {
+        let err = require_for_new_address(Some("h:1883"), "h:1884", &Secret::Keep);
+        assert!(err.is_err());
     }
 
     #[test]

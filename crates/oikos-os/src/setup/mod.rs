@@ -67,15 +67,43 @@ impl SetupCtx {
     /// A Run-mode context over an empty `hub.json` that never restarts, for tests and tools
     /// that need a router but not the setup. Its directory is only written if a setup write
     /// route is called.
+    #[doc(hidden)]
     pub fn inert() -> Arc<SetupCtx> {
+        static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Arc::new(SetupCtx::new(
-            std::env::temp_dir().join("oikos-os-inert"),
+            std::env::temp_dir().join(format!("oikos-os-inert-{}-{n}", std::process::id())),
             Mode::Run,
             HubFile::default(),
             None,
             Sections::default(),
             RestartHook::Record(Arc::default()),
         ))
+    }
+
+    /// Like [`SetupCtx::update_file`], but refuses (`Ok(false)`, nothing saved) when a restart is
+    /// already pending, checked under the file lock. When the edit makes `restart(before, after)`
+    /// true, the restart is scheduled while the lock is still held, so a writer queued behind
+    /// this one always sees the flag.
+    pub async fn write_unless_restarting(
+        self: &Arc<Self>,
+        delay: std::time::Duration,
+        edit: impl FnOnce(&mut HubFile),
+        restart: impl FnOnce(&HubFile, &HubFile) -> bool,
+    ) -> std::io::Result<bool> {
+        let mut held = self.file.lock().await;
+        if self.restarting.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(false);
+        }
+        let mut next = held.clone();
+        edit(&mut next);
+        next.save(&self.data_dir)?;
+        let go = restart(&held, &next);
+        *held = next;
+        if go {
+            restart::schedule_restart(self, delay);
+        }
+        Ok(true)
     }
 
     /// Edits `hub.json` under the lock: changes a copy, saves the copy, and only then replaces

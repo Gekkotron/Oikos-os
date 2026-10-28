@@ -2304,6 +2304,7 @@ dependencies = [
  "oikos-push",
  "oikos-solcast",
  "oikos-watchdog",
+ "percent-encoding",
  "reqwest",
  "rmcp",
  "rumqttc",

@@ -25,7 +25,6 @@ use url::Url;
 
 use crate::config::MqttConfig;
 use crate::setup::bundled::{self, Bundled};
-use crate::setup::restart::schedule_restart;
 use crate::setup::{HubFile, Mode, SetupCtx, probe, secret};
 use crate::weather::open_meteo::{self, Endpoints};
 
@@ -80,27 +79,14 @@ fn save_failed() -> Response {
     error(StatusCode::INTERNAL_SERVER_ERROR, "cannot save hub.json")
 }
 
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = bytes
-            .get(i + 1..i + 3)
-            .and_then(|h| std::str::from_utf8(h).ok())
-            .and_then(|h| u8::from_str_radix(h, 16).ok());
-        match (bytes[i], hex) {
-            (b'%', Some(b)) => {
-                out.push(b);
-                i += 3;
-            }
-            (b, _) => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
+fn decode(s: &str) -> String {
+    percent_encoding::percent_decode_str(s)
+        .decode_utf8_lossy()
+        .into_owned()
+}
+
+fn encode(s: &str) -> String {
+    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
 }
 
 fn mqtt_view(file: &HubFile, bundled: Option<&Bundled>) -> Option<MqttView> {
@@ -132,8 +118,8 @@ fn database_view(file: &HubFile, bundled: Option<&Bundled>) -> Option<DatabaseVi
         return Some(DatabaseView {
             host: url.host_str()?.to_owned(),
             port: url.port().unwrap_or(BUNDLED_DB_PORT),
-            database: percent_decode(url.path().trim_start_matches('/')),
-            user: percent_decode(url.username()),
+            database: decode(url.path().trim_start_matches('/')),
+            user: decode(url.username()),
             password: SecretView {
                 set: url.password().is_some(),
             },
@@ -204,30 +190,21 @@ async fn geocode(State(s): State<RouteState>, Query(q): Query<GeocodeQuery>) -> 
     }
 }
 
-/// Saves under the file lock, then answers with the new status and restarts when due.
-async fn finish_write(
-    s: &RouteState,
-    restart_when_complete: bool,
-    edit: impl FnOnce(&mut HubFile),
-) -> Response {
-    let mut was_complete = false;
-    let mut now_complete = false;
+/// Saves under the file lock, then answers with the new status. A restart is scheduled (still
+/// under the lock) when `restarts` and the hub runs, or when the file just became complete. A restart already pending answers 503 without saving.
+async fn finish_write(s: &RouteState, restarts: bool, edit: impl FnOnce(&mut HubFile)) -> Response {
+    let in_run = s.ctx.mode == Mode::Run;
     let saved = s
         .ctx
-        .update_file(|f| {
-            was_complete = f.is_complete();
-            edit(f);
-            now_complete = f.is_complete();
+        .write_unless_restarting(RESTART_DELAY, edit, |before, after| {
+            restarts && (in_run || (!before.is_complete() && after.is_complete()))
         })
         .await;
-    if saved.is_err() {
-        return save_failed();
+    match saved {
+        Err(_) => save_failed(),
+        Ok(false) => error(StatusCode::SERVICE_UNAVAILABLE, "restarting"),
+        Ok(true) => status(State(s.clone())).await.into_response(),
     }
-    let in_run = s.ctx.mode == Mode::Run;
-    if in_run || (restart_when_complete && !was_complete && now_complete) {
-        schedule_restart(&s.ctx, RESTART_DELAY);
-    }
-    status(State(s.clone())).await.into_response()
 }
 
 async fn put_location(State(s): State<RouteState>, Json(loc): Json<Location>) -> Response {
@@ -244,7 +221,7 @@ async fn put_location(State(s): State<RouteState>, Json(loc): Json<Location>) ->
             "The location is not valid",
         );
     }
-    finish_write(&s, false, |f| {
+    finish_write(&s, true, |f| {
         f.location = Some(loc);
         // The chosen place supersedes anything the import left as a fallback.
         f.pending_city = None;
@@ -258,19 +235,24 @@ async fn put_location(State(s): State<RouteState>, Json(loc): Json<Location>) ->
 async fn stored_mqtt(ctx: &SetupCtx) -> (Option<MqttConfig>, Option<String>, Option<String>) {
     let file = ctx.file.lock().await.clone();
     if let Some(m) = file.mqtt {
-        let (host, pw) = (m.host.clone(), m.password.clone());
-        return (Some(m), Some(host), pw);
+        let (addr, pw) = (format!("{}:{}", m.host, m.port), m.password.clone());
+        return (Some(m), Some(addr), pw);
     }
     match bundled::load(&ctx.data_dir) {
-        Some(b) => (None, Some(BUNDLED_HOST.into()), Some(b.mqtt_password)),
+        Some(b) => (
+            None,
+            Some(format!("{BUNDLED_HOST}:{BUNDLED_MQTT_PORT}")),
+            Some(b.mqtt_password),
+        ),
         None => (None, None, None),
     }
 }
 
 /// The config a request would save, or the refusal.
 async fn mqtt_candidate(ctx: &SetupCtx, input: &MqttInput) -> Result<MqttConfig, Response> {
-    let (stored, old_host, stored_pw) = stored_mqtt(ctx).await;
-    secret::require_for_new_address(old_host.as_deref(), &input.host, &input.password)
+    let (stored, old_addr, stored_pw) = stored_mqtt(ctx).await;
+    let new_addr = format!("{}:{}", input.host.trim(), input.port);
+    secret::require_for_new_address(old_addr.as_deref(), &new_addr, &input.password)
         .map_err(|m| error(StatusCode::UNPROCESSABLE_ENTITY, m))?;
     let mut cfg = stored.unwrap_or_default();
     cfg.host = input.host.trim().to_owned();
@@ -279,6 +261,13 @@ async fn mqtt_candidate(ctx: &SetupCtx, input: &MqttInput) -> Result<MqttConfig,
     cfg.password = secret::apply(stored_pw, input.password.clone());
     if let Some(id) = input.client_id.as_deref().filter(|c| !c.is_empty()) {
         cfg.client_id = id.to_owned();
+    }
+    // The broker login needs a user: refuse rather than save a password nothing would send.
+    if cfg.user.is_none() && cfg.password.is_some() {
+        return Err(error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Enter a user name for the password",
+        ));
     }
     Ok(cfg)
 }
@@ -323,36 +312,52 @@ async fn database_candidate(ctx: &SetupCtx, input: &DatabaseInput) -> Result<Str
         .as_deref()
         .and_then(|u| Url::parse(u).ok());
     let bundled = bundled::load(&ctx.data_dir);
-    let old_host = match (&stored, &bundled) {
-        (Some(u), _) => u.host_str().map(str::to_owned),
-        (None, Some(_)) => Some(BUNDLED_HOST.to_owned()),
+    let old_addr = match (&stored, &bundled) {
+        (Some(u), _) => u
+            .host_str()
+            .map(|h| format!("{h}:{}", u.port().unwrap_or(BUNDLED_DB_PORT))),
+        (None, Some(_)) => Some(format!("{BUNDLED_HOST}:{BUNDLED_DB_PORT}")),
         (None, None) => None,
     };
-    secret::require_for_new_address(old_host.as_deref(), &input.host, &input.password)
+    let new_addr = format!("{}:{}", input.host.trim(), input.port);
+    secret::require_for_new_address(old_addr.as_deref(), &new_addr, &input.password)
         .map_err(|m| error(StatusCode::UNPROCESSABLE_ENTITY, m))?;
-    let invalid = || error(StatusCode::UNPROCESSABLE_ENTITY, "The address is not valid");
+    build_database_url(
+        stored,
+        bundled.as_ref().map(|b| b.db_password.as_str()),
+        input,
+    )
+    .ok_or_else(|| error(StatusCode::UNPROCESSABLE_ENTITY, "The address is not valid"))
+}
+
+/// The URL to save: the stored one with the address, user and database replaced (a kept password
+/// stays as stored), or a new one carrying the bundled password. User, password and database
+/// are percent-encoded up front, because `Url` leaves `%` alone and sqlx decodes it.
+fn build_database_url(
+    stored: Option<Url>,
+    bundled_password: Option<&str>,
+    input: &DatabaseInput,
+) -> Option<String> {
     let mut url = match stored {
         Some(u) => u,
         None => {
-            let mut u = Url::parse("postgres://placeholder/").map_err(|_| invalid())?;
-            if let Some(b) = &bundled {
-                u.set_password(Some(&b.db_password))
-                    .map_err(|_| invalid())?;
+            let mut u = Url::parse("postgres://placeholder/").ok()?;
+            if let Some(p) = bundled_password {
+                u.set_password(Some(&encode(p))).ok()?;
             }
             u
         }
     };
-    url.set_host(Some(input.host.trim()))
-        .map_err(|_| invalid())?;
-    url.set_port(Some(input.port)).map_err(|_| invalid())?;
-    url.set_username(&input.user).map_err(|_| invalid())?;
-    url.set_path(&format!("/{}", input.database));
+    url.set_host(Some(input.host.trim())).ok()?;
+    url.set_port(Some(input.port)).ok()?;
+    url.set_username(&encode(&input.user)).ok()?;
+    url.set_path(&format!("/{}", encode(&input.database)));
     match &input.password {
         Secret::Keep => {}
-        Secret::Clear => url.set_password(None).map_err(|_| invalid())?,
-        Secret::Set(p) => url.set_password(Some(p)).map_err(|_| invalid())?,
+        Secret::Clear => url.set_password(None).ok()?,
+        Secret::Set(p) => url.set_password(Some(&encode(p))).ok()?,
     }
-    Ok(url.into())
+    Some(url.into())
 }
 
 async fn test_database(State(s): State<RouteState>, Json(input): Json<DatabaseInput>) -> Response {
@@ -390,26 +395,67 @@ async fn put_step(State(s): State<RouteState>, Json(body): Json<StepBody>) -> Re
     if let Some(r) = restarting(&s.ctx) {
         return r;
     }
-    let saved = s.ctx.update_file(|f| f.step = body.step).await;
-    if saved.is_err() {
-        return save_failed();
-    }
-    status(State(s)).await.into_response()
+    finish_write(&s, false, |f| f.step = body.step).await
 }
 
 async fn finish(State(s): State<RouteState>) -> Response {
     if let Some(r) = restarting(&s.ctx) {
         return r;
     }
-    let saved = s
-        .ctx
-        .update_file(|f| {
-            f.finished = true;
-            f.step = SetupStep::Done;
-        })
-        .await;
-    if saved.is_err() {
-        return save_failed();
+    finish_write(&s, false, |f| {
+        f.finished = true;
+        f.step = SetupStep::Done;
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn database_url_round_trips_awkward_characters() {
+        let input = DatabaseInput {
+            host: "192.0.2.7".into(),
+            port: 5433,
+            database: "my db".into(),
+            user: "me@home".into(),
+            password: Secret::Set("ab%41:c/d@e f".into()),
+        };
+        let url = build_database_url(None, None, &input).unwrap();
+        // What sqlx will see once it decodes the URL.
+        let parsed = Url::parse(&url).unwrap();
+        assert_eq!(decode(parsed.password().unwrap()), "ab%41:c/d@e f");
+        assert_eq!(decode(parsed.username()), "me@home");
+        let file = HubFile {
+            database_url: Some(url),
+            ..HubFile::default()
+        };
+        let view = database_view(&file, None).unwrap();
+        assert_eq!(view.host, "192.0.2.7");
+        assert_eq!(view.port, 5433);
+        assert_eq!(view.user, "me@home");
+        assert_eq!(view.database, "my db");
+        assert!(view.password.set);
+        // sqlx itself reads the same values back.
+        let opts: sqlx::postgres::PgConnectOptions = file.database_url.unwrap().parse().unwrap();
+        assert_eq!(opts.get_username(), "me@home");
+        assert_eq!(opts.get_database(), Some("my db"));
     }
-    status(State(s)).await.into_response()
+
+    #[test]
+    fn bundled_password_is_encoded_too() {
+        let input = DatabaseInput {
+            host: "localhost".into(),
+            port: 5432,
+            database: "oikos".into(),
+            user: "oikos".into(),
+            password: Secret::Keep,
+        };
+        let url = build_database_url(None, Some("p%41ss"), &input).unwrap();
+        assert_eq!(
+            decode(Url::parse(&url).unwrap().password().unwrap()),
+            "p%41ss"
+        );
+    }
 }

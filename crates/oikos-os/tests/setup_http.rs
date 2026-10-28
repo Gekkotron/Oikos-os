@@ -262,7 +262,7 @@ async fn failed_mqtt_probe_on_a_running_hub_leaves_the_file_and_does_not_restart
     let (code, body) = s
         .put(
             "/mqtt",
-            json!({"host":"127.0.0.1","port":1,"password":"wrong"}),
+            json!({"host":"127.0.0.1","port":1,"user":"u","password":"wrong"}),
         )
         .await;
     assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
@@ -345,12 +345,12 @@ async fn failed_database_probe_saves_nothing() {
     let (code, body) = s
         .put(
             "/database",
-            json!({"host":"127.0.0.1","port":port,"database":"oikos","user":"u","password":"pw"}),
+            json!({"host":"127.0.0.1","port":port,"database":"oikos","user":"u","password":"pw-secret-9"}),
         )
         .await;
     assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["ok"], false);
-    assert!(!body.to_string().contains("pw\""));
+    assert!(!body.to_string().contains("pw-secret-9"));
     assert!(s.hub_json().is_none());
 }
 
@@ -455,14 +455,23 @@ async fn setup_router_default_builds() {
 
 /// A one-shot broker: reads the CONNECT, answers a CONNACK with `code`, keeps the socket open.
 async fn fake_broker(code: u8) -> u16 {
+    fake_broker_with(code, None).await
+}
+
+/// Like [`fake_broker`]; `flag` is set the moment a CONNECT arrives, before the answer.
+async fn fake_broker_with(code: u8, flag: Option<Arc<std::sync::atomic::AtomicBool>>) -> u16 {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         while let Ok((mut sock, _)) = listener.accept().await {
+            let flag = flag.clone();
             tokio::spawn(async move {
                 let mut buf = [0u8; 512];
                 let _ = sock.read(&mut buf).await;
+                if let Some(flag) = flag {
+                    flag.store(true, Ordering::SeqCst);
+                }
                 let _ = sock.write_all(&[0x20, 0x02, 0x00, code]).await;
                 let _ = sock.read(&mut buf).await;
             });
@@ -524,4 +533,172 @@ async fn mqtt_bad_credentials_are_reported() {
         .post("/test/mqtt", json!({"host":"127.0.0.1","port":port}))
         .await;
     assert_eq!(body, json!({"ok":true,"message":"connected","detail":null}));
+}
+
+#[tokio::test]
+async fn bad_broker_credentials_on_a_running_hub_are_never_saved() {
+    let port = fake_broker(4).await;
+    let s = serve(Mode::Run, mqtt_file("192.0.2.1"), None, true).await;
+    s.ctx.update_file(|_| {}).await.unwrap();
+    let before = s.hub_json().unwrap();
+    let (code, body) = s
+        .put(
+            "/mqtt",
+            json!({"host":"127.0.0.1","port":port,"user":"u","password":"typo-pass"}),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["message"], "bad credentials");
+    assert!(!body.to_string().contains("typo-pass"));
+    assert_eq!(s.hub_json().unwrap(), before);
+    assert_eq!(s.restarts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_restart_scheduled_during_the_probe_refuses_the_save() {
+    let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let port = fake_broker_with(0, Some(Arc::clone(&flag))).await;
+    let s = serve(Mode::Setup, HubFile::default(), None, false).await;
+    // The broker raises `restarting` (as a racing write would) after the gate, during the probe.
+    let ctx_flag = Arc::clone(&s.ctx);
+    let watcher = tokio::spawn(async move {
+        while !flag.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        ctx_flag.restarting.store(true, Ordering::SeqCst);
+    });
+    let (code, body) = s
+        .put("/mqtt", json!({"host":"127.0.0.1","port":port}))
+        .await;
+    watcher.await.unwrap();
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body, json!({"error":"restarting"}));
+    assert!(s.hub_json().is_none(), "nothing saved");
+}
+
+#[tokio::test]
+async fn password_without_a_user_is_refused() {
+    let s = setup_server().await;
+    let port = closed_port().await;
+    for path in ["/mqtt", "/test/mqtt"] {
+        let (code, body) = s
+            .send(
+                if path == "/mqtt" {
+                    reqwest::Method::PUT
+                } else {
+                    reqwest::Method::POST
+                },
+                path,
+                json!({"host":"127.0.0.1","port":port,"password":"pw"}),
+            )
+            .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{path}");
+        assert_eq!(body["error"], "Enter a user name for the password");
+    }
+    assert!(s.hub_json().is_none());
+}
+
+const NEW_ADDRESS: &str = "Enter the password for the new address";
+
+#[tokio::test]
+async fn mqtt_same_host_other_port_needs_the_password() {
+    let s = serve(Mode::Setup, mqtt_file("127.0.0.1"), None, false).await; // stored port 1
+    for (method, path) in [
+        (reqwest::Method::PUT, "/mqtt"),
+        (reqwest::Method::POST, "/test/mqtt"),
+    ] {
+        let (code, body) = s
+            .send(
+                method,
+                path,
+                json!({"host":"127.0.0.1","port":2,"user":"u"}),
+            )
+            .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{path}");
+        assert_eq!(body["error"], NEW_ADDRESS);
+    }
+    assert!(s.hub_json().is_none());
+}
+
+#[tokio::test]
+async fn bundled_mqtt_password_stays_on_the_bundled_port() {
+    let s = setup_server().await;
+    write_bundled(s.dir.path());
+    for (method, path) in [
+        (reqwest::Method::PUT, "/mqtt"),
+        (reqwest::Method::POST, "/test/mqtt"),
+    ] {
+        let (code, body) = s
+            .send(
+                method,
+                path,
+                json!({"host":"localhost","port":1884,"user":"oikos"}),
+            )
+            .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{path}");
+        assert_eq!(body["error"], NEW_ADDRESS);
+    }
+    assert!(s.hub_json().is_none());
+}
+
+#[tokio::test]
+async fn database_same_host_other_port_needs_the_password() {
+    let file = HubFile {
+        database_url: Some("postgres://u:p@127.0.0.1:5432/oikos".into()),
+        ..HubFile::default()
+    };
+    let s = serve(Mode::Setup, file, None, false).await;
+    for (method, path) in [
+        (reqwest::Method::PUT, "/database"),
+        (reqwest::Method::POST, "/test/database"),
+    ] {
+        let (code, body) = s
+            .send(
+                method,
+                path,
+                json!({"host":"127.0.0.1","port":5433,"database":"oikos","user":"u"}),
+            )
+            .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{path}");
+        assert_eq!(body["error"], NEW_ADDRESS);
+    }
+}
+
+#[tokio::test]
+async fn bundled_database_password_stays_on_the_bundled_port() {
+    let s = setup_server().await;
+    write_bundled(s.dir.path());
+    for (method, path) in [
+        (reqwest::Method::PUT, "/database"),
+        (reqwest::Method::POST, "/test/database"),
+    ] {
+        let (code, body) = s
+            .send(
+                method,
+                path,
+                json!({"host":"localhost","port":5433,"database":"oikos","user":"oikos"}),
+            )
+            .await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{path}");
+        assert_eq!(body["error"], NEW_ADDRESS);
+    }
+}
+
+#[tokio::test]
+async fn database_name_or_user_change_alone_is_not_a_new_address() {
+    let port = closed_port().await;
+    let file = HubFile {
+        database_url: Some(format!("postgres://u:p@127.0.0.1:{port}/oikos")),
+        ..HubFile::default()
+    };
+    let s = serve(Mode::Setup, file, None, false).await;
+    let (code, body) = s
+        .post(
+            "/test/database",
+            json!({"host":"127.0.0.1","port":port,"database":"other","user":"v"}),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["ok"], false, "the probe ran (and found no server)");
 }
