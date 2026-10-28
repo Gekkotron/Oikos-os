@@ -245,6 +245,11 @@ pub fn assemble(file: &HubFile, s: &Sections) -> Config {
         cfg.weather.country = loc.country.clone();
         cfg.weather.latitude = Some(loc.latitude);
         cfg.weather.longitude = Some(loc.longitude);
+    } else if let Some((city, country)) = &file.pending_city {
+        // An imported city still waiting for its lookup: the weather poller geocodes it
+        // itself, as the hub did before the import.
+        cfg.weather.city = city.clone();
+        cfg.weather.country = country.clone();
     }
     cfg
 }

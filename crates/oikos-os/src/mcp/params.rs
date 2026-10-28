@@ -607,7 +607,7 @@ pub struct SetSettingsParams {
     /// The section: `weather`, `solcast`, `frigate`, `push`, `climate` or `advanced`.
     pub section: String,
     /// The whole section, as `get_settings` shows it; it replaces the stored one. A secret
-    /// field is a string to set it, `null` to clear it, absent (or `{"set": true}`) to keep it.
+    /// field is a string to set it, `null` to clear it, absent, `""` or `{"set": true}` to keep it.
     pub value: serde_json::Value,
 }
 

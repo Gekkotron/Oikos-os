@@ -25,7 +25,7 @@ use url::Url;
 
 use crate::config::MqttConfig;
 use crate::setup::bundled::{self, Bundled};
-use crate::setup::{HubFile, Mode, SetupCtx, probe, secret};
+use crate::setup::{HubFile, Mode, SetupCtx, Written, probe, secret, settings};
 use crate::weather::open_meteo::{self, Endpoints};
 
 pub(super) const RESTART_DELAY: Duration = Duration::from_millis(500);
@@ -204,19 +204,41 @@ async fn geocode(State(s): State<RouteState>, Query(q): Query<GeocodeQuery>) -> 
 }
 
 /// Saves under the file lock, then answers with the new status. A restart is scheduled (still
-/// under the lock) when `restarts` and the hub runs, or when the file just became complete. A restart already pending answers 503 without saving.
+/// under the lock) when `restarts` and the hub runs, or when the file just became complete. A
+/// restart already pending answers 503 without saving. On a running hub, a write that restarts
+/// it must leave a config the hub can boot with (`main` checks it before anything starts), or
+/// it answers 422 with the reason and saves nothing.
 async fn finish_write(s: &RouteState, restarts: bool, edit: impl FnOnce(&mut HubFile)) -> Response {
     let in_run = s.ctx.mode == Mode::Run;
+    // The settings lock comes first (the lock order) and is held through the write, so the
+    // check sees the settings the restart boots with. Setup mode is not checked: its settings
+    // can only be edited once the hub runs.
+    let sections = if restarts && in_run {
+        if let Some(r) = restarting(&s.ctx) {
+            return r;
+        }
+        Some(s.ctx.sections.lock().await)
+    } else {
+        None
+    };
     let saved = s
         .ctx
-        .write_unless_restarting(RESTART_DELAY, edit, |before, after| {
-            restarts && (in_run || (!before.is_complete() && after.is_complete()))
-        })
+        .write_unless_restarting(
+            RESTART_DELAY,
+            edit,
+            |before, after| restarts && (in_run || (!before.is_complete() && after.is_complete())),
+            |after| match &sections {
+                Some(held) => settings::check_boot(after, held),
+                None => Ok(()),
+            },
+        )
         .await;
+    drop(sections);
     match saved {
         Err(_) => save_failed(),
-        Ok(false) => error(StatusCode::SERVICE_UNAVAILABLE, "restarting"),
-        Ok(true) => status(State(s.clone())).await.into_response(),
+        Ok(Written::Restarting) => error(StatusCode::SERVICE_UNAVAILABLE, "restarting"),
+        Ok(Written::Refused(message)) => error(StatusCode::UNPROCESSABLE_ENTITY, &message),
+        Ok(Written::Saved) => status(State(s.clone())).await.into_response(),
     }
 }
 
@@ -234,6 +256,20 @@ async fn put_location(State(s): State<RouteState>, Json(loc): Json<Location>) ->
             "The location is not valid",
         );
     }
+    // The weather check wants two letters; an empty field is no country.
+    let country = match loc.country.as_deref().map(str::trim) {
+        None | Some("") => None,
+        Some(c) if c.len() == 2 && c.chars().all(|c| c.is_ascii_alphabetic()) => {
+            Some(c.to_ascii_uppercase())
+        }
+        Some(_) => {
+            return error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "The country must be two letters, such as FR",
+            );
+        }
+    };
+    let loc = Location { country, ..loc };
     finish_write(&s, true, |f| {
         f.location = Some(loc);
         // The chosen place supersedes anything the import left as a fallback.
@@ -428,6 +464,10 @@ async fn put_step(State(s): State<RouteState>, Json(body): Json<StepBody>) -> Re
 async fn finish(State(s): State<RouteState>) -> Response {
     if let Some(r) = restarting(&s.ctx) {
         return r;
+    }
+    // Nothing clears MQTT or the database once set, so this cannot go stale before the write.
+    if !s.ctx.file.lock().await.is_complete() {
+        return error(StatusCode::CONFLICT, "finish MQTT and database setup first");
     }
     finish_write(&s, false, |f| {
         f.finished = true;

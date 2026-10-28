@@ -1,4 +1,4 @@
-//! How a `PUT` treats a secret: absent keeps, `null` clears, a string sets.
+//! How a `PUT` treats a secret: absent (or `""`) keeps, `null` clears, a string sets.
 
 use oikos_api::Secret;
 
@@ -28,6 +28,37 @@ pub fn apply(stored: Option<String>, input: Secret) -> Option<String> {
         Secret::Clear => None,
         Secret::Set(s) => Some(s),
     }
+}
+
+/// A URL's `user:password@` part, taken off: `(the URL without it, user, password)`, the two
+/// percent-decoded and `None` when empty. `None` when the URL carries no such part. The rest of
+/// the URL is kept as written.
+pub fn split_userinfo(url: &str) -> Option<(String, Option<String>, Option<String>)> {
+    let (scheme, rest) = url.split_once("://")?;
+    // Where a URL parser ends the authority (a backslash counts as `/` for http and https).
+    let end = rest.find(['/', '?', '#', '\\']).unwrap_or(rest.len());
+    let authority = &rest[..end];
+    let at = authority.rfind('@')?;
+    let info = &authority[..at];
+    let (user, password) = match info.split_once(':') {
+        Some((user, password)) => (user, Some(password)),
+        None => (info, None),
+    };
+    let decode = |s: &str| {
+        Some(
+            percent_encoding::percent_decode_str(s)
+                .decode_utf8_lossy()
+                .into_owned(),
+        )
+        .filter(|s| !s.is_empty())
+    };
+    let bare = format!("{scheme}://{}{}", &authority[at + 1..], &rest[end..]);
+    Some((bare, decode(user), password.and_then(decode)))
+}
+
+/// `url` without its `user:password@` part, for a read.
+pub fn without_userinfo(url: &str) -> String {
+    split_userinfo(url).map_or_else(|| url.to_owned(), |(bare, _, _)| bare)
 }
 
 #[cfg(test)]
@@ -61,6 +92,40 @@ mod tests {
         assert_eq!(
             apply(Some("old".into()), Secret::Set("new".into())).as_deref(),
             Some("new")
+        );
+    }
+
+    #[test]
+    fn empty_string_is_keep() {
+        assert_eq!(input(r#","password":"""#), Secret::Keep);
+        // So an empty field sent to a new address still needs the password.
+        let err = require_for_new_address(Some("a:1"), "b:1", &input(r#","password":"""#), true);
+        assert_eq!(err, Err("Enter the password for the new address"));
+    }
+
+    #[test]
+    fn userinfo_is_split_off() {
+        assert_eq!(split_userinfo("http://192.0.2.5:5000/x"), None);
+        assert_eq!(split_userinfo("not a url"), None);
+        assert_eq!(
+            split_userinfo("http://fu:f%40p@192.0.2.5:5000"),
+            Some((
+                "http://192.0.2.5:5000".to_owned(),
+                Some("fu".to_owned()),
+                Some("f@p".to_owned())
+            ))
+        );
+        assert_eq!(
+            split_userinfo("https://only@frigate.example.com/a/"),
+            Some((
+                "https://frigate.example.com/a/".to_owned(),
+                Some("only".to_owned()),
+                None
+            ))
+        );
+        assert_eq!(
+            split_userinfo("http://:pw@192.0.2.5/"),
+            Some(("http://192.0.2.5/".to_owned(), None, Some("pw".to_owned())))
         );
     }
 

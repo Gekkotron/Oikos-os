@@ -11,18 +11,49 @@ use oikos_api::{Location, SetupStep};
 
 use crate::config::Config;
 use crate::setup::hub_file::HubFile;
+use crate::setup::secret::split_userinfo;
 use crate::setup::sections::{
     AdvancedSection, PushSection, Sections, SolcastSection, WeatherSection,
 };
 
 /// The TOML to import: the `--config` file when it exists, else `<data_dir>/oikos.toml` when it
-/// exists, else `None`. A missing file never imports.
+/// exists, else (with no `--config`) `oikos.toml` in the working directory, the file a hub
+/// started without a flag has always read. `None` when none exists: a missing file never
+/// imports.
 pub fn toml_candidate(data_dir: &Path, flag: Option<&Path>) -> Option<PathBuf> {
     if let Some(flag) = flag.filter(|p| p.is_file()) {
         return Some(flag.to_path_buf());
     }
     let default = data_dir.join("oikos.toml");
-    default.is_file().then_some(default)
+    if default.is_file() {
+        return Some(default);
+    }
+    flag.is_none().then(cwd_toml).flatten()
+}
+
+/// `oikos.toml` in the working directory, when it exists.
+pub fn cwd_toml() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let path = cwd.join("oikos.toml");
+    path.is_file().then_some(path)
+}
+
+/// Moves a `user:password@` written into a Frigate address into the user and password
+/// fields (a field already set wins), so no read ever shows it and the form can edit it.
+fn lift_frigate_login(frigate: &mut crate::config::FrigateConfig) {
+    for address in [&mut frigate.url, &mut frigate.media_url] {
+        let Some((bare, user, password)) = address.as_deref().and_then(split_userinfo) else {
+            continue;
+        };
+        tracing::info!("frigate: the login written in its address moved to its own fields");
+        *address = Some(bare);
+        if frigate.user.is_none() {
+            frigate.user = user;
+        }
+        if frigate.password.is_none() {
+            frigate.password = password;
+        }
+    }
 }
 
 /// Loads and validates `path` as today's hub does, then maps it into the new files.
@@ -113,7 +144,11 @@ pub fn import_toml(path: &Path) -> anyhow::Result<(HubFile, Sections)> {
             daily_limit: cfg.solcast.daily_limit,
             api_key,
         },
-        frigate: cfg.frigate.clone(),
+        frigate: {
+            let mut frigate = cfg.frigate.clone();
+            lift_frigate_login(&mut frigate);
+            frigate
+        },
         push: PushSection {
             service_account,
             prefix: cfg.push.prefix.clone(),
@@ -241,6 +276,56 @@ country = "FR"
     }
 
     #[test]
+    fn a_city_only_weather_import_assembles_a_valid_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write(
+            dir.path(),
+            "oikos.toml",
+            "[weather]\nenabled = true\ncity = \"Lyon\"\ncountry = \"FR\"\n",
+        );
+        let (file, sections) = import_locked(&p).unwrap();
+        let cfg = assemble(&file, &sections);
+        assert_eq!(cfg.validate_all(), Ok(()));
+        // The poller geocodes the city as it does today.
+        assert_eq!(cfg.weather.city, "Lyon");
+        assert_eq!(cfg.weather.country.as_deref(), Some("FR"));
+        assert_eq!((cfg.weather.latitude, cfg.weather.longitude), (None, None));
+    }
+
+    #[test]
+    fn frigate_userinfo_moves_into_its_own_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write(
+            dir.path(),
+            "oikos.toml",
+            "[frigate]\nurl = \"http://fu:f%40p@192.0.2.5:8971\"\nmedia_url = \"http://mu:mp@192.0.2.5:8971/media\"\n",
+        );
+        let (_, sections) = import_locked(&p).unwrap();
+        let f = &sections.frigate;
+        assert_eq!(f.url.as_deref(), Some("http://192.0.2.5:8971"));
+        assert_eq!(f.user.as_deref(), Some("fu"));
+        assert_eq!(f.password.as_deref(), Some("f@p"));
+        assert_eq!(f.media_url.as_deref(), Some("http://192.0.2.5:8971/media"));
+    }
+
+    #[test]
+    fn frigate_fields_win_over_userinfo() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write(
+            dir.path(),
+            "oikos.toml",
+            "[frigate]\nurl = \"http://x:y@192.0.2.5:8971/\"\nuser = \"fu\"\npassword = \"fp\"\n",
+        );
+        let (_, sections) = import_locked(&p).unwrap();
+        let f = &sections.frigate;
+        assert_eq!(f.url.as_deref(), Some("http://192.0.2.5:8971/"));
+        assert_eq!(
+            (f.user.as_deref(), f.password.as_deref()),
+            (Some("fu"), Some("fp"))
+        );
+    }
+
+    #[test]
     fn empty_city_with_coordinates_gives_empty_name() {
         let dir = tempfile::tempdir().unwrap();
         let p = write(
@@ -293,7 +378,7 @@ country = "FR"
             toml_candidate(dir.path(), Some(&dir.path().join("nope.toml"))),
             None
         );
-        assert_eq!(toml_candidate(dir.path(), None), None);
+        assert_eq!(in_cwd(|_| toml_candidate(dir.path(), None)), None);
     }
 
     #[test]
@@ -303,6 +388,60 @@ country = "FR"
         let flag = write(dir.path(), "other.toml", "");
         assert_eq!(toml_candidate(dir.path(), Some(&flag)), Some(flag));
         assert_eq!(toml_candidate(dir.path(), None), Some(data));
+    }
+
+    /// Runs `f` with the working directory set to a fresh folder (figment's jail, which also
+    /// serializes the tests that change it).
+    #[allow(clippy::result_large_err)]
+    fn in_cwd<T>(f: impl FnOnce(&Path) -> T) -> T {
+        let mut out = None;
+        figment::Jail::expect_with(|jail| {
+            out = Some(f(jail.directory()));
+            Ok(())
+        });
+        out.unwrap()
+    }
+
+    #[test]
+    fn candidate_falls_back_to_the_working_directory() {
+        let data = tempfile::tempdir().unwrap();
+        // Compared inside the jail: its folder is gone once it ends.
+        let (got, expected) = in_cwd(|cwd| {
+            write(cwd, "oikos.toml", "");
+            (
+                toml_candidate(data.path(), None).map(|p| p.canonicalize().unwrap()),
+                cwd.join("oikos.toml").canonicalize().unwrap(),
+            )
+        });
+        assert_eq!(got, Some(expected));
+    }
+
+    #[test]
+    fn candidate_order_is_flag_then_data_dir_then_working_directory() {
+        let data = tempfile::tempdir().unwrap();
+        let in_data = write(data.path(), "oikos.toml", "");
+        let flag = write(data.path(), "other.toml", "");
+        let (with_flag, with_data, missing_flag) = in_cwd(|cwd| {
+            write(cwd, "oikos.toml", "");
+            (
+                toml_candidate(data.path(), Some(&flag)),
+                toml_candidate(data.path(), None),
+                // A flag names the file: the working directory is only today's default.
+                toml_candidate(
+                    tempfile::tempdir().unwrap().path(),
+                    Some(&data.path().join("nope.toml")),
+                ),
+            )
+        });
+        assert_eq!(with_flag, Some(flag));
+        assert_eq!(with_data, Some(in_data));
+        assert_eq!(missing_flag, None);
+    }
+
+    #[test]
+    fn no_file_anywhere_is_none() {
+        let data = tempfile::tempdir().unwrap();
+        assert_eq!(in_cwd(|_| toml_candidate(data.path(), None)), None);
     }
 
     #[test]

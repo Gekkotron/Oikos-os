@@ -12,10 +12,10 @@ use tokio::task::JoinHandle;
 use crate::config::Config;
 use crate::history::db::Db;
 use crate::history::writer::{INITIAL_BACKOFF, MAX_BACKOFF};
-use crate::setup::import::{import_toml, toml_candidate};
+use crate::setup::import::{cwd_toml, import_toml, toml_candidate};
 use crate::setup::restart::schedule_restart;
 use crate::setup::sections::{Sections, assemble};
-use crate::setup::store::{load_sections, read_cache, save_sections, write_cache};
+use crate::setup::store::{load_stored, read_cache, save_sections, write_cache};
 use crate::setup::{HubFile, Mode, RestartHook, SetupCtx};
 use crate::weather::open_meteo::{self, Endpoints, FetchError};
 use crate::weather::poller::{GEOCODE_BACKOFF_MAX, GEOCODE_BACKOFF_START};
@@ -66,6 +66,15 @@ pub async fn resolve(data_dir: &Path, config_flag: Option<&Path>) -> anyhow::Res
 
     let restart = RestartHook::Exec;
     let Some(url) = file.database_url.clone().filter(|_| file.is_complete()) else {
+        if imported.is_none()
+            && let Some(path) = cwd_toml()
+        {
+            tracing::warn!(
+                path = %path.display(),
+                "setup mode: this oikos.toml is not read; the hub reads hub.json in its data \
+                 folder, and imports an oikos.toml only when there is no hub.json yet"
+            );
+        }
         let sections = imported
             .or_else(|| read_cache(data_dir))
             .unwrap_or_default();
@@ -122,13 +131,30 @@ pub async fn resolve(data_dir: &Path, config_flag: Option<&Path>) -> anyhow::Res
     })
 }
 
-/// The settings table within [`DB_WAIT`] (refreshing the cache), else the cached copy, else
-/// the defaults. A database that answers badly is told apart from one that does not answer.
+/// The settings table within [`DB_WAIT`] (refreshing the cache, or refilling an empty table
+/// from it, see [`from_table`]), else the cached copy, else the defaults. A database that
+/// answers badly is told apart from one that does not answer.
 async fn load_or_cached(db: Option<&Db>, data_dir: &Path) -> Sections {
     if let Some(db) = db {
         match tokio::time::timeout(DB_WAIT, load_from_db(db)).await {
-            Ok(Ok(sections)) => {
-                if let Err(error) = write_cache(data_dir, &sections) {
+            Ok(Ok(stored)) => {
+                let (sections, refill) = from_table(stored, read_cache(data_dir));
+                if refill {
+                    tracing::warn!(
+                        "settings: the database holds no settings; restoring them from the cached copy"
+                    );
+                    // The import copy's save step. A failure leaves the table empty and the
+                    // cache as it is, so the next boot tries again.
+                    match tokio::time::timeout(DB_WAIT, save_sections(db, &sections)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => {
+                            tracing::warn!(%error, "settings: cannot restore the database settings")
+                        }
+                        Err(_) => tracing::warn!(
+                            "settings: cannot restore the database settings (no answer)"
+                        ),
+                    }
+                } else if let Err(error) = write_cache(data_dir, &sections) {
                     tracing::warn!(%error, "settings: cannot refresh the cached copy");
                 }
                 return sections;
@@ -150,9 +176,21 @@ async fn load_or_cached(db: Option<&Db>, data_dir: &Path) -> Sections {
     })
 }
 
-async fn load_from_db(db: &Db) -> anyhow::Result<Sections> {
+/// The settings a boot takes once the database answered, and whether they must be written
+/// back into the table. A table with rows rules (a missing row is that section's defaults). An
+/// empty table is a new database: the cached copy is taken and put back into it, so pointing
+/// the hub at a new database never wipes the settings. With no cache either: the defaults.
+fn from_table(stored: Option<Sections>, cached: Option<Sections>) -> (Sections, bool) {
+    match (stored, cached) {
+        (Some(stored), _) => (stored, false),
+        (None, Some(cached)) => (cached, true),
+        (None, None) => (Sections::default(), false),
+    }
+}
+
+async fn load_from_db(db: &Db) -> anyhow::Result<Option<Sections>> {
     db.migrate().await?;
-    Ok(load_sections(db).await?)
+    Ok(load_stored(db).await?)
 }
 
 /// Copies the sections into the `settings` table once the database answers, then marks the
@@ -226,8 +264,14 @@ pub fn spawn_location_lookup(ctx: Arc<SetupCtx>, endpoints: Endpoints) -> JoinHa
             }
             return;
         };
+        let mut applied = false;
         let saved = ctx
             .update_file(|f| {
+                // A place the user chose meanwhile (which clears the pending city) wins.
+                if f.pending_city.is_none() {
+                    return;
+                }
+                applied = true;
                 // An explicit imported time zone wins over the geocoded one.
                 let timezone = f
                     .timezone
@@ -246,6 +290,12 @@ pub fn spawn_location_lookup(ctx: Arc<SetupCtx>, endpoints: Endpoints) -> JoinHa
             })
             .await;
         match saved {
+            Ok(()) if !applied => {
+                tracing::info!(
+                    city,
+                    "settings: a location was set meanwhile; lookup dropped"
+                );
+            }
             Ok(()) => {
                 tracing::info!(city, "settings: location found");
                 schedule_restart(&ctx, RESTART_DELAY);
@@ -333,6 +383,37 @@ mod tests {
         assert!(tmp.path().join("settings-cache.json").exists());
         // The copy has not happened: the flag stays off until the database takes the rows.
         assert!(!ctx.file.try_lock().unwrap().settings_imported);
+    }
+
+    #[test]
+    fn a_city_only_weather_import_boots_a_config_that_validates() {
+        // `toml_with_history` turns weather on with a city and no coordinates (the documented
+        // setup): main validates the config before anything starts.
+        let tmp = tempfile::tempdir().unwrap();
+        let toml = write(tmp.path(), "oikos.toml", &toml_with_history(DOWN));
+        let Boot::Run { cfg, ctx } = resolve_locked(tmp.path(), Some(&toml)).unwrap() else {
+            panic!("expected normal mode")
+        };
+        assert_eq!(cfg.validate_all(), Ok(()));
+        assert_eq!(cfg.weather.city, "Lyon");
+        assert!(ctx.file.try_lock().unwrap().pending_city.is_some());
+    }
+
+    #[test]
+    fn an_empty_table_boots_from_the_cache_and_refills_it() {
+        let mut cached = Sections::default();
+        cached.weather.enabled = true;
+        let (got, refill) = from_table(None, Some(cached.clone()));
+        assert_eq!(got, cached);
+        assert!(refill);
+        // No cache either: the defaults, nothing to put back.
+        let (got, refill) = from_table(None, None);
+        assert_eq!(got, Sections::default());
+        assert!(!refill);
+        // Rows win over the cache, even rows at their defaults.
+        let (got, refill) = from_table(Some(Sections::default()), Some(cached));
+        assert_eq!(got, Sections::default());
+        assert!(!refill);
     }
 
     #[test]
@@ -611,6 +692,63 @@ mod tests {
                 .unwrap()
                 .pending_city
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_location_set_during_the_lookup_is_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ctx, count) = ctx_with(pending(None), tmp.path());
+        // The geocoder answers only once the user has picked a place.
+        let go = Arc::new(tokio::sync::Notify::new());
+        let asked = Arc::new(tokio::sync::Notify::new());
+        let (wait, ask) = (Arc::clone(&go), Arc::clone(&asked));
+        let app = Router::new().route(
+            "/geocode",
+            get(move || {
+                let (wait, ask) = (Arc::clone(&wait), Arc::clone(&ask));
+                async move {
+                    ask.notify_one();
+                    wait.notified().await;
+                    LYON
+                }
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let ep = Endpoints {
+            geocoding: format!("{base}/geocode"),
+            forecast: format!("{base}/forecast"),
+        };
+        let task = spawn_location_lookup(Arc::clone(&ctx), ep);
+        // The lookup has read the pending city and is waiting for the answer.
+        asked.notified().await;
+        let chosen = Location {
+            city: "Paris".into(),
+            country: Some("FR".into()),
+            latitude: 48.85,
+            longitude: 2.35,
+            timezone: "Europe/Paris".into(),
+        };
+        let picked = chosen.clone();
+        ctx.update_file(move |f| {
+            f.location = Some(picked);
+            f.pending_city = None;
+        })
+        .await
+        .unwrap();
+        go.notify_one();
+        task.await.unwrap();
+        assert_eq!(ctx.file.lock().await.location, Some(chosen.clone()));
+        assert_eq!(
+            HubFile::load(tmp.path()).unwrap().unwrap().location,
+            Some(chosen)
+        );
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            0,
+            "no restart for a stale lookup"
         );
     }
 

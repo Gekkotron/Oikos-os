@@ -231,6 +231,96 @@ async fn location_with_a_bad_timezone_is_422() {
 }
 
 #[tokio::test]
+async fn location_with_a_bad_country_is_422() {
+    let s = setup_server().await;
+    for country in [json!("France"), json!("F1"), json!("")] {
+        let mut bad = paris();
+        bad["country"] = country.clone();
+        let (code, body) = s.put("/location", bad).await;
+        if country == json!("") {
+            // An empty field is no country at all.
+            assert_eq!(code, StatusCode::OK, "{body}");
+            continue;
+        }
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{country}");
+        assert_eq!(
+            body,
+            json!({"error": "The country must be two letters, such as FR"})
+        );
+    }
+    let saved = HubFile::load(s.dir.path()).unwrap().unwrap();
+    assert_eq!(saved.location.unwrap().country, None);
+    let mut lower = paris();
+    lower["country"] = json!("fr");
+    assert_eq!(s.put("/location", lower).await.0, StatusCode::OK);
+    let saved = HubFile::load(s.dir.path()).unwrap().unwrap();
+    assert_eq!(saved.location.unwrap().country.as_deref(), Some("FR"));
+}
+
+#[tokio::test]
+async fn a_bad_country_saves_nothing() {
+    let s = setup_server().await;
+    let mut bad = paris();
+    bad["country"] = json!("France");
+    assert_eq!(
+        s.put("/location", bad).await.0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert!(s.hub_json().is_none());
+}
+
+/// Sections the boot would refuse: Solcast on with no site.
+fn unbootable() -> Sections {
+    let mut s = Sections::default();
+    s.solcast.enabled = true;
+    s
+}
+
+#[tokio::test]
+async fn a_running_hub_never_saves_a_location_it_could_not_boot_with() {
+    let s = serve_settings(Mode::Run, HubFile::default(), unbootable(), None, None).await;
+    s.ctx.update_file(|_| {}).await.unwrap();
+    let before = s.hub_json().unwrap();
+    let (code, body) = s.put("/location", paris()).await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body,
+        json!({"error": "[solcast] sites needs at least one rooftop resource id"})
+    );
+    assert_eq!(s.hub_json().unwrap(), before, "hub.json is byte-identical");
+    assert_eq!(s.restarts.load(Ordering::SeqCst), 0);
+    assert!(s.ctx.file.lock().await.location.is_none());
+}
+
+#[tokio::test]
+async fn a_running_hub_never_saves_a_broker_it_could_not_boot_with() {
+    let port = fake_broker(0).await;
+    let s = serve_settings(Mode::Run, mqtt_file("192.0.2.1"), unbootable(), None, None).await;
+    s.ctx.update_file(|_| {}).await.unwrap();
+    let before = s.hub_json().unwrap();
+    let (code, body) = s
+        .put(
+            "/mqtt",
+            json!({"host":"127.0.0.1","port":port,"user":"u","password":"pw","z2m_base":"z"}),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert!(
+        body["error"].as_str().unwrap().contains("[solcast] sites"),
+        "{body}"
+    );
+    assert_eq!(s.hub_json().unwrap(), before, "hub.json is byte-identical");
+    assert_eq!(s.restarts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn setup_mode_writes_are_not_held_to_the_running_rules() {
+    // Settings can only be fixed once the hub runs, so setup never refuses on them.
+    let s = serve_settings(Mode::Setup, HubFile::default(), unbootable(), None, None).await;
+    assert_eq!(s.put("/location", paris()).await.0, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn location_in_run_mode_restarts_once() {
     let s = serve(Mode::Run, HubFile::default(), None, true).await;
     assert_eq!(s.put("/location", paris()).await.0, StatusCode::OK);
@@ -366,11 +456,27 @@ async fn step_put_never_finishes() {
 
 #[tokio::test]
 async fn finish_sets_finished_and_done() {
-    let s = setup_server().await;
+    let file = HubFile {
+        database_url: Some("postgres://u:p@192.0.2.2/oikos".into()),
+        ..mqtt_file("192.0.2.1")
+    };
+    let s = serve(Mode::Setup, file, None, false).await;
     let (code, body) = s.post("/finish", json!({})).await;
     assert_eq!(code, StatusCode::OK);
     assert_eq!(body["finished"], true);
     assert_eq!(body["step"], "done");
+}
+
+#[tokio::test]
+async fn finish_before_mqtt_and_database_is_409() {
+    let s = serve(Mode::Setup, mqtt_file("192.0.2.1"), None, false).await;
+    let (code, body) = s.post("/finish", json!({})).await;
+    assert_eq!(code, StatusCode::CONFLICT);
+    assert_eq!(
+        body,
+        json!({"error": "finish MQTT and database setup first"})
+    );
+    assert!(s.hub_json().is_none(), "nothing saved");
 }
 
 #[tokio::test]
@@ -940,6 +1046,55 @@ async fn weather_without_location_is_422() {
     let (code, body) = s.sput("/weather", json!({"enabled": true})).await;
     assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["error"], "Set the home location first");
+}
+
+#[tokio::test]
+async fn weather_with_an_imported_city_waiting_for_its_lookup_is_accepted() {
+    let file = HubFile {
+        pending_city: Some(("Lyon".into(), Some("FR".into()))),
+        ..HubFile::default()
+    };
+    let s = serve_settings(Mode::Run, file, Sections::default(), Some(DEAD_DB), None).await;
+    let (code, body) = s
+        .sput("/weather", json!({"enabled": true, "refresh_minutes": 30}))
+        .await;
+    // Past the location rule and the validation; only the dead database stops it.
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body, json!({"error": "database unreachable"}));
+}
+
+#[tokio::test]
+async fn frigate_url_with_a_login_in_it_is_refused() {
+    let s = serve_settings(Mode::Run, located(), secret_sections(), Some(DEAD_DB), None).await;
+    let refused = json!({"error": "Put the user and password in their own fields"});
+    for body in [
+        json!({"url": "http://u:inline-pass@192.0.2.9:5000", "password": "p"}),
+        json!({"url": "http://192.0.2.9:5000", "media_url": "http://u:inline-pass@192.0.2.9:8971"}),
+    ] {
+        let (code, got) = s.sput("/frigate", body.clone()).await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(got, refused);
+        let (code, got) = s.post("/test/frigate", body.clone()).await;
+        assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(got, refused);
+    }
+    assert!(!s.dir.path().join("settings-cache.json").exists());
+}
+
+#[tokio::test]
+async fn frigate_view_never_shows_a_login_in_the_url() {
+    let mut sections = Sections::default();
+    sections.frigate.url = Some("http://fu:inline-pass@192.0.2.9:5000".into());
+    sections.frigate.media_url = Some("http://mu:media-pass@192.0.2.9:8971/m".into());
+    let s = serve_settings(Mode::Run, located(), sections, None, None).await;
+    let (code, text) = s.sget("/frigate").await;
+    assert_eq!(code, StatusCode::OK);
+    for leak in ["inline-pass", "media-pass", "fu:", "mu:"] {
+        assert!(!text.contains(leak), "{leak} in {text}");
+    }
+    let view: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(view["url"], "http://192.0.2.9:5000");
+    assert_eq!(view["media_url"], "http://192.0.2.9:8971/m");
 }
 
 #[tokio::test]

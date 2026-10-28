@@ -25,7 +25,7 @@ use crate::setup::routes::{RESTART_DELAY, RouteState, error};
 use crate::setup::sections::{
     AdvancedSection, PushSection, SECTION_KEYS, Sections, SolcastSection, WeatherSection, assemble,
 };
-use crate::setup::store::{save_sections, write_cache};
+use crate::setup::store::{save_section, write_cache};
 use crate::setup::{HubFile, Mode, probe, restart, secret};
 
 pub(super) fn routes() -> Router<RouteState> {
@@ -93,11 +93,13 @@ fn view(section: &str, s: &Sections) -> Value {
         }),
         "frigate" => {
             let f = &s.frigate;
+            // A login written into an address (from an import) never shows.
+            let address = |u: &Option<String>| u.as_deref().map(secret::without_userinfo);
             to(&FrigateView {
-                url: f.url.clone(),
+                url: address(&f.url),
                 user: f.user.clone(),
                 password: set(&f.password),
-                media_url: f.media_url.clone(),
+                media_url: address(&f.media_url),
                 bridge: f.bridge,
                 labels: f.labels.clone(),
                 cameras: f.cameras.clone(),
@@ -158,6 +160,17 @@ fn address_of(url: &str) -> String {
 fn frigate_candidate(old: &FrigateConfig, input: FrigateInput) -> Result<FrigateConfig, ApiError> {
     let clean = |v: Option<String>| v.map(|v| v.trim().to_owned()).filter(|v| !v.is_empty());
     let url = clean(input.url).map(|u| u.trim_end_matches('/').to_owned());
+    let media_url = clean(input.media_url);
+    // A login inside an address would be shown back by every read.
+    if [&url, &media_url]
+        .into_iter()
+        .flatten()
+        .any(|u| secret::split_userinfo(u).is_some())
+    {
+        return Err(unprocessable(
+            "Put the user and password in their own fields",
+        ));
+    }
     if let Some(url) = &url {
         if crate::media::origin_of(url).is_none() {
             return Err(unprocessable("The Frigate address is not valid"));
@@ -180,7 +193,7 @@ fn frigate_candidate(old: &FrigateConfig, input: FrigateInput) -> Result<Frigate
     cfg.url = url;
     cfg.user = clean(input.user);
     cfg.password = secret::apply(old.password.clone(), input.password);
-    cfg.media_url = clean(input.media_url);
+    cfg.media_url = media_url;
     cfg.bridge = input.bridge;
     cfg.labels = input.labels;
     cfg.cameras = input.cameras;
@@ -206,7 +219,8 @@ fn merge(section: &str, body: Value, next: &mut Sections, file: &HubFile) -> Res
     match section {
         "weather" => {
             let weather: WeatherSection = parse(body, section)?;
-            if weather.enabled && file.location.is_none() {
+            // An imported city waiting for its lookup counts: the poller geocodes it.
+            if weather.enabled && file.location.is_none() && file.pending_city.is_none() {
                 return Err(unprocessable("Set the home location first"));
             }
             next.weather = weather;
@@ -249,8 +263,15 @@ fn merge(section: &str, body: Value, next: &mut Sections, file: &HubFile) -> Res
     Ok(())
 }
 
-/// Replaces the `section` with `body`: validates, saves to the database and the cache, then
-/// schedules the restart. Returns `{"restarting": true}`.
+/// Whether the hub could boot with `file` and `sections`: the check `main` runs before
+/// anything starts. Every write that leads to a restart runs it first, so a saved change can
+/// never leave a hub that refuses to start.
+pub(super) fn check_boot(file: &HubFile, sections: &Sections) -> Result<(), String> {
+    assemble(file, sections).validate_all()
+}
+
+/// Replaces the `section` with `body`: validates, saves its row to the database and the
+/// whole settings to the cache, then schedules the restart. Returns `{"restarting": true}`.
 pub async fn write_section(
     ctx: &Arc<SetupCtx>,
     section: &str,
@@ -281,10 +302,10 @@ pub async fn write_section(
     let file = ctx.file.lock().await.clone();
     let mut next = held.clone();
     merge(section, body, &mut next, &file)?;
-    assemble(&file, &next)
-        .validate_all()
-        .map_err(|message| unprocessable(&message))?;
-    if let Err(error) = save_sections(db, &next).await {
+    check_boot(&file, &next).map_err(|message| unprocessable(&message))?;
+    // Only the edited row: the others in memory may be defaults the hub fell back to while
+    // the database was down, and must not overwrite the stored ones.
+    if let Err(error) = save_section(db, section, &next).await {
         tracing::warn!(%error, "settings: cannot save to the database");
         return Err(unavailable("database unreachable"));
     }
@@ -293,7 +314,7 @@ pub async fn write_section(
         // could come back reverted: report the failure, keep the old settings, and put the
         // table back as it was (best effort).
         tracing::error!(error = %error.kind(), "settings: cannot write the settings cache");
-        if let Err(error) = save_sections(db, &held).await {
+        if let Err(error) = save_section(db, section, &held).await {
             tracing::warn!(%error, "settings: cannot restore the database after a cache failure");
         }
         return Err(ApiError::new(

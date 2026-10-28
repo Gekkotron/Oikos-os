@@ -10,6 +10,8 @@ use oikos_os::setup::store::{load_sections, save_sections};
 fn sample() -> Sections {
     let mut s = Sections::default();
     s.solcast.enabled = true;
+    // Solcast on needs a site, or every PUT fails the boot validation.
+    s.solcast.sites = vec!["site-1".into()];
     s.solcast.api_key = Some("solcast-key".into());
     s.frigate.url = Some("http://192.0.2.9:5000".into());
     s.frigate.password = Some("frigate-pass".into());
@@ -222,11 +224,14 @@ mod put {
         let stored = load_sections(&tdb.db).await.unwrap();
         assert_eq!(stored.solcast.sites, ["site-1"]);
         assert_eq!(stored.solcast.api_key.as_deref(), Some("solcast-key"));
+        drop(client);
+        tdb.drop_db().await;
     }
 
     #[tokio::test]
     async fn put_saves_db_and_cache_and_keeps_omitted_secret() {
         let Some(tdb) = fresh_db().await else { return };
+        save_sections(&tdb.db, &sample()).await.unwrap();
         let s = serve(&tdb.url, sample()).await;
         let (code, body) = s
             .put(
@@ -257,25 +262,25 @@ mod put {
     async fn null_clears_a_secret_and_a_string_sets_it() {
         let Some(tdb) = fresh_db().await else { return };
         let s = serve(&tdb.url, sample()).await;
-        let (code, _) = s
+        let (code, body) = s
             .put(
                 "solcast",
                 json!({"enabled": false, "sites": [], "api_key": null}),
             )
             .await;
-        assert_eq!(code, StatusCode::OK);
+        assert_eq!(code, StatusCode::OK, "{body}");
         assert_eq!(load_sections(&tdb.db).await.unwrap().solcast.api_key, None);
         tdb.drop_db().await;
 
         let Some(tdb) = fresh_db().await else { return };
         let s = serve(&tdb.url, sample()).await;
-        let (code, _) = s
+        let (code, body) = s
             .put(
                 "frigate",
                 json!({"url": "http://frigate.example.com:5000", "password": "new-pass"}),
             )
             .await;
-        assert_eq!(code, StatusCode::OK);
+        assert_eq!(code, StatusCode::OK, "{body}");
         let stored = load_sections(&tdb.db).await.unwrap();
         assert_eq!(stored.frigate.password.as_deref(), Some("new-pass"));
         assert_eq!(
@@ -346,10 +351,14 @@ mod put {
         let frigate = s.get("frigate").await;
         let (code, body) = s.put("frigate", frigate).await;
         assert_eq!(code, StatusCode::OK, "{body}");
+        // Each PUT schedules a restart; the stand-in hook never performs it, so clear the
+        // flag for the next PUT (a real hub would have restarted in between).
+        s.ctx.restarting.store(false, Ordering::SeqCst);
         let push = s.get("push").await;
         assert_eq!(push["service_account"], json!({"set": true}));
         let solcast = s.get("solcast").await;
         assert_eq!(s.put("solcast", solcast).await.0, StatusCode::OK);
+        s.ctx.restarting.store(false, Ordering::SeqCst);
         let stored = load_sections(&tdb.db).await.unwrap();
         assert_eq!(stored.frigate.password.as_deref(), Some("frigate-pass"));
         assert_eq!(stored.solcast.api_key.as_deref(), Some("solcast-key"));
@@ -394,6 +403,85 @@ mod put {
         let stored = load_sections(&tdb.db).await.unwrap();
         assert_eq!(stored.weather.refresh_minutes, 45);
         assert_eq!(stored, *s.ctx.sections.lock().await);
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn a_put_rewrites_only_its_own_row() {
+        let Some(tdb) = fresh_db().await else { return };
+        // The table holds real settings, but the hub booted from the defaults (the database
+        // was down and there was no cache).
+        save_sections(&tdb.db, &sample()).await.unwrap();
+        let s = serve(&tdb.url, Sections::default()).await;
+        let (code, body) = s
+            .put("weather", json!({"enabled": true, "refresh_minutes": 45}))
+            .await;
+        assert_eq!(code, StatusCode::OK, "{body}");
+        let stored = load_sections(&tdb.db).await.unwrap();
+        assert_eq!(stored.weather.refresh_minutes, 45);
+        // Every other row is as it was.
+        let expected = Sections {
+            weather: stored.weather.clone(),
+            ..sample()
+        };
+        assert_eq!(stored, expected);
+        assert_eq!(stored.frigate.password.as_deref(), Some("frigate-pass"));
+        assert_eq!(stored.solcast.api_key.as_deref(), Some("solcast-key"));
+        tdb.drop_db().await;
+    }
+}
+
+// ---- booting over an empty settings table ----------------------------------------------
+
+mod boot {
+    use oikos_os::config::MqttConfig;
+    use oikos_os::setup::HubFile;
+    use oikos_os::setup::boot::{Boot, resolve};
+    use oikos_os::setup::store::{read_cache, save_section, write_cache};
+
+    use super::*;
+
+    fn complete(url: &str) -> HubFile {
+        HubFile {
+            mqtt: Some(MqttConfig::default()),
+            database_url: Some(url.to_owned()),
+            settings_imported: true,
+            finished: true,
+            ..HubFile::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn an_empty_table_boots_from_the_cache_and_fills_the_table() {
+        let Some(tdb) = fresh_db().await else { return };
+        let tmp = tempfile::tempdir().unwrap();
+        complete(&tdb.url).save(tmp.path()).unwrap();
+        write_cache(tmp.path(), &sample()).unwrap();
+        let Boot::Run { cfg, ctx } = resolve(tmp.path(), None).await.unwrap() else {
+            panic!("expected normal mode")
+        };
+        assert_eq!(*ctx.sections.lock().await, sample());
+        assert_eq!(cfg.frigate.password.as_deref(), Some("frigate-pass"));
+        assert_eq!(load_sections(&tdb.db).await.unwrap(), sample());
+        assert_eq!(read_cache(tmp.path()), Some(sample()));
+        tdb.drop_db().await;
+    }
+
+    #[tokio::test]
+    async fn a_table_with_some_rows_still_rules() {
+        let Some(tdb) = fresh_db().await else { return };
+        let tmp = tempfile::tempdir().unwrap();
+        complete(&tdb.url).save(tmp.path()).unwrap();
+        write_cache(tmp.path(), &sample()).unwrap();
+        let mut one = Sections::default();
+        one.weather.refresh_minutes = 45;
+        save_section(&tdb.db, "weather", &one).await.unwrap();
+        let Boot::Run { ctx, .. } = resolve(tmp.path(), None).await.unwrap() else {
+            panic!("expected normal mode")
+        };
+        // The missing rows are defaults; the cache is refreshed from the table.
+        assert_eq!(*ctx.sections.lock().await, one);
+        assert_eq!(read_cache(tmp.path()), Some(one));
         tdb.drop_db().await;
     }
 }

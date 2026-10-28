@@ -34,6 +34,16 @@ pub enum Mode {
     Run,
 }
 
+/// What [`SetupCtx::write_unless_restarting`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Written {
+    Saved,
+    /// A restart was already pending: nothing saved.
+    Restarting,
+    /// The write would restart into a hub that cannot boot (the reason): nothing saved.
+    Refused(String),
+}
+
 /// What the setup code shares: the files, the database and the restart switch.
 pub struct SetupCtx {
     pub data_dir: PathBuf,
@@ -83,29 +93,34 @@ impl SetupCtx {
         ))
     }
 
-    /// Like [`SetupCtx::update_file`], but refuses (`Ok(false)`, nothing saved) when a restart is
-    /// already pending, checked under the file lock. When the edit makes `restart(before, after)`
-    /// true, the restart is scheduled while the lock is still held, so a writer queued behind
-    /// this one always sees the flag.
+    /// Like [`SetupCtx::update_file`], but refuses ([`Written::Restarting`], nothing saved) when
+    /// a restart is already pending, checked under the file lock. When the edit makes
+    /// `restart(before, after)` true, `check(after)` must pass first (else
+    /// [`Written::Refused`], nothing saved), and the restart is scheduled while the lock is
+    /// still held, so a writer queued behind this one always sees the flag.
     pub async fn write_unless_restarting(
         self: &Arc<Self>,
         delay: std::time::Duration,
         edit: impl FnOnce(&mut HubFile),
         restart: impl FnOnce(&HubFile, &HubFile) -> bool,
-    ) -> std::io::Result<bool> {
+        check: impl FnOnce(&HubFile) -> Result<(), String>,
+    ) -> std::io::Result<Written> {
         let mut held = self.file.lock().await;
         if self.restarting.load(std::sync::atomic::Ordering::SeqCst) {
-            return Ok(false);
+            return Ok(Written::Restarting);
         }
         let mut next = held.clone();
         edit(&mut next);
-        next.save(&self.data_dir)?;
         let go = restart(&held, &next);
+        if go && let Err(message) = check(&next) {
+            return Ok(Written::Refused(message));
+        }
+        next.save(&self.data_dir)?;
         *held = next;
         if go {
             restart::schedule_restart(self, delay);
         }
-        Ok(true)
+        Ok(Written::Saved)
     }
 
     /// Edits `hub.json` under the lock: changes a copy, saves the copy, and only then replaces

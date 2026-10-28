@@ -11,27 +11,46 @@ use crate::setup::sections::Sections;
 
 pub const CACHE_FILE: &str = "settings-cache.json";
 
+const UPSERT: &str = "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now()) \
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()";
+
+/// The stored sections; a missing row is that section's defaults.
 pub async fn load_sections(db: &Db) -> Result<Sections, sqlx::Error> {
+    Ok(load_stored(db).await?.unwrap_or_default())
+}
+
+/// Like [`load_sections`], but `None` when the table has no row at all (a new database).
+pub async fn load_stored(db: &Db) -> Result<Option<Sections>, sqlx::Error> {
     let rows: Vec<(String, Value)> = sqlx::query_as("SELECT key, value FROM settings")
         .fetch_all(db.pool())
         .await?;
-    Ok(Sections::from_rows(rows))
+    Ok((!rows.is_empty()).then(|| Sections::from_rows(rows)))
 }
 
 /// Upserts every section row in one transaction.
 pub async fn save_sections(db: &Db, s: &Sections) -> Result<(), sqlx::Error> {
     let mut tx = db.pool().begin().await?;
     for (key, value) in s.to_rows() {
-        sqlx::query(
-            "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now()) \
-             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
-        )
-        .bind(key)
-        .bind(value)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query(UPSERT)
+            .bind(key)
+            .bind(value)
+            .execute(&mut *tx)
+            .await?;
     }
     tx.commit().await
+}
+
+/// Upserts the one row `key` names, from `s`. An unknown key writes nothing.
+pub async fn save_section(db: &Db, key: &str, s: &Sections) -> Result<(), sqlx::Error> {
+    let Some((key, value)) = s.to_rows().into_iter().find(|(k, _)| *k == key) else {
+        return Ok(());
+    };
+    sqlx::query(UPSERT)
+        .bind(key)
+        .bind(value)
+        .execute(db.pool())
+        .await?;
+    Ok(())
 }
 
 /// `None` when the cache is missing or unparsable. The warning names the file, never its

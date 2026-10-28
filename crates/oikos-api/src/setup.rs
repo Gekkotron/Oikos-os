@@ -37,7 +37,8 @@ pub struct SecretView {
     pub set: bool,
 }
 
-/// A secret in a `PUT` or a test: left out keeps the stored one, `null` clears it, a string sets it.
+/// A secret in a `PUT` or a test: left out (or an empty string) keeps the stored one, `null`
+/// clears it, any other string sets it.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub enum Secret {
     #[default]
@@ -57,8 +58,9 @@ impl fmt::Debug for Secret {
 }
 
 /// Absent fields are `Keep` through `#[serde(default)]` on the field; `null` is `Clear`; a
-/// string is `Set`. The `{"set": bool}` object a read returns is `Keep`, so a read can be
-/// edited and sent back as it is.
+/// string is `Set`, except `""`, which is `Keep`: a form posting its empty password field
+/// never clears the stored secret by accident. The `{"set": bool}` object a read returns is
+/// `Keep`, so a read can be edited and sent back as it is.
 impl<'de> Deserialize<'de> for Secret {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Secret, D::Error> {
         #[derive(Deserialize)]
@@ -72,6 +74,7 @@ impl<'de> Deserialize<'de> for Secret {
         }
         Ok(match Option::<Raw>::deserialize(d)? {
             None => Secret::Clear,
+            Some(Raw::Text(s)) if s.is_empty() => Secret::Keep,
             Some(Raw::Text(s)) => Secret::Set(s),
             Some(Raw::View { .. }) => Secret::Keep,
         })
@@ -282,5 +285,16 @@ mod tests {
         let view: MqttInput =
             serde_json::from_value(json!({"host":"h","port":1,"password":{"set":true}})).unwrap();
         assert_eq!(view.password, Secret::Keep);
+    }
+
+    #[test]
+    fn an_empty_string_keeps_the_secret() {
+        // A form posting its empty password field must never clear the stored one.
+        let empty: MqttInput =
+            serde_json::from_value(json!({"host":"h","port":1,"password":""})).unwrap();
+        assert_eq!(empty.password, Secret::Keep);
+        let spaces: MqttInput =
+            serde_json::from_value(json!({"host":"h","port":1,"password":" "})).unwrap();
+        assert_eq!(spaces.password, Secret::Set(" ".into()));
     }
 }

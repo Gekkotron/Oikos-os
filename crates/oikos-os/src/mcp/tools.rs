@@ -95,7 +95,7 @@ impl OikosMcp {
     /// restarts the hub so every service picks it up (returns `{"restarting": true}`).
     /// Read the section with `get_settings` first and send the whole of it back: what is left
     /// out takes its default. Secrets are write-only: a string sets one, `null` clears it, and
-    /// leaving it out (or sending back `{"set": true}`) keeps the stored value. Changing a
+    /// leaving it out (or sending `""` or back `{"set": true}`) keeps the stored value. Changing a
     /// service's address (the Frigate URL) needs its secret sent again. The reason of a
     /// refusal is returned, and never contains a secret.
     #[tool(name = "set_settings", annotations(idempotent_hint = true))]
