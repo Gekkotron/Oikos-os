@@ -1550,13 +1550,13 @@ impl ManualKind {
     }
 
     /// The value for this kind with `raw` typed in the box; a number box that does not read as
-    /// a number gives nothing yet.
+    /// a number gives no value, so the draft always matches the kind shown.
     fn value(self, raw: &str) -> Option<Option<Scalar>> {
         match self {
             Self::Nothing => Some(None),
             Self::On => Some(Some(Scalar::Bool(true))),
             Self::Off => Some(Some(Scalar::Bool(false))),
-            Self::Number => parse_decimal(raw.trim()).map(|n| Some(Scalar::Number(n))),
+            Self::Number => Some(parse_decimal(raw.trim()).map(Scalar::Number)),
             Self::Text => Some(Some(Scalar::Text(raw.to_owned()))),
         }
     }
@@ -1704,7 +1704,9 @@ mod tests {
             ManualKind::Number.value("21,5"),
             Some(Some(Scalar::Number(21.5)))
         );
-        assert_eq!(ManualKind::Number.value("abc"), None);
+        // An empty or unreadable number box holds no value, never the previous one.
+        assert_eq!(ManualKind::Number.value("abc"), Some(None));
+        assert_eq!(ManualKind::Number.value(""), Some(None));
         assert_eq!(
             ManualKind::On.value("ignored"),
             Some(Some(Scalar::Bool(true)))

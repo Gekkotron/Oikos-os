@@ -658,6 +658,21 @@ mod tests {
     }
 
     #[test]
+    fn manual_card_reads_with_its_value() {
+        let card =
+            |value: &str| format!(r#"{{"id":"m","type":"trigger.manual","params":{value}}}"#);
+        let none = card("{}");
+        let on = card(r#"{"value":true}"#);
+        let num = card(r#"{"value":21.5}"#);
+        assert_eq!(text(&none), "Manual");
+        assert_eq!(text(&on), "Manual · on");
+        assert_eq!(text(&num), "Manual · 21.5");
+        assert_eq!(text_in(Lang::Fr, &none), "Manuel");
+        assert_eq!(text_in(Lang::Fr, &on), "Manuel · activé");
+        assert_eq!(text_in(Lang::Fr, &num), "Manuel · 21,5");
+    }
+
+    #[test]
     fn sun_and_is_dark_cards_read_as_sentences() {
         let sun =
             r#"{"id":"s","type":"trigger.sun","params":{"which":"dusk","offset_minutes":-15}}"#;
