@@ -236,6 +236,7 @@ pub fn assemble(file: &HubFile, s: &Sections) -> Config {
         },
         ..Config::default()
     };
+    cfg.flows.timezone = file.timezone.clone();
     if let Some(loc) = &file.location {
         cfg.flows.timezone = Some(loc.timezone.clone());
         cfg.flows.latitude = Some(loc.latitude);
@@ -289,6 +290,18 @@ mod tests {
             database_url: Some("postgres://u:pw@db.example.com/oikos".into()),
             ..HubFile::default()
         }
+    }
+
+    #[test]
+    fn timezone_without_location_reaches_flows_and_location_wins() {
+        let mut f = file();
+        f.timezone = Some("America/Toronto".into());
+        let cfg = assemble(&f, &Sections::default());
+        assert_eq!(cfg.flows.timezone.as_deref(), Some("America/Toronto"));
+        assert_eq!(cfg.flows.latitude, None);
+        f.location = Some(location());
+        let cfg = assemble(&f, &Sections::default());
+        assert_eq!(cfg.flows.timezone.as_deref(), Some("Europe/Paris"));
     }
 
     #[test]

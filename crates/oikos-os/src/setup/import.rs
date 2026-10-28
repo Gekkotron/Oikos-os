@@ -34,8 +34,15 @@ pub fn import_toml(path: &Path) -> anyhow::Result<(HubFile, Sections)> {
     let database_url = (!cfg.history.url.is_empty()).then(|| cfg.history.url.clone());
     let city = cfg.weather.city.clone();
     let country = cfg.weather.country.clone();
-    let (location, pending_city) = match (cfg.flows.latitude, cfg.flows.longitude) {
-        (Some(latitude), Some(longitude)) => {
+    let coords = match (cfg.flows.latitude, cfg.flows.longitude) {
+        (Some(lat), Some(lon)) => Some((lat, lon)),
+        _ => match (cfg.weather.latitude, cfg.weather.longitude) {
+            (Some(lat), Some(lon)) => Some((lat, lon)),
+            _ => None,
+        },
+    };
+    let (location, pending_city) = match coords {
+        Some((latitude, longitude)) => {
             let timezone = cfg
                 .flows
                 .timezone
@@ -54,6 +61,11 @@ pub fn import_toml(path: &Path) -> anyhow::Result<(HubFile, Sections)> {
         _ if !city.is_empty() => (None, Some((city, country))),
         _ => (None, None),
     };
+    let timezone = if location.is_none() {
+        cfg.flows.timezone.clone()
+    } else {
+        None
+    };
     let finished = database_url.is_some();
     let file = HubFile {
         mqtt: Some(cfg.mqtt.clone()),
@@ -61,6 +73,7 @@ pub fn import_toml(path: &Path) -> anyhow::Result<(HubFile, Sections)> {
         database_url,
         location,
         pending_city,
+        timezone,
         http: cfg.http.clone(),
         log: cfg.log.clone(),
         step: if finished {
@@ -129,6 +142,8 @@ mod tests {
     use super::*;
     use crate::setup::sections::assemble;
 
+    // Lib tests that call `Config::load` must run under `figment::Jail`: it serializes them with
+    // the tests that set `OIKOS_*` env vars, which `load` would otherwise read mid-test.
     /// Holds figment's global lock so `OIKOS_*` env tests elsewhere cannot leak in mid-load.
     #[allow(clippy::result_large_err)]
     fn import_locked(p: &Path) -> anyhow::Result<(HubFile, Sections)> {
@@ -141,10 +156,10 @@ mod tests {
     }
 
     #[allow(clippy::result_large_err)]
-    fn load_locked(p: &Path) -> Config {
+    fn load_locked(p: &Path) -> Result<Config, figment::Error> {
         let mut out = None;
         figment::Jail::expect_with(|_| {
-            out = Some(Config::load(Some(p)).unwrap());
+            out = Some(Config::load(Some(p)));
             Ok(())
         });
         out.unwrap()
@@ -291,23 +306,135 @@ country = "FR"
     }
 
     #[test]
-    fn assemble_matches_load_on_the_key_sections() {
+    fn timezone_only_is_kept_without_a_location() {
         let dir = tempfile::tempdir().unwrap();
-        let p = write(dir.path(), "oikos.toml", FULL);
-        let loaded = load_locked(&p);
+        let p = write(
+            dir.path(),
+            "oikos.toml",
+            "[flows]\ntimezone = \"Europe/Paris\"\n",
+        );
+        let (file, sections) = import_locked(&p).unwrap();
+        assert!(file.location.is_none());
+        assert_eq!(file.timezone.as_deref(), Some("Europe/Paris"));
+        let cfg = assemble(&file, &sections);
+        assert_eq!(cfg.flows.timezone.as_deref(), Some("Europe/Paris"));
+    }
+
+    #[test]
+    fn weather_only_coordinates_build_the_location() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write(
+            dir.path(),
+            "oikos.toml",
+            "[flows]\ntimezone = \"Europe/Paris\"\n[weather]\ncity = \"Lyon\"\nlatitude = 45.76\nlongitude = 4.84\n",
+        );
+        let (file, _) = import_locked(&p).unwrap();
+        let loc = file.location.unwrap();
+        assert_eq!((loc.latitude, loc.longitude), (45.76, 4.84));
+        assert_eq!(loc.city, "Lyon");
+        assert_eq!(loc.timezone, "Europe/Paris");
+        assert!(file.timezone.is_none() && file.pending_city.is_none());
+    }
+
+    const EVERYTHING: &str = r#"
+[mqtt]
+host = "192.0.2.1"
+port = 1884
+user = "u"
+password = "pw"
+client_id = "cid"
+send_ha_birth = false
+ha_status_topic = "ha/status"
+[topics]
+discovery_prefixes = ["oikos", "homeassistant"]
+ui_prefix = "x/ui"
+z2m_base = "z2m"
+automation_prefix = "x/auto"
+[http]
+bind = "127.0.0.1:9000"
+[log]
+level = "debug"
+json = true
+[commands]
+confirm_timeout_ms = 1234
+subscription_debounce_ms = 77
+[automation]
+runs_kept = 5
+[watchdog.gateway]
+enabled = true
+prefix = "gw/health"
+[watchdog.acl]
+enabled = true
+source = "file"
+log_file = "/var/log/mosquitto.log"
+cooldown = 99
+[groups]
+enabled = true
+[alarm]
+prefix = "x/alarm"
+[history]
+url = "postgres://u:pw@db.example.com/oikos"
+buffer_rows = 42
+[flows]
+timezone = "Europe/Paris"
+latitude = 45.76
+longitude = 4.84
+[weather]
+enabled = true
+refresh_minutes = 30
+city = "Lyon"
+country = "FR"
+[solcast]
+enabled = true
+sites = ["site-1", "site_2"]
+daily_limit = 20
+api_key = "sk-inline"
+[frigate]
+url = "http://192.0.2.5:5000"
+user = "fu"
+password = "fp"
+connect_timeout_ms = 1111
+media_url = "http://192.0.2.5:8971"
+bridge = true
+labels = ["person"]
+cameras = ["door"]
+zones = ["yard"]
+cooldown = 12
+severity = "alert"
+ttl = 100
+topic_prefix = "fr"
+live = true
+[push]
+prefix = "p/push"
+legacy_prefix = "p-legacy"
+retry_interval = 11
+max_retries = 3
+history_size = 50
+history_days = 2
+[climate]
+enabled = true
+prefix = "x/climate"
+"#;
+
+    #[test]
+    fn assemble_of_the_import_equals_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write(dir.path(), "oikos.toml", EVERYTHING);
+        write(dir.path(), "secrets/firebase.json", "{\"k\":1}");
+        let mut expected = load_locked(&p).unwrap();
         let (file, sections) = import_locked(&p).unwrap();
         let got = assemble(&file, &sections);
-        assert_eq!(got.mqtt, loaded.mqtt);
-        assert_eq!(got.topics, loaded.topics);
-        assert_eq!(got.history, loaded.history);
-        assert_eq!(got.flows, loaded.flows);
-        assert_eq!(got.weather.enabled, loaded.weather.enabled);
-        assert_eq!(got.weather.city, loaded.weather.city);
-        assert_eq!(got.weather.country, loaded.weather.country);
-        assert_eq!(got.weather.refresh_minutes, loaded.weather.refresh_minutes);
-        assert_eq!(got.solcast.enabled, loaded.solcast.enabled);
-        assert_eq!(got.frigate, loaded.frigate);
-        assert_eq!(got.climate, loaded.climate);
-        assert_eq!(got.push.prefix, loaded.push.prefix);
+        // What assemble leaves unset on purpose, and what the import inlines.
+        expected.push.credentials = None;
+        expected.push.service_account = Some("{\"k\":1}".into());
+        expected.solcast.api_key_file = None;
+        // The location also feeds the weather coordinates.
+        expected.weather.latitude = Some(45.76);
+        expected.weather.longitude = Some(4.84);
+        assert_eq!(got, expected);
+        // Guard the test itself: it really sets non-default values.
+        assert_ne!(got.watchdog, Config::default().watchdog);
+        assert_ne!(got.frigate, Config::default().frigate);
+        assert_ne!(got.push.history_days, Config::default().push.history_days);
     }
 }

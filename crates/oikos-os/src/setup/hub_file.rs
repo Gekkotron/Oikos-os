@@ -37,6 +37,8 @@ pub struct HubFile {
     pub location: Option<Location>,
     /// A city (and country) to geocode into `location`; set only by the import.
     pub pending_city: Option<(String, Option<String>)>,
+    /// An imported `[flows] timezone`, kept while `location` is `None`.
+    pub timezone: Option<String>,
     pub http: HttpConfig,
     pub log: LogConfig,
     pub step: SetupStep,
@@ -53,6 +55,7 @@ impl fmt::Debug for HubFile {
             .field("database_url", &url)
             .field("location", &self.location)
             .field("pending_city", &self.pending_city)
+            .field("timezone", &self.timezone)
             .field("http", &self.http)
             .field("log", &self.log)
             .field("step", &self.step)
