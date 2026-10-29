@@ -157,9 +157,9 @@ async fn main() -> anyhow::Result<ExitCode> {
             tracing::info!("stopped");
             Ok(ExitCode::SUCCESS)
         }
-        Cli::InitBundled { data_dir } => {
+        Cli::InitBundled { data_dir, config } => {
             logging::init(&LogConfig::default());
-            match bundled::init_bundled(&data_dir)? {
+            match bundled::init_bundled(&data_dir, config.as_deref())? {
                 InitOutcome::Created => println!(
                     "bundled credentials created in {}",
                     data_dir.join(bundled::BUNDLED_FILE).display()
@@ -171,7 +171,8 @@ async fn main() -> anyhow::Result<ExitCode> {
                 InitOutcome::DatabaseWithoutCredentials => {
                     eprintln!(
                         "data/timescaledb already holds a database but data/bundled.json is gone; \
-                         restore bundled.json or delete data/timescaledb to start over"
+                         its password may still be in data/bundled/db-password; restore \
+                         bundled.json or delete data/timescaledb to start over"
                     );
                     return Ok(ExitCode::from(1));
                 }
