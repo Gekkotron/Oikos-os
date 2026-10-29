@@ -248,14 +248,14 @@ fn push_keys_are_read() {
         jail.create_file(
             "oikos.toml",
             "[push]\nprefix = \"home/push\"\nlegacy_prefix = \"\"\n\
-             credentials = \"/etc/oikos/fcm.json\"\nretry_interval = 30\n",
+             credentials = \"/srv/keys/fcm.json\"\nretry_interval = 30\n",
         )?;
         let push = Config::load(None)?.push;
         assert_eq!(push.prefix, "home/push");
         assert_eq!(push.legacy_prefix, "");
         assert_eq!(
             push.credentials.as_deref(),
-            Some(std::path::Path::new("/etc/oikos/fcm.json"))
+            Some(std::path::Path::new("/srv/keys/fcm.json"))
         );
         assert_eq!(push.retry_interval, 30);
         jail.set_env("OIKOS_PUSH__CREDENTIALS", "/tmp/key.json");
@@ -306,11 +306,11 @@ fn explicit_push_credentials_win_over_the_secrets_folder() {
         jail.create_file("secrets/firebase.json", "{}")?;
         jail.create_file(
             "oikos.toml",
-            "[push]\ncredentials = \"/etc/oikos/fcm.json\"\n",
+            "[push]\ncredentials = \"/srv/keys/fcm.json\"\n",
         )?;
         assert_eq!(
             Config::load(None)?.push.credentials.as_deref(),
-            Some(std::path::Path::new("/etc/oikos/fcm.json"))
+            Some(std::path::Path::new("/srv/keys/fcm.json"))
         );
         jail.set_env("OIKOS_PUSH__CREDENTIALS", "/tmp/key.json");
         assert_eq!(
@@ -340,11 +340,11 @@ fn old_push_keys_are_rejected() {
 }
 
 #[test]
-fn example_config_loads() {
+fn legacy_config_still_loads() {
     Jail::expect_with(|_jail| {
         let path = std::path::Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../oikos.example.toml"
+            "/tests/fixtures/legacy-oikos.toml"
         ));
         let cfg = Config::load(Some(path))?;
         assert_eq!(cfg.push.prefix, "oikos/push");

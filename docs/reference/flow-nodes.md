@@ -67,11 +67,11 @@ A run follows the graph from the trigger that fired, depth first. A failing node
 
 The **scalar** is the one value of a state that triggers and `if` compare: the on/off bool, the number, the text, a light's `on`, a cover's `state`.
 
-Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker. `[automation] runs_kept` (default 20) sets how many recent runs are remembered per flow.
+Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker. The `automation.runs_kept` setting (default 20, see the [Settings reference](configuration.md#automation)) sets how many recent runs are remembered per flow.
 
 ### The house position
 
-Sun nodes need the position of the house. Set `[flows] latitude` and `[flows] longitude` in `oikos.toml` (see [Configuration](configuration.md#flows)). With neither set, the hub uses Paris and saving a flow that has a `trigger.sun` or an `if` with `op: is_dark` returns a warning. Schedules use `[flows] timezone`.
+Sun nodes need the position of the house. Set your home location in the setup wizard or **Settings → Location** (see the [Settings reference](configuration.md#home-location)). With none set, the hub uses Paris and saving a flow that has a `trigger.sun` or an `if` with `op: is_dark` returns a warning. Schedules use `[flows] timezone`.
 
 ## `trigger.state`
 
@@ -110,7 +110,7 @@ Starts a run at each wall-clock tick while the flow is enabled.
 | --- | --- | --- |
 | `cron` | string | Five fields: minute, hour, day of month, month, day of week. Seconds and year forms are refused. |
 
-Outputs: one. The cron runs in `[flows] timezone` (the system zone when unset). The first run is at the next tick. Ticks missed while the hub was busy or down are never replayed. `GET /api/v1/schedule?cron=…` previews the next ticks.
+Outputs: one. The cron runs in the home location's time zone (the system zone when none is set). The first run is at the next tick. Ticks missed while the hub was busy or down are never replayed. `GET /api/v1/schedule?cron=…` previews the next ticks.
 
 An `if` or a `switch` reachable from a schedule trigger (or a sun trigger) must name an `entity`, because these triggers carry no value; the exception is an `if` with `op: is_dark`. A `time.between` reads the clock and needs none.
 
@@ -233,7 +233,7 @@ Outputs: two ports, `in` and `out`. Every edge leaving a `time.between` names on
 
 - The range is `from <= time < to`. A `to` earlier than `from` crosses midnight: `22:00` to `06:00` is in from 22:00 up to 05:59.
 - `from` and `to` must differ. Times need two digits each (`07:00`, not `7:00`).
-- It reads the clock of the house zone (`[flows] timezone`, the system zone when unset), by wall-clock time: on a day the clocks change, `07:00` still means 07:00 on the wall.
+- It reads the clock of the house zone (the home location's time zone, the system zone when none is set), by wall-clock time: on a day the clocks change, `07:00` still means 07:00 on the wall.
 - It needs no entity and no trigger value, so it works after any trigger, schedule and sun triggers included.
 - The step detail shows the time read and the port, for example `22:40 → out`.
 
@@ -267,7 +267,7 @@ Sends a command to an entity.
 | `entity` | string | The entity id. |
 | `command` | object | The same JSON as the API's `Command`, for example `{"type": "turn_on", "brightness": 200}`. See [MCP tools](mcp-tools.md#commands). |
 
-Outputs: one. The command goes through the hub's command path, confirmed by the entity's state echo within `[commands] confirm_timeout_ms`, exactly like `send_command`. No echo, a rejection or an offline entity fails the node.
+Outputs: one. The command goes through the hub's command path, confirmed by the entity's state echo within the `commands.confirm_timeout_ms` setting (default 5000), exactly like `send_command`. No echo, a rejection or an offline entity fails the node.
 
 On save the hub refuses a command the entity cannot take. It also refuses `arm` and `disarm` with a `code`: flows are retained on the broker in clear, so alarm codes are not allowed. Arm and disarm from a flow only on a panel that needs none.
 

@@ -8,19 +8,15 @@ description: How the climate engine decides each zone's heating or cooling, what
 The climate engine is still being tested. Its rules, settings and decisions may change between releases, and it commands real heating and cooling: watch what it decides before you leave a zone on it.
 :::
 
-With `[climate] enabled = true` the hub heats and cools by zone. The engine is off by default:
+With climate on, the hub heats and cools by zone. The engine is off by default. Turn it on with the **Climate** card in the Services step of the setup wizard (**Settings → Run setup again** reopens it; nothing is wiped), where it is marked Beta. It is the card's **Enabled** switch. Everything else is edited on the Climate screen, over REST and over MCP.
 
-```toml
-[climate]
-enabled = false
-# prefix = "oikos/climate"
-```
+The one low-level field, the topic `prefix` (`oikos/climate` by default), has no screen: change it with `PUT /api/v1/settings/climate` or the `set_settings` MCP tool, which restarts the hub (see the [Settings reference](../reference/configuration.md#climate)).
 
-Settings are retained documents under `[climate] prefix` (`oikos/climate` by default), edited over REST and MCP. While `enabled` is false the REST routes answer `503` and the MCP tools answer `climate disabled`.
+Settings are retained documents under that prefix. While climate is off the REST routes answer `503` and the MCP tools answer `climate disabled`.
 
 ## The Climate screen
 
-The **Climate** tab appears when `[climate] enabled = true`. It lists the rooms with their state, the current reading and what the engine decided (the source and the reason). Open a room to see its panel:
+The **Climate** tab appears when climate is on. It lists the rooms with their state, the current reading and what the engine decided (the source and the reason). Open a room to see its panel:
 
 - **Zone state**: Off, Pending or Active.
 - **Room thermometer**: Automatic (the room's own temperature sensor when it has one, else the mean of its climate devices' readings) or a sensor you pick.

@@ -77,4 +77,4 @@ The ingest path offers each changed state to a bounded channel with `try_send`, 
 
 ### Climate engine
 
-With `[climate] enabled`, the hub holds the retained documents under `[climate] prefix` and runs an evaluation loop. Per zone, `oikos-climate` decides from a priority tree (safety, override, holiday, away, schedule); the hub commands the devices through the normal command path, tells a hand change on a device from the engine's own echo, and raises safety alerts through push. A learner reads history, proposes a schedule, and nothing applies until it is approved. See [Climate](../users/climate.md).
+With the climate engine on, the hub holds the retained documents under the climate `prefix` and runs an evaluation loop. Per zone, `oikos-climate` decides from a priority tree (safety, override, holiday, away, schedule); the hub commands the devices through the normal command path, tells a hand change on a device from the engine's own echo, and raises safety alerts through push. A learner reads history, proposes a schedule, and nothing applies until it is approved. See [Climate](../users/climate.md).

@@ -28,7 +28,7 @@ The house overview (**House**, first under Overview) opens with a header above i
 
 On a wide window the text sits on the left and the weather card on the right. On a phone everything stacks, and the weather card becomes one compact row under the chips. Without a weather card, the sentence takes the full width and the sunset moves to the detail line.
 
-The header is computed in the browser from what the screen already has: entities, rooms, alerts, the sun from `[flows]`, the weather and the home settings. Nothing is stored for it. When a part has no data, that part hides.
+The header is computed in the browser from what the screen already has: entities, rooms, alerts, the sun from your home location, the weather and the home settings. Nothing is stored for it. When a part has no data, that part hides.
 
 ### Greeting
 
@@ -65,7 +65,7 @@ Examples:
 The rules behind the table:
 
 - The door or window line uses the entity's name. The room is added in brackets when the entity has one.
-- "Dark" means between dusk and dawn at the location set in `[flows]`, as the flow canvas computes it.
+- "Dark" means between dusk and dawn at your home location, as the flow canvas computes it.
 - A light counts when it is on and not hidden. A light inside a group counts on its own; the group entity does not count, so no light is counted twice.
 - The indoor temperature is the sensor you pick in [Settings](#settings), or else the median of the rooms: each room counts as the mean of its temperature sensors, offline sensors are left out, and so is any sensor that does not read in °C. One outdoor sensor cannot skew it. Outdoor weather sensors are never used. Offline lights, doors, windows and thermostats are ignored everywhere in the header. The sentence and the indoor chip show the same value.
 - The cold and hot thresholds come from Settings › Home. They default to 15 °C and 26 °C.
@@ -77,7 +77,7 @@ Under the sentence, in a muted style, the detail line holds up to two fragments 
 
 1. Rain expected within the hour (more than 0.1 mm): « Pluie attendue dans l'heure » / "Rain expected within the hour".
 2. Frost tonight (a minimum of 0 °C or below), shown from 15:00: « Gel cette nuit » / "Frost tonight".
-3. The sunset time, shown from two hours before sunset until sunset, or at all times when the weather card is hidden: « Coucher du soleil à 18 h 42 » / "Sunset at 6:42 pm". When the house location is not set in `[flows]`, this fragment reads « Coucher du soleil : position de la maison non réglée » / "Sunset: house location not set" instead of a time.
+3. The sunset time, shown from two hours before sunset until sunset, or at all times when the weather card is hidden: « Coucher du soleil à 18 h 42 » / "Sunset at 6:42 pm". When the home location is not set, this fragment reads « Coucher du soleil : position de la maison non réglée » / "Sunset: house location not set" instead of a time.
 
 ### Chips
 
@@ -120,7 +120,7 @@ The weather page is at `/weather`, opened from the weather card. The Back button
 - **Forecast**: a Today card, then one card per day for the next five days (six cards in all), each with the weekday, the condition icon, the high, the low and the chance of rain. Tap a card to show that day on the whole page (`/weather?day=YYYY-MM-DD`; the card is pressed, and tapping through days does not pile up Back entries). The top then shows the day's condition, high, feels-like high, low and high and the chance of rain, and the heading above the tiles shows the day's name ("Tomorrow", "Thursday 29"). The tiles show the day's strongest wind and main direction, the mean humidity, pressure and cloud cover, the total rain, the strongest gust, the highest UV index, and that day's sunrise and sunset. Tap Today to come back.
 - **Footer**: the place (with its region when known), the time of the last update, a stale notice when the data is late, and the Open-Meteo credit.
 
-The page keeps showing the last data however old it is, unlike the header card. When weather is off or not fetched yet, the page says that the weather is unavailable and tells you to enable `[weather]` in `oikos.toml`.
+The page keeps showing the last data however old it is, unlike the header card. When weather is off or not fetched yet, the page says that the weather is unavailable and tells you to turn it on in **Settings → Weather**.
 
 ## Dashboards
 

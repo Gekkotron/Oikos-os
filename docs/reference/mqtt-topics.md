@@ -4,7 +4,7 @@ sidebar_position: 6
 description: Every MQTT topic the hub reads or writes, with its direction, retention, payload and the setting that moves it.
 ---
 
-The table lists every topic the hub reads or writes, with its default prefix. "In" means the hub subscribes; "out" means the hub publishes. A prefix is shown in `<angle brackets>` or as its default, and the last column names the `oikos.toml` key that moves it (see [Configuration](configuration.md)). The broker user in `[mqtt] user` needs read and/or write on each topic accordingly.
+The table lists every topic the hub reads or writes, with its default prefix. "In" means the hub subscribes; "out" means the hub publishes. A prefix is shown in `<angle brackets>` or as its default, and the last column names the setting that moves it (see the [Settings reference](configuration.md)). The broker user (the MQTT user of **Settings → Broker**) needs read and/or write on each topic accordingly.
 
 | Topic | Direction | Retained | Payload | Moved by |
 | --- | --- | --- | --- | --- |

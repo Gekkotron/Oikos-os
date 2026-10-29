@@ -115,7 +115,7 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 
 ## Climate
 
-The climate engine is in beta. These nine tools answer `climate disabled` while `[climate] enabled` is `false`. See [Climate](../users/climate.md).
+The climate engine is in beta. These nine tools answer `climate disabled` while the climate engine is off. See [Climate](../users/climate.md).
 
 | Tool | What it does |
 | --- | --- |

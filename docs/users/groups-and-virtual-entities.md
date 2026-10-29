@@ -10,14 +10,9 @@ Two kinds of entity belong to the hub itself, with no device behind them. A **gr
 
 A group is an entity the hub publishes as `group_<id>`. It stands for a list of **member** entities of one kind. A command sent to the group goes to every member, and the group's state is the combination of the members' states. The group's definition is a retained message, so it survives a restart and the broker holds the truth.
 
-Groups are off by default. Turn them on in `oikos.toml`:
+Groups are off by default. They have no switch on a Settings page: turn them on through `PUT /api/v1/settings/advanced` or the `set_settings` MCP tool, by setting `groups.enabled` to `true` in the `advanced` section (read it first and send the whole section back). The hub restarts to apply it.
 
-```toml
-[groups]
-enabled = true
-```
-
-While `enabled` is `false`, the group routes and tools answer `groups disabled`, and group commands are rejected. See [Configuration](../reference/configuration.md#groups).
+While groups are off, the group routes and tools answer `groups disabled`, and group commands are rejected. See the [Settings reference](../reference/configuration.md#advanced).
 
 ### Definition
 

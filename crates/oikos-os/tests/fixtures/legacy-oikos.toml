@@ -1,3 +1,6 @@
+# An old-format oikos.toml, kept only to test that the hub still reads and imports one.
+# New installs configure the hub in the setup wizard and Settings; they have no such file.
+
 [mqtt]
 host = "192.168.1.91"
 port = 1883
