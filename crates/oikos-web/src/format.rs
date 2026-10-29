@@ -293,6 +293,12 @@ fn date_time(s: &str) -> Option<String> {
     shaped.then(|| format!("{} {}", &s[..10], &s[11..16]))
 }
 
+/// The date part of an RFC 3339 date-time as "2026-10-19", as sent (no zone conversion).
+pub fn date_only(s: &str) -> Option<String> {
+    let t = chrono::DateTime::parse_from_rfc3339(s).ok()?;
+    Some(t.format("%Y-%m-%d").to_string())
+}
+
 /// `heat_cool` becomes "Heat cool".
 pub fn word(s: &str) -> String {
     let spaced = s.replace('_', " ");
@@ -350,8 +356,8 @@ pub fn generic_value(
 #[cfg(test)]
 mod tests {
     use super::{
-        display_value, entity_title, entity_value, list_label, shown_device_name, shown_name,
-        wrap_id,
+        date_only, display_value, entity_title, entity_value, list_label, shown_device_name,
+        shown_name, wrap_id,
     };
     use crate::i18n::Lang;
     use oikos_api::EntityView;
@@ -631,6 +637,15 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(display_value(Lang::En, &under, None), "999.5");
+    }
+
+    #[test]
+    fn date_only_keeps_the_date_as_sent() {
+        assert_eq!(
+            date_only("2026-01-15T22:30:00+02:00").as_deref(),
+            Some("2026-01-15")
+        );
+        assert_eq!(date_only("last week"), None);
     }
 
     #[test]

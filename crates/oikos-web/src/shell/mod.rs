@@ -70,14 +70,20 @@ pub fn Shell(
         open
     });
 
+    // The wizard is a bare page: no sidebar or header.
+    let bare = move || location.pathname.with(|p| p.starts_with("/setup"));
     view! {
-        <div class="shell">
-            <Sidebar climate_on alarm_armed solar_active alerts_badge drawer_open />
+        <div class="shell" class:shell--bare=bare>
+            <Show when=move || !bare()>
+                <Sidebar climate_on alarm_armed solar_active alerts_badge drawer_open />
+            </Show>
             <Show when=move || drawer_open.get()>
                 <div class="shell__scrim" aria-hidden="true" on:click=move |_| drawer_open.set(false)></div>
             </Show>
             <div class="shell__content" inert=move || drawer_open.get().then_some("")>
-                <ContentHeader drawer_open />
+                <Show when=move || !bare()>
+                    <ContentHeader drawer_open />
+                </Show>
                 <main class="screen">{children()}</main>
             </div>
         </div>

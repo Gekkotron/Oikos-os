@@ -15,6 +15,7 @@ use crate::components::confirm::Confirming;
 use crate::components::now::install_now;
 use crate::components::toast::{ToastQueue, Toasts};
 use crate::house::House;
+use crate::i18n::Lang;
 use crate::i18n::errors::{dashboards_load_failed, named_failure};
 use crate::i18n::install_lang;
 use crate::nav::{TrackBackStack, install_nav};
@@ -36,6 +37,10 @@ use crate::screens::security::SecurityScreen;
 use crate::screens::settings::{SettingsPageScreen, SettingsScreen};
 use crate::screens::solar::SolarScreen;
 use crate::screens::weather::WeatherScreen;
+use crate::setup::wizard::SetupScreen;
+use crate::setup::{
+    Applying, ApplyingOverlay, SetupApp, SetupState, redirects_to_setup, reload_to,
+};
 use crate::shell::Shell;
 use crate::theme::install_theme;
 
@@ -50,9 +55,15 @@ pub(crate) fn landing_path() -> String {
 #[component]
 fn HouseRedirect() -> impl IntoView {
     let navigate = use_navigate();
+    let setup = use_context::<SetupState>();
     Effect::new(move |_| {
+        // An unfinished setup takes the landing page; the wizard resumes where it stopped.
+        let target = match setup.and_then(|s| s.0.get()) {
+            Some(status) if redirects_to_setup(&status, "/") => "/setup".to_owned(),
+            _ => landing_path(),
+        };
         navigate(
-            &landing_path(),
+            &target,
             leptos_router::NavigateOptions {
                 replace: true,
                 ..Default::default()
@@ -72,11 +83,45 @@ pub(crate) fn any_alarm_armed<'a>(
     })
 }
 
+/// What mounts first: asks the hub for its mode once, then shows the setup app or the house.
+/// A failed call (an older hub with no setup API) shows the house. The "Applying…" overlay sits
+/// above either.
+#[component]
+pub fn Root() -> impl IntoView {
+    let lang = install_lang();
+    provide_context(lang);
+    provide_context(Applying::new(reload_to));
+    let state = SetupState(RwSignal::new(None));
+    provide_context(state);
+    let loaded = RwSignal::new(false);
+    leptos::task::spawn_local(async move {
+        if let Ok(status) = crate::api::setup::get_setup().await {
+            state.0.set(Some(status));
+        }
+        loaded.set(true);
+    });
+    view! {
+        {move || {
+            loaded
+                .get()
+                .then(|| {
+                    if state.0.with_untracked(|s| s.as_ref().is_some_and(|s| s.mode == "setup")) {
+                        view! { <SetupApp /> }.into_any()
+                    } else {
+                        view! { <App /> }.into_any()
+                    }
+                })
+        }}
+        <ApplyingOverlay />
+    }
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     let house = House::new();
     provide_context(house);
-    let lang = install_lang();
+    // `Root` already installed the language; a test mounting `App` alone installs its own.
+    let lang = use_context::<RwSignal<Lang>>().unwrap_or_else(install_lang);
     provide_context(lang);
     let toasts = Toasts::new();
     provide_context(toasts);
@@ -187,6 +232,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("/devices") view=DevicesScreen />
                     <Route path=path!("/settings") view=SettingsScreen />
                     <Route path=path!("/settings/:page") view=SettingsPageScreen />
+                    <Route path=path!("/setup") view=SetupScreen />
                 </Routes>
             </Shell>
             <ToastQueue />

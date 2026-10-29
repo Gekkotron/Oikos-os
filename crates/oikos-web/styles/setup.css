@@ -1,0 +1,403 @@
+/* The setup wizard and the "Applying…" overlay. */
+.applying {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: var(--bg-gradient) fixed, var(--bg);
+  color: var(--ink);
+}
+
+.applying__text {
+  margin: 0;
+  color: var(--muted);
+}
+
+.setup {
+  box-sizing: border-box;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 32px 16px;
+}
+
+.setup__progress {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+.setup__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--chip-border);
+}
+
+.setup__dot--done {
+  background: var(--muted);
+}
+
+.setup__dot--current {
+  background: var(--accent-amber);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* On /setup inside the running app the shell drops its sidebar and header. */
+.shell--bare {
+  display: block;
+}
+
+/* Welcome step and Settings > Location. */
+.setup__title {
+  margin: 0 0 8px;
+  font: var(--type-display);
+}
+
+.setup__lead {
+  margin: 0 0 20px;
+  color: var(--muted);
+}
+
+.loc__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 12px;
+}
+
+.loc__wide {
+  grid-column: 1 / -1;
+}
+
+.loc__results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.loc__details {
+  margin: 12px 0;
+}
+
+.loc__place {
+  margin: 8px 0;
+  color: var(--muted);
+}
+
+.loc__problem {
+  min-height: 1.2em;
+  margin: 8px 0;
+  color: var(--accent-amber);
+}
+
+.loc__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.loc__actions .btn {
+  flex: none;
+  min-width: 120px;
+}
+
+.conn__result {
+  min-height: 1.2em;
+  margin: 8px 0;
+}
+
+.conn__line {
+  margin: 0;
+}
+
+.conn__line--ok {
+  color: var(--accent-mint);
+}
+
+.conn__line--bad {
+  color: var(--danger);
+}
+
+.conn__actions {
+  gap: 8px;
+}
+
+.conn__actions .conn__test {
+  margin-right: auto;
+}
+
+/* Devices step. */
+.devices__count {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.devices__group {
+  margin: 0 0 16px;
+}
+
+.devices__room-title {
+  margin: 0 0 6px;
+  font: var(--type-body);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.devices__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.devices__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 10rem);
+  grid-template-areas:
+    "name room"
+    "model room";
+  align-items: center;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--chip-border);
+}
+
+.devices__name {
+  grid-area: name;
+  overflow-wrap: anywhere;
+}
+
+.devices__model {
+  grid-area: model;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.devices__room {
+  grid-area: room;
+  width: 100%;
+  min-width: 0;
+}
+
+.devices__back {
+  margin: 8px 0;
+}
+
+@media (max-width: 480px) {
+  .devices__row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "name"
+      "model"
+      "room";
+  }
+}
+
+.devices__actions {
+  gap: 8px;
+}
+
+/* Services step: one collapsible card per service. */
+.svc__list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.svc {
+  margin: 0 0 8px;
+  border: 1px solid var(--chip-border);
+  border-radius: 12px;
+}
+
+.svc__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.svc__head:focus-visible {
+  outline: 2px solid var(--accent-amber);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+.svc__icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
+.svc__icon svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+.svc__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.svc__title {
+  font-weight: 600;
+}
+
+.svc__desc {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.svc__pill {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid var(--chip-border);
+  border-radius: 999px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.svc__pill--unknown {
+  border-style: dashed;
+}
+
+.svc__pill--checking {
+  border-style: dotted;
+  opacity: 0.7;
+}
+
+.svc__pill--set {
+  border-color: var(--accent-mint);
+  color: var(--accent-mint);
+}
+
+.svc__body {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--chip-border);
+}
+
+.svc__form {
+  padding-top: 12px;
+}
+
+/* Energy card and the Home settings Energy panel: one labelled select per role. */
+.energy__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.energy__field {
+  min-width: 0;
+}
+
+.energy__role {
+  width: 100%;
+  min-width: 0;
+}
+
+.energy__field .loc__problem {
+  min-height: 0;
+  margin: 4px 0 0;
+}
+
+.svc__skip {
+  margin-top: 12px;
+}
+
+/* Frigate alert and camera chips. */
+.svc__label {
+  margin: 12px 0 4px;
+  color: var(--muted);
+}
+
+.svc__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.svc__form input[type="file"] {
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 480px) {
+  .svc__head {
+    flex-wrap: wrap;
+  }
+
+  .svc__text {
+    flex-basis: calc(100% - 48px);
+  }
+
+  .svc__pill {
+    margin-left: 36px;
+  }
+}
+
+/* Done step: the summary of what is set up. */
+.done__list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.done__row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+  border: 1px solid var(--chip-border);
+  border-radius: 12px;
+}
+
+.done__mark {
+  color: var(--accent-mint);
+}
+
+.done__label {
+  min-width: 0;
+}
+
+.done__value {
+  min-width: 0;
+  color: var(--muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.done__row--off .done__mark {
+  color: var(--muted);
+}
+
+@media (max-width: 480px) {
+  .done__row {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .done__value {
+    grid-column: 2;
+    text-align: left;
+  }
+}

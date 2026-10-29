@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::A;
 use leptos_router::hooks::use_params_map;
-use oikos_api::{ConnectionStatus, DeviceView, UpdateView};
+use oikos_api::{ConnectionStatus, DeviceView, SetupStatus, UpdateView};
 use oikos_core::model::Availability;
 
 use crate::energy_view::{EnergyView, energy_view, set_energy_view};
@@ -15,11 +15,16 @@ use crate::i18n::settings::{
     CLAUDE_CODE_SNIPPET, CLAUDE_DESKTOP_SNIPPET, CODEX_SNIPPET, SettingsText as T, settings_text,
     updates_waiting,
 };
+use crate::i18n::setup::{SetupText, setup_text};
 use crate::i18n::{Key, Lang, text, use_lang};
 use crate::nav::BackLink;
 use crate::screens::alarm_settings::{AlarmSettingsPage, settings_status};
 use crate::screens::entity_sheet::availability_class;
 use crate::screens::home_settings_panel::HomeSettingsPanel;
+use crate::setup::connection::{DatabaseForm, MqttForm};
+use crate::setup::services::basic::WeatherForm;
+use crate::setup::services::keys::{FrigateForm, PushForm, SolcastForm};
+use crate::setup::welcome::LocationForm;
 use crate::theme::Theme;
 
 const DASH: &str = "—";
@@ -186,22 +191,34 @@ fn EnergyViewSwitch() -> impl IntoView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsPage {
     Home,
+    Location,
+    Weather,
+    SolarForecast,
+    Cameras,
+    Push,
     Alarm,
     Appearance,
     Zigbee2mqtt,
     Broker,
+    Database,
     Mcp,
     About,
 }
 
 impl SettingsPage {
     /// In the order the Settings list shows them.
-    pub const ALL: [SettingsPage; 7] = [
+    pub const ALL: [SettingsPage; 13] = [
         SettingsPage::Home,
+        SettingsPage::Location,
+        SettingsPage::Weather,
+        SettingsPage::SolarForecast,
+        SettingsPage::Cameras,
+        SettingsPage::Push,
         SettingsPage::Alarm,
         SettingsPage::Appearance,
         SettingsPage::Zigbee2mqtt,
         SettingsPage::Broker,
+        SettingsPage::Database,
         SettingsPage::Mcp,
         SettingsPage::About,
     ];
@@ -209,10 +226,16 @@ impl SettingsPage {
     pub fn slug(self) -> &'static str {
         match self {
             SettingsPage::Home => "home",
+            SettingsPage::Location => "location",
+            SettingsPage::Weather => "weather",
+            SettingsPage::SolarForecast => "solar-forecast",
+            SettingsPage::Cameras => "cameras",
+            SettingsPage::Push => "push-notifications",
             SettingsPage::Alarm => "alarm",
             SettingsPage::Appearance => "appearance",
             SettingsPage::Zigbee2mqtt => "zigbee2mqtt",
             SettingsPage::Broker => "broker",
+            SettingsPage::Database => "database",
             SettingsPage::Mcp => "mcp",
             SettingsPage::About => "about",
         }
@@ -226,10 +249,16 @@ impl SettingsPage {
     pub fn key(self) -> Key {
         match self {
             SettingsPage::Home => Key::HomeSection,
+            SettingsPage::Location => Key::Location,
+            SettingsPage::Weather => Key::Weather,
+            SettingsPage::SolarForecast => Key::SolarForecast,
+            SettingsPage::Cameras => Key::Cameras,
+            SettingsPage::Push => Key::PushNotifications,
             SettingsPage::Alarm => Key::Alarm,
             SettingsPage::Appearance => Key::Appearance,
             SettingsPage::Zigbee2mqtt => Key::Zigbee2mqtt,
             SettingsPage::Broker => Key::Broker,
+            SettingsPage::Database => Key::Database,
             SettingsPage::Mcp => Key::AiAssistants,
             SettingsPage::About => Key::About,
         }
@@ -244,10 +273,16 @@ impl SettingsPage {
             lang,
             match self {
                 SettingsPage::Home => T::HintHome,
+                SettingsPage::Location => T::HintLocation,
+                SettingsPage::Weather => T::HintWeather,
+                SettingsPage::SolarForecast => T::HintSolarForecast,
+                SettingsPage::Cameras => T::HintCameras,
+                SettingsPage::Push => T::HintPush,
                 SettingsPage::Alarm => T::HintAlarm,
                 SettingsPage::Appearance => T::HintAppearance,
                 SettingsPage::Zigbee2mqtt => T::HintZigbee,
                 SettingsPage::Broker => T::HintBroker,
+                SettingsPage::Database => T::HintDatabase,
                 SettingsPage::Mcp => T::HintMcp,
                 SettingsPage::About => T::HintAbout,
             },
@@ -308,7 +343,12 @@ pub fn SettingsScreen() -> impl IntoView {
         });
     });
     let status = move |page: SettingsPage| match page {
-        SettingsPage::Home => String::new(),
+        SettingsPage::Home
+        | SettingsPage::Location
+        | SettingsPage::Weather
+        | SettingsPage::SolarForecast
+        | SettingsPage::Cameras
+        | SettingsPage::Push => String::new(),
         SettingsPage::Alarm => alarm
             .get()
             .map(|v| settings_status(&v, lang()))
@@ -320,7 +360,7 @@ pub fn SettingsScreen() -> impl IntoView {
             house.bridge.with(|b| b.state),
         ),
         SettingsPage::Broker => house.connection.with(|c| connection_word(lang(), c)),
-        SettingsPage::Mcp => String::new(),
+        SettingsPage::Database | SettingsPage::Mcp => String::new(),
         SettingsPage::About => VERSION.to_owned(),
     };
 
@@ -352,6 +392,9 @@ pub fn SettingsScreen() -> impl IntoView {
                     })
                     .collect_view()}
             </ul>
+            <A href="/setup" attr:class="chip settings__all">
+                {move || setup_text(lang(), SetupText::RunSetupAgain)}
+            </A>
         </div>
     }
 }
@@ -386,10 +429,16 @@ pub fn SettingsPageScreen() -> impl IntoView {
             </header>
             {move || match page.get() {
                 Some(SettingsPage::Home) => view! { <HomeSettingsPanel /> }.into_any(),
+                Some(SettingsPage::Location) => view! { <LocationPage /> }.into_any(),
+                Some(SettingsPage::Weather) => view! { <WeatherPage /> }.into_any(),
+                Some(SettingsPage::SolarForecast) => view! { <SolarPage /> }.into_any(),
+                Some(SettingsPage::Cameras) => view! { <CamerasPage /> }.into_any(),
+                Some(SettingsPage::Push) => view! { <PushPage /> }.into_any(),
                 Some(SettingsPage::Alarm) => view! { <AlarmSettingsPage /> }.into_any(),
                 Some(SettingsPage::Appearance) => view! { <AppearancePage /> }.into_any(),
                 Some(SettingsPage::Zigbee2mqtt) => view! { <ZigbeePage /> }.into_any(),
                 Some(SettingsPage::Broker) => view! { <BrokerPage /> }.into_any(),
+                Some(SettingsPage::Database) => view! { <DatabasePage /> }.into_any(),
                 Some(SettingsPage::Mcp) => view! { <McpPage /> }.into_any(),
                 Some(SettingsPage::About) => view! { <AboutPage /> }.into_any(),
                 None => {
@@ -403,6 +452,123 @@ pub fn SettingsPageScreen() -> impl IntoView {
                 }
             }}
         </div>
+    }
+}
+
+/// The hub's setup status, read once. A failed read keeps the hub's wording so the page can
+/// show it instead of a form that would save over the stored values.
+fn load_status() -> RwSignal<Option<Result<SetupStatus, String>>> {
+    let status = RwSignal::new(None);
+    spawn_local(async move {
+        let result = crate::api::setup::get_setup().await.map_err(|e| e.error);
+        status.try_set(Some(result));
+    });
+    status
+}
+
+/// Why the stored values could not be read.
+fn load_failed(lang: Lang, error: String) -> impl IntoView {
+    view! {
+        <p class="settings__empty" role="alert">
+            {format!("{} {error}", setup_text(lang, SetupText::LoadFailed))}
+        </p>
+    }
+}
+
+/// The home's place, edited with the wizard's form. A running hub restarts on every save, so
+/// the overlay reloads this page and `on_saved` has nothing to do.
+#[component]
+fn LocationPage() -> impl IntoView {
+    let lang = use_lang();
+    let status = load_status();
+    view! {
+        <section class="sheet__panel">
+            {move || {
+                status
+                    .get()
+                    .map(|loaded| match loaded {
+                        Ok(s) => {
+                            view! {
+                                <LocationForm
+                                    initial=s.location
+                                    applying_target="/settings/location".to_owned()
+                                    on_saved=|_| {}
+                                />
+                            }
+                                .into_any()
+                        }
+                        Err(e) => load_failed(lang(), e).into_any(),
+                    })
+            }}
+        </section>
+    }
+}
+
+/// The weather switch and refresh interval, edited with the wizard's form.
+#[component]
+fn WeatherPage() -> impl IntoView {
+    view! {
+        <section class="sheet__panel">
+            <WeatherForm applying_target="/settings/weather".to_owned() />
+        </section>
+    }
+}
+
+/// The Solcast forecast, edited with the wizard's form.
+#[component]
+fn SolarPage() -> impl IntoView {
+    view! {
+        <section class="sheet__panel">
+            <SolcastForm applying_target="/settings/solar-forecast".to_owned() />
+        </section>
+    }
+}
+
+/// The Frigate connection, edited with the wizard's form.
+#[component]
+fn CamerasPage() -> impl IntoView {
+    view! {
+        <section class="sheet__panel">
+            <FrigateForm applying_target="/settings/cameras".to_owned() />
+        </section>
+    }
+}
+
+/// The push service-account key, edited with the wizard's form.
+#[component]
+fn PushPage() -> impl IntoView {
+    view! {
+        <section class="sheet__panel">
+            <PushForm applying_target="/settings/push-notifications".to_owned() />
+        </section>
+    }
+}
+
+/// The database connection, edited with the wizard's form.
+#[component]
+fn DatabasePage() -> impl IntoView {
+    let lang = use_lang();
+    let status = load_status();
+    view! {
+        <section class="sheet__panel">
+            {move || {
+                status
+                    .get()
+                    .map(|loaded| match loaded {
+                        Ok(s) => {
+                            view! {
+                                <DatabaseForm
+                                    initial=s.database
+                                    applying_target="/settings/database".to_owned()
+                                    on_saved=|_| {}
+                                />
+                            }
+                                .into_any()
+                        }
+                        Err(e) => load_failed(lang(), e).into_any(),
+                    })
+            }}
+        </section>
     }
 }
 
@@ -517,6 +683,7 @@ pub fn ZigbeePage() -> impl IntoView {
 fn BrokerPage() -> impl IntoView {
     let house = expect_context::<House>();
     let lang = use_lang();
+    let status = load_status();
     let reason = move || match house.connection.get() {
         ConnectionStatus::Offline { reason } => Some(reason),
         _ => None,
@@ -536,6 +703,25 @@ fn BrokerPage() -> impl IntoView {
                 }}
             </dl>
         </Panel>
+        <section class="sheet__panel">
+            {move || {
+                status
+                    .get()
+                    .map(|loaded| match loaded {
+                        Ok(s) => {
+                            view! {
+                                <MqttForm
+                                    initial=s.mqtt
+                                    applying_target="/settings/broker".to_owned()
+                                    on_saved=|_| {}
+                                />
+                            }
+                                .into_any()
+                        }
+                        Err(e) => load_failed(lang(), e).into_any(),
+                    })
+            }}
+        </section>
     }
 }
 

@@ -41,6 +41,7 @@ pub mod schedule;
 pub mod screens;
 pub mod security;
 pub mod settings_rules;
+pub mod setup;
 pub mod shell;
 pub mod solar;
 pub mod theme;

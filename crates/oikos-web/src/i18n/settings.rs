@@ -9,10 +9,16 @@ use super::{Lang, format};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsText {
     HintHome,
+    HintLocation,
+    HintWeather,
+    HintSolarForecast,
+    HintCameras,
+    HintPush,
     HintAlarm,
     HintAppearance,
     HintZigbee,
     HintBroker,
+    HintDatabase,
     HintMcp,
     HintAbout,
     NoSuchPage,
@@ -73,10 +79,16 @@ pub enum SettingsText {
 impl SettingsText {
     pub const ALL: &'static [SettingsText] = &[
         SettingsText::HintHome,
+        SettingsText::HintLocation,
+        SettingsText::HintWeather,
+        SettingsText::HintSolarForecast,
+        SettingsText::HintCameras,
+        SettingsText::HintPush,
         SettingsText::HintAlarm,
         SettingsText::HintAppearance,
         SettingsText::HintZigbee,
         SettingsText::HintBroker,
+        SettingsText::HintDatabase,
         SettingsText::HintMcp,
         SettingsText::HintAbout,
         SettingsText::NoSuchPage,
@@ -143,6 +155,20 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
             "Eco setpoint, house mode, indoor temperature, off-peak hours",
             "Consigne éco, mode de la maison, température intérieure, heures creuses",
         ),
+        T::HintLocation => (
+            "City, coordinates and time zone",
+            "Ville, coordonnées et fuseau horaire",
+        ),
+        T::HintWeather => ("Forecast for your home", "Prévisions pour votre maison"),
+        T::HintSolarForecast => (
+            "Solcast forecast for your panels",
+            "Prévision Solcast pour vos panneaux",
+        ),
+        T::HintCameras => (
+            "Frigate events, snapshots and live view",
+            "Événements, images et vue en direct de Frigate",
+        ),
+        T::HintPush => ("Alerts on your phone", "Alertes sur votre téléphone"),
         T::HintAlarm => (
             "Sensors, sirens, remotes and presence",
             "Capteurs, sirènes, télécommandes et présence",
@@ -153,6 +179,7 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
             "Passerelle, mises à jour du micrologiciel et appareils",
         ),
         T::HintBroker => ("MQTT connection", "Connexion MQTT"),
+        T::HintDatabase => ("TimescaleDB connection", "Connexion à TimescaleDB"),
         T::HintMcp => (
             "Connect Claude, Codex and other assistants",
             "Connecter Claude, Codex et d'autres assistants",
@@ -317,7 +344,7 @@ mod tests {
     #[test]
     fn all_lists_every_variant() {
         // The match in `settings_text` is exhaustive, so a new variant only needs listing here.
-        assert_eq!(SettingsText::ALL.len(), 60);
+        assert_eq!(SettingsText::ALL.len(), 66);
     }
 
     #[test]
