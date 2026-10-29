@@ -37,6 +37,21 @@ fn cancel_alert(hub: &Hub, proposal_id: &str) {
     }
 }
 
+/// The zone a proposal alert is about: proposal ids are `p-<YYYYMMDD-HHMMSS>-<zone>`.
+fn alert_zone(alert_id: &str) -> Option<&str> {
+    let stamped = alert_id.strip_prefix(ALERT_PREFIX)?.strip_prefix("p-")?;
+    stamped.get("YYYYMMDD-HHMMSS-".len()..)
+}
+
+/// When `zone`'s last proposal push was sent, as the push history holds it.
+fn last_push_in_history(hub: &Hub, zone: &str) -> Option<u64> {
+    hub.alerts()
+        .iter()
+        .filter(|a| alert_zone(&a.id) == Some(zone))
+        .map(|a| a.sent_at)
+        .max()
+}
+
 /// Publishes `proposal` retained as the zone's one pending proposal, and tells the user unless
 /// they were told less than a day ago. A pending proposal it replaces has its alert resolved.
 pub(crate) fn publish(hub: &Hub, zone: &str, proposal: Proposal, now: u64) {
@@ -56,13 +71,10 @@ pub(crate) fn publish(hub: &Hub, zone: &str, proposal: Proposal, now: u64) {
     if let Some(old) = replaced {
         cancel_alert(hub, &old);
     }
-    // After a restart nothing is remembered: the pending proposal says when the user was told.
-    let due = hub
-        .climate_runtime()
-        .last_proposal_push
-        .get(zone)
-        .copied()
-        .or(pending.as_ref().map(|old| old.created))
+    // After a restart nothing is remembered: the push history says when the user was told.
+    let last = hub.climate_runtime().last_proposal_push.get(zone).copied();
+    let due = last
+        .or_else(|| last_push_in_history(hub, zone))
         .is_none_or(|at| now.saturating_sub(at) >= PUSH_EVERY_S);
     if !due {
         return;
@@ -543,23 +555,60 @@ mod tests {
         assert!(alerts[0].resolved, "the old rules' alert was cancelled");
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn the_daily_limit_survives_a_restart() {
-        let (hub, mut rx) = hub();
-        settle(&hub).await;
-        // A proposal was pushed an hour ago, before the restart: nothing is remembered but it.
-        let mut old = proposal("p-old", ProposalKind::Initial, &[]);
-        old.created = 1_000_000 - 3_600;
+    /// The retained push history of a hub that pushed `alert_id` at `sent_at`, delivered as
+    /// the broker does after a restart.
+    fn ingest_pushed(hub: &Hub, alert_id: &str, sent_at: u64) {
+        let history = json!([{
+            "v": 1, "id": alert_id, "channel": "climate", "severity": "info",
+            "title": "Climate: new rules for living", "body": "", "actions": [],
+            "silent": false, "source": "climate", "sent_at": sent_at,
+        }]);
+        hub.ingest_message("oikos/push/history", history.to_string().as_bytes(), true);
+    }
+
+    /// A pending proposal, as the broker delivers it after a restart.
+    fn ingest_pending(hub: &Hub, id: &str, created: u64) {
+        let mut old = proposal(id, ProposalKind::Initial, &[]);
+        old.created = created;
         hub.ingest_message(
             "oikos/climate/zone/living/proposal",
             serde_json::to_string(&old).unwrap().as_bytes(),
             true,
         );
+    }
+
+    #[test]
+    fn a_proposal_alert_names_its_zone() {
+        assert_eq!(
+            alert_zone("climate-proposal-p-20261029-080000-living"),
+            Some("living")
+        );
+        assert_eq!(
+            alert_zone("climate-proposal-p-20261029-080000-x-living"),
+            Some("x-living")
+        );
+        assert_eq!(alert_zone("climate-proposal-p-1"), None);
+        assert_eq!(alert_zone("climate-safety-living-frost"), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_daily_limit_survives_a_restart() {
+        let (hub, mut rx) = hub();
+        let now = clock::now();
+        // A proposal was pushed an hour ago, before the restart; a later one replaced it
+        // without a push. Only the push history remembers when the user was told.
+        ingest_pushed(
+            &hub,
+            "climate-proposal-p-20261029-080000-living",
+            now - 3_600,
+        );
+        settle(&hub).await;
+        ingest_pending(&hub, "p-20261029-084000-living", now - 1_200);
         publish(
             &hub,
             "living",
             proposal("p-new", ProposalKind::Change, &[]),
-            1_000_000,
+            now,
         );
         echo(&hub, &mut rx);
         assert!(
@@ -567,6 +616,34 @@ mod tests {
                 .iter()
                 .all(|a| a.id != "climate-proposal-p-new"),
             "no second push within a day"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pending_proposal_never_pushed_does_not_hold_the_push() {
+        let (hub, mut rx) = hub();
+        let now = clock::now();
+        // Another zone's push and a pending proposal of this zone that was never pushed.
+        ingest_pushed(
+            &hub,
+            "climate-proposal-p-20261029-080000-bedroom",
+            now - 3_600,
+        );
+        settle(&hub).await;
+        ingest_pending(&hub, "p-20261029-084000-living", now - 1_200);
+        publish(
+            &hub,
+            "living",
+            proposal("p-new", ProposalKind::Change, &[]),
+            now,
+        );
+        echo(&hub, &mut rx);
+        assert!(
+            alerts_of(&hub)
+                .iter()
+                .any(|a| a.id == "climate-proposal-p-new"),
+            "pushed: {:?}",
+            alerts_of(&hub)
         );
     }
 

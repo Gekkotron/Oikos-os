@@ -733,6 +733,68 @@ fn days_without_data_keep_their_approved_block() {
 }
 
 #[test]
+fn evidence_counts_days_that_agree_with_the_fitted_setpoint() {
+    // Weekdays heat to 20 °C, 20.5 °C or 21 °C; the median is 20.5 °C, and on a device in
+    // whole degrees the block is 21 °C. The days at 20 °C are a full degree away from it.
+    let warm = |d: NaiveDate| match (d - monday()).num_days() % 5 {
+        0 | 1 => 20.0,
+        2 => 21.0,
+        _ => 20.5,
+    };
+    let h = history(28, |d| {
+        if is_weekday(d) {
+            day_of(d, &[("00:00", 17.0), ("07:00", warm(d)), ("22:30", 17.0)])
+        } else {
+            day_of(d, &[("00:00", 17.0)])
+        }
+    });
+    let mut c = caps();
+    c.temp_step = Some(1.0);
+    let rules = rules_of(learn(&input(&h, &[], &c, 28)));
+    assert_eq!(rules.blocks.len(), 1, "{rules:?}");
+    let b = &rules.blocks[0];
+    assert_eq!(b.setpoint, Setpoint::Temp(21.0));
+    let at_20 = (0..28)
+        .map(|i| monday() + Duration::days(i))
+        .filter(|d| is_weekday(*d) && warm(*d) == 20.0)
+        .count() as u32;
+    assert!(at_20 > 0);
+    assert_eq!(
+        b.evidence,
+        Some(Evidence {
+            agree: 20 - at_20,
+            of: 20
+        })
+    );
+}
+
+#[test]
+fn a_day_agrees_only_when_it_starts_and_ends_within_30_minutes() {
+    // Of 20 weekdays, 4 start two hours early, 4 an hour late and 2 end an hour early; the
+    // rest follow 07:00–22:30 exactly. The block stays, carried by the 10 that keep its hours.
+    let h = history(28, |d| {
+        if !is_weekday(d) {
+            return day_of(d, &[("00:00", 17.0)]);
+        }
+        let (from, to) = match (d - monday()).num_days() {
+            0..=3 => ("05:00", "22:30"),
+            4 | 7 | 8 | 9 => ("08:00", "22:30"),
+            10 | 11 => ("07:00", "21:30"),
+            _ => ("07:00", "22:30"),
+        };
+        day_of(d, &[("00:00", 17.0), (from, 20.5), (to, 17.0)])
+    });
+    let c = caps();
+    let mut i = input(&h, &[], &c, 28);
+    i.support = 0.5;
+    let rules = rules_of(learn(&i));
+    assert_eq!(rules.blocks.len(), 1, "{rules:?}");
+    let b = &rules.blocks[0];
+    assert_eq!((b.from, b.to), (HhMm(420), HhMm(1350)));
+    assert_eq!(b.evidence, Some(Evidence { agree: 10, of: 20 }));
+}
+
+#[test]
 fn corrected_slots_count_as_the_target() {
     // The device ran 1 degree lower from 12:00 to 16:00: the engine's correction, not a
     // change of the schedule.

@@ -58,8 +58,20 @@ pub(crate) fn command_id(entity: &str) -> String {
     format!("climate-command-{entity}")
 }
 
+/// Takes alert `id` as raised when the push history still holds it open: the raised set is
+/// in memory only, and after a restart the retained history is what remembers it.
+fn adopt(hub: &Hub, id: &str) {
+    if hub.climate_runtime().active_alerts.contains(id) {
+        return;
+    }
+    if hub.alerts().iter().any(|a| a.id == id && !a.resolved) {
+        hub.climate_runtime().active_alerts.insert(id.to_owned());
+    }
+}
+
 /// Raises alert `id` unless it is already raised.
 pub(crate) fn raise(hub: &Hub, id: &str, title: &str, body: &str, severity: &str) {
+    adopt(hub, id);
     if hub.climate_runtime().active_alerts.contains(id) {
         return;
     }
@@ -82,6 +94,7 @@ pub(crate) fn raise(hub: &Hub, id: &str, title: &str, body: &str, severity: &str
 
 /// Resolves alert `id` when it is raised.
 pub(crate) fn resolve(hub: &Hub, id: &str) {
+    adopt(hub, id);
     if !hub.climate_runtime().active_alerts.remove(id) {
         return;
     }
@@ -103,6 +116,7 @@ pub(crate) fn sync_safety(
 ) {
     for cause in ALL_CAUSES {
         let id = safety_id(zone, cause);
+        adopt(hub, &id);
         if d.cause == Some(cause) {
             let recently_resolved = {
                 let mut rt = hub.climate_runtime();

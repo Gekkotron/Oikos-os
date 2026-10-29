@@ -400,6 +400,8 @@ mod engine {
     /// What the simulated Daikins hold: mode, target and current temperature per unit.
     struct Sim {
         echo: bool,
+        /// The broker link drops as a command reaches a daikin, before any echo.
+        drop_link: bool,
         units: BTreeMap<u8, (String, f64, f64)>,
         /// Fan mode per unit, reported only for the units that have one.
         fans: BTreeMap<u8, String>,
@@ -409,6 +411,7 @@ mod engine {
         fn new() -> Self {
             Self {
                 echo: true,
+                drop_link: false,
                 units: BTreeMap::new(),
                 fans: BTreeMap::new(),
             }
@@ -444,6 +447,12 @@ mod engine {
             let Some(rest) = p.topic.strip_prefix("daikin/192.168.1.15") else {
                 return;
             };
+            if self.drop_link {
+                hub.set_connection(ConnectionStatus::Offline {
+                    reason: "test".into(),
+                });
+                return;
+            }
             if !self.echo {
                 return;
             }
@@ -972,6 +981,27 @@ mod engine {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_link_lost_during_the_confirm_wait_is_not_counted() {
+        let mut rig = Rig::new(None).await;
+        load_push(&rig.hub).await;
+        rig.settings(heat_rules(17.0));
+        rig.sim.drop_link = true;
+        for at in [0, 61, 122] {
+            rig.hub.set_connection(ConnectionStatus::Online);
+            assert_eq!(
+                temperature_commands(&rig.pass(at).await),
+                vec![17.0],
+                "at {at}"
+            );
+        }
+        assert!(alert(&rig.hub, &format!("climate-command-{}", rig.id)).is_none());
+        // Not paused: sent again as soon as the link is back.
+        rig.sim.drop_link = false;
+        rig.hub.set_connection(ConnectionStatus::Online);
+        assert_eq!(temperature_commands(&rig.pass(183).await), vec![17.0]);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn hand_change_on_a_device_already_at_target() {
         let mut rig = Rig::new(None).await;
         rig.sim.set(&rig.hub, 0, "heat", 17.0, 20.0);
@@ -1196,6 +1226,46 @@ mod engine {
         };
         assert_eq!(held_in("other"), 1);
         assert_eq!(held_in("living"), 0);
+    }
+
+    /// The push history the hub last published in `out`.
+    fn last_history(out: &[Publish]) -> Option<String> {
+        out.iter()
+            .rev()
+            .find(|p| p.topic == "oikos/push/history")
+            .map(|p| p.payload.clone())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_raised_safety_alert_survives_a_restart() {
+        let id = "climate-safety-living-frost";
+        let house = HouseSettings {
+            stale_after_min: 24 * 60,
+            ..HouseSettings::default()
+        };
+        let mut before = Rig::new(None).await;
+        load_push(&before.hub).await;
+        before.hub.set_climate_house(house.clone()).unwrap();
+        drain(&mut before.rx);
+        before.sim.set(&before.hub, 0, "off", 10.0, 5.0);
+        let history = last_history(&before.pass(0).await).expect("alert pushed");
+        assert!(!alert(&before.hub, id).unwrap().resolved);
+        // The hub restarts and finds the alert in the retained history.
+        let mut rig = Rig::new(None).await;
+        rig.hub
+            .ingest_message("oikos/push/history", history.as_bytes(), true);
+        load_push(&rig.hub).await;
+        rig.hub.set_climate_house(house).unwrap();
+        drain(&mut rig.rx);
+        rig.sim.set(&rig.hub, 0, "off", 10.0, 5.0);
+        let out = rig.pass(0).await;
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Safety);
+        assert_eq!(last_history(&out), None, "pushed again: {out:?}");
+        // Warm again: the alert raised before the restart still resolves.
+        rig.sim.set(&rig.hub, 0, "heat", 10.0, 18.0);
+        rig.pass(61).await;
+        rig.pass(61 + 601).await;
+        assert!(alert(&rig.hub, id).unwrap().resolved);
     }
 
     #[tokio::test(start_paused = true)]
