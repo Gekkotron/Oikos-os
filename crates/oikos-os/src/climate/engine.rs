@@ -476,6 +476,14 @@ impl Hub {
             }
         }
         let state = inp.settings.state;
+        if state == ZoneState::Off {
+            // What is done by hand while the zone is off is not a change against the engine:
+            // once back on, its devices start from what they hold, with no hold.
+            let mut rt = self.climate_runtime();
+            for id in &inp.entity_ids {
+                rt.ledger.forget(id);
+            }
+        }
         if state == ZoneState::Active {
             self.acknowledge_at_target(&inp, &decision, now);
         }

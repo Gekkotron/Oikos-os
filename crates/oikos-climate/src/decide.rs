@@ -276,15 +276,21 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
                     Setpoint::Temp(t) if t <= house.overheat => Some(Setpoint::Temp(t)),
                     _ => None,
                 });
-            let mut d = safety_decision(
-                inp,
-                SafetyCause::Overheat,
+            // Latched inside the hysteresis band, the reading is no longer above the limit.
+            let reason = if value > house.overheat {
                 format!(
                     "Overheat protection: {} > {}",
                     temp(value),
                     temp(house.overheat)
-                ),
-            );
+                )
+            } else {
+                format!(
+                    "Overheat protection: {}, holding until {}",
+                    temp(value),
+                    temp(house.overheat - SAFETY_HYSTERESIS)
+                )
+            };
+            let mut d = safety_decision(inp, SafetyCause::Overheat, reason);
             // A device that is off is not heating, so overheat leaves it alone.
             let running: Vec<Device> = inp
                 .devices
@@ -321,15 +327,20 @@ fn safety(inp: &ZoneInputs) -> Option<Decision> {
                     || (latched(inp, SafetyCause::Overcool)
                         && value < house.overcool + SAFETY_HYSTERESIS)) =>
         {
-            let mut d = safety_decision(
-                inp,
-                SafetyCause::Overcool,
+            let reason = if value < house.overcool {
                 format!(
                     "Overcool protection: {} < {}",
                     temp(value),
                     temp(house.overcool)
-                ),
-            );
+                )
+            } else {
+                format!(
+                    "Overcool protection: {}, holding until {}",
+                    temp(value),
+                    temp(house.overcool + SAFETY_HYSTERESIS)
+                )
+            };
+            let mut d = safety_decision(inp, SafetyCause::Overcool, reason);
             d.setpoint = Some(Setpoint::Off);
             d.entities = targets(inp.devices, Setpoint::Off, Mode::Cool);
             let stuck: Vec<&str> = inp
@@ -1028,6 +1039,24 @@ mod tests {
             c.reading = fresh(reading);
             assert_eq!(c.run().source == Source::Safety, safety, "{reading}");
         }
+    }
+
+    #[test]
+    fn latched_reasons_say_what_holds_them() {
+        let mut c = Case::new();
+        c.previous = Some(SafetyCause::Overheat);
+        c.reading = fresh(30.1);
+        assert!(c.run().reason.contains("> 30"), "{}", c.run().reason);
+        c.reading = fresh(29.6);
+        let reason = c.run().reason;
+        assert!(reason.contains("holding until 29.5"), "{reason}");
+        assert!(!reason.contains('>'), "{reason}");
+        c.mode = Some(Mode::Cool);
+        c.previous = Some(SafetyCause::Overcool);
+        c.reading = fresh(16.4);
+        let reason = c.run().reason;
+        assert!(reason.contains("holding until 16.5"), "{reason}");
+        assert!(!reason.contains('<'), "{reason}");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! The climate side of the hub: the read view and the writers behind the REST and MCP layers.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::MutexGuard;
 
 use oikos_api::WsEvent;
@@ -136,8 +136,9 @@ impl Hub {
         Ok(view)
     }
 
-    /// The latest decisions of `zone` (at most `limit`, newest first) from memory, then older
-    /// rows from the history database when it is on (none when it is off or unreachable).
+    /// The latest decisions of `zone` (`limit`, newest first, plus any sharing the oldest one's
+    /// second) from memory, then older rows from the history database when it is on (none when
+    /// it is off or unreachable).
     pub async fn climate_decision_log(
         &self,
         zone: &str,
@@ -151,7 +152,7 @@ impl Hub {
             .climate_runtime()
             .decisions
             .get(zone)
-            .map(|log| log.iter().rev().take(limit).cloned().collect())
+            .map(|log| newest_decisions(log, limit))
             .unwrap_or_default();
         // Rows of `recent` are in the database too: take only what is older than them.
         let before = recent.last().map(|d| {
@@ -446,5 +447,63 @@ fn zone_view(
         eco: docs.eco.clone(),
         proposal: docs.proposal.clone(),
         learn,
+    }
+}
+
+/// The newest `limit` decisions of a log kept oldest first, newest first, plus any sharing the
+/// oldest one's second: the database is read strictly before that second, so a decision left
+/// out here would be missing from both.
+fn newest_decisions(log: &VecDeque<Decision>, limit: usize) -> Vec<Decision> {
+    let mut newest = log.iter().rev();
+    let mut out: Vec<Decision> = newest.by_ref().take(limit).cloned().collect();
+    if let Some(oldest) = out.last().map(|d| d.at) {
+        out.extend(newest.take_while(|d| d.at == oldest).cloned());
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use oikos_climate::doc::Source;
+
+    use super::*;
+
+    fn decision(at: u64, reason: &str) -> Decision {
+        Decision {
+            zone: "z".into(),
+            mode: None,
+            setpoint: None,
+            source: Source::Idle,
+            cause: None,
+            reason: reason.into(),
+            reading: None,
+            reading_age_s: None,
+            outdoor_mean: None,
+            home: true,
+            applied: false,
+            at,
+            entities: BTreeMap::new(),
+            eco_restore: BTreeMap::new(),
+        }
+    }
+
+    fn reasons(list: &[Decision]) -> Vec<&str> {
+        list.iter().map(|d| d.reason.as_str()).collect()
+    }
+
+    #[test]
+    fn newest_decisions_keep_a_shared_second_together() {
+        let log: VecDeque<Decision> = [
+            decision(10, "a"),
+            decision(20, "b"),
+            decision(20, "c"),
+            decision(30, "d"),
+        ]
+        .into();
+        assert_eq!(reasons(&newest_decisions(&log, 1)), ["d"]);
+        // "c" is the second newest; "b" shares its second, so it comes too.
+        assert_eq!(reasons(&newest_decisions(&log, 2)), ["d", "c", "b"]);
+        assert_eq!(reasons(&newest_decisions(&log, 9)), ["d", "c", "b", "a"]);
+        assert!(newest_decisions(&log, 0).is_empty());
     }
 }

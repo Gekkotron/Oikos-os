@@ -726,6 +726,27 @@ mod engine {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_hand_change_while_off_is_not_held_once_back_on() {
+        let mut rig = Rig::new(None).await;
+        rig.settings(heat_rules(17.0));
+        rig.pass(0).await;
+        rig.settings(ZoneSettings {
+            state: ZoneState::Off,
+            ..heat_rules(17.0)
+        });
+        rig.pass(61).await;
+        // Turned up by hand while the zone is off.
+        rig.sim.set(&rig.hub, 0, "heat", 22.0, 20.0);
+        rig.hub.observe_climate(&rig.id, rig.t0 + 600);
+        // Back on: the device's state is not taken for a change against the engine.
+        rig.settings(heat_rules(17.0));
+        rig.hub.observe_climate(&rig.id, rig.t0 + 700);
+        let out = rig.pass(761).await;
+        assert!(rig.zone().overrides.is_empty());
+        assert_eq!(temperature_commands(&out), vec![17.0], "{out:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn echo_within_30s_is_not_hand_change() {
         let mut rig = Rig::new(None).await;
         rig.settings(heat_rules(17.0));
