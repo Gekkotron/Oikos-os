@@ -55,8 +55,8 @@ pub struct LearnInput<'a> {
     pub mode: Mode,
     pub devices: &'a [DeviceHistory],
     pub engine: &'a [EngineCommand],
-    /// The rules in force, if any. Engine-held slots already agree with them through the history,
-    /// so the learner needs no further use of them; callers compare with [`differs`].
+    /// The rules in force, if any. A slot keeps its approved value unless enough days point to
+    /// another one (§6.2); callers compare the result with [`differs`].
     pub approved: Option<&'a ModeRules>,
     pub first_day: NaiveDate,
     pub days: u32,
@@ -279,6 +279,9 @@ pub fn learn(input: &LearnInput) -> LearnOutcome {
         });
     };
     let base_sp = finalize(base, input);
+    if let Some(approved) = input.approved {
+        return LearnOutcome::Rules(revise(&counted, &groups, base_sp, approved, input));
+    }
 
     let mut blocks: Vec<Block> = Vec::new();
     for g in &groups {
@@ -331,6 +334,163 @@ fn merge_block(blocks: &mut Vec<Block>, block: Block) {
         }
         None => blocks.push(block),
     }
+}
+
+/// The learned rules against the approved ones (§6.2): a slot keeps its approved value unless
+/// the group's median differs from it there and enough of the group's days hold the median over
+/// that stretch. Scattered hand changes therefore never remove a block, and days without data
+/// keep theirs.
+fn revise(
+    counted: &[DayData],
+    groups: &[Group],
+    learned_base: Setpoint,
+    approved: &ModeRules,
+    input: &LearnInput,
+) -> ModeRules {
+    let base = if close(approved.base, learned_base) {
+        approved.base
+    } else {
+        learned_base
+    };
+    let mut plan: Vec<[Setpoint; SLOTS]> = Day::ALL
+        .iter()
+        .map(|&d| {
+            let mut day = [base; SLOTS];
+            for (s, v) in day.iter_mut().enumerate() {
+                if let Some(b) = block_at(approved, d, s) {
+                    *v = b.setpoint;
+                }
+            }
+            day
+        })
+        .collect();
+    for g in groups {
+        let total = g.members.len() as f64;
+        for run in &g.runs {
+            let learned = finalize(run.value, input);
+            let end = run.start + run.len;
+            for &d in &g.days {
+                let day = &mut plan[day_index(d)];
+                let mut s = run.start;
+                while s < end {
+                    if close(day[s], learned) {
+                        s += 1;
+                        continue;
+                    }
+                    let e = (s + 1..end)
+                        .find(|&e| close(day[e], learned))
+                        .unwrap_or(end);
+                    let stretch = Run {
+                        start: s,
+                        len: e - s,
+                        value: run.value,
+                    };
+                    let agree = g
+                        .members
+                        .iter()
+                        .filter(|&&m| day_agrees(&counted[m].slots, &stretch))
+                        .count();
+                    if agree as f64 >= input.support * total {
+                        day[s..e].fill(learned);
+                    }
+                    s = e;
+                }
+            }
+        }
+    }
+
+    // Each day's stretches off the base; the same stretch on several days is one block.
+    let mut found: Vec<(HhMm, HhMm, Setpoint, Vec<Day>)> = Vec::new();
+    for (day, d) in plan.iter().zip(Day::ALL) {
+        let mut s = 0;
+        while s < SLOTS {
+            let value = day[s];
+            let e = (s + 1..SLOTS).find(|&e| day[e] != value).unwrap_or(SLOTS);
+            if value != base {
+                let (from, to) = (slot_time(s), slot_time(e));
+                match found
+                    .iter_mut()
+                    .find(|f| f.0 == from && f.1 == to && f.2 == value)
+                {
+                    Some(f) => f.3.push(d),
+                    None => found.push((from, to, value, vec![d])),
+                }
+            }
+            s = e;
+        }
+    }
+    let mut blocks: Vec<Block> = found
+        .into_iter()
+        .map(|(from, to, setpoint, days)| {
+            // An approved block left as it was keeps its evidence.
+            let evidence = match approved.blocks.iter().find(|b| {
+                same_days(&b.days, &days) && b.from == from && b.to == to && b.setpoint == setpoint
+            }) {
+                Some(b) => b.evidence.clone(),
+                None => evidence_for(counted, &days, from, to, setpoint),
+            };
+            Block {
+                days,
+                from,
+                to,
+                setpoint,
+                evidence,
+            }
+        })
+        .collect();
+    blocks.sort_by_key(|b| (b.days[0], b.from));
+    ModeRules { base, blocks }
+}
+
+/// Two setpoints within 0.5 °C of each other, or both off.
+fn close(a: Setpoint, b: Setpoint) -> bool {
+    same(slot_of(a), slot_of(b))
+}
+
+fn slot_of(s: Setpoint) -> Slot {
+    match s {
+        Setpoint::Temp(t) => Slot::Temp(t),
+        Setpoint::Off => Slot::Off,
+    }
+}
+
+fn slot_time(slot: usize) -> HhMm {
+    HhMm((slot as u16) * SLOT_MIN as u16)
+}
+
+fn day_index(d: Day) -> usize {
+    Day::ALL.iter().position(|x| *x == d).unwrap_or(0)
+}
+
+/// The block of `rules` covering `slot` on `day`, if any.
+fn block_at(rules: &ModeRules, day: Day, slot: usize) -> Option<&Block> {
+    let minute = slot_time(slot).0;
+    rules
+        .blocks
+        .iter()
+        .find(|b| b.days.contains(&day) && b.from.0 <= minute && minute < b.to.0)
+}
+
+/// How many of the counted days on `days` agree with a block; `None` without any such day.
+fn evidence_for(
+    counted: &[DayData],
+    days: &[Day],
+    from: HhMm,
+    to: HhMm,
+    setpoint: Setpoint,
+) -> Option<Evidence> {
+    let run = Run {
+        start: usize::from(from.0) / SLOT_MIN as usize,
+        len: usize::from(to.0 - from.0) / SLOT_MIN as usize,
+        value: slot_of(setpoint),
+    };
+    let on_days: Vec<&DayData> = counted.iter().filter(|c| days.contains(&c.day)).collect();
+    let of = u32::try_from(on_days.len()).unwrap_or(u32::MAX);
+    let agree = on_days
+        .iter()
+        .filter(|c| day_agrees(&c.slots, &run))
+        .count() as u32;
+    (of > 0).then_some(Evidence { agree, of })
 }
 
 fn finalize(value: Slot, input: &LearnInput) -> Setpoint {
