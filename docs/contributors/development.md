@@ -39,7 +39,7 @@ The script needs `mosquitto_sub` and `python3`. It listens for six seconds to `h
 cargo run -p oikos-os
 ```
 
-The hub keeps its data in `./data` (`--data <dir>` picks another folder) and serves the setup wizard at `http://localhost:8081/setup` on a first start. For a local broker and database, start the bundled ones: `docker compose up -d mosquitto timescaledb`, then use the credentials in `data/bundled.json` in the wizard. See [Configuration](../reference/configuration.md) for every key.
+The hub keeps its data in `./data` (`--data <dir>` picks another folder) and serves the setup wizard at `http://localhost:8081/setup` on a first start. For a local broker and database, start the bundled ones: `cargo run -p oikos-os -- init-bundled && docker compose up -d --no-deps mosquitto timescaledb` (host networking needs Linux, or Docker Desktop's host networking enabled on macOS), then use the credentials in `data/bundled.json` in the wizard. See [Configuration](../reference/configuration.md) for every key.
 
 ## Web UI
 

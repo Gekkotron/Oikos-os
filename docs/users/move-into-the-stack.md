@@ -8,6 +8,10 @@ If you already run Mosquitto and TimescaleDB in Docker for the hub, you can let 
 
 You do not have to do this. A hub with its own broker and database keeps working with `docker compose up -d --build hub`. See [Bring your own broker and database](install-on-linux.md#bring-your-own-broker-and-database).
 
+## Step 0: upgrade first
+
+Run `git pull --rebase && tools/update.sh`, then check that `data/hub.json` exists. The hub must already be configured, or the stack's `init` would generate credentials for services you are about to replace. See [Upgrade](install-on-linux.md#upgrade).
+
 ## What to note first
 
 Write these five facts down for each of the two old containers (`docker inspect <name>` shows them):

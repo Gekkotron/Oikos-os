@@ -37,6 +37,8 @@ cd Oikos-os
 docker compose up -d --build
 ```
 
+Already run a broker or database? See [Bring your own broker and database](https://gekkotron.github.io/Oikos-os/docs/users/install-on-linux#bring-your-own-broker-and-database).
+
 `docker compose logs hub` prints the address to open (`Open http://<ip>:8081 to set up your home`); a browser wizard does the rest. Then connect an assistant:
 
 ```sh

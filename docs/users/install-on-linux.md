@@ -53,7 +53,7 @@ Everything the stack writes lives in `./data/` next to `compose.yml`:
 | `data/timescaledb/` | The database files. |
 | `data/secrets/` | Only on upgraded installs: the old key files moved from `secrets/` (see [Upgrading from `oikos.toml`](#upgrading-from-oikostoml)). Keys you upload in the wizard are stored in the database, not here. |
 
-Back up `./data/`. Without `bundled.json` the database can no longer be unlocked, and `init` refuses to write a new password for a database that already exists.
+Back up `./data/`, and keep `data/bundled.json`: without it `tools/update.sh` rebuilds only the hub, so you would have to use `tools/update.sh --all`. If it is lost, the database password is still in `data/bundled/db-password` and in the database URL of `data/hub.json`, but `init` refuses to write a new password for a database that already exists.
 
 ## Point Zigbee2MQTT at the bundled broker
 
@@ -63,7 +63,7 @@ The bundled broker listens on port 1883 on every interface and does not accept a
 mqtt:
   server: mqtt://192.168.1.20:1883
   user: oikos
-  password: <mqtt_password from data/bundled.json>
+  password: <mqtt_password from data/bundled.json>   # sudo jq -r .mqtt_password data/bundled.json
 ```
 
 Then set the discovery prefix as described in [Zigbee2MQTT](zigbee2mqtt.md). If you prefer a separate login for Zigbee2MQTT, add a second user inside the broker container and restart it:
@@ -81,10 +81,16 @@ If this host already runs a Mosquitto on port 1883 or a Postgres on port 5432, a
 docker compose up -d --build hub
 ```
 
-The wizard asks for your broker and database addresses instead of pre-filling the bundled ones. If a plain `docker compose up` already ran, clear the failed services:
+The wizard asks for your broker and database addresses instead of pre-filling the bundled ones. The first start of such a host is always `docker compose up -d --build hub`, never the Install command above. If a plain `docker compose up` already ran, clear the failed services (the restart-looping `oikos-mosquitto` and `oikos-timescaledb` containers):
 
 ```bash
 docker compose rm -sf mosquitto timescaledb init
+```
+
+Then, unless Settings → Broker and Database point at the bundled services, remove what `init` generated, or the next `tools/update.sh` would tie this host to the full stack:
+
+```bash
+sudo rm -rf data/bundled.json data/bundled data/mosquitto data/timescaledb
 ```
 
 Want one stack in the end? [Move an existing broker and database into the stack](move-into-the-stack.md).
@@ -96,6 +102,8 @@ cd Oikos-os
 tools/update.sh
 ```
 
+The first time you upgrade past the change that introduced this stack, run `git pull --rebase` yourself, then `tools/update.sh`: the copy of the script on your host predates it. The old script would otherwise start the new `compose.yml` without moving your files. If you already ran the old script, see [Recovering from the old update script](#recovering-from-the-old-update-script).
+
 The script runs `git pull --rebase`, then re-runs itself from the pulled version, then rebuilds. It decides what to rebuild:
 
 - the whole stack (`docker compose up -d --build`) when `data/bundled.json` or a `compose.override.yml` exists, or on a fresh install;
@@ -105,7 +113,7 @@ Force one with `tools/update.sh --all` or `tools/update.sh --hub-only`. If you r
 
 ## Upgrading from `oikos.toml`
 
-Older installs were configured by `oikos.toml` and kept keys in `secrets/`. The hub now reads everything from `./data/`, and `compose.yml` no longer mounts the old locations. `tools/update.sh` moves them for you, never overwriting anything already in `./data/`:
+Older installs were configured by `oikos.toml` and kept keys in `secrets/`. The hub now reads everything from `./data/`, and `compose.yml` no longer mounts the old locations, except that it mounts the checkout read-only at `/checkout` so a `./oikos.toml` that has not moved yet is still imported. `tools/update.sh` moves them for you, never overwriting anything already in `./data/`:
 
 - `./oikos.toml` becomes `data/oikos.toml`;
 - every key in `./secrets/` (not its `README.md`) goes to `data/secrets/`.
@@ -130,6 +138,14 @@ oikos.toml imported into the database; it is no longer read and can be deleted
 After that line you can delete the file. The import reads the push and Solcast keys from `data/secrets/` once, by default, and stores them in the database. If the old file has no `[history] url`, the hub imports only MQTT and the location, then opens the wizard at the Database step so you can finish there. If your TOML names key files under `/etc/oikos/secrets`, change those paths to `/data/secrets/...` or delete the lines; `update.sh` warns when it sees them.
 
 If you run your own broker and database, keep using `docker compose up -d --build hub` (or `tools/update.sh`, which picks it). A plain `docker compose up` would start a second broker and database next to yours.
+
+## Recovering from the old update script
+
+If you ran the old `tools/update.sh` on a host still configured by `./oikos.toml`, `init` may have generated bundled credentials and `docker compose up` started `oikos-mosquitto` and `oikos-timescaledb`, which restart in a loop when your own broker or database holds the ports. Clean up:
+
+1. Remove the failed services: `docker compose rm -sf init mosquitto timescaledb`.
+2. If you never used the bundled services, remove their files: `sudo rm -rf data/bundled.json data/bundled data/mosquitto data/timescaledb`.
+3. Upgrade properly: `git pull --rebase && tools/update.sh --hub-only`.
 
 ## Logs and status
 

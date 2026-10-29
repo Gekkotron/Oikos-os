@@ -23,7 +23,7 @@ The documents the hub keeps on the broker (home settings, alarm, climate schedul
 
 You read and change the section rows with **Settings**, with `GET`/`PUT /api/v1/settings/{section}` ([HTTP API](http-api.md#setup-and-settings)) or with the `get_settings` and `set_settings` MCP tools ([MCP tools](mcp-tools.md#home-settings)). A change is checked the way the hub checks its settings at start, then saved, and the hub restarts to apply it. A value it could not start with is refused with the reason, and nothing is saved.
 
-The folder is `./data` by default. `oikos-os --data <dir>` (or `OIKOS_DATA_DIR`) picks another one; in the Docker image it is `/data`, mounted from `./data`.
+The folder is `./data` by default. `oikos-os --data <dir>` (or `OIKOS_DATA_DIR`) picks another one; in the Docker image it is `/data`, mounted from `./data`. The compose file also mounts the checkout read-only at `/checkout` and starts the hub with `--config /checkout/oikos.toml`, which only matters for a host whose `oikos.toml` has not moved into `./data` yet.
 
 ## Secrets
 
@@ -109,7 +109,7 @@ Command line:
 | `oikos-os mcp-stdio --server <url>` | Serve MCP over stdio, proxying to a running hub (for example `http://localhost:8081`). It reads the log level from `data/hub.json` when that exists. |
 | `oikos-os init-bundled` | Create the bundled broker and database credentials in `data/` and exit. The compose `init` service runs it; it changes nothing once `data/bundled.json` exists. |
 | `--data <dir>` | The data folder (default `./data`, or `OIKOS_DATA_DIR`). Works with every command. |
-| `--config <path>` | A file to import once (see below). Only used by `run`. |
+| `--config <path>` | A file to import once (see below). Used by `run`; `init-bundled` treats an existing one as a hub that is already set up. |
 
 ## Weather
 

@@ -17,6 +17,8 @@ docker compose logs hub
 
 This builds the hub and starts a broker and a database beside it. The log shows `Open http://<ip>:8081 to set up your home`: open that address in a browser. The details, and what to do if you already run a broker or a database, are in [Install on Linux](install-on-linux.md).
 
+Already run a broker or database? See [Bring your own broker and database](install-on-linux.md#bring-your-own-broker-and-database) before you run the command above.
+
 ## The setup wizard
 
 The wizard has six steps. Each one saves when you press Next, so closing the tab loses nothing, and Back is always allowed.
