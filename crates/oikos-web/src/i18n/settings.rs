@@ -284,6 +284,9 @@ pub const NO_ORIGIN: &str = "unavailable outside the browser";
 /// The media query that tells a light system theme.
 pub const LIGHT_SCHEME_QUERY: &str = "(prefers-color-scheme: light)";
 
+/// The media query that tells the user asked for less motion.
+pub const REDUCED_MOTION_QUERY: &str = "(prefers-reduced-motion: reduce)";
+
 /// The MCP set-up commands, the same in both languages; `{origin}` is the hub's address.
 pub const CLAUDE_CODE_SNIPPET: &str = "claude mcp add --transport http oikos {origin}/mcp";
 pub const CODEX_SNIPPET: &str = "[mcp_servers.oikos]\nurl = \"{origin}/mcp\"";
