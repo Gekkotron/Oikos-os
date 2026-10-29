@@ -59,7 +59,8 @@ pub struct Sankey {
     pub house_w: Option<f64>,
     /// Measured production; `None` without a live solar node.
     pub solar_w: Option<f64>,
-    pub import_w: f64,
+    /// Drawn from the grid; `None` without a live grid reading.
+    pub import_w: Option<f64>,
     pub export_w: f64,
     /// 0..=100, rounded down.
     pub solar_share: Option<u8>,
@@ -326,11 +327,15 @@ pub fn build(ui: &EnergyUi, fold_at: usize) -> Sankey {
         links,
         house_w,
         solar_w,
-        import_w: if grid.is_some_and(|n| n.flow == Flow::In) {
-            active(grid)
-        } else {
-            0.0
-        },
+        import_w: grid
+            .filter(|n| n.status == NodeStatus::Live && n.value.is_some())
+            .map(|n| {
+                if n.flow == Flow::In {
+                    active(Some(n))
+                } else {
+                    0.0
+                }
+            }),
         export_w: export,
         solar_share,
         folded,
@@ -419,7 +424,7 @@ mod tests {
         assert_eq!(link_w(&s, "house", &oven.id), Some(300.0));
         assert_eq!(link_w(&s, "house", "unitemised"), Some(200.0));
         assert!(s.nodes.iter().all(|n| n.id != "consumer:lamp"));
-        assert_eq!(s.import_w, 500.0);
+        assert_eq!(s.import_w, Some(500.0));
         assert_eq!(s.solar_share, None);
     }
 
@@ -585,6 +590,20 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn unknown_grid_has_no_import() {
+        let s = build(&ui(&[solar(800.0), house(800.0)], &[]), FOLD_WIDE);
+        assert_eq!(s.import_w, None);
+        let s = build(
+            &ui(
+                &[solar(3000.0), grid(1200.0, Flow::Out), house(1800.0)],
+                &[],
+            ),
+            FOLD_WIDE,
+        );
+        assert_eq!(s.import_w, Some(0.0));
     }
 
     #[test]

@@ -108,9 +108,11 @@ Look (from the approved mockup, "B · Flux"):
 
 - A source, sink or consumer node (bar or label) with exactly one sensor opens that sensor's
   entity page, like Classic (`open` callback, `/entity/<id>`). +N others toggles the existing
-  "all consumers" list (the same `expanded` signal Classic's More node uses). Clickable nodes are
-  focusable and react to Enter.
-- The SVG keeps `role="img"` and the same `aria_sentence` label/title as Classic.
+  "all consumers" list (the same `expanded` signal Classic's More node uses). A clickable node's
+  label is its one tab stop: a button named "name, value", reacting to Enter and Space, with a
+  visible focus ring; the bar takes clicks only.
+- The SVG is `role="group"` (an image would hide the buttons inside it) with the same
+  `aria_sentence` label/title as Classic.
 
 ### Narrow screens
 

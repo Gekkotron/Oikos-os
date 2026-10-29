@@ -4768,6 +4768,11 @@ html:has(.flow-canvas-screen) {
   cursor: pointer;
 }
 
+.energy-flux__label--click:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 2px;
+}
+
 .energy-flux__bar--solar {
   fill: var(--solar);
 }

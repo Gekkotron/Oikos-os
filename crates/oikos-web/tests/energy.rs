@@ -11,7 +11,7 @@ use oikos_web::i18n::Lang;
 use oikos_web::screens::energy::{EnergyScreen, KwhToday};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
-use web_sys::{Element, Event, HtmlElement};
+use web_sys::{Element, Event, HtmlElement, KeyboardEvent, KeyboardEventInit};
 #[path = "support/fetch_stub.rs"]
 mod fetch_stub;
 use fetch_stub::FetchStub;
@@ -433,6 +433,96 @@ async fn flux_updates_in_place() {
     let after = bar(&host, "consumer:oven");
     assert!(before.is_same_node(Some(&after)));
     assert_ne!(after.get_attribute("style").unwrap(), height);
+}
+
+#[wasm_bindgen_test]
+async fn flux_colours_follow_a_reorder() {
+    let house = House::new();
+    for e in flux_fixture(1200.0) {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(
+        house,
+        RwSignal::new(Lang::En),
+        Some(RwSignal::new(EnergyView::Flux)),
+    );
+    tick().await;
+    let class = |id: &str| bar(&host, id).get_attribute("class").unwrap_or_default();
+    assert!(
+        class("consumer:oven").contains("--c0"),
+        "{}",
+        class("consumer:oven")
+    );
+    // A bigger consumer arrives (a new set reorders at once): the oven moves down one slot,
+    // and its colour with its band.
+    house.apply(WsEvent::EntityUpserted(sensor(
+        "kettle",
+        "Kettle",
+        "W",
+        2000.0,
+        role("consumer"),
+    )));
+    tick().await;
+    assert!(
+        class("consumer:kettle").contains("--c0"),
+        "{}",
+        class("consumer:kettle")
+    );
+    assert!(
+        class("consumer:oven").contains("--c1"),
+        "{}",
+        class("consumer:oven")
+    );
+    assert!(
+        class("consumer:pump").contains("--c2"),
+        "{}",
+        class("consumer:pump")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn flux_skips_unknown_chips() {
+    let host = mount_view(
+        vec![
+            sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+            sensor("oven", "Oven", "W", 1200.0, role("consumer")),
+        ],
+        EnergyView::Flux,
+    );
+    tick().await;
+    let chips = text(&host, ".energy-flux__chips");
+    assert!(chips.contains("solar production"), "{chips}");
+    assert!(!chips.contains("from the grid"), "{chips}");
+}
+
+#[wasm_bindgen_test]
+async fn flux_label_is_the_keyboard_target() {
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Flux);
+    tick().await;
+    let svg = host.query_selector(".energy-flux__svg").unwrap().unwrap();
+    assert_eq!(svg.get_attribute("role").as_deref(), Some("group"));
+    assert_eq!(bar(&host, "consumer:oven").get_attribute("tabindex"), None);
+    let labels = host
+        .query_selector_all(".energy-flux__label[tabindex='0']")
+        .unwrap();
+    let oven: HtmlElement = (0..labels.length())
+        .filter_map(|i| labels.item(i))
+        .map(|n| n.unchecked_into::<HtmlElement>())
+        .find(|l| {
+            l.get_attribute("aria-label")
+                .is_some_and(|a| a.contains("Oven"))
+        })
+        .expect("a focusable, named oven label");
+    assert_eq!(oven.get_attribute("role").as_deref(), Some("button"));
+    let init = KeyboardEventInit::new();
+    init.set_key(" ");
+    init.set_cancelable(true);
+    let ev = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    oven.dispatch_event(&ev).unwrap();
+    tick().await;
+    assert!(ev.default_prevented());
+    let path = web_sys::window().unwrap().location().pathname().unwrap();
+    assert_eq!(path, "/entity/oven");
 }
 
 fn mount_flux_narrow(entities: Vec<EntityView>) -> Element {

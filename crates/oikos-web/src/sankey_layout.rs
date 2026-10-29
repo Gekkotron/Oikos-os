@@ -29,6 +29,8 @@ pub const BAR: f64 = 16.0;
 pub const LINE: f64 = 14.0;
 /// Half the widest narrow label (12 characters at ~7 px), so one centred on a bar stays inside.
 pub const LABEL_HALF: f64 = 44.0;
+/// How far a narrow label steps away from its bar to clear the one beside it.
+const ROW_STEP: f64 = 2.0 * LINE + 4.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Anchor {
@@ -79,7 +81,8 @@ pub struct Placed {
 /// Where a column sits along the main axis, as a share of it.
 fn column_share(column: u8, vertical: bool) -> f64 {
     let shares = if vertical {
-        [0.10, 0.44, 0.78]
+        // Room above the sources for a second row of labels.
+        [0.14, 0.46, 0.78]
     } else {
         [0.17, 0.49, 0.79]
     };
@@ -189,6 +192,10 @@ pub fn place(s: &Sankey, frame: Frame) -> Placed {
         });
     }
 
+    if v {
+        stagger(&mut out);
+    }
+
     // Bands stack from the top (left) of each bar in link order.
     let mut leaving: HashMap<&str, f64> = HashMap::new();
     let mut entering: HashMap<&str, f64> = HashMap::new();
@@ -241,6 +248,51 @@ pub fn place(s: &Sankey, frame: Frame) -> Placed {
         });
     }
     out
+}
+
+/// The x range a narrow label may cover.
+fn span(l: &Label) -> (f64, f64) {
+    match l.anchor {
+        Anchor::Start => (l.x, l.x + 2.0 * LABEL_HALF),
+        Anchor::Middle => (l.x - LABEL_HALF, l.x + LABEL_HALF),
+        Anchor::End => (l.x - 2.0 * LABEL_HALF, l.x),
+    }
+}
+
+/// Narrow labels side by side would overlap over thin bars: each one that would steps a row
+/// further from its bar, so a run of thin bars reads as a zigzag. Three rows fit below a bar and
+/// two above (the frame's top margin). Labels and bars share an index.
+fn stagger(p: &mut Placed) {
+    let mut order: Vec<usize> = (0..p.labels.len()).collect();
+    order.sort_by(|&a, &b| {
+        let (la, lb) = (&p.labels[a], &p.labels[b]);
+        la.y.total_cmp(&lb.y)
+            .then(span(la).0.total_cmp(&span(lb).0))
+    });
+    // Per row of labels (keyed by its first baseline), where each step ends on the x axis.
+    let mut rows: Vec<(f64, Vec<f64>)> = Vec::new();
+    for i in order {
+        let (y, (from, to)) = (p.labels[i].y, span(&p.labels[i]));
+        let above = y < p.bars[i].y;
+        let row = match rows.iter().position(|r| r.0 == y) {
+            Some(r) => r,
+            None => {
+                let steps = if above { 2 } else { 3 };
+                rows.push((y, vec![f64::NEG_INFINITY; steps]));
+                rows.len() - 1
+            }
+        };
+        let ends = &mut rows[row].1;
+        // The first step with room, else the one that ends earliest.
+        let step = ends.iter().position(|&e| from >= e).unwrap_or_else(|| {
+            (0..ends.len())
+                .min_by(|&a, &b| ends[a].total_cmp(&ends[b]))
+                .unwrap_or(0)
+        });
+        ends[step] = to;
+        let shift = step as f64 * ROW_STEP;
+        p.labels[i].y += if above { -shift } else { shift };
+    }
 }
 
 #[cfg(test)]
@@ -441,6 +493,53 @@ mod tests {
         }
         assert_eq!(label(&p, "tiny").anchor, Anchor::Start);
         assert_eq!(label(&p, "tiny2").anchor, Anchor::End);
+    }
+
+    #[test]
+    fn narrow_labels_in_a_row_never_overlap() {
+        // One big consumer and three thin ones: the thin bars sit closer than a label is wide.
+        let s = Sankey {
+            nodes: vec![
+                node("grid", SankeyRole::Grid, 0, 3120.0),
+                node("house", SankeyRole::House, 1, 3120.0),
+                node("oven", SankeyRole::Consumer, 2, 3000.0),
+                node("lamp", SankeyRole::Consumer, 2, 40.0),
+                node("radio", SankeyRole::Consumer, 2, 40.0),
+                node("fan", SankeyRole::Consumer, 2, 40.0),
+            ],
+            links: vec![
+                link("grid", "house", 3120.0),
+                link("house", "oven", 3000.0),
+                link("house", "lamp", 40.0),
+                link("house", "radio", 40.0),
+                link("house", "fan", 40.0),
+            ],
+            ..Sankey::default()
+        };
+        let p = place(&s, NARROW);
+        let span = |l: &Label| match l.anchor {
+            Anchor::Start => (l.x, l.x + 2.0 * LABEL_HALF),
+            Anchor::Middle => (l.x - LABEL_HALF, l.x + LABEL_HALF),
+            Anchor::End => (l.x - 2.0 * LABEL_HALF, l.x),
+        };
+        for a in &p.labels {
+            // Two lines from the baseline of the first; the frame holds both.
+            assert!(
+                a.y - LINE >= 0.0 && a.y + LINE <= NARROW.h,
+                "{} {}",
+                a.id,
+                a.y
+            );
+            for b in &p.labels {
+                if a.id >= b.id || (a.y - b.y).abs() >= 2.0 * LINE {
+                    continue;
+                }
+                let ((a0, a1), (b0, b1)) = (span(a), span(b));
+                assert!(a1 <= b0 || b1 <= a0, "{} overlaps {}", a.id, b.id);
+            }
+            // Still on its own side of the bar.
+            assert!(a.y > bar(&p, &a.id).y || a.id == "house" || a.id == "grid");
+        }
     }
 
     #[test]

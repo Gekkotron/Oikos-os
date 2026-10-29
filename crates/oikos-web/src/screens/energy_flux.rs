@@ -112,10 +112,22 @@ fn FluxBar(
         return ().into_any();
     };
     let clickable = first.sensor.is_some() || first.role == SankeyRole::Others;
-    let class = format!(
-        "energy-flux__bar energy-flux__bar--{}",
-        role_class(first.role, first.slot)
-    );
+    // A reorder moves a consumer to another slot; its colour follows, as its band's does.
+    let class = move || {
+        let (role, slot) = node.with(|n| {
+            n.as_ref()
+                .map_or((first.role, first.slot), |n| (n.role, n.slot))
+        });
+        format!(
+            "energy-flux__bar energy-flux__bar--{}{}",
+            role_class(role, slot),
+            if clickable {
+                " energy-flux__bar--click"
+            } else {
+                ""
+            }
+        )
+    };
     let activate = move || {
         let Some(n) = node.get_untracked() else {
             return;
@@ -144,15 +156,7 @@ fn FluxBar(
             width=move || bar.get().map(|b| b.w)
             height=move || bar.get().map(|b| b.h)
             style=geometry
-            tabindex=clickable.then_some("0")
-            role=clickable.then_some("button")
-            class:energy-flux__bar--click=clickable
             on:click=move |_| activate()
-            on:keydown=move |ev| {
-                if ev.key() == "Enter" {
-                    activate();
-                }
-            }
         />
     }
     .into_any()
@@ -192,6 +196,16 @@ fn FluxLabel(
         Some(Anchor::Start) | None => "start",
         Some(Anchor::Middle) => "middle",
         Some(Anchor::End) => "end",
+    };
+    let spoken_id = id.clone();
+    let spoken = move || {
+        model.with(|m| {
+            format!(
+                "{}, {}",
+                node_name(lang(), m, &spoken_id, false),
+                node_value(lang(), m, &spoken_id)
+            )
+        })
     };
     let content = move || {
         let (name, value) = model.with(|m| {
@@ -237,9 +251,12 @@ fn FluxLabel(
             }
             tabindex=clickable.then_some("0")
             role=clickable.then_some("button")
+            aria-label=move || clickable.then(&spoken)
             on:click=move |_| activate()
             on:keydown=move |ev| {
-                if ev.key() == "Enter" {
+                if ev.key() == "Enter" || ev.key() == " " {
+                    // Space would also scroll the page.
+                    ev.prevent_default();
                     activate();
                 }
             }
@@ -362,15 +379,15 @@ pub fn FluxDiagram(
     let chips = move || {
         let l = lang();
         model.with(|m| {
-            let mut out = vec![
-                view! {
-                    <Chip
-                        value=power_text(l, m.house_w)
-                        label=word(l, EnergyText::ChipConsumed)
-                    />
-                }
-                .into_any(),
-            ];
+            let mut out = Vec::new();
+            if let Some(w) = m.house_w {
+                out.push(
+                    view! {
+                        <Chip value=power_text(l, Some(w)) label=word(l, EnergyText::ChipConsumed) />
+                    }
+                    .into_any(),
+                );
+            }
             if let Some(w) = m.solar_w {
                 out.push(
                     view! {
@@ -379,22 +396,24 @@ pub fn FluxDiagram(
                     .into_any(),
                 );
             }
-            let grid = if m.export_w > 0.0 {
-                view! {
-                    <Chip
-                        value=format!("↗ {}", power_text(l, Some(m.export_w)))
-                        label=word(l, EnergyText::ChipToGrid)
-                    />
-                }
-            } else {
-                view! {
-                    <Chip
-                        value=power_text(l, Some(m.import_w))
-                        label=word(l, EnergyText::ChipFromGrid)
-                    />
-                }
-            };
-            out.push(grid.into_any());
+            if m.export_w > 0.0 {
+                out.push(
+                    view! {
+                        <Chip
+                            value=format!("↗ {}", power_text(l, Some(m.export_w)))
+                            label=word(l, EnergyText::ChipToGrid)
+                        />
+                    }
+                    .into_any(),
+                );
+            } else if let Some(w) = m.import_w {
+                out.push(
+                    view! {
+                        <Chip value=power_text(l, Some(w)) label=word(l, EnergyText::ChipFromGrid) />
+                    }
+                    .into_any(),
+                );
+            }
             if let Some(p) = m.solar_share {
                 out.push(
                     view! {
@@ -426,7 +445,7 @@ pub fn FluxDiagram(
                 <svg
                     class="energy-flux__svg"
                     viewBox=format!("0 0 {} {}", frame.w, frame.h)
-                    role="img"
+                    role="group"
                     aria-label=description
                 >
                     <title>{description}</title>
