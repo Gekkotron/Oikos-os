@@ -62,10 +62,19 @@ pub fn ClimateScreen() -> impl IntoView {
     let ids = Memo::new(move |_| climate.with(|v| zone_ids(v.as_ref())));
     let selected = RwSignal::new(None::<String>);
     let current = Memo::new(move |_| ids.with(|ids| pick_zone(ids, selected.get().as_deref())));
+    // A choice that left the view is forgotten, so a zone coming back under that id does not
+    // pull the screen away from the room shown since.
+    Effect::new(move |_| {
+        let gone = selected.with(|s| s.as_ref().is_some_and(|s| ids.with(|ids| !ids.contains(s))));
+        if gone {
+            selected.set(None);
+        }
+    });
     let zones = Signal::derive(move || {
         climate.with(|v| v.as_ref().map(|v| v.zones.clone()).unwrap_or_default())
     });
-    let tz = Signal::derive(move || {
+    // A memo, so a refetch that keeps the time zone redraws no calendar.
+    let tz = Memo::new(move |_| {
         climate.with(|v| v.as_ref().map_or(Tz::UTC, |v| parse_zone(&v.timezone)))
     });
     let loaded = move || climate.with(|v| v.is_some());
@@ -132,10 +141,10 @@ pub fn ClimateScreen() -> impl IntoView {
                     <For each=move || ids.get() key=|id| id.clone() let:id>
                         {
                             let fallback = find_zone(climate.get_untracked().as_ref(), &id);
-                            let shown = {
+                            let shown = Memo::new({
                                 let id = id.clone();
-                                move || current.with(|c| c.as_deref() == Some(id.as_str()))
-                            };
+                                move |_| current.with(|c| c.as_deref() == Some(id.as_str()))
+                            });
                             let zone = Memo::new(move |last: Option<&ZoneView>| {
                                 find_zone(climate.get().as_ref(), &id)
                                     .or_else(|| last.cloned())
@@ -143,8 +152,13 @@ pub fn ClimateScreen() -> impl IntoView {
                                     .expect("a keyed zone was in the view when its panel was built")
                             });
                             view! {
-                                <div class="climate-screen__panel" hidden=move || !shown()>
-                                    <RoomPanel zone=zone.into() tz=tz on_changed=reload />
+                                <div class="climate-screen__panel" hidden=move || !shown.get()>
+                                    <RoomPanel
+                                        zone=zone.into()
+                                        tz=tz.into()
+                                        on_changed=reload
+                                        shown=shown
+                                    />
                                 </div>
                             }
                         }

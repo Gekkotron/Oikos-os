@@ -9,7 +9,7 @@
 //! shared day).
 
 use leptos::prelude::*;
-use oikos_climate::doc::{Day, HhMm, ModeRules, Setpoint};
+use oikos_climate::doc::{Block, Day, HhMm, ModeRules, Setpoint};
 use wasm_bindgen::JsCast;
 
 use super::{TempBand, day_short, setpoint_text, temp_band};
@@ -31,6 +31,39 @@ pub const NEW_BASE: f64 = 16.0;
 pub enum Edge {
     From,
     To,
+}
+
+/// The block a viewer tapped, by the day and times it was tapped on rather than by its index, so
+/// a refetch that reorders or removes blocks never moves the peek to another block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeekKey {
+    pub day: Day,
+    pub from: HhMm,
+    pub to: HhMm,
+}
+
+impl PeekKey {
+    /// The key of `block` as tapped on `day`.
+    pub fn of(block: &Block, day: Day) -> Self {
+        Self {
+            day,
+            from: block.from,
+            to: block.to,
+        }
+    }
+}
+
+/// The index of the block `key` names, while one still covers that day at those times.
+pub fn peek_index(rules: &ModeRules, key: PeekKey) -> Option<usize> {
+    rules
+        .blocks
+        .iter()
+        .position(|b| b.days.contains(&key.day) && b.from == key.from && b.to == key.to)
+}
+
+/// The first day of the week `block` covers: its one tab stop.
+pub fn first_day(block: &Block) -> Option<Day> {
+    Day::ALL.into_iter().find(|d| block.days.contains(d))
 }
 
 /// `minutes` rounded to the nearest 15 minutes, at most 24:00.
@@ -349,7 +382,9 @@ fn Bar(
     on_change: Callback<ModeRules>,
     selected: RwSignal<Option<usize>>,
     /// The block whose times show under the calendar while viewing.
-    peek: RwSignal<Option<usize>>,
+    peek: RwSignal<Option<PeekKey>>,
+    /// The index `peek` names in the current rules.
+    peeked: Memo<Option<usize>>,
 ) -> impl IntoView {
     let lang = use_lang();
     let covers = Memo::new(move |_| {
@@ -384,6 +419,13 @@ fn Bar(
     };
     let band = move || rules.with(|r| r.blocks.get(block).map(|b| temp_band(b.setpoint)));
     let title = move || rules.with(|r| r.blocks.get(block).map(|b| peek_text(lang(), b)));
+    // One tab stop per block, on the first day it covers; the bars on its other days are the
+    // same block.
+    let tab_stop = move || {
+        let first = rules.with(|r| r.blocks.get(block).and_then(first_day)) == Some(day);
+        if first { "0" } else { "-1" }
+    };
+    let key = move || rules.with(|r| r.blocks.get(block).map(|b| PeekKey::of(b, day)));
     view! {
         <Show when=move || covers.get()>
             <div
@@ -393,20 +435,29 @@ fn Bar(
                 class:climate-temp--high=move || band() == Some(TempBand::High)
                 class:climate-temp--off=move || band() == Some(TempBand::Off)
                 class:climate-timeline__bar--editable=editable
-                class:climate-timeline__bar--peeked=move || peek.get() == Some(block)
+                class:climate-timeline__bar--peeked=move || peeked.get() == Some(block)
                 class:climate-timeline__bar--selected=move || selected.get() == Some(block)
                 style=style
                 title=title
                 role="button"
-                tabindex="0"
+                tabindex=tab_stop
                 on:click=move |_| {
-                    let open = if editable { selected } else { peek };
-                    open.update(|s| *s = if *s == Some(block) { None } else { Some(block) });
+                    if editable {
+                        selected.update(|s| *s = if *s == Some(block) { None } else { Some(block) });
+                    } else if peeked.get_untracked() == Some(block) {
+                        peek.set(None);
+                    } else {
+                        peek.set(key());
+                    }
                 }
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
                     if ev.key().eq_ignore_ascii_case("enter") || ev.key() == " " {
                         ev.prevent_default();
-                        if editable { selected } else { peek }.set(Some(block));
+                        if editable {
+                            selected.set(Some(block));
+                        } else {
+                            peek.set(key());
+                        }
                     }
                 }
             >
@@ -606,7 +657,12 @@ pub fn WeekTimeline(
     let t = use_climate_text();
     let text = use_text();
     let selected = RwSignal::new(None::<usize>);
-    let peek = RwSignal::new(None::<usize>);
+    let peek = RwSignal::new(None::<PeekKey>);
+    let peeked = Memo::new(move |_| {
+        peek.get()
+            .filter(|_| !editable)
+            .and_then(|key| rules.with(|r| peek_index(r, key)))
+    });
     let count = move || rules.with(|r| r.blocks.len());
     let base = move || rules.with(|r| setpoint_text(lang(), Some(r.base)));
     let is_today = move |day: Day| now.is_some_and(|n| n.with(|(d, _)| *d == day));
@@ -694,6 +750,7 @@ pub fn WeekTimeline(
                             on_change=on_change
                             selected=selected
                             peek=peek
+                            peeked=peeked
                         />
                     </For>
                     {now_line}
@@ -701,9 +758,9 @@ pub fn WeekTimeline(
             }
         })
         .collect_view();
-    let peeked = move || {
-        peek.get()
-            .filter(|_| !editable)
+    let peek_line = move || {
+        peeked
+            .get()
             .and_then(|i| rules.with(|r| r.blocks.get(i).map(|b| peek_text(lang(), b))))
     };
     view! {
@@ -768,7 +825,7 @@ pub fn WeekTimeline(
                 <div class="climate-timeline__hours">{hours}</div>
                 {cols}
             </div>
-            {move || peeked().map(|text| view! { <p class="climate-timeline__peek">{text}</p> })}
+            {move || peek_line().map(|text| view! { <p class="climate-timeline__peek">{text}</p> })}
             {editable
                 .then(|| {
                     view! {
@@ -837,6 +894,35 @@ mod tests {
         assert_eq!(set_base(&m, Setpoint::Off).base, Setpoint::Off);
         assert_eq!(set_base(&m, Setpoint::Temp(f64::NAN)), m);
         valid(&set_base(&m, Setpoint::Off));
+    }
+
+    #[test]
+    fn peek_index_follows_the_block_not_its_place() {
+        let morning = block(&[Day::Mon, Day::Tue], "07:00", "09:00", 21.0);
+        let evening = block(&[Day::Mon], "18:00", "22:00", 20.0);
+        let key = PeekKey::of(&evening, Day::Mon);
+        assert_eq!(
+            peek_index(&mode(vec![morning.clone(), evening.clone()]), key),
+            Some(1)
+        );
+        // Reordered: still the evening block.
+        assert_eq!(
+            peek_index(&mode(vec![evening.clone(), morning.clone()]), key),
+            Some(0)
+        );
+        // Removed, or moved to other times: nothing is peeked.
+        assert_eq!(peek_index(&mode(vec![morning.clone()]), key), None);
+        let later = block(&[Day::Mon], "19:00", "22:00", 20.0);
+        assert_eq!(peek_index(&mode(vec![morning, later]), key), None);
+    }
+
+    #[test]
+    fn first_day_is_the_earliest_in_the_week() {
+        assert_eq!(
+            first_day(&block(&[Day::Sun, Day::Wed], "07:00", "09:00", 21.0)),
+            Some(Day::Wed)
+        );
+        assert_eq!(first_day(&block(&[], "07:00", "09:00", 21.0)), None);
     }
 
     #[test]
