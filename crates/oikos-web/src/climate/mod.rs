@@ -91,6 +91,7 @@ pub fn source_word(lang: Lang, source: Source) -> &'static str {
             Source::Holiday => ClimateText::SrcHoliday,
             Source::Away => ClimateText::SrcAway,
             Source::Eco => ClimateText::SrcEco,
+            Source::Empty => ClimateText::SrcEmpty,
             Source::Schedule => ClimateText::SrcSchedule,
             Source::Idle => ClimateText::Idle,
         },
@@ -105,6 +106,7 @@ pub fn history_source(lang: Lang, raw: &str) -> String {
         "holiday" => Some(Source::Holiday),
         "away" => Some(Source::Away),
         "eco" => Some(Source::Eco),
+        "empty" => Some(Source::Empty),
         "schedule" => Some(Source::Schedule),
         "idle" => Some(Source::Idle),
         _ => None,
@@ -694,6 +696,8 @@ mod tests {
         assert_eq!(history_source(Lang::En, "away"), "Away");
         assert_eq!(history_source(Lang::En, "eco"), "Eco");
         assert_eq!(history_source(Lang::Fr, "eco"), "Éco");
+        assert_eq!(history_source(Lang::En, "empty"), "Empty room");
+        assert_eq!(history_source(Lang::Fr, "empty"), "Pièce vide");
         assert_eq!(history_source(Lang::Fr, "mystery_source"), "Mystery source");
     }
 
