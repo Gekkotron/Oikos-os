@@ -1,0 +1,389 @@
+//! Room-thermometer correction (spec §6.1–§6.4): a small offset on the schedule's target that
+//! nudges the device setpoint until the room reaches the target.
+//!
+//! Pure and deterministic: no I/O, no clock. `now` (Unix seconds) comes in through the input.
+
+use crate::doc::{Decision, FeedbackSettings, Mode, Setpoint, Source};
+use crate::schedule::ReadingSource;
+
+/// Two targets within this distance are the same target.
+const SAME_TARGET: f64 = 0.01;
+/// Readings younger than this carry no age text in the note.
+const AGE_NOTE_S: u64 = 15 * 60;
+
+/// What the correction remembers between two ticks.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FeedbackState {
+    /// The schedule target this state belongs to.
+    pub target: f64,
+    /// The offset applied on top of the target, in degrees.
+    pub offset: f64,
+    /// When this target began (Unix seconds).
+    pub since: u64,
+    /// The last offset change (Unix seconds).
+    pub last_step_at: Option<u64>,
+}
+
+/// Everything [`correct`] reads.
+pub struct CorrectionInput<'a> {
+    pub settings: &'a FeedbackSettings,
+    pub mode: Mode,
+    /// The schedule's target temperature.
+    pub target: f64,
+    /// The zone's lowest (heat) or highest (cool) useful setpoint, when set.
+    pub base: Option<f64>,
+    /// The frost floor: heat never goes below it.
+    pub frost: f64,
+    /// The room thermometer, if it has ever reported.
+    pub thermometer: Option<ReadingSource>,
+    /// The amount one correction moves the offset, in degrees.
+    pub step: f64,
+    /// A device is held by hand or in safety: keep the offset, do not step.
+    pub frozen: bool,
+    pub previous: Option<&'a FeedbackState>,
+    pub now: u64,
+}
+
+/// The offset to apply and why.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Correction {
+    pub offset: f64,
+    pub note: Option<String>,
+}
+
+/// Work out the offset for this tick.
+pub fn correct(input: &CorrectionInput) -> Correction {
+    let s = input.settings;
+    let target = input.target;
+    let previous = input
+        .previous
+        .filter(|p| (p.target - target).abs() <= SAME_TARGET);
+    let (start, since, last_step_at) = match previous {
+        Some(p) => (p.offset, p.since, p.last_step_at),
+        None => (0.0, input.now, None),
+    };
+
+    let Some(room) = input.thermometer else {
+        return silent(Some("no room thermometer".into()));
+    };
+    if room.age_s > u64::from(s.quiet_limit_min) * 60 {
+        let hours = room.age_s / 3600;
+        return silent(Some(format!(
+            "room thermometer silent for {hours} h: no correction"
+        )));
+    }
+
+    let r = room.value;
+    let ready =
+        last_step_at.is_none_or(|t| input.now.saturating_sub(t) >= u64::from(s.interval_min) * 60);
+    let warm = input.now.saturating_sub(since) >= u64::from(s.warmup_min) * 60;
+    let above = r > target + s.band;
+    let below = r < target - s.band;
+
+    let mut offset = start;
+    if !input.frozen {
+        match input.mode {
+            Mode::Heat => {
+                if above && ready {
+                    offset -= input.step;
+                } else if below && ready && warm {
+                    offset += input.step;
+                }
+            }
+            Mode::Cool => {
+                if above && ready && warm {
+                    offset -= input.step;
+                } else if below && ready {
+                    offset += input.step;
+                }
+            }
+        }
+    }
+    let (lo, hi) = limits(input);
+    let offset = offset.clamp(lo, hi);
+
+    let note = (above || below || offset != 0.0).then(|| {
+        let (word, edge) = if above {
+            ("above", target + s.band)
+        } else if below {
+            ("below", target - s.band)
+        } else {
+            ("near", target)
+        };
+        format!(
+            "room {r:.1} °C{} {word} {edge:.1} °C: AC {:.1} °C ({offset:+.1})",
+            age_text(room.age_s),
+            target + offset
+        )
+    });
+    Correction { offset, note }
+}
+
+fn silent(note: Option<String>) -> Correction {
+    Correction { offset: 0.0, note }
+}
+
+/// The lowest and highest offset allowed.
+fn limits(input: &CorrectionInput) -> (f64, f64) {
+    let s = input.settings;
+    let target = input.target;
+    match input.mode {
+        Mode::Heat => {
+            let mut floor = (target - s.max_below).max(input.frost);
+            if let Some(base) = input.base {
+                floor = floor.max(base);
+            }
+            ((floor - target).min(0.0), s.max_above)
+        }
+        Mode::Cool => {
+            let hi = match input.base {
+                Some(base) => s.max_below.min(base - target).max(0.0),
+                None => s.max_below,
+            };
+            (-s.max_above, hi)
+        }
+    }
+}
+
+/// `" (2 h ago)"` or `" (40 min ago)"` for a reading at least 15 min old, else nothing.
+fn age_text(age_s: u64) -> String {
+    if age_s >= 3600 {
+        format!(" ({} h ago)", age_s / 3600)
+    } else if age_s >= AGE_NOTE_S {
+        format!(" ({} min ago)", age_s / 60)
+    } else {
+        String::new()
+    }
+}
+
+impl FeedbackState {
+    /// The state to keep after a decision: `Some` only for an enabled, scheduled temperature.
+    pub fn after(
+        previous: Option<&FeedbackState>,
+        decision: &Decision,
+        enabled: bool,
+        now: u64,
+    ) -> Option<FeedbackState> {
+        if !enabled || decision.source != Source::Schedule {
+            return None;
+        }
+        let Some(Setpoint::Temp(target)) = decision.setpoint else {
+            return None;
+        };
+        let offset = decision.adjust.unwrap_or(0.0);
+        let state = match previous.filter(|p| (p.target - target).abs() <= SAME_TARGET) {
+            Some(p) => FeedbackState {
+                target,
+                offset,
+                since: p.since,
+                last_step_at: if (offset - p.offset).abs() > f64::EPSILON {
+                    Some(now)
+                } else {
+                    p.last_step_at
+                },
+            },
+            None => FeedbackState {
+                target,
+                offset,
+                since: now,
+                last_step_at: None,
+            },
+        };
+        Some(state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    const NOW: u64 = 100_000;
+
+    fn settings() -> FeedbackSettings {
+        FeedbackSettings::default()
+    }
+
+    fn run(
+        mode: Mode,
+        target: f64,
+        base: Option<f64>,
+        r: f64,
+        age_s: u64,
+        previous: Option<&FeedbackState>,
+        frozen: bool,
+    ) -> Correction {
+        let s = settings();
+        correct(&CorrectionInput {
+            settings: &s,
+            mode,
+            target,
+            base,
+            frost: 7.0,
+            thermometer: Some(ReadingSource { value: r, age_s }),
+            step: 0.5,
+            frozen,
+            previous,
+            now: NOW,
+        })
+    }
+
+    fn heat(r: f64, previous: Option<&FeedbackState>) -> Correction {
+        run(Mode::Heat, 19.0, Some(15.0), r, 0, previous, false)
+    }
+
+    fn state(target: f64, offset: f64, since: u64, last: Option<u64>) -> FeedbackState {
+        FeedbackState {
+            target,
+            offset,
+            since,
+            last_step_at: last,
+        }
+    }
+
+    #[test]
+    fn overshoot_steps_down_once_per_interval() {
+        assert_eq!(heat(21.6, None).offset, -0.5);
+        let p = state(19.0, -0.5, NOW - 7200, Some(NOW - 600));
+        assert_eq!(heat(21.6, Some(&p)).offset, -0.5);
+        let p = state(19.0, -0.5, NOW - 7200, Some(NOW - 900));
+        assert_eq!(heat(21.6, Some(&p)).offset, -1.0);
+    }
+
+    #[test]
+    fn stops_at_max_below_and_base() {
+        let p = state(19.0, -3.0, NOW - 7200, Some(NOW - 7200));
+        assert_eq!(heat(22.0, Some(&p)).offset, -3.0);
+        let c = run(Mode::Heat, 19.0, Some(17.0), 22.0, 0, Some(&p), false);
+        assert_eq!(c.offset, -2.0);
+    }
+
+    #[test]
+    fn band_edge_does_not_step() {
+        for r in [19.5, 18.5] {
+            let c = heat(r, None);
+            assert_eq!(c.offset, 0.0);
+            assert_eq!(c.note, None);
+        }
+    }
+
+    #[test]
+    fn undershoot_waits_for_warmup_and_max_above() {
+        let p = state(19.0, 0.0, NOW - 1800, None);
+        assert_eq!(heat(18.0, Some(&p)).offset, 0.0);
+        let p = state(19.0, 0.0, NOW - 3600, None);
+        assert_eq!(heat(18.0, Some(&p)).offset, 0.5);
+        let p = state(19.0, 0.5, NOW - 7200, Some(NOW - 7200));
+        assert_eq!(heat(18.0, Some(&p)).offset, 0.5);
+    }
+
+    #[test]
+    fn new_target_resets() {
+        let p = state(19.0, -1.0, NOW - 7200, Some(NOW - 60));
+        let c = run(Mode::Heat, 17.0, Some(15.0), 21.6, 0, Some(&p), false);
+        assert_eq!(c.offset, -0.5);
+    }
+
+    #[test]
+    fn quiet_thermometer() {
+        let c = run(Mode::Heat, 19.0, Some(15.0), 21.6, 3 * 3600, None, false);
+        assert_eq!(c.offset, -0.5);
+        let c = run(
+            Mode::Heat,
+            19.0,
+            Some(15.0),
+            21.6,
+            6 * 3600 + 1,
+            None,
+            false,
+        );
+        assert_eq!(c.offset, 0.0);
+        assert!(c.note.unwrap().contains("silent for 6 h"));
+    }
+
+    #[test]
+    fn no_thermometer_note() {
+        let s = settings();
+        let c = correct(&CorrectionInput {
+            settings: &s,
+            mode: Mode::Heat,
+            target: 19.0,
+            base: None,
+            frost: 7.0,
+            thermometer: None,
+            step: 0.5,
+            frozen: false,
+            previous: None,
+            now: NOW,
+        });
+        assert_eq!(c.offset, 0.0);
+        assert_eq!(c.note.as_deref(), Some("no room thermometer"));
+    }
+
+    #[test]
+    fn frozen_keeps_offset() {
+        let p = state(19.0, -0.5, NOW - 7200, Some(NOW - 7200));
+        let c = run(Mode::Heat, 19.0, Some(15.0), 22.0, 0, Some(&p), true);
+        assert_eq!(c.offset, -0.5);
+    }
+
+    #[test]
+    fn cool_mirrors() {
+        let cool =
+            |r: f64, p: Option<&FeedbackState>| run(Mode::Cool, 26.0, Some(28.0), r, 0, p, false);
+        let old = |off: f64| state(26.0, off, NOW - 7200, Some(NOW - 7200));
+        assert_eq!(cool(27.0, Some(&old(0.0))).offset, -0.5);
+        assert_eq!(cool(24.5, Some(&old(0.0))).offset, 0.5);
+        assert_eq!(cool(24.5, Some(&old(2.0))).offset, 2.0);
+        assert_eq!(cool(27.0, Some(&old(-0.5))).offset, -0.5);
+    }
+
+    #[test]
+    fn note_text() {
+        let c = run(Mode::Heat, 19.0, Some(15.0), 20.6, 7200, None, false);
+        assert_eq!(c.offset, -0.5);
+        assert_eq!(
+            c.note.as_deref(),
+            Some("room 20.6 °C (2 h ago) above 19.5 °C: AC 18.5 °C (-0.5)")
+        );
+    }
+
+    fn decision(source: Source, setpoint: Option<Setpoint>, adjust: Option<f64>) -> Decision {
+        Decision {
+            zone: "z".into(),
+            mode: Some(Mode::Heat),
+            setpoint,
+            source,
+            cause: None,
+            reason: String::new(),
+            reading: None,
+            reading_age_s: None,
+            outdoor_mean: None,
+            home: true,
+            applied: false,
+            at: NOW,
+            entities: BTreeMap::new(),
+            eco_restore: BTreeMap::new(),
+            adjust,
+        }
+    }
+
+    #[test]
+    fn after_tracks_since_and_steps() {
+        let prev = state(19.0, 0.0, 500, None);
+        let d = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), Some(-0.5));
+        let s = FeedbackState::after(Some(&prev), &d, true, NOW).unwrap();
+        assert_eq!(s, state(19.0, -0.5, 500, Some(NOW)));
+        // no change keeps the last step
+        let prev = state(19.0, -0.5, 500, Some(900));
+        let s = FeedbackState::after(Some(&prev), &d, true, NOW).unwrap();
+        assert_eq!(s.last_step_at, Some(900));
+        // new target starts over
+        let d2 = decision(Source::Schedule, Some(Setpoint::Temp(17.0)), None);
+        let s = FeedbackState::after(Some(&prev), &d2, true, NOW).unwrap();
+        assert_eq!(s, state(17.0, 0.0, NOW, None));
+        let o = decision(Source::Override, Some(Setpoint::Temp(19.0)), None);
+        assert_eq!(FeedbackState::after(Some(&prev), &o, true, NOW), None);
+        assert_eq!(FeedbackState::after(Some(&prev), &d, false, NOW), None);
+    }
+}
