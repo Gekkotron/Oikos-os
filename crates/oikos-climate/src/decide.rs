@@ -584,8 +584,9 @@ fn choose(inp: &ZoneInputs, mode: Option<Mode>) -> Choice {
 }
 
 /// The presence setback of a block at `scheduled` (spec §7.2), while the room is empty: lower in
-/// heat (never under the base or frost), higher in cool (never over the base). `None` when it
-/// is off, the room is occupied, or the limits leave the block as it is.
+/// heat (never under the base or frost), higher in cool (never over the base), and never past
+/// the block itself. `None` when it is off, the room is occupied, or the limits leave the block
+/// as it is.
 fn setback(inp: &ZoneInputs, mode: Mode, scheduled: f64) -> Option<Choice> {
     let p = &inp.settings.presence;
     if !p.enabled || !inp.room_empty {
@@ -614,6 +615,11 @@ fn setback(inp: &ZoneInputs, mode: Mode, scheduled: f64) -> Option<Choice> {
             Some(b) if wanted > b => (b, Some("base")),
             _ => (wanted, None),
         },
+    };
+    // A block already under the base (heat) or over it (cool) is never moved the other way.
+    let target = match mode {
+        Mode::Heat => target.min(scheduled),
+        Mode::Cool => target.max(scheduled),
     };
     if (target - scheduled).abs() <= 0.01 {
         return None;
@@ -1007,6 +1013,39 @@ mod tests {
         let d = c.run();
         assert_eq!(d.setpoint, Some(Setpoint::Temp(7.0)));
         assert!(d.reason.ends_with("7.0 °C (frost)"), "{}", d.reason);
+    }
+
+    #[test]
+    fn setback_never_heats_past_the_block() {
+        // A night block under the base: the empty room keeps its block, never the base.
+        let mut c = empty_room(20.0);
+        c.settings.rules.heat.as_mut().unwrap().blocks[0].setpoint = Setpoint::Temp(17.0);
+        let d = c.run();
+        assert_eq!(d.source, Source::Schedule);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(17.0)));
+        // A block under frost is not raised either.
+        let mut c = empty_room(15.0);
+        let heat = c.settings.rules.heat.as_mut().unwrap();
+        heat.base = Setpoint::Off;
+        heat.blocks[0].setpoint = Setpoint::Temp(6.0);
+        let d = c.run();
+        assert_eq!(d.source, Source::Schedule);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(6.0)));
+    }
+
+    #[test]
+    fn setback_never_cools_past_the_block() {
+        let mut c = Case::new();
+        c.mode = Some(Mode::Cool);
+        c.devices = vec![dev("ac", &["off", "cool"], Some(26.0))];
+        let cool = c.settings.rules.cool.as_mut().unwrap();
+        cool.base = Setpoint::Temp(24.0);
+        cool.blocks[0].setpoint = Setpoint::Temp(26.0);
+        c.settings.presence.enabled = true;
+        c.room_empty = true;
+        let d = c.run();
+        assert_eq!(d.source, Source::Schedule);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(26.0)));
     }
 
     #[test]
