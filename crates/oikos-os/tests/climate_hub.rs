@@ -1225,6 +1225,46 @@ mod engine {
         assert_eq!(held_in("living"), 0);
     }
 
+    /// The push history the hub last published in `out`.
+    fn last_history(out: &[Publish]) -> Option<String> {
+        out.iter()
+            .rev()
+            .find(|p| p.topic == "oikos/push/history")
+            .map(|p| p.payload.clone())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_raised_safety_alert_survives_a_restart() {
+        let id = "climate-safety-living-frost";
+        let house = HouseSettings {
+            stale_after_min: 24 * 60,
+            ..HouseSettings::default()
+        };
+        let mut before = Rig::new(None).await;
+        load_push(&before.hub).await;
+        before.hub.set_climate_house(house.clone()).unwrap();
+        drain(&mut before.rx);
+        before.sim.set(&before.hub, 0, "off", 10.0, 5.0);
+        let history = last_history(&before.pass(0).await).expect("alert pushed");
+        assert!(!alert(&before.hub, id).unwrap().resolved);
+        // The hub restarts and finds the alert in the retained history.
+        let mut rig = Rig::new(None).await;
+        rig.hub
+            .ingest_message("oikos/push/history", history.as_bytes(), true);
+        load_push(&rig.hub).await;
+        rig.hub.set_climate_house(house).unwrap();
+        drain(&mut rig.rx);
+        rig.sim.set(&rig.hub, 0, "off", 10.0, 5.0);
+        let out = rig.pass(0).await;
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Safety);
+        assert_eq!(last_history(&out), None, "pushed again: {out:?}");
+        // Warm again: the alert raised before the restart still resolves.
+        rig.sim.set(&rig.hub, 0, "heat", 10.0, 18.0);
+        rig.pass(61).await;
+        rig.pass(61 + 601).await;
+        assert!(alert(&rig.hub, id).unwrap().resolved);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn a_resolved_frost_alert_is_not_raised_again_for_six_hours() {
         let mut rig = Rig::new(None).await;
