@@ -2,6 +2,7 @@
 
 pub mod connection;
 pub mod devices;
+pub mod done;
 pub mod services;
 pub mod welcome;
 pub mod wizard;

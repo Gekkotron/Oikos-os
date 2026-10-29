@@ -142,6 +142,15 @@ pub enum SetupText {
     NotAServiceAccount,
     FileReadFailed,
     PushProject,
+    DoneTitle,
+    DoneLead,
+    OpenHouse,
+    RunSetupAgain,
+    RowLocation,
+    RowMqtt,
+    RowDatabase,
+    RowDevices,
+    DevicesInRooms,
 }
 
 pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
@@ -364,6 +373,21 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
             "Impossible de lire ce fichier.",
         ),
         SetupText::PushProject => ("Project: {project}", "Projet : {project}"),
+        SetupText::DoneTitle => ("Your home is ready", "Votre maison est prête"),
+        SetupText::DoneLead => (
+            "Here is what is set up. You can change any of it later in Settings.",
+            "Voici ce qui est configuré. Vous pourrez tout modifier plus tard dans les Réglages.",
+        ),
+        SetupText::OpenHouse => ("Open my house", "Ouvrir ma maison"),
+        SetupText::RunSetupAgain => ("Run setup again", "Relancer la configuration"),
+        SetupText::RowLocation => ("Location", "Localisation"),
+        SetupText::RowMqtt => ("MQTT broker", "Broker MQTT"),
+        SetupText::RowDatabase => ("Database", "Base de données"),
+        SetupText::RowDevices => ("Devices", "Appareils"),
+        SetupText::DevicesInRooms => (
+            "{n} found, {m} in rooms",
+            "{n} trouvés, {m} dans des pièces",
+        ),
     };
     match lang {
         Lang::En => en,
@@ -492,6 +516,15 @@ mod tests {
                 SetupText::NotAServiceAccount,
                 SetupText::FileReadFailed,
                 SetupText::PushProject,
+                SetupText::DoneTitle,
+                SetupText::DoneLead,
+                SetupText::OpenHouse,
+                SetupText::RunSetupAgain,
+                SetupText::RowLocation,
+                SetupText::RowMqtt,
+                SetupText::RowDatabase,
+                SetupText::RowDevices,
+                SetupText::DevicesInRooms,
             ],
             setup_text,
             &[

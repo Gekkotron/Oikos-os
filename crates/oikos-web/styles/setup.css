@@ -344,3 +344,51 @@
     margin-left: 36px;
   }
 }
+
+/* Done step: the summary of what is set up. */
+.done__list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.done__row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+  border: 1px solid var(--chip-border);
+  border-radius: 12px;
+}
+
+.done__mark {
+  color: var(--accent-mint);
+}
+
+.done__label {
+  min-width: 0;
+}
+
+.done__value {
+  min-width: 0;
+  color: var(--muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.done__row--off .done__mark {
+  color: var(--muted);
+}
+
+@media (max-width: 480px) {
+  .done__row {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .done__value {
+    grid-column: 2;
+    text-align: left;
+  }
+}

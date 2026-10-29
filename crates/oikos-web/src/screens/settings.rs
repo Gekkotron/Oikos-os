@@ -392,6 +392,9 @@ pub fn SettingsScreen() -> impl IntoView {
                     })
                     .collect_view()}
             </ul>
+            <A href="/setup" attr:class="chip settings__all">
+                {move || setup_text(lang(), SetupText::RunSetupAgain)}
+            </A>
         </div>
     }
 }

@@ -258,6 +258,123 @@ async fn section_enabled(section: &'static str) -> bool {
         .unwrap_or(false)
 }
 
+/// Which services are set up, read from the same sources the cards use. Built by
+/// [`ServiceFlags::load`], which starts the reads; call it inside the owner of the view.
+#[derive(Clone, Copy)]
+pub struct ServiceFlags {
+    pub weather: RwSignal<bool>,
+    pub solar: RwSignal<bool>,
+    pub energy: RwSignal<bool>,
+    pub cameras: RwSignal<bool>,
+    pub push: RwSignal<bool>,
+    pub climate: RwSignal<bool>,
+    pub alarm: RwSignal<bool>,
+    pub push_project: RwSignal<Option<String>>,
+    pub skipped: RwSignal<BTreeSet<String>>,
+    keys_read: RwSignal<bool>,
+    basics_read: RwSignal<bool>,
+}
+
+impl ServiceFlags {
+    /// Starts the reads. Energy follows the house's grid sensor; the others come from their
+    /// settings sections.
+    pub fn load() -> Self {
+        let flags = Self {
+            weather: RwSignal::new(false),
+            solar: RwSignal::new(false),
+            energy: RwSignal::new(false),
+            cameras: RwSignal::new(false),
+            push: RwSignal::new(false),
+            climate: RwSignal::new(false),
+            alarm: RwSignal::new(false),
+            push_project: RwSignal::new(None),
+            skipped: RwSignal::new(skipped()),
+            keys_read: RwSignal::new(false),
+            basics_read: RwSignal::new(false),
+        };
+        if let Some(house) = use_context::<House>() {
+            Effect::new(move |_| {
+                let set_up = house
+                    .entities
+                    .with(|m| holder(&m.values().cloned().collect::<Vec<_>>(), EnergyRole::Grid))
+                    .is_some();
+                flags.energy.set(set_up);
+            });
+        }
+        leptos::task::spawn_local(async move {
+            if let Ok(v) = get_section("solcast").await {
+                let enabled = v["enabled"].as_bool().unwrap_or(false);
+                flags
+                    .solar
+                    .try_set(enabled && v["api_key"]["set"].as_bool().unwrap_or(false));
+            }
+            if let Ok(v) = get_section("frigate").await {
+                flags.cameras.try_set(v["url"].as_str().is_some());
+            }
+            if let Ok(v) = get_section("push").await {
+                flags
+                    .push
+                    .try_set(v["service_account"]["set"].as_bool().unwrap_or(false));
+                flags
+                    .push_project
+                    .try_set(v["project_id"].as_str().map(str::to_owned));
+            }
+            flags.keys_read.try_set(true);
+        });
+        leptos::task::spawn_local(async move {
+            flags.weather.try_set(section_enabled("weather").await);
+            flags.climate.try_set(section_enabled("climate").await);
+            let alarm = crate::api::alarm::get_alarm()
+                .await
+                .is_ok_and(|a| a.enabled);
+            flags.alarm.try_set(alarm);
+            flags.basics_read.try_set(true);
+        });
+        flags
+    }
+
+    /// Whether every read has answered (successfully or not).
+    pub fn loaded(&self) -> bool {
+        self.keys_read.get() && self.basics_read.get()
+    }
+
+    fn on(&self, id: &str) -> bool {
+        match id {
+            "weather" => self.weather,
+            "solar" => self.solar,
+            "energy" => self.energy,
+            "cameras" => self.cameras,
+            "push" => self.push,
+            "climate" => self.climate,
+            "alarm" => self.alarm,
+            _ => return false,
+        }
+        .get()
+    }
+
+    /// What the card for `id` shows right now.
+    pub fn state(&self, id: &str) -> CardState {
+        card_state(self.on(id), self.skipped.with(|s| s.contains(id)))
+    }
+}
+
+/// Every service's card state, in [`SERVICE_IDS`] order, for the Done summary. It stays empty
+/// until the reads have answered, so nothing reads "Set up" or "Not set up" on a guess. Call it
+/// inside the owner of the view.
+pub fn service_states() -> Signal<Vec<(&'static str, CardState)>> {
+    let flags = ServiceFlags::load();
+    Signal::derive(move || {
+        if flags.loaded() {
+            SERVICE_IDS
+                .into_iter()
+                .map(|id| (id, flags.state(id)))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    })
+}
+
 /// The Services step. Needs [`Applying`] and [`WizardNav`] in context.
 #[component]
 pub fn ServicesStep() -> impl IntoView {
@@ -265,45 +382,16 @@ pub fn ServicesStep() -> impl IntoView {
     let t = use_setup_text();
     let lang = use_lang();
     let state = use_context::<SetupState>();
-    let skipped_ids = RwSignal::new(skipped());
-    let weather_on = RwSignal::new(false);
-    let climate_on = RwSignal::new(false);
-    let alarm_on = RwSignal::new(false);
-    let energy_on = RwSignal::new(false);
-    if let Some(house) = use_context::<House>() {
-        Effect::new(move |_| {
-            let set_up = house
-                .entities
-                .with(|m| holder(&m.values().cloned().collect::<Vec<_>>(), EnergyRole::Grid))
-                .is_some();
-            energy_on.set(set_up);
-        });
-    }
-    let solar_on = RwSignal::new(false);
-    let cameras_on = RwSignal::new(false);
-    let push_on = RwSignal::new(false);
-    let push_project = RwSignal::new(None::<String>);
-    leptos::task::spawn_local(async move {
-        if let Ok(v) = get_section("solcast").await {
-            let enabled = v["enabled"].as_bool().unwrap_or(false);
-            solar_on.try_set(enabled && v["api_key"]["set"].as_bool().unwrap_or(false));
-        }
-        if let Ok(v) = get_section("frigate").await {
-            cameras_on.try_set(v["url"].as_str().is_some());
-        }
-        if let Ok(v) = get_section("push").await {
-            push_on.try_set(v["service_account"]["set"].as_bool().unwrap_or(false));
-            push_project.try_set(v["project_id"].as_str().map(str::to_owned));
-        }
-    });
-    leptos::task::spawn_local(async move {
-        weather_on.try_set(section_enabled("weather").await);
-        climate_on.try_set(section_enabled("climate").await);
-        let alarm = crate::api::alarm::get_alarm()
-            .await
-            .is_ok_and(|a| a.enabled);
-        alarm_on.try_set(alarm);
-    });
+    let flags = ServiceFlags::load();
+    let skipped_ids = flags.skipped;
+    let weather_on = flags.weather;
+    let climate_on = flags.climate;
+    let alarm_on = flags.alarm;
+    let energy_on = flags.energy;
+    let solar_on = flags.solar;
+    let cameras_on = flags.cameras;
+    let push_on = flags.push;
+    let push_project = flags.push_project;
     let failure = RwSignal::new(None::<String>);
     let advancing = RwSignal::new(false);
     let go_next = move |_| {
