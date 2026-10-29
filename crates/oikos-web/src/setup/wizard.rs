@@ -6,6 +6,7 @@ use oikos_api::SetupStep;
 use serde_json::Value;
 
 use super::connection::{DatabaseStep, MqttStep};
+use super::devices::DevicesStep;
 use super::welcome::WelcomeStep;
 use super::{SetupState, opening_step};
 use crate::i18n::setup::{SetupText, use_setup_text};
@@ -97,7 +98,14 @@ pub fn SetupScreen() -> impl IntoView {
                     SetupStep::Welcome => view! { <WelcomeStep /> }.into_any(),
                     SetupStep::Mqtt => view! { <MqttStep /> }.into_any(),
                     SetupStep::Database => view! { <DatabaseStep /> }.into_any(),
-                    SetupStep::Devices => view! { <div class="setup__body"></div> }.into_any(),
+                    SetupStep::Devices => {
+                        let z2m_base = state
+                            .and_then(|s| s.0.get_untracked())
+                            .and_then(|s| s.mqtt)
+                            .and_then(|m| m.z2m_base)
+                            .unwrap_or_default();
+                        view! { <DevicesStep z2m_base=z2m_base /> }.into_any()
+                    }
                     SetupStep::Services => view! { <div class="setup__body"></div> }.into_any(),
                     SetupStep::Done => view! { <div class="setup__body"></div> }.into_any(),
                 }}

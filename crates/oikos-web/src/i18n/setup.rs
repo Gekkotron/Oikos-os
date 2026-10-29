@@ -72,6 +72,16 @@ pub enum SetupText {
     NoSkipDatabase,
     /// The Settings pages' note when the stored values could not be read.
     LoadFailed,
+    /// The Devices step's title and lead line.
+    DevicesTitle,
+    DevicesLead,
+    /// "{n} devices found", and its singular form.
+    DevicesFound,
+    DeviceFoundOne,
+    /// Shown when no device appeared; `{base}` is the Zigbee2MQTT base topic.
+    NoDevicesYet,
+    BackToMqtt,
+    Skip,
 }
 
 pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
@@ -177,6 +187,19 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
             "Could not read the current values:",
             "Impossible de lire les valeurs actuelles :",
         ),
+        SetupText::DevicesTitle => ("Your devices", "Vos appareils"),
+        SetupText::DevicesLead => (
+            "Pick a room for each device. You can change this later in Settings.",
+            "Choisissez une pièce pour chaque appareil. Vous pourrez la modifier plus tard dans les Réglages.",
+        ),
+        SetupText::DevicesFound => ("{n} devices found", "{n} appareils trouvés"),
+        SetupText::DeviceFoundOne => ("1 device found", "1 appareil trouvé"),
+        SetupText::NoDevicesYet => (
+            "No devices yet. Check that Zigbee2MQTT publishes to this broker under {base}",
+            "Aucun appareil pour l'instant. Vérifiez que Zigbee2MQTT publie sur ce broker sous {base}",
+        ),
+        SetupText::BackToMqtt => ("Back to MQTT settings", "Retour aux réglages MQTT"),
+        SetupText::Skip => ("Skip", "Passer"),
     };
     match lang {
         Lang::En => en,
@@ -251,6 +274,13 @@ mod tests {
                 SetupText::FieldRequired,
                 SetupText::NoSkipDatabase,
                 SetupText::LoadFailed,
+                SetupText::DevicesTitle,
+                SetupText::DevicesLead,
+                SetupText::DevicesFound,
+                SetupText::DeviceFoundOne,
+                SetupText::NoDevicesYet,
+                SetupText::BackToMqtt,
+                SetupText::Skip,
             ],
             setup_text,
             &[

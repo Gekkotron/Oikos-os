@@ -37,7 +37,7 @@ fn matches(device: &DeviceView, rooms: &[String], query: &str) -> bool {
 }
 
 /// The rooms of the device's entities by name, sorted and without repeats.
-fn device_rooms(
+pub(crate) fn device_rooms(
     device: &DeviceView,
     entities: &BTreeMap<String, EntityView>,
     areas: &[AreaView],
