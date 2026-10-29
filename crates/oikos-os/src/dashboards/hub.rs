@@ -2,7 +2,7 @@
 
 use oikos_api::{Dashboard, DashboardView, HOUSE_ID};
 use oikos_core::command::Publish;
-use oikos_core::dashboard::is_valid_dashboard_id;
+use oikos_core::dashboard::{is_valid_dashboard_id, validate_layout};
 
 use super::house::synthesize_house;
 use super::store::validate_widget;
@@ -40,6 +40,7 @@ impl Hub {
                 HubError::Rejected(format!("widget `{}`: {problem}", widget.id))
             })?;
         }
+        validate_layout(&body.widgets).map_err(HubError::Rejected)?;
         {
             let store = self.dashboard_store();
             let taken = store
@@ -176,6 +177,30 @@ mod tests {
         let (hub, _rx) = hub();
         let err = hub.set_dashboard(dash("house", 1)).await.unwrap_err();
         assert!(matches!(err, HubError::Rejected(_)));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn set_dashboard_rejects_overlapping_widgets() {
+        let (hub, _rx) = hub();
+        let widget = |id: &str, col| oikos_api::Widget {
+            id: id.into(),
+            kind: oikos_api::WidgetKind::Light,
+            span: oikos_api::Span::X2x1,
+            config: oikos_api::WidgetConfig::Entity {
+                entity_id: "light.a".into(),
+                title: None,
+            },
+            pos: Some(oikos_core::dashboard::Cell { row: 0, col }),
+        };
+        let mut d = dash("a", 1);
+        d.widgets = vec![widget("w1", 0), widget("w2", 1)];
+        let err = hub.set_dashboard(d.clone()).await.unwrap_err();
+        assert!(
+            matches!(err, HubError::Rejected(ref m) if m.contains("overlap")),
+            "{err:?}"
+        );
+        d.widgets[1].pos = Some(oikos_core::dashboard::Cell { row: 0, col: 3 });
+        assert!(hub.set_dashboard(d).await.is_ok());
     }
 
     #[tokio::test(flavor = "current_thread")]

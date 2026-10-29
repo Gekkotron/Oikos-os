@@ -82,12 +82,9 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
                 <select
                     class="select"
                     on:change=move |ev| {
-                        let v = event_target_value(&ev);
-                        state.draft.update(|d| {
-                            if let (Some(w), Some(s)) = (d.widgets.get_mut(index), parse_span(&v)) {
-                                w.span = s;
-                            }
-                        });
+                        if let Some(s) = parse_span(&event_target_value(&ev)) {
+                            state.resize(index, s);
+                        }
                     }
                 >
                     {move || {
@@ -511,6 +508,7 @@ mod tests {
                 entity_id: "light.a".into(),
                 title: None,
             },
+            pos: None,
         }
     }
 
@@ -570,6 +568,7 @@ mod tests {
                 entity_id: "sensor.a".into(),
                 range: DashboardHistoryRange::H24,
             },
+            pos: None,
         };
         set_range(&mut h, DashboardHistoryRange::H6);
         assert_eq!(

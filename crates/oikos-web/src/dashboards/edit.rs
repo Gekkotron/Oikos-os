@@ -2,7 +2,9 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use oikos_core::dashboard::{Dashboard, Widget, allowed_spans};
+use oikos_core::dashboard::{
+    Cell, Dashboard, Span, Widget, allowed_spans, append_widget, move_widget, resize_widget,
+};
 
 use crate::api;
 use crate::house::House;
@@ -42,28 +44,32 @@ impl EditState {
         Memo::new(move |_| draft.get() != original.get())
     }
 
-    /// Moves the widget at `from` so it ends up at index `to`.
-    pub fn reorder(&self, from: usize, to: usize) {
-        // Selection is positional, so any reorder invalidates it.
-        self.selected_widget.set(None);
-        self.draft.update(|d| {
-            if from < d.widgets.len() && to < d.widgets.len() && from != to {
-                let w = d.widgets.remove(from);
-                d.widgets.insert(to, w);
-            }
-        });
+    /// Moves widget `index` so its top-left corner is on cell `to`; see [`move_widget`]. The
+    /// list order is left alone, so an open config sheet keeps its widget.
+    pub fn move_to(&self, index: usize, to: Cell) {
+        self.draft
+            .update(|d| move_widget(&mut d.widgets, index, to));
+    }
+
+    /// Sets widget `index` to `span`; what it now covers moves down (see [`resize_widget`]).
+    pub fn resize(&self, index: usize, span: Span) {
+        self.draft
+            .update(|d| resize_widget(&mut d.widgets, index, span));
     }
 
     /// Advances widget `index` to the next span its kind allows, wrapping around, so the
     /// editor can never produce a span the hub would reject.
     pub fn cycle_span(&self, index: usize) {
-        self.draft.update(|d| {
-            if let Some(w) = d.widgets.get_mut(index) {
+        let next = self.draft.with_untracked(|d| {
+            d.widgets.get(index).map(|w| {
                 let allowed = allowed_spans(w.kind);
                 let cur = allowed.iter().position(|s| *s == w.span).unwrap_or(0);
-                w.span = allowed[(cur + 1) % allowed.len()];
-            }
+                allowed[(cur + 1) % allowed.len()]
+            })
         });
+        if let Some(span) = next {
+            self.resize(index, span);
+        }
     }
 
     /// Leaves edit mode, closing the widget and dashboard sheets.
@@ -130,11 +136,14 @@ fn flash(fresh: RwSignal<Option<String>>, id: String) {
     .forget();
 }
 
-/// Appends a picked widget to the draft and marks it fresh; the hub validates it on Save.
+/// Adds a picked widget after the last one on the grid and marks it fresh; the hub validates
+/// it on Save.
 pub fn add_widget_handler(state: EditState) -> Callback<Widget> {
     Callback::new(move |widget: Widget| {
         let id = widget.id.clone();
-        state.draft.update(|d| d.widgets.push(widget));
+        state
+            .draft
+            .update(|d| append_widget(&mut d.widgets, widget));
         #[cfg(target_arch = "wasm32")]
         flash(state.fresh, id);
         #[cfg(not(target_arch = "wasm32"))]
@@ -232,6 +241,7 @@ mod tests {
                 entity_id: "light.a".into(),
                 title: None,
             },
+            pos: None,
         }
     }
 
@@ -249,16 +259,19 @@ mod tests {
     }
 
     #[test]
-    fn dirty_memo_true_after_reorder() {
+    fn dirty_memo_true_after_a_move_that_keeps_the_list_order() {
         let s = state(vec![
             widget("a", WidgetKind::Light, Span::X1x1),
             widget("b", WidgetKind::Light, Span::X1x1),
         ]);
         let dirty = s.dirty();
         assert!(!dirty.get());
-        s.reorder(0, 1);
+        s.move_to(1, Cell { row: 1, col: 0 });
         assert!(dirty.get());
-        assert_eq!(s.draft.get().widgets[0].id, "b");
+        let d = s.draft.get();
+        assert_eq!(d.widgets[1].id, "b");
+        assert_eq!(d.widgets[1].pos, Some(Cell { row: 1, col: 0 }));
+        assert_eq!(d.widgets[0].pos, Some(Cell { row: 0, col: 0 }));
     }
 
     #[test]
