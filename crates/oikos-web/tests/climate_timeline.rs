@@ -108,6 +108,31 @@ fn click_at(target: &Element, fraction: f64) {
     target.dispatch_event(&event).unwrap();
 }
 
+/// Dispatches a pointer event of `kind` on `target` at `y` px below the top of `column`.
+fn pointer(kind: &str, target: &Element, column: &Element, y: f64) {
+    let rect = column.get_bounding_client_rect();
+    let init = PointerEventInit::new();
+    init.set_bubbles(true);
+    init.set_pointer_id(1);
+    init.set_client_x((rect.left() + rect.width() / 2.0) as i32);
+    init.set_client_y((rect.top() + y) as i32);
+    let event = PointerEvent::new_with_event_init_dict(kind, &init).unwrap();
+    target.dispatch_event(&event).unwrap();
+}
+
+/// The `edge` ("from" or "to") handle of the `n`th bar in the Monday column.
+fn monday_handle(host: &Element, n: u32, edge: &str) -> Element {
+    col(host, Day::Mon)
+        .query_selector_all(".climate-timeline__bar")
+        .unwrap()
+        .item(n)
+        .expect("Monday bar")
+        .unchecked_into::<Element>()
+        .query_selector(&format!(".climate-timeline__handle--{edge}"))
+        .unwrap()
+        .expect("handle")
+}
+
 fn chip(host: &Element, label: &str) -> HtmlElement {
     let chips = host
         .query_selector_all(".climate-timeline__days .chip")
@@ -407,4 +432,83 @@ async fn the_timeline_reads_and_parses_in_french_and_flips_back() {
         "20.5"
     );
     chip(&host, "Mon");
+}
+
+#[wasm_bindgen_test]
+async fn dragging_a_handle_down_moves_the_edge_and_snaps() {
+    let rules = RwSignal::new(ModeRules {
+        base: Setpoint::Temp(15.5),
+        blocks: vec![block(&[Day::Mon], "08:00", "10:00", 18.0)],
+    });
+    let host = mount(rules).await;
+    let monday = col(&host, Day::Mon);
+    let handle = monday_handle(&host, 0, "to");
+
+    // The column is 480px tall, so 1px is 3 min: 244px is minute 732, which snaps to 12:15.
+    pointer("pointerdown", &handle, &monday, 240.0);
+    pointer("pointermove", &handle, &monday, 244.0);
+    pointer("pointerup", &handle, &monday, 244.0);
+    tick().await;
+
+    let moved = rules.with_untracked(|r| r.blocks[0].clone());
+    assert_eq!(moved.to, HhMm(12 * 60 + 15));
+    assert_eq!(moved.from, HhMm(8 * 60));
+    assert!(
+        host.query_selector(".climate-timeline__editor")
+            .unwrap()
+            .is_none(),
+        "a drag does not open the editor"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn dragging_a_handle_stops_at_the_neighbouring_block() {
+    let rules = RwSignal::new(ModeRules {
+        base: Setpoint::Temp(15.5),
+        blocks: vec![
+            block(&[Day::Mon], "06:00", "07:00", 17.0),
+            block(&[Day::Mon], "08:00", "10:00", 18.0),
+        ],
+    });
+    let host = mount(rules).await;
+    let monday = col(&host, Day::Mon);
+    let handle = monday_handle(&host, 1, "from");
+
+    // 100px is minute 300 (05:00), past the first block's end: the start stops at 07:00.
+    pointer("pointerdown", &handle, &monday, 160.0);
+    pointer("pointermove", &handle, &monday, 100.0);
+    pointer("pointerup", &handle, &monday, 100.0);
+    tick().await;
+
+    let blocks = rules.with_untracked(|r| r.blocks.clone());
+    assert_eq!(blocks[1].from, HhMm(7 * 60));
+    assert_eq!(blocks[1].to, HhMm(10 * 60));
+    assert_eq!(blocks[0].to, HhMm(7 * 60));
+}
+
+#[wasm_bindgen_test]
+async fn pressing_a_handle_without_dragging_opens_the_block() {
+    let rules = RwSignal::new(ModeRules {
+        base: Setpoint::Temp(15.5),
+        blocks: vec![block(&[Day::Mon], "08:00", "10:00", 18.0)],
+    });
+    let host = mount(rules).await;
+    let monday = col(&host, Day::Mon);
+    let handle = monday_handle(&host, 0, "from");
+
+    pointer("pointerdown", &handle, &monday, 160.0);
+    pointer("pointerup", &handle, &monday, 160.0);
+    tick().await;
+
+    assert_eq!(
+        rules.with_untracked(|r| r.blocks[0].from),
+        HhMm(8 * 60),
+        "the press leaves the block as it was"
+    );
+    assert!(
+        host.query_selector(".climate-timeline__editor")
+            .unwrap()
+            .is_some(),
+        "the block's editor opens"
+    );
 }

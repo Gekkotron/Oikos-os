@@ -80,13 +80,18 @@ pub fn RoomPanel(
     tz: Signal<Tz>,
     /// Called after any change so the screen refetches.
     on_changed: Callback<()>,
+    /// Whether the panel is on screen; a hidden panel leaves its decisions unfetched. Shown when
+    /// absent.
+    #[prop(optional, into)]
+    shown: Option<Signal<bool>>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let lang = use_lang();
     let t = use_climate_text();
     let id = zone.with_untracked(|z| z.zone.clone());
     let clock = expect_context::<Now>().0;
-    let now = Signal::derive(move || week_minute(clock.get(), tz.get()));
+    // A memo, so the calendars redraw their now line only when the minute or the day changes.
+    let now = Memo::new(move |_| week_minute(clock.get(), tz.get()));
 
     let reading = move || {
         zone.with(|z| {
@@ -353,13 +358,14 @@ pub fn RoomPanel(
     let learn_id = id.clone();
 
     // Decisions: fetched when the list opens, and again whenever the zone's data changes while
-    // it is open.
+    // it is open. A hidden panel waits, and fetches again when it is shown.
     let open = RwSignal::new(false);
     let log = RwSignal::new(None::<DecisionLog>);
     let decisions_id = id.clone();
     Effect::new(move |_| {
         zone.track();
-        if open.get() {
+        let visible = shown.is_none_or(|s| s.get());
+        if open.get() && visible {
             let id = decisions_id.clone();
             spawn_local(async move {
                 match api::decisions(&id, FETCH).await {
@@ -406,7 +412,7 @@ pub fn RoomPanel(
             zone.with_untracked(|z| {
                 z.proposal.clone().map(|p| {
                     let approved = Signal::derive(move || zone.with(|z| z.settings.rules.clone()));
-                    view! { <ProposalPanel zone=z.zone.clone() proposal=p approved=approved on_changed=on_changed now=now /> }
+                    view! { <ProposalPanel zone=z.zone.clone() proposal=p approved=approved on_changed=on_changed now=now.into() /> }
                 })
             })
         })
@@ -501,7 +507,7 @@ pub fn RoomPanel(
                 {eco_row}
             </div>
             <div class="card climate-week">
-                <RulesPanel zone=zone on_changed=on_changed now=now />
+                <RulesPanel zone=zone on_changed=on_changed now=now.into() />
                 <p class="climate-legend">
                     <span><i class="climate-legend__swatch climate-temp--low"></i>"≤ 16°"</span>
                     <span><i class="climate-legend__swatch climate-temp--mid"></i>"17 – 19°"</span>
