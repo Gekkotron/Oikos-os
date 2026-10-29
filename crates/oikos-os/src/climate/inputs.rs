@@ -9,6 +9,7 @@ use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
 use oikos_climate::doc::{HouseSettings, Mode, Override, RoomEco, SafetyCause, ZoneSettings};
 use oikos_climate::feedback::FeedbackState;
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
+use oikos_climate::view::ThermometerReading;
 use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind, StateValue};
 
 use super::GROUP_PREFIX;
@@ -322,6 +323,24 @@ pub(crate) fn view_reading(
         }
         Reading::Missing => (None, None),
     }
+}
+
+/// The room thermometer's own value and age for the read view, whatever its age.
+pub(crate) fn view_thermometer(
+    hub: &Hub,
+    sensor: Option<&str>,
+    now: u64,
+    seen: &HashMap<String, u64>,
+) -> Option<ThermometerReading> {
+    let id = sensor?;
+    let (reading, _) = reading_sources(hub, Some(id), &[], seen, now);
+    reading
+        .filter(|source| source.age_s < UNKNOWN_AGE_S)
+        .map(|source| ThermometerReading {
+            entity: id.to_owned(),
+            value: source.value,
+            age_s: source.age_s,
+        })
 }
 
 /// The mean outdoor temperature: the history's, while its cache is fresh, else the mean of the

@@ -45,6 +45,13 @@ pub struct ZoneView {
     /// in the area; none when the climate devices' own readings are used.
     #[serde(default)]
     pub room_sensor: Option<String>,
+    /// The room thermometer's own latest value and age, even when it is too old to be the
+    /// reading.
+    #[serde(default)]
+    pub thermometer: Option<ThermometerReading>,
+    /// When the thermometer correction last changed its offset (Unix seconds).
+    #[serde(default)]
+    pub correction_step_at: Option<u64>,
     pub decision: Option<Decision>,
     pub overrides: Vec<Override>,
     /// The zone's own eco, while set.
@@ -52,6 +59,15 @@ pub struct ZoneView {
     pub eco: Option<RoomEco>,
     pub proposal: Option<Proposal>,
     pub learn: LearnStatus,
+}
+
+/// What the room thermometer reports: its entity, value and how long ago it last reported.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct ThermometerReading {
+    pub entity: String,
+    pub value: f64,
+    pub age_s: u64,
 }
 
 /// The whole engine as one document.
@@ -164,6 +180,19 @@ impl RoomEcoRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zone_view_thermometer_is_optional() {
+        let json = serde_json::json!({
+            "zone": "z", "name": "Z", "orphan": false,
+            "settings": serde_json::to_value(ZoneSettings::default()).unwrap(),
+            "settings_invalid": null, "entities": [], "reading": null, "reading_age_s": null,
+            "decision": null, "overrides": [], "proposal": null, "learn": {"state": "off"}
+        });
+        let view: ZoneView = serde_json::from_value(json).expect("old json parses");
+        assert!(view.thermometer.is_none());
+        assert!(view.correction_step_at.is_none());
+    }
 
     #[test]
     fn override_request_needs_one_duration_and_one_target() {

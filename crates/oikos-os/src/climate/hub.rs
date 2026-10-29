@@ -108,6 +108,7 @@ impl Hub {
         // The reading and its age are what the engine sees now, not what the last decision froze.
         let stale_after_s = u64::from(view.house.stale_after_min) * 60;
         let outdoor = view.house.outdoor_entity.clone();
+        let feedback = self.climate_runtime().feedback.clone();
         for zone in &mut view.zones {
             zone.room_sensor = inputs::room_sensor(
                 self,
@@ -126,6 +127,11 @@ impl Hub {
             );
             zone.reading = reading;
             zone.reading_age_s = age;
+            zone.thermometer =
+                inputs::view_thermometer(self, zone.room_sensor.as_deref(), now, &seen);
+            zone.correction_step_at = feedback
+                .get(&zone.zone)
+                .and_then(|state| state.last_step_at);
         }
         Ok(view)
     }
@@ -431,6 +437,8 @@ fn zone_view(
         reading: None,
         reading_age_s: None,
         room_sensor: None,
+        thermometer: None,
+        correction_step_at: None,
         decision: docs.decision.clone(),
         overrides: docs.overrides.clone(),
         eco: docs.eco.clone(),
