@@ -1,10 +1,12 @@
 //! Hub-side history: the Postgres pool and schema (`db`), the bounded writer task that
 //! feeds it without blocking the ingest path (`writer`), and the hourly rollup task that
-//! fills `history_hourly` (`rollup`).
+//! fills `history_hourly` (`rollup`). `restore` puts the last recorded value back on an entity
+//! that has not spoken since boot.
 
 pub mod climate;
 pub mod db;
 pub mod query;
+pub mod restore;
 pub mod rollup;
 pub mod solar;
 pub mod writer;

@@ -50,6 +50,8 @@ Oikos-os is one Cargo workspace (`crates/*`) with one binary, `oikos-os`. The hu
 3. The registry applies discovery configs (expanding Home Assistant abbreviations and device-based configs), computes the folding of entities into each other, and maps each state payload through the entity's templates into a typed state.
 4. The hub turns the registry's changes into events (`entity_upserted`, `state_changed`, `areas_changed`, and so on) on a broadcast channel, and feeds changed states to the history writer.
 
+After a restart the registry only knows what the broker replays as retained, so a sensor that does not retain its state stays unknown until its next message. Once the link is first up and the replay has settled (10 seconds), the hub restores the last recorded value from the history for each entity that has not reported yet, stamped with the time it was recorded. It does so once per process, and the restore is broadcast like a state change but is neither a report nor a new history row.
+
 ### Reads: HTTP, WebSocket, MCP
 
 `/api/v1/snapshot` and the `oikos://snapshot` MCP resource build the same `Snapshot` from the registry. `/ws` sends that snapshot, then every broadcast event. The web UI loads the snapshot, applies the events, and reads and writes through the same REST routes the assistants use. The MCP tools call the same `Hub` methods as the REST handlers, so both surfaces share validation and error mapping. A write refused because the broker link is down is a `503` over HTTP and an in-band tool error over MCP. See [HTTP API](../reference/http-api.md) and [MCP tools](../reference/mcp-tools.md).

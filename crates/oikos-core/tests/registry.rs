@@ -1056,3 +1056,62 @@ fn invert_is_ignored_on_a_non_switch() {
     assert!(!changes.contains(&Change::StateChanged(SHUTTER_COVER.to_owned())));
     assert_eq!(registry.state(SHUTTER_COVER).expect("state").value, before);
 }
+
+/// A switch with one state topic, as `equal_value_report_is_reported_not_changed` builds it.
+fn switch_registry() -> Registry {
+    let mut registry = Registry::new(config());
+    let config = json!({
+        "unique_id": "test_switch",
+        "state_topic": "zigbee2mqtt/test",
+        "command_topic": "zigbee2mqtt/test/set",
+        "device": {"identifiers": ["zigbee2mqtt_0xtest"], "name": "test"}
+    });
+    registry.apply(Inbound::Discovery(
+        discovery_topic("oikos/switch/test/config"),
+        config.to_string().into_bytes(),
+    ));
+    registry
+}
+
+/// A recorded value goes back on an entity that never reported, stamped with its recorded
+/// time; a real message after that overrides it.
+#[test]
+fn restore_state_fills_a_never_reported_entity() {
+    let mut registry = switch_registry();
+    let changes = registry.restore_state("test_switch", StateValue::OnOff(true), AT);
+    assert_eq!(
+        changes,
+        vec![Change::StateChanged("test_switch".to_owned())]
+    );
+    let state = registry.state("test_switch").expect("state");
+    assert_eq!(state.value, StateValue::OnOff(true));
+    assert_eq!(state.last_update, Some(AT));
+
+    let inbound = registry.route("zigbee2mqtt/test", b"OFF".to_vec(), AT + 5);
+    registry.apply(inbound);
+    let state = registry.state("test_switch").expect("state");
+    assert_eq!(state.value, StateValue::OnOff(false));
+    assert_eq!(state.last_update, Some(AT + 5));
+}
+
+#[test]
+fn restore_state_ignores_an_unknown_id() {
+    let mut registry = switch_registry();
+    assert!(
+        registry
+            .restore_state("nope", StateValue::OnOff(true), AT)
+            .is_empty()
+    );
+}
+
+#[test]
+fn restore_state_keeps_a_value_already_read() {
+    let mut registry = switch_registry();
+    let inbound = registry.route("zigbee2mqtt/test", b"ON".to_vec(), AT);
+    registry.apply(inbound);
+    let changes = registry.restore_state("test_switch", StateValue::OnOff(false), AT - 100);
+    assert!(changes.is_empty(), "{changes:?}");
+    let state = registry.state("test_switch").expect("state");
+    assert_eq!(state.value, StateValue::OnOff(true));
+    assert_eq!(state.last_update, Some(AT));
+}

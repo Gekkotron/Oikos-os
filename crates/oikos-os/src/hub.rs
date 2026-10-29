@@ -599,6 +599,40 @@ impl Hub {
         self.with_button_subscriptions(changes)
     }
 
+    /// Puts recorded values back on the entities that have not reported since boot (see
+    /// [`oikos_core::registry::Registry::restore_state`]) and broadcasts them like an ingest.
+    /// A restore is not a report: nothing goes to history (the row is already its latest), to
+    /// the readings or to `state_seen`, and a secret entity is skipped. `values` carry the
+    /// recorded time in microseconds. Returns how many entities were restored.
+    pub fn restore_recorded_states(&self, values: Vec<(String, i64, StateValue)>) -> usize {
+        let (changes, events) = {
+            let mut reg = self.write();
+            let mut changes = Vec::new();
+            for (id, at_micros, value) in values {
+                if reg
+                    .entity(&id)
+                    .and_then(|entity| entity.capabilities.generic.as_ref())
+                    .is_some_and(|g| g.secret)
+                {
+                    continue;
+                }
+                let at_secs = u64::try_from(at_micros / 1_000_000).unwrap_or(0);
+                changes.extend(reg.restore_state(&id, value, at_secs));
+            }
+            let events = events_for(&reg, &changes);
+            (changes, events)
+        };
+        for event in events {
+            self.broadcast(event);
+        }
+        for change in &changes {
+            if let Change::StateChanged(id) = change {
+                self.on_member_state_change(id);
+            }
+        }
+        changes.len()
+    }
+
     /// [`Self::ingest`] for a message that carries the broker's retain flag. A press is an
     /// event: a non-retained message on the command topic of a button some flow watches
     /// broadcasts [`WsEvent::ButtonPressed`]. A retained one is a replay, never a press.

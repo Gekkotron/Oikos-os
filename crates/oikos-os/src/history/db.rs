@@ -95,6 +95,24 @@ impl Db {
         Ok(lw)
     }
 
+    /// The latest recorded value per entity with the time it was recorded; a row whose value
+    /// no longer deserializes is skipped.
+    pub async fn latest_states(&self) -> Result<Vec<(String, Micros, StateValue)>, sqlx::Error> {
+        let rows = sqlx::query("SELECT entity_id, time, value FROM entity_latest")
+            .fetch_all(&self.pool)
+            .await?;
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: String = row.get(0);
+            let t: DateTime<Utc> = row.get(1);
+            let value: Json = row.get(2);
+            if let Ok(sv) = serde_json::from_value::<StateValue>(value) {
+                out.push((id, dt_to_micros(t), sv));
+            }
+        }
+        Ok(out)
+    }
+
     /// Raw numeric samples in `[from, to)`, in `(entity_id, time, seq)` order so writes at
     /// the same microsecond keep their insert order.
     pub async fn samples(
