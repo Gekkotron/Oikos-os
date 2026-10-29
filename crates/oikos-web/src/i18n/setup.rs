@@ -117,6 +117,12 @@ pub enum SetupText {
     AlarmOpenSettings,
     /// Body of a service card whose form is not built yet.
     ComingSoon,
+    /// The Energy card's role pickers.
+    RoleGrid,
+    RoleGridExport,
+    RoleSolar,
+    /// Shown when changing an energy role failed; `{error}` is the hub's text.
+    RoleMoveFailed,
 }
 
 pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
@@ -295,6 +301,13 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
         ),
         SetupText::AlarmOpenSettings => ("Alarm settings", "Réglages de l'alarme"),
         SetupText::ComingSoon => ("Coming soon.", "Bientôt disponible."),
+        SetupText::RoleGrid => ("Grid, bought", "Réseau, acheté"),
+        SetupText::RoleGridExport => ("Grid, sold", "Réseau, vendu"),
+        SetupText::RoleSolar => ("Solar production", "Production solaire"),
+        SetupText::RoleMoveFailed => (
+            "Could not change the sensor: {error}",
+            "Impossible de changer le capteur : {error}",
+        ),
     };
     match lang {
         Lang::En => en,
@@ -403,6 +416,10 @@ mod tests {
                 SetupText::ClimateBeta,
                 SetupText::AlarmOpenSettings,
                 SetupText::ComingSoon,
+                SetupText::RoleGrid,
+                SetupText::RoleGridExport,
+                SetupText::RoleSolar,
+                SetupText::RoleMoveFailed,
             ],
             setup_text,
             &[

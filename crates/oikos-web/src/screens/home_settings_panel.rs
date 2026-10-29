@@ -19,6 +19,7 @@ use crate::i18n::settings::{
     RULE_BAD_TIME, RULE_BETWEEN, RULE_LOWER_THAN, RULE_NOT_A, RULE_OVERLAP, RULE_START_EQUALS_END,
 };
 use crate::i18n::{HomeText, Lang, home_text};
+use crate::setup::services::energy::EnergyPanel;
 
 /// A setting the panel edits, for pointing an error at its field.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,6 +156,17 @@ fn message_key(field: Field, message: &str) -> Option<HomeText> {
     }
 }
 
+/// The windows to save for the typed `(start, end)` rows: blank rows dropped, times trimmed.
+pub fn off_peak_windows(rows: &[(String, String)]) -> Vec<OffPeakWindow> {
+    rows.iter()
+        .filter(|(start, end)| !(start.trim().is_empty() && end.trim().is_empty()))
+        .map(|(start, end)| OffPeakWindow {
+            start: start.trim().to_owned(),
+            end: end.trim().to_owned(),
+        })
+        .collect()
+}
+
 /// The settings document the draft stands for, or the first number that does not parse.
 pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, Field> {
     Ok(HomeSettings {
@@ -163,15 +175,7 @@ pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, Field> {
         indoor_entity: draft.indoor.clone(),
         cold_below: parse_number(&draft.cold, Field::Cold)?,
         hot_above: parse_number(&draft.hot, Field::Hot)?,
-        off_peak: draft
-            .off_peak
-            .iter()
-            .filter(|(start, end)| !(start.trim().is_empty() && end.trim().is_empty()))
-            .map(|(start, end)| OffPeakWindow {
-                start: start.trim().to_owned(),
-                end: end.trim().to_owned(),
-            })
-            .collect(),
+        off_peak: off_peak_windows(&draft.off_peak),
         off_peak_history: Vec::new(),
         // Not on this panel: Save puts the stored choice back.
         energy_view: Default::default(),
@@ -192,6 +196,86 @@ fn field_of_message(message: &str) -> Option<Field> {
     .into_iter()
     .find(|(name, _)| message.contains(name))
     .map(|(_, field)| field)
+}
+
+/// The off-peak window list: one row per `(start, end)` pair of `draft`, with add and remove.
+/// `children` render under the list, where the caller shows its validation message.
+#[component]
+pub fn OffPeakEditor(draft: RwSignal<Draft>, children: Children) -> impl IntoView {
+    let lang = use_context::<RwSignal<Lang>>();
+    let t = move |k: HomeText| home_text(lang.map_or(Lang::En, |l| l.get()), k);
+    view! {
+        <div class="climate-field home-settings__off-peak">
+            <span class="climate-field__label">{move || t(HomeText::OffPeakHours)}</span>
+            <p class="settings__hint">{move || t(HomeText::OffPeakHint)}</p>
+            {move || {
+                let rows = draft.with(|d| d.off_peak.len());
+                (0..rows)
+                    .map(|i| {
+                        let get = move |end: bool| {
+                            move || {
+                                draft.with(|d| {
+                                    d.off_peak
+                                        .get(i)
+                                        .map(|(a, b)| if end { b.clone() } else { a.clone() })
+                                        .unwrap_or_default()
+                                })
+                            }
+                        };
+                        let set = move |end: bool| {
+                            move |ev| {
+                                let v = event_target_value(&ev);
+                                draft.update(|d| {
+                                    if let Some(row) = d.off_peak.get_mut(i) {
+                                        if end { row.1 = v } else { row.0 = v }
+                                    }
+                                });
+                            }
+                        };
+                        view! {
+                            <div class="home-settings__window">
+                                <input
+                                    class="field"
+                                    type="time"
+                                    aria-label=move || format!("{} {}", t(HomeText::OffPeakHours), i + 1)
+                                    prop:value=get(false)
+                                    on:change=set(false)
+                                />
+                                <span aria-hidden="true">"–"</span>
+                                <input
+                                    class="field"
+                                    type="time"
+                                    prop:value=get(true)
+                                    on:change=set(true)
+                                />
+                                <button
+                                    type="button"
+                                    class="btn btn--compact"
+                                    on:click=move |_| {
+                                        draft.update(|d| {
+                                            if i < d.off_peak.len() {
+                                                d.off_peak.remove(i);
+                                            }
+                                        })
+                                    }
+                                >
+                                    {move || t(HomeText::RemoveWindow)}
+                                </button>
+                            </div>
+                        }
+                    })
+                    .collect_view()
+            }}
+            <button
+                type="button"
+                class="btn btn--compact home-settings__add"
+                on:click=move |_| draft.update(|d| d.off_peak.push((String::new(), String::new())))
+            >
+                {move || t(HomeText::AddWindow)}
+            </button>
+            {children()}
+        </div>
+    }
 }
 
 #[component]
@@ -358,76 +442,7 @@ pub fn HomeSettingsPanel() -> impl IntoView {
                 |d| d.hot.clone(),
                 |d, v| d.hot = v,
             )}
-            <div class="climate-field home-settings__off-peak">
-                <span class="climate-field__label">{move || t(HomeText::OffPeakHours)}</span>
-                <p class="settings__hint">{move || t(HomeText::OffPeakHint)}</p>
-                {move || {
-                    let rows = draft.with(|d| d.off_peak.len());
-                    (0..rows)
-                        .map(|i| {
-                            let get = move |end: bool| {
-                                move || {
-                                    draft.with(|d| {
-                                        d.off_peak
-                                            .get(i)
-                                            .map(|(a, b)| if end { b.clone() } else { a.clone() })
-                                            .unwrap_or_default()
-                                    })
-                                }
-                            };
-                            let set = move |end: bool| {
-                                move |ev| {
-                                    let v = event_target_value(&ev);
-                                    draft.update(|d| {
-                                        if let Some(row) = d.off_peak.get_mut(i) {
-                                            if end { row.1 = v } else { row.0 = v }
-                                        }
-                                    });
-                                }
-                            };
-                            view! {
-                                <div class="home-settings__window">
-                                    <input
-                                        class="field"
-                                        type="time"
-                                        aria-label=move || format!("{} {}", t(HomeText::OffPeakHours), i + 1)
-                                        prop:value=get(false)
-                                        on:change=set(false)
-                                    />
-                                    <span aria-hidden="true">"–"</span>
-                                    <input
-                                        class="field"
-                                        type="time"
-                                        prop:value=get(true)
-                                        on:change=set(true)
-                                    />
-                                    <button
-                                        type="button"
-                                        class="btn btn--compact"
-                                        on:click=move |_| {
-                                            draft.update(|d| {
-                                                if i < d.off_peak.len() {
-                                                    d.off_peak.remove(i);
-                                                }
-                                            })
-                                        }
-                                    >
-                                        {move || t(HomeText::RemoveWindow)}
-                                    </button>
-                                </div>
-                            }
-                        })
-                        .collect_view()
-                }}
-                <button
-                    type="button"
-                    class="btn btn--compact home-settings__add"
-                    on:click=move |_| draft.update(|d| d.off_peak.push((String::new(), String::new())))
-                >
-                    {move || t(HomeText::AddWindow)}
-                </button>
-                {error_for(Field::OffPeak)}
-            </div>
+            <OffPeakEditor draft=draft>{error_for(Field::OffPeak)}</OffPeakEditor>
             <button
                 type="button"
                 class="chip home-settings__save"
@@ -437,6 +452,7 @@ pub fn HomeSettingsPanel() -> impl IntoView {
                 {move || t(HomeText::Save)}
             </button>
         </section>
+        <EnergyPanel />
     }
 }
 

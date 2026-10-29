@@ -2,6 +2,7 @@
 //! service is set up, skipped or neither, and opens the same form its Settings page uses.
 
 pub mod basic;
+pub mod energy;
 
 use std::collections::BTreeSet;
 use std::future::Future;
@@ -14,9 +15,12 @@ use super::welcome::place_label;
 use super::wizard::WizardNav;
 use super::{Applying, SetupState, setup_href};
 use crate::api::setup::{SaveError, get_section, put_section, put_step};
+use crate::house::House;
 use crate::i18n::setup::{SetupText, setup_text, use_setup_text};
 use crate::i18n::{Lang, use_lang};
 use basic::{AlarmForm, ClimateForm, WeatherForm};
+use energy::{EnergyForm, holder};
+use oikos_core::energy::EnergyRole;
 
 /// What a service card says about its service.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -270,6 +274,16 @@ pub fn ServicesStep() -> impl IntoView {
     let weather_on = RwSignal::new(false);
     let climate_on = RwSignal::new(false);
     let alarm_on = RwSignal::new(false);
+    let energy_on = RwSignal::new(false);
+    if let Some(house) = use_context::<House>() {
+        Effect::new(move |_| {
+            let set_up = house
+                .entities
+                .with(|m| holder(&m.values().cloned().collect::<Vec<_>>(), EnergyRole::Grid))
+                .is_some();
+            energy_on.set(set_up);
+        });
+    }
     leptos::task::spawn_local(async move {
         weather_on.try_set(section_enabled("weather").await);
         climate_on.try_set(section_enabled("climate").await);
@@ -344,10 +358,10 @@ pub fn ServicesStep() -> impl IntoView {
                     icon=crate::icons::BOLT
                     title=SetupText::SvcEnergy
                     desc=fixed(SetupText::DescEnergy)
-                    state=card_state_of("energy", None)
+                    state=card_state_of("energy", Some(energy_on))
                     on_skip=on_skip("energy")
                 >
-                    <Later />
+                    <EnergyForm />
                 </ServiceCard>
                 <ServiceCard
                     id="cameras"

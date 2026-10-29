@@ -288,6 +288,27 @@
   padding-top: 12px;
 }
 
+/* Energy card and the Home settings Energy panel: one labelled select per role. */
+.energy__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.energy__field {
+  min-width: 0;
+}
+
+.energy__role {
+  width: 100%;
+  min-width: 0;
+}
+
+.energy__field .loc__problem {
+  min-height: 0;
+  margin: 4px 0 0;
+}
+
 .svc__skip {
   margin-top: 12px;
 }
