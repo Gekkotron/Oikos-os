@@ -136,8 +136,39 @@ test_reexecs_after_pull() {
   assert_no_log "$ALL"
 }
 
+test_uses_sudo_when_data_is_not_writable() {
+  if [ "$(id -u)" = 0 ]; then echo "    skipped: running as root"; return; fi
+  setup
+  mkdir -p "$T/repo/secrets" "$T/repo/data"
+  echo 'bind = "0.0.0.0:8081"' > "$T/repo/oikos.toml"
+  echo fb > "$T/repo/secrets/firebase.json"
+  cat > "$T/bin/sudo" <<STUB
+#!/usr/bin/env bash
+echo "sudo \$*" >> "$LOG"
+chmod u+w "$T/repo/data"
+"\$@"
+STUB
+  chmod +x "$T/bin/sudo"
+  chmod a-w "$T/repo/data"
+  run_update || { chmod u+w "$T/repo/data"; exit 1; }
+  chmod -R u+w "$T/repo/data"
+  assert_out "data/ is owned by root; using sudo to move files into it"
+  assert_log "sudo mv -n oikos.toml data/oikos.toml"
+  assert_log "sudo mv -n secrets/firebase.json data/secrets/firebase.json"
+  assert_file "$T/repo/data/oikos.toml"
+  assert_content "$T/repo/data/secrets/firebase.json" fb
+}
+
+test_rejects_bad_arguments() {
+  setup
+  if (cd "$T/repo" && PATH="$T/bin:$PATH" bash tools/update.sh --bogus >/dev/null 2>&1); then fail "--bogus accepted"; fi
+  if (cd "$T/repo" && PATH="$T/bin:$PATH" bash tools/update.sh --all --hub-only >/dev/null 2>&1); then fail "--all --hub-only accepted"; fi
+  [ ! -s "$LOG" ] || fail "git or docker ran despite bad arguments"
+}
+
 for t in test_moves_legacy_files test_never_overwrites_data test_bundled_runs_everything \
-  test_override_runs_everything test_flags_win test_warns_about_old_key_paths test_reexecs_after_pull; do
+  test_override_runs_everything test_flags_win test_warns_about_old_key_paths test_reexecs_after_pull \
+  test_uses_sudo_when_data_is_not_writable test_rejects_bad_arguments; do
   echo "==> $t"
   "$t"
 done
