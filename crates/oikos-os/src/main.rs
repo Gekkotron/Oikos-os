@@ -99,7 +99,10 @@ async fn main() -> anyhow::Result<ExitCode> {
             hub.set_setup(Arc::clone(&setup_ctx));
             if cfg.history.enabled() {
                 match History::start(&cfg.history, hub.zone()) {
-                    Ok(history) => hub.set_history(history),
+                    Ok(history) => {
+                        hub.set_history(history);
+                        tokio::spawn(oikos_os::history::restore::run(Arc::clone(&hub)));
+                    }
                     Err(e) => tracing::warn!(
                         error = %e,
                         "history disabled: lazy pool could not be built; the house keeps running"

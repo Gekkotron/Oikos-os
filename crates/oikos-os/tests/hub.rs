@@ -2071,3 +2071,41 @@ fn flow_notify_lists_mirror_the_push_service() {
         oikos_push::normalize::SEVERITIES
     );
 }
+
+/// A restored value is broadcast and stamped with its recorded time, but only while the
+/// entity has not reported; a later retained value replaces it.
+#[tokio::test]
+async fn restore_recorded_states_broadcasts_once() {
+    let (hub, _publisher) = hub();
+    feed_switch(&hub);
+    let mut events = hub.subscribe();
+
+    let restored = hub.restore_recorded_states(vec![
+        (
+            SWITCH_ID.to_owned(),
+            1_700_000_000_000_000,
+            StateValue::OnOff(true),
+        ),
+        ("missing".to_owned(), 1, StateValue::OnOff(true)),
+    ]);
+    assert_eq!(restored, 1);
+    match next_event(&mut events).await {
+        WsEvent::StateChanged { id, state } => {
+            assert_eq!(id, SWITCH_ID);
+            assert_eq!(state.value, StateValue::OnOff(true));
+            assert_eq!(state.last_update, Some(1_700_000_000));
+        }
+        other => panic!("expected StateChanged, got {other:?}"),
+    }
+
+    hub.ingest(
+        &switch_state_topic(),
+        &fixture("states/rooms__stair__light.json"),
+    );
+    let again = hub.restore_recorded_states(vec![(
+        SWITCH_ID.to_owned(),
+        1_700_000_001_000_000,
+        StateValue::OnOff(true),
+    )]);
+    assert_eq!(again, 0);
+}

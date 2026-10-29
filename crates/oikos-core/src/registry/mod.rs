@@ -248,6 +248,30 @@ impl Registry {
         vec![Change::StateChanged(unique_id.to_owned())]
     }
 
+    /// Puts a recorded value back on an entity that has never spoken since boot: it exists,
+    /// its value is [`StateValue::Unknown`] and `last_update` is `None`. `at_secs` is when the
+    /// value was recorded, not now. Anything else (an unknown id, a value already read, a
+    /// message that rendered nothing) is left alone. Availability is not touched.
+    pub fn restore_state(
+        &mut self,
+        unique_id: &str,
+        value: StateValue,
+        at_secs: u64,
+    ) -> Vec<Change> {
+        if !self.entities.contains_key(unique_id) {
+            return Vec::new();
+        }
+        let Some(state) = self.states.get_mut(unique_id) else {
+            return Vec::new();
+        };
+        if state.value != StateValue::Unknown || state.last_update.is_some() {
+            return Vec::new();
+        }
+        state.value = value;
+        state.last_update = Some(at_secs);
+        vec![Change::StateChanged(unique_id.to_owned())]
+    }
+
     pub fn entity(&self, unique_id: &str) -> Option<&Entity> {
         self.entities.get(unique_id)
     }
