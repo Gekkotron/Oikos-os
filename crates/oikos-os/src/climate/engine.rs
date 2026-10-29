@@ -18,7 +18,7 @@ use oikos_climate::feedback::FeedbackState;
 use oikos_climate::ledger::{Ledger, Observed, hold_until};
 use oikos_climate::topics::{self, ZoneDoc};
 use oikos_core::history::Micros;
-use oikos_core::model::{Availability, Command, Kind, StateValue, UNASSIGNED_AREA};
+use oikos_core::model::{Availability, Command, EntityState, Kind, StateValue, UNASSIGNED_AREA};
 use serde::Serialize;
 use tokio::task::JoinHandle;
 
@@ -139,12 +139,6 @@ impl Hub {
             return;
         };
         self.note_availability(id, state.availability, now);
-        {
-            let mut rt = self.climate_runtime();
-            if rt.presence_sensors.contains(id) {
-                note_detection(&mut rt, id, detecting(&state), now);
-            }
-        }
         let StateValue::Climate(climate) = &state.value else {
             return;
         };
@@ -192,6 +186,15 @@ impl Hub {
         }
     }
 
+    /// Notes what a presence sensor's state change says, from the state the event carries: the
+    /// registry may already hold a later state when the loop gets to the event.
+    pub fn observe_presence(&self, id: &str, state: &EntityState, now: u64) {
+        let mut rt = self.climate_runtime();
+        if rt.presence_sensors.contains(id) {
+            note_detection(&mut rt, id, detecting(state), now);
+        }
+    }
+
     async fn climate_loop(
         self: Arc<Self>,
         mut events: tokio::sync::broadcast::Receiver<WsEvent>,
@@ -222,8 +225,10 @@ impl Hub {
                     Err(RecvError::Closed) => break,
                 },
                 event = events.recv() => match event {
-                    Ok(WsEvent::StateChanged { id, .. }) if self.climate_watches(&id) => {
-                        self.observe_climate(&id, clock::now());
+                    Ok(WsEvent::StateChanged { id, state }) if self.climate_watches(&id) => {
+                        let now = clock::now();
+                        self.observe_presence(&id, &state, now);
+                        self.observe_climate(&id, now);
                         due.get_or_insert(tokio::time::Instant::now() + DEBOUNCE);
                     }
                     Ok(WsEvent::ClimateChanged { .. }) | Err(RecvError::Lagged(_)) => {

@@ -2161,10 +2161,39 @@ mod engine {
         (rig, sensor)
     }
 
+    /// The registry's current state of `id`, as a `StateChanged` event carries it.
+    fn state_of(hub: &Hub, id: &str) -> oikos_core::model::EntityState {
+        hub.snapshot()
+            .entities
+            .into_iter()
+            .find(|e| e.id == id)
+            .expect("entity")
+            .state
+    }
+
     /// The sensor reports `on` at `t0 + at`, and the engine sees the change, as its loop does.
     fn detect(rig: &Rig, sensor: &str, on: bool, at: u64) {
         occupancy(&rig.hub, on);
-        rig.hub.observe_climate(sensor, rig.t0 + at);
+        let state = state_of(&rig.hub, sensor);
+        rig.hub.observe_presence(sensor, &state, rig.t0 + at);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pulse_handled_late_still_counts() {
+        let (mut rig, sensor) = presence_rig().await;
+        rig.pass(0).await;
+        // Both events of a short pulse wait behind a slow pass: by the time they are handled
+        // the registry already says off again, but each event carries its own state.
+        occupancy(&rig.hub, true);
+        let on = state_of(&rig.hub, &sensor);
+        occupancy(&rig.hub, false);
+        let off = state_of(&rig.hub, &sensor);
+        rig.hub.observe_presence(&sensor, &on, rig.t0 + 1700);
+        rig.hub.observe_presence(&sensor, &off, rig.t0 + 1740);
+        rig.pass(1800).await;
+        assert_eq!(rig.sim.units[&0].1, 19.0);
+        rig.pass(3540).await;
+        assert_eq!(rig.sim.units[&0].1, 17.0);
     }
 
     #[tokio::test(start_paused = true)]
