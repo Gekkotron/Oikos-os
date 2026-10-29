@@ -46,6 +46,7 @@ assert_log() { grep -Fxq -- "$1" "$LOG" || fail "log lacks line: $1"; }
 assert_no_log() { ! grep -Fxq -- "$1" "$LOG" || fail "log has unexpected line: $1"; }
 assert_file() { [ -f "$1" ] || fail "missing file: $1"; }
 assert_content() { [ "$(cat "$1")" = "$2" ] || fail "$1 is '$(cat "$1")', expected '$2'"; }
+assert_no_out() { case "$OUT" in *"$1"*) fail "output has unexpected: $1" ;; esac; }
 assert_out() { case "$OUT" in *"$1"*) ;; *) fail "output lacks: $1" ;; esac; }
 
 HUB='docker compose up -d --build hub'
@@ -128,6 +129,15 @@ test_warns_about_old_key_paths() {
   assert_out "/etc/oikos/secrets"
 }
 
+test_no_old_key_warning_once_hub_json_exists() {
+  setup
+  mkdir -p "$T/repo/data"
+  echo '{}' > "$T/repo/data/hub.json"
+  echo 'key = "/etc/oikos/secrets/firebase.json"' > "$T/repo/data/oikos.toml"
+  run_update
+  assert_no_out "/etc/oikos/secrets"
+}
+
 test_reexecs_after_pull() {
   setup
   STUB_GIT_NEW_SCRIPT=1 run_update
@@ -167,7 +177,7 @@ test_rejects_bad_arguments() {
 }
 
 for t in test_moves_legacy_files test_never_overwrites_data test_bundled_runs_everything \
-  test_override_runs_everything test_flags_win test_warns_about_old_key_paths test_reexecs_after_pull \
+  test_override_runs_everything test_flags_win test_warns_about_old_key_paths test_no_old_key_warning_once_hub_json_exists test_reexecs_after_pull \
   test_uses_sudo_when_data_is_not_writable test_rejects_bad_arguments; do
   echo "==> $t"
   "$t"

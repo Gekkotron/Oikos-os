@@ -127,8 +127,10 @@ migrate_legacy_files() {
   fi
 }
 
+# Once data/hub.json exists the TOML is never read again, so the warning
+# would only confuse.
 warn_old_key_paths() {
-  if [ -f data/oikos.toml ] && grep -q '/etc/oikos/secrets' data/oikos.toml; then
+  if [ ! -f data/hub.json ] && [ -f data/oikos.toml ] && grep -q '/etc/oikos/secrets' data/oikos.toml; then
     echo "WARNING: data/oikos.toml names key files under /etc/oikos/secrets; change them to /data/secrets/... or delete those lines (the defaults find data/secrets/)" >&2
   fi
 }
