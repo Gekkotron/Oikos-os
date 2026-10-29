@@ -39,7 +39,7 @@ const STATES: [(ZoneState, ClimateText); 3] = [
     (ZoneState::Active, ClimateText::ZoneActive),
 ];
 
-fn override_text(lang: Lang, o: &Override, tz: Tz) -> String {
+fn override_text(lang: Lang, o: &Override, now: u64, tz: Tz) -> String {
     let what = match (o.setpoint, o.mode) {
         (Some(sp), Some(m)) => format!(
             "{} {}",
@@ -53,7 +53,7 @@ fn override_text(lang: Lang, o: &Override, tz: Tz) -> String {
         OverrideOrigin::Hand => ClimateText::SetOnDevice,
         OverrideOrigin::User => ClimateText::SetHere,
     };
-    hold_until(lang, &what, &until_text(lang, o.until, unix_now(), tz), by)
+    hold_until(lang, &what, &until_text(lang, o.until, now, tz), by)
 }
 
 /// A typed temperature ("19.5" or "19,5"), when it is a usable number.
@@ -168,16 +168,18 @@ pub fn RoomPanel(
         });
     });
 
-    // Overrides.
+    // Overrides, redrawn on the clock's tick so "until" stays right and an ended hold goes.
     let clear_id = id.clone();
     let overrides = move || {
-        let list = zone.with(|z| z.overrides.clone());
+        let now = clock.get();
+        let mut list = zone.with(|z| z.overrides.clone());
+        list.retain(|o| o.until > now);
         let tz = tz.get();
         let lang = lang();
         (!list.is_empty()).then(|| {
             let lines = list
                 .iter()
-                .map(|o| view! { <li>{override_text(lang, o, tz)}</li> })
+                .map(|o| view! { <li>{override_text(lang, o, now, tz)}</li> })
                 .collect_view();
             let id = clear_id.clone();
             view! {
@@ -215,7 +217,7 @@ pub fn RoomPanel(
                 .as_ref()
                 .and_then(|d| d.mode)
                 .unwrap_or(Mode::Heat);
-            let (day, minute) = week_minute(unix_now(), tz.get());
+            let (day, minute) = now.get();
             minutes_to_next_change(&z.settings.rules, mode, day, minute)
         })
     };

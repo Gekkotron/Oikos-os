@@ -535,10 +535,15 @@ fn BlockEditor(
         refresh.track();
         setpoint() == Some(Setpoint::Off)
     };
-    let temp = move || match setpoint() {
-        Some(Setpoint::Temp(v)) => input_number(lang(), v),
-        _ => String::new(),
+    let temp = move || {
+        refresh.track();
+        match setpoint() {
+            Some(Setpoint::Temp(v)) => input_number(lang(), v),
+            _ => String::new(),
+        }
     };
+    // The temperature a block held before Off was ticked, so unticking gives it back.
+    let before_off = RwSignal::new(None::<f64>);
     let day_chips = Day::ALL
         .into_iter()
         .map(|day| {
@@ -599,9 +604,14 @@ fn BlockEditor(
                     prop:value=temp
                     on:change=move |ev| {
                         if let Some(t) = parse_decimal(&event_target_value(&ev)) {
-                            let next = set_setpoint(&rules.get_untracked(), block, Setpoint::Temp(t));
-                            on_change.run(next);
+                            let current = rules.get_untracked();
+                            let next = set_setpoint(&current, block, Setpoint::Temp(t));
+                            if next != current {
+                                on_change.run(next);
+                            }
                         }
+                        // A refused or clamped value shows the block's real one again.
+                        refresh.update(|n| *n += 1);
                     }
                 />
             </label>
@@ -612,9 +622,15 @@ fn BlockEditor(
                     on:change=move |ev| {
                         let current = rules.get_untracked();
                         let sp = if event_target_checked(&ev) {
+                            if let Some(Setpoint::Temp(v)) = current.blocks.get(block).map(|b| b.setpoint) {
+                                before_off.set(Some(v));
+                            }
                             Some(Setpoint::Off)
                         } else {
-                            restore_temp(&current, block).map(Setpoint::Temp)
+                            before_off
+                                .get_untracked()
+                                .or_else(|| restore_temp(&current, block))
+                                .map(Setpoint::Temp)
                         };
                         // With no temperature to go back to, the block stays Off until one is typed.
                         if let Some(sp) = sp {

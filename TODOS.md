@@ -23,17 +23,10 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 - **T7** no test pins seq tie-break for equal times (history_db.rs)
 - **T8** unconfirmed entry expiry 120 s can turn a late-applied engine command into a hand change — Ruling: real but rare; holds the engine's own value (safe) — deferred.
 - **T8** safety alerts not persisted, re-pushed after restart — Ruling: real, low impact — deferred.
-- **T8** overheat/overcool reason text is false while latched inside the hysteresis band (decide.rs:264, 303)
 - **T8** a dropped pass's abandoned command is not moved to unconfirmed (engine.rs:61)
 - **T8** broker dropping during a confirm wait still counts a failure (engine.rs:629)
 - **T9** autumn repeated hour merges samples in micros_local (learning.rs:68) — Ruling: real, ≤1 h/year of evidence — deferred.
 - **T9** daily push limit seeded from a pending proposal that may never have been pushed (one suppressed push worst case)
-- **T10** decision-log `before` truncated to whole seconds can omit a same-second row (climate/hub.rs:131)
-- **T11** until/override text refreshes only on zone data change, not clock ticks (zone_card.rs)
-- **T12** Off→On restores base/nearest, not the block's own pre-Off temperature (timeline.rs BlockEditor)
-- **T12** handles tiny on one-step blocks (each is a quarter of the bar at most)
-- **T12** temperature input doesn't track refresh after a refused/clamped value
-- **Final** re-activating a zone (Off→Active) can hold devices changed by hand while it was off, up to manual_hold_max — Ruling: defensible by analogy with §7's restart rule, frost still acts; real, deferred (fix: forget the zone's ledger entries when it leaves Active).
 - **Final** overlapping learning sequences / manual learn_climate_zone bypasses claim_run — Ruling: practically unreachable, conclude is serialised — deferred.
 - **Final** one failed re-assert right after reconnect turns drift into a hold after ~121 s — Ruling: never fights the user; frost overrides — deferred.
 
