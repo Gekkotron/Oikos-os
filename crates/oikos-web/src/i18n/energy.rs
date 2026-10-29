@@ -42,6 +42,12 @@ pub enum EnergyText {
     ChipToGrid,
     ChipSolarShare,
     NoLivePower,
+    // Inside the big circles.
+    CircleProduction,
+    CircleImport,
+    CircleExport,
+    CircleCharging,
+    CircleDischarging,
 }
 
 /// A fixed word of the energy area.
@@ -98,6 +104,11 @@ pub fn energy_text(lang: Lang, k: EnergyText) -> &'static str {
             "No live power reading yet",
             "Pas encore de mesure de puissance",
         ),
+        CircleProduction => ("production", "production"),
+        CircleImport => ("import", "import"),
+        CircleExport => ("export", "export"),
+        CircleCharging => ("charging", "charge"),
+        CircleDischarging => ("discharging", "d\u{e9}charge"),
     };
     match lang {
         Lang::En => en,
@@ -170,6 +181,14 @@ pub fn show_all_consumers(lang: Lang, n: usize) -> String {
         (Lang::En, false) => format!("Show all {n} consumers"),
         (Lang::Fr, true) => format!("Afficher {n} consommateur"),
         (Lang::Fr, false) => format!("Afficher les {n} consommateurs"),
+    }
+}
+
+/// "72% solar" / "72 % solaire" (narrow no-break space before the percent sign in French).
+pub fn solar_share_line(lang: Lang, pct: u8) -> String {
+    match lang {
+        Lang::En => format!("{pct}% solar"),
+        Lang::Fr => format!("{pct}\u{202F}% solaire"),
     }
 }
 
@@ -280,8 +299,17 @@ mod tests {
             ChipToGrid,
             ChipSolarShare,
             NoLivePower,
+            CircleProduction,
+            CircleImport,
+            CircleExport,
+            CircleCharging,
+            CircleDischarging,
         ];
-        crate::i18n::assert_table(ALL, energy_text, &[]);
+        crate::i18n::assert_table(
+            ALL,
+            energy_text,
+            &[CircleProduction, CircleImport, CircleExport],
+        );
     }
 
     #[test]
@@ -300,6 +328,12 @@ mod tests {
             history_error(Lang::En, &E::BadRequest("bad".into())),
             "History error: bad"
         );
+    }
+
+    #[test]
+    fn solar_share_line_in_both_languages() {
+        assert_eq!(solar_share_line(Lang::En, 72), "72% solar");
+        assert_eq!(solar_share_line(Lang::Fr, 72), "72\u{202F}% solaire");
     }
 
     #[test]

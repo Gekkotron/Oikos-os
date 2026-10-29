@@ -204,13 +204,48 @@ fn number(lang: Lang, value: f64, min: usize, max: usize) -> String {
     }
 }
 
+/// A power as its number and its unit: ("3.2", "kW") from 1000 W, ("253", "W") below,
+/// ("—", "") when unknown.
+pub fn power_parts(lang: Lang, watts: Option<f64>) -> (String, &'static str) {
+    match watts {
+        None => ("—".to_string(), ""),
+        Some(w) if w >= 1_000.0 => (number(lang, w / 1_000.0, 1, 1), "kW"),
+        Some(w) => (number(lang, w, 0, 0), "W"),
+    }
+}
+
 /// "3.2 kW" from 1000 W, whole watts below, "—" when unknown.
 pub fn power_text(lang: Lang, watts: Option<f64>) -> String {
-    match watts {
-        None => "—".to_string(),
-        Some(w) if w >= 1_000.0 => with_unit(number(lang, w / 1_000.0, 1, 1), Some("kW")),
-        Some(w) => with_unit(number(lang, w, 0, 0), Some("W")),
+    let (n, unit) = power_parts(lang, watts);
+    with_unit(n, Some(unit).filter(|u| !u.is_empty()))
+}
+
+/// The big and the small line of a big circle: the number, then the unit and what it does
+/// ("W · ↘ import"). Unavailable gives the word alone; an unknown value gives "—".
+pub fn circle_texts(lang: Lang, node: &EnergyNode) -> (String, String) {
+    if node.status == NodeStatus::Unavailable {
+        return (
+            words::energy_text(lang, EnergyText::Unavailable).to_string(),
+            String::new(),
+        );
     }
+    if node.value.is_none() {
+        return ("—".to_string(), String::new());
+    }
+    let (n, unit) = power_parts(lang, node.value);
+    let (arrow, word) = match (node.kind, node.flow) {
+        (NodeKind::Solar, _) => ("", Some(EnergyText::CircleProduction)),
+        (NodeKind::Grid, Flow::In) => ("\u{2198} ", Some(EnergyText::CircleImport)),
+        (NodeKind::Grid, Flow::Out) => ("\u{2197} ", Some(EnergyText::CircleExport)),
+        (NodeKind::Battery, Flow::In) => ("\u{2198} ", Some(EnergyText::CircleDischarging)),
+        (NodeKind::Battery, Flow::Out) => ("\u{2197} ", Some(EnergyText::CircleCharging)),
+        _ => ("", None),
+    };
+    let small = match word {
+        Some(w) => format!("{unit} \u{b7} {arrow}{}", words::energy_text(lang, w)),
+        None => unit.to_string(),
+    };
+    (n, small)
 }
 
 /// A lifetime energy counter: "6 584 kWh", "32.7 kWh", "—" when unknown.
@@ -613,6 +648,59 @@ mod tests {
             node_value_text(Lang::En, ui.node("water").unwrap()),
             "5\u{a0}L"
         );
+    }
+
+    #[test]
+    fn circle_texts_name_the_direction() {
+        let build = |es: Vec<EnergyEntity>| EnergyFlow::build(&es, 0, None);
+        let ui = build(vec![ent("g", "G", EnergyRole::Grid, "W", 253.0)]);
+        assert_eq!(
+            circle_texts(Lang::En, ui.node("grid").unwrap()),
+            ("253".to_string(), "W \u{b7} \u{2198} import".to_string())
+        );
+        let ui = build(vec![ent("g", "G", EnergyRole::Grid, "W", -1610.0)]);
+        assert_eq!(
+            circle_texts(Lang::Fr, ui.node("grid").unwrap()),
+            ("1,6".to_string(), "kW \u{b7} \u{2197} export".to_string())
+        );
+        let ui = build(vec![ent("s", "S", EnergyRole::Solar, "W", 3460.0)]);
+        assert_eq!(
+            circle_texts(Lang::En, ui.node("solar").unwrap()),
+            ("3.5".to_string(), "kW \u{b7} production".to_string())
+        );
+        let ui = build(vec![ent("b", "B", EnergyRole::Battery, "W", -500.0)]);
+        assert_eq!(
+            circle_texts(Lang::Fr, ui.node("battery").unwrap()),
+            ("500".to_string(), "W \u{b7} \u{2197} charge".to_string())
+        );
+        let ui = build(vec![ent("b", "B", EnergyRole::Battery, "W", 500.0)]);
+        assert_eq!(
+            circle_texts(Lang::En, ui.node("battery").unwrap()).1,
+            "W \u{b7} \u{2198} discharging"
+        );
+        let mut e = ent("g", "G", EnergyRole::Grid, "W", 1.0);
+        e.available = false;
+        let ui = build(vec![e]);
+        assert_eq!(
+            circle_texts(Lang::En, ui.node("grid").unwrap()),
+            ("Unavailable".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn big_power_reads_in_kilowatts() {
+        assert_eq!(
+            power_parts(Lang::En, Some(12_345.0)),
+            ("12.3".to_string(), "kW")
+        );
+        assert_eq!(
+            power_parts(Lang::En, Some(3200.0)),
+            ("3.2".to_string(), "kW")
+        );
+        assert_eq!(power_parts(Lang::En, Some(253.3)), ("253".to_string(), "W"));
+        assert_eq!(power_parts(Lang::En, None), ("\u{2014}".to_string(), ""));
+        assert_eq!(power_text(Lang::En, Some(999.0)), "999\u{a0}W");
+        assert_eq!(power_text(Lang::En, Some(1000.0)), "1.0\u{a0}kW");
     }
 
     #[test]
