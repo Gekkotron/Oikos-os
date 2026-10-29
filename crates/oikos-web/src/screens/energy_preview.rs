@@ -47,17 +47,30 @@ fn classic() -> String {
     .concat()
 }
 
+/// A fill: a theme variable's name, or a paint server such as `url(#preview-hatch)`.
+fn paint(colour: &str) -> String {
+    if colour.starts_with("--") {
+        format!("var({colour})")
+    } else {
+        colour.to_string()
+    }
+}
+
 /// A band from the bar at `x1` (spanning `a0..a1`) to the bar at `x2` (spanning `b0..b1`).
 fn band(x1: u32, a: (u32, u32), x2: u32, b: (u32, u32), colour: &str) -> String {
     let m = (x1 + x2) / 2;
     let ((a0, a1), (b0, b1)) = (a, b);
     format!(
-        r#"<path d="M{x1} {a0}C{m} {a0} {m} {b0} {x2} {b0}L{x2} {b1}C{m} {b1} {m} {a1} {x1} {a1}Z" fill="var({colour})" opacity=".38"/>"#
+        r#"<path d="M{x1} {a0}C{m} {a0} {m} {b0} {x2} {b0}L{x2} {b1}C{m} {b1} {m} {a1} {x1} {a1}Z" fill="{fill}" opacity=".38"/>"#,
+        fill = paint(colour)
     )
 }
 
 fn bar(x: u32, y: u32, h: u32, colour: &str) -> String {
-    format!(r#"<rect x="{x}" y="{y}" width="6" height="{h}" rx="2" fill="var({colour})"/>"#)
+    format!(
+        r#"<rect x="{x}" y="{y}" width="6" height="{h}" rx="2" fill="{fill}"/>"#,
+        fill = paint(colour)
+    )
 }
 
 fn flux() -> String {
@@ -67,14 +80,18 @@ fn flux() -> String {
         band(76, (12, 40), 132, (8, 36), "--energy-c0"),
         band(76, (40, 56), 132, (42, 58), "--energy-c1"),
         band(76, (56, 66), 132, (64, 74), "--energy-c2"),
-        band(76, (66, 78), 132, (80, 92), "--energy-muted"),
+        // What no consumer accounts for is hatched, as on the Energy screen.
+        r#"<pattern id="preview-hatch" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)"><rect width="4" height="4" fill="var(--energy-hatch-ground)"/><rect width="1.6" height="4" fill="var(--energy-hatch)"/></pattern>"#.to_string(),
+        band(76, (66, 78), 132, (80, 92), "url(#preview-hatch)"),
         bar(10, 12, 46, "--energy-solar"),
         bar(10, 64, 18, "--energy-grid"),
-        bar(70, 12, 66, "--ink"),
+        // The house bar in what flows into it.
+        bar(70, 12, 46, "--energy-solar"),
+        bar(70, 58, 20, "--energy-grid"),
         bar(132, 8, 28, "--energy-c0"),
         bar(132, 42, 16, "--energy-c1"),
         bar(132, 64, 10, "--energy-c2"),
-        bar(132, 80, 12, "--energy-muted"),
+        bar(132, 80, 12, "url(#preview-hatch)"),
     ]
     .concat()
 }
