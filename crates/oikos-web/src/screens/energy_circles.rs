@@ -268,9 +268,9 @@ fn CircleNode(
     let house = kind == NodeKind::House;
     // The mockups' type grid: wide, then phone.
     let (icon, icon_top, value_y, unit_y, name_y) = if narrow {
-        (20.0, -r + 8.0, 8.0, 22.0, r + 18.0)
+        (20.0, -r + 8.0, 8.0, 22.0, r + 25.0)
     } else {
-        (22.0, -r + 9.0, 10.0, 26.0, r + 22.0)
+        (22.0, -r + 9.0, 10.0, 26.0, r + 30.0)
     };
     let (shared_value_y, shared_unit_y, share_y) = if narrow {
         (6.0, 19.0, 32.0)
@@ -331,9 +331,9 @@ fn CircleNode(
     } else {
         // Wide: right of the circle; phone: under it.
         let (x, anchor, value_at, name_at) = if narrow {
-            (0.0, "middle", r + 15.0, r + 29.0)
+            (0.0, "middle", r + 21.0, r + 35.0)
         } else {
-            (r + 12.0, "start", -1.0, 16.0)
+            (r + 20.0, "start", -1.0, 16.0)
         };
         view! {
             <text class="energy-node__value" x=x y=value_at text-anchor=anchor>

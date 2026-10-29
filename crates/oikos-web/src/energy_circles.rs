@@ -58,7 +58,7 @@ impl CirclesLayout {
 
     pub const NARROW: CirclesLayout = CirclesLayout {
         view_w: 360.0,
-        view_h: 470.0,
+        view_h: 484.0,
         r_big: 44.0,
         r_house: 54.0,
         r_small: 30.0,
