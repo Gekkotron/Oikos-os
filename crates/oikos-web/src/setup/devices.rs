@@ -2,6 +2,8 @@
 //! `area` override the device sheet does, on every entity of the device.
 
 use gloo_timers::future::TimeoutFuture;
+use std::collections::BTreeMap;
+
 use leptos::prelude::*;
 use oikos_api::{DeviceView, OverridePatch, SetupStep};
 use serde_json::json;
@@ -49,7 +51,13 @@ fn area_patch(area: Option<&str>) -> OverridePatch {
 
 /// One device: name, model and a room select. Changing the room moves each of its entities.
 #[component]
-fn DeviceLine(device: DeviceView, failure: RwSignal<Option<String>>) -> impl IntoView {
+fn DeviceLine(
+    device: DeviceView,
+    failure: RwSignal<Option<String>>,
+    /// Rooms to show for devices whose move failed part-way, by device id. It outlives the row,
+    /// which the hub's entity upserts rebuild while a move is in flight.
+    forced: RwSignal<BTreeMap<String, String>>,
+) -> impl IntoView {
     let house = expect_context::<House>();
     let t = use_device_text();
     let model = [device.model.as_deref(), device.vendor.as_deref()]
@@ -61,6 +69,9 @@ fn DeviceLine(device: DeviceView, failure: RwSignal<Option<String>>) -> impl Int
     let current = {
         let device = device.clone();
         Memo::new(move |_| {
+            if let Some(room) = forced.with(|f| f.get(&device.id).cloned()) {
+                return room;
+            }
             house.entities.with(|m| {
                 device
                     .entity_ids
@@ -76,6 +87,8 @@ fn DeviceLine(device: DeviceView, failure: RwSignal<Option<String>>) -> impl Int
     let lang = use_lang();
     let on_change = move |ev: leptos::ev::Event| {
         let value = event_target_value(&ev);
+        // Read before the PUTs: the hub's upserts change the store while they run.
+        let previous = current.get_untracked();
         let ids: Vec<String> = house.entities.with_untracked(|m| {
             m.values()
                 .filter(|e| e.device_id.as_deref() == Some(device_id.as_str()))
@@ -83,6 +96,10 @@ fn DeviceLine(device: DeviceView, failure: RwSignal<Option<String>>) -> impl Int
                 .collect()
         });
         failure.set(None);
+        forced.update(|f| {
+            f.remove(&device_id);
+        });
+        let device_id = device_id.clone();
         leptos::task::spawn_local(async move {
             // Every entity is tried; the rows already moved stay moved.
             let mut first_error = None;
@@ -96,8 +113,11 @@ fn DeviceLine(device: DeviceView, failure: RwSignal<Option<String>>) -> impl Int
                 failure.try_set(Some(
                     setup_text(lang(), SetupText::RoomMoveIncomplete).replace("{error}", &error),
                 ));
-                if let Some(el) = select.get_untracked() {
-                    el.set_value(&current.get_untracked());
+                forced.try_update(|f| {
+                    f.insert(device_id.clone(), previous.clone());
+                });
+                if let Some(el) = select.try_get_untracked().flatten() {
+                    el.set_value(&previous);
                 }
             }
         });
@@ -138,6 +158,7 @@ pub fn DevicesStep(z2m_base: String, #[prop(default = 5000)] empty_after_ms: u32
     let lang = use_lang();
     let waited = RwSignal::new(false);
     let failure = RwSignal::new(None::<String>);
+    let forced = RwSignal::new(BTreeMap::<String, String>::new());
     leptos::task::spawn_local(async move {
         TimeoutFuture::new(empty_after_ms).await;
         waited.try_set(true);
@@ -206,7 +227,7 @@ pub fn DevicesStep(z2m_base: String, #[prop(default = 5000)] empty_after_ms: u32
                                                 <ul class="devices__list">
                                                     {devices
                                                         .into_iter()
-                                                        .map(|d| view! { <DeviceLine device=d failure=failure /> })
+                                                        .map(|d| view! { <DeviceLine device=d failure=failure forced=forced /> })
                                                         .collect_view()}
                                                 </ul>
                                             </section>

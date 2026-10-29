@@ -42,7 +42,7 @@ fn entity(id: &str, device_id: &str) -> EntityView {
         icon: None,
         category: EntityCategory::Primary,
         enabled_by_default: true,
-        area: "unassigned".into(),
+        area: oikos_core::model::UNASSIGNED_AREA.into(),
         part_of: None,
         capabilities: Capabilities::default(),
         ui: UiOverride::default(),
@@ -165,12 +165,14 @@ async fn a_failed_entity_move_is_reported_and_the_select_reverts() {
         200,
         &serde_json::to_string(&entity("e1", "d1")).unwrap(),
     );
-    stub.reply(
+    stub.reply_after(
         "PATCH",
         "/api/v1/entities/e2/override",
         500,
         r#"{"error":"hub exploded"}"#,
+        120,
     );
+    let store = house.entities;
     let (host, _step) = mount(house, 5000);
     tick().await;
     let select: web_sys::HtmlSelectElement = host
@@ -189,7 +191,11 @@ async fn a_failed_entity_move_is_reported_and_the_select_reverts() {
             .unwrap(),
         )
         .unwrap();
-    for _ in 0..6 {
+    // The hub's upsert for entity 1 lands while entity 2's request is still in flight.
+    TimeoutFuture::new(60).await;
+    store.update(|m| m.get_mut("e1").unwrap().area = "kitchen".into());
+    tick().await;
+    for _ in 0..16 {
         TimeoutFuture::new(15).await;
         tick().await;
     }
@@ -204,5 +210,11 @@ async fn a_failed_entity_move_is_reported_and_the_select_reverts() {
         alert.contains("not moved") || alert.contains("incomplete"),
         "alert: {alert}"
     );
+    // The upsert rebuilt the row, so look the select up again.
+    let select: web_sys::HtmlSelectElement = host
+        .query_selector("select.devices__room")
+        .unwrap()
+        .expect("room select")
+        .unchecked_into();
     assert_eq!(select.value(), "");
 }

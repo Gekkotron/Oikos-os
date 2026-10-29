@@ -47,6 +47,9 @@ const STUB_SOURCE: &str = r#"
         if (route.hang) {
             return new Promise(() => {});
         }
+        if (route.delay) {
+            await new Promise((resolve) => setTimeout(resolve, route.delay));
+        }
         return new Response(route.body, {
             status: route.status,
             headers: { "content-type": "application/json" },
@@ -80,7 +83,20 @@ impl FetchStub {
     }
 
     fn route(&self, method: &str, url: &str, status: u16, body: &str, hang: bool) {
+        self.route_after(method, url, status, body, hang, 0);
+    }
+
+    fn route_after(
+        &self,
+        method: &str,
+        url: &str,
+        status: u16,
+        body: &str,
+        hang: bool,
+        delay_ms: u32,
+    ) {
         let entry = js_sys::Object::new();
+        set(&entry, "delay", &JsValue::from(delay_ms));
         set(&entry, "status", &JsValue::from(status));
         set(&entry, "body", &JsValue::from_str(body));
         set(&entry, "hang", &JsValue::from(hang));
@@ -94,6 +110,11 @@ impl FetchStub {
     /// Answers `method url` with `status` and the JSON text `body`.
     pub fn reply(&self, method: &str, url: &str, status: u16, body: &str) {
         self.route(method, url, status, body, false);
+    }
+
+    /// Like `reply`, but answers only after `delay_ms`.
+    pub fn reply_after(&self, method: &str, url: &str, status: u16, body: &str, delay_ms: u32) {
+        self.route_after(method, url, status, body, false, delay_ms);
     }
 
     /// Makes `method url` never answer.
