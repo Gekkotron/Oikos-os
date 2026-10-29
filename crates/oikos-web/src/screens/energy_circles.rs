@@ -346,8 +346,11 @@ fn CircleNode(
     view! {
         <g
             class=class
-            transform=move || {
-                spot.get().map(|p| format!("translate({} {})", p.at.0, p.at.1)).unwrap_or_default()
+            style=move || {
+                // A CSS transform, so the node glides to its new place.
+                spot.get()
+                    .map(|p| format!("transform: translate({}px, {}px)", p.at.0, p.at.1))
+                    .unwrap_or_default()
             }
             tabindex=move || can_click().then_some("0")
             role=move || can_click().then_some("button")
@@ -365,7 +368,7 @@ fn CircleNode(
                 class="energy-node__halo"
                 r=move || r + glow().0
                 fill=move || format!("url(#energy-halo-{})", tone_now())
-                style=move || format!("opacity:{}", glow().1)
+                style=move || format!("opacity: calc({} * var(--energy-glow))", glow().1)
             />
             <circle
                 class="energy-node__disc"

@@ -4629,6 +4629,13 @@ html:has(.flow-canvas-screen) {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Consumers never reuse a source colour (solar amber, grid violet, battery/export mint). */
+  --flux-c0: var(--accent-cyan);
+  --flux-c1: var(--accent-rose);
+  --flux-c2: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-violet));
+  --flux-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
+  --flux-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
+  --flux-muted: color-mix(in srgb, var(--ink) 35%, transparent);
 }
 
 .energy .room__title {
@@ -4665,20 +4672,13 @@ html:has(.flow-canvas-screen) {
 .energy-diagram {
   box-sizing: border-box;
   width: 100%;
-  /* Taller than the 260 × 250 drawing: the bottom-left node's labels hang below the viewBox. */
-  aspect-ratio: 260 / 272;
-  padding: 8px 8px 28px;
+  padding: 8px;
   border: 1px solid var(--card-border);
   border-radius: var(--radius-card);
   background: var(--card-bg);
   box-shadow: var(--shadow), inset 0 1px 0 rgb(255 255 255 / 8%);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
-}
-
-/* The wide drawing (720 × 250) spans the page, like the day chart under it. */
-.energy-diagram--wide {
-  aspect-ratio: 720 / 272;
 }
 
 .energy-diagram__svg {
@@ -4691,13 +4691,6 @@ html:has(.flow-canvas-screen) {
 /* The Flux (Sankey) view: bands between bars, glides when a reading changes. */
 .energy-flux {
   width: 100%;
-  /* Consumers never reuse a source colour (solar amber, grid violet, battery/export mint). */
-  --flux-c0: var(--accent-cyan);
-  --flux-c1: var(--accent-rose);
-  --flux-c2: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-violet));
-  --flux-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
-  --flux-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
-  --flux-muted: color-mix(in srgb, var(--ink) 35%, transparent);
 }
 
 .energy-flux__chips {
@@ -4852,92 +4845,176 @@ html:has(.flow-canvas-screen) {
   }
 }
 
+/* Classic: glowing circles joined by gradient wires. */
+.energy-circles {
+  --tone-solar: var(--solar);
+  --tone-grid: var(--accent-violet);
+  --tone-export: var(--accent-mint);
+  --tone-battery: var(--accent-mint);
+  --tone-house: var(--ink);
+  --tone-water: var(--accent-cyan);
+  --tone-more: var(--flux-muted);
+  --tone-c0: var(--flux-c0);
+  --tone-c1: var(--flux-c1);
+  --tone-c2: var(--flux-c2);
+  --energy-glow: 1;
+  aspect-ratio: 760 / 380;
+}
+
+.energy-circles--narrow {
+  aspect-ratio: 360 / 470;
+}
+
+:root[data-theme="light"] .energy-circles {
+  --energy-glow: 0.45;
+}
+
+.energy-tone--solar {
+  --tone: var(--tone-solar);
+}
+
+.energy-tone--grid {
+  --tone: var(--tone-grid);
+}
+
+.energy-tone--export {
+  --tone: var(--tone-export);
+}
+
+.energy-tone--battery {
+  --tone: var(--tone-battery);
+}
+
+.energy-tone--house {
+  --tone: var(--tone-house);
+}
+
+.energy-tone--more {
+  --tone: var(--tone-more);
+}
+
+.energy-tone--water {
+  --tone: var(--tone-water);
+}
+
+.energy-tone--c0 {
+  --tone: var(--tone-c0);
+}
+
+.energy-tone--c1 {
+  --tone: var(--tone-c1);
+}
+
+.energy-tone--c2 {
+  --tone: var(--tone-c2);
+}
+
 .energy-edge {
   fill: none;
-  stroke: var(--ink);
-  stroke-dasharray: 6 8;
   stroke-linecap: round;
-  opacity: 0.9;
-  animation: energy-dash linear infinite;
-}
-
-.energy-edge--solar {
-  stroke: var(--solar);
-}
-
-.energy-edge--grid {
-  stroke: var(--accent-violet);
-}
-
-.energy-edge--water {
-  stroke: var(--accent-cyan);
-}
-
-.energy-edge--battery {
-  stroke: var(--accent-mint);
-}
-
-.energy-edge--consumer {
-  stroke: var(--accent-rose);
-}
-
-.energy-edge--out {
-  animation-direction: reverse;
+  opacity: 0.4;
+  transition:
+    stroke-width 0.6s,
+    opacity 0.4s;
 }
 
 .energy-edge--idle {
-  stroke-dasharray: none;
-  opacity: 0.25;
-  animation: none;
+  opacity: 0.12;
 }
 
-@keyframes energy-dash {
-  to {
-    stroke-dashoffset: -14;
-  }
+.energy-dots__wire {
+  fill: var(--tone);
+}
+
+.energy-dots__halo {
+  fill: var(--tone);
 }
 
 .energy-node {
-  --node: var(--ink);
   color: var(--ink);
-}
-
-.energy-node--solar {
-  --node: var(--solar);
-}
-
-.energy-node--grid {
-  --node: var(--accent-violet);
-}
-
-.energy-node--water {
-  --node: var(--accent-cyan);
-}
-
-.energy-node--battery {
-  --node: var(--accent-mint);
-}
-
-.energy-node--consumer {
-  --node: var(--accent-rose);
+  transition: transform 0.6s;
 }
 
 .energy-node--click {
   cursor: pointer;
 }
 
+.energy-node--click:focus-visible {
+  outline: none;
+}
+
+.energy-node--click:focus-visible .energy-node__rim {
+  stroke: var(--select);
+  stroke-width: 4;
+}
+
 .energy-node--off {
-  opacity: 0.38;
+  opacity: 0.42;
+}
+
+.energy-node__halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: energy-breathe 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes energy-breathe {
+  50% {
+    transform: scale(1.06);
+  }
 }
 
 .energy-node__disc {
-  fill: color-mix(in srgb, var(--node) 18%, transparent);
-  stroke: var(--node);
-  stroke-width: 1;
+  stroke: none;
 }
 
-.energy-node--water .energy-node__disc {
-  stroke-dasharray: 3 3;
+.energy-node__rim {
+  stroke: var(--tone);
+  stroke-width: 2.5;
+}
+
+.energy-node__track {
+  stroke: color-mix(in srgb, var(--ink) 14%, transparent);
+}
+
+.energy-node__arc {
+  transition:
+    stroke-dasharray 0.9s,
+    stroke-dashoffset 0.9s;
+}
+
+.energy-node__big {
+  fill: var(--ink);
+  font: 700 19px var(--font-display);
+}
+
+.energy-node__small,
+.energy-node__value,
+.energy-node__label {
+  fill: var(--flux-muted);
+  font: 600 11px var(--font-body);
+}
+
+.energy-node__label {
+  font-size: 13px;
+}
+
+.energy-node__share {
+  fill: var(--solar);
+  font: 600 11px var(--font-body);
+}
+
+.energy-circles--narrow .energy-node__big {
+  font-size: 17px;
+}
+
+.energy-circles--narrow .energy-node__small {
+  font-size: 10px;
+}
+
+.energy-circles--narrow .energy-node__label {
+  font-size: 12px;
 }
 
 .energy-node__glyph {
@@ -4950,17 +5027,6 @@ html:has(.flow-canvas-screen) {
 .energy-node__glyph svg {
   width: 100%;
   height: 100%;
-}
-
-.energy-node__label,
-.energy-node__value {
-  fill: currentcolor;
-  font: var(--type-label);
-  font-size: 10px;
-}
-
-.energy-node__label {
-  opacity: 0.65;
 }
 
 .energy__more-toggle {
@@ -5177,8 +5243,14 @@ html:has(.flow-canvas-screen) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .energy-edge {
+  .energy-node__halo {
     animation: none;
+  }
+
+  .energy-circles *,
+  .energy-circles *::before,
+  .energy-circles *::after {
+    transition: none;
   }
 }
 /* /Energy */
