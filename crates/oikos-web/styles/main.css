@@ -4862,10 +4862,12 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-circles--narrow {
-  aspect-ratio: 360 / 470;
+  aspect-ratio: 360 / 484;
 }
 
+/* Ivoire: the ink would turn the house disc, halo and wires gray; a warm sand keeps them in the palette. */
 :root[data-theme="light"] .energy-circles {
+  --tone-house: var(--wire);
   --energy-glow: 0.45;
 }
 
