@@ -226,6 +226,7 @@ mod tests {
             kind,
             span,
             config,
+            pos: None,
         }
     }
 

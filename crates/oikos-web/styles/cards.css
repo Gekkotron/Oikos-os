@@ -205,8 +205,10 @@
   color: var(--muted);
 }
 
+/* The curve drops under the humidity when a narrow tile cannot hold both on one line. */
 .temp__foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
   gap: 8px;
@@ -225,6 +227,8 @@
 .temp__spark {
   flex: 0 1 110px;
   min-width: 60px;
+  max-width: 100%;
+  margin-left: auto;
 }
 
 /* A value card's 24 h curve, under the value: it opens the history chart. */
@@ -265,6 +269,7 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  container: climate / inline-size;
 }
 
 .dial {
@@ -349,6 +354,29 @@
 .climate__foot .btn--round {
   min-width: var(--touch-min);
   min-height: var(--touch-min);
+}
+
+/* A narrow tile (a dashboard's six columns beside the widget panel) cannot hold − "It's 22°" +
+   on one line: the reading goes above, centred, and the smaller buttons share the line below. */
+@container climate (max-width: 150px) {
+  .climate__foot {
+    flex-wrap: wrap;
+    justify-content: space-between;
+    row-gap: 4px;
+  }
+
+  .climate__now {
+    order: -1;
+    flex-basis: 100%;
+    text-align: center;
+  }
+
+  .climate__foot .btn--round {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
 }
 
 .card__badge--select {

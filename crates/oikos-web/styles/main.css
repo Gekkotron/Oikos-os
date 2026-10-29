@@ -5921,8 +5921,19 @@ html:has(.flow-canvas-screen) {
 .widget-span-1x2 { grid-column: span 1; grid-row: span 2; }
 .widget-span-4x2 { grid-column: span 4; grid-row: span 2; }
 .widget-span-6x3 { grid-column: span 6; grid-row: span 3; }
+/* On the desktop grid every tile sits on its saved cell (`--col` / `--row`, 1-based lines, set
+   by grid.rs), so empty cells between tiles stay empty. Narrower grids flow the tiles in
+   reading order with the span classes above. */
+@media (min-width: 1201px) {
+  .dashboard-grid > .widget,
+  .dashboard-grid__ghost {
+    grid-column: var(--col) / span var(--w);
+    grid-row: var(--row) / span var(--h);
+  }
+}
 @media (max-width: 1200px) {
   .widget-span-6x3 { grid-column: span 4; }
+  .dashboard-grid__ghost { display: none; }
 }
 @media (max-width: 600px) {
   .widget-span-4x2,
@@ -6016,15 +6027,31 @@ html:has(.flow-canvas-screen) {
 .dashboard-grid--dragging,
 .dashboard-grid--dragging .widget__edit-overlay,
 .dashboard-grid--dragging .widget__grip { cursor: grabbing; }
+/* The dragged tile follows the pointer (`translate`, set inline) and lets pointer events through,
+   so the tile or cell under it can be found. */
 .widget--dragging {
   z-index: 3;
   border-radius: var(--radius-card);
   box-shadow: 0 0 0 2px var(--accent-amber), var(--shadow);
   opacity: 0.85;
   transform: scale(1.02);
+  pointer-events: none;
 }
 @media (prefers-reduced-motion: no-preference) {
   .widget--dragging { transition: transform 120ms var(--ease); }
+}
+/* Where the dragged tile will land: an outline on the desktop grid (empty cells included), the
+   tile it will take the place of on a narrower one. */
+.dashboard-grid__ghost {
+  min-height: 64px;
+  border: 2px dashed var(--accent-amber);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+  pointer-events: none;
+}
+.widget--drop-target {
+  border-radius: var(--radius-card);
+  box-shadow: 0 0 0 2px var(--accent-amber);
 }
 
 /* Widget library: an always-open panel beside the grid while editing a dashboard. It reuses

@@ -251,6 +251,7 @@ async fn add_camera_select_resets_after_a_pick() {
                 cameras: vec!["front_door".into()],
                 title: None,
             },
+            pos: None,
         }],
         show_header: false,
     };

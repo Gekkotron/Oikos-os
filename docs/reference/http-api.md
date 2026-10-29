@@ -96,7 +96,7 @@ The body takes `kind` (`switch`, `number`, `button` or `select`) and `name`; for
 | `DELETE /api/v1/dashboards/{id}` | Removes a dashboard (`204`); `403` for `house`, `404` for an unknown id. |
 | `POST /api/v1/dashboards/order` | `{"order": ["<id>", …]}` reassigns contiguous orders by position (`204`). The list must name every authored dashboard exactly once (`house` is ignored); otherwise `422`, and nothing changes. |
 
-A widget `kind` is one of `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera` or `water-heater`, with a `span` from the kind's allowed set (`1x1`, `2x1`, `2x2`, `1x2`). A dashboard id is 1 to 64 characters of letters, digits, `_` and `-`, and not `house`.
+A widget `kind` is one of `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera` or `water-heater`, with a `span` from the kind's allowed set (`1x1`, `2x1`, `2x2`, `1x2`, plus `4x2` and `6x3` for `camera`) and an optional `pos` (`{"row": 1, "col": 0}`, 0-based) for its top-left cell on the 6-column desktop grid. A save is refused when a widget runs past column 6 or two widgets cover the same cell; widgets without `pos` flow into the first free cells in list order. A dashboard id is 1 to 64 characters of letters, digits, `_` and `-`, and not `house`.
 
 ## Ambiances
 

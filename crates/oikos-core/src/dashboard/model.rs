@@ -22,7 +22,24 @@ pub struct Widget {
     pub kind: WidgetKind,
     pub span: Span,
     pub config: WidgetConfig,
+    /// The widget's top-left cell on the desktop grid. Without one the widget flows into the
+    /// first free cells in list order (see `layout`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pos: Option<Cell>,
 }
+
+/// A cell of the [`GRID_COLUMNS`]-wide desktop grid, 0-based. Ordered row first, so sorting
+/// cells gives reading order.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct Cell {
+    pub row: u16,
+    pub col: u16,
+}
+
+/// Columns of the desktop grid that widget positions refer to. Narrower grids (4 on a tablet,
+/// 2 on a phone) flow the widgets in reading order instead.
+pub const GRID_COLUMNS: u16 = 6;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
@@ -69,6 +86,18 @@ impl Span {
             Span::X1x2 => "1x2",
             Span::X4x2 => "4x2",
             Span::X6x3 => "6x3",
+        }
+    }
+
+    /// Columns and rows the span covers on the desktop grid.
+    pub fn size(&self) -> (u16, u16) {
+        match self {
+            Span::X1x1 => (1, 1),
+            Span::X2x1 => (2, 1),
+            Span::X2x2 => (2, 2),
+            Span::X1x2 => (1, 2),
+            Span::X4x2 => (4, 2),
+            Span::X6x3 => (6, 3),
         }
     }
 }
@@ -221,6 +250,7 @@ mod tests {
                         entity_id: "lamp".into(),
                         title: Some("Lamp".into()),
                     },
+                    pos: Some(Cell { row: 0, col: 2 }),
                 },
                 Widget {
                     id: "w2".into(),
@@ -230,6 +260,7 @@ mod tests {
                         entity_id: "temp".into(),
                         range: DashboardHistoryRange::D7,
                     },
+                    pos: None,
                 },
             ],
             show_header: true,
@@ -264,6 +295,8 @@ mod tests {
         .unwrap();
         assert_eq!(w.kind, WidgetKind::Light);
         assert_eq!(w.span, Span::X1x1);
+        assert_eq!(w.pos, None);
+        assert!(!serde_json::to_string(&w).unwrap().contains("pos"));
         assert_eq!(
             w.config,
             WidgetConfig::Entity {

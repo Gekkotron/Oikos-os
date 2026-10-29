@@ -45,6 +45,7 @@ fn make_widget_with_id(id: String, kind: WidgetKind, config: WidgetConfig) -> Wi
         kind,
         span,
         config,
+        pos: None,
     }
 }
 

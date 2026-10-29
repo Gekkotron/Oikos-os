@@ -283,6 +283,7 @@ mod tests {
                 entity_id: "light.a".into(),
                 title: None,
             },
+            pos: None,
         };
         Dashboard {
             id: id.into(),
