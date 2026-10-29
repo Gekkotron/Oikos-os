@@ -562,7 +562,7 @@ async fn get_flow(
 }
 
 /// Creates or replaces a flow. The path id wins: a body without an `id` takes it, a body with
-/// another one is `400 id mismatch`. `422` for a flow that does not validate, `503` while the
+/// another one is `422 id mismatch`. `422` for a flow that does not validate, `503` while the
 /// broker link is down.
 async fn put_flow(
     State(hub): HubState,
@@ -575,12 +575,7 @@ async fn put_flow(
             None | Some("") => {
                 object.insert("id".to_owned(), serde_json::Value::String(id.clone()));
             }
-            Some(body_id) if body_id != id => {
-                return Err(HttpError {
-                    status: StatusCode::BAD_REQUEST,
-                    error: "id mismatch".to_owned(),
-                });
-            }
+            Some(body_id) if body_id != id => return Err(id_mismatch(&id, body_id)),
             Some(_) => {}
         }
     }
@@ -631,10 +626,7 @@ async fn put_dashboard(
     reject_house(&id)?;
     let Json(dashboard) = body?;
     if dashboard.id != id {
-        return Err(HttpError {
-            status: StatusCode::UNPROCESSABLE_ENTITY,
-            error: format!("path id `{id}` does not match body id `{}`", dashboard.id),
-        });
+        return Err(id_mismatch(&id, &dashboard.id));
     }
     Ok(Json(hub.set_dashboard(dashboard).await?))
 }
@@ -657,6 +649,15 @@ async fn reorder_dashboards(
     let Json(body) = body?;
     hub.reorder_dashboards(&body.order).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `422 id mismatch` for a PUT whose body names another id than its path, the same on every
+/// route.
+fn id_mismatch(path: &str, body: &str) -> HttpError {
+    HttpError {
+        status: StatusCode::UNPROCESSABLE_ENTITY,
+        error: format!("id mismatch: the path says `{path}`, the body `{body}`"),
+    }
 }
 
 fn reject_house(id: &str) -> Result<(), HttpError> {
@@ -800,11 +801,7 @@ async fn put_ambiance(
     if ambiance.id.is_empty() {
         ambiance.id.clone_from(&id);
     } else if ambiance.id != id {
-        return Err(HubError::Rejected(format!(
-            "the body id `{}` differs from the path id `{id}`",
-            ambiance.id
-        ))
-        .into());
+        return Err(id_mismatch(&id, &ambiance.id));
     }
     Ok(Json(hub.set_ambiance(ambiance).await?))
 }
@@ -960,7 +957,8 @@ async fn clear_climate_eco(
 }
 
 /// Approves the pending proposal of a zone (204), with optional edited rules as the body;
-/// `422` when there is none.
+/// `422` when there is none. The body is optional, so it is read as bytes, then parsed like
+/// every other JSON body: `400` for broken JSON, `422` for rules of the wrong shape.
 async fn approve_climate(
     State(hub): HubState,
     Path(id): Path<String>,
@@ -969,10 +967,8 @@ async fn approve_climate(
     let rules: Option<Rules> = if body.iter().all(u8::is_ascii_whitespace) {
         None
     } else {
-        Some(serde_json::from_slice(&body).map_err(|err| HttpError {
-            status: StatusCode::UNPROCESSABLE_ENTITY,
-            error: format!("invalid rules: {err}"),
-        })?)
+        let Json(rules) = Json::<Rules>::from_bytes(&body)?;
+        Some(rules)
     };
     hub.approve_climate_proposal(&id, rules).await?;
     Ok(StatusCode::NO_CONTENT)

@@ -1415,7 +1415,7 @@ async fn put_flow_then_get_and_list() {
 }
 
 #[tokio::test]
-async fn put_flow_invalid_422_and_id_mismatch_400() {
+async fn put_flow_invalid_422_and_id_mismatch_422() {
     let server = Server::start_with_flows().await;
 
     let mut bad = reference_flow();
@@ -1436,9 +1436,12 @@ async fn put_flow_invalid_422_and_id_mismatch_400() {
         .send()
         .await
         .expect("PUT");
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let res: Value = res.json().await.expect("json");
-    assert_eq!(res["error"], "id mismatch");
+    assert!(
+        res["error"].as_str().unwrap().starts_with("id mismatch"),
+        "{res}"
+    );
 
     // A body without an id takes the path's.
     let mut anonymous = reference_flow();
@@ -2295,6 +2298,22 @@ async fn climate_approve_without_proposal_is_rejected() {
             .expect("POST");
         assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "{action}");
     }
+}
+
+#[tokio::test]
+async fn climate_approve_body_is_parsed_like_any_json_body() {
+    let server = climate_server().await;
+    let url = server.url("/api/v1/climate/zones/living/proposal/approve");
+    let post = |body: &'static str| {
+        let req = server.client.post(&url).body(body);
+        async move { req.send().await.expect("POST").status() }
+    };
+    // The body is read before the proposal is looked up.
+    assert_eq!(post("{").await, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        post(r#"{"heat": 5}"#).await,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
 }
 
 #[tokio::test]

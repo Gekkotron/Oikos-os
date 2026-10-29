@@ -92,7 +92,7 @@ The body takes `kind` (`switch`, `number`, `button` or `select`) and `name`; for
 | --- | --- |
 | `GET /api/v1/dashboards` | The dashboards as `{dashboard, synthesized}`: `house` first (synthesized by the hub), then the authored ones sorted by `order`. |
 | `GET /api/v1/dashboards/{id}` | One dashboard; `404` for an unknown id. |
-| `PUT /api/v1/dashboards/{id}` | Creates or replaces a dashboard (`{"id", "name", "order", "widgets": […]}`) and returns it. The body `id` must equal the path id. An `order` of 0 or one already taken is replaced by the next free one. `403` for the reserved id `house`, `422` when the ids differ or a widget does not validate, `503` while the broker link is down. |
+| `PUT /api/v1/dashboards/{id}` | Creates or replaces a dashboard (`{"id", "name", "order", "widgets": […]}`) and returns it. The body `id` must equal the path id. An `order` of 0 or one already taken is replaced by the next free one. `403` for the reserved id `house`, `422 id mismatch` when the ids differ, `422` when a widget does not validate, `503` while the broker link is down. |
 | `DELETE /api/v1/dashboards/{id}` | Removes a dashboard (`204`); `403` for `house`, `404` for an unknown id. |
 | `POST /api/v1/dashboards/order` | `{"order": ["<id>", …]}` reassigns contiguous orders by position (`204`). The list must name every authored dashboard exactly once (`house` is ignored); otherwise `422`, and nothing changes. |
 
@@ -117,7 +117,7 @@ See [Flow nodes](flow-nodes.md) for the document format.
 | --- | --- |
 | `GET /api/v1/flows` | Every flow with its engine state: definition, why it is invalid, the active run and the recent runs. Each step of a run has `node`, `at`, `outcome`, `detail` and, for a succeeded `if`, `switch` or `time.between` step, `ports`, the output ports it followed. |
 | `GET /api/v1/flows/{id}` | One flow; `404` for an unknown id. |
-| `PUT /api/v1/flows/{id}` | Creates or replaces a flow (`oikos/automation/<id>`). The path id wins: a body without `id` takes it, another one is `400 id mismatch`. Returns `{flow, warning}`; `warning` is `null`, or a message when the flow reads the sun while the house point is the Paris fallback. `422` for a flow that does not validate against the house, `503` while the broker link is down. |
+| `PUT /api/v1/flows/{id}` | Creates or replaces a flow (`oikos/automation/<id>`). The path id wins: a body without `id` takes it, another one is `422 id mismatch`. Returns `{flow, warning}`; `warning` is `null`, or a message when the flow reads the sun while the house point is the Paris fallback. `422` for a flow that does not validate against the house, `503` while the broker link is down. |
 | `DELETE /api/v1/flows/{id}` | Removes the flow (`204`), or `404`. |
 | `POST /api/v1/flows/{id}/enabled` | `{"enabled": bool}`; returns the flow. |
 | `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run. Optional JSON body `{"node": "<card id>"}` starts from that `trigger.manual` card and the run carries its value. `422` when the flow is disabled, invalid or already running (a card press on a `restart` flow replaces the active run instead), or when `<card id>` is not a manual trigger of this flow. |
@@ -171,7 +171,7 @@ Available when the climate engine is on; otherwise these routes answer `503`. Se
 | `DELETE /api/v1/climate/zones/{id}/override` | Clears the zone's overrides (`204`). |
 | `PUT /api/v1/climate/zones/{id}/eco` | `{until}` (unix seconds): holds the zone in eco until then (`204`; a past `until` or an `off` zone is `422`). |
 | `DELETE /api/v1/climate/zones/{id}/eco` | Ends the zone's eco (`204`). |
-| `POST /api/v1/climate/zones/{id}/proposal/approve` | Approves the pending proposal, optionally with edited `Rules` as the body (`204`); `422` when there is none. |
+| `POST /api/v1/climate/zones/{id}/proposal/approve` | Approves the pending proposal, optionally with edited `Rules` as the body (`204`); `422` when there is none or the rules have the wrong shape, `400` for a body that is not JSON. |
 | `POST /api/v1/climate/zones/{id}/proposal/reject` | Drops the pending proposal (`204`); `422` when there is none. |
 | `POST /api/v1/climate/zones/{id}/learn` | Learns the zone now; `200` with the learner state. |
 | `GET /api/v1/climate/zones/{id}/decisions?limit=` | `{recent, older}`: the latest decisions from memory, then older rows from history when it is on (`limit` 50 by default, 500 at most; `400` for a `limit` that is not a number). |
@@ -289,10 +289,10 @@ Errors are `{"error": "…"}` with one of these statuses:
 
 | Status | When |
 | --- | --- |
-| `400` | A bad override patch, a flow body whose `id` differs from the path (`id mismatch`), a bad query parameter, or a body that is not valid JSON of the expected shape. |
+| `400` | A bad override patch, a bad query parameter, or a body that is not valid JSON. |
 | `403` | The reserved `house` dashboard id, or media off the Frigate origin. |
 | `404` | An unknown entity, alert, action, flow, area, dashboard, group, virtual entity, ambiance or route. |
-| `422` | A command refused, a bad virtual or group id or spec, a flow that is invalid, disabled or already running, an unknown room, a dashboard that does not validate, or an ambiance that does not validate, names something the house does not know, or is already running. |
+| `422` | A body of the wrong shape, a PUT body whose `id` differs from the path (`id mismatch`, on flows, dashboards and ambiances), a command refused, a bad virtual or group id or spec, a flow that is invalid, disabled or already running, an unknown room, a dashboard that does not validate, or an ambiance that does not validate, names something the house does not know, or is already running. |
 | `502` | A picture URL or Frigate media that cannot be fetched. |
 | `503` | The broker link is down, so the write was refused and nothing was applied; or the feature is off (groups, climate, history). The same publish refusal is an in-band tool error over MCP. |
 
