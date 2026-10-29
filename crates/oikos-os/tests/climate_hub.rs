@@ -2144,6 +2144,24 @@ mod engine {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn correction_note_is_stable_while_the_reading_ages() {
+        let mut rig = corrected_rig(21.6).await;
+        // The thermometer reported 20 min ago: the note must not carry its age.
+        let first = rig.pass(1200).await;
+        assert_eq!(decisions_published(&first), 1, "{first:?}");
+        let second = rig.pass(1260).await;
+        assert_eq!(decisions_published(&second), 0, "{second:?}");
+        let decision = rig.zone().decision.unwrap();
+        assert!(
+            decision
+                .reason
+                .ends_with("room above 19.5 °C: AC 18.5 °C (-0.5)"),
+            "{}",
+            decision.reason
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn correction_survives_restart_without_hand_change() {
         let mut rig = corrected_rig(21.6).await;
         // The device sits at the corrected 18.5, as the retained decision says.

@@ -922,7 +922,7 @@ mod tests {
         let d = corrected(21.6, 7 * 3600).run();
         assert_eq!(d.entities["trv"].setpoint, Some(19.0));
         assert_eq!(d.adjust, None);
-        assert!(d.reason.contains("silent for"), "{}", d.reason);
+        assert!(d.reason.contains("silent: no correction"), "{}", d.reason);
     }
 
     #[test]

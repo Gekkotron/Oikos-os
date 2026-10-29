@@ -7,7 +7,7 @@ use chrono::NaiveDateTime;
 use chrono_tz::Tz;
 use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
 use oikos_climate::doc::{HouseSettings, Mode, Override, RoomEco, SafetyCause, ZoneSettings};
-use oikos_climate::feedback::FeedbackState;
+use oikos_climate::feedback::{FeedbackState, UNKNOWN_AGE_S};
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
 use oikos_climate::view::ThermometerReading;
 use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind, StateValue};
@@ -19,8 +19,6 @@ use crate::hub::Hub;
 
 /// Step assumed for a device that does not advertise one; the same as the decision tree's.
 const DEFAULT_STEP: f64 = 0.5;
-/// Age given to a report whose time is unknown: older than any `stale_after`.
-const UNKNOWN_AGE_S: u64 = u64::MAX / 4;
 /// How long the history mean of the outdoor sensor is reused.
 pub(crate) const OUTDOOR_CACHE_S: u64 = 600;
 

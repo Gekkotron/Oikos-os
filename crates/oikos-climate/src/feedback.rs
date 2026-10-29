@@ -8,8 +8,8 @@ use crate::schedule::ReadingSource;
 
 /// Two targets within this distance are the same target.
 const SAME_TARGET: f64 = 0.01;
-/// Readings younger than this carry no age text in the note.
-const AGE_NOTE_S: u64 = 15 * 60;
+/// Age given to a thermometer that has never reported: older than any quiet limit.
+pub const UNKNOWN_AGE_S: u64 = u64::MAX / 4;
 
 /// What the correction remembers between two ticks.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -66,11 +66,20 @@ pub fn correct(input: &CorrectionInput) -> Correction {
     let Some(room) = input.thermometer else {
         return silent(Some("no room thermometer".into()));
     };
+    if room.age_s >= UNKNOWN_AGE_S {
+        return silent(Some(
+            "room thermometer has not reported: no correction".into(),
+        ));
+    }
     if room.age_s > u64::from(s.quiet_limit_min) * 60 {
-        let hours = room.age_s / 3600;
-        return silent(Some(format!(
-            "room thermometer silent for {hours} h: no correction"
-        )));
+        return silent(Some("room thermometer silent: no correction".into()));
+    }
+    if input.frozen {
+        let (lo, hi) = limits(input);
+        return Correction {
+            offset: start.clamp(lo, hi),
+            note: Some("all units held: correction paused".into()),
+        };
     }
 
     let r = room.value;
@@ -102,6 +111,7 @@ pub fn correct(input: &CorrectionInput) -> Correction {
     let (lo, hi) = limits(input);
     let offset = offset.clamp(lo, hi);
 
+    // No live reading or age here: the reason must only change with the situation or the action.
     let note = (above || below || offset != 0.0).then(|| {
         let (word, edge) = if above {
             ("above", target + s.band)
@@ -110,11 +120,12 @@ pub fn correct(input: &CorrectionInput) -> Correction {
         } else {
             ("near", target)
         };
-        format!(
-            "room {r:.1} °C{} {word} {edge:.1} °C: AC {:.1} °C ({offset:+.1})",
-            age_text(room.age_s),
-            target + offset
-        )
+        let ac = target + offset;
+        if offset == 0.0 {
+            format!("room {word} {edge:.1} °C: AC {ac:.1} °C")
+        } else {
+            format!("room {word} {edge:.1} °C: AC {ac:.1} °C ({offset:+.1})")
+        }
     });
     Correction { offset, note }
 }
@@ -123,8 +134,21 @@ fn silent(note: Option<String>) -> Correction {
     Correction { offset: 0.0, note }
 }
 
-/// The lowest and highest offset allowed.
+/// The lowest and highest offset allowed, in whole steps toward zero so that a device that moves
+/// in steps never gets more than the limits.
 fn limits(input: &CorrectionInput) -> (f64, f64) {
+    let (lo, hi) = raw_limits(input);
+    (whole_steps(lo, input.step), whole_steps(hi, input.step))
+}
+
+fn whole_steps(limit: f64, step: f64) -> f64 {
+    if step <= 0.0 {
+        return limit;
+    }
+    ((limit / step).abs() + 1e-9).floor() * step * limit.signum()
+}
+
+fn raw_limits(input: &CorrectionInput) -> (f64, f64) {
     let s = input.settings;
     let target = input.target;
     match input.mode {
@@ -142,17 +166,6 @@ fn limits(input: &CorrectionInput) -> (f64, f64) {
             };
             (-s.max_above, hi)
         }
-    }
-}
-
-/// `" (2 h ago)"` or `" (40 min ago)"` for a reading at least 15 min old, else nothing.
-fn age_text(age_s: u64) -> String {
-    if age_s >= 3600 {
-        format!(" ({} h ago)", age_s / 3600)
-    } else if age_s >= AGE_NOTE_S {
-        format!(" ({} min ago)", age_s / 60)
-    } else {
-        String::new()
     }
 }
 
@@ -300,7 +313,7 @@ mod tests {
             false,
         );
         assert_eq!(c.offset, 0.0);
-        assert!(c.note.unwrap().contains("silent for 6 h"));
+        assert!(c.note.unwrap().contains("silent: no correction"));
     }
 
     #[test]
@@ -346,7 +359,7 @@ mod tests {
         assert_eq!(c.offset, -0.5);
         assert_eq!(
             c.note.as_deref(),
-            Some("room 20.6 °C (2 h ago) above 19.5 °C: AC 18.5 °C (-0.5)")
+            Some("room above 19.5 °C: AC 18.5 °C (-0.5)")
         );
     }
 
@@ -391,5 +404,60 @@ mod tests {
         let o = decision(Source::Override, Some(Setpoint::Temp(19.0)), None);
         assert_eq!(FeedbackState::after(Some(&prev), &o, true, NOW), None);
         assert_eq!(FeedbackState::after(Some(&prev), &d, false, NOW), None);
+    }
+
+    #[test]
+    fn coarse_step_never_exceeds_max_above() {
+        let s = settings();
+        let c = correct(&CorrectionInput {
+            settings: &s,
+            mode: Mode::Heat,
+            target: 19.0,
+            base: Some(15.0),
+            frost: 7.0,
+            thermometer: Some(ReadingSource {
+                value: 17.0,
+                age_s: 0,
+            }),
+            step: 1.0,
+            frozen: false,
+            previous: Some(&state(19.0, 0.0, NOW - 7200, None)),
+            now: NOW,
+        });
+        assert_eq!(c.offset, 0.0);
+    }
+
+    #[test]
+    fn never_reported_thermometer_has_its_own_note() {
+        let c = run(Mode::Heat, 19.0, None, 21.6, UNKNOWN_AGE_S, None, false);
+        assert_eq!(c.offset, 0.0);
+        assert_eq!(
+            c.note.as_deref(),
+            Some("room thermometer has not reported: no correction")
+        );
+    }
+
+    #[test]
+    fn frozen_note_claims_no_ac_value() {
+        let p = state(19.0, -0.5, NOW - 7200, Some(NOW - 7200));
+        let c = run(Mode::Heat, 19.0, Some(15.0), 22.0, 0, Some(&p), true);
+        assert_eq!(c.note.as_deref(), Some("all units held: correction paused"));
+    }
+
+    #[test]
+    fn note_omits_zero_offset_and_names_near() {
+        let c = run(Mode::Heat, 15.5, Some(15.0), 18.0, 0, None, false);
+        assert_eq!(
+            c.note.as_deref(),
+            Some("room above 16.0 °C: AC 15.0 °C (-0.5)")
+        );
+        let p = state(19.0, -0.5, NOW - 7200, Some(NOW));
+        let c = run(Mode::Heat, 19.0, Some(15.0), 19.0, 0, Some(&p), false);
+        assert_eq!(
+            c.note.as_deref(),
+            Some("room near 19.0 °C: AC 18.5 °C (-0.5)")
+        );
+        let c = run(Mode::Heat, 15.0, Some(15.0), 16.0, 0, None, false);
+        assert_eq!(c.note.as_deref(), Some("room above 15.5 °C: AC 15.0 °C"));
     }
 }

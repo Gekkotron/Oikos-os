@@ -1196,7 +1196,16 @@ mod tests {
         hub.climate_runtime()
             .feedback
             .insert("living".to_owned(), state);
-        let mut settings = oikos_climate::doc::ZoneSettings::default();
+        // Other settings keep the correction.
+        let settings = oikos_climate::doc::ZoneSettings {
+            sensor: Some("sensor.x".to_owned()),
+            manual_hold_max_min: 100,
+            ..Default::default()
+        };
+        hub.set_climate_zone("living", settings.clone()).unwrap();
+        assert!(hub.climate_runtime().feedback.contains_key("living"));
+        // A change to the correction settings drops it.
+        let mut settings = settings;
         settings.feedback.band = 0.8;
         hub.set_climate_zone("living", settings).unwrap();
         assert!(!hub.climate_runtime().feedback.contains_key("living"));

@@ -85,7 +85,7 @@ The room reading is checked on every pass. Once it is `band` (0.5 °C) off the t
 
 If the thermometer has not reported for `quiet_limit_min` (6 h), the correction is dropped and the unit follows the schedule target alone. Under the room's reading, the screen shows the thermometer's value and its age once it is 15 min old or more.
 
-Each correction is written in the decision's reason, for example "room 20.6 °C (2 h ago) above 19.5 °C: AC 18.5 °C (-0.5)", and appears under **Recent decisions**. The settings live in the zone's `feedback` block (`enabled`, `band`, `step`, `interval_min`, `warmup_min`, `max_below`, `max_above`, `quiet_limit_min`).
+Each correction is written in the decision's reason, for example "room above 19.5 °C: AC 18.5 °C (-0.5)", and appears under **Recent decisions**. The settings live in the zone's `feedback` block (`enabled`, `band`, `step`, `interval_min`, `warmup_min`, `max_below`, `max_above`, `quiet_limit_min`).
 
 ## The learner and proposals
 

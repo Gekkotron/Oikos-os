@@ -460,7 +460,8 @@ pub struct FeedbackSettings {
     pub step: f64,
     /// Minimum minutes between two corrections.
     pub interval_min: u32,
-    /// Minutes after a schedule change before correcting.
+    /// Minutes after the schedule target began before the slow side may step: raising the
+    /// setpoint in heat, extra cooling in cool.
     pub warmup_min: u32,
     /// Largest offset below the target, in degrees (positive).
     pub max_below: f64,
