@@ -201,7 +201,8 @@ fn instructions() -> String {
     numbers. `get_home_settings` and `set_home_settings` read and replace the whole \
     home settings document: `eco_setpoint` (°C), `mode_entity` (a select), `indoor_entity` (a \
     temperature sensor), `cold_below` and `hot_above` (°C, the web reads cold below 15 and warm \
-    above 26 when unset). The native alarm is optional (`enabled` in its settings): \
+    above 26 when unset), `energy_view` (`classic` or `flux`, the web Energy page's live \
+    diagram). The native alarm is optional (`enabled` in its settings): \
     `alarm_status` reads the settings and the panel state, `set_alarm_settings` replaces the \
     whole document (read it first). Arm and disarm with `send_command` on `oikos_alarm_house`, \
     `{{\"type\":\"arm\",\"mode\":\"away\"}}` or `{{\"type\":\"disarm\"}}`; there are no codes.",

@@ -5,12 +5,13 @@ use leptos::task::tick;
 use leptos_router::components::Router;
 use oikos_api::{EntityView, WsEvent};
 use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride};
+use oikos_web::energy_view::EnergyView;
 use oikos_web::house::House;
 use oikos_web::i18n::Lang;
 use oikos_web::screens::energy::{EnergyScreen, KwhToday};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
-use web_sys::{Element, Event, HtmlElement};
+use web_sys::{Element, Event, HtmlElement, KeyboardEvent, KeyboardEventInit};
 #[path = "support/fetch_stub.rs"]
 mod fetch_stub;
 use fetch_stub::FetchStub;
@@ -54,13 +55,26 @@ fn mount(entities: Vec<EntityView>) -> Element {
 }
 
 fn mount_lang(entities: Vec<EntityView>, lang: RwSignal<Lang>) -> Element {
-    let document = web_sys::window().unwrap().document().unwrap();
-    let host = document.create_element("div").unwrap();
-    document.body().unwrap().append_child(&host).unwrap();
+    mount_with(entities, lang, EnergyView::Classic)
+}
+
+fn mount_view(entities: Vec<EntityView>, view: EnergyView) -> Element {
+    mount_with(entities, RwSignal::new(Lang::En), view)
+}
+
+fn mount_with(entities: Vec<EntityView>, lang: RwSignal<Lang>, view: EnergyView) -> Element {
     let house = House::new();
     for e in entities {
         house.apply(WsEvent::EntityUpserted(e));
     }
+    mount_house(house, lang, view)
+}
+
+fn mount_house(house: House, lang: RwSignal<Lang>, view: EnergyView) -> Element {
+    house.home_settings.update(|s| s.energy_view = view);
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
     std::mem::forget(leptos::mount::mount_to(
         host.clone().unchecked_into(),
         move || {
@@ -332,4 +346,263 @@ async fn empty_state_follows_the_language() {
     lang.set(Lang::En);
     tick().await;
     assert!(text(&host, ".energy__empty").contains("energy role"));
+}
+
+fn flux_fixture(oven: f64) -> Vec<EntityView> {
+    vec![
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("grid", "Grid power", "W", 300.0, role("grid")),
+        sensor("oven", "Oven", "W", oven, role("consumer")),
+        sensor("pump", "Heat pump", "W", 600.0, role("consumer")),
+    ]
+}
+
+fn bar(host: &Element, id: &str) -> Element {
+    host.query_selector(&format!(".energy-flux__bar[data-id='{id}']"))
+        .unwrap()
+        .unwrap_or_else(|| panic!("no bar {id}"))
+}
+
+#[wasm_bindgen_test]
+async fn classic_is_the_default() {
+    let host = mount(flux_fixture(1200.0));
+    tick().await;
+    assert_eq!(count(&host, ".energy-diagram__svg"), 1);
+    assert_eq!(count(&host, ".energy-flux"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn flux_replaces_the_diagram() {
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Flux);
+    tick().await;
+    assert_eq!(count(&host, ".energy-flux__svg"), 1);
+    assert_eq!(count(&host, ".energy-diagram__svg"), 0);
+    for id in ["solar", "grid", "house", "consumer:oven", "consumer:pump"] {
+        bar(&host, id);
+    }
+    assert_eq!(
+        count(&host, ".energy-flux__bar--c0, .energy-flux__bar--c1"),
+        2
+    );
+    assert_eq!(count(&host, ".energy-flux__chip"), 4);
+    assert!(text(&host, ".energy-flux__chips").contains("consumed now"));
+    assert_eq!(count(&host, ".energy-day"), 1);
+    assert!(count(&host, ".energy-card") > 0);
+}
+
+#[wasm_bindgen_test]
+async fn flux_opens_a_sensor() {
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Flux);
+    tick().await;
+    let oven = bar(&host, "consumer:oven");
+    oven.dispatch_event(&Event::new("click").unwrap()).unwrap();
+    tick().await;
+    let path = web_sys::window().unwrap().location().pathname().unwrap();
+    assert_eq!(path, "/entity/oven");
+}
+
+#[wasm_bindgen_test]
+async fn flux_updates_in_place() {
+    let house = House::new();
+    for e in flux_fixture(1200.0) {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Flux);
+    tick().await;
+    let before = bar(&host, "consumer:oven");
+    let height = before.get_attribute("style").unwrap();
+    // A second reading from the same entity through the same house.
+    house.apply(WsEvent::EntityUpserted(sensor(
+        "oven",
+        "Oven",
+        "W",
+        400.0,
+        role("consumer"),
+    )));
+    tick().await;
+    let after = bar(&host, "consumer:oven");
+    assert!(before.is_same_node(Some(&after)));
+    assert_ne!(after.get_attribute("style").unwrap(), height);
+}
+
+#[wasm_bindgen_test]
+async fn flux_colours_follow_a_reorder() {
+    let house = House::new();
+    for e in flux_fixture(1200.0) {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Flux);
+    tick().await;
+    let class = |id: &str| bar(&host, id).get_attribute("class").unwrap_or_default();
+    assert!(
+        class("consumer:oven").contains("--c0"),
+        "{}",
+        class("consumer:oven")
+    );
+    // A bigger consumer arrives (a new set reorders at once): the oven moves down one slot,
+    // and its colour with its band.
+    house.apply(WsEvent::EntityUpserted(sensor(
+        "kettle",
+        "Kettle",
+        "W",
+        2000.0,
+        role("consumer"),
+    )));
+    tick().await;
+    assert!(
+        class("consumer:kettle").contains("--c0"),
+        "{}",
+        class("consumer:kettle")
+    );
+    assert!(
+        class("consumer:oven").contains("--c1"),
+        "{}",
+        class("consumer:oven")
+    );
+    assert!(
+        class("consumer:pump").contains("--c2"),
+        "{}",
+        class("consumer:pump")
+    );
+}
+
+#[wasm_bindgen_test]
+async fn flux_skips_unknown_chips() {
+    let host = mount_view(
+        vec![
+            sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+            sensor("oven", "Oven", "W", 1200.0, role("consumer")),
+        ],
+        EnergyView::Flux,
+    );
+    tick().await;
+    let chips = text(&host, ".energy-flux__chips");
+    assert!(chips.contains("solar production"), "{chips}");
+    assert!(!chips.contains("from the grid"), "{chips}");
+}
+
+#[wasm_bindgen_test]
+async fn flux_label_is_the_keyboard_target() {
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Flux);
+    tick().await;
+    let svg = host.query_selector(".energy-flux__svg").unwrap().unwrap();
+    assert_eq!(svg.get_attribute("role").as_deref(), Some("group"));
+    assert_eq!(bar(&host, "consumer:oven").get_attribute("tabindex"), None);
+    let labels = host
+        .query_selector_all(".energy-flux__label[tabindex='0']")
+        .unwrap();
+    let oven: HtmlElement = (0..labels.length())
+        .filter_map(|i| labels.item(i))
+        .map(|n| n.unchecked_into::<HtmlElement>())
+        .find(|l| {
+            l.get_attribute("aria-label")
+                .is_some_and(|a| a.contains("Oven"))
+        })
+        .expect("a focusable, named oven label");
+    assert_eq!(oven.get_attribute("role").as_deref(), Some("button"));
+    let init = KeyboardEventInit::new();
+    init.set_key(" ");
+    init.set_cancelable(true);
+    let ev = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    oven.dispatch_event(&ev).unwrap();
+    tick().await;
+    assert!(ev.default_prevented());
+    let path = web_sys::window().unwrap().location().pathname().unwrap();
+    assert_eq!(path, "/entity/oven");
+}
+
+fn mount_flux_narrow(entities: Vec<EntityView>) -> Element {
+    let map: std::collections::BTreeMap<String, EntityView> =
+        entities.into_iter().map(|e| (e.id.clone(), e)).collect();
+    let ui = Memo::new(move |_| {
+        oikos_core::energy::EnergyFlow::build(&oikos_web::energy::energy_entities(&map), 0, None)
+    });
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    host.set_attribute("style", "width: 390px").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(RwSignal::new(Lang::En));
+            view! {
+                <oikos_web::screens::energy_flux::FluxDiagram
+                    ui=ui
+                    narrow=true
+                    open=Callback::new(|_: String| {})
+                    expanded=RwSignal::new(false)
+                />
+            }
+        },
+    ));
+    host
+}
+
+#[wasm_bindgen_test]
+async fn flux_narrow_runs_top_to_bottom() {
+    let mut entities = vec![
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("grid", "Grid power", "W", 600.0, role("grid")),
+    ];
+    for (i, (name, w)) in [
+        ("Oven", 900.0),
+        ("Heat pump", 800.0),
+        ("Air conditioning unit", 500.0),
+        ("Kettle", 300.0),
+        ("Dryer", 200.0),
+        ("Fridge", 100.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        entities.push(sensor(&format!("c{i}"), name, "W", w, role("consumer")));
+    }
+    let host = mount_flux_narrow(entities);
+    tick().await;
+    let svg = host.query_selector(".energy-flux__svg").unwrap().unwrap();
+    assert_eq!(svg.get_attribute("viewBox").unwrap(), "0 0 360 620");
+    let rect = |e: &Element| e.get_bounding_client_rect();
+    let house = rect(&bar(&host, "house"));
+    assert!(house.width() > house.height());
+    assert_eq!(
+        count(
+            &host,
+            ".energy-flux__bar--c0, .energy-flux__bar--c1, .energy-flux__bar--c2"
+        ),
+        3
+    );
+    assert_eq!(count(&host, ".energy-flux__bar--others"), 1);
+    // Every bar and label stays inside the svg.
+    let frame = rect(&svg);
+    let inside = |r: &web_sys::DomRect, what: &str| {
+        assert!(
+            r.left() >= frame.left() - 1.0
+                && r.right() <= frame.right() + 1.0
+                && r.top() >= frame.top() - 1.0
+                && r.bottom() <= frame.bottom() + 1.0,
+            "{what} overflows: {} {} {} {}",
+            r.left(),
+            r.top(),
+            r.right(),
+            r.bottom()
+        );
+    };
+    let bars = host.query_selector_all(".energy-flux__bar").unwrap();
+    for i in 0..bars.length() {
+        let el: Element = bars.item(i).unwrap().unchecked_into();
+        inside(&rect(&el), "bar");
+    }
+    let labels = host.query_selector_all(".energy-flux__label").unwrap();
+    assert!(labels.length() >= 6);
+    let mut names = String::new();
+    for i in 0..labels.length() {
+        let el: Element = labels.item(i).unwrap().unchecked_into();
+        inside(&rect(&el), "label");
+        names.push_str(&el.text_content().unwrap_or_default());
+        // Two lines: value then name.
+        assert_eq!(el.query_selector_all("tspan").unwrap().length(), 2);
+    }
+    // Names are cut at Classic's length.
+    assert!(names.contains("Heat pump"), "{names}");
+    assert!(!names.contains("Air conditioning unit"));
 }

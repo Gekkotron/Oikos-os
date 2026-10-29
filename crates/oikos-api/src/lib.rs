@@ -42,7 +42,7 @@ pub use history::{
     EnergyKind, GridDay, GridSlot, GridTotals, HistoryDaily, HistoryRange, HistorySeries,
     HistoryToday, LastChange, LastChangeItem,
 };
-pub use home::{HomeSettings, OffPeakEntry, OffPeakWindow};
+pub use home::{EnergyView, HomeSettings, OffPeakEntry, OffPeakWindow};
 pub use setup::{
     DatabaseInput, DatabaseView, FrigateInput, FrigateView, GeoPlace, Location, MqttInput,
     MqttView, PushInput, PushView, Secret, SecretView, SetupStatus, SetupStep, SolcastInput,

@@ -32,6 +32,16 @@ pub enum EnergyText {
     Bought,
     Sold,
     SolarExport,
+    // Flux (Sankey) view.
+    Export,
+    BatteryCharging,
+    Unitemised,
+    ChipConsumed,
+    ChipSolar,
+    ChipFromGrid,
+    ChipToGrid,
+    ChipSolarShare,
+    NoLivePower,
 }
 
 /// A fixed word of the energy area.
@@ -76,6 +86,18 @@ pub fn energy_text(lang: Lang, k: EnergyText) -> &'static str {
         Bought => ("Bought", "Acheté"),
         Sold => ("Sold", "Vendu"),
         SolarExport => ("Solar export", "Injection solaire"),
+        Export => ("To the grid", "Vers le réseau"),
+        BatteryCharging => ("Battery charging", "Charge batterie"),
+        Unitemised => ("Not itemised", "Non détaillé"),
+        ChipConsumed => ("consumed now", "consommés maintenant"),
+        ChipSolar => ("solar production", "production solaire"),
+        ChipFromGrid => ("from the grid", "tirés du réseau"),
+        ChipToGrid => ("sent to the grid", "renvoyés au réseau"),
+        ChipSolarShare => ("solar share", "part solaire"),
+        NoLivePower => (
+            "No live power reading yet",
+            "Pas encore de mesure de puissance",
+        ),
     };
     match lang {
         Lang::En => en,
@@ -148,6 +170,14 @@ pub fn show_all_consumers(lang: Lang, n: usize) -> String {
         (Lang::En, false) => format!("Show all {n} consumers"),
         (Lang::Fr, true) => format!("Afficher {n} consommateur"),
         (Lang::Fr, false) => format!("Afficher les {n} consommateurs"),
+    }
+}
+
+/// "+3 others".
+pub fn others(lang: Lang, n: usize) -> String {
+    match lang {
+        Lang::En => format!("+{n} others"),
+        Lang::Fr => format!("+{n} autres"),
     }
 }
 
@@ -241,6 +271,15 @@ mod tests {
             Bought,
             Sold,
             SolarExport,
+            Export,
+            BatteryCharging,
+            Unitemised,
+            ChipConsumed,
+            ChipSolar,
+            ChipFromGrid,
+            ChipToGrid,
+            ChipSolarShare,
+            NoLivePower,
         ];
         crate::i18n::assert_table(ALL, energy_text, &[]);
     }
@@ -261,6 +300,12 @@ mod tests {
             history_error(Lang::En, &E::BadRequest("bad".into())),
             "History error: bad"
         );
+    }
+
+    #[test]
+    fn others_in_both_languages() {
+        assert_eq!(others(Lang::En, 3), "+3 others");
+        assert_eq!(others(Lang::Fr, 3), "+3 autres");
     }
 
     #[test]

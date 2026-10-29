@@ -206,6 +206,8 @@ const PROPERTIES: &[&str] = &[
     "color",
     "opacity",
     "fill",
+    "stop-color",
+    "d",
     "stroke",
     "stroke-width",
     "animation-duration",

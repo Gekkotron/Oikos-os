@@ -22,6 +22,10 @@ pub enum SettingsText {
     ThemeAuto,
     ThemeNight,
     ThemeIvoire,
+    EnergyView,
+    EnergyViewHint,
+    EnergyViewClassic,
+    EnergyViewFlux,
     Yes,
     No,
     Copy,
@@ -82,6 +86,10 @@ impl SettingsText {
         SettingsText::ThemeAuto,
         SettingsText::ThemeNight,
         SettingsText::ThemeIvoire,
+        SettingsText::EnergyView,
+        SettingsText::EnergyViewHint,
+        SettingsText::EnergyViewClassic,
+        SettingsText::EnergyViewFlux,
         SettingsText::Yes,
         SettingsText::No,
         SettingsText::Copy,
@@ -139,7 +147,7 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
             "Sensors, sirens, remotes and presence",
             "Capteurs, sirènes, télécommandes et présence",
         ),
-        T::HintAppearance => ("Theme", "Thème"),
+        T::HintAppearance => ("Theme, energy view", "Thème, vue énergie"),
         T::HintZigbee => (
             "Bridge, firmware updates and devices",
             "Passerelle, mises à jour du micrologiciel et appareils",
@@ -163,6 +171,13 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
         T::ThemeAuto => ("Auto", "Auto"),
         T::ThemeNight => ("Night Glass", "Night Glass"),
         T::ThemeIvoire => ("Ivoire", "Ivoire"),
+        T::EnergyView => ("Energy view", "Vue énergie"),
+        T::EnergyViewHint => (
+            "How the Energy page draws the live power.",
+            "Comment la page Énergie dessine la puissance en direct.",
+        ),
+        T::EnergyViewClassic => ("Classic", "Classique"),
+        T::EnergyViewFlux => ("Flux", "Flux"),
         T::Yes => ("Yes", "Oui"),
         T::No => ("No", "Non"),
         T::Copy => ("Copy", "Copier"),
@@ -285,6 +300,7 @@ mod tests {
         SettingsText::ThemeAuto,
         SettingsText::ThemeNight,
         SettingsText::ThemeIvoire,
+        SettingsText::EnergyViewFlux,
         SettingsText::Version,
         SettingsText::Transport,
         SettingsText::ClaudeCode,
@@ -301,7 +317,7 @@ mod tests {
     #[test]
     fn all_lists_every_variant() {
         // The match in `settings_text` is exhaustive, so a new variant only needs listing here.
-        assert_eq!(SettingsText::ALL.len(), 56);
+        assert_eq!(SettingsText::ALL.len(), 60);
     }
 
     #[test]

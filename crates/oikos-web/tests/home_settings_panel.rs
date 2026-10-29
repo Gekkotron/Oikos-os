@@ -3,7 +3,7 @@
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::tick;
-use oikos_api::{EntityView, HomeSettings, WsEvent};
+use oikos_api::{EnergyView, EntityView, HomeSettings, WsEvent};
 use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride};
 use oikos_web::components::now::Now;
 use oikos_web::components::toast::Toasts;
@@ -11,6 +11,9 @@ use oikos_web::house::House;
 use oikos_web::screens::home_settings_panel::HomeSettingsPanel;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
+#[path = "support/fetch_stub.rs"]
+mod fetch_stub;
+use fetch_stub::FetchStub;
 wasm_bindgen_test_configure!(run_in_browser);
 
 fn entity(id: &str, kind: Kind, device_class: Option<&str>) -> EntityView {
@@ -145,4 +148,36 @@ async fn mode_list_hides_non_primary_selects_but_keeps_the_chosen_one() {
     tick().await;
     tick().await;
     assert!(mode_values(&host).contains(&"diag_select".to_owned()));
+}
+
+#[wasm_bindgen_test]
+async fn save_keeps_the_energy_view() {
+    let stub = FetchStub::install();
+    let stored = HomeSettings {
+        energy_view: EnergyView::Flux,
+        ..Default::default()
+    };
+    stub.reply(
+        "PUT",
+        "/api/v1/home/settings",
+        200,
+        &serde_json::to_string(&stored).unwrap(),
+    );
+    let (host, house) = mount().await;
+    house.home_settings.set(stored);
+    tick().await;
+    host.query_selector(".home-settings__save")
+        .unwrap()
+        .unwrap()
+        .unchecked_into::<web_sys::HtmlElement>()
+        .click();
+    tick().await;
+    TimeoutFuture::new(50).await;
+    let puts = stub.requests();
+    assert_eq!(puts.len(), 1);
+    assert!(
+        puts[0].body.contains("\"energy_view\":\"flux\""),
+        "{}",
+        puts[0].body
+    );
 }

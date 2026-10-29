@@ -19,6 +19,7 @@ use crate::energy::{
     energy_entities, energy_text, meter_text, node_label, node_value_text, now_ms, plus_minus_ids,
     positions, power_text, should_fire_mount, speed, stroke,
 };
+use crate::energy_view::{EnergyView, energy_view};
 use crate::house::House;
 use crate::i18n::energy::{
     EnergyText, energy_text as word, kwh_today, live_subtitle, meter_line, show_all_consumers,
@@ -26,6 +27,7 @@ use crate::i18n::energy::{
 use crate::i18n::{Key, Lang, text, use_lang};
 use crate::icons::{consumer_icon, role_icon};
 use crate::screens::energy_day::GridDayCard;
+use crate::screens::energy_flux::{FluxDiagram, flux_folded};
 
 /// Where a node's labels end, below its centre, plus a gap: where solar's edge starts.
 const LABELS_BOTTOM: f64 = NODE_R + 29.0;
@@ -43,7 +45,7 @@ fn kind_class(kind: NodeKind) -> &'static str {
     }
 }
 
-fn short(label: String) -> String {
+pub(crate) fn short(label: String) -> String {
     if label.chars().count() > LABEL_CHARS {
         let cut: String = label.chars().take(LABEL_CHARS - 1).collect();
         format!("{}…", cut.trim_end())
@@ -436,6 +438,8 @@ pub fn EnergyScreen() -> impl IntoView {
         built
     });
     let layout = layout();
+    let narrow = layout == Layout::NARROW;
+    let classic = move || energy_view(house) == EnergyView::Classic;
     let pos: Positions = Memo::new(move |_| ui.with(|u| positions(&u.diagram, &layout)));
     let names = Memo::new(move |_| {
         house.entities.with(|m| {
@@ -463,7 +467,15 @@ pub fn EnergyScreen() -> impl IntoView {
     let nodes = move || ui.with(|u| u.diagram.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
     let cards = move || ui.with(|u| u.cards.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
     let description = move || ui.with(|u| aria_sentence(lang(), u));
-    let folded = move || ui.with(|u| u.consumers.len() > ARC_SLOTS);
+    let folded = move || {
+        ui.with(|u| {
+            if classic() {
+                u.consumers.len() > ARC_SLOTS
+            } else {
+                flux_folded(u, narrow)
+            }
+        })
+    };
 
     // Shared KwhToday map, installed once by App::install_history_refresh.
     let kwh_map = expect_context::<KwhToday>().0;
@@ -501,41 +513,50 @@ pub fn EnergyScreen() -> impl IntoView {
                     <Show when=hint>
                         <p class="energy__hint">{move || word(lang(), EnergyText::CheckSign)}</p>
                     </Show>
-                    <div
-                        class="energy-diagram"
-                        class:energy-diagram--wide=layout == Layout::WIDE
+                    <Show
+                        when=classic
+                        fallback=move || {
+                            view! {
+                                <FluxDiagram ui=ui narrow=narrow open=open expanded=expanded />
+                            }
+                        }
                     >
-                        <svg
-                            class="energy-diagram__svg"
-                            viewBox=format!("0 0 {} {VIEW_H}", layout.view_w)
-                            role="img"
-                            aria-label=description
+                        <div
+                            class="energy-diagram"
+                            class:energy-diagram--wide=layout == Layout::WIDE
                         >
-                            <title>{description}</title>
-                            <For
-                                each=edges
-                                key=|(id, _)| id.clone()
-                                children=move |(id, kind)| {
-                                    view! { <DiagramEdge id=id kind=kind ui=ui pos=pos /> }
-                                }
-                            />
-                            <For
-                                each=nodes
-                                key=|id| id.clone()
-                                children=move |id| {
-                                    view! {
-                                        <DiagramNode
-                                            id=id
-                                            ui=ui
-                                            pos=pos
-                                            open=open
-                                            expanded=expanded
-                                        />
+                            <svg
+                                class="energy-diagram__svg"
+                                viewBox=format!("0 0 {} {VIEW_H}", layout.view_w)
+                                role="img"
+                                aria-label=description
+                            >
+                                <title>{description}</title>
+                                <For
+                                    each=edges
+                                    key=|(id, _)| id.clone()
+                                    children=move |(id, kind)| {
+                                        view! { <DiagramEdge id=id kind=kind ui=ui pos=pos /> }
                                     }
-                                }
-                            />
-                        </svg>
-                    </div>
+                                />
+                                <For
+                                    each=nodes
+                                    key=|id| id.clone()
+                                    children=move |id| {
+                                        view! {
+                                            <DiagramNode
+                                                id=id
+                                                ui=ui
+                                                pos=pos
+                                                open=open
+                                                expanded=expanded
+                                            />
+                                        }
+                                    }
+                                />
+                            </svg>
+                        </div>
+                    </Show>
                     <Show when=folded>
                         <button
                             type="button"

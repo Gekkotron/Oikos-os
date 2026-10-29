@@ -8,6 +8,7 @@ use leptos_router::hooks::use_params_map;
 use oikos_api::{ConnectionStatus, DeviceView, UpdateView};
 use oikos_core::model::Availability;
 
+use crate::energy_view::{EnergyView, energy_view, set_energy_view};
 use crate::house::House;
 use crate::i18n::devices::availability_text;
 use crate::i18n::settings::{
@@ -152,6 +153,31 @@ fn ThemeSwitch() -> impl IntoView {
     view! {
         <div class="segmented" role="group" aria-label=move || settings_text(lang(), T::Theme)>
             {segment(Theme::Auto)} {segment(Theme::Night)} {segment(Theme::Ivoire)}
+        </div>
+    }
+}
+
+#[component]
+fn EnergyViewSwitch() -> impl IntoView {
+    let house = expect_context::<House>();
+    let lang = use_lang();
+    let segment = move |value: EnergyView, text: T| {
+        view! {
+            <button
+                type="button"
+                class="chip segmented__option"
+                class:chip--selected=move || energy_view(house) == value
+                aria-pressed=move || (energy_view(house) == value).to_string()
+                on:click=move |_| set_energy_view(house, value)
+            >
+                {move || settings_text(lang(), text)}
+            </button>
+        }
+    };
+    view! {
+        <div class="segmented" role="group" aria-label=move || settings_text(lang(), T::EnergyView)>
+            {segment(EnergyView::Classic, T::EnergyViewClassic)}
+            {segment(EnergyView::Flux, T::EnergyViewFlux)}
         </div>
     }
 }
@@ -387,6 +413,10 @@ fn AppearancePage() -> impl IntoView {
         <Panel title=T::Theme>
             <ThemeSwitch />
             <p class="settings__hint">{move || settings_text(lang(), T::ThemeHint)}</p>
+        </Panel>
+        <Panel title=T::EnergyView>
+            <EnergyViewSwitch />
+            <p class="settings__hint">{move || settings_text(lang(), T::EnergyViewHint)}</p>
         </Panel>
     }
 }

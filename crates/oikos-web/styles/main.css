@@ -4688,6 +4688,170 @@ html:has(.flow-canvas-screen) {
   overflow: visible;
 }
 
+/* The Flux (Sankey) view: bands between bars, glides when a reading changes. */
+.energy-flux {
+  width: 100%;
+  /* Consumers never reuse a source colour (solar amber, grid violet, battery/export mint). */
+  --flux-c0: var(--accent-cyan);
+  --flux-c1: var(--accent-rose);
+  --flux-c2: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-violet));
+  --flux-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
+  --flux-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
+  --flux-muted: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+
+.energy-flux__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.energy-flux__chip {
+  min-width: 140px;
+  padding: 12px 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.energy-flux__chip b {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.energy-flux__chip span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.energy-flux__empty {
+  color: var(--muted);
+}
+
+.energy-flux__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.energy-flux__band {
+  fill-opacity: 0.42;
+  transition:
+    d 0.9s var(--ease),
+    fill-opacity 0.2s;
+}
+
+.energy-flux__band:hover {
+  fill-opacity: 0.8;
+}
+
+.energy-flux__sweep {
+  pointer-events: none;
+  transition: d 0.9s var(--ease);
+}
+
+.energy-flux__bar {
+  fill: var(--ink);
+  transition:
+    transform 0.9s var(--ease),
+    width 0.9s var(--ease),
+    height 0.9s var(--ease),
+    opacity 0.4s;
+}
+
+.energy-flux__bar--click,
+.energy-flux__label--click {
+  cursor: pointer;
+}
+
+.energy-flux__label--click:focus-visible {
+  outline: 2px solid var(--select);
+  outline-offset: 2px;
+}
+
+.energy-flux__bar--solar {
+  fill: var(--solar);
+}
+
+.energy-flux__bar--grid {
+  fill: var(--accent-violet);
+}
+
+.energy-flux__bar--battery,
+.energy-flux__bar--export,
+.energy-flux__bar--charge {
+  fill: var(--accent-mint);
+}
+
+.energy-flux__bar--house {
+  fill: var(--ink);
+}
+
+.energy-flux__bar--unitemised,
+.energy-flux__bar--others {
+  fill: var(--flux-muted);
+}
+
+.energy-flux__bar--c0 {
+  fill: var(--flux-c0);
+}
+
+.energy-flux__bar--c1 {
+  fill: var(--flux-c1);
+}
+
+.energy-flux__bar--c2 {
+  fill: var(--flux-c2);
+}
+
+.energy-flux__bar--c3 {
+  fill: var(--flux-c3);
+}
+
+.energy-flux__bar--c4 {
+  fill: var(--flux-c4);
+}
+
+.energy-flux__label {
+  font-size: 12px;
+  /* A halo keeps the text readable where it crosses a band. */
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  transition: transform 0.9s var(--ease);
+}
+
+.energy-flux--narrow .energy-flux__label {
+  font-size: 11px;
+}
+
+.energy-flux__value {
+  fill: var(--ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.energy-flux__name {
+  fill: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .energy-flux__sweep {
+    display: none;
+  }
+
+  .energy-flux__band,
+  .energy-flux__bar,
+  .energy-flux__label {
+    transition: none;
+  }
+}
+
 .energy-edge {
   fill: none;
   stroke: var(--ink);

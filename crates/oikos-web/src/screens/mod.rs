@@ -6,6 +6,7 @@ pub mod dashboard;
 pub mod devices;
 pub mod energy;
 pub mod energy_day;
+pub mod energy_flux;
 pub mod entity_sheet;
 pub mod flow_canvas;
 pub mod flow_schedule;
