@@ -1058,23 +1058,40 @@ fn decision_rows(decision: &Decision, at: Micros) -> Vec<ClimateDecisionRow> {
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_default();
-    let row = |entity_id: &str, mode: &str, setpoint: Option<f64>| ClimateDecisionRow {
-        at,
-        zone: decision.zone.clone(),
-        entity_id: entity_id.to_owned(),
-        mode: mode.to_owned(),
-        setpoint,
-        source: source.clone(),
-        reason: decision.reason.clone(),
-        applied: decision.applied,
+    let row = |entity_id: &str, mode: &str, setpoint: Option<f64>, adjust: Option<f64>| {
+        ClimateDecisionRow {
+            at,
+            zone: decision.zone.clone(),
+            entity_id: entity_id.to_owned(),
+            mode: mode.to_owned(),
+            setpoint,
+            source: source.clone(),
+            reason: decision.reason.clone(),
+            applied: decision.applied,
+            adjust,
+        }
     };
     if decision.entities.is_empty() {
-        return vec![row("", "", None)];
+        return vec![row("", "", None, None)];
     }
     decision
         .entities
         .iter()
-        .map(|(id, target)| row(id, &target.mode, target.setpoint))
+        .map(|(id, target)| {
+            // A corrected decision stores the target and the offset that was added to it for
+            // each unheld device; a held device keeps its own value.
+            if let (Some(_), false, Some(Setpoint::Temp(goal)), Some(commanded)) = (
+                decision.adjust,
+                target.held,
+                decision.setpoint,
+                target.setpoint,
+            ) {
+                let diff = commanded - goal;
+                let adjust = (diff != 0.0).then_some(diff);
+                return row(id, &target.mode, Some(goal), adjust);
+            }
+            row(id, &target.mode, target.setpoint, None)
+        })
         .collect()
 }
 
@@ -1208,5 +1225,37 @@ mod tests {
             &device(Some(9.0), "off"),
             &want(Some(10.0), "off")
         ));
+    }
+
+    #[test]
+    fn decision_rows_store_target_and_adjust() {
+        let mut decision = no_safety("z");
+        decision.setpoint = Some(Setpoint::Temp(19.0));
+        decision.adjust = Some(-0.5);
+        decision
+            .entities
+            .insert("a".into(), want(Some(18.5), "heat"));
+        decision.entities.insert(
+            "b".into(),
+            DeviceTarget {
+                setpoint: Some(21.0),
+                mode: "heat".into(),
+                held: true,
+            },
+        );
+        let rows = decision_rows(&decision, 0);
+        let got: Vec<_> = rows
+            .iter()
+            .map(|r| (r.entity_id.as_str(), r.setpoint, r.adjust))
+            .collect();
+        assert_eq!(
+            got,
+            vec![("a", Some(19.0), Some(-0.5)), ("b", Some(21.0), None)]
+        );
+
+        decision.adjust = None;
+        let rows = decision_rows(&decision, 0);
+        assert_eq!(rows[0].setpoint, Some(18.5));
+        assert_eq!(rows[0].adjust, None);
     }
 }

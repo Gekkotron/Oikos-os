@@ -171,6 +171,7 @@ impl Hub {
                                 source: row.source,
                                 reason: row.reason,
                                 applied: row.applied,
+                                adjust: row.adjust,
                             })
                             .collect();
                     }

@@ -80,6 +80,9 @@ pub struct DecisionRow {
     pub source: String,
     pub reason: String,
     pub applied: bool,
+    /// The correction the command carried: it was `setpoint + adjust`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adjust: Option<f64>,
 }
 
 /// The decisions of one zone: the recent ones the hub holds in memory, then older rows from

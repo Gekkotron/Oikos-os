@@ -146,6 +146,7 @@ fn cmd(date: NaiveDate, hhmm: &str, sp: f64, source: Source) -> EngineCommand {
         setpoint: Some(sp),
         mode: "heat".into(),
         source,
+        adjust: None,
     }
 }
 
@@ -729,4 +730,42 @@ fn days_without_data_keep_their_approved_block() {
         "{learned:?}"
     );
     assert!(heat(learned).validate().is_ok());
+}
+
+#[test]
+fn corrected_slots_count_as_the_target() {
+    // The device ran 1 degree lower from 12:00 to 16:00: the engine's correction, not a
+    // change of the schedule.
+    let h = history(14, |d| {
+        day_of(
+            d,
+            &[
+                ("00:00", 17.0),
+                ("09:00", 19.0),
+                ("12:00", 18.0),
+                ("16:00", 19.0),
+                ("20:30", 17.0),
+            ],
+        )
+    });
+    let c = caps();
+    let engine: Vec<EngineCommand> = (0..14)
+        .map(|i| monday() + Duration::days(i))
+        .flat_map(|d| {
+            let mut corrected = cmd(d, "12:00", 19.0, Source::Schedule);
+            corrected.adjust = Some(-1.0);
+            vec![
+                cmd(d, "09:00", 19.0, Source::Schedule),
+                corrected,
+                cmd(d, "16:00", 19.0, Source::Schedule),
+            ]
+        })
+        .collect();
+    let rules = rules_of(learn(&input(&h, &engine, &c, 14)));
+    assert_eq!(rules.base, Setpoint::Temp(17.0));
+    assert_eq!(rules.blocks.len(), 1);
+    let b = &rules.blocks[0];
+    assert_eq!(b.days.len(), 7);
+    assert_eq!((b.from, b.to), (HhMm(540), HhMm(1230)));
+    assert_eq!(b.setpoint, Setpoint::Temp(19.0));
 }
