@@ -63,7 +63,7 @@ The argument schema of `set_flow` that the server advertises still describes fou
 
 ## Groups
 
-Groups need `[groups] enabled = true`; otherwise these tools answer `groups disabled`. See [Groups and virtual entities](../users/groups-and-virtual-entities.md).
+Groups need `groups.enabled` in the advanced settings ([Settings reference](configuration.md#groups)); otherwise these tools answer `groups disabled`. See [Groups and virtual entities](../users/groups-and-virtual-entities.md).
 
 | Tool | What it does |
 | --- | --- |
@@ -89,20 +89,20 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 
 | Tool | What it does |
 | --- | --- |
-| `get_history` | One slice of an entity's history, available only when `[history] url` is set. Args: `entity`, `what`, and by `what`: `series` needs `range` (`1h`, `6h`, `24h`, `7d`, `30d`, `1y`); `daily` needs `days` (7, 30 or 365) and `kind` (`counter` or `power`); `today` needs `kind`; `last_change` needs nothing more. The reply is a one-field object named after `what`. Errors read `history_unavailable: …` or `not_recorded: …`. |
+| `get_history` | One slice of an entity's history, available only when the database is connected (**Settings → Database**). Args: `entity`, `what`, and by `what`: `series` needs `range` (`1h`, `6h`, `24h`, `7d`, `30d`, `1y`); `daily` needs `days` (7, 30 or 365) and `kind` (`counter` or `power`); `today` needs `kind`; `last_change` needs nothing more. The reply is a one-field object named after `what`. Errors read `history_unavailable: …` or `not_recorded: …`. |
 | `get_grid_day` | What crossed the grid meter on one house-local day, per half hour: kWh bought off-peak and peak, kWh sold, with the day's totals and off-peak bands (the shape of `GET /history/grid_day`). Args: `date` (`YYYY-MM-DD`, today when absent). Errors read `history_unavailable: …`, `no_grid_meter: …` or `bad_request: …`. |
 
 ## Weather
 
 | Tool | What it does |
 | --- | --- |
-| `get_weather` | The outdoor weather from Open-Meteo: now, today, rain in the next hour, tonight's low and the next five days, in metric units, with `stale` set when the data is old. The same document as `GET /api/v1/weather`. Answers `weather unavailable` while `[weather] enabled` is `false` or before the first fetch. See [Weather](../users/weather.md). |
+| `get_weather` | The outdoor weather from Open-Meteo: now, today, rain in the next hour, tonight's low and the next five days, in metric units, with `stale` set when the data is old. The same document as `GET /api/v1/weather`. Answers `weather unavailable` while weather is off in **Settings → Weather** or before the first fetch. See [Weather](../users/weather.md). |
 
 ## Solar
 
 | Tool | What it does |
 | --- | --- |
-| `get_solar` | The Solcast solar forecast: today, tomorrow, the next seven days, the 30-minute periods and the request budget, with `stale` set when the data is old. The same document as `GET /api/v1/solar`. Answers `solar unavailable` while `[solcast] enabled` is `false` or before the first fetch. See [Solar forecast](../users/solar-forecast.md). |
+| `get_solar` | The Solcast solar forecast: today, tomorrow, the next seven days, the 30-minute periods and the request budget, with `stale` set when the data is old. The same document as `GET /api/v1/solar`. Answers `solar unavailable` while the solar forecast is off in **Settings → Solar forecast** or before the first fetch. See [Solar forecast](../users/solar-forecast.md). |
 
 ## Home settings
 

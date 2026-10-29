@@ -96,7 +96,7 @@ fn numeric_looking_env_strings_stay_strings() {
         jail.set_env("OIKOS_MQTT__PASSWORD", "123456");
         jail.set_env("OIKOS_MQTT__CLIENT_ID", "1");
         jail.set_env("OIKOS_MQTT__USER", "007");
-        jail.set_env("OIKOS_MQTT__HOST", "192.168.1.91");
+        jail.set_env("OIKOS_MQTT__HOST", "192.168.1.20");
         jail.set_env("OIKOS_MQTT__HA_STATUS_TOPIC", "42");
         jail.set_env("OIKOS_TOPICS__UI_PREFIX", "7");
         jail.set_env("OIKOS_TOPICS__Z2M_BASE", "0123");
@@ -115,7 +115,7 @@ fn numeric_looking_env_strings_stay_strings() {
         assert_eq!(cfg.mqtt.password.as_deref(), Some("123456"));
         assert_eq!(cfg.mqtt.client_id, "1");
         assert_eq!(cfg.mqtt.user.as_deref(), Some("007"));
-        assert_eq!(cfg.mqtt.host, "192.168.1.91");
+        assert_eq!(cfg.mqtt.host, "192.168.1.20");
         Ok(())
     });
 }
@@ -185,12 +185,12 @@ fn history_url_from_env_stays_a_string() {
     Jail::expect_with(|jail| {
         jail.set_env(
             "OIKOS_HISTORY__URL",
-            "postgres://oikos:s3cret@192.168.1.91:5432/oikos",
+            "postgres://oikos:s3cret@192.168.1.20:5432/oikos",
         );
         let cfg = Config::load(None)?;
         assert_eq!(
             cfg.history.url,
-            "postgres://oikos:s3cret@192.168.1.91:5432/oikos"
+            "postgres://oikos:s3cret@192.168.1.20:5432/oikos"
         );
         assert!(cfg.history.enabled());
         Ok(())
@@ -202,7 +202,7 @@ fn history_debug_masks_password() {
     Jail::expect_with(|jail| {
         jail.create_file(
             "oikos.toml",
-            "[history]\nurl = \"postgres://oikos:s3cret@192.168.1.91:5432/oikos\"\n",
+            "[history]\nurl = \"postgres://oikos:s3cret@192.168.1.20:5432/oikos\"\n",
         )?;
         let cfg = Config::load(None)?;
         let text = format!("{:?}", cfg.history);

@@ -2,7 +2,7 @@
 # New installs configure the hub in the setup wizard and Settings; they have no such file.
 
 [mqtt]
-host = "192.168.1.91"
+host = "192.168.1.20"
 port = 1883
 user = "oikos"
 password = "change-me"
@@ -98,7 +98,7 @@ password = ""
 # pending states the writer keeps when the database is unreachable, before dropping the
 # oldest.
 [history]
-# url = "postgres://oikos:change-me@192.168.1.91:5432/oikos"
+# url = "postgres://oikos:change-me@192.168.1.20:5432/oikos"
 # buffer_rows = 100000
 
 # The climate engine (beta, still being tested): learns each room's heating/cooling rules from history (needs [history]),

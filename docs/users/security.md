@@ -16,7 +16,7 @@ The hub can run the alarm itself, optional and off by default (see [Alarm](alarm
 
 ## Settings and secrets
 
-The setup and settings routes have no login either: anyone on the LAN can read or change the hub's settings, and can reach the wizard of a hub that has not finished setup. Secrets are write-only through the API (a read says only `{"set": true}`), the Frigate and database passwords must be entered again when their address changes, and no log line or error carries one. They are stored in the hub's database (and in `data/settings-cache.json` and `data/hub.json`, both readable by the hub's user only). Back up and protect `./data/` and the database like any other secret store. See the [Settings reference](../reference/configuration.md#secrets).
+The setup and settings routes have no login either: anyone on the LAN can read or change the hub's settings, and can reach the wizard of a hub that has not finished setup. Secrets are write-only through the API (a read says only `{"set": true}`), the MQTT, database and Frigate passwords must be entered again when their address (host and port) changes, and no log line or error carries one. They are stored in the hub's database (and in `data/settings-cache.json` and `data/hub.json`, both readable by the hub's user only). Back up and protect `./data/` and the database like any other secret store. See the [Settings reference](../reference/configuration.md#secrets).
 
 ## What else to know
 

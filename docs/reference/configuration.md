@@ -37,7 +37,7 @@ See [Security](../users/security.md#settings-and-secrets) for what is and is not
 
 ## Bootstrap settings (`hub.json`)
 
-These have a screen in the wizard and in **Settings**.
+The location, the database and the MQTT connection have a screen in the wizard and in **Settings**. The HTTP and log settings do not: set them with the `OIKOS_*` variables below, or in `hub.json` while the hub is stopped.
 
 ### Home location
 
@@ -77,6 +77,8 @@ Two more MQTT fields have no screen. Set them in the `mqtt` object of `data/hub.
 | `mqtt.ha_status_topic` | `"homeassistant/status"` | Topic of the birth message. |
 
 ### HTTP and log
+
+No screen. Set with `OIKOS_HTTP__BIND`, `OIKOS_LOG__LEVEL` and `OIKOS_LOG__JSON`, or in the `http` and `log` objects of `data/hub.json` while the hub is stopped.
 
 | Field | Default | Description |
 | --- | --- | --- |

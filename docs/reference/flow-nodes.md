@@ -71,7 +71,7 @@ Runs live in memory only: a hub restart forgets them, the flow definitions stay 
 
 ### The house position
 
-Sun nodes need the position of the house. Set your home location in the setup wizard or **Settings → Location** (see the [Settings reference](configuration.md#home-location)). With none set, the hub uses Paris and saving a flow that has a `trigger.sun` or an `if` with `op: is_dark` returns a warning. Schedules use `[flows] timezone`.
+Sun nodes need the position of the house. Set your home location in the setup wizard or **Settings → Location** (see the [Settings reference](configuration.md#home-location)). With none set, the hub uses Paris and saving a flow that has a `trigger.sun` or an `if` with `op: is_dark` returns a warning. Schedules use the home location's time zone.
 
 ## `trigger.state`
 
