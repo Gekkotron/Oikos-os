@@ -160,7 +160,13 @@ async fn alarm_switch_needs_no_restart() {
 
 #[wasm_bindgen_test]
 async fn skip_marks_the_card() {
-    let _stub = FetchStub::install();
+    let stub = FetchStub::install();
+    stub.reply(
+        "GET",
+        "/api/v1/settings/weather",
+        200,
+        r#"{"enabled":false,"refresh_minutes":15}"#,
+    );
     let storage = storage();
     let before = storage.get_item(SKIPPED_KEY).unwrap();
     storage.remove_item(SKIPPED_KEY).unwrap();
@@ -232,4 +238,36 @@ async fn a_failed_alarm_load_leaves_the_switch_disabled() {
         .unchecked_into();
     assert!(switch.disabled());
     assert!(m.host.text_content().unwrap().contains("alarm down"));
+}
+
+#[wasm_bindgen_test]
+async fn an_unreachable_database_is_an_error_not_a_restart() {
+    let stub = FetchStub::install();
+    stub.reply(
+        "GET",
+        "/api/v1/settings/climate",
+        200,
+        r#"{"enabled":false,"prefix":"house/climate"}"#,
+    );
+    stub.reply(
+        "PUT",
+        "/api/v1/settings/climate",
+        503,
+        r#"{"error":"database unreachable"}"#,
+    );
+    let m = mount();
+    settle().await;
+    click(&m.host, "#svc-climate .svc__head");
+    settle().await;
+    click(&m.host, "#svc-climate button.switch");
+    tick().await;
+    click(&m.host, "#svc-climate .svc__save");
+    settle().await;
+    assert_eq!(m.applying.target.get_untracked(), None);
+    assert!(
+        m.host
+            .text_content()
+            .unwrap()
+            .contains("database unreachable")
+    );
 }

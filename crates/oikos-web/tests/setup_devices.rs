@@ -218,3 +218,131 @@ async fn a_failed_entity_move_is_reported_and_the_select_reverts() {
         .unchecked_into();
     assert_eq!(select.value(), "");
 }
+
+fn change(select: &web_sys::HtmlSelectElement, value: &str) {
+    select.set_value(value);
+    select
+        .dispatch_event(
+            &web_sys::Event::new_with_event_init_dict("change", &{
+                let init = web_sys::EventInit::new();
+                init.set_bubbles(true);
+                init
+            })
+            .unwrap(),
+        )
+        .unwrap();
+}
+
+#[wasm_bindgen_test]
+async fn a_room_change_on_the_hub_wins_over_a_forced_room() {
+    let stub = FetchStub::install();
+    let house = House::new();
+    house.devices.set(vec![device("d1", "Lamp", &["e1", "e2"])]);
+    house.entities.set(
+        [("e1", "d1"), ("e2", "d1")]
+            .into_iter()
+            .map(|(id, dev)| (id.to_owned(), entity(id, dev)))
+            .collect(),
+    );
+    house
+        .areas
+        .set(vec![area("kitchen", "Kitchen"), area("office", "Office")]);
+    stub.reply(
+        "PATCH",
+        "/api/v1/entities/e1/override",
+        200,
+        &serde_json::to_string(&entity("e1", "d1")).unwrap(),
+    );
+    stub.reply(
+        "PATCH",
+        "/api/v1/entities/e2/override",
+        500,
+        r#"{"error":"hub exploded"}"#,
+    );
+    let store = house.entities;
+    let (host, _step) = mount(house, 5000);
+    tick().await;
+    let select = |host: &web_sys::Element| -> web_sys::HtmlSelectElement {
+        host.query_selector("select.devices__room")
+            .unwrap()
+            .expect("room select")
+            .unchecked_into()
+    };
+    change(&select(&host), "kitchen");
+    for _ in 0..16 {
+        TimeoutFuture::new(15).await;
+        tick().await;
+    }
+    assert_eq!(select(&host).value(), "", "the failed move reverts");
+    // The device is moved elsewhere on the hub's side.
+    store.update(|m| m.get_mut("e1").unwrap().area = "office".into());
+    for _ in 0..4 {
+        TimeoutFuture::new(15).await;
+        tick().await;
+    }
+    assert_eq!(select(&host).value(), "office");
+}
+
+#[wasm_bindgen_test]
+async fn a_move_reply_updates_the_store_and_the_select_is_off_meanwhile() {
+    let stub = FetchStub::install();
+    let house = House::new();
+    house.devices.set(vec![device("d1", "Lamp", &["e1"])]);
+    house.entities.set(
+        [("e1".to_owned(), entity("e1", "d1"))]
+            .into_iter()
+            .collect(),
+    );
+    house.areas.set(vec![area("kitchen", "Kitchen")]);
+    let mut moved = entity("e1", "d1");
+    moved.area = "kitchen".into();
+    stub.reply_after(
+        "PATCH",
+        "/api/v1/entities/e1/override",
+        200,
+        &serde_json::to_string(&moved).unwrap(),
+        80,
+    );
+    let store = house.entities;
+    let (host, _step) = mount(house, 5000);
+    tick().await;
+    let select: web_sys::HtmlSelectElement = host
+        .query_selector("select.devices__room")
+        .unwrap()
+        .unwrap()
+        .unchecked_into();
+    change(&select, "kitchen");
+    tick().await;
+    let during: web_sys::HtmlSelectElement = host
+        .query_selector("select.devices__room")
+        .unwrap()
+        .unwrap()
+        .unchecked_into();
+    assert!(during.disabled(), "no second move while one is in flight");
+    for _ in 0..16 {
+        TimeoutFuture::new(15).await;
+        tick().await;
+    }
+    assert_eq!(store.with_untracked(|m| m["e1"].area.clone()), "kitchen");
+    let after: web_sys::HtmlSelectElement = host
+        .query_selector("select.devices__room")
+        .unwrap()
+        .unwrap()
+        .unchecked_into();
+    assert!(!after.disabled());
+}
+
+#[wasm_bindgen_test]
+async fn devices_has_a_back_button_to_the_database() {
+    let _stub = FetchStub::install();
+    let (host, step) = mount(House::new(), 5000);
+    tick().await;
+    let back: web_sys::HtmlButtonElement = host
+        .query_selector(".devices__actions .devices__prev")
+        .unwrap()
+        .expect("back button")
+        .unchecked_into();
+    back.click();
+    tick().await;
+    assert_eq!(step.get_untracked(), SetupStep::Database);
+}

@@ -274,6 +274,10 @@
   white-space: nowrap;
 }
 
+.svc__pill--unknown {
+  border-style: dashed;
+}
+
 .svc__pill--set {
   border-color: var(--accent-mint);
   color: var(--accent-mint);

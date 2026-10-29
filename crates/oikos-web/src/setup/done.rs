@@ -155,6 +155,7 @@ pub fn DoneStep() -> impl IntoView {
                                 CardState::SetUp => SetupText::CardSetUp,
                                 CardState::Skipped => SetupText::CardSkipped,
                                 CardState::NotSetUp => SetupText::CardNotSetUp,
+                                CardState::Unknown => SetupText::CardUnknown,
                             };
                             view! {
                                 <SummaryRow

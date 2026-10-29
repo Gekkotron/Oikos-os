@@ -170,7 +170,7 @@ pub fn ClimateForm(applying_target: String) -> impl IntoView {
 /// The alarm's switch. It goes through the alarm's own route, which applies live, so there is
 /// no restart and no overlay. `set_up` follows the switch so the card's pill stays current.
 #[component]
-pub fn AlarmForm(#[prop(optional)] set_up: Option<RwSignal<bool>>) -> impl IntoView {
+pub fn AlarmForm(#[prop(optional)] set_up: Option<RwSignal<Option<bool>>>) -> impl IntoView {
     let t = use_setup_text();
     let lang = use_lang();
     let settings = RwSignal::new(None::<AlarmSettings>);
@@ -218,7 +218,7 @@ pub fn AlarmForm(#[prop(optional)] set_up: Option<RwSignal<bool>>) -> impl IntoV
                 Ok(()) => {
                     settings.try_set(Some(current));
                     if let Some(s) = set_up {
-                        s.try_set(next);
+                        s.try_set(Some(next));
                     }
                 }
                 Err(e) => {

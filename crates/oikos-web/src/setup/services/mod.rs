@@ -8,6 +8,7 @@ pub mod keys;
 use std::collections::BTreeSet;
 use std::future::Future;
 
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use oikos_api::{GeoPlace, SetupStep};
 use serde_json::{Map, Value};
@@ -30,16 +31,30 @@ pub enum CardState {
     NotSetUp,
     SetUp,
     Skipped,
+    /// The hub could not be read, or did not answer in time.
+    Unknown,
 }
 
-/// A service that is set up stays set up, even if the user skipped it earlier.
-pub fn card_state(set_up: bool, skipped: bool) -> CardState {
-    if set_up {
-        CardState::SetUp
-    } else if skipped {
-        CardState::Skipped
-    } else {
-        CardState::NotSetUp
+/// A service that is set up stays set up, even if the user skipped it earlier. `set_up` is
+/// `None` when the hub could not be read; that never reads as "Not set up".
+pub fn card_state(set_up: Option<bool>, skipped: bool) -> CardState {
+    match set_up {
+        Some(true) => CardState::SetUp,
+        _ if skipped => CardState::Skipped,
+        Some(false) => CardState::NotSetUp,
+        None => CardState::Unknown,
+    }
+}
+
+/// How long a settings read may take before its service reads as unknown.
+const READ_TIMEOUT_MS: u32 = 5_000;
+
+/// `fut`'s answer, or `None` when it fails to answer within [`READ_TIMEOUT_MS`].
+async fn within<T>(fut: impl Future<Output = Option<T>>) -> Option<T> {
+    use futures_util::future::{Either, select};
+    match select(Box::pin(fut), TimeoutFuture::new(READ_TIMEOUT_MS)).await {
+        Either::Left((answer, _)) => answer,
+        Either::Right(_) => None,
     }
 }
 
@@ -48,6 +63,7 @@ pub const SERVICE_IDS: [&str; 7] = [
     "weather", "solar", "energy", "cameras", "push", "climate", "alarm",
 ];
 
+#[cfg(target_arch = "wasm32")]
 const SKIPPED_KEY: &str = "oikos.setup.skipped";
 
 /// The ids in a stored skipped list; anything unreadable reads as empty.
@@ -191,12 +207,14 @@ pub fn ServiceCard(
         CardState::SetUp => "svc__pill svc__pill--set",
         CardState::Skipped => "svc__pill svc__pill--skipped",
         CardState::NotSetUp => "svc__pill",
+        CardState::Unknown => "svc__pill svc__pill--unknown",
     };
     let pill_text = move || {
         t(match state.get() {
             CardState::SetUp => SetupText::CardSetUp,
             CardState::Skipped => SetupText::CardSkipped,
             CardState::NotSetUp => SetupText::CardNotSetUp,
+            CardState::Unknown => SetupText::CardUnknown,
         })
     };
     view! {
@@ -249,48 +267,51 @@ pub fn place_line(state: Option<SetupState>, lang: Lang) -> String {
     }
 }
 
-/// Whether a settings section reads `enabled: true`; a failed read counts as off.
-async fn section_enabled(section: &'static str) -> bool {
-    get_section(section)
-        .await
-        .ok()
-        .and_then(|v| v.get("enabled").and_then(Value::as_bool))
-        .unwrap_or(false)
+/// Whether a settings section reads `enabled: true`; `None` when it could not be read.
+async fn section_enabled(section: &'static str) -> Option<bool> {
+    let v = get_section(section).await.ok()?;
+    Some(v.get("enabled").and_then(Value::as_bool).unwrap_or(false))
 }
 
-/// Which services are set up, read from the same sources the cards use. Built by
+/// Runs `read` on its own task, bounded by [`READ_TIMEOUT_MS`], and stores its answer.
+fn load_flag(target: RwSignal<Option<bool>>, read: impl Future<Output = Option<bool>> + 'static) {
+    leptos::task::spawn_local(async move {
+        if let Some(answer) = within(read).await {
+            target.try_set(Some(answer));
+        }
+    });
+}
+
+/// Which services are set up, read from the same sources the cards use. A flag is `None`
+/// until its read answers, and stays `None` when the read fails or hangs. Built by
 /// [`ServiceFlags::load`], which starts the reads; call it inside the owner of the view.
 #[derive(Clone, Copy)]
 pub struct ServiceFlags {
-    pub weather: RwSignal<bool>,
-    pub solar: RwSignal<bool>,
-    pub energy: RwSignal<bool>,
-    pub cameras: RwSignal<bool>,
-    pub push: RwSignal<bool>,
-    pub climate: RwSignal<bool>,
-    pub alarm: RwSignal<bool>,
+    pub weather: RwSignal<Option<bool>>,
+    pub solar: RwSignal<Option<bool>>,
+    pub energy: RwSignal<Option<bool>>,
+    pub cameras: RwSignal<Option<bool>>,
+    pub push: RwSignal<Option<bool>>,
+    pub climate: RwSignal<Option<bool>>,
+    pub alarm: RwSignal<Option<bool>>,
     pub push_project: RwSignal<Option<String>>,
     pub skipped: RwSignal<BTreeSet<String>>,
-    keys_read: RwSignal<bool>,
-    basics_read: RwSignal<bool>,
 }
 
 impl ServiceFlags {
     /// Starts the reads. Energy follows the house's grid sensor; the others come from their
-    /// settings sections.
+    /// settings sections, each read on its own so one slow answer holds back no other.
     pub fn load() -> Self {
         let flags = Self {
-            weather: RwSignal::new(false),
-            solar: RwSignal::new(false),
-            energy: RwSignal::new(false),
-            cameras: RwSignal::new(false),
-            push: RwSignal::new(false),
-            climate: RwSignal::new(false),
-            alarm: RwSignal::new(false),
+            weather: RwSignal::new(None),
+            solar: RwSignal::new(None),
+            energy: RwSignal::new(Some(false)),
+            cameras: RwSignal::new(None),
+            push: RwSignal::new(None),
+            climate: RwSignal::new(None),
+            alarm: RwSignal::new(None),
             push_project: RwSignal::new(None),
             skipped: RwSignal::new(skipped()),
-            keys_read: RwSignal::new(false),
-            basics_read: RwSignal::new(false),
         };
         if let Some(house) = use_context::<House>() {
             Effect::new(move |_| {
@@ -298,47 +319,43 @@ impl ServiceFlags {
                     .entities
                     .with(|m| holder(&m.values().cloned().collect::<Vec<_>>(), EnergyRole::Grid))
                     .is_some();
-                flags.energy.set(set_up);
+                flags.energy.set(Some(set_up));
             });
         }
-        leptos::task::spawn_local(async move {
-            if let Ok(v) = get_section("solcast").await {
-                let enabled = v["enabled"].as_bool().unwrap_or(false);
-                flags
-                    .solar
-                    .try_set(enabled && v["api_key"]["set"].as_bool().unwrap_or(false));
-            }
-            if let Ok(v) = get_section("frigate").await {
-                flags.cameras.try_set(v["url"].as_str().is_some());
-            }
-            if let Ok(v) = get_section("push").await {
-                flags
-                    .push
-                    .try_set(v["service_account"]["set"].as_bool().unwrap_or(false));
-                flags
-                    .push_project
-                    .try_set(v["project_id"].as_str().map(str::to_owned));
-            }
-            flags.keys_read.try_set(true);
+        load_flag(flags.weather, section_enabled("weather"));
+        load_flag(flags.climate, section_enabled("climate"));
+        load_flag(flags.alarm, async {
+            crate::api::alarm::get_alarm().await.ok().map(|a| a.enabled)
+        });
+        load_flag(flags.solar, async {
+            let v = get_section("solcast").await.ok()?;
+            Some(
+                v["enabled"].as_bool().unwrap_or(false)
+                    && v["api_key"]["set"].as_bool().unwrap_or(false),
+            )
+        });
+        load_flag(flags.cameras, async {
+            let v = get_section("frigate").await.ok()?;
+            Some(v["url"].as_str().is_some())
         });
         leptos::task::spawn_local(async move {
-            flags.weather.try_set(section_enabled("weather").await);
-            flags.climate.try_set(section_enabled("climate").await);
-            let alarm = crate::api::alarm::get_alarm()
-                .await
-                .is_ok_and(|a| a.enabled);
-            flags.alarm.try_set(alarm);
-            flags.basics_read.try_set(true);
+            let read = async {
+                let v = get_section("push").await.ok()?;
+                let project = v["project_id"].as_str().map(str::to_owned);
+                Some((
+                    v["service_account"]["set"].as_bool().unwrap_or(false),
+                    project,
+                ))
+            };
+            if let Some((set, project)) = within(read).await {
+                flags.push.try_set(Some(set));
+                flags.push_project.try_set(project);
+            }
         });
         flags
     }
 
-    /// Whether every read has answered (successfully or not).
-    pub fn loaded(&self) -> bool {
-        self.keys_read.get() && self.basics_read.get()
-    }
-
-    fn on(&self, id: &str) -> bool {
+    fn on(&self, id: &str) -> Option<bool> {
         match id {
             "weather" => self.weather,
             "solar" => self.solar,
@@ -347,7 +364,7 @@ impl ServiceFlags {
             "push" => self.push,
             "climate" => self.climate,
             "alarm" => self.alarm,
-            _ => return false,
+            _ => return Some(false),
         }
         .get()
     }
@@ -358,20 +375,16 @@ impl ServiceFlags {
     }
 }
 
-/// Every service's card state, in [`SERVICE_IDS`] order, for the Done summary. It stays empty
-/// until the reads have answered, so nothing reads "Set up" or "Not set up" on a guess. Call it
-/// inside the owner of the view.
+/// Every service's card state, in [`SERVICE_IDS`] order, for the Done summary. A read still
+/// pending or failed reads as unknown, never as "Not set up". Call it inside the owner of the
+/// view.
 pub fn service_states() -> Signal<Vec<(&'static str, CardState)>> {
     let flags = ServiceFlags::load();
     Signal::derive(move || {
-        if flags.loaded() {
-            SERVICE_IDS
-                .into_iter()
-                .map(|id| (id, flags.state(id)))
-                .collect()
-        } else {
-            Vec::new()
-        }
+        SERVICE_IDS
+            .into_iter()
+            .map(|id| (id, flags.state(id)))
+            .collect()
     })
 }
 
@@ -411,10 +424,10 @@ pub fn ServicesStep() -> impl IntoView {
             advancing.try_set(false);
         });
     };
-    let card_state_of = move |id: &'static str, on: Option<RwSignal<bool>>| {
+    let card_state_of = move |id: &'static str, on: Option<RwSignal<Option<bool>>>| {
         Signal::derive(move || {
             card_state(
-                on.is_some_and(|o| o.get()),
+                on.and_then(|o| o.get()),
                 skipped_ids.with(|s| s.contains(id)),
             )
         })
@@ -538,9 +551,15 @@ mod tests {
 
     #[test]
     fn set_up_wins_over_skipped() {
-        assert_eq!(card_state(true, true), CardState::SetUp);
-        assert_eq!(card_state(false, true), CardState::Skipped);
-        assert_eq!(card_state(false, false), CardState::NotSetUp);
+        assert_eq!(card_state(Some(true), true), CardState::SetUp);
+        assert_eq!(card_state(Some(false), true), CardState::Skipped);
+        assert_eq!(card_state(Some(false), false), CardState::NotSetUp);
+    }
+
+    #[test]
+    fn an_unread_service_is_unknown_unless_skipped() {
+        assert_eq!(card_state(None, false), CardState::Unknown);
+        assert_eq!(card_state(None, true), CardState::Skipped);
     }
 
     #[test]

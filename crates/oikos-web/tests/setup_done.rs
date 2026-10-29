@@ -4,6 +4,8 @@ use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::tick;
 use leptos_router::components::Router;
+use oikos_alarm::doc::AlarmSettings;
+use oikos_alarm::view::AlarmView;
 use oikos_web::house::House;
 use oikos_web::i18n::Lang;
 use oikos_web::screens::settings::SettingsScreen;
@@ -115,9 +117,60 @@ async fn finish_error_is_shown() {
     assert!(problem.text_content().unwrap().contains("disk full"));
 }
 
+/// Answers every service read as "not set up", except climate (500) and cameras (500).
+fn stub_services(stub: &FetchStub) {
+    let off = r#"{"enabled":false}"#;
+    stub.reply("GET", "/api/v1/settings/weather", 200, off);
+    stub.reply(
+        "GET",
+        "/api/v1/settings/solcast",
+        200,
+        r#"{"enabled":false,"api_key":{"set":false}}"#,
+    );
+    stub.reply(
+        "GET",
+        "/api/v1/settings/push",
+        200,
+        r#"{"service_account":{"set":false},"project_id":null}"#,
+    );
+    stub.reply(
+        "GET",
+        "/api/v1/settings/climate",
+        500,
+        r#"{"error":"down"}"#,
+    );
+    stub.reply(
+        "GET",
+        "/api/v1/settings/frigate",
+        500,
+        r#"{"error":"down"}"#,
+    );
+    let alarm = AlarmView {
+        enabled: false,
+        entity_id: "alarm_control_panel.oikos_alarm_house".into(),
+        state: "disarmed".into(),
+        mode: None,
+        source: None,
+        since: 0,
+        deadline: None,
+        cause: vec![],
+        open_at_arm: vec![],
+        settings: AlarmSettings::default(),
+        settings_invalid: None,
+        warnings: vec![],
+    };
+    stub.reply(
+        "GET",
+        "/api/v1/alarm",
+        200,
+        &serde_json::to_string(&alarm).unwrap(),
+    );
+}
+
 #[wasm_bindgen_test]
 async fn summary_shows_skipped_services() {
-    let _stub = FetchStub::install();
+    let stub = FetchStub::install();
+    stub_services(&stub);
     storage().set_item(SKIPPED_KEY, r#"["cameras"]"#).unwrap();
     let host = mount_done();
     settle().await;
@@ -131,6 +184,17 @@ async fn summary_shows_skipped_services() {
     };
     assert!(text("cameras").contains("Skipped"), "{}", text("cameras"));
     assert!(text("weather").contains("Not set up"));
+    // A read that fails is not "Not set up".
+    assert!(
+        text("climate").contains("Couldn't check"),
+        "{}",
+        text("climate")
+    );
+    assert!(
+        host.query_selector("#done-climate.done__row--off")
+            .unwrap()
+            .is_some()
+    );
     assert!(text("location").contains("Bordeaux, FR"));
     assert!(text("mqtt").contains("192.0.2.10:1883"));
     assert!(text("database").contains("192.0.2.11:5432 / oikos"));
@@ -152,4 +216,22 @@ async fn run_setup_again_is_listed() {
     ));
     tick().await;
     assert!(host.query_selector("a[href=\"/setup\"]").unwrap().is_some());
+}
+
+#[wasm_bindgen_test]
+async fn a_hanging_read_does_not_hide_the_other_rows() {
+    let stub = FetchStub::install();
+    stub_services(&stub);
+    stub.hang("GET", "/api/v1/settings/solcast");
+    let host = mount_done();
+    settle().await;
+    let text = |id: &str| {
+        host.query_selector(&format!("#done-{id}"))
+            .unwrap()
+            .unwrap_or_else(|| panic!("no row {id}"))
+            .text_content()
+            .unwrap()
+    };
+    assert!(text("weather").contains("Not set up"));
+    assert!(text("solar").contains("Couldn't check"));
 }

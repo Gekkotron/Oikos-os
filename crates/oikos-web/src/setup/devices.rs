@@ -2,7 +2,7 @@
 //! `area` override the device sheet does, on every entity of the device.
 
 use gloo_timers::future::TimeoutFuture;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use leptos::prelude::*;
 use oikos_api::{DeviceView, OverridePatch, SetupStep};
@@ -54,9 +54,12 @@ fn area_patch(area: Option<&str>) -> OverridePatch {
 fn DeviceLine(
     device: DeviceView,
     failure: RwSignal<Option<String>>,
-    /// Rooms to show for devices whose move failed part-way, by device id. It outlives the row,
-    /// which the hub's entity upserts rebuild while a move is in flight.
-    forced: RwSignal<BTreeMap<String, String>>,
+    /// For devices whose move failed part-way, by device id: the room to show, and the room the
+    /// store held when it failed. The pin holds only while the store still says the latter. It
+    /// outlives the row, which the hub's entity upserts rebuild while a move is in flight.
+    forced: RwSignal<BTreeMap<String, (String, String)>>,
+    /// Devices with a move in flight; shared for the same reason as `forced`.
+    busy: RwSignal<BTreeSet<String>>,
 ) -> impl IntoView {
     let house = expect_context::<House>();
     let t = use_device_text();
@@ -66,12 +69,10 @@ fn DeviceLine(
         .collect::<Vec<_>>()
         .join(" · ");
     let device_id = device.id.clone();
-    let current = {
+    let busy_id = device.id.clone();
+    let live_room = {
         let device = device.clone();
-        Memo::new(move |_| {
-            if let Some(room) = forced.with(|f| f.get(&device.id).cloned()) {
-                return room;
-            }
+        move || {
             house.entities.with(|m| {
                 device
                     .entity_ids
@@ -81,6 +82,17 @@ fn DeviceLine(
                     .find(|a| room_name(&house.areas.get_untracked(), a).is_some())
                     .unwrap_or_default()
             })
+        }
+    };
+    let current = {
+        let device = device.clone();
+        let live_room = live_room.clone();
+        Memo::new(move |_| {
+            let live = live_room();
+            match forced.with(|f| f.get(&device.id).cloned()) {
+                Some((shown, live_at_failure)) if live == live_at_failure => shown,
+                _ => live,
+            }
         })
     };
     let select = NodeRef::<leptos::html::Select>::new();
@@ -88,6 +100,9 @@ fn DeviceLine(
     let on_change = move |ev: leptos::ev::Event| {
         let value = event_target_value(&ev);
         // Read before the PUTs: the hub's upserts change the store while they run.
+        if busy.with_untracked(|b| b.contains(&device_id)) {
+            return;
+        }
         let previous = current.get_untracked();
         let ids: Vec<String> = house.entities.with_untracked(|m| {
             m.values()
@@ -99,34 +114,56 @@ fn DeviceLine(
         forced.update(|f| {
             f.remove(&device_id);
         });
+        busy.update(|b| {
+            b.insert(device_id.clone());
+        });
         let device_id = device_id.clone();
+        let live_room = live_room.clone();
         leptos::task::spawn_local(async move {
             // Every entity is tried; the rows already moved stay moved.
             let mut first_error = None;
             for id in ids {
                 let area = (!value.is_empty()).then_some(value.as_str());
-                if let Err(e) = crate::api::set_override(&id, area_patch(area)).await {
-                    first_error.get_or_insert(e.error);
+                match crate::api::set_override(&id, area_patch(area)).await {
+                    // The reply is the entity as the hub now has it, so the store is right
+                    // before the socket echo arrives.
+                    Ok(view) => {
+                        house.entities.try_update(|m| {
+                            m.insert(view.id.clone(), view);
+                        });
+                    }
+                    Err(e) => {
+                        first_error.get_or_insert(e.error);
+                    }
                 }
             }
             if let Some(error) = first_error {
                 failure.try_set(Some(
                     setup_text(lang(), SetupText::RoomMoveIncomplete).replace("{error}", &error),
                 ));
+                let live = live_room();
                 forced.try_update(|f| {
-                    f.insert(device_id.clone(), previous.clone());
+                    f.insert(device_id.clone(), (previous.clone(), live));
                 });
                 if let Some(el) = select.try_get_untracked().flatten() {
                     el.set_value(&previous);
                 }
             }
+            busy.try_update(|b| {
+                b.remove(&device_id);
+            });
         });
     };
     view! {
         <li class="devices__row">
             <span class="devices__name">{device.friendly_name.clone()}</span>
             <span class="devices__model">{model}</span>
-            <select node_ref=select class="select devices__room" on:change=on_change>
+            <select
+                node_ref=select
+                class="select devices__room"
+                prop:disabled=move || busy.with(|b| b.contains(&busy_id))
+                on:change=on_change
+            >
                 <option value="" prop:selected=move || current.with(String::is_empty)>
                     {move || t(DeviceText::NoRoom)}
                 </option>
@@ -158,7 +195,8 @@ pub fn DevicesStep(z2m_base: String, #[prop(default = 5000)] empty_after_ms: u32
     let lang = use_lang();
     let waited = RwSignal::new(false);
     let failure = RwSignal::new(None::<String>);
-    let forced = RwSignal::new(BTreeMap::<String, String>::new());
+    let forced = RwSignal::new(BTreeMap::<String, (String, String)>::new());
+    let busy = RwSignal::new(BTreeSet::<String>::new());
     leptos::task::spawn_local(async move {
         TimeoutFuture::new(empty_after_ms).await;
         waited.try_set(true);
@@ -227,7 +265,7 @@ pub fn DevicesStep(z2m_base: String, #[prop(default = 5000)] empty_after_ms: u32
                                                 <ul class="devices__list">
                                                     {devices
                                                         .into_iter()
-                                                        .map(|d| view! { <DeviceLine device=d failure=failure forced=forced /> })
+                                                        .map(|d| view! { <DeviceLine device=d failure=failure forced=forced busy=busy /> })
                                                         .collect_view()}
                                                 </ul>
                                             </section>
@@ -257,6 +295,13 @@ pub fn DevicesStep(z2m_base: String, #[prop(default = 5000)] empty_after_ms: u32
             }}
             <p class="loc__problem" role="alert">{move || failure.get()}</p>
             <div class="loc__actions devices__actions">
+                <button
+                    type="button"
+                    class="btn devices__prev"
+                    on:click=move |_| nav.step.set(SetupStep::Database)
+                >
+                    {move || t(SetupText::Back)}
+                </button>
                 <button type="button" class="btn" prop:disabled=move || advancing.get() on:click=go_next>
                     {move || t(SetupText::Skip)}
                 </button>
