@@ -13,20 +13,16 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/superpowers/plans/2026-10-22-climate-engine.md`.
 
 - Follow-up designs, each its own brainstorm: shutters, comfort ↔ cost slider with prices, ML layers.
-- **Open:** run the DB-gated climate tests against a TimescaleDB (`TEST_DATABASE_URL=… cargo test -p oikos-os --test history_db climate learn_zone`).
 
 ### Deferred follow-ups (from the SDD reviews; none blocks enabling the feature)
 
 - **T3** hold_devices skips a device override the device can't do; device keeps zone target (decide.rs hold_devices)
-- **T5** day_agrees measures against the raw run median, not the final fitted setpoint; 80 % slot rule looser than spec's "start/end within 30 min" for long blocks (learn.rs day_agrees)
 - **T5** combine() float summation order depends on device order (learn.rs combine)
 - **T7** no test pins seq tie-break for equal times (history_db.rs)
 - **T8** unconfirmed entry expiry 120 s can turn a late-applied engine command into a hand change — Ruling: real but rare; holds the engine's own value (safe) — deferred.
-- **T8** safety alerts not persisted, re-pushed after restart — Ruling: real, low impact — deferred.
 - **T8** a dropped pass's abandoned command is not moved to unconfirmed (engine.rs:61)
-- **T8** broker dropping during a confirm wait still counts a failure (engine.rs:629)
+- **T8** a safety alert resolved less than six hours before a restart can be pushed again: the repeat window is in memory, and the push history keeps no resolve time (an open alert is no longer re-pushed).
 - **T9** autumn repeated hour merges samples in micros_local (learning.rs:68) — Ruling: real, ≤1 h/year of evidence — deferred.
-- **T9** daily push limit seeded from a pending proposal that may never have been pushed (one suppressed push worst case)
 - **Final** overlapping learning sequences / manual learn_climate_zone bypasses claim_run — Ruling: practically unreachable, conclude is serialised — deferred.
 - **Final** one failed re-assert right after reconnect turns drift into a hold after ~121 s — Ruling: never fights the user; frost overrides — deferred.
 
