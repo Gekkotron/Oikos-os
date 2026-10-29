@@ -43,12 +43,15 @@ pub struct Ledger {
 }
 
 impl Ledger {
-    /// Seed from each zone's latest decision, applied or not, skipping held entities. Later
-    /// decisions override earlier ones for the same entity, so pass them oldest first.
+    /// Seed from each zone's latest decision, applied or not, skipping held entities. The newest
+    /// decision wins for an entity whatever the order they come in; on equal times the later one.
     pub fn from_decisions<'a>(decisions: impl IntoIterator<Item = &'a Decision>) -> Ledger {
         let mut ledger = Ledger::default();
         for d in decisions {
             for (entity, target) in d.entities.iter().filter(|(_, t)| !t.held) {
+                if ledger.get(entity).is_some_and(|c| c.at > d.at) {
+                    continue;
+                }
                 ledger.record(entity, target, d.at);
             }
         }
@@ -100,14 +103,15 @@ impl Ledger {
         let Some(c) = self.last.get(entity) else {
             return Observed::Unknown;
         };
-        // A device that is off has no meaningful target: whatever it reports is the same.
-        let same_target = c.mode == "off"
+        // A device that is off has no meaningful target: whatever it reports is the same. Modes
+        // compare without case: a device may report `Heat` for the `heat` we sent.
+        let same_target = c.mode.eq_ignore_ascii_case("off")
             || match (c.setpoint, observed_target) {
                 (None, None) => true,
                 (Some(a), Some(b)) => (a - b).abs() <= step / 2.0,
                 _ => false,
             };
-        if same_target && observed_mode == Some(c.mode.as_str()) {
+        if same_target && observed_mode.is_some_and(|m| m.eq_ignore_ascii_case(&c.mode)) {
             return Observed::Matches;
         }
         if c.ours && at.saturating_sub(c.at) <= ECHO_WINDOW_S {
@@ -152,7 +156,6 @@ mod tests {
             mode: Some(Mode::Heat),
             setpoint: None,
             source: Source::Schedule,
-
             cause: None,
             reason: String::new(),
             reading: None,
@@ -202,6 +205,37 @@ mod tests {
         assert_eq!(
             l.classify("climate.a", Some(19.0), Some("heat"), 0.5, 1010, None),
             Observed::Echo
+        );
+    }
+
+    #[test]
+    fn echo_window_ends_after_30s() {
+        let l = ledger_with(Some(20.0), "heat", 1000);
+        let at = |t| l.classify("climate.a", Some(19.0), Some("heat"), 0.5, t, None);
+        assert_eq!(at(1000 + ECHO_WINDOW_S), Observed::Echo);
+        assert_eq!(at(1000 + ECHO_WINDOW_S + 1), Observed::HandChange);
+    }
+
+    #[test]
+    fn drift_window_ends_after_120s() {
+        let l = ledger_with(Some(20.0), "heat", 1000);
+        let at = 5000;
+        let since = |s| l.classify("climate.a", Some(19.0), Some("heat"), 0.5, at, Some(s));
+        assert_eq!(since(at - DRIFT_WINDOW_S), Observed::Drift);
+        assert_eq!(since(at - DRIFT_WINDOW_S - 1), Observed::HandChange);
+    }
+
+    #[test]
+    fn modes_compare_without_case() {
+        let l = ledger_with(Some(20.0), "heat", 1000);
+        assert_eq!(
+            l.classify("climate.a", Some(20.0), Some("Heat"), 0.5, 5000, None),
+            Observed::Matches
+        );
+        let l = ledger_with(None, "OFF", 1000);
+        assert_eq!(
+            l.classify("climate.a", Some(21.0), Some("off"), 0.5, 5000, None),
+            Observed::Matches
         );
     }
 
@@ -294,6 +328,25 @@ mod tests {
                 .setpoint,
             Some(18.0)
         );
+    }
+
+    #[test]
+    fn an_older_decision_never_overwrites_a_newer_one() {
+        let newer = decision(
+            false,
+            2000,
+            vec![("climate.a", target(Some(18.0), "heat", false))],
+        );
+        let older = decision(
+            true,
+            1000,
+            vec![("climate.a", target(Some(20.0), "heat", false))],
+        );
+        let a = Ledger::from_decisions([&newer, &older])
+            .get("climate.a")
+            .cloned()
+            .unwrap();
+        assert_eq!((a.setpoint, a.at), (Some(18.0), 2000));
     }
 
     #[test]

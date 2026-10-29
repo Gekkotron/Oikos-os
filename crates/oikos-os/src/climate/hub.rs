@@ -304,6 +304,7 @@ impl Hub {
         let mut out: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
         let mut skipped: Vec<String> = Vec::new();
         let reg = self.read();
+        let areas = reg.effective_areas();
         for entity in reg.entities() {
             if entity.kind != Kind::Climate
                 || entity.unique_id.starts_with(GROUP_PREFIX)
@@ -316,13 +317,14 @@ impl Hub {
                 skipped.push(area.clone());
                 continue;
             }
-            let name = reg
-                .effective_areas()
-                .into_iter()
-                .find(|a| a.id == *area)
-                .map_or_else(|| area.clone(), |a| a.name);
             out.entry(area.clone())
-                .or_insert_with(|| (name, Vec::new()))
+                .or_insert_with(|| {
+                    let name = areas
+                        .iter()
+                        .find(|a| a.id == *area)
+                        .map_or_else(|| area.clone(), |a| a.name.clone());
+                    (name, Vec::new())
+                })
                 .1
                 .push(entity.unique_id.clone());
         }
