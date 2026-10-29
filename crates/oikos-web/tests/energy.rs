@@ -1039,6 +1039,57 @@ async fn orbite_replaces_the_diagram() {
 }
 
 #[wasm_bindgen_test]
+async fn orbite_dots_move() {
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Orbite);
+    let wait = |ms| gloo_timers::future::TimeoutFuture::new(ms);
+    wait(100).await;
+    let layer = host
+        .query_selector(".energy-orbite__dots")
+        .unwrap()
+        .expect("dots layer");
+    assert!(count(&layer, "circle") > 0, "dots drawn");
+    let cx = || {
+        layer
+            .query_selector("circle")
+            .unwrap()
+            .and_then(|c| c.get_attribute("cx"))
+    };
+    let first = cx().unwrap();
+    wait(200).await;
+    assert_ne!(cx().unwrap(), first, "dots move");
+}
+
+#[wasm_bindgen_test]
+async fn orbite_dots_stop_after_unmount() {
+    let house = House::new();
+    for e in flux_fixture(1200.0) {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Orbite);
+    let wait = |ms| gloo_timers::future::TimeoutFuture::new(ms);
+    wait(100).await;
+    let layer = host
+        .query_selector(".energy-orbite__dots")
+        .unwrap()
+        .expect("dots layer");
+    let cx = || {
+        layer
+            .query_selector("circle")
+            .unwrap()
+            .and_then(|c| c.get_attribute("cx"))
+    };
+    assert!(cx().is_some(), "dots drawn");
+    house
+        .home_settings
+        .update(|s| s.energy_view = EnergyView::Flux);
+    wait(50).await;
+    assert_eq!(count(&host, ".energy-orbite__dots"), 0);
+    let parked = cx();
+    wait(200).await;
+    assert_eq!(cx(), parked, "the loop stops on unmount");
+}
+
+#[wasm_bindgen_test]
 async fn orbite_rows_show_the_flux_values() {
     let flux = mount_view(flux_fixture(1200.0), EnergyView::Flux);
     tick().await;

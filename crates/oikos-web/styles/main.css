@@ -4867,10 +4867,15 @@ html:has(.flow-canvas-screen) {
 
 /* Orbite: two rings round the house (in inside, out outside), the lists beside or under them. */
 .energy-orbite {
+  --orbite-dot: rgb(255 255 255 / 90%);
   display: grid;
   grid-template-columns: 1fr minmax(260px, 340px) 1fr;
   gap: 12px;
   align-items: center;
+}
+
+:root[data-theme="light"] .energy-orbite {
+  --orbite-dot: rgb(255 253 248 / 95%);
 }
 
 .energy-orbite--narrow {
@@ -4928,7 +4933,7 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-orbite__dots circle {
-  fill: var(--ink);
+  fill: var(--orbite-dot);
   pointer-events: none;
 }
 

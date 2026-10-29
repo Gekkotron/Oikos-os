@@ -30,6 +30,128 @@ fn geometry(ring: Ring) -> (f64, f64) {
     }
 }
 
+/// What the dot loop needs of each arc: the arc, and the radius and stroke width it is drawn with.
+#[cfg(target_arch = "wasm32")]
+type DotArcs = Vec<(Arc, f64, f64)>;
+
+/// Dots are this share of their arc's stroke width in radius.
+#[cfg(target_arch = "wasm32")]
+const DOT_R: f64 = 0.17;
+
+#[cfg(target_arch = "wasm32")]
+fn dot_arcs(r: &Rings) -> DotArcs {
+    r.inner
+        .iter()
+        .chain(&r.outer)
+        .map(|a| {
+            let (radius, width) = geometry(a.ring);
+            (a.clone(), radius, width)
+        })
+        .collect()
+}
+
+/// Starts the dot loop on `layer`: one `requestAnimationFrame` chain that lays each arc's dots out
+/// with `arc_dots` and moves the layer's circles to match. Dots stop (and the loop ends) once the
+/// returned flag is set to `false`.
+#[cfg(target_arch = "wasm32")]
+fn run_dots(
+    layer: web_sys::Element,
+    arcs: StoredValue<DotArcs>,
+) -> std::rc::Rc<std::cell::Cell<bool>> {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use leptos::prelude::request_animation_frame;
+
+    use crate::energy_orbite::{arc_dots, point};
+
+    const SVG_NS: &str = "http://www.w3.org/2000/svg";
+
+    fn frame(layer: web_sys::Element, arcs: StoredValue<DotArcs>, alive: Rc<Cell<bool>>) {
+        if !alive.get() {
+            return;
+        }
+        let hidden = layer.owner_document().is_none_or(|d| d.hidden());
+        if !hidden {
+            // The store is gone once the view is: end the chain rather than touch it.
+            let Some(dots) = arcs.try_with_value(|list| {
+                let t = js_sys::Date::now() / 1000.0;
+                let mut dots = Vec::new();
+                for (arc, radius, width) in list {
+                    for (deg, opacity) in arc_dots(arc, t) {
+                        let (x, y) = point(CENTRE, CENTRE, *radius, deg);
+                        dots.push((x, y, opacity, width * DOT_R));
+                    }
+                }
+                dots
+            }) else {
+                return;
+            };
+            draw(&layer, &dots);
+        }
+        request_animation_frame(move || frame(layer, arcs, alive));
+    }
+
+    fn draw(layer: &web_sys::Element, dots: &[(f64, f64, f64, f64)]) {
+        let Some(doc) = layer.owner_document() else {
+            return;
+        };
+        let mut have = layer.child_element_count() as usize;
+        while have < dots.len() {
+            let Ok(c) = doc.create_element_ns(Some(SVG_NS), "circle") else {
+                break;
+            };
+            let _ = layer.append_child(&c);
+            have += 1;
+        }
+        let mut node = layer.first_element_child();
+        for (x, y, opacity, r) in dots {
+            let Some(c) = node else { break };
+            node = c.next_element_sibling();
+            let _ = c.set_attribute("cx", &format!("{x:.2}"));
+            let _ = c.set_attribute("cy", &format!("{y:.2}"));
+            let _ = c.set_attribute("opacity", &format!("{opacity:.2}"));
+            let _ = c.set_attribute("r", &format!("{r:.2}"));
+        }
+        while let Some(c) = node {
+            node = c.next_element_sibling();
+            c.remove();
+        }
+    }
+
+    let alive = Rc::new(Cell::new(true));
+    frame(layer, arcs, alive.clone());
+    alive
+}
+
+/// Keeps the loop's arc list in step with the rings and runs the loop once per mount, on the dots
+/// layer; nothing at all when the system asks for reduced motion.
+#[cfg(target_arch = "wasm32")]
+fn animate_dots(layer: NodeRef<leptos::svg::G>, rings: Memo<Rings>) {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    if crate::energy_dots::reduced_motion() {
+        return;
+    }
+    let arcs = StoredValue::new(rings.with_untracked(dot_arcs));
+    Effect::new(move |_| arcs.set_value(rings.with(dot_arcs)));
+    let alive = StoredValue::new_local(None::<Rc<Cell<bool>>>);
+    Effect::new(move |_| {
+        let Some(el) = layer.get() else {
+            return;
+        };
+        if alive.with_value(Option::is_none) {
+            alive.set_value(Some(run_dots(el.into(), arcs)));
+        }
+    });
+    on_cleanup(move || {
+        if let Some(Some(flag)) = alive.try_get_value() {
+            flag.set(false);
+        }
+    });
+}
+
 fn find(r: &Rings, id: &str) -> Option<Arc> {
     r.inner.iter().chain(&r.outer).find(|a| a.id == id).cloned()
 }
@@ -195,6 +317,9 @@ pub fn OrbiteDiagram(
     let model = Memo::new(move |_| ui.with(|u| build(u, fold_at(narrow))));
     let ring_set = Memo::new(move |_| model.with(rings));
     let hot = RwSignal::new(None::<String>);
+    let dots_layer = NodeRef::<leptos::svg::G>::new();
+    #[cfg(target_arch = "wasm32")]
+    animate_dots(dots_layer, ring_set);
     let description = move || ui.with(|u| aria_sentence(lang(), u));
     let empty = move || model.with(Sankey::is_empty);
 
@@ -254,7 +379,7 @@ pub fn OrbiteDiagram(
                     />
                     <For each=inner key=|id| id.clone() children=arc />
                     <For each=outer key=|id| id.clone() children=arc />
-                    <g class="energy-orbite__dots"></g>
+                    <g class="energy-orbite__dots" node_ref=dots_layer></g>
                 </svg>
                 <div class="energy-orbite__centre">
                     <span class="energy-orbite__ico" inner_html=HOUSE></span>
