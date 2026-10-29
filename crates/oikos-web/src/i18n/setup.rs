@@ -116,7 +116,8 @@ pub enum SetupText {
     /// The weather form's problem message.
     MinutesInvalid,
     ClimateBeta,
-    AlarmOpenSettings,
+    /// The Alarm card's note: the rest is set up later in Settings › Alarm.
+    AlarmLater,
     /// The Energy card's role pickers.
     RoleGrid,
     RoleGridExport,
@@ -331,7 +332,10 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
             "Beta: it drives your heating. Check your schedules before turning it on.",
             "Bêta : il pilote votre chauffage. Vérifiez vos programmes avant de l'activer.",
         ),
-        SetupText::AlarmOpenSettings => ("Alarm settings", "Réglages de l'alarme"),
+        SetupText::AlarmLater => (
+            "Choose its sensors, sirens and delays later in Settings › Alarm.",
+            "Choisissez ses capteurs, sirènes et délais plus tard dans Réglages › Alarme.",
+        ),
         SetupText::RoleGrid => ("Grid, bought", "Réseau, acheté"),
         SetupText::RoleGridExport => ("Grid, sold", "Réseau, vendu"),
         SetupText::RoleSolar => ("Solar production", "Production solaire"),
@@ -500,7 +504,7 @@ mod tests {
                 SetupText::RefreshMinutes,
                 SetupText::MinutesInvalid,
                 SetupText::ClimateBeta,
-                SetupText::AlarmOpenSettings,
+                SetupText::AlarmLater,
                 SetupText::RoleGrid,
                 SetupText::RoleGridExport,
                 SetupText::RoleSolar,

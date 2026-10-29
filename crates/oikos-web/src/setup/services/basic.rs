@@ -169,6 +169,8 @@ pub fn ClimateForm(applying_target: String) -> impl IntoView {
 
 /// The alarm's switch. It goes through the alarm's own route, which applies live, so there is
 /// no restart and no overlay. `set_up` follows the switch so the card's pill stays current.
+/// Sensors, sirens and delays stay out of the wizard: a link to the alarm page would leave the
+/// setup with nothing to bring the user back, so the hint points there for later.
 #[component]
 pub fn AlarmForm(#[prop(optional)] set_up: Option<RwSignal<Option<bool>>>) -> impl IntoView {
     let t = use_setup_text();
@@ -233,9 +235,7 @@ pub fn AlarmForm(#[prop(optional)] set_up: Option<RwSignal<Option<bool>>>) -> im
         <div class="svc__form">
             <EnabledRow on=on busy=busy />
             <p class="loc__problem" role="alert">{move || failure.get()}</p>
-            <a class="chip" href="/settings/alarm">
-                {move || t(SetupText::AlarmOpenSettings)}
-            </a>
+            <p class="settings__hint">{move || t(SetupText::AlarmLater)}</p>
         </div>
     }
 }
