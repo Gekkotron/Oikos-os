@@ -132,3 +132,69 @@
 .conn__actions .conn__test {
   margin-right: auto;
 }
+
+/* Devices step. */
+.devices__count {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.devices__group {
+  margin: 0 0 16px;
+}
+
+.devices__room-title {
+  margin: 0 0 6px;
+  font: var(--type-body);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.devices__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.devices__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 10rem);
+  grid-template-areas:
+    "name room"
+    "model room";
+  align-items: center;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--chip-border);
+}
+
+.devices__name {
+  grid-area: name;
+  overflow-wrap: anywhere;
+}
+
+.devices__model {
+  grid-area: model;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.devices__room {
+  grid-area: room;
+  width: 100%;
+  min-width: 0;
+}
+
+.devices__back {
+  margin: 8px 0;
+}
+
+@media (max-width: 480px) {
+  .devices__row {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "name"
+      "model"
+      "room";
+  }
+}
