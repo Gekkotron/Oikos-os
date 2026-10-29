@@ -18,8 +18,6 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 
 ### Deferred follow-ups (from the SDD reviews; none blocks enabling the feature)
 
-- **T1** ZoneSettings::validate does not range-check away_setpoint 0..=40 (doc.rs:444)
-- **T1** ModeRules::validate does not check to <= 1440 for programmatic HhMm (doc.rs:277)
 - **T2** no boundary test for age == stale_after_s (fresh when <=) (schedule.rs:129)
 - **T2** no boundary test for outdoor == heat_below / cool_above (hold band) (schedule.rs:84)
 - **T2** Stale.last prefers stale sensor over newer device value — display only (schedule.rs:152)
@@ -57,15 +55,6 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 ## Climate screen redesign (landed on `feat/climate-screen-full-width-redesign`, 2026-10-24)
 
 Deferred minors from the final review.
-
-### P2 — polish / test coverage
-
-- **Hidden panels keep fetching decisions.** `climate/room_panel.rs`: a decisions list left open in room A refetches `api::decisions` on every engine tick after switching to room B. Skip the fetch while the panel is hidden and refetch when it is shown again.
-- **`tz` and `now` are `Signal::derive`.** `screens/climate.rs`, `climate/room_panel.rs`: every refetch re-runs `is_today` and rebuilds the now-line `<div>`s in every calendar, hidden panels included. Make both `Memo`s.
-- **Stale selection.** `screens/climate.rs`: after falling back to the first zone, `selected` keeps the gone id, so the view jumps back if a zone with that id returns. Clear it on fallback.
-- **Peek follows a block index.** `climate/timeline.rs`: a refetch that removes or reorders blocks moves the outline and the peek line to another block. Key it by the block's day/from/to instead.
-- **Too many tab stops while viewing.** `climate/timeline.rs`: every bar is `role="button" tabindex="0"` on every day it covers (about 35 per calendar). Use a roving tabindex per column, or one tab stop per block.
-- **No test drags a handle on the Y axis.** Only the add-block click covers the vertical pointer mapping (`minute_at` → `move_edge`). Add a pointer-drag browser test to `tests/climate_timeline.rs`.
 
 ### P3 — cosmetic
 

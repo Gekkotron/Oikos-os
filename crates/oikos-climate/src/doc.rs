@@ -207,6 +207,10 @@ impl ModeRules {
             if b.from >= b.to {
                 return Err(format!("{at}: from must be before to"));
             }
+            // `HhMm::parse` stops at 24:00, a block built in code may not.
+            if b.to.0 > 1440 {
+                return Err(format!("{at}: to must be at most 24:00"));
+            }
             check_setpoint(&b.setpoint).map_err(|e| format!("{at}: {e}"))?;
             for (j, o) in self.blocks.iter().enumerate().take(i) {
                 let shared = b.days.iter().any(|d| o.days.contains(d));
@@ -376,6 +380,8 @@ impl EcoSettings {
     }
 
     fn validate(&self, house: &HouseSettings) -> Result<(), String> {
+        check_setpoint(&Setpoint::Temp(self.heat)).map_err(|e| format!("eco heat: {e}"))?;
+        check_setpoint(&Setpoint::Temp(self.cool)).map_err(|e| format!("eco cool: {e}"))?;
         if self.heat < house.frost {
             return Err("eco heat must not be below frost".into());
         }
@@ -714,6 +720,7 @@ mod tests {
             ]),
             heat(vec![block(&[Day::Mon], 600, 700, 41.0)]),
             heat(vec![block(&[Day::Mon], 600, 700, -1.0)]),
+            heat(vec![block(&[Day::Mon], 1400, 1441, 20.0)]),
             Rules {
                 heat: None,
                 cool: Some(ModeRules {
@@ -911,6 +918,16 @@ mod tests {
         let mut h = HouseSettings::default();
         h.eco.cool = 31.0;
         assert!(h.validate().unwrap_err().contains("eco"));
+        // Inside frost..overheat is not enough: a setpoint stays within 0..=40.
+        let mut h = HouseSettings {
+            overheat: 60.0,
+            ..HouseSettings::default()
+        };
+        h.eco.heat = 45.0;
+        assert!(h.validate().unwrap_err().contains("eco heat"));
+        let mut h = HouseSettings::default();
+        h.eco.cool = f64::NAN;
+        assert!(h.validate().unwrap_err().contains("eco cool"));
         let mut h = HouseSettings::default();
         h.eco.actions = vec![
             EcoAction::FanMode("low".into()),
