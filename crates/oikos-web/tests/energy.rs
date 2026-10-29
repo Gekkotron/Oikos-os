@@ -369,6 +369,23 @@ async fn classic_is_the_default() {
     tick().await;
     assert_eq!(count(&host, ".energy-diagram__svg"), 1);
     assert_eq!(count(&host, ".energy-flux"), 0);
+    // Every circle carries its icon, in a nested svg rather than a foreignObject.
+    assert_eq!(count(&host, "foreignObject"), 0);
+    assert_eq!(
+        count(&host, ".energy-node__glyph > svg"),
+        count(&host, ".energy-node")
+    );
+    let icon = host
+        .query_selector(".energy-node__glyph > svg")
+        .unwrap()
+        .unwrap()
+        .get_bounding_client_rect();
+    assert!(icon.width() > 0.0 && icon.height() > 0.0);
+    let glyph = host.query_selector(".energy-node__glyph").unwrap().unwrap();
+    assert_eq!(
+        glyph.namespace_uri().as_deref(),
+        Some("http://www.w3.org/2000/svg")
+    );
 }
 
 #[wasm_bindgen_test]

@@ -30,6 +30,8 @@ const TONES: [&str; 10] = [
 /// The mix ring's stroke width and the gap between its arcs, in px.
 const RING_W: f64 = 7.0;
 const RING_GAP: f64 = 4.0;
+/// A node's icon, in px.
+const GLYPH: f64 = 20.0;
 /// The mix ring's arcs, in `ring_dashes` order.
 const RING_PARTS: [&str; 3] = ["solar", "battery", "grid"];
 
@@ -400,9 +402,15 @@ fn CircleNode(
                         </g>
                     }
                 })}
-            <foreignObject x=glyph_at.0 y=glyph_at.1 width=icon height=icon>
-                <span class="energy-node__glyph" inner_html=glyph_html></span>
-            </foreignObject>
+            // A nested viewport, not a foreignObject: Safari misplaces those under a CSS transform.
+            <svg
+                class="energy-node__glyph"
+                x=glyph_at.0
+                y=glyph_at.1
+                width=GLYPH
+                height=GLYPH
+                inner_html=glyph_html
+            ></svg>
             {texts}
         </g>
     }

@@ -5042,9 +5042,6 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-node__glyph {
-  display: flex;
-  width: 20px;
-  height: 20px;
   color: var(--ink);
 }
 
