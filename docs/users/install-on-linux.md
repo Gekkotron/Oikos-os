@@ -93,6 +93,25 @@ Then, unless Settings → Broker and Database point at the bundled services, rem
 sudo rm -rf data/bundled.json data/bundled data/mosquitto data/timescaledb
 ```
 
+### If Docker says a container name is already in use
+
+If your own database or broker container is already named `oikos-timescaledb` or `oikos-mosquitto`, a plain `docker compose up` stops with:
+
+```text
+Error response from daemon: Conflict. The container name "/oikos-timescaledb" is already in use by container "<id>". You have to remove (or rename) that container to be able to reuse that name.
+```
+
+That container is your own database (or broker), not a leftover from the stack. **Do not remove or rename it** as Docker suggests. The bundled service would then start on an empty `data/timescaledb/`, and your history would be left in a volume nothing uses any more, where a `docker volume prune` deletes it for good. Start the hub alone instead:
+
+```bash
+docker compose rm -sf mosquitto timescaledb init   # clears only this stack's containers; yours belong to another project and are untouched
+docker compose up -d --build hub
+docker compose ps                                  # oikos-hub is up
+docker ps --filter name=oikos                      # your own oikos-timescaledb / oikos-mosquitto are still up
+```
+
+Then check for `data/bundled.json` and remove what `init` generated, as above. From then on upgrade with `tools/update.sh`, which picks the hub only. Letting the stack take over that container's name is the job of the move guide below: it backs up the data and renames the old container first.
+
 Want one stack in the end? [Move an existing broker and database into the stack](move-into-the-stack.md).
 
 ## Upgrade
@@ -143,7 +162,7 @@ If you run your own broker and database, keep using `docker compose up -d --buil
 
 If you ran the old `tools/update.sh` on a host still configured by `./oikos.toml`, `init` may have generated bundled credentials and `docker compose up` started `oikos-mosquitto` and `oikos-timescaledb`, which restart in a loop when your own broker or database holds the ports. Clean up:
 
-1. Remove the failed services: `docker compose rm -sf init mosquitto timescaledb`.
+1. Remove the failed services: `docker compose rm -sf init mosquitto timescaledb`. If `docker compose up` stopped on "container name already in use", that container is your own: leave it alone (see [If Docker says a container name is already in use](#if-docker-says-a-container-name-is-already-in-use)).
 2. If you never used the bundled services, remove their files: `sudo rm -rf data/bundled.json data/bundled data/mosquitto data/timescaledb`.
 3. Upgrade properly: `git pull --rebase && tools/update.sh --hub-only`.
 
