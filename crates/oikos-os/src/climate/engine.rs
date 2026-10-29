@@ -1014,7 +1014,6 @@ fn no_safety(zone: &str) -> Decision {
         mode: None,
         setpoint: None,
         source: Source::Idle,
-
         cause: None,
         reason: String::new(),
         reading: None,

@@ -71,7 +71,7 @@ fn active() -> ZoneSettings {
 
 #[tokio::test]
 async fn disabled_has_no_filters_and_refuses() {
-    let (hub, _rx) = hub(false);
+    let (hub, mut rx) = hub(false);
     assert!(!hub.extra_filters().iter().any(|f| f.contains("climate")));
     assert!(!hub.climate_enabled());
     assert!(matches!(hub.climate_view(), Err(HubError::Publish(m)) if m == "climate disabled"));
@@ -80,7 +80,12 @@ async fn disabled_has_no_filters_and_refuses() {
         Err(HubError::Publish(m)) if m == "climate disabled"
     ));
     // A climate-looking topic is just an unknown topic while the engine is off.
-    hub.ingest_message("oikos/climate/house", b"{}", true);
+    assert!(
+        hub.ingest_message("oikos/climate/house", b"{}", true)
+            .is_empty()
+    );
+    assert!(drain(&mut rx).is_empty());
+    assert!(matches!(hub.climate_view(), Err(HubError::Publish(m)) if m == "climate disabled"));
 }
 
 #[tokio::test]
@@ -782,7 +787,6 @@ mod engine {
             mode: Some(Mode::Heat),
             setpoint: Some(Setpoint::Temp(20.0)),
             source: Source::Schedule,
-
             cause: None,
             reason: "Schedule base: 20.0 °C".into(),
             reading: Some(19.0),
@@ -843,7 +847,6 @@ mod engine {
                 mode: Some(Mode::Heat),
                 setpoint: None,
                 source: Source::Schedule,
-
                 cause: None,
                 reason: String::new(),
                 reading: None,
@@ -1996,7 +1999,6 @@ mod engine {
             mode: Some(Mode::Heat),
             setpoint: None,
             source: Source::Idle,
-
             cause: None,
             reason: String::new(),
             reading: Some(99.0),

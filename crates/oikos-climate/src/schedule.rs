@@ -79,7 +79,8 @@ pub enum Reading {
         from_sensor: bool,
         sensor_stale: bool,
     },
-    /// Readings exist but are all too old; `last` is the best remaining value.
+    /// Readings exist but are all too old; `last` is the newest of them (the sensor unless a
+    /// device reported after it, else the devices' mean).
     Stale { last: Option<f64> },
     /// No reading at all.
     Missing,
@@ -120,7 +121,9 @@ pub fn room_reading(
             sensor_stale: sensor.is_some(),
         };
     }
+    let newest_device = devices.iter().map(|d| d.age_s).min();
     let last = sensor
+        .filter(|s| newest_device.is_none_or(|age| s.age_s <= age))
         .map(|s| s.value)
         .or_else(|| mean(devices.iter().map(|d| d.value)));
     if last.is_some() {
@@ -246,6 +249,19 @@ mod tests {
     }
 
     #[test]
+    fn season_thresholds_themselves_hold_the_previous_mode() {
+        let h = HouseSettings::default();
+        assert_eq!(
+            season_mode(&h, Some(h.heat_below), Some(Mode::Cool)),
+            Some(Mode::Cool)
+        );
+        assert_eq!(
+            season_mode(&h, Some(h.cool_above), Some(Mode::Heat)),
+            Some(Mode::Heat)
+        );
+    }
+
+    #[test]
     fn season_fixed_and_off() {
         let with = |season| HouseSettings {
             season,
@@ -302,6 +318,33 @@ mod tests {
                 from_sensor: false,
                 sensor_stale: false
             }
+        );
+    }
+
+    #[test]
+    fn reading_at_exactly_stale_after_is_fresh() {
+        assert!(matches!(
+            room_reading(Some(src(20.0, 3600)), &[], 3600),
+            Reading::Fresh {
+                from_sensor: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            room_reading(None, &[src(19.0, 3600)], 3600),
+            Reading::Fresh { .. }
+        ));
+        assert_eq!(
+            room_reading(None, &[src(19.0, 3601)], 3600),
+            Reading::Stale { last: Some(19.0) }
+        );
+    }
+
+    #[test]
+    fn reading_stale_keeps_the_newest_value() {
+        assert_eq!(
+            room_reading(Some(src(22.0, 9000)), &[src(19.0, 5000)], 3600),
+            Reading::Stale { last: Some(19.0) }
         );
     }
 

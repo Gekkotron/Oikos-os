@@ -7115,7 +7115,7 @@ html:has(.flow-canvas-screen) {
   height: 3px;
   margin: 3px auto 0;
   border-radius: 2px;
-  background: var(--danger);
+  background: var(--now);
 }
 
 .climate-timeline__hours,
@@ -7244,7 +7244,7 @@ html:has(.flow-canvas-screen) {
   left: 0;
   right: 0;
   height: 2px;
-  background: var(--danger);
+  background: var(--now);
   pointer-events: none;
 }
 
@@ -7256,7 +7256,7 @@ html:has(.flow-canvas-screen) {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--danger);
+  background: var(--now);
 }
 
 /* Full-width strips at the top and bottom, never more than a quarter of the block each, so its

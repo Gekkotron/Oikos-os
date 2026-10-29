@@ -380,18 +380,19 @@ pub fn RoomPanel(
     let list = move || {
         let tz = tz.get();
         let lang = lang();
+        let now = clock.get();
         log.get().map(|l| {
             let recent = l
                 .recent
                 .iter()
                 .take(RECENT)
-                .map(|d| view! { <li>{decision_line(lang, d, tz)}</li> })
+                .map(|d| view! { <li>{decision_line(lang, d, now, tz)}</li> })
                 .collect_view();
             let older = l
                 .older
                 .iter()
                 .map(
-                    |r| view! { <li class="climate-decisions__older">{row_line(lang, r, tz)}</li> },
+                    |r| view! { <li class="climate-decisions__older">{row_line(lang, r, now, tz)}</li> },
                 )
                 .collect_view();
             view! { <ul class="climate-decisions__list">{recent}{older}</ul> }

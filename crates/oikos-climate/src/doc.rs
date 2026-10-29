@@ -818,7 +818,6 @@ mod tests {
             mode: Some(Mode::Heat),
             setpoint: Some(Setpoint::Temp(20.0)),
             source: Source::Schedule,
-
             cause: None,
             reason: "r".into(),
             reading: Some(19.0),

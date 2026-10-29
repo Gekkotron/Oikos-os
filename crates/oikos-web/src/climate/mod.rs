@@ -152,6 +152,14 @@ pub fn until_text(lang: Lang, until: u64, now: u64, tz: Tz) -> String {
     }
 }
 
+/// When a decision was made, in `tz`: "14:05" today, else with its date ("Tue 3 Nov 14:05").
+pub fn stamp_text(lang: Lang, at: u64, now: u64, tz: Tz) -> String {
+    match (local(at, tz), local(now, tz)) {
+        (Some(a), Some(n)) if a.date_naive() == n.date_naive() => clock_text(at, tz),
+        _ => eco_end_text(lang, at, tz),
+    }
+}
+
 /// When a room's eco ends, in `tz`: "Tue 3 Nov 19:00" / "mar. 3 nov. 19:00". The date is always
 /// there, since an eco can end days or weeks away.
 pub fn eco_end_text(lang: Lang, until: u64, tz: Tz) -> String {
@@ -232,11 +240,11 @@ pub fn week_minute(now: u64, tz: Tz) -> (Day, u16) {
     })
 }
 
-/// One decision as a list line: "14:05 · Schedule · Heat 21° · reason".
-pub fn decision_line(lang: Lang, d: &Decision, tz: Tz) -> String {
+/// One decision as a list line: "14:05 · Schedule · Heat 21° · reason", dated when not today.
+pub fn decision_line(lang: Lang, d: &Decision, now: u64, tz: Tz) -> String {
     format!(
         "{} · {} · {} {} · {}",
-        clock_text(d.at, tz),
+        stamp_text(lang, d.at, now, tz),
         source_word(lang, d.source),
         mode_word(lang, d.mode),
         setpoint_text(lang, d.setpoint),
@@ -244,14 +252,14 @@ pub fn decision_line(lang: Lang, d: &Decision, tz: Tz) -> String {
     )
 }
 
-/// An older history row as a list line.
-pub fn row_line(lang: Lang, r: &DecisionRow, tz: Tz) -> String {
+/// An older history row as a list line, dated when not today.
+pub fn row_line(lang: Lang, r: &DecisionRow, now: u64, tz: Tz) -> String {
     let setpoint = r
         .setpoint
         .map_or_else(|| "—".to_owned(), |t| degrees_text(lang, t));
     format!(
         "{} · {} · {} {} · {}",
-        clock_text(r.at, tz),
+        stamp_text(lang, r.at, now, tz),
         history_source(lang, &r.source),
         state_word(lang, StateCtx::Hvac, &r.mode),
         setpoint,
@@ -649,6 +657,29 @@ mod tests {
         assert_eq!(
             until_text(Lang::Fr, at(2026, 1, 8, 6, 0), now, paris),
             "jeu. 07:00"
+        );
+    }
+
+    #[test]
+    fn stamps_are_dated_unless_today() {
+        let paris = parse_zone("Europe/Paris");
+        let now = at(2026, 1, 5, 10, 0); // Monday 11:00 in Paris
+        assert_eq!(
+            stamp_text(Lang::En, at(2026, 1, 5, 7, 5), now, paris),
+            "08:05"
+        );
+        // 23:30 UTC on Sunday is already Monday in Paris.
+        assert_eq!(
+            stamp_text(Lang::En, at(2026, 1, 4, 23, 30), now, paris),
+            "00:30"
+        );
+        assert_eq!(
+            stamp_text(Lang::En, at(2026, 1, 4, 22, 30), now, paris),
+            "Sun 4 Jan 23:30"
+        );
+        assert_eq!(
+            stamp_text(Lang::Fr, at(2026, 1, 4, 22, 30), now, paris),
+            "dim. 4 janv. 23:30"
         );
     }
 

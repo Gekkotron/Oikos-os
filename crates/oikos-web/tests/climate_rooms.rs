@@ -305,7 +305,7 @@ async fn refetch_keeps_the_draft_and_the_open_editor() {
             .map(|n| n.unchecked_into::<HtmlElement>())
             .find(|b| b.text_content().as_deref() == Some(label))
     };
-    find("Edit rules").expect("Edit rules").click();
+    find("Edit schedule").expect("Edit schedule").click();
     tick().await;
     let bar: HtmlElement = host
         .query_selector(".climate-timeline__bar")
