@@ -7,7 +7,6 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 ### P3 — cosmetic / backlog
 
 - Two concurrent PUTs can pick the same `next_free_order` (lock released between read and publish). Fine single-user; add a guard if the hub grows multi-writer.
-- `path/body id mismatch` returns 422 while flows PUT returns 400 — normalize across PUT routes.
 
 ## Climate engine v1 (landed on sc-critical-meissner-823c, 2026-10-22)
 
@@ -39,7 +38,6 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 - **T8** stray blank lines before `cause: None,` in struct literals
 - **T9** autumn repeated hour merges samples in micros_local (learning.rs:68) — Ruling: real, ≤1 h/year of evidence — deferred.
 - **T9** daily push limit seeded from a pending proposal that may never have been pushed (one suppressed push worst case)
-- **T10** approve route parses its body outside Body<T>/JsonRejection (inconsistent 422 path)
 - **T10** pre-existing workspace clippy failure in oikos-web dashboards/grid.rs:57 (not from this branch)
 - **T10** decision-log `before` truncated to whole seconds can omit a same-second row (climate/hub.rs:131)
 - **T11** until/override text refreshes only on zone data change, not clock ticks (zone_card.rs)
