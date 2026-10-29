@@ -1004,3 +1004,195 @@ async fn ivoire_uses_the_candy_palette() {
     root.remove_attribute("data-theme").unwrap();
     style.remove();
 }
+
+fn orbite_arc(host: &Element, id: &str) -> Element {
+    host.query_selector(&format!(".energy-orbite__arc[data-id='{id}']"))
+        .unwrap()
+        .unwrap_or_else(|| panic!("no arc {id}"))
+}
+
+fn orbite_row(host: &Element, id: &str) -> Element {
+    host.query_selector(&format!(".energy-orbite__row[data-id='{id}']"))
+        .unwrap()
+        .unwrap_or_else(|| panic!("no row {id}"))
+}
+
+#[wasm_bindgen_test]
+async fn orbite_replaces_the_diagram() {
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Orbite);
+    tick().await;
+    assert_eq!(count(&host, ".energy-orbite__svg"), 1);
+    assert_eq!(count(&host, ".energy-flux"), 0);
+    assert_eq!(count(&host, ".energy-diagram__svg"), 0);
+    for id in ["solar", "grid", "consumer:oven", "consumer:pump"] {
+        let arc = orbite_arc(&host, id);
+        assert_eq!(arc.get_attribute("aria-hidden").as_deref(), Some("true"));
+        assert!(
+            arc.get_attribute("stroke")
+                .unwrap()
+                .starts_with("var(--energy-")
+        );
+    }
+    assert_eq!(count(&host, ".energy-orbite__dots"), 1);
+    assert_eq!(count(&host, ".energy-day"), 1);
+    assert!(count(&host, ".energy-card") > 0);
+}
+
+#[wasm_bindgen_test]
+async fn orbite_rows_show_the_flux_values() {
+    let flux = mount_view(flux_fixture(1200.0), EnergyView::Flux);
+    tick().await;
+    let labels = flux.query_selector_all(".energy-flux__label").unwrap();
+    let values: Vec<String> = (0..labels.length())
+        .map(|i| {
+            let el: Element = labels.item(i).unwrap().unchecked_into();
+            text(&el, ".energy-flux__value")
+        })
+        .collect();
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Orbite);
+    tick().await;
+    let rows = host.query_selector_all(".energy-orbite__row").unwrap();
+    assert!(rows.length() >= 4);
+    // Every row's value is a value Flux labels a node with.
+    for i in 0..rows.length() {
+        let el: Element = rows.item(i).unwrap().unchecked_into();
+        let shown = text(&el, ".energy-orbite__val");
+        assert!(values.contains(&shown), "{shown} not in {values:?}");
+    }
+}
+
+#[wasm_bindgen_test]
+async fn orbite_centre_shows_house_and_solar_share() {
+    let flux = mount_view(flux_fixture(1200.0), EnergyView::Flux);
+    tick().await;
+    let chip = text(&flux, ".energy-flux__chip b");
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Orbite);
+    tick().await;
+    assert_eq!(text(&host, ".energy-orbite__house"), chip);
+    let mix = text(&host, ".energy-orbite__mix");
+    assert!(mix.contains('%') && mix.contains("solar"), "{mix}");
+}
+
+#[wasm_bindgen_test]
+async fn orbite_opens_a_sensor() {
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Orbite);
+    tick().await;
+    let path = || web_sys::window().unwrap().location().pathname().unwrap();
+    orbite_row(&host, "consumer:oven")
+        .dispatch_event(&Event::new("click").unwrap())
+        .unwrap();
+    tick().await;
+    assert_eq!(path(), "/entity/oven");
+    // The arc opens its own sensor too.
+    orbite_arc(&host, "consumer:pump")
+        .dispatch_event(&Event::new("click").unwrap())
+        .unwrap();
+    tick().await;
+    assert_eq!(path(), "/entity/pump");
+}
+
+#[wasm_bindgen_test]
+async fn orbite_others_toggle_the_list() {
+    let mut entities = vec![
+        sensor("solar", "Solar power", "W", 5000.0, role("solar")),
+        sensor("grid", "Grid power", "W", 600.0, role("grid")),
+    ];
+    for i in 0..10 {
+        entities.push(sensor(
+            &format!("c{i}"),
+            &format!("Load {i}"),
+            "W",
+            500.0 - 20.0 * i as f64,
+            role("consumer"),
+        ));
+    }
+    let host = mount_view(entities, EnergyView::Orbite);
+    tick().await;
+    assert_eq!(count(&host, ".energy-more"), 0);
+    orbite_row(&host, "others")
+        .dispatch_event(&Event::new("click").unwrap())
+        .unwrap();
+    tick().await;
+    assert_eq!(count(&host, ".energy-more"), 1);
+}
+
+#[wasm_bindgen_test]
+async fn orbite_flips_grid_to_export_in_place() {
+    let house = House::new();
+    for e in flux_fixture(1200.0) {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Orbite);
+    tick().await;
+    let inner = ".energy-orbite__arc[data-id='grid']";
+    assert_eq!(count(&host, inner), 1);
+    // Core's convention: a negative grid reading is power sent to the grid.
+    house.apply(WsEvent::EntityUpserted(sensor(
+        "grid",
+        "Grid power",
+        "W",
+        -500.0,
+        role("grid"),
+    )));
+    tick().await;
+    assert_eq!(count(&host, inner), 0);
+    assert_eq!(count(&host, ".energy-orbite__arc[data-id='export']"), 1);
+    assert_eq!(count(&host, ".energy-orbite__arc[data-id='solar']"), 1);
+    assert_eq!(count(&host, ".energy-orbite__row[data-id='export']"), 1);
+}
+
+#[wasm_bindgen_test]
+async fn orbite_narrow_stacks_lists_under_the_ring() {
+    let style = inject_styles();
+    let map: std::collections::BTreeMap<String, EntityView> = flux_fixture(1200.0)
+        .into_iter()
+        .map(|e| (e.id.clone(), e))
+        .collect();
+    let ui = Memo::new(move |_| {
+        oikos_core::energy::EnergyFlow::build(&oikos_web::energy::energy_entities(&map), 0, None)
+    });
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    host.set_attribute("style", "width: 390px").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(RwSignal::new(Lang::En));
+            view! {
+                <oikos_web::screens::energy_orbite::OrbiteDiagram
+                    ui=ui
+                    narrow=true
+                    open=Callback::new(|_: String| {})
+                    expanded=RwSignal::new(false)
+                />
+            }
+        },
+    ));
+    tick().await;
+    assert_eq!(count(&host, ".energy-orbite--narrow"), 1);
+    let svg = host.query_selector(".energy-orbite__svg").unwrap().unwrap();
+    let list = host
+        .query_selector(".energy-orbite__list--in")
+        .unwrap()
+        .unwrap();
+    assert!(list.get_bounding_client_rect().top() >= svg.get_bounding_client_rect().bottom() - 1.0);
+    style.remove();
+    host.remove();
+}
+
+#[wasm_bindgen_test]
+async fn orbite_follows_the_language() {
+    let lang = RwSignal::new(Lang::En);
+    let host = mount_with(flux_fixture(1200.0), lang, EnergyView::Orbite);
+    tick().await;
+    let all = host.text_content().unwrap_or_default();
+    assert!(
+        all.contains("Coming in") && all.contains("Going out"),
+        "{all}"
+    );
+    lang.set(Lang::Fr);
+    tick().await;
+    let all = host.text_content().unwrap_or_default();
+    assert!(all.contains("Entrant") && all.contains("Sortant"), "{all}");
+}

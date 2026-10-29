@@ -8,6 +8,7 @@ pub mod energy;
 pub mod energy_circles;
 pub mod energy_day;
 pub mod energy_flux;
+pub mod energy_orbite;
 pub mod entity_sheet;
 pub mod flow_canvas;
 pub mod flow_schedule;

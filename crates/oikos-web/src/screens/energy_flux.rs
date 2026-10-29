@@ -15,7 +15,7 @@ use crate::i18n::{Key, Lang, text, use_lang};
 use crate::sankey_layout::{Anchor, LINE, NARROW, Placed, WIDE, place};
 use crate::screens::energy::short;
 
-fn fold_at(narrow: bool) -> usize {
+pub(crate) fn fold_at(narrow: bool) -> usize {
     if narrow { FOLD_NARROW } else { FOLD_WIDE }
 }
 
@@ -60,7 +60,7 @@ fn role_class(role: SankeyRole, slot: usize) -> String {
 
 /// The words of a node: its name, from the UI words for everything but a consumer; cut short on
 /// phones (Classic's `LABEL_CHARS`).
-fn node_name(lang: Lang, model: &Sankey, id: &str, narrow: bool) -> String {
+pub(crate) fn node_name(lang: Lang, model: &Sankey, id: &str, narrow: bool) -> String {
     let Some(n) = model.nodes.iter().find(|n| n.id == id) else {
         return String::new();
     };
