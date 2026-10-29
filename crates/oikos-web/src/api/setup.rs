@@ -35,7 +35,11 @@ impl SaveError {
 /// The error for a non-2xx reply to a save, told apart by status and body.
 pub fn decode_save_error(status: u16, body: &str) -> SaveError {
     if status == 503 {
-        return SaveError::Restarting;
+        // The hub also answers 503 when the database is unreachable; only "restarting" restarts.
+        return match serde_json::from_str::<ApiError>(body) {
+            Ok(e) if e.error != "restarting" => SaveError::Api(e),
+            _ => SaveError::Restarting,
+        };
     }
     if status == 422 {
         if let Ok(result) = serde_json::from_str::<TestResult>(body) {
@@ -156,6 +160,10 @@ mod tests {
         assert!(matches!(
             decode_save_error(503, r#"{"error":"restarting"}"#),
             SaveError::Restarting
+        ));
+        assert!(matches!(
+            decode_save_error(503, r#"{"error":"database unreachable"}"#),
+            SaveError::Api(_)
         ));
         assert!(matches!(decode_save_error(500, "oops"), SaveError::Api(_)));
     }

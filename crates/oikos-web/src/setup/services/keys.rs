@@ -162,6 +162,9 @@ fn save(
     saving: RwSignal<bool>,
     failure: RwSignal<Option<String>>,
 ) {
+    if saving.get_untracked() {
+        return;
+    }
     saving.set(true);
     failure.set(None);
     let done = save_section(section, body, target);
@@ -355,7 +358,7 @@ fn FrigateFields(base: Value, applying_target: String) -> impl IntoView {
                         .collect()
                 })
                 .unwrap_or_default();
-            known.update(|k| {
+            known.try_update(|k| {
                 for n in names {
                     if !k.contains(&n) {
                         k.push(n);

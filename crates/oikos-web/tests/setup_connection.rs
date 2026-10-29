@@ -146,10 +146,16 @@ async fn a_refused_save_shows_the_brokers_reason() {
             .contains("bad user name or password")
     );
     assert_eq!(m.step.get_untracked(), SetupStep::Mqtt);
+    // The broker no longer vouches for these values: no green line, no Next, until a new test.
+    assert!(!m.host.text_content().unwrap().contains("Connected"));
+    assert!(button(&m.host, ".loc__save").disabled());
     assert!(
-        !button(&m.host, ".loc__save").disabled(),
-        "the user can retry"
+        !button(&m.host, ".conn__test").disabled(),
+        "the user can retest"
     );
+    button(&m.host, ".conn__test").click();
+    settle().await;
+    assert!(!button(&m.host, ".loc__save").disabled());
 }
 
 #[wasm_bindgen_test]
@@ -224,4 +230,57 @@ async fn saving_the_database_in_setup_mode_starts_applying() {
         .filter(|r| r.method == "PUT")
         .count();
     assert_eq!(puts, 1);
+}
+
+const SAVED_MQTT: &str = r#"{"mode":"setup","step":"database","finished":false,"bundled":false,"location":null,"mqtt":{"host":"192.0.2.10","port":1883,"user":"oikos","password":{"set":true},"client_id":null,"z2m_base":null},"database":null,"restarting":false}"#;
+
+#[wasm_bindgen_test]
+async fn back_after_a_saved_mqtt_step_shows_what_was_saved() {
+    let stub = FetchStub::install();
+    stub.reply("POST", "/api/v1/setup/test/mqtt", 200, OK);
+    stub.reply("PUT", "/api/v1/setup/mqtt", 200, SAVED_MQTT);
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let step = RwSignal::new(SetupStep::Mqtt);
+    let _handle = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(WizardNav { step });
+        provide_context(Applying::new(|_| {}));
+        provide_context(SetupState(RwSignal::new(None)));
+        move || {
+            if step.get() == SetupStep::Mqtt {
+                view! { <MqttStep /> }.into_any()
+            } else {
+                view! { <p>"elsewhere"</p> }.into_any()
+            }
+        }
+    });
+    tick().await;
+    button(&host, ".conn__test").click();
+    settle().await;
+    button(&host, ".loc__save").click();
+    settle().await;
+    assert_eq!(step.get_untracked(), SetupStep::Database);
+    step.set(SetupStep::Mqtt);
+    settle().await;
+    assert_eq!(input(&host, "#mqtt-host").value(), "192.0.2.10");
+    assert_eq!(
+        input(&host, "#mqtt-password").placeholder(),
+        "Saved, enter a new one to replace it"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn a_database_save_in_setup_mode_without_restart_goes_back_to_the_broker() {
+    let stub = FetchStub::install();
+    stub.reply("POST", "/api/v1/setup/test/database", 200, OK);
+    stub.reply("PUT", "/api/v1/setup/database", 200, STATUS);
+    let m = mount(true, None, Applying::new(|_| {}));
+    tick().await;
+    button(&m.host, ".conn__test").click();
+    settle().await;
+    button(&m.host, ".loc__save").click();
+    settle().await;
+    assert_eq!(m.step.get_untracked(), SetupStep::Mqtt);
 }

@@ -301,3 +301,34 @@ async fn a_file_without_project_id_is_not_sent() {
     let text = m.host.text_content().unwrap();
     assert!(text.contains("not a service-account key"), "{text}");
 }
+
+#[wasm_bindgen_test]
+async fn a_double_click_on_save_sends_one_put() {
+    let stub = FetchStub::install();
+    stub.reply(
+        "GET",
+        "/api/v1/settings/solcast",
+        200,
+        r#"{"enabled":false,"sites":["abcd-1234"],"daily_limit":10,"api_key":{"set":true}}"#,
+    );
+    stub.reply_after(
+        "PUT",
+        "/api/v1/settings/solcast",
+        200,
+        r#"{"restarting":true}"#,
+        60,
+    );
+    let m = mount();
+    settle().await;
+    click(&m.host, "#svc-solar .svc__head");
+    settle().await;
+    click(&m.host, "#svc-solar .svc__save");
+    click(&m.host, "#svc-solar .svc__save");
+    settle().await;
+    let puts = stub
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "PUT")
+        .count();
+    assert_eq!(puts, 1);
+}

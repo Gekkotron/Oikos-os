@@ -50,6 +50,10 @@ impl Applying {
 
     /// Shows the overlay and reloads into `target` once the hub is back.
     pub fn start(&self, target: &str) {
+        // A second start (a double click, a 503 after the first save) must not spawn a second wait.
+        if self.target.with_untracked(Option::is_some) {
+            return;
+        }
         self.failed.set(false);
         self.target.set(Some(target.to_owned()));
     }

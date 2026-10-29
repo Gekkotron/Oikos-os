@@ -5,8 +5,8 @@ use leptos::prelude::*;
 use oikos_api::{GeoPlace, Location, SetupStatus, SetupStep};
 
 use super::wizard::WizardNav;
-use super::{Applying, setup_href};
-use crate::api::setup::{geocode, put_location};
+use super::{Applying, SetupState, setup_href};
+use crate::api::setup::{SaveError, geocode, put_location};
 use crate::i18n::setup::{SetupText, use_setup_text};
 use crate::i18n::{Lang, use_lang};
 
@@ -140,8 +140,10 @@ pub fn LocationForm(
         lat.set(p.latitude.to_string());
         lon.set(p.longitude.to_string());
         // A result without a time zone keeps the current one.
-        if let Some(zone) = p.timezone {
-            tz.set(zone);
+        match p.timezone {
+            Some(zone) => tz.set(zone),
+            // The zone field lives in the closed disclosure; show it so the user can fill it.
+            None => open.set(true),
         }
         places.set(Vec::new());
         none_found.set(false);
@@ -164,7 +166,15 @@ pub fn LocationForm(
         let target = applying_target.clone();
         leptos::task::spawn_local(async move {
             match put_location(&location).await {
-                Ok(status) if status.restarting => applying.start(&target),
+                // The hub restarts: the button stays off until the page reloads.
+                Ok(status) if status.restarting => {
+                    applying.start(&target);
+                    return;
+                }
+                Err(SaveError::Restarting) => {
+                    applying.start(&target);
+                    return;
+                }
                 Ok(status) => on_saved.run(status),
                 Err(e) => {
                     failure.try_set(Some(e.message(lang())));
@@ -314,6 +324,7 @@ pub fn WelcomeStep() -> impl IntoView {
     let t = use_setup_text();
     let nav = expect_context::<WizardNav>();
     let lang = use_context::<RwSignal<Lang>>();
+    let state = use_context::<SetupState>();
     let chip = move |value: Lang, label: SetupText| {
         view! {
             <button
@@ -343,9 +354,14 @@ pub fn WelcomeStep() -> impl IntoView {
             </div>
             <h2 class="sheet__heading">{move || t(SetupText::LocationTitle)}</h2>
             <LocationForm
-                initial=None
+                initial=state.and_then(|s| s.0.get_untracked()).and_then(|s| s.location)
                 applying_target=setup_href(SetupStep::Mqtt)
-                on_saved=move |_: SetupStatus| nav.step.set(SetupStep::Mqtt)
+                on_saved=move |s: SetupStatus| {
+                    if let Some(st) = state {
+                        st.0.try_set(Some(s));
+                    }
+                    nav.step.set(SetupStep::Mqtt);
+                }
                 wizard=true
             />
         </div>

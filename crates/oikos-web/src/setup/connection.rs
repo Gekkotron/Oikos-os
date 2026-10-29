@@ -252,6 +252,16 @@ fn ConnectionActions(
                     return;
                 }
                 Ok(s) => on_saved.run(s),
+                Err(SaveError::Failed(r)) => {
+                    // The broker changed since the test: it no longer vouches for these values.
+                    last_ok.try_set(None);
+                    outcome.try_set(Some(Outcome {
+                        key: b.to_string(),
+                        ok: false,
+                        message: r.message,
+                        history: None,
+                    }));
+                }
                 Err(e) => {
                     failure.try_set(Some(e.message(lang())));
                 }
@@ -476,18 +486,13 @@ fn known_status() -> Option<SetupStatus> {
     use_context::<SetupState>().and_then(|s| s.0.get_untracked())
 }
 
-/// Remembers a save's reply so Back shows what was just saved.
-fn remember(status: &SetupStatus) {
-    if let Some(state) = use_context::<SetupState>() {
-        state.0.set(Some(status.clone()));
-    }
-}
-
 /// The MQTT step. Needs [`WizardNav`] and [`Applying`] in context.
 #[component]
 pub fn MqttStep() -> impl IntoView {
     let t = use_setup_text();
     let nav = expect_context::<WizardNav>();
+    // Captured here: a spawned task has no reactive owner, so context is gone after an await.
+    let state = use_context::<SetupState>();
     view! {
         <div class="setup__body">
             <h1 class="setup__title">{move || t(SetupText::MqttTitle)}</h1>
@@ -496,7 +501,9 @@ pub fn MqttStep() -> impl IntoView {
                 initial=known_status().and_then(|s| s.mqtt)
                 applying_target=setup_href(SetupStep::Database)
                 on_saved=move |s: SetupStatus| {
-                    remember(&s);
+                    if let Some(st) = state {
+                        st.0.try_set(Some(s));
+                    }
                     nav.step.set(SetupStep::Database);
                 }
                 on_back=Callback::new(move |_| nav.step.set(SetupStep::Welcome))
@@ -512,6 +519,7 @@ pub fn MqttStep() -> impl IntoView {
 pub fn DatabaseStep() -> impl IntoView {
     let t = use_setup_text();
     let nav = expect_context::<WizardNav>();
+    let state = use_context::<SetupState>();
     view! {
         <div class="setup__body">
             <h1 class="setup__title">{move || t(SetupText::DatabaseTitle)}</h1>
@@ -520,8 +528,17 @@ pub fn DatabaseStep() -> impl IntoView {
                 initial=known_status().and_then(|s| s.database)
                 applying_target=setup_href(SetupStep::Devices)
                 on_saved=move |s: SetupStatus| {
-                    remember(&s);
-                    nav.step.set(SetupStep::Devices);
+                    // Only reached when the hub did not restart. A hub still in setup mode has
+                    // no house to show Devices with, so it goes back to the broker.
+                    let next = if s.mode == "setup" {
+                        SetupStep::Mqtt
+                    } else {
+                        SetupStep::Devices
+                    };
+                    if let Some(st) = state {
+                        st.0.try_set(Some(s));
+                    }
+                    nav.step.set(next);
                 }
                 on_back=Callback::new(move |_| nav.step.set(SetupStep::Mqtt))
                 wizard=true

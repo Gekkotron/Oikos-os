@@ -7,7 +7,7 @@ use oikos_api::SetupStep;
 use oikos_web::i18n::Lang;
 use oikos_web::setup::welcome::WelcomeStep;
 use oikos_web::setup::wizard::WizardNav;
-use oikos_web::setup::{Applying, reload_to};
+use oikos_web::setup::{Applying, SetupState, reload_to};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 wasm_bindgen_test_configure!(run_in_browser);
@@ -27,6 +27,11 @@ struct Mounted {
 }
 
 fn mount() -> Mounted {
+    mount_with(None)
+}
+
+fn mount_with(status: Option<&str>) -> Mounted {
+    let status = status.map(|s| serde_json::from_str(s).unwrap());
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -35,6 +40,7 @@ fn mount() -> Mounted {
         provide_context(RwSignal::new(Lang::En));
         provide_context(WizardNav { step });
         provide_context(Applying::new(reload_to));
+        provide_context(SetupState(RwSignal::new(status)));
         view! { <WelcomeStep /> }
     });
     Mounted {
@@ -172,4 +178,74 @@ async fn a_restarting_save_shows_the_overlay_target_once() {
         Some("/setup?step=mqtt")
     );
     assert_eq!(step.get_untracked(), SetupStep::Welcome);
+}
+
+const LOCATED: &str = r#"{"mode":"setup","step":"mqtt","finished":false,"bundled":false,"location":{"city":"Bordeaux","country":"FR","latitude":44.84,"longitude":-0.58,"timezone":"Europe/Paris"},"mqtt":null,"database":null,"restarting":false}"#;
+
+#[wasm_bindgen_test]
+async fn welcome_starts_from_the_stored_location() {
+    let _stub = FetchStub::install();
+    let m = mount_with(Some(LOCATED));
+    tick().await;
+    assert_eq!(input(&m.host, "#loc-city").value(), "Bordeaux");
+    assert!(!button(&m.host, ".loc__save").disabled());
+}
+
+#[wasm_bindgen_test]
+async fn a_pick_without_a_time_zone_opens_the_coordinates() {
+    let stub = FetchStub::install();
+    stub.reply(
+        "GET",
+        "/api/v1/setup/geocode?city=Bordeaux&",
+        200,
+        r#"[{"name":"Bordeaux","admin":null,"country":"FR","latitude":44.84,"longitude":-0.58,"timezone":null}]"#,
+    );
+    let m = mount();
+    tick().await;
+    type_into(&m.host, "#loc-city", "Bordeaux").await;
+    button(&m.host, ".loc__search").click();
+    settle().await;
+    button(&m.host, ".loc__result").click();
+    tick().await;
+    let details: web_sys::HtmlDetailsElement = m
+        .host
+        .query_selector("details.loc__details")
+        .unwrap()
+        .unwrap()
+        .unchecked_into();
+    assert!(details.open(), "the time zone field is visible");
+    assert!(m.host.text_content().unwrap().contains("Unknown time zone"));
+}
+
+#[wasm_bindgen_test]
+async fn a_restart_already_underway_shows_the_overlay_not_an_error() {
+    let stub = FetchStub::install();
+    stub.reply(
+        "PUT",
+        "/api/v1/setup/location",
+        503,
+        r#"{"error":"restarting"}"#,
+    );
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let applying = Applying::new(|_| {});
+    let step = RwSignal::new(SetupStep::Welcome);
+    let status = serde_json::from_str(LOCATED).unwrap();
+    let _h = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(WizardNav { step });
+        provide_context(applying);
+        provide_context(SetupState(RwSignal::new(Some(status))));
+        view! { <WelcomeStep /> }
+    });
+    tick().await;
+    button(&host, ".loc__save").click();
+    settle().await;
+    assert_eq!(
+        applying.target.get_untracked().as_deref(),
+        Some("/setup?step=mqtt")
+    );
+    assert!(!host.text_content().unwrap().contains("Applying"));
+    assert!(button(&host, ".loc__save").disabled(), "no second save");
 }
