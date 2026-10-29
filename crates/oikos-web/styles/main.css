@@ -5006,21 +5006,25 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-node__small {
-  font-size: 10px;
+  font-size: 9px;
 }
 
-/* A halo in the card colour lets the wires pass behind the texts. */
-.energy-node__label,
-.energy-node__value {
+/* On the phone layout wires cross the labels: a halo in the card colour lets them pass behind. */
+.energy-circles--narrow .energy-node__label,
+.energy-circles--narrow .energy-node__value {
   paint-order: stroke;
   stroke: var(--bg);
-  stroke-width: 4px;
+  stroke-width: 3px;
   stroke-linejoin: round;
 }
 
 :root[data-theme="light"] .energy-node__label,
 :root[data-theme="light"] .energy-node__value {
   fill: color-mix(in srgb, var(--ink) 70%, transparent);
+}
+
+:root[data-theme="light"] .energy-circles--narrow .energy-node__label,
+:root[data-theme="light"] .energy-circles--narrow .energy-node__value {
   stroke: var(--card-bg);
 }
 
