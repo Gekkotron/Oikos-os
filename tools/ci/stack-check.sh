@@ -13,6 +13,17 @@ if [ -e compose.override.yml ]; then
   exit 1
 fi
 
+# Also before the trap: cleanup runs `docker compose down -v`, which would tear
+# down a developer's own stack, and the check would write into its ./data.
+if [ -e data ]; then
+  echo "./data already exists; this check writes credentials there; move it away first" >&2
+  exit 1
+fi
+if [ -n "$(docker compose ps -q)" ]; then
+  echo "a compose stack is already running here; stop it before running this check" >&2
+  exit 1
+fi
+
 cleanup() {
   status=$?
   if [ "$status" -ne 0 ]; then
@@ -71,6 +82,27 @@ if docker exec oikos-timescaledb psql \
   echo "timescaledb accepted a wrong password" >&2
   exit 1
 fi
+
+# An override host has no password file (init skipped), yet the wrapper must
+# still start on the already-initialised database: the password set the first
+# time keeps working.
+echo "== timescaledb without a password file"
+docker compose stop timescaledb
+mv data/bundled/db-password data/bundled/db-password.away
+docker compose up -d --no-deps timescaledb
+ready=0
+for _ in $(seq 1 60); do
+  if docker exec oikos-timescaledb pg_isready -h localhost -p 5433 >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 1
+done
+[ "$ready" -eq 1 ] || { echo "timescaledb not ready without a password file after 60 s" >&2; exit 1; }
+extension=$(docker exec oikos-timescaledb psql \
+  "postgresql://oikos:${db_password}@${host_ip}:5433/oikos" \
+  -tAc "select extname from pg_extension where extname='timescaledb'")
+[ "$extension" = "timescaledb" ] || { echo "right password refused without a password file: '$extension'" >&2; exit 1; }
 
 echo "== mosquitto"
 published=0
