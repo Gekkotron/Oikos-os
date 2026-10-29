@@ -15,6 +15,7 @@ use oikos_climate::decide::SafetyMemory;
 use oikos_climate::doc::{Decision, DeviceTarget, Mode};
 use oikos_climate::feedback::FeedbackState;
 use oikos_climate::ledger::Ledger;
+use oikos_climate::presence::PresenceState;
 use oikos_climate::view::LearnStatus;
 use oikos_core::model::Availability;
 
@@ -74,6 +75,15 @@ pub(crate) struct ClimateRuntime {
     /// Zone -> the room-thermometer correction's state from the previous tick; absent while
     /// the correction is off or not acting (spec §6.5). Dropped when the zone's settings change.
     pub feedback: HashMap<String, FeedbackState>,
+    /// Zone -> its room presence state; absent while presence is off. Dropped when the zone's
+    /// presence settings change.
+    pub presence: HashMap<String, PresenceState>,
+    /// Presence sensor -> the last time it was seen detecting (on, or turning off).
+    pub detected_at: HashMap<String, u64>,
+    /// Presence sensor -> whether it was on at its last usable report.
+    pub sensor_on: HashMap<String, bool>,
+    /// The presence sensors of the zones with presence on; rebuilt each pass.
+    pub presence_sensors: HashSet<String>,
     /// The last decisions per zone, newest last.
     pub decisions: HashMap<String, VecDeque<Decision>>,
     pub last_home_at: Option<u64>,

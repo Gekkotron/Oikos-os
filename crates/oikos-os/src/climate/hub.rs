@@ -237,6 +237,10 @@ impl Hub {
         if settings.feedback != current.feedback {
             self.climate_runtime().feedback.remove(zone);
         }
+        // New presence settings start over: occupied until `empty_after` passes.
+        if settings.presence != current.presence {
+            self.climate_runtime().presence.remove(zone);
+        }
         if !settings.rules.is_empty() && settings.rules != current.rules {
             settings.approved_at = Some(clock::now());
             if current.state == ZoneState::Pending && settings.state == ZoneState::Pending {

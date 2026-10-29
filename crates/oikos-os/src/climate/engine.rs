@@ -1,7 +1,7 @@
 //! The evaluation loop: decide per zone, command the devices, tell a hand change from the
 //! engine's own echo, and raise the safety alerts (spec §5.5, §7, §9).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,8 +24,9 @@ use tokio::task::JoinHandle;
 
 use super::hub::valid_zone_id;
 use super::inputs::{
-    HomeNow, OUTDOOR_CACHE_S, OwnedZoneInputs, local_time, outdoor_mean, outdoor_reading,
-    presence_home_now, room_sensor, step_from, step_of, zone_entity_ids, zone_inputs_owned,
+    HomeNow, OUTDOOR_CACHE_S, OwnedZoneInputs, detecting, local_time, note_detection, outdoor_mean,
+    outdoor_reading, presence_home_now, room_sensor, step_from, step_of, zone_entity_ids,
+    zone_inputs_owned,
 };
 use super::{GROUP_PREFIX, alerts, learning};
 use crate::clock;
@@ -138,6 +139,12 @@ impl Hub {
             return;
         };
         self.note_availability(id, state.availability, now);
+        {
+            let mut rt = self.climate_runtime();
+            if rt.presence_sensors.contains(id) {
+                note_detection(&mut rt, id, detecting(&state), now);
+            }
+        }
         let StateValue::Climate(climate) = &state.value else {
             return;
         };
@@ -414,8 +421,12 @@ impl Hub {
         watched.insert(crate::alarm::ALARM_ENTITY_ID.to_owned());
         watched.extend(house.holiday_entity.clone());
         watched.extend(house.outdoor_entity.clone());
+        let mut presence_sensors = HashSet::new();
         for zone in self.climate_zone_ids() {
             let settings = self.zone_settings(&zone);
+            if settings.presence.enabled {
+                presence_sensors.extend(settings.presence.sensors.iter().cloned());
+            }
             let entity_ids = zone_entity_ids(self, &zone, &settings);
             watched.extend(room_sensor(
                 self,
@@ -435,7 +446,9 @@ impl Hub {
         {
             rt.previous_mode = Some(mode);
         }
+        watched.extend(presence_sensors.iter().cloned());
         rt.watched = watched.into_iter().collect();
+        rt.presence_sensors = presence_sensors;
     }
 
     async fn evaluate_zone(self: &Arc<Self>, zone: &str, now: u64) {
@@ -472,6 +485,14 @@ impl Hub {
                 }
                 None => {
                     rt.feedback.remove(zone);
+                }
+            }
+            match inp.presence {
+                Some(state) => {
+                    rt.presence.insert(zone.to_owned(), state);
+                }
+                None => {
+                    rt.presence.remove(zone);
                 }
             }
         }
@@ -1151,6 +1172,7 @@ fn secs_until_next_change(
 mod tests {
     use super::*;
     use oikos_climate::decide::DeviceCaps;
+    use oikos_climate::presence::PresenceState;
 
     fn device(target: Option<f64>, mode: &str) -> Device {
         Device {
@@ -1217,6 +1239,49 @@ mod tests {
         settings.feedback.band = 0.8;
         hub.set_climate_zone("living", settings).unwrap();
         assert!(!hub.climate_runtime().feedback.contains_key("living"));
+    }
+
+    #[tokio::test]
+    async fn presence_settings_change_resets_state() {
+        let mut cfg = crate::config::Config::default();
+        cfg.topics.discovery_prefixes = vec!["oikos".to_owned()];
+        cfg.climate.enabled = true;
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
+        let hub = Hub::new(&cfg, tx);
+        hub.set_connection(ConnectionStatus::Online);
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../oikos-core/tests/fixtures/discovery/climate__daikin_192_168_1_150__climate.json",
+        );
+        hub.ingest(
+            "oikos/climate/daikin_192_168_1_150/climate/config",
+            &std::fs::read(fixture).unwrap(),
+        );
+        let id = hub.snapshot().entities[0].id.clone();
+        let mut patch = serde_json::Map::new();
+        patch.insert("area".to_owned(), serde_json::Value::from("living"));
+        hub.set_override(&id, &patch).await.unwrap();
+        let state = PresenceState {
+            last_detected: 1,
+            empty_since: Some(2),
+            arrival: None,
+        };
+        hub.climate_runtime()
+            .presence
+            .insert("living".to_owned(), state);
+        let mut settings = oikos_climate::doc::ZoneSettings::default();
+        settings.presence.enabled = true;
+        hub.set_climate_zone("living", settings.clone()).unwrap();
+        hub.climate_runtime()
+            .presence
+            .insert("living".to_owned(), state);
+        // Other settings keep the state.
+        settings.manual_hold_max_min = 100;
+        hub.set_climate_zone("living", settings.clone()).unwrap();
+        assert!(hub.climate_runtime().presence.contains_key("living"));
+        // A change to the presence settings drops it.
+        settings.presence.setback = 3.0;
+        hub.set_climate_zone("living", settings).unwrap();
+        assert!(!hub.climate_runtime().presence.contains_key("living"));
     }
 
     #[test]
