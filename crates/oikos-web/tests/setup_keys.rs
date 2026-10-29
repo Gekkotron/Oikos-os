@@ -137,10 +137,7 @@ async fn an_empty_secret_field_keeps_the_stored_key() {
     assert_eq!(body["enabled"], true);
     assert_eq!(body["sites"], serde_json::json!(["abcd-1234"]));
     let key = &body["api_key"];
-    assert!(
-        *key == serde_json::json!({"set": true}) || *key == serde_json::json!(""),
-        "{key}"
-    );
+    assert_eq!(*key, serde_json::json!(""));
 }
 
 #[wasm_bindgen_test]
@@ -184,4 +181,123 @@ async fn push_upload_sends_the_file_text() {
     assert_eq!(body["service_account"], text);
     assert_eq!(body["prefix"], "oikos/push");
     assert_eq!(body["history_days"], 7);
+}
+
+const FRIGATE_TWO_CAMERAS: &str = r#"{"url":"http://192.0.2.4:5000","user":null,"password":{"set":true},"media_url":null,"bridge":false,"labels":[],"cameras":["front","back"],"zones":[],"cooldown":60,"severity":"alert","ttl":7,"topic_prefix":"frigate","live":false}"#;
+
+fn chip_pressed(host: &web_sys::Element, name: &str) -> Option<String> {
+    let chips = host
+        .query_selector_all("#svc-cameras .svc__chips .chip")
+        .unwrap();
+    for i in 0..chips.length() {
+        let el: web_sys::Element = chips.get(i).unwrap().unchecked_into();
+        if el.text_content().unwrap().trim() == name {
+            return el.get_attribute("aria-pressed");
+        }
+    }
+    None
+}
+
+fn click_chip(host: &web_sys::Element, name: &str) {
+    let chips = host
+        .query_selector_all("#svc-cameras .svc__chips .chip")
+        .unwrap();
+    for i in 0..chips.length() {
+        let el: web_sys::HtmlElement = chips.get(i).unwrap().unchecked_into();
+        if el.text_content().unwrap().trim() == name {
+            el.click();
+            return;
+        }
+    }
+    panic!("no chip {name}");
+}
+
+#[wasm_bindgen_test]
+async fn a_deselected_stored_camera_stays_and_can_come_back() {
+    let stub = FetchStub::install();
+    stub.reply("GET", "/api/v1/settings/frigate", 200, FRIGATE_TWO_CAMERAS);
+    stub.reply(
+        "PUT",
+        "/api/v1/settings/frigate",
+        200,
+        r#"{"restarting":true}"#,
+    );
+    let m = mount();
+    settle().await;
+    click(&m.host, "#svc-cameras .svc__head");
+    settle().await;
+    click_chip(&m.host, "back");
+    settle().await;
+    assert_eq!(chip_pressed(&m.host, "back").as_deref(), Some("false"));
+    click_chip(&m.host, "front");
+    settle().await;
+    assert_eq!(chip_pressed(&m.host, "front").as_deref(), Some("false"));
+    click_chip(&m.host, "back");
+    click_chip(&m.host, "front");
+    settle().await;
+    click(&m.host, "#svc-cameras .svc__save");
+    settle().await;
+    let mut cams: Vec<String> = serde_json::from_value(put_body(&stub)["cameras"].clone()).unwrap();
+    cams.sort();
+    assert_eq!(cams, ["back", "front"]);
+}
+
+#[wasm_bindgen_test]
+async fn frigate_422_shows_as_received() {
+    let stub = FetchStub::install();
+    stub.reply("GET", "/api/v1/settings/frigate", 200, FRIGATE_TWO_CAMERAS);
+    stub.reply(
+        "PUT",
+        "/api/v1/settings/frigate",
+        422,
+        r#"{"error":"Enter the password for the new address"}"#,
+    );
+    let m = mount();
+    settle().await;
+    click(&m.host, "#svc-cameras .svc__head");
+    settle().await;
+    type_into(&m.host, "#frigate-url", "http://192.0.2.9:5000");
+    tick().await;
+    click(&m.host, "#svc-cameras .svc__save");
+    settle().await;
+    let text = m.host.text_content().unwrap();
+    assert!(
+        text.contains("Enter the password for the new address"),
+        "{text}"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn a_file_without_project_id_is_not_sent() {
+    let stub = FetchStub::install();
+    stub.reply(
+        "GET",
+        "/api/v1/settings/push",
+        200,
+        r#"{"service_account":{"set":false},"project_id":null,"prefix":"oikos/push","legacy_prefix":"legacy","retry_interval":30,"max_retries":5,"history_size":100,"history_days":7}"#,
+    );
+    let m = mount();
+    settle().await;
+    click(&m.host, "#svc-push .svc__head");
+    settle().await;
+    let parts = js_sys::Array::of1(&wasm_bindgen::JsValue::from_str(r#"{"type":"x"}"#));
+    let file = web_sys::File::new_with_str_sequence(&parts, "key.json").unwrap();
+    let transfer = web_sys::DataTransfer::new().unwrap();
+    transfer.items().add_with_file(&file).unwrap();
+    let input: web_sys::HtmlInputElement = m
+        .host
+        .query_selector("#push-file")
+        .unwrap()
+        .unwrap()
+        .unchecked_into();
+    input.set_files(transfer.files().as_ref());
+    input
+        .dispatch_event(&web_sys::Event::new("change").unwrap())
+        .unwrap();
+    settle().await;
+    click(&m.host, "#svc-push .svc__save");
+    settle().await;
+    assert!(stub.requests().iter().all(|r| r.method != "PUT"));
+    let text = m.host.text_content().unwrap();
+    assert!(text.contains("not a service-account key"), "{text}");
 }

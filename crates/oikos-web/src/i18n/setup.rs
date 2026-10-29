@@ -115,8 +115,6 @@ pub enum SetupText {
     MinutesInvalid,
     ClimateBeta,
     AlarmOpenSettings,
-    /// Body of a service card whose form is not built yet.
-    ComingSoon,
     /// The Energy card's role pickers.
     RoleGrid,
     RoleGridExport,
@@ -142,6 +140,7 @@ pub enum SetupText {
     /// The Push form; `{project}` is the stored key's project id.
     PushFile,
     NotAServiceAccount,
+    FileReadFailed,
     PushProject,
 }
 
@@ -320,7 +319,6 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
             "Bêta : il pilote votre chauffage. Vérifiez vos programmes avant de l'activer.",
         ),
         SetupText::AlarmOpenSettings => ("Alarm settings", "Réglages de l'alarme"),
-        SetupText::ComingSoon => ("Coming soon.", "Bientôt disponible."),
         SetupText::RoleGrid => ("Grid, bought", "Réseau, acheté"),
         SetupText::RoleGridExport => ("Grid, sold", "Réseau, vendu"),
         SetupText::RoleSolar => ("Solar production", "Production solaire"),
@@ -360,6 +358,10 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
         SetupText::NotAServiceAccount => (
             "This file is not a service-account key: it has no project_id.",
             "Ce fichier n'est pas une clé de compte de service : il n'a pas de project_id.",
+        ),
+        SetupText::FileReadFailed => (
+            "Could not read this file.",
+            "Impossible de lire ce fichier.",
         ),
         SetupText::PushProject => ("Project: {project}", "Projet : {project}"),
     };
@@ -469,7 +471,6 @@ mod tests {
                 SetupText::MinutesInvalid,
                 SetupText::ClimateBeta,
                 SetupText::AlarmOpenSettings,
-                SetupText::ComingSoon,
                 SetupText::RoleGrid,
                 SetupText::RoleGridExport,
                 SetupText::RoleSolar,
@@ -489,6 +490,7 @@ mod tests {
                 SetupText::CamerasAllHint,
                 SetupText::PushFile,
                 SetupText::NotAServiceAccount,
+                SetupText::FileReadFailed,
                 SetupText::PushProject,
             ],
             setup_text,

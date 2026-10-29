@@ -310,17 +310,9 @@ fn FrigateFields(base: Value, applying_target: String) -> impl IntoView {
                 .filter(|l| !LABELS.contains(&l.as_str())),
         )
         .collect();
-    // Camera chips: the ones a test found plus the ones already stored.
-    let found = RwSignal::new(Vec::<String>::new());
-    let camera_chips = move || {
-        let mut all = found.get();
-        for c in cameras.get() {
-            if !all.contains(&c) {
-                all.push(c);
-            }
-        }
-        all
-    };
+    // Camera chips: the stored cameras plus any a test finds. Never derived from the live
+    // selection, so a camera that is switched off keeps its chip and can be switched back on.
+    let known = RwSignal::new(cameras.get_untracked());
     let saving = RwSignal::new(false);
     let testing = RwSignal::new(false);
     let failure = RwSignal::new(None::<String>);
@@ -363,7 +355,13 @@ fn FrigateFields(base: Value, applying_target: String) -> impl IntoView {
                         .collect()
                 })
                 .unwrap_or_default();
-            found.set(names);
+            known.update(|k| {
+                for n in names {
+                    if !k.contains(&n) {
+                        k.push(n);
+                    }
+                }
+            });
         }
     });
     let on_save = Callback::new(move |()| {
@@ -415,12 +413,13 @@ fn FrigateFields(base: Value, applying_target: String) -> impl IntoView {
             </div>
             {flag(SetupText::LiveView, live)}
             <div class="conn__result" role="status">{outcome(tested, |_| None)}</div>
-            <Show when=move || !camera_chips().is_empty()>
+            <Show when=move || known.with(|k| !k.is_empty())>
                 <p class="svc__label">{move || t(SetupText::FrigateCameras)}</p>
                 <p class="settings__hint">{move || t(SetupText::CamerasAllHint)}</p>
                 <div class="svc__chips">
                     {move || {
-                        camera_chips()
+                        known
+                            .get()
                             .into_iter()
                             .map(|c| view! { <ToggleChip name=c list=cameras /> })
                             .collect_view()
@@ -460,23 +459,40 @@ fn PushFields(base: Value, applying_target: String) -> impl IntoView {
     // The text of a chosen file that passed the project check; `None` until one does.
     let pending = RwSignal::new(None::<String>);
     let not_a_key = RwSignal::new(false);
+    let read_failed = RwSignal::new(false);
+    // Bumped on every selection so a slow read of an earlier file is ignored.
+    let generation = RwSignal::new(0u32);
     let saving = RwSignal::new(false);
     let failure = RwSignal::new(None::<String>);
     let on_change = move |ev: leptos::ev::Event| {
         let input = event_target::<HtmlInputElement>(&ev);
+        let mine = generation.get_untracked() + 1;
+        generation.set(mine);
+        pending.set(None);
+        not_a_key.set(false);
+        read_failed.set(false);
         let Some(file) = input.files().and_then(|f| f.get(0)) else {
-            pending.set(None);
-            not_a_key.set(false);
             return;
         };
         leptos::task::spawn_local(async move {
-            let text = JsFuture::from(file.text())
+            let read = JsFuture::from(file.text())
                 .await
                 .ok()
-                .and_then(|v| v.as_string())
-                .filter(|s| project_id_of(s).is_some());
-            not_a_key.try_set(text.is_none());
-            pending.try_set(text);
+                .and_then(|v| v.as_string());
+            if generation.try_get_untracked() != Some(mine) {
+                return;
+            }
+            match read {
+                None => {
+                    read_failed.try_set(true);
+                }
+                Some(text) if project_id_of(&text).is_none() => {
+                    not_a_key.try_set(true);
+                }
+                Some(text) => {
+                    pending.try_set(Some(text));
+                }
+            }
         });
     };
     let on_save = Callback::new(move |()| {
@@ -509,7 +525,13 @@ fn PushFields(base: Value, applying_target: String) -> impl IntoView {
                 />
             </label>
             <p class="loc__problem" role="status">
-                {move || not_a_key.get().then(|| t(SetupText::NotAServiceAccount))}
+                {move || {
+                    if read_failed.get() {
+                        Some(t(SetupText::FileReadFailed))
+                    } else {
+                        not_a_key.get().then(|| t(SetupText::NotAServiceAccount))
+                    }
+                }}
             </p>
             <SaveRow
                 saving=saving
