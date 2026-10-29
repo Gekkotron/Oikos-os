@@ -4865,6 +4865,72 @@ html:has(.flow-canvas-screen) {
   }
 }
 
+/* Settings > Appearance: a small fixed sketch of the chosen energy view. */
+.energy-preview {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.energy-preview svg {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+  margin: 0 auto;
+}
+
+.energy-preview__caption {
+  margin: 6px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+.energy-preview__flow {
+  stroke: var(--ink);
+  stroke-dasharray: 2 6;
+  opacity: 0.8;
+  animation: energy-preview-run 1.4s linear infinite;
+}
+
+.energy-preview__track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.energy-preview__spin {
+  transform-origin: 75px 48px;
+  animation: energy-preview-spin 18s linear infinite;
+}
+
+.energy-preview__centre {
+  fill: var(--ink);
+  font-weight: 700;
+  font-size: 11px;
+}
+
+@keyframes energy-preview-run {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+@keyframes energy-preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .energy-preview__flow,
+  .energy-preview__spin {
+    animation: none;
+  }
+}
+
 /* Orbite: two rings round the house (in inside, out outside), the lists beside or under them. */
 .energy-orbite {
   --orbite-dot: rgb(255 255 255 / 90%);
