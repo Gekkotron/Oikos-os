@@ -75,6 +75,18 @@ Eco starts two ways, and a zone is in eco while either one applies:
 
 The two are independent: a bedroom in eco until Sunday stays in eco when the house is disarmed on Saturday. Holiday and overrides still come first, and a temperature set by hand during eco holds as usual.
 
+## Thermometer correction
+
+A climate unit often reads its own surroundings, which can sit far from the room's temperature. With **Thermometer correction** on, the hub nudges the unit's target from the room thermometer's reading so the room, not the unit, reaches the schedule target. It is off by default and set per room, on the room's card on the Climate screen; it needs a room thermometer (pick one in the same card).
+
+It acts only on the **Schedule** row of an active room with a temperature target: never under holiday, eco or away, nor under a whole-room hold (the hold buttons on the room card). A hand change on one unit leaves only that unit out; the others keep being corrected, and if every unit is held the offset stays where it is.
+
+The room reading is checked on every pass. Once it is `band` (0.5 °C) off the target, the hub moves the unit's target by `step` (0.5 °C) to close the gap, at most once per `interval_min` (15 min), and never more than `max_below` (3 °C) under or `max_above` (0.5 °C) over the target. `warmup_min` (60 min after the schedule target began) delays only the slow side: in heat, raising the unit's target when the room is too cold; in cool, the extra cooling when the room is too warm. The other direction can happen at once. Inside the band nothing changes, and the offset stays where it is. It goes back to 0 when the schedule target changes, the Schedule row stops applying, the room's settings change, the thermometer goes quiet, or the hub restarts.
+
+If the thermometer has not reported for `quiet_limit_min` (6 h), the correction is dropped and the unit follows the schedule target alone. Under the room's reading, the screen shows the thermometer's value and its age once it is 15 min old or more.
+
+Each correction is written in the decision's reason, for example "room above 19.5 °C: AC 18.5 °C (-0.5)", and appears under **Recent decisions**. The settings live in the zone's `feedback` block (`enabled`, `band`, `step`, `interval_min`, `warmup_min`, `max_below`, `max_above`, `quiet_limit_min`).
+
 ## The learner and proposals
 
 The learner builds a weekly schedule from the devices' target history (time held in eco, away, holiday, safety or an override is not evidence) in the history database and proposes it with the evidence behind it. Once a schedule is approved, a part of it changes only where enough days (**Agreement needed**) held the same other value there: hand changes that vary from day to day keep the approved block, and days with no data keep theirs. Nothing applies until it is approved, through REST, MCP or the push button. The hub remembers a fingerprint of each rejected rule set. A room in eco is not learned until its eco ends (its learning state reads `eco`, "Learning paused while in eco"), so no new proposal arrives for it meanwhile; a proposal made before the eco stays. Requires [History](history.md).

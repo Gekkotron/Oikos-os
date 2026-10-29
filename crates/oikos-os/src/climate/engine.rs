@@ -14,6 +14,7 @@ use oikos_climate::doc::{
     RoomEco, Setpoint, Source, ZoneState,
 };
 use oikos_climate::eco::fan_plan;
+use oikos_climate::feedback::FeedbackState;
 use oikos_climate::ledger::{Ledger, Observed, hold_until};
 use oikos_climate::topics::{self, ZoneDoc};
 use oikos_core::history::Micros;
@@ -458,6 +459,23 @@ impl Hub {
         self.tidy_zone(&mut inp);
         inp.previous_cause = self.last_decision(zone).and_then(|d| d.cause);
         let mut decision = decide(&inp.borrowed());
+        {
+            let kept = FeedbackState::after(
+                inp.feedback.as_ref(),
+                &decision,
+                inp.settings.feedback.enabled,
+                now,
+            );
+            let mut rt = self.climate_runtime();
+            match kept {
+                Some(state) => {
+                    rt.feedback.insert(zone.to_owned(), state);
+                }
+                None => {
+                    rt.feedback.remove(zone);
+                }
+            }
+        }
         let state = inp.settings.state;
         if state == ZoneState::Off {
             // What is done by hand while the zone is off is not a change against the engine:
@@ -1045,6 +1063,7 @@ fn no_safety(zone: &str) -> Decision {
         at: 0,
         entities: Default::default(),
         eco_restore: Default::default(),
+        adjust: None,
     }
 }
 
@@ -1060,23 +1079,40 @@ fn decision_rows(decision: &Decision, at: Micros) -> Vec<ClimateDecisionRow> {
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))
         .unwrap_or_default();
-    let row = |entity_id: &str, mode: &str, setpoint: Option<f64>| ClimateDecisionRow {
-        at,
-        zone: decision.zone.clone(),
-        entity_id: entity_id.to_owned(),
-        mode: mode.to_owned(),
-        setpoint,
-        source: source.clone(),
-        reason: decision.reason.clone(),
-        applied: decision.applied,
+    let row = |entity_id: &str, mode: &str, setpoint: Option<f64>, adjust: Option<f64>| {
+        ClimateDecisionRow {
+            at,
+            zone: decision.zone.clone(),
+            entity_id: entity_id.to_owned(),
+            mode: mode.to_owned(),
+            setpoint,
+            source: source.clone(),
+            reason: decision.reason.clone(),
+            applied: decision.applied,
+            adjust,
+        }
     };
     if decision.entities.is_empty() {
-        return vec![row("", "", None)];
+        return vec![row("", "", None, None)];
     }
     decision
         .entities
         .iter()
-        .map(|(id, target)| row(id, &target.mode, target.setpoint))
+        .map(|(id, target)| {
+            // A corrected decision stores the target and the offset that was added to it for
+            // each unheld device; a held device keeps its own value.
+            if let (Some(_), false, Some(Setpoint::Temp(goal)), Some(commanded)) = (
+                decision.adjust,
+                target.held,
+                decision.setpoint,
+                target.setpoint,
+            ) {
+                let diff = commanded - goal;
+                let adjust = (diff != 0.0).then_some(diff);
+                return row(id, &target.mode, Some(goal), adjust);
+            }
+            row(id, &target.mode, target.setpoint, None)
+        })
         .collect()
 }
 
@@ -1153,6 +1189,49 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn settings_change_resets_correction() {
+        let mut cfg = crate::config::Config::default();
+        cfg.topics.discovery_prefixes = vec!["oikos".to_owned()];
+        cfg.climate.enabled = true;
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
+        let hub = Hub::new(&cfg, tx);
+        hub.set_connection(ConnectionStatus::Online);
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../oikos-core/tests/fixtures/discovery/climate__daikin_192_168_1_150__climate.json",
+        );
+        hub.ingest(
+            "oikos/climate/daikin_192_168_1_150/climate/config",
+            &std::fs::read(fixture).unwrap(),
+        );
+        let id = hub.snapshot().entities[0].id.clone();
+        let mut patch = serde_json::Map::new();
+        patch.insert("area".to_owned(), serde_json::Value::from("living"));
+        hub.set_override(&id, &patch).await.unwrap();
+        let state = FeedbackState {
+            target: 19.0,
+            offset: -0.5,
+            since: 1,
+            last_step_at: Some(2),
+        };
+        hub.climate_runtime()
+            .feedback
+            .insert("living".to_owned(), state);
+        // Other settings keep the correction.
+        let settings = oikos_climate::doc::ZoneSettings {
+            sensor: Some("sensor.x".to_owned()),
+            manual_hold_max_min: 100,
+            ..Default::default()
+        };
+        hub.set_climate_zone("living", settings.clone()).unwrap();
+        assert!(hub.climate_runtime().feedback.contains_key("living"));
+        // A change to the correction settings drops it.
+        let mut settings = settings;
+        settings.feedback.band = 0.8;
+        hub.set_climate_zone("living", settings).unwrap();
+        assert!(!hub.climate_runtime().feedback.contains_key("living"));
+    }
+
     #[test]
     fn a_command_is_needed_beyond_half_a_step_or_for_another_mode() {
         assert!(!needs_command(
@@ -1176,5 +1255,37 @@ mod tests {
             &device(Some(9.0), "off"),
             &want(Some(10.0), "off")
         ));
+    }
+
+    #[test]
+    fn decision_rows_store_target_and_adjust() {
+        let mut decision = no_safety("z");
+        decision.setpoint = Some(Setpoint::Temp(19.0));
+        decision.adjust = Some(-0.5);
+        decision
+            .entities
+            .insert("a".into(), want(Some(18.5), "heat"));
+        decision.entities.insert(
+            "b".into(),
+            DeviceTarget {
+                setpoint: Some(21.0),
+                mode: "heat".into(),
+                held: true,
+            },
+        );
+        let rows = decision_rows(&decision, 0);
+        let got: Vec<_> = rows
+            .iter()
+            .map(|r| (r.entity_id.as_str(), r.setpoint, r.adjust))
+            .collect();
+        assert_eq!(
+            got,
+            vec![("a", Some(19.0), Some(-0.5)), ("b", Some(21.0), None)]
+        );
+
+        decision.adjust = None;
+        let rows = decision_rows(&decision, 0);
+        assert_eq!(rows[0].setpoint, Some(18.5));
+        assert_eq!(rows[0].adjust, None);
     }
 }

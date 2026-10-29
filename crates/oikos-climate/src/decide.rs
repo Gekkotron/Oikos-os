@@ -10,7 +10,8 @@ use crate::doc::{
     Decision, DeviceTarget, HouseSettings, Mode, Override, RoomEco, SafetyCause, Setpoint, Source,
     ZoneSettings, ZoneState,
 };
-use crate::schedule::Reading;
+use crate::feedback::{CorrectionInput, FeedbackState, correct};
+use crate::schedule::{Reading, ReadingSource};
 
 /// Step used when a device does not advertise one.
 const DEFAULT_STEP: f64 = 0.5;
@@ -82,6 +83,10 @@ pub struct ZoneInputs<'a> {
     pub previous_cause: Option<SafetyCause>,
     /// The zone's own eco, if set; one whose `until` has passed is ignored.
     pub room_eco: Option<&'a RoomEco>,
+    /// The room thermometer's own value and age, whatever `reading` says.
+    pub thermometer: Option<ReadingSource>,
+    /// The thermometer correction's state from the previous tick.
+    pub feedback: Option<&'a FeedbackState>,
 }
 
 /// How far back inside the overheat or overcool limit the reading must be before that latched
@@ -184,6 +189,7 @@ fn base_decision(inp: &ZoneInputs, source: Source, reason: String) -> Decision {
         at: inp.now,
         entities: BTreeMap::new(),
         eco_restore: BTreeMap::new(),
+        adjust: None,
     }
 }
 
@@ -595,9 +601,56 @@ fn rules(inp: &ZoneInputs) -> Decision {
     if let (Some(mode), Some(sp)) = (inp.mode, choice.setpoint) {
         d.setpoint = Some(sp);
         d.entities = targets(inp.devices, sp, mode);
+        if let (Source::Schedule, Setpoint::Temp(target)) = (choice.source, sp) {
+            apply_correction(inp, &mut d, mode, target);
+        }
     }
     hold_devices(inp, &mut d, choice.setpoint);
     d
+}
+
+/// The room-thermometer correction (spec §6): shift the unheld devices' setpoint by the offset.
+fn apply_correction(inp: &ZoneInputs, d: &mut Decision, mode: Mode, target: f64) {
+    let fb = &inp.settings.feedback;
+    if !fb.enabled {
+        return;
+    }
+    let unheld = || {
+        inp.devices.iter().filter(|dev| {
+            !inp.overrides
+                .iter()
+                .any(|o| o.entity.as_deref() == Some(dev.id.as_str()) && live(o, inp.now))
+        })
+    };
+    let step = unheld()
+        .map(|dev| {
+            dev.caps
+                .temp_step
+                .filter(|s| *s > 0.0)
+                .unwrap_or(DEFAULT_STEP)
+        })
+        .fold(fb.step, f64::max);
+    let base = match inp.settings.rules.get(mode).map(|r| r.base) {
+        Some(Setpoint::Temp(b)) => Some(b),
+        _ => None,
+    };
+    let c = correct(&CorrectionInput {
+        settings: fb,
+        mode,
+        target,
+        base,
+        frost: inp.house.frost,
+        thermometer: inp.thermometer,
+        step,
+        frozen: unheld().next().is_none(),
+        previous: inp.feedback,
+        now: inp.now,
+    });
+    d.entities = targets(inp.devices, Setpoint::Temp(target + c.offset), mode);
+    d.adjust = (c.offset != 0.0).then_some(c.offset);
+    if let Some(note) = c.note {
+        d.reason.push_str(&format!("; {note}"));
+    }
 }
 
 /// Per-device overrides (hand changes) hold their device whatever the zone does (§7).
@@ -716,6 +769,8 @@ mod tests {
         memory: Option<SafetyMemory>,
         room_eco: Option<RoomEco>,
         previous: Option<SafetyCause>,
+        thermometer: Option<ReadingSource>,
+        feedback: Option<FeedbackState>,
     }
 
     impl Case {
@@ -732,6 +787,8 @@ mod tests {
                 memory: None,
                 previous: None,
                 room_eco: None,
+                thermometer: None,
+                feedback: None,
             }
         }
 
@@ -752,6 +809,8 @@ mod tests {
                 safety_memory: self.memory.as_ref(),
                 previous_cause: self.previous,
                 room_eco: self.room_eco.as_ref(),
+                thermometer: self.thermometer,
+                feedback: self.feedback.as_ref(),
             })
         }
     }
@@ -772,6 +831,122 @@ mod tests {
             until,
             origin: OverrideOrigin::User,
         }
+    }
+
+    /// Heat, block 19 °C, correction on, room thermometer at `r` and `age_s` old.
+    fn corrected(r: f64, age_s: u64) -> Case {
+        let mut c = Case::new();
+        c.settings.rules.heat.as_mut().unwrap().blocks[0].setpoint = Setpoint::Temp(19.0);
+        c.settings.feedback.enabled = true;
+        c.thermometer = Some(ReadingSource { value: r, age_s });
+        c
+    }
+
+    fn dev_step(id: &str, step: f64) -> Device {
+        let mut d = dev(id, &["off", "heat"], Some(19.0));
+        d.caps.temp_step = Some(step);
+        d
+    }
+
+    fn dev_ov(id: &str, sp: f64) -> Override {
+        Override {
+            entity: Some(id.into()),
+            setpoint: Some(Setpoint::Temp(sp)),
+            mode: None,
+            until: NOW + 3600,
+            origin: OverrideOrigin::User,
+        }
+    }
+
+    #[test]
+    fn correction_lowers_unheld_devices() {
+        let d = corrected(21.6, 30).run();
+        assert_eq!(d.source, Source::Schedule);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(19.0)));
+        assert_eq!(d.entities["trv"].setpoint, Some(18.5));
+        assert_eq!(d.adjust, Some(-0.5));
+        assert!(
+            d.reason.contains("above 19.5 °C: AC 18.5 °C"),
+            "{}",
+            d.reason
+        );
+    }
+
+    #[test]
+    fn correction_off_by_default() {
+        let mut c = corrected(21.6, 30);
+        c.settings.feedback.enabled = false;
+        let d = c.run();
+        assert_eq!(d.entities["trv"].setpoint, Some(19.0));
+        assert_eq!(d.adjust, None);
+    }
+
+    #[test]
+    fn no_correction_under_zone_override() {
+        let mut c = corrected(21.6, 30);
+        c.overrides = vec![zone_ov(21.0, NOW + 3600)];
+        let d = c.run();
+        assert_eq!(d.entities["trv"].setpoint, Some(21.0));
+        assert_eq!(d.adjust, None);
+    }
+
+    #[test]
+    fn held_device_keeps_its_value() {
+        let mut c = corrected(21.6, 30);
+        c.devices = vec![dev_step("a", 0.5), dev_step("b", 0.5)];
+        c.overrides = vec![dev_ov("a", 20.0)];
+        let d = c.run();
+        assert_eq!(d.entities["a"].setpoint, Some(20.0));
+        assert!(d.entities["a"].held);
+        assert_eq!(d.entities["b"].setpoint, Some(18.5));
+    }
+
+    #[test]
+    fn all_held_freezes() {
+        let mut c = corrected(22.0, 30);
+        c.devices = vec![dev_step("a", 0.5), dev_step("b", 0.5)];
+        c.overrides = vec![dev_ov("a", 20.0), dev_ov("b", 20.0)];
+        c.feedback = Some(FeedbackState {
+            target: 19.0,
+            offset: -0.5,
+            since: NOW - 7200,
+            last_step_at: Some(NOW - 7200),
+        });
+        let d = c.run();
+        assert_eq!(d.adjust, Some(-0.5));
+        assert_eq!(d.entities["a"].setpoint, Some(20.0));
+        assert_eq!(d.entities["b"].setpoint, Some(20.0));
+    }
+
+    #[test]
+    fn coarse_device_sets_the_step() {
+        let mut c = corrected(21.6, 30);
+        c.devices = vec![dev_step("a", 0.5), dev_step("b", 1.0)];
+        let d = c.run();
+        assert_eq!(d.adjust, Some(-1.0));
+        assert_eq!(d.entities["a"].setpoint, Some(18.0));
+        assert_eq!(d.entities["b"].setpoint, Some(18.0));
+    }
+
+    #[test]
+    fn silent_thermometer_sends_the_schedule() {
+        let d = corrected(21.6, 7 * 3600).run();
+        assert_eq!(d.entities["trv"].setpoint, Some(19.0));
+        assert_eq!(d.adjust, None);
+        assert!(d.reason.contains("silent: no correction"), "{}", d.reason);
+    }
+
+    #[test]
+    fn stale_reading_but_quiet_thermometer_still_corrects() {
+        let mut c = corrected(21.0, 2 * 3600);
+        c.reading = Reading::Fresh {
+            value: 20.0,
+            age_s: 30,
+            from_sensor: false,
+            sensor_stale: true,
+        };
+        let d = c.run();
+        assert_eq!(d.entities["trv"].setpoint, Some(18.5));
     }
 
     #[test]

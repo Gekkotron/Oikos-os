@@ -12,6 +12,7 @@ use oikos_climate::doc::{Mode, Override, OverrideOrigin, Setpoint, ZoneState};
 use oikos_climate::view::{DecisionLog, ZoneView};
 
 use crate::api::climate::{self as api, OverrideBody};
+use crate::climate::correction_card::CorrectionCard;
 use crate::climate::entity_field::ThermometerField;
 use crate::climate::proposal::{ProposalPanel, RulesPanel};
 use crate::climate::{
@@ -32,6 +33,9 @@ use crate::i18n::{current_lang, use_lang};
 const RECENT: usize = 10;
 /// How many decisions the hub is asked for when the list opens.
 const FETCH: u32 = 50;
+
+/// A thermometer reading this old shows its age under the reading (15 min).
+const THERMOMETER_AGE_SHOWN_S: u64 = 15 * 60;
 
 const STATES: [(ZoneState, ClimateText); 3] = [
     (ZoneState::Off, ClimateText::ZoneOff),
@@ -106,6 +110,22 @@ pub fn RoomPanel(
             (Some(_), Some(age)) => now_with_age(lang(), &age_text(lang(), age)),
             _ => t(ClimateText::Now).to_owned(),
         })
+    };
+    // The room thermometer's own value and age, when it is older than the reading's freshness.
+    let thermometer_line = move || {
+        zone.with(|z| {
+            z.thermometer
+                .as_ref()
+                .filter(|th| th.age_s >= THERMOMETER_AGE_SHOWN_S)
+                .map(|th| {
+                    format!(
+                        "{} · {}",
+                        degrees_text(lang(), th.value),
+                        age_text(lang(), th.age_s)
+                    )
+                })
+        })
+        .map(|line| view! { <span class="climate-status__label">{line}</span> })
     };
     let target = move || {
         zone.with(|z| {
@@ -439,6 +459,7 @@ pub fn RoomPanel(
                     <div class="climate-status__figure">
                         <span class="climate-status__label">{reading_label}</span>
                         <strong class="climate-status__reading">{reading}</strong>
+                        {thermometer_line}
                     </div>
                     <div class="climate-status__figure">
                         <span class="climate-status__label">{move || t(ClimateText::Target)}</span>
@@ -553,6 +574,7 @@ pub fn RoomPanel(
                         on_change=set_sensor
                     />
                 </div>
+                <CorrectionCard zone=zone on_changed=on_changed />
                 <div class="card climate-decisions">
                     <button
                         type="button"

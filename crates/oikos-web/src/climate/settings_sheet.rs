@@ -42,7 +42,7 @@ fn hhmm_text(t: HhMm) -> String {
 
 /// What a settings number is measured in.
 #[derive(Clone, Copy)]
-enum Unit {
+pub enum Unit {
     Celsius,
     Word(ClimateText),
 }
@@ -50,7 +50,7 @@ enum Unit {
 /// A number input ("21.5" or "21,5"); an unparsable edit is ignored so the field keeps its last
 /// good value.
 #[component]
-fn NumField(
+pub fn NumField(
     label: ClimateText,
     unit: Unit,
     value: Signal<f64>,

@@ -114,6 +114,7 @@ pub(crate) fn commands_from_rows(tz: Tz, rows: &[ClimateDecisionRow]) -> Vec<Eng
                 setpoint: row.setpoint,
                 mode: row.mode.clone(),
                 source,
+                adjust: row.adjust,
             })
         })
         .collect()
@@ -565,6 +566,7 @@ mod tests {
             source: source.into(),
             reason: String::new(),
             applied: true,
+            adjust: None,
         }
     }
 

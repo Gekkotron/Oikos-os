@@ -1,5 +1,6 @@
 //! The Climate screen's parts: the zone card, the settings sheet and the pure text helpers.
 
+pub mod correction_card;
 pub mod entity_field;
 pub mod proposal;
 pub mod room_list;
@@ -395,6 +396,8 @@ mod tests {
             reading: None,
             reading_age_s: None,
             room_sensor: None,
+            thermometer: None,
+            correction_step_at: None,
             decision: None,
             overrides: vec![],
             proposal: None,
@@ -405,6 +408,7 @@ mod tests {
     fn decided(mut z: ZoneView, setpoint: Setpoint) -> ZoneView {
         z.decision = Some(Decision {
             eco_restore: Default::default(),
+            adjust: None,
             zone: z.zone.clone(),
             mode: Some(Mode::Heat),
             setpoint: Some(setpoint),
