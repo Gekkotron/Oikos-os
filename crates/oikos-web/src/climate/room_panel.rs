@@ -14,6 +14,7 @@ use oikos_climate::view::{DecisionLog, ZoneView};
 use crate::api::climate::{self as api, OverrideBody};
 use crate::climate::correction_card::CorrectionCard;
 use crate::climate::entity_field::ThermometerField;
+use crate::climate::presence_card::PresenceCard;
 use crate::climate::proposal::{ProposalPanel, RulesPanel};
 use crate::climate::{
     age_text, can_hold, decision_line, degrees_text, eco_end_text, eco_until, learn_status_text,
@@ -575,6 +576,7 @@ pub fn RoomPanel(
                     />
                 </div>
                 <CorrectionCard zone=zone on_changed=on_changed />
+                <PresenceCard zone=zone tz=tz on_changed=on_changed />
                 <div class="card climate-decisions">
                     <button
                         type="button"

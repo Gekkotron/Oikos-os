@@ -2,6 +2,7 @@
 
 pub mod correction_card;
 pub mod entity_field;
+pub mod presence_card;
 pub mod proposal;
 pub mod room_list;
 pub mod room_panel;

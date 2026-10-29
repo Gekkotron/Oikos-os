@@ -21,13 +21,16 @@ pub fn is_thermometer(entity: &EntityView) -> bool {
 /// Whether `e` reports presence: a presence, occupancy or motion sensor, a tracker or an alarm
 /// panel (the hub reads its armed state as "home").
 pub fn is_presence(e: &EntityView) -> bool {
-    e.kind == Kind::AlarmPanel
-        || (e.kind == Kind::BinarySensor
-            && matches!(
-                e.device_class.as_deref(),
-                Some("presence" | "occupancy" | "motion")
-            ))
-        || is_tracker(e)
+    e.kind == Kind::AlarmPanel || is_room_presence(e) || is_tracker(e)
+}
+
+/// Whether `e` detects someone in a room: a presence, occupancy or motion binary sensor.
+pub fn is_room_presence(e: &EntityView) -> bool {
+    e.kind == Kind::BinarySensor
+        && matches!(
+            e.device_class.as_deref(),
+            Some("presence" | "occupancy" | "motion")
+        )
 }
 
 /// Whether `e` has an on/off state: a switch or a binary sensor, or a virtual switch.
@@ -107,6 +110,31 @@ mod tests {
             .insert("state".into(), vec!["home".into(), "not_home".into()]);
         e.capabilities.generic = Some(caps);
         e
+    }
+
+    #[test]
+    fn room_presence_takes_binary_sensors_only() {
+        for class in ["presence", "occupancy", "motion"] {
+            assert!(is_room_presence(&ent(
+                "p",
+                Kind::BinarySensor,
+                Some(class),
+                "binary_sensor"
+            )));
+        }
+        assert!(!is_room_presence(&ent(
+            "d",
+            Kind::BinarySensor,
+            Some("door"),
+            "binary_sensor"
+        )));
+        assert!(!is_room_presence(&ent(
+            "al",
+            Kind::AlarmPanel,
+            None,
+            "alarm_control_panel"
+        )));
+        assert!(!is_room_presence(&tracker()));
     }
 
     #[test]

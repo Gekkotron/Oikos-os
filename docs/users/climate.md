@@ -48,12 +48,12 @@ Each area with a climate device is a zone. A zone is in one of three states:
 
 ## How a zone is decided
 
-The engine decides per zone from a priority tree, and every decision carries its `source` (`safety`, `override`, `holiday`, `eco`, `away`, `schedule` or `idle`) and a `reason`:
+The engine decides per zone from a priority tree, and every decision carries its `source` (`safety`, `override`, `holiday`, `eco`, `away`, `empty`, `schedule` or `idle`) and a `reason`:
 
 1. **Safety** comes first and always acts: frost, overheat, overcool, and a stale reading (no usable temperature, so no schedule, override or eco setpoint is sent to an active zone). A safety cause that holds stays until the reading is clearly back inside its limit.
 2. **Pending**: a pending zone does nothing beyond safety.
 3. **Zone override**: a whole-zone target and/or mode held for a number of minutes or until a time.
-4. **Rules**: holiday, then eco (the zone's own eco, or the whole house's while nobody is home), then the schedule.
+4. **Rules**: holiday, then eco (the zone's own eco, or the whole house's while nobody is home), then the schedule, set back while the room is empty (see [Room presence](#room-presence)).
 
 Per-device overrides (hand changes) sit on top of the rules and hold their device whatever the zone does.
 
@@ -87,8 +87,20 @@ If the thermometer has not reported for `quiet_limit_min` (6 h), the correction 
 
 Each correction is written in the decision's reason, for example "room above 19.5 °C: AC 18.5 °C (-0.5)", and appears under **Recent decisions**. The settings live in the zone's `feedback` block (`enabled`, `band`, `step`, `interval_min`, `warmup_min`, `max_below`, `max_above`, `quiet_limit_min`).
 
+## Room presence
+
+Eco covers a house nobody is in. **Room presence** covers a room nobody is in while the rest of the house is lived in: after a while with no one detected in it, the room's schedule block is lowered (raised in cool) until someone stays again. It is off by default and set per room, on the room's **Room presence** card on the Climate screen, where you pick the room's presence sensors (its occupancy, motion and presence binary sensors).
+
+- **Empty**: no sensor has detected anyone for `empty_after_min` (30 min). Any one sensor detecting counts, and a motion sensor's short pulse between two passes counts too.
+- **Occupied again**: someone is still detected near the end of `back_after_min` (5 min) after the first detection. Walking through the room does not end the setback; staying does, within about those 5 min.
+- Sensors that are unavailable are ignored. With none picked, or all unavailable, the room counts as occupied. After a hub restart the room counts as occupied until `empty_after_min` passes with nobody detected.
+
+It acts only during a schedule **block** of an active room with a temperature target: outside blocks the room is already at its base. In heat the block is lowered by `setback` (2 °C), never under the rules' base or the frost limit; in cool it is raised by `setback`, never over the base. Safety, overrides, holiday, eco and the whole house's "nobody home" come first, and a temperature set by hand on a unit still holds that unit.
+
+The decision's source is `empty`, shown as **Empty room** under **Recent decisions**, with a reason such as "No one in the room for 30 min: 17.0 °C (19.0 − 2.0)". The card says whether the room counts as occupied or since when it is empty. The [thermometer correction](#thermometer-correction) works on top, against the lowered target, and starts again from 0 when the setback starts or ends. The learner ignores the time a room spent set back. The settings live in the zone's `presence` block (`enabled`, `sensors`, `empty_after_min`, `back_after_min`, `setback`); over MCP, `set_climate_zone` takes them and `get_climate_zone` shows the live state (`presence.empty_since`).
+
 ## The learner and proposals
 
-The learner builds a weekly schedule from the devices' target history (time held in eco, away, holiday, safety or an override is not evidence) in the history database and proposes it with the evidence behind it. Once a schedule is approved, a part of it changes only where enough days (**Agreement needed**) held the same other value there: hand changes that vary from day to day keep the approved block, and days with no data keep theirs. Nothing applies until it is approved, through REST, MCP or the push button. The hub remembers a fingerprint of each rejected rule set. A room in eco is not learned until its eco ends (its learning state reads `eco`, "Learning paused while in eco"), so no new proposal arrives for it meanwhile; a proposal made before the eco stays. Requires [History](history.md).
+The learner builds a weekly schedule from the devices' target history (time held in eco, away, a room set back as empty, holiday, safety or an override is not evidence) in the history database and proposes it with the evidence behind it. Once a schedule is approved, a part of it changes only where enough days (**Agreement needed**) held the same other value there: hand changes that vary from day to day keep the approved block, and days with no data keep theirs. Nothing applies until it is approved, through REST, MCP or the push button. The hub remembers a fingerprint of each rejected rule set. A room in eco is not learned until its eco ends (its learning state reads `eco`, "Learning paused while in eco"), so no new proposal arrives for it meanwhile; a proposal made before the eco stays. Requires [History](history.md).
 
 The approval routes and the rest of the climate API are in the [HTTP API](../reference/http-api.md); the MCP tools are in [MCP tools](../reference/mcp-tools.md).
