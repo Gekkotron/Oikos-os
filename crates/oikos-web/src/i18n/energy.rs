@@ -48,6 +48,10 @@ pub enum EnergyText {
     CircleExport,
     CircleCharging,
     CircleDischarging,
+    // Orbite view.
+    ComingIn,
+    GoingOut,
+    InTheHouse,
 }
 
 /// A fixed word of the energy area.
@@ -109,6 +113,9 @@ pub fn energy_text(lang: Lang, k: EnergyText) -> &'static str {
         CircleExport => ("export", "export"),
         CircleCharging => ("charging", "charge"),
         CircleDischarging => ("discharging", "d\u{e9}charge"),
+        ComingIn => ("Coming in", "Entrant"),
+        GoingOut => ("Going out", "Sortant"),
+        InTheHouse => ("in the house", "dans la maison"),
     };
     match lang {
         Lang::En => en,
@@ -304,6 +311,9 @@ mod tests {
             CircleExport,
             CircleCharging,
             CircleDischarging,
+            ComingIn,
+            GoingOut,
+            InTheHouse,
         ];
         crate::i18n::assert_table(
             ALL,

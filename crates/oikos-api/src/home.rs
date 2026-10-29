@@ -37,6 +37,8 @@ pub enum EnergyView {
     Classic,
     /// The Sankey diagram.
     Flux,
+    /// The double ring.
+    Orbite,
 }
 
 #[cfg(test)]
@@ -76,6 +78,12 @@ mod tests {
     fn energy_view_is_lowercase_and_refuses_unknown_values() {
         let s: HomeSettings = serde_json::from_value(json!({"energy_view": "flux"})).unwrap();
         assert_eq!(s.energy_view, EnergyView::Flux);
+        let s: HomeSettings = serde_json::from_value(json!({"energy_view": "orbite"})).unwrap();
+        assert_eq!(s.energy_view, EnergyView::Orbite);
+        assert_eq!(
+            serde_json::to_value(EnergyView::Orbite).unwrap(),
+            json!("orbite")
+        );
         assert!(serde_json::from_value::<HomeSettings>(json!({"energy_view": "orbit"})).is_err());
     }
 }

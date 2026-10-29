@@ -210,6 +210,7 @@ const PROPERTIES: &[&str] = &[
     "d",
     "stroke",
     "stroke-width",
+    "stroke-dasharray",
     "animation-duration",
     "animation-delay",
     "transition",

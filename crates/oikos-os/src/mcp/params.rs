@@ -591,7 +591,7 @@ pub struct SetHomeSettingsParams {
     /// The whole home settings document; it replaces the current one. `eco_setpoint` is in
     /// 5..=30 °C, `mode_entity` a select entity id, `indoor_entity` a temperature sensor id,
     /// `cold_below` and `hot_above` 5..=35 °C with `cold_below` lower; `null` or absent clears
-    /// a field. `energy_view` is `classic` (the default) or `flux`.
+    /// a field. `energy_view` is `classic` (the default), `flux` or `orbite`.
     pub settings: oikos_api::HomeSettings,
 }
 

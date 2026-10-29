@@ -15,7 +15,7 @@ use crate::i18n::{Key, Lang, text, use_lang};
 use crate::sankey_layout::{Anchor, LINE, NARROW, Placed, WIDE, place};
 use crate::screens::energy::short;
 
-fn fold_at(narrow: bool) -> usize {
+pub(crate) fn fold_at(narrow: bool) -> usize {
     if narrow { FOLD_NARROW } else { FOLD_WIDE }
 }
 
@@ -27,18 +27,18 @@ pub fn flux_folded(ui: &EnergyUi, narrow: bool) -> bool {
 /// The theme variable a node is drawn in.
 fn color_var(role: SankeyRole, slot: usize) -> &'static str {
     match role {
-        SankeyRole::Solar => "--solar",
-        SankeyRole::Grid => "--accent-violet",
-        SankeyRole::Battery | SankeyRole::Export | SankeyRole::BatteryCharge => "--accent-mint",
+        SankeyRole::Solar => "--energy-solar",
+        SankeyRole::Grid => "--energy-grid",
+        SankeyRole::Battery | SankeyRole::Export | SankeyRole::BatteryCharge => "--energy-battery",
         SankeyRole::House => "--ink",
-        SankeyRole::Unitemised | SankeyRole::Others => "--flux-muted",
-        // Consumer colours are defined in `.energy-flux` and never reuse a source colour.
+        SankeyRole::Unitemised | SankeyRole::Others => "--energy-muted",
+        // Consumer colours are defined on `.energy` and never reuse a source colour.
         SankeyRole::Consumer => [
-            "--flux-c0",
-            "--flux-c1",
-            "--flux-c2",
-            "--flux-c3",
-            "--flux-c4",
+            "--energy-c0",
+            "--energy-c1",
+            "--energy-c2",
+            "--energy-c3",
+            "--energy-c4",
         ][slot % 5],
     }
 }
@@ -60,7 +60,7 @@ fn role_class(role: SankeyRole, slot: usize) -> String {
 
 /// The words of a node: its name, from the UI words for everything but a consumer; cut short on
 /// phones (Classic's `LABEL_CHARS`).
-fn node_name(lang: Lang, model: &Sankey, id: &str, narrow: bool) -> String {
+pub(crate) fn node_name(lang: Lang, model: &Sankey, id: &str, narrow: bool) -> String {
     let Some(n) = model.nodes.iter().find(|n| n.id == id) else {
         return String::new();
     };
@@ -520,5 +520,20 @@ pub fn FluxDiagram(
                 </svg>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn colours_come_from_the_shared_palette() {
+        assert_eq!(color_var(SankeyRole::Solar, 0), "--energy-solar");
+        assert_eq!(color_var(SankeyRole::Grid, 0), "--energy-grid");
+        assert_eq!(color_var(SankeyRole::Export, 0), "--energy-battery");
+        assert_eq!(color_var(SankeyRole::Consumer, 6), "--energy-c1");
+        assert_eq!(color_var(SankeyRole::Others, 0), "--energy-muted");
+        assert_eq!(color_var(SankeyRole::House, 0), "--ink");
     }
 }

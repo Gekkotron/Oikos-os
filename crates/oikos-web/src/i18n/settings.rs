@@ -32,6 +32,8 @@ pub enum SettingsText {
     EnergyViewHint,
     EnergyViewClassic,
     EnergyViewFlux,
+    EnergyViewOrbite,
+    EnergyPreview,
     Yes,
     No,
     Copy,
@@ -102,6 +104,8 @@ impl SettingsText {
         SettingsText::EnergyViewHint,
         SettingsText::EnergyViewClassic,
         SettingsText::EnergyViewFlux,
+        SettingsText::EnergyViewOrbite,
+        SettingsText::EnergyPreview,
         SettingsText::Yes,
         SettingsText::No,
         SettingsText::Copy,
@@ -205,6 +209,11 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
         ),
         T::EnergyViewClassic => ("Classic", "Classique"),
         T::EnergyViewFlux => ("Flux", "Flux"),
+        T::EnergyViewOrbite => ("Orbite", "Orbite"),
+        T::EnergyPreview => (
+            "Preview with sample values",
+            "Aperçu avec des valeurs d'exemple",
+        ),
         T::Yes => ("Yes", "Oui"),
         T::No => ("No", "Non"),
         T::Copy => ("Copy", "Copier"),
@@ -331,6 +340,7 @@ mod tests {
         SettingsText::ThemeNight,
         SettingsText::ThemeIvoire,
         SettingsText::EnergyViewFlux,
+        SettingsText::EnergyViewOrbite,
         SettingsText::Version,
         SettingsText::Transport,
         SettingsText::ClaudeCode,
@@ -347,7 +357,7 @@ mod tests {
     #[test]
     fn all_lists_every_variant() {
         // The match in `settings_text` is exhaustive, so a new variant only needs listing here.
-        assert_eq!(SettingsText::ALL.len(), 66);
+        assert_eq!(SettingsText::ALL.len(), 68);
     }
 
     #[test]

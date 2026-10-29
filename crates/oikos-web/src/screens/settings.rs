@@ -19,6 +19,7 @@ use crate::i18n::setup::{SetupText, setup_text};
 use crate::i18n::{Key, Lang, text, use_lang};
 use crate::nav::BackLink;
 use crate::screens::alarm_settings::{AlarmSettingsPage, settings_status};
+use crate::screens::energy_preview::EnergyPreview;
 use crate::screens::entity_sheet::availability_class;
 use crate::screens::home_settings_panel::HomeSettingsPanel;
 use crate::setup::connection::{DatabaseForm, MqttForm};
@@ -183,6 +184,7 @@ fn EnergyViewSwitch() -> impl IntoView {
         <div class="segmented" role="group" aria-label=move || settings_text(lang(), T::EnergyView)>
             {segment(EnergyView::Classic, T::EnergyViewClassic)}
             {segment(EnergyView::Flux, T::EnergyViewFlux)}
+            {segment(EnergyView::Orbite, T::EnergyViewOrbite)}
         </div>
     }
 }
@@ -574,6 +576,7 @@ fn DatabasePage() -> impl IntoView {
 
 #[component]
 fn AppearancePage() -> impl IntoView {
+    let house = expect_context::<House>();
     let lang = use_lang();
     view! {
         <Panel title=T::Theme>
@@ -582,6 +585,7 @@ fn AppearancePage() -> impl IntoView {
         </Panel>
         <Panel title=T::EnergyView>
             <EnergyViewSwitch />
+            <EnergyPreview view=Signal::derive(move || energy_view(house)) />
             <p class="settings__hint">{move || settings_text(lang(), T::EnergyViewHint)}</p>
         </Panel>
     }

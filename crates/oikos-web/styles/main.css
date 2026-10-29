@@ -4629,13 +4629,33 @@ html:has(.flow-canvas-screen) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* Consumers never reuse a source colour (solar amber, grid violet, battery/export mint). */
-  --flux-c0: var(--accent-cyan);
-  --flux-c1: var(--accent-rose);
-  --flux-c2: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-violet));
-  --flux-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
-  --flux-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
-  --flux-muted: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+
+/* One palette for Classic, Flux, Orbite and the Settings preview. Consumers never reuse a source colour. */
+.energy,
+.energy-preview {
+  --energy-solar: var(--solar);
+  --energy-grid: var(--accent-violet);
+  --energy-battery: var(--accent-mint);
+  --energy-c0: var(--accent-cyan);
+  --energy-c1: var(--accent-rose);
+  --energy-c2: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-violet));
+  --energy-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
+  --energy-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
+  --energy-muted: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+
+/* Ivoire: Candy colours, the app's muted tokens would read as sad. */
+:root[data-theme="light"] :is(.energy, .energy-preview) {
+  --energy-solar: #ffb21f;
+  --energy-grid: #9a7bff;
+  --energy-battery: #2fd3a0;
+  --energy-c0: #35b9f0;
+  --energy-c1: #ff6f91;
+  --energy-c2: #7f9cff;
+  --energy-c3: #ff9a55;
+  --energy-c4: #3fd6c6;
+  --energy-muted: #d9d1c3;
 }
 
 .energy .room__title {
@@ -4767,17 +4787,17 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-flux__bar--solar {
-  fill: var(--solar);
+  fill: var(--energy-solar);
 }
 
 .energy-flux__bar--grid {
-  fill: var(--accent-violet);
+  fill: var(--energy-grid);
 }
 
 .energy-flux__bar--battery,
 .energy-flux__bar--export,
 .energy-flux__bar--charge {
-  fill: var(--accent-mint);
+  fill: var(--energy-battery);
 }
 
 .energy-flux__bar--house {
@@ -4786,27 +4806,27 @@ html:has(.flow-canvas-screen) {
 
 .energy-flux__bar--unitemised,
 .energy-flux__bar--others {
-  fill: var(--flux-muted);
+  fill: var(--energy-muted);
 }
 
 .energy-flux__bar--c0 {
-  fill: var(--flux-c0);
+  fill: var(--energy-c0);
 }
 
 .energy-flux__bar--c1 {
-  fill: var(--flux-c1);
+  fill: var(--energy-c1);
 }
 
 .energy-flux__bar--c2 {
-  fill: var(--flux-c2);
+  fill: var(--energy-c2);
 }
 
 .energy-flux__bar--c3 {
-  fill: var(--flux-c3);
+  fill: var(--energy-c3);
 }
 
 .energy-flux__bar--c4 {
-  fill: var(--flux-c4);
+  fill: var(--energy-c4);
 }
 
 .energy-flux__label {
@@ -4845,18 +4865,349 @@ html:has(.flow-canvas-screen) {
   }
 }
 
+/* Settings > Appearance: a small fixed sketch of the chosen energy view. */
+.energy-preview {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.energy-preview svg {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+  margin: 0 auto;
+}
+
+.energy-preview__caption {
+  margin: 6px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font: var(--type-label);
+}
+
+.energy-preview__flow {
+  stroke: var(--ink);
+  stroke-dasharray: 2 6;
+  opacity: 0.8;
+  animation: energy-preview-run 1.4s linear infinite;
+}
+
+.energy-preview__track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.energy-preview__spin {
+  transform-origin: 75px 48px;
+  animation: energy-preview-spin 18s linear infinite;
+}
+
+.energy-preview__centre {
+  fill: var(--ink);
+  font-weight: 700;
+  font-size: 11px;
+}
+
+@keyframes energy-preview-run {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+@keyframes energy-preview-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .energy-preview__flow,
+  .energy-preview__spin {
+    animation: none;
+  }
+}
+
+/* Orbite: two rings round the house (in inside, out outside), the lists beside or under them. */
+.energy-orbite {
+  --orbite-dot: rgb(255 255 255 / 90%);
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 340px) 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+:root[data-theme="light"] .energy-orbite {
+  --orbite-dot: rgb(255 253 248 / 95%);
+}
+
+.energy-orbite--narrow {
+  grid-template-columns: 1fr;
+}
+
+.energy-orbite--empty {
+  grid-template-columns: 1fr;
+}
+
+.energy-orbite__ring {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  width: 100%;
+  max-width: 340px;
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
+
+.energy-orbite--narrow .energy-orbite__ring,
+.energy-orbite--empty .energy-orbite__ring {
+  grid-column: 1;
+}
+
+.energy-orbite__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.energy-orbite__track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.energy-orbite__arc {
+  filter: drop-shadow(0 0 6px currentColor);
+  transition:
+    stroke-dasharray 0.6s var(--ease),
+    stroke-dashoffset 0.6s var(--ease),
+    opacity 0.25s;
+}
+
+:root[data-theme="light"] .energy-orbite__arc {
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, currentColor 45%, transparent));
+}
+
+.energy-orbite__arc--click {
+  cursor: pointer;
+}
+
+.energy-orbite--dim .energy-orbite__arc:not(.energy-orbite__arc--hot) {
+  opacity: 0.25;
+}
+
+.energy-orbite__dots circle {
+  fill: var(--orbite-dot);
+  pointer-events: none;
+}
+
+.energy-orbite__centre {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.energy-orbite__ico {
+  width: 22px;
+  height: 22px;
+  margin-bottom: 2px;
+  color: var(--muted);
+}
+
+.energy-orbite__ico svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.energy-orbite__house {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.energy-orbite__small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.energy-orbite__mix {
+  margin-top: 6px;
+  color: var(--energy-solar);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.energy-orbite__empty {
+  color: var(--muted);
+  text-align: center;
+}
+
+.energy-orbite__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.energy-orbite__list {
+  width: 100%;
+  max-width: 300px;
+}
+
+.energy-orbite__list--in {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.energy-orbite__list--out {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: start;
+}
+
+.energy-orbite--narrow .energy-orbite__list--in,
+.energy-orbite--narrow .energy-orbite__list--out {
+  grid-column: 1;
+  max-width: none;
+  justify-self: stretch;
+}
+
+.energy-orbite--narrow .energy-orbite__list--in {
+  grid-row: 2;
+  margin-top: 10px;
+}
+
+.energy-orbite--narrow .energy-orbite__list--out {
+  grid-row: 3;
+  margin-top: 10px;
+}
+
+.energy-orbite__list h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.energy-orbite__list--in h3 {
+  text-align: right;
+}
+
+.energy-orbite--narrow .energy-orbite__list--in h3 {
+  text-align: left;
+}
+
+.energy-orbite__row {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    opacity 0.2s;
+}
+
+.energy-orbite__row--static {
+  cursor: default;
+}
+
+.energy-orbite__row:hover,
+.energy-orbite__row--hot {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.energy-orbite__row:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.energy-orbite--dim .energy-orbite__row:not(.energy-orbite__row--hot) {
+  opacity: 0.45;
+}
+
+.energy-orbite__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.energy-orbite__who,
+.energy-orbite__nums {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.energy-orbite__nums {
+  align-items: flex-end;
+}
+
+.energy-orbite__name {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.energy-orbite__note,
+.energy-orbite__pct {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.energy-orbite__val {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .energy-orbite__arc,
+  .energy-orbite__row {
+    transition: none;
+  }
+
+  .energy-orbite__dots {
+    display: none;
+  }
+}
+
 /* Classic: glowing circles joined by gradient wires. */
 .energy-circles {
-  --tone-solar: var(--solar);
-  --tone-grid: var(--accent-violet);
-  --tone-export: var(--accent-mint);
-  --tone-battery: var(--accent-mint);
+  --tone-solar: var(--energy-solar);
+  --tone-grid: var(--energy-grid);
+  --tone-export: var(--energy-battery);
+  --tone-battery: var(--energy-battery);
   --tone-house: var(--ink);
   --tone-water: var(--accent-cyan);
-  --tone-more: var(--flux-muted);
-  --tone-c0: var(--flux-c0);
-  --tone-c1: var(--flux-c1);
-  --tone-c2: var(--flux-c2);
+  --tone-more: var(--energy-muted);
+  --tone-c0: var(--energy-c0);
+  --tone-c1: var(--energy-c1);
+  --tone-c2: var(--energy-c2);
   --energy-glow: 1;
   aspect-ratio: 800 / 410;
 }
@@ -4868,6 +5219,7 @@ html:has(.flow-canvas-screen) {
 /* Ivoire: the ink would turn the house disc, halo and wires gray; a warm sand keeps them in the palette. */
 :root[data-theme="light"] .energy-circles {
   --tone-house: var(--wire);
+  --tone-water: #35b9f0;
   --energy-glow: 0.45;
 }
 
@@ -5009,7 +5361,7 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-node__share {
-  fill: var(--solar);
+  fill: var(--energy-solar);
   font: 600 11px var(--font-body);
 }
 

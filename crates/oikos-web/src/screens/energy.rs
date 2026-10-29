@@ -1,8 +1,8 @@
 //! The Energy screen: the live power flow of the house, a port of the app's Energy tab.
 //!
-//! The live diagram is Classic's glowing circles (`energy_circles`) or the Flux Sankey
-//! (`energy_flux`); the glyphs are the icon constants, so the same strings serve the cards and
-//! both diagrams.
+//! The live diagram is Classic's glowing circles (`energy_circles`), the Flux Sankey
+//! (`energy_flux`) or the Orbite rings (`energy_orbite`); the glyphs are the icon constants, so
+//! the same strings serve the cards and all three diagrams.
 
 use std::collections::BTreeMap;
 
@@ -29,6 +29,7 @@ use crate::icons::{consumer_icon, role_icon};
 use crate::screens::energy_circles::CirclesDiagram;
 use crate::screens::energy_day::GridDayCard;
 use crate::screens::energy_flux::{FluxDiagram, flux_folded};
+use crate::screens::energy_orbite::OrbiteDiagram;
 
 /// Longest label drawn before it is ellipsised.
 const LABEL_CHARS: usize = 12;
@@ -330,7 +331,7 @@ pub fn EnergyScreen() -> impl IntoView {
         built
     });
     let narrow = narrow();
-    let classic = move || energy_view(house) == EnergyView::Classic;
+    let view_choice = Memo::new(move |_| energy_view(house));
     let names = Memo::new(move |_| {
         house.entities.with(|m| {
             m.values()
@@ -347,12 +348,9 @@ pub fn EnergyScreen() -> impl IntoView {
     let hint = move || ui.with(|u| u.hint == Some(EnergyHint::CheckSign));
     let cards = move || ui.with(|u| u.cards.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
     let folded = move || {
-        ui.with(|u| {
-            if classic() {
-                u.consumers.len() > ARC_SLOTS
-            } else {
-                flux_folded(u, narrow)
-            }
+        ui.with(|u| match view_choice.get() {
+            EnergyView::Classic => u.consumers.len() > ARC_SLOTS,
+            EnergyView::Flux | EnergyView::Orbite => flux_folded(u, narrow),
         })
     };
 
@@ -392,16 +390,24 @@ pub fn EnergyScreen() -> impl IntoView {
                     <Show when=hint>
                         <p class="energy__hint">{move || word(lang(), EnergyText::CheckSign)}</p>
                     </Show>
-                    <Show
-                        when=classic
-                        fallback=move || {
+                    {move || match view_choice.get() {
+                        EnergyView::Classic => {
                             view! {
-                                <FluxDiagram ui=ui narrow=narrow open=open expanded=expanded />
+                                <CirclesDiagram ui=ui narrow=narrow open=open expanded=expanded />
                             }
+                                .into_any()
                         }
-                    >
-                        <CirclesDiagram ui=ui narrow=narrow open=open expanded=expanded />
-                    </Show>
+                        EnergyView::Flux => {
+                            view! { <FluxDiagram ui=ui narrow=narrow open=open expanded=expanded /> }
+                                .into_any()
+                        }
+                        EnergyView::Orbite => {
+                            view! {
+                                <OrbiteDiagram ui=ui narrow=narrow open=open expanded=expanded />
+                            }
+                                .into_any()
+                        }
+                    }}
                     <Show when=folded>
                         <button
                             type="button"
