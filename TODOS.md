@@ -4,11 +4,6 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ## Dashboards (landed on `feat/dashboards`, 2026-10-22; triaged 2026-10-24)
 
-### P2 — polish / test coverage
-
-- `WidgetConfigSheet` has no entity/target picker — swap-target requires delete + re-add.
-- HistoryChart entry filter in the widget library uses Sensor entities only; spec says "any entity with history".
-
 ### P3 — cosmetic / backlog
 
 - Two concurrent PUTs can pick the same `next_free_order` (lock released between read and publish). Fine single-user; add a guard if the hub grows multi-writer.

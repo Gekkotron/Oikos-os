@@ -1,12 +1,13 @@
 use leptos::prelude::*;
 use oikos_api::EntityView;
-use oikos_core::dashboard::{Widget, WidgetConfig, WidgetKind};
+use oikos_core::dashboard::{DashboardHistoryRange, Widget, WidgetConfig, WidgetKind};
 
 use super::camera_widget::CameraWidget;
 use super::config_sheet::title_of;
 use super::energy_stat::EnergyStatWidget;
 use super::flow_button::FlowButtonWidget;
 use super::history_widget::HistoryWidget;
+use super::library::target_id;
 use super::room_group::RoomGroupWidget;
 use crate::cards::climate::ClimateCard;
 use crate::cards::cover::CoverCard;
@@ -16,6 +17,16 @@ use crate::cards::sensor::SensorCard;
 use crate::cards::water_heater::WaterHeaterCard;
 use crate::house::House;
 use crate::i18n::{use_lang, widget_kind_word, widget_placeholder};
+
+/// What a widget's card is built from, apart from the title and a Camera widget's list (both
+/// followed live): its target and a history chart's range.
+pub fn shown(config: &WidgetConfig) -> (Option<String>, Option<DashboardHistoryRange>) {
+    let range = match config {
+        WidgetConfig::History { range, .. } => Some(*range),
+        _ => None,
+    };
+    (target_id(config).map(str::to_owned), range)
+}
 
 /// Picks the card for a widget. An entity card takes a copy of its entity, so it is rebuilt on
 /// each change of that entity, as a room's cards are; the history chart only waits for its

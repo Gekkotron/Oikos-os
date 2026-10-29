@@ -141,6 +141,74 @@ fn subline(entity: &EntityView, areas: &[AreaView], title: &str) -> Option<Strin
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
+/// Whether the hub records a chartable number for this kind (`oikos_core::history::num_of`):
+/// on/off is a 0/1 step, a cover its position, a climate or water heater its reading. Text,
+/// alarm, vacuum, select and button states have none, and a generic entity only when its type
+/// says so, which the web does not know.
+fn charts(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::Light
+            | Kind::Switch
+            | Kind::Cover
+            | Kind::Climate
+            | Kind::Sensor
+            | Kind::BinarySensor
+            | Kind::Number
+            | Kind::WaterHeater
+    )
+}
+
+/// What a widget of `kind` can be pointed at, as `(target id, label)`: the library's rows of
+/// that kind, labelled "title · room · device". Camera widgets edit their list instead.
+pub fn targets(
+    lang: Lang,
+    kind: WidgetKind,
+    entities: &BTreeMap<String, EntityView>,
+    areas: &[AreaView],
+    flows: &[(String, String)],
+) -> Vec<(String, String)> {
+    entries(lang, "", entities, areas, flows, &[])
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .filter_map(|e| {
+            let id = target_id(&e.config)?.to_owned();
+            let label = match e.sub {
+                Some(sub) => format!("{} · {sub}", e.title),
+                None => e.title,
+            };
+            Some((id, label))
+        })
+        .collect()
+}
+
+/// The one thing a widget shows: its entity, room, flow or energy metric. `None` for a
+/// Camera widget, which shows a list.
+pub fn target_id(config: &WidgetConfig) -> Option<&str> {
+    match config {
+        WidgetConfig::Entity { entity_id, .. } | WidgetConfig::History { entity_id, .. } => {
+            Some(entity_id)
+        }
+        WidgetConfig::Area { area_id, .. } => Some(area_id),
+        WidgetConfig::Flow { flow_id, .. } => Some(flow_id),
+        WidgetConfig::Energy { metric, .. } => Some(metric),
+        WidgetConfig::Cameras { .. } => None,
+    }
+}
+
+/// Points the widget at `id`, keeping its title and range.
+pub fn retarget(config: &mut WidgetConfig, id: String) {
+    match config {
+        WidgetConfig::Entity { entity_id, .. } | WidgetConfig::History { entity_id, .. } => {
+            *entity_id = id
+        }
+        WidgetConfig::Area { area_id, .. } => *area_id = id,
+        WidgetConfig::Flow { flow_id, .. } => *flow_id = id,
+        WidgetConfig::Energy { metric, .. } => *metric = id,
+        WidgetConfig::Cameras { .. } => {}
+    }
+}
+
 /// What `query` offers to put on a dashboard, ordered by section, then title. A row matches
 /// when its title or second line contains the query, ignoring case and accents. Each Frigate
 /// camera is a row, plus "All cameras" (the first [`MAX_CAMERAS`]) when there are several.
@@ -162,37 +230,41 @@ pub fn entries(
         ]
     };
     for e in entities.values().filter(|e| e.is_primary()) {
-        let (section, kind) = match e.kind {
-            Kind::Light => (Section::Lights, WidgetKind::Light),
-            Kind::Cover => (Section::Covers, WidgetKind::Cover),
-            Kind::Climate => (Section::Climates, WidgetKind::Climate),
-            Kind::Sensor => (Section::Sensors, WidgetKind::Sensor),
-            Kind::WaterHeater => (Section::WaterHeaters, WidgetKind::WaterHeater),
-            Kind::Generic if e.component == "lock" => (Section::Locks, WidgetKind::Lock),
-            _ => continue,
+        let card = match e.kind {
+            Kind::Light => Some((Section::Lights, WidgetKind::Light)),
+            Kind::Cover => Some((Section::Covers, WidgetKind::Cover)),
+            Kind::Climate => Some((Section::Climates, WidgetKind::Climate)),
+            Kind::Sensor => Some((Section::Sensors, WidgetKind::Sensor)),
+            Kind::WaterHeater => Some((Section::WaterHeaters, WidgetKind::WaterHeater)),
+            Kind::Generic if e.component == "lock" => Some((Section::Locks, WidgetKind::Lock)),
+            _ => None,
         };
+        if card.is_none() && !charts(e.kind) {
+            continue;
+        }
         let title = entity_title(lang, e);
         let sub = subline(e, areas, &title);
         let icon = entity_icon(e);
         let words = kind_search_words(e);
         let entity_id = e.id.clone();
-        let config = WidgetConfig::Entity {
-            entity_id: entity_id.clone(),
-            title: None,
-        };
-        rows.push((
-            entity_id.clone(),
-            Entry {
-                section,
-                title: title.clone(),
-                sub: sub.clone(),
-                icon,
-                kind,
-                config,
-            },
-            Some(words.clone()),
-        ));
-        if e.kind == Kind::Sensor {
+        if let Some((section, kind)) = card {
+            rows.push((
+                entity_id.clone(),
+                Entry {
+                    section,
+                    title: title.clone(),
+                    sub: sub.clone(),
+                    icon,
+                    kind,
+                    config: WidgetConfig::Entity {
+                        entity_id: entity_id.clone(),
+                        title: None,
+                    },
+                },
+                Some(words.clone()),
+            ));
+        }
+        if charts(e.kind) {
             rows.push((
                 entity_id.clone(),
                 Entry {
@@ -320,6 +392,16 @@ pub fn entries(
     rows.into_iter().map(|(_, e, _)| e).collect()
 }
 
+/// Every flow as `(id, name)`, for flow-button rows.
+pub(super) fn flow_names(house: House) -> Vec<(String, String)> {
+    house.flows.with(|flows| {
+        flows
+            .iter()
+            .map(|f| (f.definition.id.clone(), f.definition.name.clone()))
+            .collect()
+    })
+}
+
 /// The library. Clicking a row, or Enter on the highlighted one while the search box has the
 /// focus, calls `on_add`; the library stays as it is so several widgets can go in a row. Esc
 /// in the search box clears it.
@@ -335,12 +417,7 @@ pub fn WidgetLibrary(on_add: Callback<Widget>) -> impl IntoView {
 
     let results = Memo::new(move |_| {
         let query = query.get();
-        let flows: Vec<(String, String)> = house.flows.with(|flows| {
-            flows
-                .iter()
-                .map(|f| (f.definition.id.clone(), f.definition.name.clone()))
-                .collect()
-        });
+        let flows = flow_names(house);
         house.entities.with(|entities| {
             house.areas.with(|areas| {
                 cameras
@@ -729,6 +806,96 @@ mod tests {
                 range: DashboardHistoryRange::H24
             }
         );
+    }
+
+    #[test]
+    fn any_entity_with_a_chartable_history_is_offered_as_a_chart() {
+        let entities = house(vec![
+            ent("l1", "Lamp", Kind::Light),
+            ent("sw1", "Plug", Kind::Switch),
+            ent("b1", "Door", Kind::BinarySensor),
+            ent("n1", "Level", Kind::Number),
+            ent("a1", "Alarm", Kind::AlarmPanel),
+            ent("se1", "Mode", Kind::Select),
+            ent("v1", "Robot", Kind::Vacuum),
+        ]);
+        let got = run("", &entities);
+        let mut charted: Vec<_> = of(&got, Section::HistoryCharts)
+            .iter()
+            .filter_map(|e| target_id(&e.config).map(str::to_owned))
+            .collect();
+        charted.sort();
+        assert_eq!(charted, ["b1", "l1", "n1", "sw1"]);
+        // A switch has no card of its own, only the chart.
+        assert!(got.iter().all(|e| e.section == Section::HistoryCharts
+            || target_id(&e.config) != Some("sw1")));
+    }
+
+    #[test]
+    fn targets_list_the_rows_of_one_kind() {
+        let entities = house(vec![
+            ent("l1", "Lamp", Kind::Light),
+            ent("l2", "Desk", Kind::Light),
+            ent("s1", "Temp", Kind::Sensor),
+        ]);
+        let areas = [area("salon", "Salon")];
+        let flows = [("f1".to_owned(), "Night".to_owned())];
+        let lights = targets(Lang::En, WidgetKind::Light, &entities, &areas, &flows);
+        assert_eq!(
+            lights,
+            [
+                ("l2".to_owned(), "Desk · Salon".to_owned()),
+                ("l1".to_owned(), "Lamp · Salon".to_owned()),
+            ]
+        );
+        let charts = targets(
+            Lang::En,
+            WidgetKind::HistoryChart,
+            &entities,
+            &areas,
+            &flows,
+        );
+        assert_eq!(charts.len(), 3);
+        let buttons = targets(Lang::En, WidgetKind::FlowButton, &entities, &areas, &flows);
+        assert_eq!(buttons[0].0, "f1");
+        let rooms = targets(Lang::En, WidgetKind::RoomGroup, &entities, &areas, &flows);
+        assert_eq!(rooms[0].0, "salon");
+        assert!(targets(Lang::En, WidgetKind::Camera, &entities, &areas, &flows).is_empty());
+    }
+
+    #[test]
+    fn retarget_keeps_the_title_and_the_range() {
+        let mut entity = WidgetConfig::Entity {
+            entity_id: "l1".into(),
+            title: Some("Hall".into()),
+        };
+        retarget(&mut entity, "l2".into());
+        assert_eq!(
+            entity,
+            WidgetConfig::Entity {
+                entity_id: "l2".into(),
+                title: Some("Hall".into())
+            }
+        );
+        let mut chart = WidgetConfig::History {
+            entity_id: "s1".into(),
+            range: DashboardHistoryRange::D7,
+        };
+        retarget(&mut chart, "s2".into());
+        assert_eq!(
+            chart,
+            WidgetConfig::History {
+                entity_id: "s2".into(),
+                range: DashboardHistoryRange::D7
+            }
+        );
+        let mut cams = WidgetConfig::Cameras {
+            cameras: vec!["a".into()],
+            title: None,
+        };
+        retarget(&mut cams, "b".into());
+        assert_eq!(target_id(&cams), None);
+        assert!(matches!(cams, WidgetConfig::Cameras { cameras, .. } if cameras == ["a"]));
     }
 
     #[test]

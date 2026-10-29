@@ -229,6 +229,31 @@ async fn a_title_typed_in_the_widget_sheet_shows_on_the_tile_at_once() {
 }
 
 #[wasm_bindgen_test]
+async fn picking_another_target_in_the_widget_sheet_swaps_what_the_tile_shows() {
+    let house = House::new();
+    house.dashboards_loaded.set(true);
+    house.dashboards.set(vec![solar_stat("d_target", None)]);
+    let (host, _app) = mount_at("/dashboards/d_target?edit=1", house);
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Solar now");
+
+    click(&host, ".widget__edit-overlay");
+    settle().await;
+    let select: web_sys::HtmlSelectElement = host
+        .query_selector(".widget-config-sheet select.select")
+        .unwrap()
+        .expect("the Shows select")
+        .unchecked_into();
+    assert_eq!(select.value(), "pv_power_now");
+    select.set_value("grid_power_now");
+    select
+        .dispatch_event(&web_sys::Event::new("change").unwrap())
+        .unwrap();
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Grid now");
+}
+
+#[wasm_bindgen_test]
 async fn a_refetched_copy_replaces_the_shown_dashboard_unless_it_is_being_edited() {
     let house = House::new();
     house.dashboards_loaded.set(true);

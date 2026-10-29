@@ -16,13 +16,13 @@ use crate::components::toast::Toasts;
 use crate::dashboards::camera_widget::camera_name;
 use crate::dashboards::edit::EditState;
 use crate::dashboards::history_widget::chart_range;
+use crate::dashboards::library::{flow_names, retarget, target_id, targets};
 use crate::house::House;
 use crate::i18n::history::range_name;
 use crate::i18n::{DashText, Key, dash_text, delete_question, text, use_lang, widget_sheet_title};
 
-/// Per-widget sheet: title override, size, a history chart's range, a Camera widget's ordered
-/// camera list and delete. Swapping the widget's target entity is deferred; delete + re-add
-/// covers it for v1.
+/// Per-widget sheet: what the widget shows, title override, size, a history chart's range, a
+/// Camera widget's ordered camera list and delete.
 #[component]
 pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>) -> impl IntoView {
     let lang = use_lang();
@@ -61,6 +61,7 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
     view! {
         <aside class="widget-config-sheet">
             <h3>{move || widget_sheet_title(lang(), kind.get().unwrap_or(WidgetKind::Light))}</h3>
+            <TargetField state=state index=index kind=kind />
             <label class="sheet-form__field">
                 <span class="sheet-form__label">{move || dash_text(lang(), DashText::Title)}</span>
                 <input
@@ -148,6 +149,69 @@ pub fn WidgetConfigSheet(state: EditState, index: usize, on_close: Callback<()>)
                 {move || dash_text(lang(), DashText::Close)}
             </button>
         </aside>
+    }
+}
+
+/// What the widget shows: the entities, rooms, flows or energy metrics a widget of its kind can
+/// show, as the library lists them. A target that is gone (a deleted device) stays listed under
+/// its id so the select does not jump to another one. Camera widgets have their own list.
+#[component]
+fn TargetField(state: EditState, index: usize, kind: Memo<Option<WidgetKind>>) -> impl IntoView {
+    let lang = use_lang();
+    let house = expect_context::<House>();
+    let current = Memo::new(move |_| {
+        state.draft.with(|d| {
+            d.widgets
+                .get(index)
+                .and_then(|w| target_id(&w.config).map(str::to_owned))
+        })
+    });
+    let options = Memo::new(move |_| {
+        let Some(kind) = kind.get() else {
+            return Vec::new();
+        };
+        let flows = flow_names(house);
+        let mut list = house.entities.with(|entities| {
+            house
+                .areas
+                .with(|areas| targets(lang(), kind, entities, areas, &flows))
+        });
+        if let Some(cur) = current.get()
+            && !list.iter().any(|(id, _)| *id == cur)
+        {
+            list.insert(0, (cur.clone(), cur));
+        }
+        list
+    });
+    view! {
+        <Show when=move || current.with(Option::is_some)>
+            <label class="sheet-form__field">
+                <span class="sheet-form__label">{move || dash_text(lang(), DashText::Shows)}</span>
+                <select
+                    class="select"
+                    on:change=move |ev| {
+                        let id = event_target_value(&ev);
+                        state.draft.update(|d| {
+                            if let Some(w) = d.widgets.get_mut(index) {
+                                retarget(&mut w.config, id);
+                            }
+                        });
+                    }
+                >
+                    {move || {
+                        let cur = current.get();
+                        options
+                            .get()
+                            .into_iter()
+                            .map(|(id, label)| {
+                                let selected = cur.as_deref() == Some(id.as_str());
+                                view! { <option value=id selected=selected>{label}</option> }
+                            })
+                            .collect_view()
+                    }}
+                </select>
+            </label>
+        </Show>
     }
 }
 

@@ -80,6 +80,8 @@ pub enum DashText {
     Title,
     Size,
     Range,
+    /// The config sheet's picker for what the widget shows.
+    Shows,
     DeleteWidget,
     Close,
     // Dashboard sheet.
@@ -136,6 +138,7 @@ pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
         T::Title => ("Title", "Titre"),
         T::Size => ("Size", "Taille"),
         T::Range => ("Range", "Période"),
+        T::Shows => ("Shows", "Affiche"),
         T::DeleteWidget => ("Delete widget", "Supprimer le widget"),
         T::Close => ("Close", "Fermer"),
         T::Name => ("Name", "Nom"),
@@ -310,6 +313,7 @@ mod tests {
             T::Title,
             T::Size,
             T::Range,
+            T::Shows,
             T::DeleteWidget,
             T::Close,
             T::Name,
