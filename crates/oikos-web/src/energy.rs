@@ -1,74 +1,18 @@
-//! Pure presentation of the Energy tab: entity views → energy inputs, diagram geometry, labels.
-//! Geometry and wording are ported from the app's `FlowLayout.kt`, `EnergyFormat.kt` and
-//! `EnergyDescription.kt`.
+//! Pure presentation of the Energy tab: entity views → energy inputs, values and labels. The
+//! wording is ported from the app's `EnergyFormat.kt` and `EnergyDescription.kt`; the diagram's
+//! geometry lives in `energy_circles`.
 
 use std::collections::BTreeMap;
 
 use oikos_api::EntityView;
 use oikos_core::energy::{
-    ARC_SLOTS, EnergyEntity, EnergyNode, EnergyRole, EnergyUi, Flow, IDLE_W, NodeKind, NodeStatus,
-    PowerUnits,
+    EnergyEntity, EnergyNode, EnergyRole, EnergyUi, Flow, IDLE_W, NodeKind, NodeStatus, PowerUnits,
 };
 use oikos_core::model::StateValue;
 
 use crate::i18n::energy::{self as words, AriaPart, EnergyText};
 use crate::i18n::format::with_unit;
 use crate::i18n::{Key, Lang, text};
-
-/// The diagram's viewBox height, in px; the width comes from the [`Layout`].
-pub const VIEW_H: f64 = 250.0;
-/// A node circle's radius.
-pub const NODE_R: f64 = 22.0;
-/// How far an edge stays from a node's centre.
-pub const CLEARANCE: f64 = 26.0;
-
-/// Where the diagram's nodes sit, as fractions of the viewBox.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Layout {
-    /// The viewBox width, in px.
-    pub view_w: f64,
-    solar: (f64, f64),
-    house: (f64, f64),
-    grid: (f64, f64),
-    bottom_left: (f64, f64),
-    /// The arc slots right of the house, by how many consumer nodes are drawn (1..=3).
-    arc: [&'static [(f64, f64)]; ARC_SLOTS],
-}
-
-impl Layout {
-    /// The phone drawing, nearly square: the app's layout.
-    pub const NARROW: Layout = Layout {
-        view_w: 260.0,
-        solar: (0.5, 0.12),
-        house: (0.5, 0.52),
-        grid: (0.12, 0.52),
-        bottom_left: (0.15, 0.86),
-        arc: [
-            &[(0.86, 0.52)],
-            &[(0.86, 0.34), (0.86, 0.72)],
-            &[(0.82, 0.2), (0.88, 0.52), (0.82, 0.84)],
-        ],
-    };
-
-    /// The wide-screen drawing, as wide as the day chart: the same rows, the sources and
-    /// consumers spread away from the house so the card can span the page.
-    pub const WIDE: Layout = Layout {
-        view_w: 720.0,
-        solar: (0.5, 0.12),
-        house: (0.5, 0.52),
-        grid: (0.2, 0.52),
-        bottom_left: (0.2, 0.86),
-        arc: [
-            &[(0.8, 0.52)],
-            &[(0.8, 0.34), (0.8, 0.72)],
-            &[(0.77, 0.2), (0.8, 0.52), (0.77, 0.84)],
-        ],
-    };
-
-    fn arc_slots(&self, n: usize) -> &'static [(f64, f64)] {
-        self.arc[n.clamp(1, ARC_SLOTS) - 1]
-    }
-}
 
 pub use oikos_api::energy_entity;
 
@@ -92,83 +36,12 @@ pub fn any_solar_active<'a>(entities: impl Iterator<Item = &'a EntityView>) -> b
     watts >= IDLE_W
 }
 
-/// Node centres in viewBox px, by node id.
-pub fn positions(diagram: &[EnergyNode], layout: &Layout) -> BTreeMap<String, (f64, f64)> {
-    let px = |(x, y): (f64, f64)| (x * layout.view_w, y * VIEW_H);
-    let arc: Vec<&EnergyNode> = diagram
-        .iter()
-        .filter(|n| matches!(n.kind, NodeKind::Consumer | NodeKind::More))
-        .collect();
-    let mut out = BTreeMap::new();
-    for n in diagram {
-        let at = match n.kind {
-            NodeKind::Solar => layout.solar,
-            NodeKind::Grid => layout.grid,
-            NodeKind::House => layout.house,
-            NodeKind::Battery | NodeKind::Water => layout.bottom_left,
-            NodeKind::Consumer | NodeKind::More => continue,
-        };
-        out.insert(n.id.clone(), px(at));
-    }
-    let slots = layout.arc_slots(arc.len());
-    for (n, slot) in arc.iter().zip(slots) {
-        out.insert(n.id.clone(), px(*slot));
-    }
-    out
-}
-
-/// A straight edge, node to house.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Edge {
-    pub start: (f64, f64),
-    pub end: (f64, f64),
-}
-
-impl Edge {
-    /// The SVG path: `M x y L x y`.
-    pub fn path(&self) -> String {
-        format!(
-            "M {} {} L {} {}",
-            self.start.0, self.start.1, self.end.0, self.end.1
-        )
-    }
-}
-
-/// The spoke between `node` and the house `hub`: a straight line along their centres, kept
-/// `clearance` px from both, so every edge leaves the house at its own point on the rim and
-/// meets its node head-on. A node above (solar) passes `below`, the bottom of its labels, as
-/// its start instead.
-pub fn edge(node: (f64, f64), hub: (f64, f64), clearance: f64, below: Option<f64>) -> Edge {
-    let from = below.map_or(node, |y| (node.0, y));
-    let (dx, dy) = (hub.0 - from.0, hub.1 - from.1);
-    let len = dx.hypot(dy).max(f64::EPSILON);
-    let (ux, uy) = (dx / len, dy / len);
-    let lead = if below.is_some() { 0.0 } else { clearance };
-    Edge {
-        start: (from.0 + ux * lead, from.1 + uy * lead),
-        end: (hub.0 - ux * clearance, hub.1 - uy * clearance),
-    }
-}
-
 /// 0 at 10 W, 1 at 10 kW and above, on a log scale.
 pub fn level(watts: Option<f64>) -> f64 {
     match watts {
         Some(w) if w >= 10.0 => ((w.log10() - 1.0) / 3.0).clamp(0.0, 1.0),
         _ => 0.0,
     }
-}
-
-pub fn stroke(watts: Option<f64>, flow: Flow) -> f64 {
-    if flow == Flow::Idle {
-        1.0
-    } else {
-        1.0 + 5.0 * level(watts)
-    }
-}
-
-/// Dash cycles per second: 0.5 at 10 W to 2 at 10 kW.
-pub fn speed(watts: Option<f64>) -> f64 {
-    0.5 + 1.5 * level(watts)
 }
 
 /// Not `i18n::format::number`: this one takes min/max fraction digits (kW to 1, counters to 3).
@@ -204,13 +77,48 @@ fn number(lang: Lang, value: f64, min: usize, max: usize) -> String {
     }
 }
 
+/// A power as its number and its unit: ("3.2", "kW") from 1000 W, ("253", "W") below,
+/// ("—", "") when unknown.
+pub fn power_parts(lang: Lang, watts: Option<f64>) -> (String, &'static str) {
+    match watts {
+        None => ("—".to_string(), ""),
+        Some(w) if w >= 1_000.0 => (number(lang, w / 1_000.0, 1, 1), "kW"),
+        Some(w) => (number(lang, w, 0, 0), "W"),
+    }
+}
+
 /// "3.2 kW" from 1000 W, whole watts below, "—" when unknown.
 pub fn power_text(lang: Lang, watts: Option<f64>) -> String {
-    match watts {
-        None => "—".to_string(),
-        Some(w) if w >= 1_000.0 => with_unit(number(lang, w / 1_000.0, 1, 1), Some("kW")),
-        Some(w) => with_unit(number(lang, w, 0, 0), Some("W")),
+    let (n, unit) = power_parts(lang, watts);
+    with_unit(n, Some(unit).filter(|u| !u.is_empty()))
+}
+
+/// The big and the small line of a big circle: the number, then the unit and what it does
+/// ("W · ↘ import"). Unavailable gives the word alone; an unknown value gives "—".
+pub fn circle_texts(lang: Lang, node: &EnergyNode) -> (String, String) {
+    if node.status == NodeStatus::Unavailable {
+        return (
+            words::energy_text(lang, EnergyText::Unavailable).to_string(),
+            String::new(),
+        );
     }
+    if node.value.is_none() {
+        return ("—".to_string(), String::new());
+    }
+    let (n, unit) = power_parts(lang, node.value);
+    let (arrow, word) = match (node.kind, node.flow) {
+        (NodeKind::Solar, _) => ("", Some(EnergyText::CircleProduction)),
+        (NodeKind::Grid, Flow::In) => ("\u{2198} ", Some(EnergyText::CircleImport)),
+        (NodeKind::Grid, Flow::Out) => ("\u{2197} ", Some(EnergyText::CircleExport)),
+        (NodeKind::Battery, Flow::In) => ("\u{2198} ", Some(EnergyText::CircleDischarging)),
+        (NodeKind::Battery, Flow::Out) => ("\u{2197} ", Some(EnergyText::CircleCharging)),
+        _ => ("", None),
+    };
+    let small = match word {
+        Some(w) => format!("{unit} \u{b7} {arrow}{}", words::energy_text(lang, w)),
+        None => unit.to_string(),
+    };
+    (n, small)
 }
 
 /// A lifetime energy counter: "6 584 kWh", "32.7 kWh", "—" when unknown.
@@ -449,120 +357,13 @@ mod tests {
         }
     }
 
-    fn consumer(n: usize) -> EnergyEntity {
-        ent(
-            &format!("c{n}"),
-            &format!("C{n}"),
-            EnergyRole::Consumer,
-            "W",
-            100.0 * (n as f64 + 1.0),
-        )
-    }
-
     #[test]
-    fn positions_follow_layout_b() {
-        let mut es = vec![
-            ent("s", "S", EnergyRole::Solar, "W", 100.0),
-            ent("g", "G", EnergyRole::Grid, "W", 100.0),
-            ent("w", "Water", EnergyRole::Water, "L", 5.0),
-        ];
-        es.extend((0..5).map(consumer));
-        let ui = EnergyFlow::build(&es, 0, None);
-        let p = positions(&ui.diagram, &Layout::NARROW);
-        assert_eq!(p["solar"], (130.0, 30.0));
-        assert_eq!(p["house"], (130.0, 130.0));
-        assert_eq!(p["grid"], (31.2, 130.0));
-        assert_eq!(p["water"], (39.0, 215.0));
-        let arc: Vec<(f64, f64)> = ui
-            .diagram
-            .iter()
-            .filter(|n| matches!(n.kind, NodeKind::Consumer | NodeKind::More))
-            .map(|n| p[&n.id])
-            .collect();
-        assert_eq!(arc, vec![(213.2, 50.0), (228.8, 130.0), (213.2, 210.0)]);
-
-        es.push(ent("b", "B", EnergyRole::Battery, "W", 5.0));
-        let ui = EnergyFlow::build(&es, 0, None);
-        let p = positions(&ui.diagram, &Layout::NARROW);
-        assert_eq!(p["battery"], (39.0, 215.0));
-        assert!(!p.contains_key("water"));
-    }
-
-    #[test]
-    fn wide_layout_spreads_the_rows() {
-        let mut es = vec![
-            ent("s", "S", EnergyRole::Solar, "W", 100.0),
-            ent("g", "G", EnergyRole::Grid, "W", 100.0),
-            ent("w", "Water", EnergyRole::Water, "L", 5.0),
-        ];
-        es.extend((0..5).map(consumer));
-        let ui = EnergyFlow::build(&es, 0, None);
-        let p = positions(&ui.diagram, &Layout::WIDE);
-        assert_eq!(p["solar"], (360.0, 30.0));
-        assert_eq!(p["house"], (360.0, 130.0));
-        assert_eq!(p["grid"], (144.0, 130.0));
-        assert_eq!(p["water"], (144.0, 215.0));
-        let arc: Vec<(f64, f64)> = ui
-            .diagram
-            .iter()
-            .filter(|n| matches!(n.kind, NodeKind::Consumer | NodeKind::More))
-            .map(|n| p[&n.id])
-            .collect();
-        assert_eq!(arc, vec![(554.4, 50.0), (576.0, 130.0), (554.4, 210.0)]);
-    }
-
-    #[test]
-    fn edge_keeps_clearance() {
-        let grid = (31.2, 130.0);
-        let hub = (130.0, 130.0);
-        let e = edge(grid, hub, CLEARANCE, None);
-        assert_eq!(e.start, (grid.0 + CLEARANCE, 130.0));
-        assert_eq!(e.end, (hub.0 - CLEARANCE, 130.0));
-        let consumer = edge((228.8, 130.0), hub, CLEARANCE, None);
-        assert_eq!(consumer.start.0, 228.8 - CLEARANCE);
-        assert_eq!(consumer.end.0, 130.0 + CLEARANCE);
-        let solar = edge((130.0, 30.0), hub, CLEARANCE, Some(80.0));
-        assert_eq!(solar.start, (130.0, 80.0));
-        assert_eq!(solar.end, (130.0, 130.0 - CLEARANCE));
-        assert_eq!(
-            edge((0.0, 0.0), (100.0, 0.0), 26.0, None).path(),
-            "M 26 0 L 74 0"
-        );
-    }
-
-    /// A consumer up or down the arc gets its own spoke along the centre line: no shared
-    /// start on the house's side and no hook into the node.
-    #[test]
-    fn arc_edges_are_spokes() {
-        let hub = (130.0, 130.0);
-        let dist = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).hypot(a.1 - b.1);
-        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
-        let ends: Vec<_> = [(213.2, 50.0), (228.8, 130.0), (213.2, 210.0)]
-            .into_iter()
-            .map(|at| {
-                let e = edge(at, hub, CLEARANCE, None);
-                assert!(close(dist(e.start, at), CLEARANCE));
-                assert!(close(dist(e.end, hub), CLEARANCE));
-                // Start, end and both centres on one line.
-                let cross =
-                    (e.end.0 - e.start.0) * (hub.1 - at.1) - (e.end.1 - e.start.1) * (hub.0 - at.0);
-                assert!(close(cross, 0.0));
-                e.end
-            })
-            .collect();
-        assert!(ends[0].1 < hub.1 && ends[2].1 > hub.1);
-        assert!(close(ends[1].1, hub.1));
-    }
-
-    #[test]
-    fn stroke_and_speed() {
-        assert_eq!(stroke(Some(10.0), Flow::In), 1.0);
-        assert_eq!(speed(Some(10.0)), 0.5);
-        assert_eq!(stroke(Some(10_000.0), Flow::In), 6.0);
-        assert_eq!(speed(Some(10_000.0)), 2.0);
-        assert_eq!(stroke(None, Flow::Idle), 1.0);
-        assert_eq!(speed(None), 0.5);
+    fn level_is_log_scaled() {
+        assert_eq!(level(Some(10.0)), 0.0);
+        assert_eq!(level(Some(10_000.0)), 1.0);
         assert_eq!(level(Some(1_000_000.0)), 1.0);
+        assert_eq!(level(Some(5.0)), 0.0);
+        assert_eq!(level(None), 0.0);
     }
 
     #[test]
@@ -613,6 +414,59 @@ mod tests {
             node_value_text(Lang::En, ui.node("water").unwrap()),
             "5\u{a0}L"
         );
+    }
+
+    #[test]
+    fn circle_texts_name_the_direction() {
+        let build = |es: Vec<EnergyEntity>| EnergyFlow::build(&es, 0, None);
+        let ui = build(vec![ent("g", "G", EnergyRole::Grid, "W", 253.0)]);
+        assert_eq!(
+            circle_texts(Lang::En, ui.node("grid").unwrap()),
+            ("253".to_string(), "W \u{b7} \u{2198} import".to_string())
+        );
+        let ui = build(vec![ent("g", "G", EnergyRole::Grid, "W", -1610.0)]);
+        assert_eq!(
+            circle_texts(Lang::Fr, ui.node("grid").unwrap()),
+            ("1,6".to_string(), "kW \u{b7} \u{2197} export".to_string())
+        );
+        let ui = build(vec![ent("s", "S", EnergyRole::Solar, "W", 3460.0)]);
+        assert_eq!(
+            circle_texts(Lang::En, ui.node("solar").unwrap()),
+            ("3.5".to_string(), "kW \u{b7} production".to_string())
+        );
+        let ui = build(vec![ent("b", "B", EnergyRole::Battery, "W", -500.0)]);
+        assert_eq!(
+            circle_texts(Lang::Fr, ui.node("battery").unwrap()),
+            ("500".to_string(), "W \u{b7} \u{2197} charge".to_string())
+        );
+        let ui = build(vec![ent("b", "B", EnergyRole::Battery, "W", 500.0)]);
+        assert_eq!(
+            circle_texts(Lang::En, ui.node("battery").unwrap()).1,
+            "W \u{b7} \u{2198} discharging"
+        );
+        let mut e = ent("g", "G", EnergyRole::Grid, "W", 1.0);
+        e.available = false;
+        let ui = build(vec![e]);
+        assert_eq!(
+            circle_texts(Lang::En, ui.node("grid").unwrap()),
+            ("Unavailable".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn big_power_reads_in_kilowatts() {
+        assert_eq!(
+            power_parts(Lang::En, Some(12_345.0)),
+            ("12.3".to_string(), "kW")
+        );
+        assert_eq!(
+            power_parts(Lang::En, Some(3200.0)),
+            ("3.2".to_string(), "kW")
+        );
+        assert_eq!(power_parts(Lang::En, Some(253.3)), ("253".to_string(), "W"));
+        assert_eq!(power_parts(Lang::En, None), ("\u{2014}".to_string(), ""));
+        assert_eq!(power_text(Lang::En, Some(999.0)), "999\u{a0}W");
+        assert_eq!(power_text(Lang::En, Some(1000.0)), "1.0\u{a0}kW");
     }
 
     #[test]

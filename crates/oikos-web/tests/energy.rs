@@ -369,6 +369,23 @@ async fn classic_is_the_default() {
     tick().await;
     assert_eq!(count(&host, ".energy-diagram__svg"), 1);
     assert_eq!(count(&host, ".energy-flux"), 0);
+    // Every circle carries its icon, in a nested svg rather than a foreignObject.
+    assert_eq!(count(&host, "foreignObject"), 0);
+    assert_eq!(
+        count(&host, ".energy-node__glyph > svg"),
+        count(&host, ".energy-node")
+    );
+    let icon = host
+        .query_selector(".energy-node__glyph > svg")
+        .unwrap()
+        .unwrap()
+        .get_bounding_client_rect();
+    assert!(icon.width() > 0.0 && icon.height() > 0.0);
+    let glyph = host.query_selector(".energy-node__glyph").unwrap().unwrap();
+    assert_eq!(
+        glyph.namespace_uri().as_deref(),
+        Some("http://www.w3.org/2000/svg")
+    );
 }
 
 #[wasm_bindgen_test]
@@ -605,4 +622,329 @@ async fn flux_narrow_runs_top_to_bottom() {
     // Names are cut at Classic's length.
     assert!(names.contains("Heat pump"), "{names}");
     assert!(!names.contains("Air conditioning unit"));
+}
+
+fn edges(host: &Element) -> Vec<Element> {
+    let all = host.query_selector_all(".energy-edge").unwrap();
+    (0..all.length())
+        .filter_map(|i| all.item(i))
+        .map(|n| n.unchecked_into::<Element>())
+        .collect()
+}
+
+fn edge(host: &Element, selector: &str) -> Element {
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}"))
+}
+
+#[wasm_bindgen_test]
+async fn circles_wire_solar_only_to_the_house() {
+    let host = mount(vec![
+        sensor("solar", "Solar power", "W", 3000.0, role("solar")),
+        sensor("grid", "Grid power", "W", -1500.0, role("grid")),
+        sensor("oven", "Oven", "W", 900.0, role("consumer")),
+        sensor("pump", "Heat pump", "W", 600.0, role("consumer")),
+    ]);
+    tick().await;
+    let all = edges(&host);
+    assert!(!all.is_empty());
+    let from_solar: Vec<_> = all
+        .iter()
+        .filter(|e| e.get_attribute("data-from").as_deref() == Some("solar"))
+        .collect();
+    assert_eq!(from_solar.len(), 1);
+    for e in &all {
+        let ends = (
+            e.get_attribute("data-from").unwrap_or_default(),
+            e.get_attribute("data-to").unwrap_or_default(),
+        );
+        if ends.0 == "solar" {
+            assert_eq!(ends.1, "house");
+        }
+        let pair = [ends.0.as_str(), ends.1.as_str()];
+        assert!(
+            !(pair.contains(&"solar") && pair.contains(&"grid")),
+            "{pair:?}"
+        );
+    }
+    let grid = edge(&host, ".energy-edge--grid");
+    assert_eq!(grid.get_attribute("data-from").as_deref(), Some("house"));
+    assert_eq!(grid.get_attribute("data-to").as_deref(), Some("grid"));
+    let class = grid.get_attribute("class").unwrap_or_default();
+    assert!(class.contains("energy-tone--export"), "{class}");
+}
+
+#[wasm_bindgen_test]
+async fn export_flips_the_grid_wire_in_place() {
+    let house = House::new();
+    for e in [
+        sensor("solar", "Solar power", "W", 600.0, role("solar")),
+        sensor("grid", "Grid power", "W", 400.0, role("grid")),
+        sensor("oven", "Oven", "W", 900.0, role("consumer")),
+    ] {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Classic);
+    tick().await;
+    let before = edge(&host, ".energy-edge--grid");
+    assert_eq!(before.get_attribute("data-from").as_deref(), Some("grid"));
+    house.apply(WsEvent::EntityUpserted(sensor(
+        "grid",
+        "Grid power",
+        "W",
+        -800.0,
+        role("grid"),
+    )));
+    tick().await;
+    let after = edge(&host, ".energy-edge--grid");
+    assert!(before.is_same_node(Some(&after)));
+    assert_eq!(after.get_attribute("data-from").as_deref(), Some("house"));
+    assert_eq!(after.get_attribute("data-to").as_deref(), Some("grid"));
+}
+
+#[wasm_bindgen_test]
+async fn house_shows_the_solar_share() {
+    let host = mount(vec![
+        sensor("solar", "Solar power", "W", 600.0, role("solar")),
+        sensor("grid", "Grid power", "W", 200.0, role("grid")),
+    ]);
+    tick().await;
+    assert_eq!(
+        text(&host, ".energy-node--house .energy-node__share"),
+        "75% solar"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn circle_opens_its_sensor_from_the_keyboard() {
+    // Other tests leave the page on /entity/oven: the router starts from "/", so the path
+    // proves the key.
+    web_sys::window()
+        .unwrap()
+        .history()
+        .unwrap()
+        .replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/"))
+        .unwrap();
+    assert_eq!(
+        web_sys::window().unwrap().location().pathname().unwrap(),
+        "/"
+    );
+    let host = mount(vec![
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("oven", "Oven", "W", 1200.0, role("consumer")),
+    ]);
+    tick().await;
+    let oven = node_with(&host, "Oven");
+    assert_eq!(oven.get_attribute("tabindex").as_deref(), Some("0"));
+    assert_eq!(oven.get_attribute("role").as_deref(), Some("button"));
+    let init = KeyboardEventInit::new();
+    init.set_key("Enter");
+    init.set_cancelable(true);
+    let ev = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    oven.dispatch_event(&ev).unwrap();
+    tick().await;
+    assert!(ev.default_prevented());
+    let path = web_sys::window().unwrap().location().pathname().unwrap();
+    assert_eq!(path, "/entity/oven");
+}
+
+#[wasm_bindgen_test]
+async fn dots_move_and_stop_when_the_diagram_unmounts() {
+    let map: std::collections::BTreeMap<String, EntityView> = [
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("oven", "Oven", "W", 1200.0, role("consumer")),
+    ]
+    .into_iter()
+    .map(|e| (e.id.clone(), e))
+    .collect();
+    let ui = Memo::new(move |_| {
+        oikos_core::energy::EnergyFlow::build(&oikos_web::energy::energy_entities(&map), 0, None)
+    });
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let handle = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(RwSignal::new(Lang::En));
+        view! {
+            <oikos_web::screens::energy_circles::CirclesDiagram
+                ui=ui
+                narrow=false
+                open=Callback::new(|_: String| {})
+                expanded=RwSignal::new(false)
+            />
+        }
+    });
+    let wait = |ms| gloo_timers::future::TimeoutFuture::new(ms);
+    wait(150).await;
+    let layer = host
+        .query_selector(".energy-circles__dots")
+        .unwrap()
+        .expect("dots layer");
+    let cx = || {
+        layer
+            .query_selector("circle")
+            .unwrap()
+            .and_then(|c| c.get_attribute("cx"))
+    };
+    let first = cx().expect("dots drawn");
+    // A halo then its head: opacity as an attribute, a class on the halo only.
+    let circles = layer.query_selector_all("circle").unwrap();
+    let (halo, head): (Element, Element) = (
+        circles.item(0).unwrap().unchecked_into(),
+        circles.item(1).unwrap().unchecked_into(),
+    );
+    assert_eq!(
+        halo.get_attribute("class").as_deref(),
+        Some("energy-dots__halo")
+    );
+    assert_eq!(head.get_attribute("class"), None);
+    for c in [&halo, &head] {
+        assert!(c.get_attribute("opacity").is_some());
+        assert!(c.get_attribute("r").is_some());
+        assert_eq!(c.get_attribute("style"), None);
+    }
+    wait(150).await;
+    assert_ne!(cx().unwrap(), first, "dots move");
+
+    drop(handle);
+    wait(50).await;
+    let parked = cx();
+    wait(200).await;
+    assert_eq!(cx(), parked, "the loop stops on unmount");
+}
+
+#[wasm_bindgen_test]
+async fn switching_to_flux_stops_the_dots() {
+    let house = House::new();
+    for e in flux_fixture(1200.0) {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Classic);
+    let wait = |ms| gloo_timers::future::TimeoutFuture::new(ms);
+    wait(150).await;
+    let layer = host
+        .query_selector(".energy-circles__dots")
+        .unwrap()
+        .expect("dots layer");
+    let cx = || {
+        layer
+            .query_selector("circle")
+            .unwrap()
+            .and_then(|c| c.get_attribute("cx"))
+    };
+    assert!(cx().is_some(), "dots drawn");
+    house
+        .home_settings
+        .update(|s| s.energy_view = EnergyView::Flux);
+    wait(50).await;
+    assert_eq!(count(&host, ".energy-circles"), 0);
+    let parked = cx();
+    wait(200).await;
+    assert_eq!(cx(), parked, "the loop stops when Classic leaves");
+}
+
+/// Mounts the circles diagram alone, with the real stylesheet, in a `width` px host; the returned
+/// `<style>` is for the caller to remove, so the other tests keep running unstyled.
+fn mount_circles_styled(entities: Vec<EntityView>, narrow: bool, width: u32) -> (Element, Element) {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let style = document.create_element("style").unwrap();
+    style.set_text_content(Some(concat!(
+        include_str!("../styles/tokens.css"),
+        include_str!("../styles/main.css")
+    )));
+    document.head().unwrap().append_child(&style).unwrap();
+    let map: std::collections::BTreeMap<String, EntityView> =
+        entities.into_iter().map(|e| (e.id.clone(), e)).collect();
+    let ui = Memo::new(move |_| {
+        oikos_core::energy::EnergyFlow::build(&oikos_web::energy::energy_entities(&map), 0, None)
+    });
+    let host = document.create_element("div").unwrap();
+    host.set_attribute("style", &format!("width: {width}px"))
+        .unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(RwSignal::new(Lang::En));
+            view! {
+                <oikos_web::screens::energy_circles::CirclesDiagram
+                    ui=ui
+                    narrow=narrow
+                    open=Callback::new(|_: String| {})
+                    expanded=RwSignal::new(false)
+                />
+            }
+        },
+    ));
+    (host, style)
+}
+
+fn full_house() -> Vec<EntityView> {
+    let mut entities = vec![
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("grid", "Grid power", "W", 600.0, role("grid")),
+        sensor("battery", "Battery power", "W", 800.0, role("battery")),
+    ];
+    for (i, (name, w)) in [
+        ("Oven", 900.0),
+        ("Heat pump", 800.0),
+        ("Kettle", 500.0),
+        ("Dryer", 300.0),
+        ("Fridge", 100.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        entities.push(sensor(&format!("c{i}"), name, "W", w, role("consumer")));
+    }
+    entities
+}
+
+/// Every circle's value and name lies inside the diagram's card.
+async fn circle_texts_stay_in_the_card(narrow: bool, width: u32) {
+    let (host, style) = mount_circles_styled(full_house(), narrow, width);
+    // Past the nodes' 0.6 s glide from the origin to their place.
+    gloo_timers::future::TimeoutFuture::new(800).await;
+    let frame = host
+        .query_selector(".energy-diagram")
+        .unwrap()
+        .expect("diagram")
+        .get_bounding_client_rect();
+    let texts = host
+        .query_selector_all(".energy-node__label, .energy-node__value")
+        .unwrap();
+    assert!(texts.length() >= 6, "{}", texts.length());
+    for i in 0..texts.length() {
+        let el: Element = texts.item(i).unwrap().unchecked_into();
+        let r = el.get_bounding_client_rect();
+        assert!(
+            r.left() >= frame.left() - 1.0
+                && r.right() <= frame.right() + 1.0
+                && r.top() >= frame.top() - 1.0
+                && r.bottom() <= frame.bottom() + 1.0,
+            "{:?} overflows the card: {} {} {} {} in {} {} {} {}",
+            el.text_content(),
+            r.left(),
+            r.top(),
+            r.right(),
+            r.bottom(),
+            frame.left(),
+            frame.top(),
+            frame.right(),
+            frame.bottom()
+        );
+    }
+    style.remove();
+    host.remove();
+}
+
+#[wasm_bindgen_test]
+async fn wide_circle_texts_stay_in_the_card() {
+    circle_texts_stay_in_the_card(false, 800).await;
+}
+
+#[wasm_bindgen_test]
+async fn narrow_circle_texts_stay_in_the_card() {
+    circle_texts_stay_in_the_card(true, 390).await;
 }

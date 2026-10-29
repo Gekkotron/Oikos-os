@@ -5,6 +5,7 @@ pub mod climate;
 pub mod dashboard;
 pub mod devices;
 pub mod energy;
+pub mod energy_circles;
 pub mod energy_day;
 pub mod energy_flux;
 pub mod entity_sheet;

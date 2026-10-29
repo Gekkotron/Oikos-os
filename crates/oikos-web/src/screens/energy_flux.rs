@@ -8,6 +8,7 @@ use leptos::prelude::*;
 use oikos_core::energy::EnergyUi;
 
 use crate::energy::{aria_sentence, power_text};
+use crate::energy_circles::sanitise;
 use crate::energy_sankey::{FOLD_NARROW, FOLD_WIDE, Sankey, SankeyRole, build};
 use crate::i18n::energy::{EnergyText, energy_text as word, others};
 use crate::i18n::{Key, Lang, text, use_lang};
@@ -21,13 +22,6 @@ fn fold_at(narrow: bool) -> usize {
 /// Whether the diagram folds some consumers into "+N others" (so the screen offers the list).
 pub fn flux_folded(ui: &EnergyUi, narrow: bool) -> bool {
     build(ui, fold_at(narrow)).folded
-}
-
-/// A node id as an SVG id fragment.
-fn sanitise(id: &str) -> String {
-    id.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
 }
 
 /// The theme variable a node is drawn in.
