@@ -484,6 +484,7 @@ mod tests {
             at,
             entities: BTreeMap::new(),
             eco_restore: BTreeMap::new(),
+            adjust: None,
         }
     }
 
