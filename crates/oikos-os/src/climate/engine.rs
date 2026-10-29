@@ -19,6 +19,7 @@ use oikos_climate::topics::{self, ZoneDoc};
 use oikos_core::history::Micros;
 use oikos_core::model::{Availability, Command, Kind, StateValue, UNASSIGNED_AREA};
 use serde::Serialize;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 use super::hub::valid_zone_id;
@@ -645,7 +646,8 @@ impl Hub {
     /// everything it needed was accepted.
     async fn command_device(&self, device: &Device, target: &DeviceTarget, now: u64) -> bool {
         // No broker link: nothing can be sent, and that is not the device's fault.
-        if !matches!(*self.connection().borrow(), ConnectionStatus::Online) {
+        let link = self.connection();
+        if !matches!(*link.borrow(), ConnectionStatus::Online) {
             return false;
         }
         {
@@ -673,7 +675,7 @@ impl Hub {
         if result.is_ok() {
             self.climate_runtime().unconfirmed.remove(&device.id);
         }
-        self.note_command_result(&device.id, result, now)
+        self.note_command_result(&device.id, result, &link, now)
     }
 
     /// Whether `id` is paused after repeated failures.
@@ -686,14 +688,26 @@ impl Hub {
     }
 
     /// Counts a command's outcome for `id`: a success clears its failures and alert; the
-    /// `MAX_FAILURES`th failure in a row pauses it and raises the alert. True on success.
-    fn note_command_result(&self, id: &str, result: Result<(), String>, now: u64) -> bool {
+    /// `MAX_FAILURES`th failure in a row pauses it and raises the alert. A failure while the
+    /// broker link changed since `link` was taken is not the device's fault and is not
+    /// counted. True on success.
+    fn note_command_result(
+        &self,
+        id: &str,
+        result: Result<(), String>,
+        link: &watch::Receiver<ConnectionStatus>,
+        now: u64,
+    ) -> bool {
         let alert = alerts::command_id(id);
         match result {
             Ok(()) => {
                 self.climate_runtime().failures.remove(id);
                 alerts::resolve(self, &alert);
                 true
+            }
+            Err(reason) if link.has_changed().unwrap_or(true) => {
+                tracing::debug!(entity = %id, %reason, "climate command lost with the broker link");
+                false
             }
             Err(reason) => {
                 let failures = {
@@ -726,9 +740,8 @@ impl Hub {
     /// Sets the fan mode of `id` for eco (spec §7). Shares the failure count and pause of the
     /// target commands, but not their resend spacing, so it can follow one in the same pass.
     async fn command_fan(&self, id: &str, fan_mode: &str, now: u64) -> bool {
-        if !matches!(*self.connection().borrow(), ConnectionStatus::Online)
-            || self.command_paused(id, now)
-        {
+        let link = self.connection();
+        if !matches!(*link.borrow(), ConnectionStatus::Online) || self.command_paused(id, now) {
             return false;
         }
         let command = Command::SetFanMode {
@@ -741,7 +754,7 @@ impl Hub {
                 .unwrap_or_else(|| "not confirmed".to_owned())),
             Err(err) => Err(err.to_string()),
         };
-        self.note_command_result(id, result, now)
+        self.note_command_result(id, result, &link, now)
     }
 
     /// Sends the fan commands of eco for `decision` and keeps what to put back in it. Only an

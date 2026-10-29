@@ -400,6 +400,8 @@ mod engine {
     /// What the simulated Daikins hold: mode, target and current temperature per unit.
     struct Sim {
         echo: bool,
+        /// The broker link drops as a command reaches a daikin, before any echo.
+        drop_link: bool,
         units: BTreeMap<u8, (String, f64, f64)>,
         /// Fan mode per unit, reported only for the units that have one.
         fans: BTreeMap<u8, String>,
@@ -409,6 +411,7 @@ mod engine {
         fn new() -> Self {
             Self {
                 echo: true,
+                drop_link: false,
                 units: BTreeMap::new(),
                 fans: BTreeMap::new(),
             }
@@ -444,6 +447,12 @@ mod engine {
             let Some(rest) = p.topic.strip_prefix("daikin/192.168.1.15") else {
                 return;
             };
+            if self.drop_link {
+                hub.set_connection(ConnectionStatus::Offline {
+                    reason: "test".into(),
+                });
+                return;
+            }
             if !self.echo {
                 return;
             }
@@ -967,6 +976,27 @@ mod engine {
         // Back online: sent at once, not paused.
         rig.hub.set_connection(ConnectionStatus::Online);
         assert_eq!(temperature_commands(&rig.pass(184).await), vec![17.0]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_link_lost_during_the_confirm_wait_is_not_counted() {
+        let mut rig = Rig::new(None).await;
+        load_push(&rig.hub).await;
+        rig.settings(heat_rules(17.0));
+        rig.sim.drop_link = true;
+        for at in [0, 61, 122] {
+            rig.hub.set_connection(ConnectionStatus::Online);
+            assert_eq!(
+                temperature_commands(&rig.pass(at).await),
+                vec![17.0],
+                "at {at}"
+            );
+        }
+        assert!(alert(&rig.hub, &format!("climate-command-{}", rig.id)).is_none());
+        // Not paused: sent again as soon as the link is back.
+        rig.sim.drop_link = false;
+        rig.hub.set_connection(ConnectionStatus::Online);
+        assert_eq!(temperature_commands(&rig.pass(183).await), vec![17.0]);
     }
 
     #[tokio::test(start_paused = true)]
