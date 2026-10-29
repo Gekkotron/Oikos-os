@@ -31,6 +31,8 @@ enum RawCommand {
         #[arg(long)]
         server: String,
     },
+    /// Create the bundled broker and database credentials, then exit.
+    InitBundled,
 }
 
 /// Resolved command line.
@@ -42,6 +44,9 @@ pub enum Cli {
     },
     McpStdio {
         server: String,
+        data_dir: PathBuf,
+    },
+    InitBundled {
         data_dir: PathBuf,
     },
 }
@@ -67,6 +72,9 @@ impl Cli {
             },
             Some(RawCommand::McpStdio { server }) => Cli::McpStdio {
                 server,
+                data_dir: raw.data_dir,
+            },
+            Some(RawCommand::InitBundled) => Cli::InitBundled {
                 data_dir: raw.data_dir,
             },
         }
@@ -165,6 +173,25 @@ mod tests {
                 Cli::McpStdio {
                     server: "http://h:1".into(),
                     data_dir: "d".into(),
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn init_bundled_takes_data() {
+        figment::Jail::expect_with(|_| {
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "init-bundled"]).unwrap(),
+                Cli::InitBundled {
+                    data_dir: "./data".into(),
+                }
+            );
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "--data", "/data", "init-bundled"]).unwrap(),
+                Cli::InitBundled {
+                    data_dir: "/data".into(),
                 }
             );
             Ok(())

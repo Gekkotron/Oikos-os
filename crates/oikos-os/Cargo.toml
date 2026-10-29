@@ -33,6 +33,9 @@ serde.workspace = true
 serde_json.workspace = true
 reqwest = { workspace = true, features = ["query"] }
 base64 = "0.22"
+getrandom = "0.2"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+sha2 = "0.10"
 bytes = "1"
 sqlx.workspace = true
 thiserror.workspace = true
