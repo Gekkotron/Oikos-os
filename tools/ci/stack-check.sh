@@ -7,6 +7,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+# Checked before the trap exists, so cleanup never deletes a file of the user's.
+if [ -e compose.override.yml ]; then
+  echo "compose.override.yml already exists; move it away before running this check" >&2
+  exit 1
+fi
+
 cleanup() {
   status=$?
   if [ "$status" -ne 0 ]; then
@@ -25,8 +31,7 @@ echo "$config" | jq -e '.services.hub.depends_on == null' >/dev/null
 echo "$config" | jq -e '.services | has("init") and has("mosquitto") and has("timescaledb")' >/dev/null
 
 echo "== init-bundled"
-cargo build -p oikos-os
-target/debug/oikos-os --data ./data init-bundled
+cargo run -q -p oikos-os -- --data ./data init-bundled
 
 # The migration guide's override shape: a second port for Postgres.
 cat > compose.override.yml <<'YAML'
@@ -52,14 +57,32 @@ for _ in $(seq 1 60); do
 done
 [ "$ready" -eq 1 ] || { echo "timescaledb not ready after 60 s" >&2; exit 1; }
 
+# The image trusts loopback connections, so only a non-loopback address
+# really tests the password (it goes through the scram-sha-256 line).
+host_ip=$(hostname -I | awk '{print $1}')
+[ -n "$host_ip" ] || { echo "no non-loopback address found" >&2; exit 1; }
+
 extension=$(docker exec oikos-timescaledb psql \
-  "postgresql://oikos:${db_password}@localhost:5433/oikos" \
+  "postgresql://oikos:${db_password}@${host_ip}:5433/oikos" \
   -tAc "select extname from pg_extension where extname='timescaledb'")
 [ "$extension" = "timescaledb" ] || { echo "timescaledb extension missing: '$extension'" >&2; exit 1; }
+if docker exec oikos-timescaledb psql \
+  "postgresql://oikos:wrong@${host_ip}:5433/oikos" -tAc "select 1" >/dev/null 2>&1; then
+  echo "timescaledb accepted a wrong password" >&2
+  exit 1
+fi
 
 echo "== mosquitto"
-docker exec oikos-mosquitto mosquitto_pub -h localhost \
-  -u oikos -P "$mqtt_password" -t oikos/ci -m ok
+published=0
+for _ in $(seq 1 20); do
+  if docker exec oikos-mosquitto mosquitto_pub -h localhost \
+    -u oikos -P "$mqtt_password" -t oikos/ci -m ok >/dev/null 2>&1; then
+    published=1
+    break
+  fi
+  sleep 1
+done
+[ "$published" -eq 1 ] || { echo "mosquitto refused the right password for 20 s" >&2; exit 1; }
 if docker exec oikos-mosquitto mosquitto_pub -h localhost \
   -u oikos -P wrong -t oikos/ci -m ok >/dev/null 2>&1; then
   echo "mosquitto accepted a wrong password" >&2
