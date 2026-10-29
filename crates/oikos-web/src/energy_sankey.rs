@@ -316,7 +316,8 @@ pub fn build(ui: &EnergyUi, fold_at: usize) -> Sankey {
         .and_then(|n| n.value);
     let solar_share = match solar_w {
         Some(_) if house_val > 0.0 => {
-            Some((solar_house / house_val * 100.0).floor().clamp(0.0, 100.0) as u8)
+            // Scale before dividing: 290 / 1000 * 100 is 28.999…, 290 * 100 / 1000 is 29.
+            Some((solar_house * 100.0 / house_val).floor().clamp(0.0, 100.0) as u8)
         }
         _ => None,
     };
@@ -441,6 +442,15 @@ mod tests {
         assert_eq!((e.column, e.size), (1, 1200.0));
         assert_eq!(find(&s, "unitemised").unwrap().watts, 900.0);
         assert_eq!(s.solar_share, Some(100));
+    }
+
+    #[test]
+    fn solar_share_does_not_lose_a_percent_to_rounding() {
+        // 290 W of 1000 W: 290 / 1000 * 100 is 28.999…
+        let u = ui(&[solar(290.0), grid(710.0, Flow::In), house(1000.0)], &[]);
+        let s = build(&u, FOLD_WIDE);
+        assert_eq!(link_w(&s, "solar", "house"), Some(290.0));
+        assert_eq!(s.solar_share, Some(29));
     }
 
     #[test]

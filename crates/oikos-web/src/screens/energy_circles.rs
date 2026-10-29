@@ -61,7 +61,8 @@ fn clickable(n: &EnergyNode) -> bool {
 
 /// The house's solar share in whole percent, when solar feeds part of it.
 fn share(mix: Option<Mix>) -> Option<u8> {
-    let pct = (mix?.solar * 100.0).floor();
+    // The mix holds fractions: 0.29 * 100 is 28.999…, so a hair of slack before the floor.
+    let pct = (mix?.solar * 100.0 + 1e-9).floor();
     (pct > 0.0).then_some(pct.min(100.0) as u8)
 }
 
@@ -534,5 +535,17 @@ mod tests {
         assert_eq!(share(Some(mix(0.004))), None);
         assert_eq!(share(Some(mix(1.0))), Some(100));
         assert_eq!(share(None), None);
+    }
+
+    #[test]
+    fn share_does_not_lose_a_percent_to_rounding() {
+        // 290 W of 1000 W is 0.29, and 0.29 * 100 is 28.999…
+        let solar = 290.0 / 1000.0;
+        let mix = Mix {
+            solar,
+            battery: 0.0,
+            grid: 1.0 - solar,
+        };
+        assert_eq!(share(Some(mix)), Some(29));
     }
 }
