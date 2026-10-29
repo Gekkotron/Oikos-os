@@ -24,6 +24,19 @@ pub struct HomeSettings {
     pub off_peak: Vec<OffPeakWindow>,
     /// The dated windows of past days, kept by the hub: a client's value is ignored.
     pub off_peak_history: Vec<OffPeakEntry>,
+    /// How the web Energy page draws the live power, the same for every browser.
+    pub energy_view: EnergyView,
+}
+
+/// The web Energy page's live diagram.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum EnergyView {
+    /// The circle diagram.
+    #[default]
+    Classic,
+    /// The Sankey diagram.
+    Flux,
 }
 
 #[cfg(test)]
@@ -43,6 +56,7 @@ mod tests {
         );
         assert_eq!((s.cold_below, s.hot_above), (None, None));
         assert!(s.off_peak.is_empty() && s.off_peak_history.is_empty());
+        assert_eq!(s.energy_view, EnergyView::Classic);
         assert_eq!(
             serde_json::to_value(HomeSettings::default()).unwrap(),
             json!({
@@ -52,8 +66,16 @@ mod tests {
                 "cold_below": null,
                 "hot_above": null,
                 "off_peak": [],
-                "off_peak_history": []
+                "off_peak_history": [],
+                "energy_view": "classic"
             })
         );
+    }
+
+    #[test]
+    fn energy_view_is_lowercase_and_refuses_unknown_values() {
+        let s: HomeSettings = serde_json::from_value(json!({"energy_view": "flux"})).unwrap();
+        assert_eq!(s.energy_view, EnergyView::Flux);
+        assert!(serde_json::from_value::<HomeSettings>(json!({"energy_view": "orbit"})).is_err());
     }
 }

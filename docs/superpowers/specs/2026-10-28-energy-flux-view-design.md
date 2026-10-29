@@ -21,9 +21,10 @@ not part of this design.
 
 - A new **Energy view** setting on `/settings/appearance`, under the theme switch: a segmented
   choice **Classic** / **Flux** (FR: **Classique** / **Flux**), with a one-line hint.
-- Persisted per browser in `localStorage`, exactly like the theme (`oikos.theme` →
-  `oikos.energy_view`); unknown or missing value = Classic; every storage access fallible and
-  silent.
+- Saved on the hub, the same for every browser: `energy_view` (`classic` / `flux`) in the home
+  settings document (`PUT /api/v1/home/settings`, broadcast as `home_settings_changed`); missing
+  = Classic. (A first cut kept it per browser in `localStorage`; it is a house choice, not a
+  browser one.)
 - Classic is the default and is unchanged.
 - With Flux selected, the `/energy` page replaces the circle diagram with a Sankey of the live
   power, fed by the same `EnergyUi` the Classic diagram uses (`EnergyFlow::build`).
@@ -162,7 +163,7 @@ as they already do. Build the narrow layout as a separate step after the wide on
 - Measured values label the nodes; links are allocated sinks first (export, then battery
   charging, then the house); grid and battery are split into two keyed nodes each.
 - Sub-10 W consumers join Not itemised; solar share is a new figure (solar → house ÷ house).
-- `localStorage` key `oikos.energy_view`, values `classic` / `flux`.
+- Home settings field `energy_view`, values `classic` / `flux`.
 - Labels in the app language, not always French as in the mockup.
 - The settings list's Appearance status line still shows only the theme name.
 

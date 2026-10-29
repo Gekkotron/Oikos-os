@@ -41,7 +41,7 @@ pub use history::{
     EnergyKind, GridDay, GridSlot, GridTotals, HistoryDaily, HistoryRange, HistorySeries,
     HistoryToday, LastChange, LastChangeItem,
 };
-pub use home::{HomeSettings, OffPeakEntry, OffPeakWindow};
+pub use home::{EnergyView, HomeSettings, OffPeakEntry, OffPeakWindow};
 pub use snapshot::{Snapshot, area_views, device_views, entity_views, snapshot};
 pub use solar::{
     SolarDay, SolarForecastDay, SolarHistory, SolarNow, SolarPeak, SolarPeriod, SolarSite,

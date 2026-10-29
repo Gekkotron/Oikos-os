@@ -59,7 +59,8 @@ impl OikosMcp {
     /// a list of `{"start": "HH:MM", "end": "HH:MM"}` local off-peak windows, `end` before
     /// `start` crossing midnight, none overlapping, empty for a single tariff; a change applies
     /// from the start of today and past days keep their windows in `off_peak_history`, which the
-    /// hub keeps and ignores when sent). Read them with `get_home_settings` first and send
+    /// hub keeps and ignores when sent; `energy_view` `classic` or `flux`, how the web Energy
+    /// page draws the live power). Read them with `get_home_settings` first and send
     /// the whole document back. The reason of a refusal is returned so you can fix it.
     #[tool(name = "set_home_settings", annotations(idempotent_hint = true))]
     async fn set_home_settings(

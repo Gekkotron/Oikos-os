@@ -173,6 +173,8 @@ pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, Field> {
             })
             .collect(),
         off_peak_history: Vec::new(),
+        // Not on this panel: Save puts the stored choice back.
+        energy_view: Default::default(),
     })
 }
 
@@ -226,7 +228,10 @@ pub fn HomeSettingsPanel() -> impl IntoView {
             .with_untracked(|s| Draft::new(untrack(current), s));
         let merged = merge(&base.get_untracked(), &draft.get_untracked(), &latest);
         let settings = match draft_to_settings(&merged) {
-            Ok(s) => s,
+            Ok(s) => HomeSettings {
+                energy_view: house.home_settings.with_untracked(|s| s.energy_view),
+                ..s
+            },
             Err(field) => {
                 error.set(Some((field, Message::Key(HomeText::NotANumber))));
                 return;

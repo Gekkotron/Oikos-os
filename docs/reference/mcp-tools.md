@@ -108,8 +108,8 @@ Groups need `[groups] enabled = true`; otherwise these tools answer `groups disa
 
 | Tool | What it does |
 | --- | --- |
-| `get_home_settings` | The home settings: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a temperature sensor), `cold_below` and `hot_above` (°C); a field that is not set is `null`. `off_peak` lists the off-peak windows in force, `off_peak_history` the dated windows of past days. |
-| `set_home_settings` | Replaces the home settings (retained on `oikos/ui/_home`) and returns them. Read them with `get_home_settings` first and send the whole document back. Args: `settings`. `eco_setpoint` must be from 5 to 30, `cold_below` and `hot_above` from 5 to 35 with `cold_below` lower (the web uses 15 and 26 when unset); an entity of the wrong kind is refused with the reason. `off_peak` takes `{start, end}` `HH:MM` windows (crossing midnight allowed, no overlap); a change applies from today and past days keep theirs; `off_peak_history` is kept by the hub and ignored when sent. |
+| `get_home_settings` | The home settings: `eco_setpoint` (°C), `mode_entity` (a select) and `indoor_entity` (a temperature sensor), `cold_below` and `hot_above` (°C); a field that is not set is `null`. `off_peak` lists the off-peak windows in force, `off_peak_history` the dated windows of past days. `energy_view` is `classic` or `flux`, the web Energy page's live diagram. |
+| `set_home_settings` | Replaces the home settings (retained on `oikos/ui/_home`) and returns them. Read them with `get_home_settings` first and send the whole document back. Args: `settings`. `eco_setpoint` must be from 5 to 30, `cold_below` and `hot_above` from 5 to 35 with `cold_below` lower (the web uses 15 and 26 when unset); an entity of the wrong kind is refused with the reason. `off_peak` takes `{start, end}` `HH:MM` windows (crossing midnight allowed, no overlap); a change applies from today and past days keep theirs; `off_peak_history` is kept by the hub and ignored when sent. `energy_view` is `classic` (the default) or `flux`. |
 
 ## Climate
 

@@ -19,7 +19,7 @@ use crate::energy::{
     energy_entities, energy_text, meter_text, node_label, node_value_text, now_ms, plus_minus_ids,
     positions, power_text, should_fire_mount, speed, stroke,
 };
-use crate::energy_view::EnergyView;
+use crate::energy_view::{EnergyView, energy_view};
 use crate::house::House;
 use crate::i18n::energy::{
     EnergyText, energy_text as word, kwh_today, live_subtitle, meter_line, show_all_consumers,
@@ -439,10 +439,7 @@ pub fn EnergyScreen() -> impl IntoView {
     });
     let layout = layout();
     let narrow = layout == Layout::NARROW;
-    let view = use_context::<RwSignal<EnergyView>>()
-        .map(|s| s.read_only())
-        .unwrap_or_else(|| RwSignal::new(EnergyView::Classic).read_only());
-    let classic = move || view.get() == EnergyView::Classic;
+    let classic = move || energy_view(house) == EnergyView::Classic;
     let pos: Positions = Memo::new(move |_| ui.with(|u| positions(&u.diagram, &layout)));
     let names = Memo::new(move |_| {
         house.entities.with(|m| {

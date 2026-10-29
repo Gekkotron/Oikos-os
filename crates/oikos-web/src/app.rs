@@ -130,7 +130,6 @@ pub fn App() -> impl IntoView {
     });
     let theme = install_theme();
     provide_context(theme);
-    provide_context(crate::energy_view::install_energy_view());
     let alarm_armed = Memo::new(move |_| house.entities.with(|m| any_alarm_armed(m.values())));
     let solar_active = Memo::new(move |_| {
         house

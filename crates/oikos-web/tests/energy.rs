@@ -55,18 +55,14 @@ fn mount(entities: Vec<EntityView>) -> Element {
 }
 
 fn mount_lang(entities: Vec<EntityView>, lang: RwSignal<Lang>) -> Element {
-    mount_with(entities, lang, None)
+    mount_with(entities, lang, EnergyView::Classic)
 }
 
 fn mount_view(entities: Vec<EntityView>, view: EnergyView) -> Element {
-    mount_with(entities, RwSignal::new(Lang::En), Some(RwSignal::new(view)))
+    mount_with(entities, RwSignal::new(Lang::En), view)
 }
 
-fn mount_with(
-    entities: Vec<EntityView>,
-    lang: RwSignal<Lang>,
-    view: Option<RwSignal<EnergyView>>,
-) -> Element {
+fn mount_with(entities: Vec<EntityView>, lang: RwSignal<Lang>, view: EnergyView) -> Element {
     let house = House::new();
     for e in entities {
         house.apply(WsEvent::EntityUpserted(e));
@@ -74,7 +70,8 @@ fn mount_with(
     mount_house(house, lang, view)
 }
 
-fn mount_house(house: House, lang: RwSignal<Lang>, view: Option<RwSignal<EnergyView>>) -> Element {
+fn mount_house(house: House, lang: RwSignal<Lang>, view: EnergyView) -> Element {
+    house.home_settings.update(|s| s.energy_view = view);
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -83,9 +80,6 @@ fn mount_house(house: House, lang: RwSignal<Lang>, view: Option<RwSignal<EnergyV
         move || {
             provide_context(house);
             provide_context(lang);
-            if let Some(view) = view {
-                provide_context(view);
-            }
             // App installs this through install_history_refresh, which also fetches.
             provide_context(KwhToday(RwSignal::new(Default::default())));
             view! {
@@ -413,11 +407,7 @@ async fn flux_updates_in_place() {
     for e in flux_fixture(1200.0) {
         house.apply(WsEvent::EntityUpserted(e));
     }
-    let host = mount_house(
-        house,
-        RwSignal::new(Lang::En),
-        Some(RwSignal::new(EnergyView::Flux)),
-    );
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Flux);
     tick().await;
     let before = bar(&host, "consumer:oven");
     let height = before.get_attribute("style").unwrap();
@@ -441,11 +431,7 @@ async fn flux_colours_follow_a_reorder() {
     for e in flux_fixture(1200.0) {
         house.apply(WsEvent::EntityUpserted(e));
     }
-    let host = mount_house(
-        house,
-        RwSignal::new(Lang::En),
-        Some(RwSignal::new(EnergyView::Flux)),
-    );
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Flux);
     tick().await;
     let class = |id: &str| bar(&host, id).get_attribute("class").unwrap_or_default();
     assert!(
