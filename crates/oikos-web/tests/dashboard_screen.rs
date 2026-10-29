@@ -1,6 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 //! Opening an authored dashboard's address directly: the screen paints before the dashboards
-//! fetch lands and must swap "Unknown dashboard." for the dashboard once it does. Its own test
+//! fetch lands, shows a loading state, and swaps in the dashboard once it does. Its own test
 //! binary, so no router from another test reads the address.
 
 use leptos::prelude::*;
@@ -82,8 +82,10 @@ async fn a_dashboard_fetched_after_first_paint_replaces_unknown() {
         }
     });
     settle().await;
-    assert!(host.query_selector(".dashboard-unknown").unwrap().is_some());
+    assert!(host.query_selector(".dashboard-loading").unwrap().is_some());
+    assert!(host.query_selector(".dashboard-unknown").unwrap().is_none());
 
+    house.dashboards_loaded.set(true);
     house.dashboards.set(vec![DashboardView {
         dashboard: Dashboard {
             id: "d_late".into(),
@@ -103,6 +105,7 @@ async fn a_dashboard_fetched_after_first_paint_replaces_unknown() {
         synthesized: false,
     }]);
     settle().await;
+    assert!(host.query_selector(".dashboard-loading").unwrap().is_none());
     assert!(host.query_selector(".dashboard-unknown").unwrap().is_none());
     assert!(
         host.query_selector(".dashboard-edit-toolbar")
@@ -127,6 +130,130 @@ async fn a_dashboard_fetched_after_first_paint_replaces_unknown() {
             .unwrap()
             .is_none()
     );
+}
+
+/// Mounts the dashboard screen at `url` over `house`, in English.
+fn mount_at(url: &str, house: House) -> (web_sys::Element, impl Drop) {
+    let window = web_sys::window().unwrap();
+    window
+        .history()
+        .unwrap()
+        .push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(url))
+        .unwrap();
+    let document = window.document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let app = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(RwSignal::new(Theme::Auto));
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(oikos_web::components::toast::Toasts::new());
+        provide_context(oikos_web::commands::Pending::new());
+        provide_context(oikos_web::components::confirm::Confirming::new());
+        oikos_web::nav::install_nav();
+        view! {
+            <Router>
+                <Routes fallback=|| ()>
+                    <Route path=path!("/dashboards/:id") view=DashboardScreen />
+                </Routes>
+            </Router>
+        }
+    });
+    (host, app)
+}
+
+/// A dashboard `id` holding one solar power stat, titled `title`.
+fn solar_stat(id: &str, title: Option<&str>) -> DashboardView {
+    DashboardView {
+        dashboard: Dashboard {
+            id: id.into(),
+            name: "Energy".into(),
+            order: 1,
+            widgets: vec![Widget {
+                id: "w1".into(),
+                kind: WidgetKind::EnergyStat,
+                span: Span::X1x1,
+                config: WidgetConfig::Energy {
+                    metric: "pv_power_now".into(),
+                    title: title.map(str::to_owned),
+                },
+            }],
+            show_header: false,
+        },
+        synthesized: false,
+    }
+}
+
+fn click(host: &web_sys::Element, selector: &str) {
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}"))
+        .unchecked_into::<web_sys::HtmlElement>()
+        .click();
+}
+
+#[wasm_bindgen_test]
+async fn an_id_missing_from_the_loaded_list_is_unknown() {
+    let house = House::new();
+    house.dashboards_loaded.set(true);
+    let (host, _app) = mount_at("/dashboards/d_gone", house);
+    settle().await;
+    assert!(host.query_selector(".dashboard-unknown").unwrap().is_some());
+    assert!(host.query_selector(".dashboard-loading").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn a_title_typed_in_the_widget_sheet_shows_on_the_tile_at_once() {
+    let house = House::new();
+    house.dashboards_loaded.set(true);
+    house.dashboards.set(vec![solar_stat("d_title", None)]);
+    let (host, _app) = mount_at("/dashboards/d_title?edit=1", house);
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Solar now");
+
+    click(&host, ".widget__edit-overlay");
+    settle().await;
+    let input: web_sys::HtmlInputElement = host
+        .query_selector(".widget-config-sheet input.field")
+        .unwrap()
+        .expect("title field")
+        .unchecked_into();
+    input.set_value("Roof");
+    input
+        .dispatch_event(&web_sys::Event::new("input").unwrap())
+        .unwrap();
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Roof");
+}
+
+#[wasm_bindgen_test]
+async fn a_refetched_copy_replaces_the_shown_dashboard_unless_it_is_being_edited() {
+    let house = House::new();
+    house.dashboards_loaded.set(true);
+    house.dashboards.set(vec![solar_stat("d_sync", None)]);
+    let (host, _app) = mount_at("/dashboards/d_sync", house);
+    settle().await;
+
+    // A reconnect brings a copy saved on another device.
+    house
+        .dashboards
+        .set(vec![solar_stat("d_sync", Some("Roof"))]);
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Roof");
+
+    // While editing, the draft stays as it is.
+    click(&host, ".dashboard-edit-toolbar__pencil");
+    settle().await;
+    house
+        .dashboards
+        .set(vec![solar_stat("d_sync", Some("Garage"))]);
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Roof");
+
+    // Leaving edit mode with nothing unsaved takes the copy held back meanwhile.
+    click(&host, ".dashboard-edit-toolbar__pencil");
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Garage");
 }
 
 fn text_of(host: &web_sys::Element, selector: &str) -> String {

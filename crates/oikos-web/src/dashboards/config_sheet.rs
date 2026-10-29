@@ -281,7 +281,7 @@ fn remove_camera(ids: &mut Vec<String>, id: &str) -> bool {
 }
 
 /// History widgets carry no title in the model, so the override is a no-op for them.
-fn title_of(w: &Widget) -> Option<String> {
+pub(super) fn title_of(w: &Widget) -> Option<String> {
     match &w.config {
         WidgetConfig::Entity { title, .. }
         | WidgetConfig::Area { title, .. }

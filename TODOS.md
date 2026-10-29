@@ -6,11 +6,6 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ### P2 — polish / test coverage
 
-- `Grid` keys tiles by widget id alone and `WidgetView` takes the widget once, so a title change from the config sheet only shows after a remount.
-- Dashboards fetched once at startup; no retry/refresh on WS reconnect. Trigger a re-fetch on the WS reconnect event.
-- Overlay z-index 1 vs tools z-index 2 depends on no inner card element exceeding z-index 1 — audit the new widget cards (`widgets.css`).
-- Edits made to the draft while a Save is in flight are overwritten by the hub's reply.
-- Deep-linking an authored dashboard id shows "Unknown dashboard" briefly before the fetch lands. Add a loaded flag and a loading state in `screens/dashboard.rs`.
 - `WidgetConfigSheet` has no entity/target picker — swap-target requires delete + re-add.
 - HistoryChart entry filter in the widget library uses Sensor entities only; spec says "any entity with history".
 
@@ -95,7 +90,6 @@ Deferred minors from the final review.
 - [ ] Vacuum card animation — while the vacuum is cleaning, show a small brush in the card's top-right corner that moves (spins or sweeps), idle otherwise. See `cards/vacuum.rs`, `components/robot.rs` and the vacuum rules in `styles/cards.css`; respect `prefers-reduced-motion`.
 - [ ] Address the ~47 deferred minors from the flow-canvas redesign SDD ledger (`.superpowers/sdd/2026-10-20-flow-canvas-redesign/`).
 - [ ] Housekeeping: cap/clean `target/` so it stops filling the disk.
-- [ ] Onboarding to configure the app — a first-run setup in the web UI that walks a new install through what `oikos.toml` holds today (MQTT broker, Z2M topics, history database, push, Frigate, weather/solar), then rooms, so a fresh install works without hand-editing the TOML.
 - [ ] System health screen + uptime history — record the hub's uptime, CPU, RAM, disk and temperature over time (and the broker / Z2M / database up or down), and add a screen that shows the current values and their history. Today `oikos-watchdog` only pushes gateway and ACL alerts; nothing is stored or shown.
 - [ ] Network presence by ping — let the hub ping a configured host (IP or hostname) on an interval and publish it as a binary sensor (`connectivity`), so flows and the UI can tell whether a device is on the network (a phone at home, a TV, a NAS), with a debounce so one lost reply does not flip it.
 

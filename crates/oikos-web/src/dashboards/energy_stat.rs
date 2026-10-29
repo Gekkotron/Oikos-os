@@ -116,16 +116,19 @@ async fn consumption(plus: &[String], minus: &[String], days: u16) -> Option<f64
 }
 
 #[component]
-pub fn EnergyStatWidget(metric: String, title: Option<String>) -> impl IntoView {
+pub fn EnergyStatWidget(
+    metric: String,
+    #[prop(into)] title: Signal<Option<String>>,
+) -> impl IntoView {
     let house = expect_context::<House>();
     let lang = use_lang();
     let Some(parsed) = Metric::parse(&metric) else {
         return view! { <super::widget::Unavailable label=metric /> }.into_any();
     };
-    let title = title.filter(|t| !t.is_empty());
     let label = move || {
         title
-            .clone()
+            .get()
+            .filter(|t| !t.is_empty())
             .or_else(|| metric_label(lang(), &metric).map(str::to_owned))
             .unwrap_or_default()
     };

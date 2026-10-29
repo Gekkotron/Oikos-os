@@ -6187,6 +6187,9 @@ html:has(.flow-canvas-screen) {
 .sheet-form__flag .sheet-form__label { font: var(--type-body); color: inherit; }
 .dashboard-settings-sheet__reorder { display: flex; gap: 8px; }
 .dashboard-settings-sheet__reorder .btn { flex: 1; }
+/* Above the card, below `.widget__tools` (z-index 2). Nothing inside a widget card stacks
+   above 1 except the history chart's tooltip (z-index 2), which shows only on hover and takes
+   no pointer events; with the overlay on top it never shows. Audited 2026-10-29. */
 .widget__edit-overlay { position: absolute; inset: 0; z-index: 1; cursor: pointer; pointer-events: auto; }
 
 /* ⋯ menu on a flow row or card */

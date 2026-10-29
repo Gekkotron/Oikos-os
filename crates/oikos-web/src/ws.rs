@@ -20,6 +20,8 @@ pub fn connect(path: &str, house: House) {
     let path = path.to_owned();
     spawn_local(async move {
         let mut backoff = FIRST_BACKOFF_MS;
+        // The shell fetches the dashboards at start-up; only a reconnect refetches them here.
+        let mut connected_before = false;
         loop {
             house.connection.set(ConnectionStatus::Connecting);
             let reason = match absolute_url(&path)
@@ -44,6 +46,10 @@ pub fn connect(path: &str, house: House) {
                                         house.refresh_solar();
                                         house.refresh_ambiances();
                                         house.refresh_home_settings();
+                                        if connected_before {
+                                            house.refresh_dashboards(|_| ());
+                                        }
+                                        connected_before = true;
                                     }
                                 }
                                 Err(e) => {

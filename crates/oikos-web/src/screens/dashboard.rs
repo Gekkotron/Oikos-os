@@ -30,6 +30,8 @@ pub fn DashboardScreen() -> impl IntoView {
             .dashboards
             .with(|v| v.iter().any(|d| d.dashboard.id == current))
     });
+    // A Memo too: the fallback reads it, so only the flag's first change may rebuild the editor.
+    let loaded = Memo::new(move |_| house.dashboards_loaded.get());
 
     view! {
         <Show
@@ -45,6 +47,22 @@ pub fn DashboardScreen() -> impl IntoView {
                         // The sidebar's "New dashboard" lands here with ?edit=1.
                         let initial_edit = query.read_untracked().get("edit").as_deref() == Some("1");
                         let edit = EditState::new(view.dashboard.clone(), initial_edit);
+                        // A refetch (on a reconnect) can bring a copy saved elsewhere: take it
+                        // while nothing is being edited here. Edit mode and the unsaved flag are
+                        // tracked too, so a copy that came mid-edit lands once the edit ends clean.
+                        let dirty = edit.dirty();
+                        Effect::new(move |_| {
+                            let editing = edit.active.get() || dirty.get();
+                            let Some(fresh) = house
+                                .dashboards
+                                .with(|v| v.iter().find(|d| d.dashboard.id == current_id).cloned())
+                            else {
+                                return;
+                            };
+                            if !editing {
+                                edit.adopt(&fresh.dashboard);
+                            }
+                        });
                         let widgets = Signal::derive(move || edit.draft.get().widgets);
                         let show_header = move || edit.draft.with(|d| d.show_header);
                         view! {
@@ -78,6 +96,14 @@ pub fn DashboardScreen() -> impl IntoView {
                                     on_close=Callback::new(move |_| edit.settings_open.set(false))
                                 />
                             </Show>
+                        }
+                            .into_any()
+                    }
+                    None if !loaded.get() => {
+                        view! {
+                            <p class="dashboard-loading" aria-busy="true">
+                                {move || dash_text(lang(), DashText::LoadingDashboard)}
+                            </p>
                         }
                             .into_any()
                     }

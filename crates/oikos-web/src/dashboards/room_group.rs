@@ -61,11 +61,15 @@ fn card_name(title: Option<String>, room: &str) -> String {
 }
 
 #[component]
-pub fn RoomGroupWidget(area_id: String, room: String, title: Option<String>) -> impl IntoView {
+pub fn RoomGroupWidget(
+    area_id: String,
+    room: String,
+    #[prop(into)] title: Signal<Option<String>>,
+) -> impl IntoView {
     let house = expect_context::<House>();
     let sender = Sender::from_context();
     let lang = use_lang();
-    let name = card_name(title, &room);
+    let name = Memo::new(move |_| card_name(title.get(), &room));
     let state = {
         let area = area_id.clone();
         Memo::new(move |_| house.entities.with(|m| room_summary(m, &area)))
@@ -117,7 +121,7 @@ pub fn RoomGroupWidget(area_id: String, room: String, title: Option<String>) -> 
         <article class="card widget-room">
             <div class="widget-room__head">
                 <span class="widget-room__icon" inner_html=HOUSE></span>
-                <span class="widget-room__name" title=name.clone()>{name.clone()}</span>
+                <span class="widget-room__name" title=name>{name}</span>
             </div>
             <Show
                 when=move || state.with(|s| s.lights.is_some() || s.covers.is_some())
