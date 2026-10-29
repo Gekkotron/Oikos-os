@@ -759,6 +759,22 @@ async fn dots_move_and_stop_when_the_diagram_unmounts() {
             .and_then(|c| c.get_attribute("cx"))
     };
     let first = cx().expect("dots drawn");
+    // A halo then its head: opacity as an attribute, a class on the halo only.
+    let circles = layer.query_selector_all("circle").unwrap();
+    let (halo, head): (Element, Element) = (
+        circles.item(0).unwrap().unchecked_into(),
+        circles.item(1).unwrap().unchecked_into(),
+    );
+    assert_eq!(
+        halo.get_attribute("class").as_deref(),
+        Some("energy-dots__halo")
+    );
+    assert_eq!(head.get_attribute("class"), None);
+    for c in [&halo, &head] {
+        assert!(c.get_attribute("opacity").is_some());
+        assert!(c.get_attribute("r").is_some());
+        assert_eq!(c.get_attribute("style"), None);
+    }
     wait(150).await;
     assert_ne!(cx().unwrap(), first, "dots move");
 

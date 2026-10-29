@@ -132,22 +132,28 @@ pub fn reduced_motion() -> bool {
 #[cfg(target_arch = "wasm32")]
 const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
+/// Writes `v` with at most two decimals into `buf` (cleared first), without trailing zeros.
 #[cfg(target_arch = "wasm32")]
-fn num(v: f64) -> String {
-    let s = format!("{v:.2}");
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    if s.is_empty() || s == "-" {
-        "0".to_string()
-    } else {
-        s.to_string()
+fn num(buf: &mut String, v: f64) -> &str {
+    use std::fmt::Write;
+
+    buf.clear();
+    let _ = write!(buf, "{v:.2}");
+    let kept = buf.trim_end_matches('0').trim_end_matches('.').len();
+    buf.truncate(kept);
+    if buf.is_empty() || buf == "-" {
+        buf.clear();
+        buf.push('0');
     }
+    buf
 }
 
+/// What a wire's group was last drawn with, so `r` and `class` are only written on a change.
 #[cfg(target_arch = "wasm32")]
-fn set_attr(el: &web_sys::Element, name: &str, value: &str) {
-    if el.get_attribute(name).as_deref() != Some(value) {
-        let _ = el.set_attribute(name, value);
-    }
+#[derive(Clone, Copy, PartialEq)]
+struct Drawn {
+    radius: f64,
+    tone: &'static str,
 }
 
 /// Starts the animation loop on `layer`. Dots stop (and the loop ends) once the returned flag is
@@ -157,29 +163,35 @@ pub fn run(layer: web_sys::Element, store: DotStore) -> Rc<std::cell::Cell<bool>
     use leptos::prelude::request_animation_frame;
     use std::cell::Cell;
 
-    let alive = Rc::new(Cell::new(true));
-    let last = Rc::new(Cell::new(js_sys::Date::now()));
+    /// The loop's own state, carried from frame to frame.
+    struct Loop {
+        layer: web_sys::Element,
+        store: DotStore,
+        alive: Rc<Cell<bool>>,
+        last: f64,
+        drawn: BTreeMap<String, Drawn>,
+        buf: String,
+    }
 
-    fn frame(layer: web_sys::Element, store: DotStore, alive: Rc<Cell<bool>>, last: Rc<Cell<f64>>) {
-        if !alive.get() {
+    fn frame(mut s: Loop) {
+        if !s.alive.get() {
             return;
         }
         let now = js_sys::Date::now();
-        let dt = ((now - last.get()) / 1000.0).clamp(0.0, 0.1);
-        last.set(now);
-        draw(&layer, &store, dt);
-        let (l, s, a, t) = (layer.clone(), store.clone(), alive.clone(), last.clone());
-        request_animation_frame(move || frame(l, s, a, t));
+        let dt = ((now - s.last) / 1000.0).clamp(0.0, 0.1);
+        s.last = now;
+        draw(&mut s, dt);
+        request_animation_frame(move || frame(s));
     }
 
-    fn draw(layer: &web_sys::Element, store: &DotStore, dt: f64) {
-        let Some(doc) = layer.owner_document() else {
+    fn draw(s: &mut Loop, dt: f64) {
+        let Some(doc) = s.layer.owner_document() else {
             return;
         };
-        let mut map = store.borrow_mut();
+        let mut map = s.store.borrow_mut();
         // Drop groups of wires that are gone.
         let mut existing: BTreeMap<String, web_sys::Element> = BTreeMap::new();
-        let mut child = layer.first_element_child();
+        let mut child = s.layer.first_element_child();
         while let Some(el) = child {
             child = el.next_element_sibling();
             match el.get_attribute("data-k") {
@@ -189,6 +201,7 @@ pub fn run(layer: web_sys::Element, store: DotStore) -> Rc<std::cell::Cell<bool>
                 _ => el.remove(),
             }
         }
+        s.drawn.retain(|k, _| existing.contains_key(k));
         for (id, w) in map.iter_mut() {
             w.phase = advance(w.phase, dt, w.speed, w.len);
             let g = match existing.get(id) {
@@ -198,18 +211,31 @@ pub fn run(layer: web_sys::Element, store: DotStore) -> Rc<std::cell::Cell<bool>
                         continue;
                     };
                     let _ = g.set_attribute("data-k", id);
-                    let _ = layer.append_child(&g);
+                    let _ = s.layer.append_child(&g);
                     g
                 }
             };
-            set_attr(
-                &g,
-                "class",
-                &format!("energy-dots__wire energy-tone--{}", w.tone),
-            );
+            let now = Drawn {
+                radius: w.radius,
+                tone: w.tone,
+            };
+            // `drawn` only knows the groups still in the layer, so a new group has no entry.
+            let before = s.drawn.get(id).copied();
+            if before != Some(now) {
+                s.drawn.insert(id.clone(), now);
+            }
+            if before.map(|d| d.tone) != Some(now.tone) {
+                let _ = g.set_attribute(
+                    "class",
+                    &format!("energy-dots__wire energy-tone--{}", w.tone),
+                );
+            }
+            // Circles already drawn keep their `class`, and their `r` while the radius holds.
+            let resized = before.map(|d| d.radius) != Some(now.radius);
             let list = dots(w);
             // Add missing circles, remove extras.
             let mut have = g.child_element_count() as usize;
+            let fresh_from = if before.is_some() { have } else { 0 };
             while have < list.len() {
                 let Ok(c) = doc.create_element_ns(Some(SVG_NS), "circle") else {
                     break;
@@ -218,14 +244,19 @@ pub fn run(layer: web_sys::Element, store: DotStore) -> Rc<std::cell::Cell<bool>
                 have += 1;
             }
             let mut node = g.first_element_child();
-            for d in &list {
+            for (i, d) in list.iter().enumerate() {
                 let Some(c) = node else { break };
                 node = c.next_element_sibling();
-                set_attr(&c, "cx", &num(d.x));
-                set_attr(&c, "cy", &num(d.y));
-                set_attr(&c, "r", &num(d.r));
-                set_attr(&c, "style", &format!("opacity:{}", num(d.opacity)));
-                set_attr(&c, "class", if d.halo { "energy-dots__halo" } else { "" });
+                let _ = c.set_attribute("cx", num(&mut s.buf, d.x));
+                let _ = c.set_attribute("cy", num(&mut s.buf, d.y));
+                let _ = c.set_attribute("opacity", num(&mut s.buf, d.opacity));
+                let fresh = i >= fresh_from;
+                if fresh || resized {
+                    let _ = c.set_attribute("r", num(&mut s.buf, d.r));
+                }
+                if fresh && d.halo {
+                    let _ = c.set_attribute("class", "energy-dots__halo");
+                }
             }
             while let Some(c) = node {
                 node = c.next_element_sibling();
@@ -234,7 +265,15 @@ pub fn run(layer: web_sys::Element, store: DotStore) -> Rc<std::cell::Cell<bool>
         }
     }
 
-    frame(layer, store, alive.clone(), last);
+    let alive = Rc::new(Cell::new(true));
+    frame(Loop {
+        layer,
+        store,
+        alive: alive.clone(),
+        last: js_sys::Date::now(),
+        drawn: BTreeMap::new(),
+        buf: String::new(),
+    });
     alive
 }
 
