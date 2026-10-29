@@ -48,19 +48,19 @@ pub fn DashboardScreen() -> impl IntoView {
                         let initial_edit = query.read_untracked().get("edit").as_deref() == Some("1");
                         let edit = EditState::new(view.dashboard.clone(), initial_edit);
                         // A refetch (on a reconnect) can bring a copy saved elsewhere: take it
-                        // while nothing is being edited here.
+                        // while nothing is being edited here. Edit mode and the unsaved flag are
+                        // tracked too, so a copy that came mid-edit lands once the edit ends clean.
+                        let dirty = edit.dirty();
                         Effect::new(move |_| {
+                            let editing = edit.active.get() || dirty.get();
                             let Some(fresh) = house
                                 .dashboards
                                 .with(|v| v.iter().find(|d| d.dashboard.id == current_id).cloned())
                             else {
                                 return;
                             };
-                            let original = edit.original.get_untracked();
-                            let idle = !edit.active.get_untracked() && edit.draft.get_untracked() == original;
-                            if idle && original != fresh.dashboard {
-                                edit.original.set(fresh.dashboard.clone());
-                                edit.draft.set(fresh.dashboard);
+                            if !editing {
+                                edit.adopt(&fresh.dashboard);
                             }
                         });
                         let widgets = Signal::derive(move || edit.draft.get().widgets);

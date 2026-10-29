@@ -77,6 +77,28 @@ impl EditState {
         self.selected_widget.set(None);
         self.draft.set(self.original.get_untracked());
     }
+
+    /// Takes the hub's reply to a Save of `sent`. Edits made while the request was in flight
+    /// stay in the draft, still unsaved, and the edit goes on; otherwise the reply becomes the
+    /// draft and the save ends the edit (the widget library and any open sheet close with it).
+    pub fn saved(&self, sent: &Dashboard, saved: Dashboard) {
+        self.original.set(saved.clone());
+        if self.draft.with_untracked(|d| d == sent) {
+            self.draft.set(saved);
+            self.close();
+        }
+    }
+
+    /// Takes a copy refetched from the hub when nothing is being edited here; a copy that
+    /// arrives mid-edit waits in the house list for the next call.
+    pub fn adopt(&self, fresh: &Dashboard) {
+        let original = self.original.get_untracked();
+        let idle = !self.active.get_untracked() && self.draft.with_untracked(|d| *d == original);
+        if idle && original != *fresh {
+            self.original.set(fresh.clone());
+            self.draft.set(fresh.clone());
+        }
+    }
 }
 
 /// The pencil's accessible name; it says so when switching edit mode off left an unsaved draft.
@@ -180,12 +202,8 @@ pub fn EditToolbar(state: EditState) -> impl IntoView {
                         let d = state.draft.get_untracked();
                         spawn_local(async move {
                             if let Ok(saved) = api::put_dashboard(&d).await {
-                                state.original.set(saved.clone());
-                                state.draft.set(saved.clone());
+                                state.saved(&d, saved.clone());
                                 house.store_dashboard(saved);
-                                // A save ends the edit: the widget library and any open sheet
-                                // close with it.
-                                state.close();
                             }
                             saving.set(false);
                         });
@@ -252,6 +270,59 @@ mod tests {
         assert!(!s.active.get());
         assert_eq!(s.selected_widget.get(), None);
         assert!(!s.settings_open.get());
+    }
+
+    #[test]
+    fn a_save_reply_becomes_the_draft_and_ends_the_edit() {
+        let s = state(vec![widget("a", WidgetKind::Light, Span::X1x1)]);
+        s.cycle_span(0);
+        let sent = s.draft.get();
+        let mut reply = sent.clone();
+        reply.name = "From hub".into();
+        s.saved(&sent, reply.clone());
+        assert_eq!(s.original.get(), reply);
+        assert_eq!(s.draft.get(), reply);
+        assert!(!s.active.get());
+    }
+
+    #[test]
+    fn edits_made_while_a_save_is_in_flight_survive_the_reply() {
+        let s = state(vec![widget("a", WidgetKind::Light, Span::X1x1)]);
+        s.cycle_span(0);
+        let sent = s.draft.get();
+        s.selected_widget.set(Some(0));
+        // Edited after the PUT went out.
+        s.cycle_span(0);
+        let edited = s.draft.get();
+        s.saved(&sent, sent.clone());
+        assert_eq!(s.original.get(), sent);
+        assert_eq!(s.draft.get(), edited);
+        assert!(s.dirty().get());
+        assert!(s.active.get());
+        assert_eq!(s.selected_widget.get(), Some(0));
+    }
+
+    #[test]
+    fn a_refetched_copy_is_adopted_only_when_idle() {
+        let s = state(vec![widget("a", WidgetKind::Light, Span::X1x1)]);
+        let mut fresh = s.original.get();
+        fresh.name = "Elsewhere".into();
+
+        // Editing: held back.
+        s.adopt(&fresh);
+        assert_eq!(s.draft.get().name, "D");
+
+        // Not editing, but an unsaved draft is left: still held back.
+        s.cycle_span(0);
+        s.close();
+        s.adopt(&fresh);
+        assert_ne!(s.original.get(), fresh);
+
+        // Draft discarded: taken.
+        s.discard();
+        s.adopt(&fresh);
+        assert_eq!(s.original.get(), fresh);
+        assert_eq!(s.draft.get(), fresh);
     }
 
     #[test]

@@ -6,9 +6,6 @@ Running backlog of ideas and deferred follow-ups. Priority: **P1** = correctness
 
 ### P2 — polish / test coverage
 
-- Overlay z-index 1 vs tools z-index 2 depends on no inner card element exceeding z-index 1 — audit the new widget cards (`widgets.css`).
-- Edits made to the draft while a Save is in flight are overwritten by the hub's reply.
-- A copy refetched on reconnect while the dashboard is in edit mode is ignored, and stays ignored after leaving edit mode until the next refetch.
 - `WidgetConfigSheet` has no entity/target picker — swap-target requires delete + re-add.
 - HistoryChart entry filter in the widget library uses Sensor entities only; spec says "any entity with history".
 

@@ -249,6 +249,11 @@ async fn a_refetched_copy_replaces_the_shown_dashboard_unless_it_is_being_edited
         .set(vec![solar_stat("d_sync", Some("Garage"))]);
     settle().await;
     assert_eq!(text_of(&host, ".widget-stat__label"), "Roof");
+
+    // Leaving edit mode with nothing unsaved takes the copy held back meanwhile.
+    click(&host, ".dashboard-edit-toolbar__pencil");
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Garage");
 }
 
 fn text_of(host: &web_sys::Element, selector: &str) -> String {
