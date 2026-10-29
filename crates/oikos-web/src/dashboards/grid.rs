@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use oikos_core::dashboard::{Cell, GRID_COLUMNS, Widget, layout};
 
 use super::edit::EditState;
-use super::widget::WidgetView;
+use super::widget::{WidgetView, shown};
 use crate::i18n::{DashText, dash_text, use_lang};
 use crate::icons::GRIP;
 
@@ -410,6 +410,9 @@ pub fn Grid(
                                 .unwrap_or_else(|| initial.clone())
                         })
                     };
+                    // A new target or chart range rebuilds the card, not the tile, so a drag or
+                    // the open config sheet carries on.
+                    let shows = Memo::new(move |_| current.with(|w| shown(&w.config)));
                     let is_fresh = {
                         let id = id.clone();
                         move || edit.is_some_and(|e| e.fresh.with(|f| f.as_deref() == Some(id.as_str())))
@@ -478,7 +481,10 @@ pub fn Grid(
                             style=style
                             data-widget-id=id
                         >
-                            <WidgetView widget=w current=current />
+                            {move || {
+                                shows.get();
+                                view! { <WidgetView widget=current.get_untracked() current=current /> }
+                            }}
                             // An overlay (not a tile click handler) so the inner card's own
                             // controls, e.g. a light toggle, cannot fire while editing. It sits
                             // above the card and below `.widget__tools` (z-index 2).

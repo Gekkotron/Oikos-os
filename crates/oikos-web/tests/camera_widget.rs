@@ -263,6 +263,7 @@ async fn add_camera_select_resets_after_a_pick() {
     std::mem::forget(leptos::mount::mount_to(
         host.clone().unchecked_into(),
         move || {
+            provide_context(House::new());
             provide_context(CameraList(RwSignal::new(list.clone())));
             let state = EditState::new(dashboard.clone(), true);
             view! { <WidgetConfigSheet state=state index=0 on_close=Callback::new(|()| {}) /> }
