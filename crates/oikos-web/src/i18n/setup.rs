@@ -123,6 +123,8 @@ pub enum SetupText {
     RoleSolar,
     /// Shown when changing an energy role failed; `{error}` is the hub's text.
     RoleMoveFailed,
+    /// Shown when the old sensor was cleared but the new one could not be set.
+    RoleClearedNotSet,
 }
 
 pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
@@ -304,6 +306,10 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
         SetupText::RoleGrid => ("Grid, bought", "Réseau, acheté"),
         SetupText::RoleGridExport => ("Grid, sold", "Réseau, vendu"),
         SetupText::RoleSolar => ("Solar production", "Production solaire"),
+        SetupText::RoleClearedNotSet => (
+            "The old sensor no longer holds this role, so it is now empty. The new sensor could not be set: {error}",
+            "L'ancien capteur ne porte plus ce rôle, il est donc vide. Le nouveau capteur n'a pas pu être défini : {error}",
+        ),
         SetupText::RoleMoveFailed => (
             "Could not change the sensor: {error}",
             "Impossible de changer le capteur : {error}",
@@ -420,6 +426,7 @@ mod tests {
                 SetupText::RoleGridExport,
                 SetupText::RoleSolar,
                 SetupText::RoleMoveFailed,
+                SetupText::RoleClearedNotSet,
             ],
             setup_text,
             &[

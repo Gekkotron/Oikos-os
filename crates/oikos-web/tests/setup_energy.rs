@@ -195,3 +195,89 @@ async fn off_peak_from_the_card_keeps_the_rest_of_home_settings() {
     expected["off_peak"] = serde_json::json!([{"start":"22:00","end":"06:00"}]);
     assert_eq!(sent, expected);
 }
+
+fn with_role(e: &EntityView, role: Option<&str>) -> String {
+    let mut e = e.clone();
+    e.ui.energy_role = role.map(Into::into);
+    serde_json::to_string(&e).unwrap()
+}
+
+async fn choose(host: &web_sys::Element, value: &str) -> web_sys::HtmlSelectElement {
+    let select: web_sys::HtmlSelectElement = host
+        .query_selector("select.energy__role")
+        .unwrap()
+        .expect("grid select")
+        .unchecked_into();
+    select.set_value(value);
+    change(&select);
+    settle().await;
+    select
+}
+
+#[wasm_bindgen_test]
+async fn the_reply_updates_the_house_without_a_socket_echo() {
+    let stub = FetchStub::install();
+    let a = sensor("meter_a", "power", Some("grid"));
+    let b = sensor("meter_b", "energy", None);
+    stub.reply("GET", "/api/v1/home/settings", 200, "{}");
+    stub.reply(
+        "PATCH",
+        "/api/v1/entities/meter_a/override",
+        200,
+        &with_role(&a, None),
+    );
+    stub.reply(
+        "PATCH",
+        "/api/v1/entities/meter_b/override",
+        200,
+        &with_role(&b, Some("grid")),
+    );
+    let house = house_with(vec![a, b]);
+    let store = house.entities;
+    let host = mount(house);
+    tick().await;
+    let select = choose(&host, "meter_b").await;
+    assert_eq!(select.value(), "meter_b");
+    store.with_untracked(|m| {
+        assert_eq!(m["meter_a"].ui.energy_role, None);
+        assert_eq!(m["meter_b"].ui.energy_role.as_deref(), Some("grid"));
+    });
+    // A second move right away clears B, not A again.
+    choose(&host, "").await;
+    let got = patches(&stub);
+    assert_eq!(got.len(), 3, "{got:?}");
+    assert_eq!(got[2].0, "/api/v1/entities/meter_b/override");
+    assert!(got[2].1.contains("\"energyRole\":null"), "{}", got[2].1);
+}
+
+#[wasm_bindgen_test]
+async fn a_failed_second_step_says_the_role_is_now_empty() {
+    let stub = FetchStub::install();
+    let a = sensor("meter_a", "power", Some("grid"));
+    let b = sensor("meter_b", "energy", None);
+    stub.reply("GET", "/api/v1/home/settings", 200, "{}");
+    stub.reply(
+        "PATCH",
+        "/api/v1/entities/meter_a/override",
+        200,
+        &with_role(&a, None),
+    );
+    stub.reply(
+        "PATCH",
+        "/api/v1/entities/meter_b/override",
+        500,
+        r#"{"error":"hub exploded"}"#,
+    );
+    let host = mount(house_with(vec![a, b]));
+    tick().await;
+    let select = choose(&host, "meter_b").await;
+    let alert = host
+        .query_selector("[role=alert]")
+        .unwrap()
+        .unwrap()
+        .text_content()
+        .unwrap();
+    assert!(alert.contains("hub exploded"), "alert: {alert}");
+    assert!(alert.contains("is now empty"), "alert: {alert}");
+    assert_eq!(select.value(), "");
+}

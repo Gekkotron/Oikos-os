@@ -36,6 +36,27 @@ pub fn holder(entities: &[EntityView], role: EnergyRole) -> Option<String> {
         .map(|e| e.id.clone())
 }
 
+/// The options of the picker for `role`: candidates that hold no other role, plus the current
+/// holder of `role` even when it would not qualify, so the select never misreports it.
+pub fn role_options(entities: &[EntityView], role: EnergyRole) -> Vec<EntityView> {
+    let mut list: Vec<EntityView> = role_candidates(entities)
+        .into_iter()
+        .filter(|e| {
+            e.ui.energy_role
+                .as_deref()
+                .and_then(EnergyRole::parse)
+                .is_none_or(|r| r == role)
+        })
+        .collect();
+    if let Some(h) = holder(entities, role)
+        && !list.iter().any(|e| e.id == h)
+        && let Some(e) = entities.iter().find(|e| e.id == h)
+    {
+        list.push(e.clone());
+    }
+    list
+}
+
 /// The stored name a role is written under.
 fn role_name(role: EnergyRole) -> &'static str {
     match role {
@@ -83,45 +104,53 @@ pub fn EnergyRolePicker(role: EnergyRole) -> impl IntoView {
             .entities
             .with(|m| holder(&m.values().cloned().collect::<Vec<_>>(), role))
     });
-    // The candidates, plus the current holder when it would not qualify, so it stays visible.
-    let options = Memo::new(move |_| {
-        let all = all_entities(house);
-        let mut list = role_candidates(&all);
-        if let Some(h) = holder(&all, role)
-            && !list.iter().any(|e| e.id == h)
-            && let Some(e) = all.iter().find(|e| e.id == h)
-        {
-            list.push(e.clone());
-        }
-        list
-    });
+    let options = Memo::new(move |_| role_options(&all_entities(house), role));
+    let busy = RwSignal::new(false);
     let on_change = move |ev: leptos::ev::Event| {
         let value = event_target_value(&ev);
         let previous = current.get_untracked();
-        if previous.as_deref().unwrap_or_default() == value {
+        if busy.get_untracked() || previous.as_deref().unwrap_or_default() == value {
             return;
         }
         failure.set(None);
+        busy.set(true);
         leptos::task::spawn_local(async move {
+            // Each reply goes into the house at once, so the holder is right before any echo.
+            let mut cleared = false;
             let mut result = Ok(());
             if let Some(old) = previous {
-                result = crate::api::set_override(&old, role_patch(None))
-                    .await
-                    .map(|_| ());
-            }
-            if result.is_ok() && !value.is_empty() {
-                result = crate::api::set_override(&value, role_patch(Some(role)))
-                    .await
-                    .map(|_| ());
-            }
-            if let Err(e) = result {
-                failure.try_set(Some(
-                    setup_text(lang(), SetupText::RoleMoveFailed).replace("{error}", &e.error),
-                ));
-                if let Some(el) = select.try_get_untracked().flatten() {
-                    el.set_value(&current.try_get_untracked().flatten().unwrap_or_default());
+                match crate::api::set_override(&old, role_patch(None)).await {
+                    Ok(view) => {
+                        house.entities.update(|m| {
+                            m.insert(view.id.clone(), view);
+                        });
+                        cleared = true;
+                    }
+                    Err(e) => result = Err(e),
                 }
             }
+            if result.is_ok() && !value.is_empty() {
+                match crate::api::set_override(&value, role_patch(Some(role))).await {
+                    Ok(view) => {
+                        house.entities.update(|m| {
+                            m.insert(view.id.clone(), view);
+                        });
+                    }
+                    Err(e) => result = Err(e),
+                }
+            }
+            if let Err(e) = result {
+                let key = if cleared {
+                    SetupText::RoleClearedNotSet
+                } else {
+                    SetupText::RoleMoveFailed
+                };
+                failure.try_set(Some(setup_text(lang(), key).replace("{error}", &e.error)));
+            }
+            if let Some(el) = select.try_get_untracked().flatten() {
+                el.set_value(&current.try_get_untracked().flatten().unwrap_or_default());
+            }
+            busy.try_set(false);
         });
     };
     let id = format!("energy-{}", role_name(role));
@@ -130,7 +159,10 @@ pub fn EnergyRolePicker(role: EnergyRole) -> impl IntoView {
             <label class="climate-field__label" for=id.clone()>
                 {move || t(role_label(role))}
             </label>
-            <select id=id node_ref=select class="select energy__role" on:change=on_change>
+            <select id=id node_ref=select class="select energy__role"
+                prop:disabled=move || busy.get()
+                on:change=on_change
+            >
                 <option value="" prop:selected=move || current.with(Option::is_none)>
                     {move || home_text(lang(), HomeText::NoneChoice)}
                 </option>
@@ -190,6 +222,14 @@ fn OffPeakCard() -> impl IntoView {
     let problem = RwSignal::new(None::<String>);
     let saved = RwSignal::new(false);
     let saving = RwSignal::new(false);
+    // An edit after a save leaves the "Saved" note stale.
+    Effect::new(move |previous: Option<Draft>| {
+        let now = draft.get();
+        if previous.is_some_and(|p| p != now) {
+            saved.set(false);
+        }
+        now
+    });
     leptos::task::spawn_local(async move {
         match crate::api::home::get_home_settings().await {
             Ok(s) => {
@@ -321,5 +361,31 @@ mod tests {
         assert_eq!(holder(&list, EnergyRole::Grid).as_deref(), Some("a"));
         assert_eq!(holder(&list, EnergyRole::Solar).as_deref(), Some("b"));
         assert_eq!(holder(&list, EnergyRole::GridExport), None);
+    }
+
+    #[test]
+    fn options_leave_out_sensors_holding_another_role() {
+        let list = [
+            sensor("a_free", "power", None),
+            sensor("b_solar", "power", Some("solar")),
+            sensor("c_grid", "power", Some("grid")),
+            sensor("d_temp_grid", "temperature", Some("grid")),
+        ];
+        let ids = |role| -> Vec<String> {
+            role_options(&list, role)
+                .into_iter()
+                .map(|e| e.id)
+                .collect()
+        };
+        assert_eq!(ids(EnergyRole::Grid), ["a_free", "c_grid"]);
+        assert_eq!(ids(EnergyRole::Solar), ["a_free", "b_solar"]);
+        // A holder that is no energy or power sensor stays listed.
+        let mut with_odd = list.to_vec();
+        with_odd[3] = sensor("d_temp_grid", "temperature", Some("grid"));
+        assert!(
+            role_options(&with_odd[3..], EnergyRole::Grid)
+                .iter()
+                .any(|e| e.id == "d_temp_grid")
+        );
     }
 }
