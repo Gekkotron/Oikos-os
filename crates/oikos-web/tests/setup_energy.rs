@@ -159,7 +159,7 @@ async fn a_failed_move_is_reported_and_the_select_keeps_the_real_holder() {
 #[wasm_bindgen_test]
 async fn off_peak_from_the_card_keeps_the_rest_of_home_settings() {
     let stub = FetchStub::install();
-    let doc = r#"{"eco_setpoint":17.5,"mode_entity":"virtual_mode","indoor_entity":null,"cold_below":12.0,"hot_above":28.0,"off_peak":[],"off_peak_history":[]}"#;
+    let doc = r#"{"eco_setpoint":17.5,"mode_entity":"virtual_mode","indoor_entity":null,"cold_below":12.0,"hot_above":28.0,"energy_view":"flux","off_peak":[],"off_peak_history":[]}"#;
     stub.reply("GET", "/api/v1/home/settings", 200, doc);
     stub.reply("PUT", "/api/v1/home/settings", 200, doc);
     let host = mount(house_with(vec![]));
