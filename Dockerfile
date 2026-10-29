@@ -89,4 +89,4 @@ ENV OIKOS_HTTP__BIND=0.0.0.0:8081
 ENV OIKOS_DATA_DIR=/data
 EXPOSE 8081
 ENTRYPOINT ["/usr/local/bin/oikos-os"]
-CMD ["--config", "/etc/oikos/oikos.toml"]
+CMD ["run"]

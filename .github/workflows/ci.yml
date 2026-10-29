@@ -81,3 +81,14 @@ jobs:
       # The runner image ships Chrome and a matching chromedriver.
       - run: wasm-pack test --headless --chrome --chromedriver "$CHROMEWEBDRIVER/chromedriver"
         working-directory: crates/oikos-web
+
+  stack:
+    name: bundled stack
+    runs-on: ubuntu-latest
+    # Starts the real Mosquitto and TimescaleDB images from compose.yml, on
+    # top of the credentials init-bundled writes.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: tools/ci/stack-check.sh

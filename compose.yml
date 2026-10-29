@@ -1,27 +1,85 @@
 # Oikos-os single-host Docker Compose.
 # See docs/users/install-on-linux.md for the full install.
 #
-# The hub only needs its own container. Mosquitto, TimescaleDB and
-# (optionally) Frigate are expected to run on the same host; `network_mode:
-# host` makes `localhost` inside the container the host's localhost.
+# `docker compose up` starts four services:
+#   init         one-shot: writes the Mosquitto and TimescaleDB credentials
+#                into ./data the first time, then exits.
+#   mosquitto    the MQTT broker, on port 1883.
+#   timescaledb  the history database, on port 5432.
+#   hub          Oikos-os itself, on port 8081.
+#
+# Already have a broker and a database? Start only the hub and point it at
+# them from the setup wizard: `docker compose up -d hub`.
+#
+# `network_mode: host` makes `localhost` inside each container the host's
+# localhost. Everything the stack writes lives under ./data.
+
+x-oikos-build: &oikos-build
+  context: .
+  dockerfile: Dockerfile
 
 services:
+  init:
+    build: *oikos-build
+    # Same tag as the hub, so a fresh `docker compose up` builds it once
+    # instead of trying to pull it.
+    image: oikos-os:local
+    command: ["init-bundled"]
+    restart: "no"
+    volumes:
+      - ./data:/data
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    container_name: oikos-mosquitto
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    volumes:
+      - ./data/mosquitto/config:/mosquitto/config
+      - ./data/mosquitto/data:/mosquitto/data
+      - ./data/mosquitto/log:/mosquitto/log
+
+  timescaledb:
+    image: timescale/timescaledb:2.30.2-pg17
+    container_name: oikos-timescaledb
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_USER: oikos
+      POSTGRES_DB: oikos
+    # The password file only exists when init created the bundled
+    # credentials. Without it (a hub that already has its own database) the
+    # image's entrypoint never sees POSTGRES_PASSWORD_FILE, which it would
+    # reject for a missing file. "$$@" passes on the command, so an override
+    # such as `command: postgres -c port=5433` still works.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        [ -f /run/oikos-bundled/db-password ] && export POSTGRES_PASSWORD_FILE=/run/oikos-bundled/db-password
+        exec docker-entrypoint.sh "$$0" "$$@"
+    command: ["postgres"]
+    volumes:
+      - ./data/timescaledb:/var/lib/postgresql/data
+      - ./data/bundled:/run/oikos-bundled:ro
+
   hub:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *oikos-build
     image: oikos-os:local
     container_name: oikos-hub
     restart: unless-stopped
     network_mode: host
-    # Optional, git-ignored: any OIKOS_* override (see oikos.example.toml).
+    # Optional, git-ignored: any OIKOS_* override.
     env_file:
       - path: .env
         required: false
     volumes:
-      # hub.json and settings-cache.json live here.
+      # hub.json, oikos.toml, settings-cache.json and the push key
+      # (firebase.json) live here.
       - ./data:/data
-      - ./oikos.toml:/etc/oikos/oikos.toml:ro
-      # Git-ignored keys. The hub sends push notifications when
-      # secrets/firebase.json is there; see secrets/README.md.
-      - ./secrets:/etc/oikos/secrets:ro
