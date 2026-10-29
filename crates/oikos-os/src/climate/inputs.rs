@@ -70,6 +70,7 @@ impl OwnedZoneInputs {
             room_eco: self.room_eco.as_ref(),
             thermometer: self.thermometer,
             feedback: self.feedback.as_ref(),
+            room_empty: false,
         }
     }
 }

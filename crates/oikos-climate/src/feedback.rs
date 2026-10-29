@@ -170,14 +170,15 @@ fn raw_limits(input: &CorrectionInput) -> (f64, f64) {
 }
 
 impl FeedbackState {
-    /// The state to keep after a decision: `Some` only for an enabled, scheduled temperature.
+    /// The state to keep after a decision: `Some` only for an enabled, scheduled (or set back)
+    /// temperature.
     pub fn after(
         previous: Option<&FeedbackState>,
         decision: &Decision,
         enabled: bool,
         now: u64,
     ) -> Option<FeedbackState> {
-        if !enabled || decision.source != Source::Schedule {
+        if !enabled || !matches!(decision.source, Source::Schedule | Source::Empty) {
             return None;
         }
         let Some(Setpoint::Temp(target)) = decision.setpoint else {
@@ -404,6 +405,21 @@ mod tests {
         let o = decision(Source::Override, Some(Setpoint::Temp(19.0)), None);
         assert_eq!(FeedbackState::after(Some(&prev), &o, true, NOW), None);
         assert_eq!(FeedbackState::after(Some(&prev), &d, false, NOW), None);
+    }
+
+    #[test]
+    fn after_keeps_state_for_empty() {
+        let d = decision(Source::Empty, Some(Setpoint::Temp(17.0)), None);
+        let s = FeedbackState::after(None, &d, true, NOW).unwrap();
+        assert_eq!(s.target, 17.0);
+        // The setback starting moves the target: the correction starts over.
+        let prev = state(19.0, -0.5, 500, Some(900));
+        let s = FeedbackState::after(Some(&prev), &d, true, NOW).unwrap();
+        assert_eq!(s, state(17.0, 0.0, NOW, None));
+        // And so does it ending.
+        let back = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), None);
+        let s = FeedbackState::after(Some(&state(17.0, -0.5, 500, Some(900))), &back, true, NOW);
+        assert_eq!(s, Some(state(19.0, 0.0, NOW, None)));
     }
 
     #[test]

@@ -87,6 +87,8 @@ pub struct ZoneInputs<'a> {
     pub thermometer: Option<ReadingSource>,
     /// The thermometer correction's state from the previous tick.
     pub feedback: Option<&'a FeedbackState>,
+    /// Nobody has been detected in the room for its presence settings' `empty_after`.
+    pub room_empty: bool,
 }
 
 /// How far back inside the overheat or overcool limit the reading must be before that latched
@@ -565,6 +567,11 @@ fn choose(inp: &ZoneInputs, mode: Option<Mode>) -> Choice {
             reason,
         };
     }
+    if let (Some(_), Setpoint::Temp(t)) = (block, scheduled)
+        && let Some(choice) = setback(inp, mode, t)
+    {
+        return choice;
+    }
     let reason = match block {
         Some(i) => format!("Schedule block {}: {}", i + 1, setpoint_text(scheduled)),
         None => format!("Schedule base: {}", setpoint_text(scheduled)),
@@ -574,6 +581,56 @@ fn choose(inp: &ZoneInputs, mode: Option<Mode>) -> Choice {
         setpoint: Some(scheduled),
         reason,
     }
+}
+
+/// The presence setback of a block at `scheduled` (spec §7.2), while the room is empty: lower in
+/// heat (never under the base or frost), higher in cool (never over the base). `None` when it
+/// is off, the room is occupied, or the limits leave the block as it is.
+fn setback(inp: &ZoneInputs, mode: Mode, scheduled: f64) -> Option<Choice> {
+    let p = &inp.settings.presence;
+    if !p.enabled || !inp.room_empty {
+        return None;
+    }
+    let base = match inp.settings.rules.get(mode).map(|r| r.base) {
+        Some(Setpoint::Temp(b)) => Some(b),
+        _ => None,
+    };
+    let (wanted, sign) = match mode {
+        Mode::Heat => (scheduled - p.setback, '−'),
+        Mode::Cool => (scheduled + p.setback, '+'),
+    };
+    let (target, limit) = match mode {
+        Mode::Heat => {
+            let floor = base.map_or(inp.house.frost, |b| b.max(inp.house.frost));
+            if wanted >= floor {
+                (wanted, None)
+            } else if base.is_some_and(|b| b >= inp.house.frost) {
+                (floor, Some("base"))
+            } else {
+                (floor, Some("frost"))
+            }
+        }
+        Mode::Cool => match base {
+            Some(b) if wanted > b => (b, Some("base")),
+            _ => (wanted, None),
+        },
+    };
+    if (target - scheduled).abs() <= 0.01 {
+        return None;
+    }
+    let detail = match limit {
+        Some(word) => word.to_owned(),
+        None => format!("{scheduled:.1} {sign} {:.1}", p.setback),
+    };
+    Some(Choice {
+        source: Source::Empty,
+        setpoint: Some(Setpoint::Temp(target)),
+        reason: format!(
+            "No one in the room for {} min: {} ({detail})",
+            p.empty_after_min,
+            temp(target)
+        ),
+    })
 }
 
 /// What eco holds in `mode` given what the schedule asks for: never more than the schedule
@@ -601,7 +658,7 @@ fn rules(inp: &ZoneInputs) -> Decision {
     if let (Some(mode), Some(sp)) = (inp.mode, choice.setpoint) {
         d.setpoint = Some(sp);
         d.entities = targets(inp.devices, sp, mode);
-        if let (Source::Schedule, Setpoint::Temp(target)) = (choice.source, sp) {
+        if let (Source::Schedule | Source::Empty, Setpoint::Temp(target)) = (choice.source, sp) {
             apply_correction(inp, &mut d, mode, target);
         }
     }
@@ -771,6 +828,7 @@ mod tests {
         previous: Option<SafetyCause>,
         thermometer: Option<ReadingSource>,
         feedback: Option<FeedbackState>,
+        room_empty: bool,
     }
 
     impl Case {
@@ -789,6 +847,7 @@ mod tests {
                 room_eco: None,
                 thermometer: None,
                 feedback: None,
+                room_empty: false,
             }
         }
 
@@ -811,6 +870,7 @@ mod tests {
                 room_eco: self.room_eco.as_ref(),
                 thermometer: self.thermometer,
                 feedback: self.feedback.as_ref(),
+                room_empty: self.room_empty,
             })
         }
     }
@@ -856,6 +916,112 @@ mod tests {
             until: NOW + 3600,
             origin: OverrideOrigin::User,
         }
+    }
+
+    /// Heat over a `base` base, block 19 °C at 10:00, presence on and the room empty.
+    fn empty_room(base: f64) -> Case {
+        let mut c = Case::new();
+        let heat = c.settings.rules.heat.as_mut().unwrap();
+        heat.base = Setpoint::Temp(base);
+        heat.blocks[0].setpoint = Setpoint::Temp(19.0);
+        c.settings.presence.enabled = true;
+        c.room_empty = true;
+        c
+    }
+
+    #[test]
+    fn empty_room_lowers_a_block() {
+        let d = empty_room(15.0).run();
+        assert_eq!(d.source, Source::Empty);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(17.0)));
+        assert_eq!(d.entities["trv"].setpoint, Some(17.0));
+        assert_eq!(
+            d.reason,
+            "No one in the room for 30 min: 17.0 °C (19.0 − 2.0)"
+        );
+    }
+
+    #[test]
+    fn empty_room_keeps_the_base() {
+        let mut c = empty_room(15.0);
+        // The block starts at 11:00: at 10:00 the room is on its base.
+        c.settings.rules.heat.as_mut().unwrap().blocks[0].from = HhMm(660);
+        let d = c.run();
+        assert_eq!(d.source, Source::Schedule);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(15.0)));
+    }
+
+    #[test]
+    fn setback_stops_at_the_base() {
+        let d = empty_room(18.0).run();
+        assert_eq!(d.source, Source::Empty);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(18.0)));
+        assert!(d.reason.ends_with("18.0 °C (base)"), "{}", d.reason);
+    }
+
+    #[test]
+    fn setback_is_off_by_default() {
+        let mut c = empty_room(15.0);
+        c.settings.presence.enabled = false;
+        let d = c.run();
+        assert_eq!(d.source, Source::Schedule);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(19.0)));
+    }
+
+    #[test]
+    fn away_wins_over_setback() {
+        let mut c = empty_room(15.0);
+        c.home = false;
+        assert_eq!(c.run().source, Source::Away);
+    }
+
+    #[test]
+    fn cool_setback_raises() {
+        let mut c = Case::new();
+        c.mode = Some(Mode::Cool);
+        c.devices = vec![dev("ac", &["off", "cool"], Some(25.0))];
+        let cool = c.settings.rules.cool.as_mut().unwrap();
+        cool.base = Setpoint::Temp(28.0);
+        cool.blocks[0].setpoint = Setpoint::Temp(25.0);
+        c.settings.presence.enabled = true;
+        c.room_empty = true;
+        let d = c.run();
+        assert_eq!(d.source, Source::Empty);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(27.0)));
+        assert_eq!(
+            d.reason,
+            "No one in the room for 30 min: 27.0 °C (25.0 + 2.0)"
+        );
+        c.settings.rules.cool.as_mut().unwrap().base = Setpoint::Temp(26.0);
+        let d = c.run();
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(26.0)));
+        assert!(d.reason.ends_with("26.0 °C (base)"), "{}", d.reason);
+    }
+
+    #[test]
+    fn setback_stops_at_frost() {
+        let mut c = empty_room(15.0);
+        let heat = c.settings.rules.heat.as_mut().unwrap();
+        heat.base = Setpoint::Off;
+        heat.blocks[0].setpoint = Setpoint::Temp(8.0);
+        let d = c.run();
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(7.0)));
+        assert!(d.reason.ends_with("7.0 °C (frost)"), "{}", d.reason);
+    }
+
+    #[test]
+    fn correction_runs_against_the_setback_target() {
+        let mut c = empty_room(15.0);
+        c.settings.feedback.enabled = true;
+        c.thermometer = Some(ReadingSource {
+            value: 19.0,
+            age_s: 30,
+        });
+        let d = c.run();
+        assert_eq!(d.source, Source::Empty);
+        assert_eq!(d.setpoint, Some(Setpoint::Temp(17.0)));
+        assert_eq!(d.entities["trv"].setpoint, Some(16.5));
+        assert_eq!(d.adjust, Some(-0.5));
     }
 
     #[test]
