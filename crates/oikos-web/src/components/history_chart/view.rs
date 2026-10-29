@@ -338,6 +338,7 @@ fn render_series(
             },
         )
     };
+    let keyed = shows_band(range, discrete, &s.points);
     let (ylabels, hlines) = y_axis(lang, &nice, scale, &kind);
     let xticks = tick_labels(lang, range, now);
     let fracs = plot_points(&s.points, scale, t_start, now);
@@ -413,9 +414,27 @@ fn render_series(
         </div>
         <div class="history-chart__legend">
             <span>{range_name(lang, range)}</span>
+            {keyed.then(|| view! {
+                <span class="history-chart__key" title=history_text(lang, HistoryText::SpreadHint)>
+                    <span class="history-chart__key-item">
+                        <i class="history-chart__key-line" aria-hidden="true"></i>
+                        {history_text(lang, HistoryText::Average)}
+                    </span>
+                    <span class="history-chart__key-item">
+                        <i class="history-chart__key-band" aria-hidden="true"></i>
+                        {history_text(lang, HistoryText::Spread)}
+                    </span>
+                </span>
+            })}
             <span>{min_max(lang, min_v, max_v, unit.as_deref())}</span>
         </div>
     }
+}
+
+/// Whether the chart draws the min/max band, and so keys it in the legend: a continuous value
+/// on a bucketed range with at least one bucket that spread.
+fn shows_band(range: HistoryRange, discrete: bool, points: &[(i64, f64, f64, f64)]) -> bool {
+    !discrete && is_bucketed(range) && points.iter().any(|p| p.2 < p.3)
 }
 
 /// The y labels as `(fraction down from the top, text)` and the gridlines as fractions down
@@ -664,6 +683,18 @@ mod tests {
             &flat,
         );
         assert_eq!(tip.band, None);
+    }
+
+    #[test]
+    fn the_band_is_keyed_only_where_it_is_drawn() {
+        let spread = [(0, 20.0, 18.0, 22.0), (3_600, 21.0, 21.0, 21.0)];
+        let flat = [(0, 20.0, 20.0, 20.0)];
+        assert!(shows_band(HistoryRange::Week, false, &spread));
+        assert!(shows_band(HistoryRange::Year, false, &spread));
+        // Raw samples, a two-state entity and buckets that never moved have no band to explain.
+        assert!(!shows_band(HistoryRange::Day, false, &spread));
+        assert!(!shows_band(HistoryRange::Week, true, &spread));
+        assert!(!shows_band(HistoryRange::Month, false, &flat));
     }
 
     #[test]
