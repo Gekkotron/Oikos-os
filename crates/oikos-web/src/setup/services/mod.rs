@@ -15,7 +15,7 @@ use super::wizard::WizardNav;
 use super::{Applying, SetupState, setup_href};
 use crate::api::setup::{SaveError, get_section, put_section, put_step};
 use crate::i18n::setup::{SetupText, setup_text, use_setup_text};
-use crate::i18n::use_lang;
+use crate::i18n::{Lang, use_lang};
 use basic::{AlarmForm, ClimateForm, WeatherForm};
 
 /// What a service card says about its service.
@@ -220,6 +220,29 @@ pub fn ServiceCard(
     }
 }
 
+/// `Uses your home location: {place}`, or a note that the location is missing. The place comes
+/// from the setup status, which carries the home's location.
+pub fn place_line(state: Option<SetupState>, lang: Lang) -> String {
+    let place = state.and_then(|s| {
+        s.0.with(|st| {
+            st.as_ref().and_then(|st| st.location.as_ref()).map(|l| {
+                place_label(&GeoPlace {
+                    name: l.city.clone(),
+                    admin: None,
+                    country: l.country.clone(),
+                    latitude: l.latitude,
+                    longitude: l.longitude,
+                    timezone: Some(l.timezone.clone()),
+                })
+            })
+        })
+    });
+    match place {
+        Some(p) => setup_text(lang, SetupText::DescWeatherPlace).replace("{place}", &p),
+        None => setup_text(lang, SetupText::DescWeatherNoPlace).to_owned(),
+    }
+}
+
 /// A card body whose form is not built yet.
 #[component]
 fn Later() -> impl IntoView {
@@ -290,26 +313,7 @@ pub fn ServicesStep() -> impl IntoView {
         })
     };
     let fixed = move |k: SetupText| Signal::derive(move || setup_text(lang(), k).to_owned());
-    let weather_desc = Signal::derive(move || {
-        let place = state.and_then(|s| {
-            s.0.with(|st| {
-                st.as_ref().and_then(|st| st.location.as_ref()).map(|l| {
-                    place_label(&GeoPlace {
-                        name: l.city.clone(),
-                        admin: None,
-                        country: l.country.clone(),
-                        latitude: l.latitude,
-                        longitude: l.longitude,
-                        timezone: Some(l.timezone.clone()),
-                    })
-                })
-            })
-        });
-        match place {
-            Some(p) => setup_text(lang(), SetupText::DescWeatherPlace).replace("{place}", &p),
-            None => setup_text(lang(), SetupText::DescWeatherNoPlace).to_owned(),
-        }
-    });
+    let weather_desc = Signal::derive(move || place_line(state, lang()));
     view! {
         <div class="setup__body">
             <h1 class="setup__title">{move || t(SetupText::ServicesTitle)}</h1>

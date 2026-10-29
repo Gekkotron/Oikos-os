@@ -27,6 +27,11 @@ struct Mounted {
 }
 
 fn mount() -> Mounted {
+    mount_with(None)
+}
+
+fn mount_with(status: Option<&str>) -> Mounted {
+    let status = status.map(|s| serde_json::from_str(s).unwrap());
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
     document.body().unwrap().append_child(&host).unwrap();
@@ -36,7 +41,7 @@ fn mount() -> Mounted {
         provide_context(RwSignal::new(Lang::En));
         provide_context(WizardNav { step });
         provide_context(applying);
-        provide_context(SetupState(RwSignal::new(None)));
+        provide_context(SetupState(RwSignal::new(status)));
         view! { <ServicesStep /> }
     });
     Mounted {
@@ -181,4 +186,50 @@ async fn skip_marks_the_card() {
         Some(v) => storage.set_item(SKIPPED_KEY, &v).unwrap(),
         None => storage.remove_item(SKIPPED_KEY).unwrap(),
     }
+}
+
+const LOCATED: &str = r#"{"mode":"running","step":"services","finished":false,"bundled":false,"location":{"city":"Bordeaux","country":"FR","latitude":44.84,"longitude":-0.58,"timezone":"Europe/Paris"},"mqtt":null,"database":null,"restarting":false}"#;
+
+#[wasm_bindgen_test]
+async fn the_weather_form_names_the_home_location() {
+    let stub = FetchStub::install();
+    stub.reply(
+        "GET",
+        "/api/v1/settings/weather",
+        200,
+        r#"{"enabled":false,"refresh_minutes":15}"#,
+    );
+    let m = mount_with(Some(LOCATED));
+    settle().await;
+    click(&m.host, "#svc-weather .svc__head");
+    settle().await;
+    let body = m
+        .host
+        .query_selector("#svc-weather .svc__body")
+        .unwrap()
+        .unwrap()
+        .text_content()
+        .unwrap();
+    assert!(
+        body.contains("Uses your home location: Bordeaux, FR"),
+        "{body}"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn a_failed_alarm_load_leaves_the_switch_disabled() {
+    let stub = FetchStub::install();
+    stub.reply("GET", "/api/v1/alarm", 500, r#"{"error":"alarm down"}"#);
+    let m = mount();
+    settle().await;
+    click(&m.host, "#svc-alarm .svc__head");
+    settle().await;
+    let switch: web_sys::HtmlButtonElement = m
+        .host
+        .query_selector("#svc-alarm button.switch")
+        .unwrap()
+        .unwrap()
+        .unchecked_into();
+    assert!(switch.disabled());
+    assert!(m.host.text_content().unwrap().contains("alarm down"));
 }

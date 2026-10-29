@@ -4,10 +4,11 @@
 use leptos::prelude::*;
 use serde_json::{Value, json};
 
-use super::{EnabledRow, load_section, save_section, with_fields};
+use super::{EnabledRow, load_section, place_line, save_section, with_fields};
 use crate::api::alarm::{get_alarm, put_alarm_settings};
 use crate::i18n::setup::{SetupText, use_setup_text};
 use crate::i18n::use_lang;
+use crate::setup::SetupState;
 use oikos_alarm::doc::AlarmSettings;
 
 /// A whole number of minutes, 1 or more.
@@ -47,6 +48,8 @@ fn WeatherFields(base: Value, applying_target: String) -> impl IntoView {
     let saving = RwSignal::new(false);
     let failure = RwSignal::new(None::<String>);
     let invalid = move || parse_minutes(&minutes.get()).is_none();
+    let lang = use_lang();
+    let state = use_context::<SetupState>();
     let save = move |_| {
         let Some(n) = parse_minutes(&minutes.get_untracked()) else {
             return;
@@ -73,6 +76,7 @@ fn WeatherFields(base: Value, applying_target: String) -> impl IntoView {
     };
     view! {
         <div class="svc__form">
+            <p class="settings__hint svc__place">{move || place_line(state, lang())}</p>
             <EnabledRow on=on />
             <label class="field" for="weather-minutes">
                 <span class="field__caption">{move || t(SetupText::RefreshMinutes)}</span>
@@ -103,8 +107,8 @@ fn WeatherFields(base: Value, applying_target: String) -> impl IntoView {
     }
 }
 
-/// The weather switch and refresh interval. Its hint names the home's place; the hub refuses
-/// to enable weather without one, and that reason shows as received.
+/// The weather switch and refresh interval. A line names the home's place, taken from the
+/// setup status; the hub refuses to enable weather without one, and that reason shows as received.
 #[component]
 pub fn WeatherForm(applying_target: String) -> impl IntoView {
     let loaded = load_section("weather");
@@ -171,11 +175,14 @@ pub fn AlarmForm(#[prop(optional)] set_up: Option<RwSignal<bool>>) -> impl IntoV
     let lang = use_lang();
     let settings = RwSignal::new(None::<AlarmSettings>);
     let on = RwSignal::new(false);
-    let busy = RwSignal::new(false);
+    // The switch stays disabled until the settings have loaded: flipping it with nothing to
+    // save would show a state the hub never got.
+    let busy = RwSignal::new(true);
     let failure = RwSignal::new(None::<String>);
     leptos::task::spawn_local(async move {
         match get_alarm().await {
             Ok(view) => {
+                busy.try_set(false);
                 on.try_set(view.settings.enabled);
                 settings.try_set(Some(view.settings));
             }
