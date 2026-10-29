@@ -16,9 +16,10 @@ use crate::cards::water_heater::WaterHeaterCard;
 use crate::house::House;
 use crate::i18n::{use_lang, widget_kind_word, widget_placeholder};
 
-/// Picks the card for a widget. Only the presence of what the widget points at is tracked, so
-/// the card mounts once the state snapshot lands (a dashboard opened by its address paints
-/// before it) without remounting on every state change; the card subscribes to its own updates.
+/// Picks the card for a widget. An entity card takes a copy of its entity, so it is rebuilt on
+/// each change of that entity, as a room's cards are; the history chart only waits for its
+/// entity to be known (a dashboard opened by its address paints before the snapshot) and then
+/// refreshes itself.
 ///
 /// `current` is the widget as the dashboard holds it now (the grid keeps a tile mounted across
 /// edits); the Camera widget follows its span and camera list, which pick its layout.
@@ -45,7 +46,7 @@ pub fn WidgetView(
             .into_any()
         }
         (kind, WidgetConfig::Entity { entity_id, .. }) => {
-            entity_widget(house, entity_id.clone(), move |entity| match kind {
+            card_widget(house, entity_id.clone(), move |entity| match kind {
                 WidgetKind::Light => view! { <LightCard entity=entity /> }.into_any(),
                 WidgetKind::Cover => view! { <CoverCard entity=entity /> }.into_any(),
                 WidgetKind::Climate => view! { <ClimateCard entity=entity /> }.into_any(),
@@ -121,7 +122,28 @@ pub fn WidgetView(
     }
 }
 
-/// `render` over the entity `entity_id`, or the placeholder while the house has none.
+/// The entity `id` as the house holds it now, `None` while it has none.
+fn tracked_entity(house: House, id: String) -> Memo<Option<EntityView>> {
+    Memo::new(move |_| house.entities.with(|m| m.get(&id).cloned()))
+}
+
+/// `render` over the entity `entity_id`, run again on each of its changes, or the placeholder
+/// while the house has none.
+fn card_widget(
+    house: House,
+    entity_id: String,
+    render: impl Fn(EntityView) -> AnyView + Send + Sync + 'static,
+) -> AnyView {
+    let entity = tracked_entity(house, entity_id.clone());
+    (move || match entity.get() {
+        Some(entity) => render(entity),
+        None => view! { <Unavailable label=entity_id.clone() /> }.into_any(),
+    })
+    .into_any()
+}
+
+/// `render` over the entity `entity_id` once the house knows it, or the placeholder while it
+/// has none. Only its presence is tracked: what `render` builds follows the entity itself.
 fn entity_widget(
     house: House,
     entity_id: String,
@@ -155,5 +177,65 @@ pub fn Unavailable(#[prop(into)] label: Signal<String>) -> impl IntoView {
             <span class="widget-unavailable-icon">"⚠"</span>
             <span class="widget-unavailable-label">{move || label.get()}</span>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use oikos_api::WsEvent;
+    use oikos_core::model::{
+        Capabilities, EntityCategory, EntityState, Kind, StateValue, UiOverride,
+    };
+
+    use super::*;
+
+    fn sensor(id: &str, value: f64) -> EntityView {
+        EntityView {
+            id: id.into(),
+            device_id: None,
+            name: "Temperature".into(),
+            device_name: None,
+            label: None,
+            kind: Kind::Sensor,
+            component: Kind::Sensor.component().to_string(),
+            protocol_kind: Kind::Sensor,
+            device_class: None,
+            unit: None,
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "salon".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui: UiOverride::default(),
+            state: EntityState {
+                value: StateValue::Number(value),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn value_of(entity: Option<EntityView>) -> Option<StateValue> {
+        entity.map(|e| e.state.value)
+    }
+
+    #[test]
+    fn a_card_widget_follows_its_entity_state() {
+        let house = House::new();
+        let entity = tracked_entity(house, "s".into());
+        assert_eq!(value_of(entity.get_untracked()), None);
+        house.apply(WsEvent::EntityUpserted(sensor("s", 1.0)));
+        assert_eq!(
+            value_of(entity.get_untracked()),
+            Some(StateValue::Number(1.0))
+        );
+        house.apply(WsEvent::StateChanged {
+            id: "s".into(),
+            state: sensor("s", 2.0).state,
+        });
+        assert_eq!(
+            value_of(entity.get_untracked()),
+            Some(StateValue::Number(2.0))
+        );
     }
 }
