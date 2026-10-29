@@ -72,6 +72,8 @@ fn DeviceLine(device: DeviceView, failure: RwSignal<Option<String>>) -> impl Int
             })
         })
     };
+    let select = NodeRef::<leptos::html::Select>::new();
+    let lang = use_lang();
     let on_change = move |ev: leptos::ev::Event| {
         let value = event_target_value(&ev);
         let ids: Vec<String> = house.entities.with_untracked(|m| {
@@ -82,10 +84,20 @@ fn DeviceLine(device: DeviceView, failure: RwSignal<Option<String>>) -> impl Int
         });
         failure.set(None);
         leptos::task::spawn_local(async move {
+            // Every entity is tried; the rows already moved stay moved.
+            let mut first_error = None;
             for id in ids {
                 let area = (!value.is_empty()).then_some(value.as_str());
                 if let Err(e) = crate::api::set_override(&id, area_patch(area)).await {
-                    failure.try_set(Some(e.error));
+                    first_error.get_or_insert(e.error);
+                }
+            }
+            if let Some(error) = first_error {
+                failure.try_set(Some(
+                    setup_text(lang(), SetupText::RoomMoveIncomplete).replace("{error}", &error),
+                ));
+                if let Some(el) = select.get_untracked() {
+                    el.set_value(&current.get_untracked());
                 }
             }
         });
@@ -94,7 +106,7 @@ fn DeviceLine(device: DeviceView, failure: RwSignal<Option<String>>) -> impl Int
         <li class="devices__row">
             <span class="devices__name">{device.friendly_name.clone()}</span>
             <span class="devices__model">{model}</span>
-            <select class="select devices__room" on:change=on_change>
+            <select node_ref=select class="select devices__room" on:change=on_change>
                 <option value="" prop:selected=move || current.with(String::is_empty)>
                     {move || t(DeviceText::NoRoom)}
                 </option>
@@ -135,7 +147,12 @@ pub fn DevicesStep(z2m_base: String, #[prop(default = 5000)] empty_after_ms: u32
     } else {
         z2m_base
     };
+    let advancing = RwSignal::new(false);
     let go_next = move |_| {
+        if advancing.get_untracked() {
+            return;
+        }
+        advancing.set(true);
         leptos::task::spawn_local(async move {
             match put_step(SetupStep::Services).await {
                 Ok(_) => {
@@ -145,6 +162,7 @@ pub fn DevicesStep(z2m_base: String, #[prop(default = 5000)] empty_after_ms: u32
                     failure.try_set(Some(e.message(lang())));
                 }
             }
+            advancing.try_set(false);
         });
     };
     let groups = Memo::new(move |_| {
@@ -217,11 +235,11 @@ pub fn DevicesStep(z2m_base: String, #[prop(default = 5000)] empty_after_ms: u32
                 }
             }}
             <p class="loc__problem" role="alert">{move || failure.get()}</p>
-            <div class="loc__actions">
-                <button type="button" class="btn devices__skip" on:click=go_next>
+            <div class="loc__actions devices__actions">
+                <button type="button" class="btn" prop:disabled=move || advancing.get() on:click=go_next>
                     {move || t(SetupText::Skip)}
                 </button>
-                <button type="button" class="btn btn--primary loc__save" on:click=go_next>
+                <button type="button" class="btn btn--primary loc__save" prop:disabled=move || advancing.get() on:click=go_next>
                     {move || t(SetupText::Next)}
                 </button>
             </div>

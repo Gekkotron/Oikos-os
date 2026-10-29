@@ -198,3 +198,7 @@
       "room";
   }
 }
+
+.devices__actions {
+  gap: 8px;
+}

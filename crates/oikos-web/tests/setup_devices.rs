@@ -146,3 +146,63 @@ async fn choosing_a_room_moves_every_entity_of_the_device() {
     );
     assert!(puts.iter().all(|r| r.body.contains("\"area\":\"kitchen\"")));
 }
+
+#[wasm_bindgen_test]
+async fn a_failed_entity_move_is_reported_and_the_select_reverts() {
+    let stub = FetchStub::install();
+    let house = House::new();
+    house.devices.set(vec![device("d1", "Lamp", &["e1", "e2"])]);
+    house.entities.set(
+        [("e1", "d1"), ("e2", "d1")]
+            .into_iter()
+            .map(|(id, dev)| (id.to_owned(), entity(id, dev)))
+            .collect(),
+    );
+    house.areas.set(vec![area("kitchen", "Kitchen")]);
+    stub.reply(
+        "PATCH",
+        "/api/v1/entities/e1/override",
+        200,
+        &serde_json::to_string(&entity("e1", "d1")).unwrap(),
+    );
+    stub.reply(
+        "PATCH",
+        "/api/v1/entities/e2/override",
+        500,
+        r#"{"error":"hub exploded"}"#,
+    );
+    let (host, _step) = mount(house, 5000);
+    tick().await;
+    let select: web_sys::HtmlSelectElement = host
+        .query_selector("select.devices__room")
+        .unwrap()
+        .expect("room select")
+        .unchecked_into();
+    select.set_value("kitchen");
+    select
+        .dispatch_event(
+            &web_sys::Event::new_with_event_init_dict("change", &{
+                let init = web_sys::EventInit::new();
+                init.set_bubbles(true);
+                init
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    for _ in 0..6 {
+        TimeoutFuture::new(15).await;
+        tick().await;
+    }
+    let alert = host
+        .query_selector("[role=alert]")
+        .unwrap()
+        .unwrap()
+        .text_content()
+        .unwrap();
+    assert!(alert.contains("hub exploded"), "alert: {alert}");
+    assert!(
+        alert.contains("not moved") || alert.contains("incomplete"),
+        "alert: {alert}"
+    );
+    assert_eq!(select.value(), "");
+}

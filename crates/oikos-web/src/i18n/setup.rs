@@ -82,6 +82,8 @@ pub enum SetupText {
     NoDevicesYet,
     BackToMqtt,
     Skip,
+    /// Shown when moving a device to a room failed for some of its entities; `{error}` is the hub's text.
+    RoomMoveIncomplete,
 }
 
 pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
@@ -200,6 +202,10 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
         ),
         SetupText::BackToMqtt => ("Back to MQTT settings", "Retour aux réglages MQTT"),
         SetupText::Skip => ("Skip", "Passer"),
+        SetupText::RoomMoveIncomplete => (
+            "The move is incomplete, some entities were not moved: {error}",
+            "Le déplacement est incomplet, certaines entités n'ont pas été déplacées : {error}",
+        ),
     };
     match lang {
         Lang::En => en,
@@ -281,6 +287,7 @@ mod tests {
                 SetupText::NoDevicesYet,
                 SetupText::BackToMqtt,
                 SetupText::Skip,
+                SetupText::RoomMoveIncomplete,
             ],
             setup_text,
             &[
