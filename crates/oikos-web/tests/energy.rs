@@ -948,3 +948,59 @@ async fn wide_circle_texts_stay_in_the_card() {
 async fn narrow_circle_texts_stay_in_the_card() {
     circle_texts_stay_in_the_card(true, 390).await;
 }
+
+/// Injects the real stylesheet; the caller removes it so the other tests keep running unstyled.
+fn inject_styles() -> Element {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let style = document.create_element("style").unwrap();
+    style.set_text_content(Some(concat!(
+        include_str!("../styles/tokens.css"),
+        include_str!("../styles/main.css")
+    )));
+    document.head().unwrap().append_child(&style).unwrap();
+    style
+}
+
+fn computed(el: &Element, prop: &str) -> String {
+    let style = web_sys::window()
+        .unwrap()
+        .get_computed_style(el)
+        .unwrap()
+        .unwrap();
+    style
+        .get_property_value(prop)
+        .unwrap()
+        .trim()
+        .to_lowercase()
+}
+
+#[wasm_bindgen_test]
+async fn ivoire_uses_the_candy_palette() {
+    let style = inject_styles();
+    let root = web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .document_element()
+        .unwrap();
+    let flux = mount_view(flux_fixture(1200.0), EnergyView::Flux);
+    let classic = mount_view(flux_fixture(1200.0), EnergyView::Classic);
+    tick().await;
+    let solar = bar(&flux, "solar");
+    let tone = classic
+        .query_selector(".energy-tone--solar")
+        .unwrap()
+        .expect("a solar tone element");
+    // Night Glass: unchanged.
+    root.remove_attribute("data-theme").unwrap();
+    tick().await;
+    assert_eq!(computed(&solar, "fill"), "rgb(255, 196, 87)");
+    assert_eq!(computed(&tone, "--tone"), "#ffc457");
+    // Ivoire: Candy.
+    root.set_attribute("data-theme", "light").unwrap();
+    tick().await;
+    assert_eq!(computed(&solar, "fill"), "rgb(255, 178, 31)");
+    assert_eq!(computed(&tone, "--tone"), "#ffb21f");
+    root.remove_attribute("data-theme").unwrap();
+    style.remove();
+}

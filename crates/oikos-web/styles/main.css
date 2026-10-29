@@ -4629,13 +4629,33 @@ html:has(.flow-canvas-screen) {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  /* Consumers never reuse a source colour (solar amber, grid violet, battery/export mint). */
-  --flux-c0: var(--accent-cyan);
-  --flux-c1: var(--accent-rose);
-  --flux-c2: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-violet));
-  --flux-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
-  --flux-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
-  --flux-muted: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+
+/* One palette for Classic, Flux, Orbite and the Settings preview. Consumers never reuse a source colour. */
+.energy,
+.energy-preview {
+  --energy-solar: var(--solar);
+  --energy-grid: var(--accent-violet);
+  --energy-battery: var(--accent-mint);
+  --energy-c0: var(--accent-cyan);
+  --energy-c1: var(--accent-rose);
+  --energy-c2: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-violet));
+  --energy-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
+  --energy-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
+  --energy-muted: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+
+/* Ivoire: Candy colours, the app's muted tokens would read as sad. */
+:root[data-theme="light"] :is(.energy, .energy-preview) {
+  --energy-solar: #ffb21f;
+  --energy-grid: #9a7bff;
+  --energy-battery: #2fd3a0;
+  --energy-c0: #35b9f0;
+  --energy-c1: #ff6f91;
+  --energy-c2: #7f9cff;
+  --energy-c3: #ff9a55;
+  --energy-c4: #3fd6c6;
+  --energy-muted: #d9d1c3;
 }
 
 .energy .room__title {
@@ -4767,17 +4787,17 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-flux__bar--solar {
-  fill: var(--solar);
+  fill: var(--energy-solar);
 }
 
 .energy-flux__bar--grid {
-  fill: var(--accent-violet);
+  fill: var(--energy-grid);
 }
 
 .energy-flux__bar--battery,
 .energy-flux__bar--export,
 .energy-flux__bar--charge {
-  fill: var(--accent-mint);
+  fill: var(--energy-battery);
 }
 
 .energy-flux__bar--house {
@@ -4786,27 +4806,27 @@ html:has(.flow-canvas-screen) {
 
 .energy-flux__bar--unitemised,
 .energy-flux__bar--others {
-  fill: var(--flux-muted);
+  fill: var(--energy-muted);
 }
 
 .energy-flux__bar--c0 {
-  fill: var(--flux-c0);
+  fill: var(--energy-c0);
 }
 
 .energy-flux__bar--c1 {
-  fill: var(--flux-c1);
+  fill: var(--energy-c1);
 }
 
 .energy-flux__bar--c2 {
-  fill: var(--flux-c2);
+  fill: var(--energy-c2);
 }
 
 .energy-flux__bar--c3 {
-  fill: var(--flux-c3);
+  fill: var(--energy-c3);
 }
 
 .energy-flux__bar--c4 {
-  fill: var(--flux-c4);
+  fill: var(--energy-c4);
 }
 
 .energy-flux__label {
@@ -4847,16 +4867,16 @@ html:has(.flow-canvas-screen) {
 
 /* Classic: glowing circles joined by gradient wires. */
 .energy-circles {
-  --tone-solar: var(--solar);
-  --tone-grid: var(--accent-violet);
-  --tone-export: var(--accent-mint);
-  --tone-battery: var(--accent-mint);
+  --tone-solar: var(--energy-solar);
+  --tone-grid: var(--energy-grid);
+  --tone-export: var(--energy-battery);
+  --tone-battery: var(--energy-battery);
   --tone-house: var(--ink);
   --tone-water: var(--accent-cyan);
-  --tone-more: var(--flux-muted);
-  --tone-c0: var(--flux-c0);
-  --tone-c1: var(--flux-c1);
-  --tone-c2: var(--flux-c2);
+  --tone-more: var(--energy-muted);
+  --tone-c0: var(--energy-c0);
+  --tone-c1: var(--energy-c1);
+  --tone-c2: var(--energy-c2);
   --energy-glow: 1;
   aspect-ratio: 800 / 410;
 }
@@ -4868,6 +4888,7 @@ html:has(.flow-canvas-screen) {
 /* Ivoire: the ink would turn the house disc, halo and wires gray; a warm sand keeps them in the palette. */
 :root[data-theme="light"] .energy-circles {
   --tone-house: var(--wire);
+  --tone-water: #35b9f0;
   --energy-glow: 0.45;
 }
 
