@@ -405,6 +405,7 @@ mod tests {
     fn decided(mut z: ZoneView, setpoint: Setpoint) -> ZoneView {
         z.decision = Some(Decision {
             eco_restore: Default::default(),
+            adjust: None,
             zone: z.zone.clone(),
             mode: Some(Mode::Heat),
             setpoint: Some(setpoint),

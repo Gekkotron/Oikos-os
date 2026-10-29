@@ -184,6 +184,7 @@ fn base_decision(inp: &ZoneInputs, source: Source, reason: String) -> Decision {
         at: inp.now,
         entities: BTreeMap::new(),
         eco_restore: BTreeMap::new(),
+        adjust: None,
     }
 }
 

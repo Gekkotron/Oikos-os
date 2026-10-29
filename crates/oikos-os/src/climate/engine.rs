@@ -1024,6 +1024,7 @@ fn no_safety(zone: &str) -> Decision {
         at: 0,
         entities: Default::default(),
         eco_restore: Default::default(),
+        adjust: None,
     }
 }
 

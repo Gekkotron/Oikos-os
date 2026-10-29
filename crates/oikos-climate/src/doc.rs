@@ -447,6 +447,68 @@ pub struct Rejection {
     pub until: u64,
 }
 
+/// Room-thermometer correction: nudges the setpoint sent to the zone's devices when the room
+/// reading stays away from the schedule target.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct FeedbackSettings {
+    pub enabled: bool,
+    /// Tolerated distance from the target, in degrees, before the offset moves.
+    pub band: f64,
+    /// Offset change per correction, in degrees.
+    pub step: f64,
+    /// Minimum minutes between two corrections.
+    pub interval_min: u32,
+    /// Minutes after a schedule change before correcting.
+    pub warmup_min: u32,
+    /// Largest offset below the target, in degrees (positive).
+    pub max_below: f64,
+    /// Largest offset above the target, in degrees (positive).
+    pub max_above: f64,
+    /// Minutes without a usable reading after which the offset is dropped.
+    pub quiet_limit_min: u32,
+}
+
+impl Default for FeedbackSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            band: 0.5,
+            step: 0.5,
+            interval_min: 15,
+            warmup_min: 60,
+            max_below: 3.0,
+            max_above: 0.5,
+            quiet_limit_min: 360,
+        }
+    }
+}
+
+impl FeedbackSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if !(self.band.is_finite() && self.band > 0.0) {
+            return Err("feedback.band must be above 0".into());
+        }
+        if !(self.step.is_finite() && self.step > 0.0) {
+            return Err("feedback.step must be above 0".into());
+        }
+        if self.interval_min == 0 {
+            return Err("feedback.interval_min must be above 0".into());
+        }
+        if self.quiet_limit_min == 0 {
+            return Err("feedback.quiet_limit_min must be above 0".into());
+        }
+        if !(self.max_below.is_finite() && self.max_below >= 0.0) {
+            return Err("feedback.max_below must not be negative".into());
+        }
+        if !(self.max_above.is_finite() && self.max_above >= 0.0) {
+            return Err("feedback.max_above must not be negative".into());
+        }
+        Ok(())
+    }
+}
+
 /// Settings of one zone (`<prefix>/zone/<zone>/settings`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -457,6 +519,7 @@ pub struct ZoneSettings {
     pub sensor: Option<String>,
     pub manual_hold_max_min: u32,
     pub rules: Rules,
+    pub feedback: FeedbackSettings,
     pub approved_at: Option<u64>,
     pub approved_proposal: Option<String>,
     pub rejected: Vec<Rejection>,
@@ -470,6 +533,7 @@ impl Default for ZoneSettings {
             sensor: None,
             manual_hold_max_min: 240,
             rules: Rules::default(),
+            feedback: FeedbackSettings::default(),
             approved_at: None,
             approved_proposal: None,
             rejected: Vec::new(),
@@ -482,6 +546,7 @@ impl ZoneSettings {
         if self.manual_hold_max_min == 0 {
             return Err("manual_hold_max_min must be above 0".into());
         }
+        self.feedback.validate()?;
         self.rules.validate()
     }
 }
@@ -565,6 +630,9 @@ pub struct Decision {
     /// Entity -> the fan mode eco changed and what it was, to put back when eco ends.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub eco_restore: BTreeMap<String, FanRestore>,
+    /// The offset applied to the zone's unheld devices; `None` when 0 or inactive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adjust: Option<f64>,
 }
 
 impl Decision {
@@ -581,6 +649,7 @@ impl Decision {
             && self.applied == other.applied
             && self.entities == other.entities
             && self.eco_restore == other.eco_restore
+            && self.adjust == other.adjust
     }
 }
 
@@ -828,7 +897,51 @@ mod tests {
             at,
             entities: BTreeMap::new(),
             eco_restore: BTreeMap::new(),
+            adjust: None,
         }
+    }
+
+    #[test]
+    fn feedback_defaults_and_old_documents() {
+        let z: ZoneSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(z.feedback, FeedbackSettings::default());
+        assert!(!z.feedback.enabled);
+        assert_eq!(z.feedback.band, 0.5);
+        assert_eq!(z.feedback.quiet_limit_min, 360);
+    }
+
+    #[test]
+    fn feedback_validation() {
+        assert!(ZoneSettings::default().validate().is_ok());
+        let bad = |f: fn(&mut FeedbackSettings)| {
+            let mut z = ZoneSettings::default();
+            f(&mut z.feedback);
+            assert!(z.validate().is_err());
+        };
+        bad(|f| f.step = 0.0);
+        bad(|f| f.band = 0.0);
+        bad(|f| f.interval_min = 0);
+        bad(|f| f.quiet_limit_min = 0);
+        bad(|f| f.max_below = -1.0);
+        bad(|f| f.max_above = -0.5);
+    }
+
+    #[test]
+    fn decision_adjust_is_optional() {
+        let mut d = decision(1);
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(!json.contains("adjust"));
+        assert_eq!(
+            serde_json::from_str::<Decision>(&json).unwrap().adjust,
+            None
+        );
+        d.adjust = Some(0.5);
+        let json = serde_json::to_string(&d).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Decision>(&json).unwrap().adjust,
+            Some(0.5)
+        );
+        assert!(!decision(1).same_outcome(&d));
     }
 
     #[test]
@@ -966,6 +1079,7 @@ mod tests {
             at: 1,
             entities: BTreeMap::new(),
             eco_restore: BTreeMap::new(),
+            adjust: None,
         };
         let s = serde_json::to_string(&d).unwrap();
         assert!(!s.contains("eco_restore"), "{s}");

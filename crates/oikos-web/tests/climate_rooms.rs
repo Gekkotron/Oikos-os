@@ -182,6 +182,7 @@ fn zone(id: &str, name: &str, state: ZoneState, setpoint: Option<f64>) -> ZoneVi
             at: 0,
             entities: Default::default(),
             eco_restore: Default::default(),
+            adjust: None,
         }),
         overrides: vec![],
         eco: None,

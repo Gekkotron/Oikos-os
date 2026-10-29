@@ -169,6 +169,7 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v))
                 .collect(),
             eco_restore: BTreeMap::new(),
+            adjust: None,
         }
     }
 
