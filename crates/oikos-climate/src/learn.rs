@@ -49,6 +49,9 @@ pub struct EngineCommand {
     pub setpoint: Option<f64>,
     pub mode: String,
     pub source: Source,
+    /// The correction added to `setpoint` when the device was commanded: it received
+    /// `setpoint + adjust`. `None` when the command was sent as is.
+    pub adjust: Option<f64>,
 }
 
 pub struct LearnInput<'a> {
@@ -212,13 +215,23 @@ fn device_slot(
         && c.mode == device_mode
         && (device_mode == "off"
             || matches!((c.setpoint, sample.target),
-                (Some(a), Some(b)) if (a - b).abs() <= ENGINE_TOL))
+                (Some(a), Some(b)) if (a + c.adjust.unwrap_or(0.0) - b).abs() <= ENGINE_TOL))
         && matches!(
             c.source,
             Source::Safety | Source::Away | Source::Eco | Source::Holiday | Source::Override
         )
     {
         return None;
+    }
+    // A corrected command moved the device off the target on purpose: the target is what the
+    // slot held.
+    if let Some(c) = engine
+        && let (Some(adjust), Some(setpoint)) = (c.adjust, c.setpoint)
+        && c.mode == device_mode
+        && device_mode != "off"
+        && matches!(sample.target, Some(b) if (setpoint + adjust - b).abs() <= ENGINE_TOL)
+    {
+        return Some(Slot::Temp(setpoint));
     }
     Some(value)
 }
@@ -1012,6 +1025,7 @@ mod tests {
             setpoint: Some(16.0),
             mode: "heat".into(),
             source,
+            adjust: None,
         };
         for source in [
             Source::Safety,

@@ -7,7 +7,9 @@ use chrono::NaiveDateTime;
 use chrono_tz::Tz;
 use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
 use oikos_climate::doc::{HouseSettings, Mode, Override, RoomEco, SafetyCause, ZoneSettings};
+use oikos_climate::feedback::{FeedbackState, UNKNOWN_AGE_S};
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
+use oikos_climate::view::ThermometerReading;
 use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind, StateValue};
 
 use super::GROUP_PREFIX;
@@ -17,8 +19,6 @@ use crate::hub::Hub;
 
 /// Step assumed for a device that does not advertise one; the same as the decision tree's.
 const DEFAULT_STEP: f64 = 0.5;
-/// Age given to a report whose time is unknown: older than any `stale_after`.
-const UNKNOWN_AGE_S: u64 = u64::MAX / 4;
 /// How long the history mean of the outdoor sensor is reused.
 pub(crate) const OUTDOOR_CACHE_S: u64 = 600;
 
@@ -44,6 +44,10 @@ pub(crate) struct OwnedZoneInputs {
     pub previous_cause: Option<SafetyCause>,
     /// The zone's own eco, if set.
     pub room_eco: Option<RoomEco>,
+    /// The room thermometer's own reading, whatever `reading` uses.
+    pub thermometer: Option<ReadingSource>,
+    /// The thermometer correction's state from the previous tick.
+    pub feedback: Option<FeedbackState>,
 }
 
 impl OwnedZoneInputs {
@@ -64,6 +68,8 @@ impl OwnedZoneInputs {
             safety_memory: self.safety_memory.as_ref(),
             previous_cause: self.previous_cause,
             room_eco: self.room_eco.as_ref(),
+            thermometer: self.thermometer,
+            feedback: self.feedback.as_ref(),
         }
     }
 }
@@ -317,6 +323,24 @@ pub(crate) fn view_reading(
     }
 }
 
+/// The room thermometer's own value and age for the read view, whatever its age.
+pub(crate) fn view_thermometer(
+    hub: &Hub,
+    sensor: Option<&str>,
+    now: u64,
+    seen: &HashMap<String, u64>,
+) -> Option<ThermometerReading> {
+    let id = sensor?;
+    let (reading, _) = reading_sources(hub, Some(id), &[], seen, now);
+    reading
+        .filter(|source| source.age_s < UNKNOWN_AGE_S)
+        .map(|source| ThermometerReading {
+            entity: id.to_owned(),
+            value: source.value,
+            age_s: source.age_s,
+        })
+}
+
 /// The mean outdoor temperature: the history's, while its cache is fresh, else the mean of the
 /// live readings seen since boot.
 pub(crate) fn outdoor_mean(hub: &Hub, now: u64) -> Option<f64> {
@@ -397,10 +421,11 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
     let (sensor, device_readings) =
         reading_sources(hub, sensor.as_deref(), &entity_ids, &seen, now);
     let reading = room_reading(sensor, &device_readings, stale_after_s);
+    let thermometer = sensor;
     let outdoor_mean = outdoor_mean(hub, now);
     let home_now = presence_home_now(hub, &house);
     let holiday = holiday_now(hub, &house);
-    let (mode, home, safety_memory) = {
+    let (mode, home, safety_memory, feedback) = {
         let rt = hub.climate_runtime();
         let grace_s = u64::from(house.away_grace_min) * 60;
         let recently_home = rt
@@ -414,6 +439,7 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
                 HomeNow::AlarmAway => false,
             },
             rt.safety_memory.get(zone).cloned(),
+            rt.feedback.get(zone).copied(),
         )
     };
     Some(OwnedZoneInputs {
@@ -433,6 +459,8 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         safety_memory,
         previous_cause: None,
         room_eco,
+        thermometer,
+        feedback,
     })
 }
 

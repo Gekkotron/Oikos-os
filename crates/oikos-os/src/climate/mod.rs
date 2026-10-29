@@ -13,6 +13,7 @@ use std::sync::Mutex;
 
 use oikos_climate::decide::SafetyMemory;
 use oikos_climate::doc::{Decision, DeviceTarget, Mode};
+use oikos_climate::feedback::FeedbackState;
 use oikos_climate::ledger::Ledger;
 use oikos_climate::view::LearnStatus;
 use oikos_core::model::Availability;
@@ -70,6 +71,9 @@ pub(crate) struct ClimateRuntime {
     pub unconfirmed: HashMap<String, (DeviceTarget, u64)>,
     /// Entities whose command is on the wire right now; their echo is not a hand change.
     pub inflight: HashSet<String>,
+    /// Zone -> the room-thermometer correction's state from the previous tick; absent while
+    /// the correction is off or not acting (spec §6.5). Dropped when the zone's settings change.
+    pub feedback: HashMap<String, FeedbackState>,
     /// The last decisions per zone, newest last.
     pub decisions: HashMap<String, VecDeque<Decision>>,
     pub last_home_at: Option<u64>,

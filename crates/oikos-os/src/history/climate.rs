@@ -20,6 +20,8 @@ pub struct ClimateDecisionRow {
     pub source: String,
     pub reason: String,
     pub applied: bool,
+    /// The correction applied to the command: it was `setpoint + adjust`. `None` when none.
+    pub adjust: Option<f64>,
 }
 
 fn decision_from_row(row: &sqlx::postgres::PgRow) -> ClimateDecisionRow {
@@ -33,6 +35,7 @@ fn decision_from_row(row: &sqlx::postgres::PgRow) -> ClimateDecisionRow {
         source: row.get(5),
         reason: row.get(6),
         applied: row.get(7),
+        adjust: row.get(8),
     }
 }
 
@@ -53,13 +56,14 @@ impl Db {
         let sources: Vec<String> = rows.iter().map(|r| r.source.clone()).collect();
         let reasons: Vec<String> = rows.iter().map(|r| r.reason.clone()).collect();
         let applied: Vec<bool> = rows.iter().map(|r| r.applied).collect();
+        let adjusts: Vec<Option<f64>> = rows.iter().map(|r| r.adjust).collect();
         sqlx::query(
             "INSERT INTO climate_decision
-               (time, zone, entity_id, mode, setpoint, source, reason, applied)
+               (time, zone, entity_id, mode, setpoint, source, reason, applied, adjust)
              SELECT * FROM UNNEST(
                  $1::timestamptz[], $2::text[], $3::text[], $4::text[],
-                 $5::float8[], $6::text[], $7::text[], $8::bool[]
-             ) AS t(time, zone, entity_id, mode, setpoint, source, reason, applied)",
+                 $5::float8[], $6::text[], $7::text[], $8::bool[], $9::float8[]
+             ) AS t(time, zone, entity_id, mode, setpoint, source, reason, applied, adjust)",
         )
         .bind(&times)
         .bind(&zones)
@@ -69,6 +73,7 @@ impl Db {
         .bind(&sources)
         .bind(&reasons)
         .bind(&applied)
+        .bind(&adjusts)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -83,7 +88,7 @@ impl Db {
         limit: i64,
     ) -> Result<Vec<ClimateDecisionRow>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT time, zone, entity_id, mode, setpoint, source, reason, applied
+            "SELECT time, zone, entity_id, mode, setpoint, source, reason, applied, adjust
              FROM climate_decision
              WHERE zone = $1 AND ($3::timestamptz IS NULL OR time < $3)
              ORDER BY time DESC, seq DESC
@@ -108,7 +113,7 @@ impl Db {
             return Ok(Vec::new());
         }
         let rows = sqlx::query(
-            "SELECT time, zone, entity_id, mode, setpoint, source, reason, applied
+            "SELECT time, zone, entity_id, mode, setpoint, source, reason, applied, adjust
              FROM climate_decision
              WHERE applied AND entity_id = ANY($1::text[]) AND time >= $2 AND time < $3
              ORDER BY time, seq",

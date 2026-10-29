@@ -423,6 +423,7 @@ fn decision(at: i64, zone: &str, entity: &str, applied: bool, reason: &str) -> C
         source: "schedule".into(),
         reason: reason.into(),
         applied,
+        adjust: None,
     }
 }
 
@@ -469,6 +470,33 @@ async fn climate_decisions_round_trip() {
     assert_eq!(earlier[0].at, 1_000_000);
     let limited = tdb.db.climate_decisions("z1", None, 1).await.unwrap();
     assert_eq!(limited, vec![empty]);
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
+async fn climate_decision_adjust_round_trips() {
+    let Some(tdb) = fresh_db().await else { return };
+    let mut corrected = decision(1_000_000, "z1", "climate.a", true, "corrected");
+    corrected.adjust = Some(-0.5);
+    let plain = decision(2_000_000, "z1", "climate.b", true, "plain");
+    tdb.db
+        .insert_climate_decisions(&[corrected.clone(), plain.clone()])
+        .await
+        .unwrap();
+
+    let got = tdb.db.climate_decisions("z1", None, 10).await.unwrap();
+    assert_eq!(got, vec![plain.clone(), corrected.clone()]);
+    let applied = tdb
+        .db
+        .climate_commands(
+            &["climate.a".to_string(), "climate.b".to_string()],
+            0,
+            5_000_000,
+        )
+        .await
+        .unwrap();
+    assert_eq!(applied, vec![corrected, plain]);
 
     tdb.drop_db().await;
 }

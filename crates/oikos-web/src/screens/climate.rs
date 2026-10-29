@@ -187,6 +187,8 @@ mod tests {
             reading,
             reading_age_s: None,
             room_sensor: None,
+            thermometer: None,
+            correction_step_at: None,
             decision: None,
             overrides: vec![],
             proposal: None,

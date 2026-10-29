@@ -108,6 +108,7 @@ impl Hub {
         // The reading and its age are what the engine sees now, not what the last decision froze.
         let stale_after_s = u64::from(view.house.stale_after_min) * 60;
         let outdoor = view.house.outdoor_entity.clone();
+        let feedback = self.climate_runtime().feedback.clone();
         for zone in &mut view.zones {
             zone.room_sensor = inputs::room_sensor(
                 self,
@@ -126,6 +127,11 @@ impl Hub {
             );
             zone.reading = reading;
             zone.reading_age_s = age;
+            zone.thermometer =
+                inputs::view_thermometer(self, zone.room_sensor.as_deref(), now, &seen);
+            zone.correction_step_at = feedback
+                .get(&zone.zone)
+                .and_then(|state| state.last_step_at);
         }
         Ok(view)
     }
@@ -172,6 +178,7 @@ impl Hub {
                                 source: row.source,
                                 reason: row.reason,
                                 applied: row.applied,
+                                adjust: row.adjust,
                             })
                             .collect();
                     }
@@ -226,6 +233,10 @@ impl Hub {
             return Err(HubError::UnknownArea(zone.to_owned()));
         }
         let current = self.zone_settings(zone);
+        // New correction settings restart it from the schedule's own target.
+        if settings.feedback != current.feedback {
+            self.climate_runtime().feedback.remove(zone);
+        }
         if !settings.rules.is_empty() && settings.rules != current.rules {
             settings.approved_at = Some(clock::now());
             if current.state == ZoneState::Pending && settings.state == ZoneState::Pending {
@@ -429,6 +440,8 @@ fn zone_view(
         reading: None,
         reading_age_s: None,
         room_sensor: None,
+        thermometer: None,
+        correction_step_at: None,
         decision: docs.decision.clone(),
         overrides: docs.overrides.clone(),
         eco: docs.eco.clone(),
@@ -471,6 +484,7 @@ mod tests {
             at,
             entities: BTreeMap::new(),
             eco_restore: BTreeMap::new(),
+            adjust: None,
         }
     }
 
