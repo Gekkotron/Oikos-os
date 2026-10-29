@@ -8,6 +8,7 @@ pub mod eco;
 pub mod feedback;
 pub mod learn;
 pub mod ledger;
+pub mod presence;
 pub mod schedule;
 pub mod topics;
 pub mod view;
