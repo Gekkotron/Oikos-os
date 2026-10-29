@@ -798,3 +798,108 @@ async fn switching_to_flux_stops_the_dots() {
     wait(200).await;
     assert_eq!(cx(), parked, "the loop stops when Classic leaves");
 }
+
+/// Mounts the circles diagram alone, with the real stylesheet, in a `width` px host; the returned
+/// `<style>` is for the caller to remove, so the other tests keep running unstyled.
+fn mount_circles_styled(entities: Vec<EntityView>, narrow: bool, width: u32) -> (Element, Element) {
+    let document = web_sys::window().unwrap().document().unwrap();
+    let style = document.create_element("style").unwrap();
+    style.set_text_content(Some(concat!(
+        include_str!("../styles/tokens.css"),
+        include_str!("../styles/main.css")
+    )));
+    document.head().unwrap().append_child(&style).unwrap();
+    let map: std::collections::BTreeMap<String, EntityView> =
+        entities.into_iter().map(|e| (e.id.clone(), e)).collect();
+    let ui = Memo::new(move |_| {
+        oikos_core::energy::EnergyFlow::build(&oikos_web::energy::energy_entities(&map), 0, None)
+    });
+    let host = document.create_element("div").unwrap();
+    host.set_attribute("style", &format!("width: {width}px"))
+        .unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    std::mem::forget(leptos::mount::mount_to(
+        host.clone().unchecked_into(),
+        move || {
+            provide_context(RwSignal::new(Lang::En));
+            view! {
+                <oikos_web::screens::energy_circles::CirclesDiagram
+                    ui=ui
+                    narrow=narrow
+                    open=Callback::new(|_: String| {})
+                    expanded=RwSignal::new(false)
+                />
+            }
+        },
+    ));
+    (host, style)
+}
+
+fn full_house() -> Vec<EntityView> {
+    let mut entities = vec![
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("grid", "Grid power", "W", 600.0, role("grid")),
+        sensor("battery", "Battery power", "W", 800.0, role("battery")),
+    ];
+    for (i, (name, w)) in [
+        ("Oven", 900.0),
+        ("Heat pump", 800.0),
+        ("Kettle", 500.0),
+        ("Dryer", 300.0),
+        ("Fridge", 100.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        entities.push(sensor(&format!("c{i}"), name, "W", w, role("consumer")));
+    }
+    entities
+}
+
+/// Every circle's value and name lies inside the diagram's card.
+async fn circle_texts_stay_in_the_card(narrow: bool, width: u32) {
+    let (host, style) = mount_circles_styled(full_house(), narrow, width);
+    // Past the nodes' 0.6 s glide from the origin to their place.
+    gloo_timers::future::TimeoutFuture::new(800).await;
+    let frame = host
+        .query_selector(".energy-diagram")
+        .unwrap()
+        .expect("diagram")
+        .get_bounding_client_rect();
+    let texts = host
+        .query_selector_all(".energy-node__label, .energy-node__value")
+        .unwrap();
+    assert!(texts.length() >= 6, "{}", texts.length());
+    for i in 0..texts.length() {
+        let el: Element = texts.item(i).unwrap().unchecked_into();
+        let r = el.get_bounding_client_rect();
+        assert!(
+            r.left() >= frame.left() - 1.0
+                && r.right() <= frame.right() + 1.0
+                && r.top() >= frame.top() - 1.0
+                && r.bottom() <= frame.bottom() + 1.0,
+            "{:?} overflows the card: {} {} {} {} in {} {} {} {}",
+            el.text_content(),
+            r.left(),
+            r.top(),
+            r.right(),
+            r.bottom(),
+            frame.left(),
+            frame.top(),
+            frame.right(),
+            frame.bottom()
+        );
+    }
+    style.remove();
+    host.remove();
+}
+
+#[wasm_bindgen_test]
+async fn wide_circle_texts_stay_in_the_card() {
+    circle_texts_stay_in_the_card(false, 800).await;
+}
+
+#[wasm_bindgen_test]
+async fn narrow_circle_texts_stay_in_the_card() {
+    circle_texts_stay_in_the_card(true, 390).await;
+}

@@ -4858,7 +4858,7 @@ html:has(.flow-canvas-screen) {
   --tone-c1: var(--flux-c1);
   --tone-c2: var(--flux-c2);
   --energy-glow: 1;
-  aspect-ratio: 800 / 380;
+  aspect-ratio: 800 / 410;
 }
 
 .energy-circles--narrow {
