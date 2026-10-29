@@ -169,6 +169,7 @@ fn zone(id: &str, name: &str, state: ZoneState, setpoint: Option<f64>) -> ZoneVi
         room_sensor: None,
         thermometer: None,
         correction_step_at: None,
+        presence: None,
         decision: setpoint.map(|t| Decision {
             zone: id.into(),
             mode: Some(Mode::Heat),

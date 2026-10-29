@@ -400,6 +400,7 @@ mod tests {
             room_sensor: None,
             thermometer: None,
             correction_step_at: None,
+            presence: None,
             decision: None,
             overrides: vec![],
             proposal: None,

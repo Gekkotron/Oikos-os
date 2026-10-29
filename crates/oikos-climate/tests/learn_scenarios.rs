@@ -769,3 +769,37 @@ fn corrected_slots_count_as_the_target() {
     assert_eq!((b.from, b.to), (HhMm(540), HhMm(1230)));
     assert_eq!(b.setpoint, Setpoint::Temp(19.0));
 }
+
+#[test]
+fn empty_slots_do_not_change_what_is_learned() {
+    // The device ran 2 degrees lower from 13:00 to 15:00: the room was empty and set back.
+    let h = history(14, |d| {
+        day_of(
+            d,
+            &[
+                ("00:00", 17.0),
+                ("09:00", 19.0),
+                ("13:00", 17.0),
+                ("15:00", 19.0),
+                ("20:30", 17.0),
+            ],
+        )
+    });
+    let c = caps();
+    let engine: Vec<EngineCommand> = (0..14)
+        .map(|i| monday() + Duration::days(i))
+        .flat_map(|d| {
+            vec![
+                cmd(d, "09:00", 19.0, Source::Schedule),
+                cmd(d, "13:00", 17.0, Source::Empty),
+                cmd(d, "15:00", 19.0, Source::Schedule),
+            ]
+        })
+        .collect();
+    let rules = rules_of(learn(&input(&h, &engine, &c, 14)));
+    assert_eq!(rules.base, Setpoint::Temp(17.0));
+    assert_eq!(rules.blocks.len(), 1, "{:?}", rules.blocks);
+    let b = &rules.blocks[0];
+    assert_eq!((b.from, b.to), (HhMm(540), HhMm(1230)));
+    assert_eq!(b.setpoint, Setpoint::Temp(19.0));
+}

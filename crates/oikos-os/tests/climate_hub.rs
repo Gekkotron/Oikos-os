@@ -394,6 +394,7 @@ mod engine {
     use oikos_climate::doc::{
         Decision, DeviceTarget, HouseSettings, Mode, Override, OverrideOrigin, Source,
     };
+    use oikos_climate::view::PresenceView;
 
     use super::*;
 
@@ -2227,6 +2228,27 @@ mod engine {
         assert_eq!(decisions_published(&first), 1, "{first:?}");
         let second = rig.pass(1860).await;
         assert_eq!(decisions_published(&second), 0, "{second:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn view_shows_room_presence() {
+        let (mut rig, _) = presence_rig().await;
+        rig.pass(0).await;
+        assert_eq!(
+            rig.zone().presence,
+            Some(PresenceView { empty_since: None })
+        );
+        rig.pass(1800).await;
+        assert_eq!(
+            rig.zone().presence,
+            Some(PresenceView {
+                empty_since: Some(rig.t0 + 1800)
+            })
+        );
+        let mut settings = rig.zone().settings;
+        settings.presence.enabled = false;
+        rig.settings(settings);
+        assert_eq!(rig.zone().presence, None);
     }
 
     #[tokio::test(start_paused = true)]

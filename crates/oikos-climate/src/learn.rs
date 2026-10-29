@@ -218,7 +218,12 @@ fn device_slot(
                 (Some(a), Some(b)) if (a + c.adjust.unwrap_or(0.0) - b).abs() <= ENGINE_TOL))
         && matches!(
             c.source,
-            Source::Safety | Source::Away | Source::Eco | Source::Holiday | Source::Override
+            Source::Safety
+                | Source::Away
+                | Source::Eco
+                | Source::Empty
+                | Source::Holiday
+                | Source::Override
         )
     {
         return None;

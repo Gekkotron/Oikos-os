@@ -6,7 +6,9 @@ use std::sync::MutexGuard;
 use oikos_api::WsEvent;
 use oikos_climate::doc::{Decision, HouseSettings, ZoneSettings, ZoneState};
 use oikos_climate::topics::{self, ClimateTopic, ZoneDoc};
-use oikos_climate::view::{ClimateView, DecisionLog, DecisionRow, LearnStatus, ZoneView};
+use oikos_climate::view::{
+    ClimateView, DecisionLog, DecisionRow, LearnStatus, PresenceView, ZoneView,
+};
 use oikos_core::command::Publish;
 use oikos_core::model::{Kind, UNASSIGNED_AREA};
 use serde::Serialize;
@@ -108,7 +110,10 @@ impl Hub {
         // The reading and its age are what the engine sees now, not what the last decision froze.
         let stale_after_s = u64::from(view.house.stale_after_min) * 60;
         let outdoor = view.house.outdoor_entity.clone();
-        let feedback = self.climate_runtime().feedback.clone();
+        let (feedback, presence) = {
+            let rt = self.climate_runtime();
+            (rt.feedback.clone(), rt.presence.clone())
+        };
         for zone in &mut view.zones {
             zone.room_sensor = inputs::room_sensor(
                 self,
@@ -132,6 +137,9 @@ impl Hub {
             zone.correction_step_at = feedback
                 .get(&zone.zone)
                 .and_then(|state| state.last_step_at);
+            zone.presence = zone.settings.presence.enabled.then(|| PresenceView {
+                empty_since: presence.get(&zone.zone).and_then(|state| state.empty_since),
+            });
         }
         Ok(view)
     }
@@ -446,6 +454,7 @@ fn zone_view(
         room_sensor: None,
         thermometer: None,
         correction_step_at: None,
+        presence: None,
         decision: docs.decision.clone(),
         overrides: docs.overrides.clone(),
         eco: docs.eco.clone(),
