@@ -323,7 +323,7 @@ fn ConnectionActions(
 
 /// A labelled text input bound to `value`.
 #[component]
-fn TextField(
+pub(crate) fn TextField(
     id: &'static str,
     label: SetupText,
     value: RwSignal<String>,

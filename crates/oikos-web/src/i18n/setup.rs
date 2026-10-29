@@ -125,6 +125,24 @@ pub enum SetupText {
     RoleMoveFailed,
     /// Shown when the old sensor was cleared but the new one could not be set.
     RoleClearedNotSet,
+    /// The Solcast form.
+    SolcastKey,
+    SolcastSites,
+    CallsPerDay,
+    CallsInvalid,
+    TestSolcast,
+    /// The Frigate form.
+    FrigateUrl,
+    MediaUrl,
+    AlertsBridge,
+    AlertOn,
+    LiveView,
+    FrigateCameras,
+    CamerasAllHint,
+    /// The Push form; `{project}` is the stored key's project id.
+    PushFile,
+    NotAServiceAccount,
+    PushProject,
 }
 
 pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
@@ -314,6 +332,36 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
             "Could not change the sensor: {error}",
             "Impossible de changer le capteur : {error}",
         ),
+        SetupText::SolcastKey => ("API key", "Clé d'API"),
+        SetupText::SolcastSites => ("Rooftop site ids", "Identifiants des sites de toiture"),
+        SetupText::CallsPerDay => ("Calls per day", "Appels par jour"),
+        SetupText::CallsInvalid => (
+            "Enter a whole number of calls, 1 or more.",
+            "Saisissez un nombre entier d'appels, 1 ou plus.",
+        ),
+        SetupText::TestSolcast => ("Test (uses 1 call)", "Tester (utilise 1 appel)"),
+        SetupText::FrigateUrl => ("Frigate address", "Adresse de Frigate"),
+        SetupText::MediaUrl => (
+            "Media URL for the phone",
+            "URL des médias pour le téléphone",
+        ),
+        SetupText::AlertsBridge => ("Alerts", "Alertes"),
+        SetupText::AlertOn => ("Alert on", "Alerter pour"),
+        SetupText::LiveView => ("Live view", "Vue en direct"),
+        SetupText::FrigateCameras => ("Cameras", "Caméras"),
+        SetupText::CamerasAllHint => (
+            "None selected means every camera.",
+            "Aucune sélection signifie toutes les caméras.",
+        ),
+        SetupText::PushFile => (
+            "Service-account key (.json)",
+            "Clé de compte de service (.json)",
+        ),
+        SetupText::NotAServiceAccount => (
+            "This file is not a service-account key: it has no project_id.",
+            "Ce fichier n'est pas une clé de compte de service : il n'a pas de project_id.",
+        ),
+        SetupText::PushProject => ("Project: {project}", "Projet : {project}"),
     };
     match lang {
         Lang::En => en,
@@ -427,6 +475,21 @@ mod tests {
                 SetupText::RoleSolar,
                 SetupText::RoleMoveFailed,
                 SetupText::RoleClearedNotSet,
+                SetupText::SolcastKey,
+                SetupText::SolcastSites,
+                SetupText::CallsPerDay,
+                SetupText::CallsInvalid,
+                SetupText::TestSolcast,
+                SetupText::FrigateUrl,
+                SetupText::MediaUrl,
+                SetupText::AlertsBridge,
+                SetupText::AlertOn,
+                SetupText::LiveView,
+                SetupText::FrigateCameras,
+                SetupText::CamerasAllHint,
+                SetupText::PushFile,
+                SetupText::NotAServiceAccount,
+                SetupText::PushProject,
             ],
             setup_text,
             &[
@@ -439,6 +502,7 @@ mod tests {
                 SetupText::Z2mBase,
                 SetupText::ServicesTitle,
                 SetupText::SvcPush,
+                SetupText::FrigateCameras,
             ],
         );
     }

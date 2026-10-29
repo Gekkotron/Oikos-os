@@ -165,6 +165,9 @@ pub enum Key {
     Security,
     Climate,
     Weather,
+    SolarForecast,
+    Cameras,
+    PushNotifications,
     Solar,
     Beta,
     Ambiances,
@@ -305,6 +308,9 @@ impl Key {
         Key::Security,
         Key::Climate,
         Key::Weather,
+        Key::SolarForecast,
+        Key::Cameras,
+        Key::PushNotifications,
         Key::Solar,
         Key::Beta,
         Key::Ambiances,
@@ -446,6 +452,9 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::Security => ("Security", "Sécurité"),
         Key::Climate => ("Climate", "Climat"),
         Key::Weather => ("Weather", "Météo"),
+        Key::SolarForecast => ("Solar forecast", "Prévision solaire"),
+        Key::Cameras => ("Cameras", "Caméras"),
+        Key::PushNotifications => ("Notifications", "Notifications"),
         Key::Solar => ("Solar", "Solaire"),
         Key::Beta => ("Beta", "Bêta"),
         Key::Ambiances => ("My moods", "Mes ambiances"),
@@ -719,6 +728,9 @@ mod tests {
             | Key::Security
             | Key::Climate
             | Key::Weather
+            | Key::SolarForecast
+            | Key::Cameras
+            | Key::PushNotifications
             | Key::Solar
             | Key::Beta
             | Key::Ambiances
@@ -848,7 +860,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 135);
+        assert_eq!(Key::ALL.len(), 138);
     }
     #[test]
     fn every_key_differs_between_languages() {
@@ -860,6 +872,7 @@ mod tests {
             Key::ModeAuto,
             Key::Mode,
             Key::Pause,
+            Key::PushNotifications,
         ];
         crate::i18n::assert_table(Key::ALL, text, SAME);
     }

@@ -11,6 +11,9 @@ pub enum SettingsText {
     HintHome,
     HintLocation,
     HintWeather,
+    HintSolarForecast,
+    HintCameras,
+    HintPush,
     HintAlarm,
     HintAppearance,
     HintZigbee,
@@ -78,6 +81,9 @@ impl SettingsText {
         SettingsText::HintHome,
         SettingsText::HintLocation,
         SettingsText::HintWeather,
+        SettingsText::HintSolarForecast,
+        SettingsText::HintCameras,
+        SettingsText::HintPush,
         SettingsText::HintAlarm,
         SettingsText::HintAppearance,
         SettingsText::HintZigbee,
@@ -154,6 +160,15 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
             "Ville, coordonnées et fuseau horaire",
         ),
         T::HintWeather => ("Forecast for your home", "Prévisions pour votre maison"),
+        T::HintSolarForecast => (
+            "Solcast forecast for your panels",
+            "Prévision Solcast pour vos panneaux",
+        ),
+        T::HintCameras => (
+            "Frigate events, snapshots and live view",
+            "Événements, images et vue en direct de Frigate",
+        ),
+        T::HintPush => ("Alerts on your phone", "Alertes sur votre téléphone"),
         T::HintAlarm => (
             "Sensors, sirens, remotes and presence",
             "Capteurs, sirènes, télécommandes et présence",
@@ -329,7 +344,7 @@ mod tests {
     #[test]
     fn all_lists_every_variant() {
         // The match in `settings_text` is exhaustive, so a new variant only needs listing here.
-        assert_eq!(SettingsText::ALL.len(), 63);
+        assert_eq!(SettingsText::ALL.len(), 66);
     }
 
     #[test]

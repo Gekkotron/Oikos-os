@@ -23,6 +23,7 @@ use crate::screens::entity_sheet::availability_class;
 use crate::screens::home_settings_panel::HomeSettingsPanel;
 use crate::setup::connection::{DatabaseForm, MqttForm};
 use crate::setup::services::basic::WeatherForm;
+use crate::setup::services::keys::{FrigateForm, PushForm, SolcastForm};
 use crate::setup::welcome::LocationForm;
 use crate::theme::Theme;
 
@@ -192,6 +193,9 @@ pub enum SettingsPage {
     Home,
     Location,
     Weather,
+    SolarForecast,
+    Cameras,
+    Push,
     Alarm,
     Appearance,
     Zigbee2mqtt,
@@ -203,10 +207,13 @@ pub enum SettingsPage {
 
 impl SettingsPage {
     /// In the order the Settings list shows them.
-    pub const ALL: [SettingsPage; 10] = [
+    pub const ALL: [SettingsPage; 13] = [
         SettingsPage::Home,
         SettingsPage::Location,
         SettingsPage::Weather,
+        SettingsPage::SolarForecast,
+        SettingsPage::Cameras,
+        SettingsPage::Push,
         SettingsPage::Alarm,
         SettingsPage::Appearance,
         SettingsPage::Zigbee2mqtt,
@@ -221,6 +228,9 @@ impl SettingsPage {
             SettingsPage::Home => "home",
             SettingsPage::Location => "location",
             SettingsPage::Weather => "weather",
+            SettingsPage::SolarForecast => "solar-forecast",
+            SettingsPage::Cameras => "cameras",
+            SettingsPage::Push => "push-notifications",
             SettingsPage::Alarm => "alarm",
             SettingsPage::Appearance => "appearance",
             SettingsPage::Zigbee2mqtt => "zigbee2mqtt",
@@ -241,6 +251,9 @@ impl SettingsPage {
             SettingsPage::Home => Key::HomeSection,
             SettingsPage::Location => Key::Location,
             SettingsPage::Weather => Key::Weather,
+            SettingsPage::SolarForecast => Key::SolarForecast,
+            SettingsPage::Cameras => Key::Cameras,
+            SettingsPage::Push => Key::PushNotifications,
             SettingsPage::Alarm => Key::Alarm,
             SettingsPage::Appearance => Key::Appearance,
             SettingsPage::Zigbee2mqtt => Key::Zigbee2mqtt,
@@ -262,6 +275,9 @@ impl SettingsPage {
                 SettingsPage::Home => T::HintHome,
                 SettingsPage::Location => T::HintLocation,
                 SettingsPage::Weather => T::HintWeather,
+                SettingsPage::SolarForecast => T::HintSolarForecast,
+                SettingsPage::Cameras => T::HintCameras,
+                SettingsPage::Push => T::HintPush,
                 SettingsPage::Alarm => T::HintAlarm,
                 SettingsPage::Appearance => T::HintAppearance,
                 SettingsPage::Zigbee2mqtt => T::HintZigbee,
@@ -327,7 +343,12 @@ pub fn SettingsScreen() -> impl IntoView {
         });
     });
     let status = move |page: SettingsPage| match page {
-        SettingsPage::Home | SettingsPage::Location | SettingsPage::Weather => String::new(),
+        SettingsPage::Home
+        | SettingsPage::Location
+        | SettingsPage::Weather
+        | SettingsPage::SolarForecast
+        | SettingsPage::Cameras
+        | SettingsPage::Push => String::new(),
         SettingsPage::Alarm => alarm
             .get()
             .map(|v| settings_status(&v, lang()))
@@ -407,6 +428,9 @@ pub fn SettingsPageScreen() -> impl IntoView {
                 Some(SettingsPage::Home) => view! { <HomeSettingsPanel /> }.into_any(),
                 Some(SettingsPage::Location) => view! { <LocationPage /> }.into_any(),
                 Some(SettingsPage::Weather) => view! { <WeatherPage /> }.into_any(),
+                Some(SettingsPage::SolarForecast) => view! { <SolarPage /> }.into_any(),
+                Some(SettingsPage::Cameras) => view! { <CamerasPage /> }.into_any(),
+                Some(SettingsPage::Push) => view! { <PushPage /> }.into_any(),
                 Some(SettingsPage::Alarm) => view! { <AlarmSettingsPage /> }.into_any(),
                 Some(SettingsPage::Appearance) => view! { <AppearancePage /> }.into_any(),
                 Some(SettingsPage::Zigbee2mqtt) => view! { <ZigbeePage /> }.into_any(),
@@ -483,6 +507,36 @@ fn WeatherPage() -> impl IntoView {
     view! {
         <section class="sheet__panel">
             <WeatherForm applying_target="/settings/weather".to_owned() />
+        </section>
+    }
+}
+
+/// The Solcast forecast, edited with the wizard's form.
+#[component]
+fn SolarPage() -> impl IntoView {
+    view! {
+        <section class="sheet__panel">
+            <SolcastForm applying_target="/settings/solar-forecast".to_owned() />
+        </section>
+    }
+}
+
+/// The Frigate connection, edited with the wizard's form.
+#[component]
+fn CamerasPage() -> impl IntoView {
+    view! {
+        <section class="sheet__panel">
+            <FrigateForm applying_target="/settings/cameras".to_owned() />
+        </section>
+    }
+}
+
+/// The push service-account key, edited with the wizard's form.
+#[component]
+fn PushPage() -> impl IntoView {
+    view! {
+        <section class="sheet__panel">
+            <PushForm applying_target="/settings/push-notifications".to_owned() />
         </section>
     }
 }

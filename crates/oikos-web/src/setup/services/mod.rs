@@ -3,6 +3,7 @@
 
 pub mod basic;
 pub mod energy;
+pub mod keys;
 
 use std::collections::BTreeSet;
 use std::future::Future;
@@ -20,6 +21,7 @@ use crate::i18n::setup::{SetupText, setup_text, use_setup_text};
 use crate::i18n::{Lang, use_lang};
 use basic::{AlarmForm, ClimateForm, WeatherForm};
 use energy::{EnergyForm, holder};
+use keys::{FrigateForm, PushForm, SolcastForm};
 use oikos_core::energy::EnergyRole;
 
 /// What a service card says about its service.
@@ -247,13 +249,6 @@ pub fn place_line(state: Option<SetupState>, lang: Lang) -> String {
     }
 }
 
-/// A card body whose form is not built yet.
-#[component]
-fn Later() -> impl IntoView {
-    let t = use_setup_text();
-    view! { <p class="settings__hint">{move || t(SetupText::ComingSoon)}</p> }
-}
-
 /// Whether a settings section reads `enabled: true`; a failed read counts as off.
 async fn section_enabled(section: &'static str) -> bool {
     get_section(section)
@@ -284,6 +279,23 @@ pub fn ServicesStep() -> impl IntoView {
             energy_on.set(set_up);
         });
     }
+    let solar_on = RwSignal::new(false);
+    let cameras_on = RwSignal::new(false);
+    let push_on = RwSignal::new(false);
+    let push_project = RwSignal::new(None::<String>);
+    leptos::task::spawn_local(async move {
+        if let Ok(v) = get_section("solcast").await {
+            let enabled = v["enabled"].as_bool().unwrap_or(false);
+            solar_on.try_set(enabled && v["api_key"]["set"].as_bool().unwrap_or(false));
+        }
+        if let Ok(v) = get_section("frigate").await {
+            cameras_on.try_set(v["url"].as_str().is_some());
+        }
+        if let Ok(v) = get_section("push").await {
+            push_on.try_set(v["service_account"]["set"].as_bool().unwrap_or(false));
+            push_project.try_set(v["project_id"].as_str().map(str::to_owned));
+        }
+    });
     leptos::task::spawn_local(async move {
         weather_on.try_set(section_enabled("weather").await);
         climate_on.try_set(section_enabled("climate").await);
@@ -327,6 +339,10 @@ pub fn ServicesStep() -> impl IntoView {
         })
     };
     let fixed = move |k: SetupText| Signal::derive(move || setup_text(lang(), k).to_owned());
+    let push_desc = Signal::derive(move || match push_project.get() {
+        Some(p) => setup_text(lang(), SetupText::PushProject).replace("{project}", &p),
+        None => setup_text(lang(), SetupText::DescPush).to_owned(),
+    });
     let weather_desc = Signal::derive(move || place_line(state, lang()));
     view! {
         <div class="setup__body">
@@ -348,10 +364,10 @@ pub fn ServicesStep() -> impl IntoView {
                     icon=crate::icons::SUN
                     title=SetupText::SvcSolar
                     desc=fixed(SetupText::DescSolar)
-                    state=card_state_of("solar", None)
+                    state=card_state_of("solar", Some(solar_on))
                     on_skip=on_skip("solar")
                 >
-                    <Later />
+                    <SolcastForm applying_target=setup_href(SetupStep::Services) />
                 </ServiceCard>
                 <ServiceCard
                     id="energy"
@@ -368,20 +384,20 @@ pub fn ServicesStep() -> impl IntoView {
                     icon=crate::icons::CAMERA
                     title=SetupText::SvcCameras
                     desc=fixed(SetupText::DescCameras)
-                    state=card_state_of("cameras", None)
+                    state=card_state_of("cameras", Some(cameras_on))
                     on_skip=on_skip("cameras")
                 >
-                    <Later />
+                    <FrigateForm applying_target=setup_href(SetupStep::Services) />
                 </ServiceCard>
                 <ServiceCard
                     id="push"
                     icon=crate::icons::BELL
                     title=SetupText::SvcPush
-                    desc=fixed(SetupText::DescPush)
-                    state=card_state_of("push", None)
+                    desc=push_desc
+                    state=card_state_of("push", Some(push_on))
                     on_skip=on_skip("push")
                 >
-                    <Later />
+                    <PushForm applying_target=setup_href(SetupStep::Services) />
                 </ServiceCard>
                 <ServiceCard
                     id="climate"
