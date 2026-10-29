@@ -4858,7 +4858,7 @@ html:has(.flow-canvas-screen) {
   --tone-c1: var(--flux-c1);
   --tone-c2: var(--flux-c2);
   --energy-glow: 1;
-  aspect-ratio: 760 / 380;
+  aspect-ratio: 800 / 380;
 }
 
 .energy-circles--narrow {
@@ -5003,6 +5003,25 @@ html:has(.flow-canvas-screen) {
 .energy-node__share {
   fill: var(--solar);
   font: 600 11px var(--font-body);
+}
+
+.energy-node__small {
+  font-size: 10px;
+}
+
+/* A halo in the card colour lets the wires pass behind the texts. */
+.energy-node__label,
+.energy-node__value {
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+:root[data-theme="light"] .energy-node__label,
+:root[data-theme="light"] .energy-node__value {
+  fill: color-mix(in srgb, var(--ink) 70%, transparent);
+  stroke: var(--card-bg);
 }
 
 .energy-circles--narrow .energy-node__big {

@@ -36,7 +36,7 @@ pub struct CirclesLayout {
 
 impl CirclesLayout {
     pub const WIDE: CirclesLayout = CirclesLayout {
-        view_w: 760.0,
+        view_w: 800.0,
         view_h: 380.0,
         r_big: 46.0,
         r_house: 54.0,
