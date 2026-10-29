@@ -22,7 +22,7 @@ The **Climate** tab appears when climate is on. It lists the rooms with their st
 - **Room thermometer**: Automatic (the room's own temperature sensor when it has one, else the mean of its climate devices' readings) or a sensor you pick.
 - **Hold temperature**: a zone override, **Until next change** or until a time you set. Active holds are listed with a **Clear** button.
 - **Eco until…** and **Cancel eco** (see [Eco](#eco)).
-- **This week**: the approved schedule as a week calendar, with a base temperature and coloured blocks. **Create schedule** starts one when there is none, **Edit rules** changes it, and you tap an empty spot to add a block.
+- **This week**: the approved schedule as a week calendar, with a base temperature and coloured blocks. **Create schedule** starts one when there is none, **Edit schedule** changes it, and you tap an empty spot to add a block.
 - **Proposed schedule**: what the learner found, with **Approve**, **Reject** and, after you edit it, **Approve edited**. **Learn now** runs the learner on demand.
 - **Recent decisions**: the engine's last decisions for the room.
 

@@ -255,7 +255,7 @@ pub fn ProposalPanel(
     }
 }
 
-/// The zone's approved rules on a timeline; "Edit rules" saves through the zone settings.
+/// The zone's approved rules on a timeline; "Edit schedule" saves through the zone settings.
 #[component]
 pub fn RulesPanel(
     zone: Signal<ZoneView>,
@@ -369,7 +369,7 @@ pub fn RulesPanel(
                                         editing.set(true);
                                     }
                                 >
-                                    {move || t(ClimateText::EditRules)}
+                                    {move || t(ClimateText::EditSchedule)}
                                 </button>
                             }
                                 .into_any()
