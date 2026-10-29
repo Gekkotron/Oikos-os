@@ -92,3 +92,5 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: tools/ci/stack-check.sh
+      - run: tools/tests/update_test.sh
+      - run: shellcheck tools/*.sh tools/ci/*.sh tools/tests/*.sh

@@ -35,7 +35,10 @@ TARGET_DIR="$(cd "$ROOT" && cargo metadata --no-deps --format-version=1 2>/dev/n
 TARGET_DIR="${TARGET_DIR:-$ROOT/target}"
 BIN="$TARGET_DIR/$PROFILE/oikos-os"
 LOG="${OIKOS_LOG:-$TARGET_DIR/oikos-os.log}"
-BIND="$(sed -n 's/^bind *= *"\(.*\)"/\1/p' "$ROOT/oikos.toml" 2>/dev/null | head -1)"
+BIND="$(sed -n 's/.*"bind": *"\([^"]*\)".*/\1/p' "$ROOT/data/hub.json" 2>/dev/null | head -1)"
+if [ -z "$BIND" ]; then
+  BIND="$(sed -n 's/^bind *= *"\(.*\)"/\1/p' "$ROOT/oikos.toml" 2>/dev/null | head -1)"
+fi
 HEALTH="http://${BIND:-127.0.0.1:8081}/health"
 
 # Inline branches below instead of arrays: macOS's system bash 3.2 treats an
@@ -80,6 +83,7 @@ fi
 pids="$(pgrep -f 'oikos-os run' || true)"
 if [ -n "$pids" ]; then
   echo "==> stopping previous hub (pid $pids)"
+  # shellcheck disable=SC2086 # several pids, split on purpose
   kill $pids 2>/dev/null || true
   for _ in $(seq 1 20); do
     pgrep -f 'oikos-os run' >/dev/null || break
