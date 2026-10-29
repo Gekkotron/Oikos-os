@@ -21,6 +21,8 @@ const MIN_KNOWN_SLOTS: usize = 48;
 const DEVIATION_SHARE: f64 = 0.25;
 /// Runs shorter than this many slots (30 min) are absorbed by a neighbour.
 const MIN_RUN: usize = 2;
+/// A day agrees with a block when it starts and ends within this many slots (30 min) of it.
+const EDGE_SLACK: usize = 2;
 /// `differs` / `diff` thresholds: 30 minutes, 0.5 degrees.
 const SHIFT_MIN: u16 = 30;
 const SHIFT_TEMP: f64 = 0.5;
@@ -239,6 +241,20 @@ struct Run {
     value: Slot,
 }
 
+/// Which edges of a run a day must keep to agree with it.
+#[derive(Clone, Copy)]
+struct Edges {
+    start: bool,
+    end: bool,
+}
+
+impl Edges {
+    const BOTH: Edges = Edges {
+        start: true,
+        end: true,
+    };
+}
+
 struct Group {
     days: Vec<Day>,
     members: Vec<usize>,
@@ -287,16 +303,21 @@ pub fn learn(input: &LearnInput) -> LearnOutcome {
     for g in &groups {
         let total = g.members.len() as u32;
         for run in g.runs.iter().filter(|r| !same(r.value, base)) {
+            let setpoint = finalize(run.value, input);
+            if setpoint == base_sp {
+                continue;
+            }
+            // Days agree with the block as it will be set, not with the raw median.
+            let block_run = Run {
+                value: slot_of(setpoint),
+                ..*run
+            };
             let agree = g
                 .members
                 .iter()
-                .filter(|&&m| day_agrees(&counted[m].slots, run))
+                .filter(|&&m| day_agrees(&counted[m].slots, &block_run, Edges::BOTH))
                 .count() as u32;
             if f64::from(agree) < input.support * f64::from(total) {
-                continue;
-            }
-            let setpoint = finalize(run.value, input);
-            if setpoint == base_sp {
                 continue;
             }
             let block = Block {
@@ -383,12 +404,18 @@ fn revise(
                     let stretch = Run {
                         start: s,
                         len: e - s,
-                        value: run.value,
+                        value: slot_of(learned),
+                    };
+                    // Only the run's own edges are edges a day must keep: inside the run the
+                    // stretch borders slots already at the learned value.
+                    let edges = Edges {
+                        start: s == run.start,
+                        end: e == end,
                     };
                     let agree = g
                         .members
                         .iter()
-                        .filter(|&&m| day_agrees(&counted[m].slots, &stretch))
+                        .filter(|&&m| day_agrees(&counted[m].slots, &stretch, edges))
                         .count();
                     if agree as f64 >= input.support * total {
                         day[s..e].fill(learned);
@@ -488,7 +515,7 @@ fn evidence_for(
     let of = u32::try_from(on_days.len()).unwrap_or(u32::MAX);
     let agree = on_days
         .iter()
-        .filter(|c| day_agrees(&c.slots, &run))
+        .filter(|c| day_agrees(&c.slots, &run, Edges::BOTH))
         .count() as u32;
     (of > 0).then_some(Evidence { agree, of })
 }
@@ -669,13 +696,26 @@ fn pick_base(groups: &[Group], mode: Mode) -> Option<Slot> {
         .map(|(v, _)| v)
 }
 
-/// A day agrees with a run when at least half of its slots are known and 80 % of the known ones
-/// are within 0.5 °C of the run's value.
-fn day_agrees(slots: &[Slot; SLOTS], run: &Run) -> bool {
-    let range = &slots[run.start..run.start + run.len];
+/// A day agrees with a run when at least half of its slots are known, 80 % of the known ones
+/// are within 0.5 °C of the run's value, and at each of `edges` the day reaches that value
+/// within 30 min of the edge without holding it from further away (§6.3: start and end within
+/// 30 min). An unknown slot never counts against the day.
+fn day_agrees(slots: &[Slot; SLOTS], run: &Run, edges: Edges) -> bool {
+    let end = run.start + run.len;
+    let range = &slots[run.start..end];
     let known = range.iter().filter(|s| **s != Slot::None).count();
     let matching = range.iter().filter(|s| same(**s, run.value)).count();
-    known * 2 >= run.len && matching * 5 >= known * 4
+    if known * 2 < run.len || matching * 5 < known * 4 {
+        return false;
+    }
+    let holds = |s: usize| slots.get(s).is_some_and(|v| same(*v, run.value));
+    let near = |edge: usize| {
+        (edge.saturating_sub(EDGE_SLACK)..=(edge + EDGE_SLACK).min(SLOTS - 1)).any(holds)
+    };
+    let starts = !edges.start
+        || (near(run.start) && !run.start.checked_sub(EDGE_SLACK + 1).is_some_and(holds));
+    let ends = !edges.end || (near(end - 1) && !holds(end + EDGE_SLACK));
+    starts && ends
 }
 
 // ---------------------------------------------------------------------------------------------
