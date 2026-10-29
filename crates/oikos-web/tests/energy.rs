@@ -718,6 +718,18 @@ async fn house_shows_the_solar_share() {
 
 #[wasm_bindgen_test]
 async fn circle_opens_its_sensor_from_the_keyboard() {
+    // Other tests leave the page on /entity/oven: the router starts from "/", so the path
+    // proves the key.
+    web_sys::window()
+        .unwrap()
+        .history()
+        .unwrap()
+        .replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/"))
+        .unwrap();
+    assert_eq!(
+        web_sys::window().unwrap().location().pathname().unwrap(),
+        "/"
+    );
     let host = mount(vec![
         sensor("solar", "Solar power", "W", 2000.0, role("solar")),
         sensor("oven", "Oven", "W", 1200.0, role("consumer")),
