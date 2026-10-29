@@ -144,7 +144,7 @@ impl Default for LogConfig {
 ///
 /// Unknown keys are refused, so a config still setting the old `history_topic` /
 /// `responses_topic` fails at start naming the keys it accepts.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct PushConfig {
     pub prefix: String,
@@ -152,6 +152,8 @@ pub struct PushConfig {
     /// Path of the service-account JSON key; only the path is ever logged. When unset, `load`
     /// uses [`PUSH_KEY_FILE`] next to the config file if it exists.
     pub credentials: Option<PathBuf>,
+    /// The service-account key JSON itself (set from the browser); wins over `credentials`.
+    pub service_account: Option<String>,
     /// Seconds between two passes of the retry queue.
     pub retry_interval: u64,
     /// Attempts before a queued alert is given up.
@@ -168,11 +170,28 @@ impl Default for PushConfig {
             prefix: "oikos/push".into(),
             legacy_prefix: "oikos-push".into(),
             credentials: None,
+            service_account: None,
             retry_interval: 60,
             max_retries: 10,
             history_size: 100,
             history_days: 7,
         }
+    }
+}
+
+impl fmt::Debug for PushConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let service_account = self.service_account.as_ref().map(|_| "***");
+        f.debug_struct("PushConfig")
+            .field("prefix", &self.prefix)
+            .field("legacy_prefix", &self.legacy_prefix)
+            .field("credentials", &self.credentials)
+            .field("service_account", &service_account)
+            .field("retry_interval", &self.retry_interval)
+            .field("max_retries", &self.max_retries)
+            .field("history_size", &self.history_size)
+            .field("history_days", &self.history_days)
+            .finish()
     }
 }
 
@@ -418,6 +437,9 @@ pub struct WeatherConfig {
     pub country: Option<String>,
     /// Minutes between two fetches.
     pub refresh_minutes: u64,
+    /// The house's coordinates when already known (from the setup); skips the geocoding.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
 }
 
 impl Default for WeatherConfig {
@@ -427,6 +449,8 @@ impl Default for WeatherConfig {
             city: String::new(),
             country: None,
             refresh_minutes: 15,
+            latitude: None,
+            longitude: None,
         }
     }
 }
@@ -465,7 +489,7 @@ impl WeatherConfig {
 }
 
 /// The Solcast rooftop solar forecast. Nothing leaves the LAN while `enabled` is false.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SolcastConfig {
     pub enabled: bool,
@@ -475,6 +499,21 @@ pub struct SolcastConfig {
     pub daily_limit: u32,
     /// The file holding the API key; `load` defaults it to [`SOLCAST_KEY_FILE`] next to the config.
     pub api_key_file: Option<PathBuf>,
+    /// The API key itself (set from the browser); wins over `api_key_file`.
+    pub api_key: Option<String>,
+}
+
+impl fmt::Debug for SolcastConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let api_key = self.api_key.as_ref().map(|_| "***");
+        f.debug_struct("SolcastConfig")
+            .field("enabled", &self.enabled)
+            .field("sites", &self.sites)
+            .field("daily_limit", &self.daily_limit)
+            .field("api_key_file", &self.api_key_file)
+            .field("api_key", &api_key)
+            .finish()
+    }
 }
 
 impl Default for SolcastConfig {
@@ -484,6 +523,7 @@ impl Default for SolcastConfig {
             sites: Vec::new(),
             daily_limit: 10,
             api_key_file: None,
+            api_key: None,
         }
     }
 }
@@ -527,8 +567,15 @@ impl SolcastConfig {
         self.read_key().map(|_| ())
     }
 
-    /// The API key: the trimmed content of the key file.
+    /// The API key: `api_key` when set, otherwise the trimmed content of the key file.
     pub fn read_key(&self) -> Result<String, String> {
+        if let Some(key) = self.api_key.as_deref() {
+            let key = key.trim();
+            if key.is_empty() {
+                return Err("[solcast] the API key is empty".to_owned());
+            }
+            return Ok(key.to_owned());
+        }
         let path = self
             .api_key_file
             .as_deref()
@@ -698,21 +745,25 @@ impl HistoryConfig {
     }
 }
 
+/// `url` with its password replaced by `***`, for `Debug` output.
+pub(crate) fn mask_url_password(url: &str) -> String {
+    if url.is_empty() {
+        return String::new();
+    }
+    match url::Url::parse(url) {
+        Ok(mut u) => {
+            if u.password().is_some() {
+                let _ = u.set_password(Some("***"));
+            }
+            u.to_string()
+        }
+        Err(_) => "<unparsable>".to_string(),
+    }
+}
+
 impl fmt::Debug for HistoryConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let masked = if self.url.is_empty() {
-            String::new()
-        } else {
-            match url::Url::parse(&self.url) {
-                Ok(mut u) => {
-                    if u.password().is_some() {
-                        let _ = u.set_password(Some("***"));
-                    }
-                    u.to_string()
-                }
-                Err(_) => "<unparsable>".to_string(),
-            }
-        };
+        let masked = mask_url_password(&self.url);
         f.debug_struct("HistoryConfig")
             .field("url", &masked)
             .field("buffer_rows", &self.buffer_rows)
@@ -755,6 +806,9 @@ pub const STRING_ENV_KEYS: &[&str] = &[
     "solcast.api_key_file",
 ];
 
+/// The only keys `OIKOS_*` env vars may override once the hub boots from `hub.json`.
+pub const BOOTSTRAP_ENV_PREFIXES: &[&str] = &["mqtt.", "history.url", "http.", "log."];
+
 /// The push key `load` falls back to, relative to the config file's folder (git-ignored).
 pub const PUSH_KEY_FILE: &str = "secrets/firebase.json";
 
@@ -762,6 +816,17 @@ pub const PUSH_KEY_FILE: &str = "secrets/firebase.json";
 pub const SOLCAST_KEY_FILE: &str = "secrets/solcast.key";
 
 impl Config {
+    /// Runs every section validator, first error wins.
+    pub fn validate_all(&self) -> Result<(), String> {
+        self.flows.validate()?;
+        self.watchdog.validate()?;
+        self.climate.validate()?;
+        self.alarm.validate()?;
+        self.weather.validate()?;
+        self.solcast.validate()?;
+        Ok(())
+    }
+
     /// The `OIKOS_*` env layer for non-string fields; string fields are
     /// excluded because figment would guess `123456` to be a number.
     pub fn env_provider() -> Env {

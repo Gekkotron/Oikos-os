@@ -1,13 +1,14 @@
 //! The weather poller against a local stub of Open-Meteo, with the hub served on an ephemeral
 //! port. No test reaches the real network.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -36,6 +37,8 @@ struct Stub {
     good_forecasts: usize,
     geocoding_calls: AtomicUsize,
     forecast_calls: AtomicUsize,
+    /// The query parameters of each forecast request.
+    forecast_queries: std::sync::Mutex<Vec<HashMap<String, String>>>,
 }
 
 impl Stub {
@@ -45,6 +48,7 @@ impl Stub {
             good_forecasts,
             geocoding_calls: AtomicUsize::new(0),
             forecast_calls: AtomicUsize::new(0),
+            forecast_queries: std::sync::Mutex::default(),
         })
     }
 
@@ -62,7 +66,11 @@ async fn geocode(State(s): State<Arc<Stub>>) -> Response {
     json(s.geocoding)
 }
 
-async fn forecast(State(s): State<Arc<Stub>>) -> Response {
+async fn forecast(
+    State(s): State<Arc<Stub>>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    s.forecast_queries.lock().unwrap().push(q);
     let n = s.forecast_calls.fetch_add(1, Ordering::SeqCst);
     if n < s.good_forecasts {
         json(FORECAST)
@@ -93,7 +101,13 @@ struct App {
 }
 
 async fn app(enabled: bool) -> App {
+    app_at(enabled, None).await
+}
+
+async fn app_at(enabled: bool, coordinates: Option<(f64, f64)>) -> App {
     let mut cfg = Config::default();
+    cfg.weather.latitude = coordinates.map(|c| c.0);
+    cfg.weather.longitude = coordinates.map(|c| c.1);
     cfg.topics.discovery_prefixes = vec!["oikos".to_owned()];
     cfg.weather.enabled = enabled;
     cfg.weather.city = "Paris".to_owned();
@@ -118,7 +132,13 @@ async fn app(enabled: bool) -> App {
     }
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(axum::serve(listener, router(Arc::clone(&hub))).into_future());
+    tokio::spawn(
+        axum::serve(
+            listener,
+            router(Arc::clone(&hub), oikos_os::setup::SetupCtx::inert()),
+        )
+        .into_future(),
+    );
     App {
         hub,
         addr,
@@ -179,6 +199,26 @@ async fn poller_publishes_offline_first_then_online_and_states() {
     let view: WeatherView = response.json().await.unwrap();
     assert_eq!(view.place.name, "Paris");
     assert_eq!(view.days.len(), 5);
+    task.abort();
+}
+
+#[tokio::test]
+async fn poller_with_coordinates_skips_geocoding() {
+    let app = app_at(true, Some((45.76, 4.84))).await;
+    let stub = Stub::new(GEOCODING, usize::MAX);
+    let endpoints = serve_stub(Arc::clone(&stub)).await;
+    let task = spawn_with(&app.hub, endpoints);
+
+    let hub = Arc::clone(&app.hub);
+    until("the first view", || hub.weather_view().is_ok()).await;
+    assert_eq!(stub.geocoding_calls.load(Ordering::SeqCst), 0);
+    {
+        let queries = stub.forecast_queries.lock().unwrap();
+        assert_eq!(queries[0]["latitude"], "45.76");
+        assert_eq!(queries[0]["longitude"], "4.84");
+    }
+    // The place is named after the configured city.
+    assert_eq!(app.hub.weather_view().unwrap().place.name, "Paris");
     task.abort();
 }
 

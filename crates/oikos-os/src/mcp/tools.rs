@@ -18,16 +18,21 @@ use serde_json::Value;
 use super::params::{
     AlertList, AreaList, BridgeStatus, ClearOverrideParams, DEFAULT_ALERTS_LIMIT, DEFAULT_LIMIT,
     DEFAULT_SEARCH_LIMIT, DeleteGroupParams, DeleteVirtualParams, Deleted, DeviceList,
-    EntityDetailView, EntityPage, GetEntityParams, GetGridDayParams, GetHistoryParams, GroupList,
-    HistoryAnswer, HistoryWhat, IgnoredList, Include, ListAlertsParams, ListDevicesParams,
-    ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult, SendCommandParams,
-    SendNotificationParams, Sent, SetAreasParams, SetGroupParams, SetHomeSettingsParams,
-    SetOverrideParams, SetVirtualParams,
+    EntityDetailView, EntityPage, GetEntityParams, GetGridDayParams, GetHistoryParams,
+    GetSettingsParams, GroupList, HistoryAnswer, HistoryWhat, IgnoredList, Include,
+    ListAlertsParams, ListDevicesParams, ListEntitiesParams, MAX_LIMIT, SearchParams, SearchResult,
+    SendCommandParams, SendNotificationParams, Sent, SetAreasParams, SetGroupParams,
+    SetHomeSettingsParams, SetOverrideParams, SetSettingsParams, SetVirtualParams,
 };
 use super::{OikosMcp, ToolError};
 use crate::history::query as history_query;
+use crate::setup::settings::{ApiError, read_section, write_section};
 
 pub(super) type ToolResult<T> = Result<Json<T>, ToolError>;
+
+fn api_error(e: ApiError) -> ToolError {
+    ToolError(e.message)
+}
 
 #[tool_router(vis = "pub(super)")]
 impl OikosMcp {
@@ -69,6 +74,44 @@ impl OikosMcp {
     ) -> ToolResult<HomeSettings> {
         log_write("set_home_settings", &params);
         Ok(Json(self.hub.set_home_settings(params.settings)?))
+    }
+
+    /// One section of the hub's service settings (`weather`, `solcast`, `frigate`, `push`,
+    /// `climate` or `advanced`), as the settings page shows it. Secrets (the Solcast key, the
+    /// Frigate password, the push service account) are write-only: they read as `{"set": bool}`.
+    #[tool(name = "get_settings", annotations(read_only_hint = true))]
+    async fn get_settings(
+        &self,
+        Parameters(params): Parameters<GetSettingsParams>,
+    ) -> ToolResult<serde_json::Value> {
+        let ctx = self.setup_ctx()?;
+        Ok(Json(
+            read_section(ctx, &params.section)
+                .await
+                .map_err(api_error)?,
+        ))
+    }
+
+    /// Replaces one section of the service settings with `value`, checks it, saves it and
+    /// restarts the hub so every service picks it up (returns `{"restarting": true}`).
+    /// Read the section with `get_settings` first and send the whole of it back: what is left
+    /// out takes its default. Secrets are write-only: a string sets one, `null` clears it, and
+    /// leaving it out (or sending `""` or back `{"set": true}`) keeps the stored value. Changing a
+    /// service's address (the Frigate URL) needs its secret sent again. The reason of a
+    /// refusal is returned, and never contains a secret.
+    #[tool(name = "set_settings", annotations(idempotent_hint = true))]
+    async fn set_settings(
+        &self,
+        Parameters(params): Parameters<SetSettingsParams>,
+    ) -> ToolResult<serde_json::Value> {
+        // Not `log_write`: `value` may hold a secret, so only the section is logged.
+        tracing::info!(tool = "set_settings", section = %params.section, "mcp write");
+        let ctx = self.setup_ctx()?;
+        Ok(Json(
+            write_section(ctx, &params.section, params.value)
+                .await
+                .map_err(api_error)?,
+        ))
     }
 
     /// The Zigbee2MQTT bridge (version, coordinator, permit join, online or not) and the

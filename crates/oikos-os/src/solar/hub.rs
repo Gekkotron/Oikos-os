@@ -77,6 +77,11 @@ impl Hub {
         self.solar_key_file.clone()
     }
 
+    /// The API key itself, when set from the browser.
+    pub fn solar_api_key(&self) -> Option<String> {
+        self.solar_api_key.clone()
+    }
+
     /// A copy of the request ledger.
     pub fn solar_ledger(&self) -> Ledger {
         self.solar_slot().ledger.clone()

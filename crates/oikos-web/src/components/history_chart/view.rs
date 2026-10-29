@@ -16,6 +16,7 @@ use super::geom::{
     y_scale,
 };
 use crate::api::history::{HistoryApiError, fetch_daily, fetch_series};
+use crate::components::now::Now;
 use crate::i18n::format as fmt;
 use crate::i18n::history::{
     HistoryText, counter_legend, history_text, kwh, load_error, min_max, range_name, total_line,
@@ -55,6 +56,18 @@ fn daily_days_for(range: HistoryRange) -> u16 {
     }
 }
 
+/// What a fetch was made for: entity, range, flavor, power pair and the Retry count.
+type FetchInputs = (String, HistoryRange, Flavor, Option<String>, u32);
+
+/// Seconds between two refetches of a chart left open: a minute for the day ranges, whose
+/// latest points move every minute, ten for the longer ones.
+pub fn refresh_period_s(range: HistoryRange) -> u64 {
+    match range {
+        HistoryRange::Hour | HistoryRange::SixHours | HistoryRange::Day => 60,
+        HistoryRange::Week | HistoryRange::Month | HistoryRange::Year => 600,
+    }
+}
+
 #[component]
 pub fn HistoryChart(
     #[prop(into)] entity_id: Signal<String>,
@@ -68,31 +81,51 @@ pub fn HistoryChart(
     let latest: Rc<Cell<u32>> = Rc::new(Cell::new(0));
     let retry_bump = RwSignal::new(0u32);
 
-    // Fetch effect — refires on any input change (or Retry).
+    // The shared clock, cut to this range's refresh period: an open chart refetches each time
+    // it moves on. Off the app (no clock) the chart never refreshes.
+    let now = use_context::<Now>();
+    let tick = Memo::new(move |_| now.map(|n| n.0.get() / refresh_period_s(range.get())));
+
+    // Fetch effect — refires on any input change (or Retry), and on each tick. A tick alone is
+    // a refresh: the chart stays up while it loads.
     {
         let latest = latest.clone();
-        Effect::new(move |_| {
-            let id = entity_id.get();
-            let r = range.get();
-            let f = flavor.get();
-            let pp = power_pair.get();
-            let _ = retry_bump.get();
+        Effect::new(move |prev: Option<FetchInputs>| {
+            let inputs = (
+                entity_id.get(),
+                range.get(),
+                flavor.get(),
+                power_pair.get(),
+                retry_bump.get(),
+            );
+            let _ = tick.get();
+            let refresh = prev.as_ref() == Some(&inputs);
             let my_req = latest.get() + 1;
             latest.set(my_req);
-            state.set(State::Loading);
+            if !refresh {
+                state.set(State::Loading);
+            }
 
+            let (id, r, f, pp, _) = inputs.clone();
             let latest_check = latest.clone();
             leptos::task::spawn_local(async move {
                 let outcome = fetch_for(&id, r, f, pp.as_deref()).await;
                 if is_stale(my_req, latest_check.get()) {
                     return;
                 }
-                state.set(match outcome {
-                    FetchResult::Series(Ok(s)) => State::Series(s),
-                    FetchResult::Daily(Ok(d)) => State::Bars(d),
-                    FetchResult::Series(Err(e)) | FetchResult::Daily(Err(e)) => map_error(e),
-                });
+                match outcome {
+                    FetchResult::Series(Ok(s)) => state.set(State::Series(s)),
+                    FetchResult::Daily(Ok(d)) => state.set(State::Bars(d)),
+                    FetchResult::Series(Err(e)) | FetchResult::Daily(Err(e)) => {
+                        // A failed refresh keeps what is drawn; one that superseded the first
+                        // fetch still has to end the shimmer.
+                        if !refresh || state.with_untracked(|s| matches!(s, State::Loading)) {
+                            state.set(map_error(e));
+                        }
+                    }
+                }
             });
+            inputs
         });
     }
 
@@ -486,6 +519,16 @@ mod tests {
         assert!(is_stale(3, 5));
         assert!(!is_stale(5, 5));
         assert!(!is_stale(1, 1));
+    }
+
+    #[test]
+    fn an_open_chart_refreshes_each_minute_on_day_ranges() {
+        assert_eq!(refresh_period_s(HistoryRange::Hour), 60);
+        assert_eq!(refresh_period_s(HistoryRange::SixHours), 60);
+        assert_eq!(refresh_period_s(HistoryRange::Day), 60);
+        assert_eq!(refresh_period_s(HistoryRange::Week), 600);
+        assert_eq!(refresh_period_s(HistoryRange::Month), 600);
+        assert_eq!(refresh_period_s(HistoryRange::Year), 600);
     }
 
     #[test]

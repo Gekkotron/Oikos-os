@@ -514,6 +514,7 @@ mod solcast {
             sites: sites.iter().map(|s| (*s).to_owned()).collect(),
             daily_limit,
             api_key_file: key.map(Into::into),
+            api_key: None,
         }
     }
 
@@ -592,6 +593,7 @@ mod solcast {
             sites: vec![String::new(), "a b".to_owned()],
             daily_limit: 0,
             api_key_file: Some("nope.key".into()),
+            api_key: None,
         };
         assert_eq!(cfg.validate(), Ok(()));
     }

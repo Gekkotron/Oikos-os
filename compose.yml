@@ -19,6 +19,8 @@ services:
       - path: .env
         required: false
     volumes:
+      # hub.json and settings-cache.json live here.
+      - ./data:/data
       - ./oikos.toml:/etc/oikos/oikos.toml:ro
       # Git-ignored keys. The hub sends push notifications when
       # secrets/firebase.json is there; see secrets/README.md.

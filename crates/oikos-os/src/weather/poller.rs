@@ -13,8 +13,8 @@ use crate::clock;
 use crate::hub::Hub;
 
 /// First wait after a failed geocoding; it doubles up to [`GEOCODE_BACKOFF_MAX`].
-const GEOCODE_BACKOFF_START: Duration = Duration::from_secs(30);
-const GEOCODE_BACKOFF_MAX: Duration = Duration::from_secs(15 * 60);
+pub(crate) const GEOCODE_BACKOFF_START: Duration = Duration::from_secs(30);
+pub(crate) const GEOCODE_BACKOFF_MAX: Duration = Duration::from_secs(15 * 60);
 
 /// The shortest sleep between two fetches. `[weather] refresh_minutes >= 10` is enforced only
 /// by `WeatherConfig::validate` at start; the poller takes whatever the hub holds, so tests
@@ -58,8 +58,23 @@ pub async fn run(hub: Arc<Hub>, endpoints: Endpoints) {
     hub.publish_weather_configs();
 
     let city = hub.weather_city();
-    let Some(place) = resolve(&client, &endpoints, &city, hub.weather_country()).await else {
-        return;
+    let place = match hub.weather_coordinates() {
+        // The house's location is known: no geocoding request.
+        Some((latitude, longitude)) => Place {
+            name: city,
+            admin: None,
+            country: hub.weather_country(),
+            latitude,
+            longitude,
+            timezone: None,
+        },
+        None => {
+            let Some(place) = resolve(&client, &endpoints, &city, hub.weather_country()).await
+            else {
+                return;
+            };
+            place
+        }
     };
 
     let mut last_success: Option<u64> = None;

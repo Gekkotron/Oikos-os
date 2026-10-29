@@ -594,3 +594,29 @@ pub struct SetHomeSettingsParams {
     /// a field. `energy_view` is `classic` (the default) or `flux`.
     pub settings: oikos_api::HomeSettings,
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GetSettingsParams {
+    /// The section: `weather`, `solcast`, `frigate`, `push`, `climate` or `advanced`.
+    pub section: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetSettingsParams {
+    /// The section: `weather`, `solcast`, `frigate`, `push`, `climate` or `advanced`.
+    pub section: String,
+    /// The whole section, as `get_settings` shows it; it replaces the stored one. A secret
+    /// field is a string to set it, `null` to clear it, absent, `""` or `{"set": true}` to keep it.
+    pub value: serde_json::Value,
+}
+
+// A secret may sit in `value`, so the parameters never print it.
+impl std::fmt::Debug for SetSettingsParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetSettingsParams")
+            .field("section", &self.section)
+            .finish_non_exhaustive()
+    }
+}

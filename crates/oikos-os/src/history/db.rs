@@ -35,6 +35,11 @@ impl Db {
     }
 
     /// Runs the embedded migrations in `./migrations` at startup.
+    /// The underlying pool, for modules outside `history` that keep their own tables.
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
     pub async fn migrate(&self) -> Result<(), sqlx::migrate::MigrateError> {
         sqlx::migrate!("./migrations").run(&self.pool).await
     }
