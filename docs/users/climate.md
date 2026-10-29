@@ -57,7 +57,7 @@ The engine decides per zone from a priority tree, and every decision carries its
 
 Per-device overrides (hand changes) sit on top of the rules and hold their device whatever the zone does.
 
-A temperature set by hand on a device holds until the zone's next scheduled change, at most `manual_hold_max_min` minutes (240 by default).
+A temperature set by hand on a device holds until the zone's next scheduled change, at most `manual_hold_max_min` minutes (240 by default). Only an active zone watches for hand changes: what is set by hand while a zone is off is not held when it is switched back on, and the schedule applies.
 
 The engine keeps deciding when history is off; only the learner pauses.
 
