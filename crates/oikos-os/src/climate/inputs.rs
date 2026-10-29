@@ -7,6 +7,7 @@ use chrono::NaiveDateTime;
 use chrono_tz::Tz;
 use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
 use oikos_climate::doc::{HouseSettings, Mode, Override, RoomEco, SafetyCause, ZoneSettings};
+use oikos_climate::feedback::FeedbackState;
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
 use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind, StateValue};
 
@@ -44,6 +45,10 @@ pub(crate) struct OwnedZoneInputs {
     pub previous_cause: Option<SafetyCause>,
     /// The zone's own eco, if set.
     pub room_eco: Option<RoomEco>,
+    /// The room thermometer's own reading, whatever `reading` uses.
+    pub thermometer: Option<ReadingSource>,
+    /// The thermometer correction's state from the previous tick.
+    pub feedback: Option<FeedbackState>,
 }
 
 impl OwnedZoneInputs {
@@ -64,6 +69,8 @@ impl OwnedZoneInputs {
             safety_memory: self.safety_memory.as_ref(),
             previous_cause: self.previous_cause,
             room_eco: self.room_eco.as_ref(),
+            thermometer: self.thermometer,
+            feedback: self.feedback.as_ref(),
         }
     }
 }
@@ -433,6 +440,8 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         safety_memory,
         previous_cause: None,
         room_eco,
+        thermometer: None,
+        feedback: None,
     })
 }
 
