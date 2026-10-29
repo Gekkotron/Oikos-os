@@ -14,6 +14,7 @@ use oikos_climate::doc::{
     RoomEco, Setpoint, Source, ZoneState,
 };
 use oikos_climate::eco::fan_plan;
+use oikos_climate::feedback::FeedbackState;
 use oikos_climate::ledger::{Ledger, Observed, hold_until};
 use oikos_climate::topics::{self, ZoneDoc};
 use oikos_core::history::Micros;
@@ -457,6 +458,23 @@ impl Hub {
         self.tidy_zone(&mut inp);
         inp.previous_cause = self.last_decision(zone).and_then(|d| d.cause);
         let mut decision = decide(&inp.borrowed());
+        {
+            let kept = FeedbackState::after(
+                inp.feedback.as_ref(),
+                &decision,
+                inp.settings.feedback.enabled,
+                now,
+            );
+            let mut rt = self.climate_runtime();
+            match kept {
+                Some(state) => {
+                    rt.feedback.insert(zone.to_owned(), state);
+                }
+                None => {
+                    rt.feedback.remove(zone);
+                }
+            }
+        }
         let state = inp.settings.state;
         if state == ZoneState::Active {
             self.acknowledge_at_target(&inp, &decision, now);
@@ -1131,6 +1149,40 @@ mod tests {
             mode: mode.into(),
             held: false,
         }
+    }
+
+    #[tokio::test]
+    async fn settings_change_resets_correction() {
+        let mut cfg = crate::config::Config::default();
+        cfg.topics.discovery_prefixes = vec!["oikos".to_owned()];
+        cfg.climate.enabled = true;
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
+        let hub = Hub::new(&cfg, tx);
+        hub.set_connection(ConnectionStatus::Online);
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../oikos-core/tests/fixtures/discovery/climate__daikin_192_168_1_150__climate.json",
+        );
+        hub.ingest(
+            "oikos/climate/daikin_192_168_1_150/climate/config",
+            &std::fs::read(fixture).unwrap(),
+        );
+        let id = hub.snapshot().entities[0].id.clone();
+        let mut patch = serde_json::Map::new();
+        patch.insert("area".to_owned(), serde_json::Value::from("living"));
+        hub.set_override(&id, &patch).await.unwrap();
+        let state = FeedbackState {
+            target: 19.0,
+            offset: -0.5,
+            since: 1,
+            last_step_at: Some(2),
+        };
+        hub.climate_runtime()
+            .feedback
+            .insert("living".to_owned(), state);
+        let mut settings = oikos_climate::doc::ZoneSettings::default();
+        settings.feedback.band = 0.8;
+        hub.set_climate_zone("living", settings).unwrap();
+        assert!(!hub.climate_runtime().feedback.contains_key("living"));
     }
 
     #[test]

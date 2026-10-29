@@ -225,6 +225,8 @@ impl Hub {
             return Err(HubError::UnknownArea(zone.to_owned()));
         }
         let current = self.zone_settings(zone);
+        // New settings restart the thermometer correction from the schedule's own target.
+        self.climate_runtime().feedback.remove(zone);
         if !settings.rules.is_empty() && settings.rules != current.rules {
             settings.approved_at = Some(clock::now());
             if current.state == ZoneState::Pending && settings.state == ZoneState::Pending {

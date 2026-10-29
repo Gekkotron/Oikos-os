@@ -404,10 +404,11 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
     let (sensor, device_readings) =
         reading_sources(hub, sensor.as_deref(), &entity_ids, &seen, now);
     let reading = room_reading(sensor, &device_readings, stale_after_s);
+    let thermometer = sensor;
     let outdoor_mean = outdoor_mean(hub, now);
     let home_now = presence_home_now(hub, &house);
     let holiday = holiday_now(hub, &house);
-    let (mode, home, safety_memory) = {
+    let (mode, home, safety_memory, feedback) = {
         let rt = hub.climate_runtime();
         let grace_s = u64::from(house.away_grace_min) * 60;
         let recently_home = rt
@@ -421,6 +422,7 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
                 HomeNow::AlarmAway => false,
             },
             rt.safety_memory.get(zone).cloned(),
+            rt.feedback.get(zone).copied(),
         )
     };
     Some(OwnedZoneInputs {
@@ -440,8 +442,8 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         safety_memory,
         previous_cause: None,
         room_eco,
-        thermometer: None,
-        feedback: None,
+        thermometer,
+        feedback,
     })
 }
 

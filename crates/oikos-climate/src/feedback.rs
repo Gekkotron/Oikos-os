@@ -186,7 +186,9 @@ impl FeedbackState {
                 target,
                 offset,
                 since: now,
-                last_step_at: None,
+                // A first tick that already steps counts as a step, or the next would follow
+                // at once.
+                last_step_at: (offset.abs() > f64::EPSILON).then_some(now),
             },
         };
         Some(state)
@@ -382,6 +384,10 @@ mod tests {
         let d2 = decision(Source::Schedule, Some(Setpoint::Temp(17.0)), None);
         let s = FeedbackState::after(Some(&prev), &d2, true, NOW).unwrap();
         assert_eq!(s, state(17.0, 0.0, NOW, None));
+        // a first tick that already steps records the step
+        let d3 = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), Some(-0.5));
+        let s = FeedbackState::after(None, &d3, true, NOW).unwrap();
+        assert_eq!(s, state(19.0, -0.5, NOW, Some(NOW)));
         let o = decision(Source::Override, Some(Setpoint::Temp(19.0)), None);
         assert_eq!(FeedbackState::after(Some(&prev), &o, true, NOW), None);
         assert_eq!(FeedbackState::after(Some(&prev), &d, false, NOW), None);

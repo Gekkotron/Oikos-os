@@ -2095,6 +2095,111 @@ mod engine {
         assert_eq!(zone.room_sensor.as_deref(), Some(thermometer.as_str()));
         assert_eq!(zone.reading, Some(19.5));
     }
+
+    /// An active heating zone at 19 °C with the correction on and a room thermometer at `room`.
+    async fn corrected_rig(room: f64) -> Rig {
+        let mut rig = Rig::new(None).await;
+        rig.sim.set(&rig.hub, 0, "heat", 19.0, 20.0);
+        feed_thermometer(
+            &rig.hub,
+            "0x5c0272fffea35cfb__temperature",
+            "living",
+            "zigbee2mqtt/rooms/bedroom2/thermometer",
+            "temperature",
+            room,
+        )
+        .await;
+        // A 19 °C block all day over a 17 °C base: the correction may go below the block.
+        let mut settings = heat_rules(17.0);
+        settings.rules.heat.as_mut().unwrap().blocks.push(Block {
+            days: Day::ALL.to_vec(),
+            from: HhMm(0),
+            to: HhMm(1440),
+            setpoint: Setpoint::Temp(19.0),
+            evidence: None,
+        });
+        settings.feedback.enabled = true;
+        rig.settings(settings);
+        rig
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn correction_steps_down_and_is_not_a_hand_change() {
+        let mut rig = corrected_rig(21.6).await;
+        let out = rig.pass(0).await;
+        assert_eq!(temperature_commands(&out), vec![18.5], "{out:?}");
+        // The device echoed 18.5: the next report is not someone's doing.
+        rig.hub.observe_climate(&rig.id, rig.t0 + 100);
+        assert!(
+            rig.zone().overrides.is_empty(),
+            "{:?}",
+            rig.zone().overrides
+        );
+        let out = rig.pass(120).await;
+        assert!(commands(&out).is_empty(), "{out:?}");
+        assert!(rig.zone().overrides.is_empty());
+        assert_eq!(rig.sim.units[&0].1, 18.5);
+        let decision = rig.zone().decision.unwrap();
+        assert_eq!(decision.adjust, Some(-0.5));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn correction_survives_restart_without_hand_change() {
+        let mut rig = corrected_rig(21.6).await;
+        // The device sits at the corrected 18.5, as the retained decision says.
+        rig.sim.set(&rig.hub, 0, "heat", 18.5, 20.0);
+        let decision = Decision {
+            eco_restore: BTreeMap::new(),
+            adjust: Some(-0.5),
+            zone: "living".into(),
+            mode: Some(Mode::Heat),
+            setpoint: Some(Setpoint::Temp(19.0)),
+            source: Source::Schedule,
+            cause: None,
+            reason: "Schedule base: 19.0 °C".into(),
+            reading: Some(21.6),
+            reading_age_s: Some(30),
+            outdoor_mean: None,
+            home: true,
+            applied: true,
+            at: rig.t0 - 3600,
+            entities: BTreeMap::from([(
+                rig.id.clone(),
+                DeviceTarget {
+                    setpoint: Some(18.5),
+                    mode: "heat".into(),
+                    held: false,
+                },
+            )]),
+        };
+        rig.hub.ingest_message(
+            "oikos/climate/zone/living/decision",
+            serde_json::to_string(&decision).unwrap().as_bytes(),
+            true,
+        );
+        let out = rig.pass(0).await;
+        assert!(
+            rig.zone().overrides.is_empty(),
+            "{:?}",
+            rig.zone().overrides
+        );
+        assert!(commands(&out).is_empty(), "{out:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn real_hand_change_still_holds() {
+        let mut rig = corrected_rig(21.6).await;
+        rig.pass(0).await;
+        assert_eq!(rig.sim.units[&0].1, 18.5);
+        rig.sim.set(&rig.hub, 0, "heat", 21.0, 20.0);
+        rig.hub.observe_climate(&rig.id, rig.t0 + 600);
+        let overrides = rig.zone().overrides;
+        assert_eq!(overrides.len(), 1, "{overrides:?}");
+        assert_eq!(overrides[0].setpoint, Some(Setpoint::Temp(21.0)));
+        let out = rig.pass(661).await;
+        assert!(commands(&out).is_empty(), "{out:?}");
+        assert_eq!(rig.sim.units[&0].1, 21.0);
+    }
 }
 
 // ----- learning, proposals and approval -----
