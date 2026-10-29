@@ -25,6 +25,12 @@ pub enum HistoryText {
     /// Legend words of `min_max`; the same in both languages.
     Min,
     Max,
+    /// Chart key of the line on the bucketed ranges.
+    Average,
+    /// Chart key of the shaded band around the line on the bucketed ranges.
+    Spread,
+    /// Hover text of the chart key: what the line and the band are.
+    SpreadHint,
 }
 
 pub fn history_text(lang: Lang, k: HistoryText) -> &'static str {
@@ -53,6 +59,12 @@ pub fn history_text(lang: Lang, k: HistoryText) -> &'static str {
         T::LastYear => ("Last year", "12 derniers mois"),
         T::Min => ("min", "min"),
         T::Max => ("max", "max"),
+        T::Average => ("Average", "Moyenne"),
+        T::Spread => ("Min–max range", "Écart min–max"),
+        T::SpreadHint => (
+            "Each point sums up a slice of time: the line is its average, the shaded band spans its lowest to highest reading.",
+            "Chaque point résume une tranche de temps : la ligne en est la moyenne, la bande ombrée va de sa valeur la plus basse à la plus haute.",
+        ),
     };
     match lang {
         Lang::En => en,
@@ -159,6 +171,9 @@ mod tests {
             HistoryText::LastYear,
             HistoryText::Min,
             HistoryText::Max,
+            HistoryText::Average,
+            HistoryText::Spread,
+            HistoryText::SpreadHint,
         ];
         crate::i18n::assert_table(ALL, history_text, &[HistoryText::Min, HistoryText::Max]);
     }
