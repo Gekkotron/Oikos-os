@@ -283,6 +283,58 @@ async fn a_refetched_copy_replaces_the_shown_dashboard_unless_it_is_being_edited
     assert_eq!(text_of(&host, ".widget-stat__label"), "Garage");
 }
 
+#[wasm_bindgen_test]
+async fn moving_to_another_dashboard_shows_that_dashboard() {
+    let house = House::new();
+    house.dashboards_loaded.set(true);
+    house.dashboards.set(vec![
+        solar_stat("d_one", Some("One")),
+        solar_stat("d_two", Some("Two")),
+    ]);
+    let window = web_sys::window().unwrap();
+    window
+        .history()
+        .unwrap()
+        .push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/dashboards/d_one"))
+        .unwrap();
+    let document = window.document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    // The router's navigate, as a sidebar link calls it.
+    let go = StoredValue::new_local(None::<Box<dyn Fn(&str)>>);
+    let _app = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(house);
+        provide_context(RwSignal::new(Theme::Auto));
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(oikos_web::components::toast::Toasts::new());
+        provide_context(oikos_web::commands::Pending::new());
+        provide_context(oikos_web::components::confirm::Confirming::new());
+        oikos_web::nav::install_nav();
+        view! {
+            <Router>
+                {
+                    let navigate = leptos_router::hooks::use_navigate();
+                    go.set_value(Some(Box::new(move |to: &str| navigate(to, Default::default()))));
+                }
+                <Routes fallback=|| ()>
+                    <Route path=path!("/dashboards/:id") view=DashboardScreen />
+                </Routes>
+            </Router>
+        }
+    });
+    let go = |to: &str| go.with_value(|f| f.as_ref().expect("navigate")(to));
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "One");
+
+    go("/dashboards/d_two");
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "Two");
+
+    go("/dashboards/d_one");
+    settle().await;
+    assert_eq!(text_of(&host, ".widget-stat__label"), "One");
+}
+
 fn text_of(host: &web_sys::Element, selector: &str) -> String {
     host.query_selector(selector)
         .unwrap()
