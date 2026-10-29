@@ -92,6 +92,7 @@ pub enum SetupText {
     CardNotSetUp,
     CardSkipped,
     CardUnknown,
+    CardChecking,
     /// The service cards' titles.
     SvcWeather,
     SvcSolar,
@@ -283,6 +284,7 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
         SetupText::CardNotSetUp => ("Not set up", "Non configuré"),
         SetupText::CardSkipped => ("Skipped", "Passé"),
         SetupText::CardUnknown => ("Couldn't check", "Vérification impossible"),
+        SetupText::CardChecking => ("Checking…", "Vérification…"),
         SetupText::SvcWeather => ("Weather", "Météo"),
         SetupText::SvcSolar => ("Solar forecast", "Prévision solaire"),
         SetupText::SvcEnergy => ("Energy", "Énergie"),
@@ -478,6 +480,7 @@ mod tests {
                 SetupText::CardNotSetUp,
                 SetupText::CardSkipped,
                 SetupText::CardUnknown,
+                SetupText::CardChecking,
                 SetupText::SvcWeather,
                 SetupText::SvcSolar,
                 SetupText::SvcEnergy,

@@ -11,6 +11,7 @@ use oikos_web::i18n::Lang;
 use oikos_web::screens::settings::SettingsScreen;
 use oikos_web::setup::SetupState;
 use oikos_web::setup::done::DoneStep;
+use oikos_web::setup::services::ReadTimeoutMs;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 wasm_bindgen_test_configure!(run_in_browser);
@@ -28,6 +29,10 @@ const STATUS: &str = r#"{"mode":"running","step":"done","finished":false,"bundle
 "restarting":false}"#;
 
 fn mount_done() -> web_sys::Element {
+    mount_done_with(None)
+}
+
+fn mount_done_with(timeout_ms: Option<u32>) -> web_sys::Element {
     let status = serde_json::from_str(STATUS).unwrap();
     let document = web_sys::window().unwrap().document().unwrap();
     let host = document.create_element("div").unwrap();
@@ -37,6 +42,9 @@ fn mount_done() -> web_sys::Element {
         move || {
             provide_context(RwSignal::new(Lang::En));
             provide_context(House::new());
+            if let Some(ms) = timeout_ms {
+                provide_context(ReadTimeoutMs(ms));
+            }
             provide_context(SetupState(RwSignal::new(Some(status))));
             view! { <Router><DoneStep /></Router> }
         },
@@ -218,20 +226,53 @@ async fn run_setup_again_is_listed() {
     assert!(host.query_selector("a[href=\"/setup\"]").unwrap().is_some());
 }
 
+fn row_text(host: &web_sys::Element, id: &str) -> String {
+    host.query_selector(&format!("#done-{id}"))
+        .unwrap()
+        .unwrap_or_else(|| panic!("no row {id}"))
+        .text_content()
+        .unwrap()
+}
+
 #[wasm_bindgen_test]
-async fn a_hanging_read_does_not_hide_the_other_rows() {
+async fn a_pending_read_shows_checking_then_unknown_after_the_timeout() {
     let stub = FetchStub::install();
     stub_services(&stub);
     stub.hang("GET", "/api/v1/settings/solcast");
-    let host = mount_done();
-    settle().await;
-    let text = |id: &str| {
-        host.query_selector(&format!("#done-{id}"))
-            .unwrap()
-            .unwrap_or_else(|| panic!("no row {id}"))
-            .text_content()
-            .unwrap()
-    };
-    assert!(text("weather").contains("Not set up"));
-    assert!(text("solar").contains("Couldn't check"));
+    let host = mount_done_with(Some(200));
+    TimeoutFuture::new(60).await;
+    tick().await;
+    assert!(
+        row_text(&host, "solar").contains("Checking"),
+        "{}",
+        row_text(&host, "solar")
+    );
+    assert!(row_text(&host, "weather").contains("Not set up"));
+    TimeoutFuture::new(300).await;
+    tick().await;
+    assert!(row_text(&host, "solar").contains("Couldn't check"));
+}
+
+#[wasm_bindgen_test]
+async fn a_late_answer_after_the_timeout_corrects_the_row() {
+    let stub = FetchStub::install();
+    stub_services(&stub);
+    stub.reply_after(
+        "GET",
+        "/api/v1/settings/solcast",
+        200,
+        r#"{"enabled":false,"api_key":{"set":false}}"#,
+        500,
+    );
+    let host = mount_done_with(Some(150));
+    TimeoutFuture::new(350).await;
+    tick().await;
+    assert!(row_text(&host, "solar").contains("Couldn't check"));
+    TimeoutFuture::new(500).await;
+    tick().await;
+    assert!(
+        row_text(&host, "solar").contains("Not set up"),
+        "{}",
+        row_text(&host, "solar")
+    );
 }

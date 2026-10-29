@@ -33,30 +33,29 @@ pub enum CardState {
     Skipped,
     /// The hub could not be read, or did not answer in time.
     Unknown,
+    /// The read is still in flight.
+    Checking,
 }
 
 /// A service that is set up stays set up, even if the user skipped it earlier. `set_up` is
-/// `None` when the hub could not be read; that never reads as "Not set up".
-pub fn card_state(set_up: Option<bool>, skipped: bool) -> CardState {
+/// `None` until the hub answers; then it reads as checking, or as unknown once `gave_up` (the
+/// read failed or timed out). It never reads as "Not set up" on a guess.
+pub fn card_state(set_up: Option<bool>, skipped: bool, gave_up: bool) -> CardState {
     match set_up {
         Some(true) => CardState::SetUp,
         _ if skipped => CardState::Skipped,
         Some(false) => CardState::NotSetUp,
-        None => CardState::Unknown,
+        None if gave_up => CardState::Unknown,
+        None => CardState::Checking,
     }
 }
 
 /// How long a settings read may take before its service reads as unknown.
 const READ_TIMEOUT_MS: u32 = 5_000;
 
-/// `fut`'s answer, or `None` when it fails to answer within [`READ_TIMEOUT_MS`].
-async fn within<T>(fut: impl Future<Output = Option<T>>) -> Option<T> {
-    use futures_util::future::{Either, select};
-    match select(Box::pin(fut), TimeoutFuture::new(READ_TIMEOUT_MS)).await {
-        Either::Left((answer, _)) => answer,
-        Either::Right(_) => None,
-    }
-}
+/// Overrides [`READ_TIMEOUT_MS`] for the reads started beneath it (a test shortens it).
+#[derive(Clone, Copy)]
+pub struct ReadTimeoutMs(pub u32);
 
 /// The service cards, in the order the mockup shows them.
 pub const SERVICE_IDS: [&str; 7] = [
@@ -208,6 +207,7 @@ pub fn ServiceCard(
         CardState::Skipped => "svc__pill svc__pill--skipped",
         CardState::NotSetUp => "svc__pill",
         CardState::Unknown => "svc__pill svc__pill--unknown",
+        CardState::Checking => "svc__pill svc__pill--checking",
     };
     let pill_text = move || {
         t(match state.get() {
@@ -215,6 +215,7 @@ pub fn ServiceCard(
             CardState::Skipped => SetupText::CardSkipped,
             CardState::NotSetUp => SetupText::CardNotSetUp,
             CardState::Unknown => SetupText::CardUnknown,
+            CardState::Checking => SetupText::CardChecking,
         })
     };
     view! {
@@ -273,12 +274,47 @@ async fn section_enabled(section: &'static str) -> Option<bool> {
     Some(v.get("enabled").and_then(Value::as_bool).unwrap_or(false))
 }
 
-/// Runs `read` on its own task, bounded by [`READ_TIMEOUT_MS`], and stores its answer.
-fn load_flag(target: RwSignal<Option<bool>>, read: impl Future<Output = Option<bool>> + 'static) {
+/// Runs `read` on its own task. A failure, or no answer within `ms`, adds `id` to `gave_up`;
+/// the read keeps running after a timeout, so a late answer still reaches `apply`.
+fn load_read<T: 'static>(
+    ms: u32,
+    id: &'static str,
+    gave_up: RwSignal<BTreeSet<&'static str>>,
+    read: impl Future<Output = Option<T>> + 'static,
+    apply: impl Fn(T) + 'static,
+) {
+    use futures_util::future::{Either, select};
     leptos::task::spawn_local(async move {
-        if let Some(answer) = within(read).await {
-            target.try_set(Some(answer));
+        let mut read = Box::pin(read);
+        let answer = match select(&mut read, TimeoutFuture::new(ms)).await {
+            Either::Left((answer, _)) => answer,
+            Either::Right(_) => {
+                gave_up.try_update(|g| {
+                    g.insert(id);
+                });
+                read.await
+            }
+        };
+        match answer {
+            Some(v) => apply(v),
+            None => {
+                gave_up.try_update(|g| {
+                    g.insert(id);
+                });
+            }
         }
+    });
+}
+
+fn load_flag(
+    ms: u32,
+    id: &'static str,
+    gave_up: RwSignal<BTreeSet<&'static str>>,
+    target: RwSignal<Option<bool>>,
+    read: impl Future<Output = Option<bool>> + 'static,
+) {
+    load_read(ms, id, gave_up, read, move |v| {
+        target.try_set(Some(v));
     });
 }
 
@@ -296,6 +332,8 @@ pub struct ServiceFlags {
     pub alarm: RwSignal<Option<bool>>,
     pub push_project: RwSignal<Option<String>>,
     pub skipped: RwSignal<BTreeSet<String>>,
+    /// Services whose read failed or timed out.
+    gave_up: RwSignal<BTreeSet<&'static str>>,
 }
 
 impl ServiceFlags {
@@ -312,7 +350,9 @@ impl ServiceFlags {
             alarm: RwSignal::new(None),
             push_project: RwSignal::new(None),
             skipped: RwSignal::new(skipped()),
+            gave_up: RwSignal::new(BTreeSet::new()),
         };
+        let ms = use_context::<ReadTimeoutMs>().map_or(READ_TIMEOUT_MS, |t| t.0);
         if let Some(house) = use_context::<House>() {
             Effect::new(move |_| {
                 let set_up = house
@@ -322,36 +362,51 @@ impl ServiceFlags {
                 flags.energy.set(Some(set_up));
             });
         }
-        load_flag(flags.weather, section_enabled("weather"));
-        load_flag(flags.climate, section_enabled("climate"));
-        load_flag(flags.alarm, async {
+        load_flag(
+            ms,
+            "weather",
+            flags.gave_up,
+            flags.weather,
+            section_enabled("weather"),
+        );
+        load_flag(
+            ms,
+            "climate",
+            flags.gave_up,
+            flags.climate,
+            section_enabled("climate"),
+        );
+        load_flag(ms, "alarm", flags.gave_up, flags.alarm, async {
             crate::api::alarm::get_alarm().await.ok().map(|a| a.enabled)
         });
-        load_flag(flags.solar, async {
+        load_flag(ms, "solar", flags.gave_up, flags.solar, async {
             let v = get_section("solcast").await.ok()?;
             Some(
                 v["enabled"].as_bool().unwrap_or(false)
                     && v["api_key"]["set"].as_bool().unwrap_or(false),
             )
         });
-        load_flag(flags.cameras, async {
+        load_flag(ms, "cameras", flags.gave_up, flags.cameras, async {
             let v = get_section("frigate").await.ok()?;
             Some(v["url"].as_str().is_some())
         });
-        leptos::task::spawn_local(async move {
-            let read = async {
+        load_read(
+            ms,
+            "push",
+            flags.gave_up,
+            async {
                 let v = get_section("push").await.ok()?;
                 let project = v["project_id"].as_str().map(str::to_owned);
                 Some((
                     v["service_account"]["set"].as_bool().unwrap_or(false),
                     project,
                 ))
-            };
-            if let Some((set, project)) = within(read).await {
+            },
+            move |(set, project)| {
                 flags.push.try_set(Some(set));
                 flags.push_project.try_set(project);
-            }
-        });
+            },
+        );
         flags
     }
 
@@ -371,7 +426,8 @@ impl ServiceFlags {
 
     /// What the card for `id` shows right now.
     pub fn state(&self, id: &str) -> CardState {
-        card_state(self.on(id), self.skipped.with(|s| s.contains(id)))
+        let gave_up = self.gave_up.with(|g| g.contains(id));
+        card_state(self.on(id), self.skipped.with(|s| s.contains(id)), gave_up)
     }
 }
 
@@ -424,13 +480,8 @@ pub fn ServicesStep() -> impl IntoView {
             advancing.try_set(false);
         });
     };
-    let card_state_of = move |id: &'static str, on: Option<RwSignal<Option<bool>>>| {
-        Signal::derive(move || {
-            card_state(
-                on.and_then(|o| o.get()),
-                skipped_ids.with(|s| s.contains(id)),
-            )
-        })
+    let card_state_of = move |id: &'static str, _on: Option<RwSignal<Option<bool>>>| {
+        Signal::derive(move || flags.state(id))
     };
     let on_skip = move |id: &'static str| {
         Callback::new(move |()| {
@@ -551,15 +602,16 @@ mod tests {
 
     #[test]
     fn set_up_wins_over_skipped() {
-        assert_eq!(card_state(Some(true), true), CardState::SetUp);
-        assert_eq!(card_state(Some(false), true), CardState::Skipped);
-        assert_eq!(card_state(Some(false), false), CardState::NotSetUp);
+        assert_eq!(card_state(Some(true), true, false), CardState::SetUp);
+        assert_eq!(card_state(Some(false), true, false), CardState::Skipped);
+        assert_eq!(card_state(Some(false), false, false), CardState::NotSetUp);
     }
 
     #[test]
     fn an_unread_service_is_unknown_unless_skipped() {
-        assert_eq!(card_state(None, false), CardState::Unknown);
-        assert_eq!(card_state(None, true), CardState::Skipped);
+        assert_eq!(card_state(None, false, true), CardState::Unknown);
+        assert_eq!(card_state(None, false, false), CardState::Checking);
+        assert_eq!(card_state(None, true, true), CardState::Skipped);
     }
 
     #[test]
