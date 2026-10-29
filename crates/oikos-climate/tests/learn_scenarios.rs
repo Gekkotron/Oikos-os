@@ -534,3 +534,199 @@ fn diff_lines() {
     });
     assert!(diff(None, &all).contains(&"New: every day 06:00–23:00 at 20.0 °C".to_string()));
 }
+
+fn every_day() -> Vec<Day> {
+    Day::ALL.to_vec()
+}
+
+/// 15 °C, 19 °C every day from 09:00 to 20:30.
+fn living_rules() -> ModeRules {
+    ModeRules {
+        base: Setpoint::Temp(15.0),
+        blocks: vec![block(&every_day(), 540, 1230, 19.0)],
+    }
+}
+
+fn learn_with(h: &[DeviceHistory], approved: &ModeRules) -> ModeRules {
+    let c = caps();
+    let mut inp = input(h, &[], &c, 14);
+    inp.approved = Some(approved);
+    rules_of(learn(&inp))
+}
+
+#[test]
+fn scattered_hand_changes_keep_the_approved_block() {
+    // A real fortnight, Saturday to Wednesday: heated from about 09:00 to 20:30 every day, but
+    // nudged between 18 and 20 °C with dips of a few hours, never the same way twice. Before
+    // the fix, no daytime stretch had enough days within 0.5 °C of the median, so the approved
+    // block was proposed for removal and only 30-minute slivers were kept.
+    let days: [&[(&str, f64)]; 12] = [
+        &[("00:00", 16.0), ("14:20", 22.0), ("15:40", 16.0)],
+        &[
+            ("00:10", 15.0),
+            ("10:00", 18.0),
+            ("13:40", 20.0),
+            ("15:50", 19.5),
+            ("19:00", 19.0),
+            ("22:20", 15.0),
+        ],
+        &[
+            ("08:40", 19.0),
+            ("09:20", 18.5),
+            ("13:30", 19.5),
+            ("18:00", 19.0),
+            ("19:40", 19.5),
+            ("20:40", 20.0),
+            ("21:50", 15.5),
+        ],
+        &[("08:20", 18.0), ("16:20", 19.5), ("22:20", 18.0)],
+        &[
+            ("00:20", 16.0),
+            ("12:00", 18.0),
+            ("13:10", 20.0),
+            ("15:00", 19.0),
+            ("16:10", 19.5),
+            ("18:00", 20.0),
+            ("21:15", 15.5),
+        ],
+        &[
+            ("08:31", 18.0),
+            ("09:29", 19.0),
+            ("10:23", 19.5),
+            ("10:47", 19.0),
+            ("15:14", 18.5),
+            ("18:49", 19.5),
+            ("22:01", 15.5),
+        ],
+        &[
+            ("08:55", 18.5),
+            ("11:01", 19.5),
+            ("14:42", 18.0),
+            ("18:58", 19.0),
+            ("19:58", 19.5),
+            ("20:29", 18.0),
+            ("21:00", 15.0),
+        ],
+        &[
+            ("09:00", 18.0),
+            ("09:45", 19.0),
+            ("11:01", 18.5),
+            ("15:02", 16.0),
+            ("17:05", 19.5),
+            ("19:07", 19.0),
+            ("21:02", 15.5),
+            ("21:05", 16.0),
+            ("22:16", 15.0),
+        ],
+        &[
+            ("08:50", 20.0),
+            ("09:00", 19.0),
+            ("11:08", 19.5),
+            ("15:09", 19.0),
+            ("19:45", 18.5),
+            ("20:30", 15.0),
+        ],
+        &[
+            ("09:00", 19.0),
+            ("12:01", 18.0),
+            ("16:01", 19.0),
+            ("20:30", 15.0),
+        ],
+        &[
+            ("09:00", 19.0),
+            ("11:28", 16.0),
+            ("13:17", 18.0),
+            ("17:17", 19.0),
+            ("18:50", 15.5),
+            ("20:30", 15.0),
+        ],
+        &[
+            ("08:20", 14.0),
+            ("09:00", 19.0),
+            ("10:18", 15.0),
+            ("14:19", 19.0),
+            ("14:32", 14.0),
+            ("18:39", 19.0),
+            ("19:53", 18.5),
+            ("20:30", 15.0),
+        ],
+    ];
+    let saturday = monday() + Duration::days(5);
+    let h = vec![DeviceHistory {
+        entity: ENTITY.into(),
+        samples: days
+            .iter()
+            .enumerate()
+            .flat_map(|(i, points)| day_of(saturday + Duration::days(i as i64), points))
+            .collect(),
+    }];
+    let engine = [cmd(
+        saturday + Duration::days(11),
+        "14:32",
+        14.0,
+        Source::Away,
+    )];
+    let c = caps();
+    let approved = living_rules();
+    let mut inp = input(&h, &engine, &c, 12);
+    inp.first_day = saturday;
+    inp.approved = Some(&approved);
+    let learned = rules_of(learn(&inp));
+    assert!(!differs(&approved, &learned), "{learned:?}");
+}
+
+#[test]
+fn consistent_hand_changes_still_move_an_approved_block() {
+    let h = history(14, |d| {
+        day_of(d, &[("00:00", 15.0), ("10:00", 19.0), ("20:30", 15.0)])
+    });
+    let approved = living_rules();
+    let learned = learn_with(&h, &approved);
+    let lines = diff(Some(&heat(approved)), &heat(learned.clone()));
+    assert_eq!(
+        lines,
+        vec!["Changed: every day start 09:00 → 10:00"],
+        "{learned:?}"
+    );
+    assert_eq!(
+        learned.blocks[0].evidence,
+        Some(Evidence { agree: 14, of: 14 })
+    );
+}
+
+#[test]
+fn an_approved_block_left_unheated_is_removed() {
+    let h = history(14, |d| day_of(d, &[("00:00", 15.0)]));
+    let approved = living_rules();
+    let learned = learn_with(&h, &approved);
+    assert!(learned.blocks.is_empty(), "{learned:?}");
+    assert_eq!(learned.base, Setpoint::Temp(15.0));
+}
+
+#[test]
+fn days_without_data_keep_their_approved_block() {
+    // Weekdays now heat from 10:00; at weekends the device cools, so there is no heat data and
+    // the weekend keeps 09:00.
+    let h = history(14, |d| {
+        if is_weekday(d) {
+            day_of(d, &[("00:00", 15.0), ("10:00", 19.0), ("20:30", 15.0)])
+        } else {
+            day_with(d, "cool", &[("00:00", Some(25.0))])
+        }
+    });
+    let c = caps();
+    let approved = living_rules();
+    let mut inp = input(&h, &[], &c, 14);
+    inp.approved = Some(&approved);
+    inp.min_days = 5;
+    let learned = rules_of(learn(&inp));
+    assert_eq!(
+        strip(learned.clone()).blocks,
+        vec![
+            block(&weekdays(), 600, 1230, 19.0),
+            block(&[Day::Sat, Day::Sun], 540, 1230, 19.0),
+        ],
+        "{learned:?}"
+    );
+    assert!(heat(learned).validate().is_ok());
+}
