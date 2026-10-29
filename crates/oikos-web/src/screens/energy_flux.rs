@@ -43,6 +43,19 @@ fn color_var(role: SankeyRole, slot: usize) -> &'static str {
     }
 }
 
+/// A band's colours at its source and target ends. The house bar is painted in what flows into
+/// it, so a band touching it takes the colour of its other end along its whole length.
+fn band_colors(from: (SankeyRole, usize), to: (SankeyRole, usize)) -> (&'static str, &'static str) {
+    let (from, to) = if to.0 == SankeyRole::House {
+        (from, from)
+    } else if from.0 == SankeyRole::House {
+        (to, to)
+    } else {
+        (from, to)
+    };
+    (color_var(from.0, from.1), color_var(to.0, to.1))
+}
+
 fn role_class(role: SankeyRole, slot: usize) -> String {
     let name = match role {
         SankeyRole::Solar => "solar",
@@ -276,15 +289,7 @@ fn FluxGradient(id: String, model: Memo<Sankey>, placed: Memo<Placed>) -> impl I
                     .find(|n| n.id == id)
                     .map(|n| (n.role, n.slot))
             };
-            let (role, slot) = of(&b.from)?;
-            let to = of(&b.to)?;
-            // Links into the house keep the source colour at both ends.
-            let to = if to.0 == SankeyRole::House {
-                (role, slot)
-            } else {
-                to
-            };
-            Some((color_var(role, slot), color_var(to.0, to.1)))
+            Some(band_colors(of(&b.from)?, of(&b.to)?))
         })
     };
     let from = move || format!("stop-color: var({})", colors().map_or("--ink", |c| c.0));
@@ -304,8 +309,63 @@ fn FluxGradient(id: String, model: Memo<Sankey>, placed: Memo<Placed>) -> impl I
     }
 }
 
+/// The house bar's fill: hard stops in the colour of each source over the stretch its band lands
+/// on, and the hatch's tone over any rest no source accounts for.
 #[component]
-fn FluxBand(id: String, placed: Memo<Placed>) -> impl IntoView {
+fn FluxHouseMix(narrow: bool, model: Memo<Sankey>, placed: Memo<Placed>) -> impl IntoView {
+    let stops = move || {
+        let mut out = Vec::new();
+        let mut end = 0.0;
+        placed.with(|p| {
+            model.with(|m| {
+                for s in &p.house_mix {
+                    let Some(n) = m.nodes.iter().find(|n| n.id == s.from) else {
+                        continue;
+                    };
+                    let colour = color_var(n.role, n.slot);
+                    out.push((s.start, colour));
+                    out.push((s.end, colour));
+                    end = s.end;
+                }
+            })
+        });
+        if end < 1.0 {
+            out.push((end, "--energy-hatch"));
+            out.push((1.0, "--energy-hatch"));
+        }
+        out.into_iter()
+            .map(|(at, colour)| {
+                view! { <stop offset=at style=format!("stop-color: var({colour})") /> }
+            })
+            .collect::<Vec<_>>()
+    };
+    view! {
+        <linearGradient
+            id="flux-house"
+            x1="0"
+            y1="0"
+            x2=if narrow { "1" } else { "0" }
+            y2=if narrow { "0" } else { "1" }
+        >
+            {stops}
+        </linearGradient>
+    }
+}
+
+#[component]
+fn FluxBand(id: String, model: Memo<Sankey>, placed: Memo<Placed>) -> impl IntoView {
+    // What no consumer accounts for is hatched, its band as its bar.
+    let to = placed.with_untracked(|p| p.bands.iter().find(|b| b.id == id).map(|b| b.to.clone()));
+    let unitemised = model.with_untracked(|m| {
+        m.nodes
+            .iter()
+            .any(|n| n.role == SankeyRole::Unitemised && Some(&n.id) == to.as_ref())
+    });
+    let fill = if unitemised {
+        "url(#flux-hatch)".to_string()
+    } else {
+        format!("url(#flux-g-{})", sanitise(&id))
+    };
     let band_id = id.clone();
     let path = Memo::new(move |_| {
         placed.with(|p| {
@@ -321,7 +381,7 @@ fn FluxBand(id: String, placed: Memo<Placed>) -> impl IntoView {
         <path
             class="energy-flux__band"
             data-id=id.clone()
-            fill=format!("url(#flux-g-{})", sanitise(&id))
+            fill=fill
             d=move || path.get()
             style=style
         />
@@ -424,7 +484,7 @@ pub fn FluxDiagram(
     };
 
     view! {
-        <div class="energy-flux" class:energy-flux--narrow=narrow>
+        <div class="energy-diagram energy-flux" class:energy-flux--narrow=narrow>
             <div class="energy-flux__chips">{chips}</div>
             <Show
                 when=move || !model.with(Sankey::is_empty)
@@ -451,6 +511,17 @@ pub fn FluxDiagram(
                                 view! { <FluxGradient id=id model=model placed=placed /> }
                             }
                         />
+                        <FluxHouseMix narrow=narrow model=model placed=placed />
+                        <pattern
+                            id="flux-hatch"
+                            patternUnits="userSpaceOnUse"
+                            width="6"
+                            height="6"
+                            patternTransform="rotate(45)"
+                        >
+                            <rect class="energy-flux__hatch-ground" width="6" height="6" />
+                            <rect class="energy-flux__hatch-line" width="2.5" height="6" />
+                        </pattern>
                         <linearGradient
                             id="flux-sweep"
                             gradientUnits="userSpaceOnUse"
@@ -479,7 +550,7 @@ pub fn FluxDiagram(
                     <For
                         each=bands
                         key=|id| id.clone()
-                        children=move |id| view! { <FluxBand id=id placed=placed /> }
+                        children=move |id| view! { <FluxBand id=id model=model placed=placed /> }
                     />
                     <For
                         each=bands
@@ -535,5 +606,22 @@ mod tests {
         assert_eq!(color_var(SankeyRole::Consumer, 6), "--energy-c1");
         assert_eq!(color_var(SankeyRole::Others, 0), "--energy-muted");
         assert_eq!(color_var(SankeyRole::House, 0), "--ink");
+    }
+
+    #[test]
+    fn bands_touching_the_house_take_the_other_end_colour() {
+        let house = (SankeyRole::House, 0);
+        assert_eq!(
+            band_colors((SankeyRole::Grid, 0), house),
+            ("--energy-grid", "--energy-grid")
+        );
+        assert_eq!(
+            band_colors(house, (SankeyRole::Consumer, 1)),
+            ("--energy-c1", "--energy-c1")
+        );
+        assert_eq!(
+            band_colors((SankeyRole::Solar, 0), (SankeyRole::Export, 0)),
+            ("--energy-solar", "--energy-battery")
+        );
     }
 }

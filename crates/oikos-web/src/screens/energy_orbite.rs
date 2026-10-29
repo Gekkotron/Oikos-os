@@ -379,7 +379,7 @@ pub fn OrbiteDiagram(
 
     view! {
         <div
-            class="energy-orbite"
+            class="energy-diagram energy-orbite"
             class:energy-orbite--narrow=narrow
             class:energy-orbite--empty=empty
             class:energy-orbite--dim=move || {

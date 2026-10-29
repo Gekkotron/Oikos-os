@@ -71,11 +71,21 @@ pub struct Label {
     pub anchor: Anchor,
 }
 
+/// The stretch of the house bar a source's band lands on, as shares of the bar's length.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixStop {
+    pub from: String,
+    pub start: f64,
+    pub end: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Placed {
     pub bars: Vec<Bar>,
     pub bands: Vec<Band>,
     pub labels: Vec<Label>,
+    /// The house bar painted in what flows into it, from its top (left) end.
+    pub house_mix: Vec<MixStop>,
 }
 
 /// Where a column sits along the main axis, as a share of it.
@@ -210,6 +220,17 @@ pub fn place(s: &Sankey, frame: Frame) -> Placed {
         let in_off = entering.entry(l.to.as_str()).or_insert(0.0);
         let c1 = b.cross + *in_off;
         *in_off += t;
+        if s.nodes
+            .iter()
+            .any(|nd| nd.id == l.to && nd.role == SankeyRole::House)
+        {
+            let share = |c: f64| ((c - b.cross) / b.len).clamp(0.0, 1.0);
+            out.house_mix.push(MixStop {
+                from: l.from.clone(),
+                start: share(c1),
+                end: share(c1 + t),
+            });
+        }
         let (m0, m1) = (a.main + BAR, b.main);
         let mm = (m0 + m1) / 2.0;
         // Horizontal: (main, cross) = (x, y). Vertical swaps them.
@@ -413,6 +434,34 @@ mod tests {
                 assert!(inn <= len + 0.5, "{} enters {inn} > {len}", b.id);
             }
         }
+    }
+
+    #[test]
+    fn house_mix_follows_the_bands_into_it() {
+        for f in [WIDE, NARROW] {
+            let p = place(&sample(), f);
+            let mix: Vec<_> = p
+                .house_mix
+                .iter()
+                .map(|m| (m.from.as_str(), m.start, m.end))
+                .collect();
+            // 2500 W of solar then 1000 W of grid fill the 3500 W house bar.
+            assert_eq!(mix.len(), 2);
+            assert_eq!((mix[0].0, mix[0].1), ("solar", 0.0));
+            assert!((mix[0].2 - 2500.0 / 3500.0).abs() < 1e-9, "{mix:?}");
+            assert_eq!(mix[1].0, "grid");
+            assert!((mix[1].1 - mix[0].2).abs() < 1e-9, "{mix:?}");
+            assert!((mix[1].2 - 1.0).abs() < 1e-9, "{mix:?}");
+        }
+    }
+
+    #[test]
+    fn house_mix_leaves_the_unsourced_rest_open() {
+        let mut s = sample();
+        // The house reads more than its sources feed it.
+        s.nodes[2].size = 5000.0;
+        let p = place(&s, WIDE);
+        assert!((p.house_mix.last().unwrap().end - 3500.0 / 5000.0).abs() < 1e-9);
     }
 
     #[test]

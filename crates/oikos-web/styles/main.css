@@ -4643,6 +4643,9 @@ html:has(.flow-canvas-screen) {
   --energy-c3: color-mix(in srgb, var(--accent-rose) 55%, var(--accent-amber));
   --energy-c4: color-mix(in srgb, var(--accent-cyan) 55%, var(--accent-mint));
   --energy-muted: color-mix(in srgb, var(--ink) 35%, transparent);
+  /* What no consumer accounts for: stripes, so it never reads as one more device. */
+  --energy-hatch: color-mix(in srgb, var(--ink) 42%, transparent);
+  --energy-hatch-ground: color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
 /* Ivoire: Candy colours, the app's muted tokens would read as sad. */
@@ -4656,6 +4659,8 @@ html:has(.flow-canvas-screen) {
   --energy-c3: #ff9a55;
   --energy-c4: #3fd6c6;
   --energy-muted: #d9d1c3;
+  --energy-hatch: #c4b8a5;
+  --energy-hatch-ground: #f1ece2;
 }
 
 .energy .room__title {
@@ -4709,8 +4714,15 @@ html:has(.flow-canvas-screen) {
 }
 
 /* The Flux (Sankey) view: bands between bars, glides when a reading changes. */
-.energy-flux {
-  width: 100%;
+/* Flux and Orbite sit on the same card as Classic, with room for their chips and lists. */
+.energy-flux,
+.energy-orbite {
+  padding: 16px;
+}
+
+.energy-flux--narrow,
+.energy-orbite--narrow {
+  padding: 12px;
 }
 
 .energy-flux__chips {
@@ -4801,12 +4813,23 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-flux__bar--house {
-  fill: var(--ink);
+  fill: url(#flux-house);
 }
 
-.energy-flux__bar--unitemised,
+.energy-flux__bar--unitemised {
+  fill: url(#flux-hatch);
+}
+
 .energy-flux__bar--others {
   fill: var(--energy-muted);
+}
+
+.energy-flux__hatch-ground {
+  fill: var(--energy-hatch-ground);
+}
+
+.energy-flux__hatch-line {
+  fill: var(--energy-hatch);
 }
 
 .energy-flux__bar--c0 {
@@ -4837,6 +4860,10 @@ html:has(.flow-canvas-screen) {
   stroke-width: 4px;
   stroke-linejoin: round;
   transition: transform 0.9s var(--ease);
+}
+
+:root[data-theme="light"] .energy-flux__label {
+  stroke: var(--card-bg);
 }
 
 .energy-flux--narrow .energy-flux__label {
