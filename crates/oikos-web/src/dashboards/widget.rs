@@ -3,6 +3,7 @@ use oikos_api::EntityView;
 use oikos_core::dashboard::{Widget, WidgetConfig, WidgetKind};
 
 use super::camera_widget::CameraWidget;
+use super::config_sheet::title_of;
 use super::energy_stat::EnergyStatWidget;
 use super::flow_button::FlowButtonWidget;
 use super::history_widget::HistoryWidget;
@@ -29,6 +30,14 @@ pub fn WidgetView(
     #[prop(optional, into)] current: Option<Signal<Widget>>,
 ) -> impl IntoView {
     let house = expect_context::<House>();
+    // Read live: the grid keeps the tile mounted while the config sheet edits the title.
+    let title = {
+        let initial = title_of(&widget);
+        Signal::derive(move || match current {
+            Some(current) => current.with(title_of),
+            None => initial.clone(),
+        })
+    };
     match (widget.kind, widget.config) {
         (WidgetKind::Camera, WidgetConfig::Cameras { cameras, .. }) => {
             let span = widget.span;
@@ -67,7 +76,7 @@ pub fn WidgetView(
                 view! { <HistoryWidget entity=entity range=range /> }.into_any()
             })
         }
-        (WidgetKind::RoomGroup, WidgetConfig::Area { area_id, title }) => {
+        (WidgetKind::RoomGroup, WidgetConfig::Area { area_id, .. }) => {
             let room = {
                 let id = area_id.clone();
                 Memo::new(move |_| {
@@ -78,14 +87,14 @@ pub fn WidgetView(
             };
             (move || match room.get() {
                 Some(room) => view! {
-                    <RoomGroupWidget area_id=area_id.clone() room=room title=title.clone() />
+                    <RoomGroupWidget area_id=area_id.clone() room=room title=title />
                 }
                 .into_any(),
                 None => view! { <Unavailable label=area_id.clone() /> }.into_any(),
             })
             .into_any()
         }
-        (WidgetKind::FlowButton, WidgetConfig::Flow { flow_id, title }) => {
+        (WidgetKind::FlowButton, WidgetConfig::Flow { flow_id, .. }) => {
             let flow = {
                 let id = flow_id.clone();
                 Memo::new(move |_| {
@@ -102,7 +111,7 @@ pub fn WidgetView(
                     <FlowButtonWidget
                         flow_id=flow_id.clone()
                         flow_name=flow_name
-                        title=title.clone()
+                        title=title
                         invalid=invalid
                     />
                 }
@@ -111,7 +120,7 @@ pub fn WidgetView(
             })
             .into_any()
         }
-        (WidgetKind::EnergyStat, WidgetConfig::Energy { metric, title }) => {
+        (WidgetKind::EnergyStat, WidgetConfig::Energy { metric, .. }) => {
             view! { <EnergyStatWidget metric=metric title=title /> }.into_any()
         }
         (kind, _) => {

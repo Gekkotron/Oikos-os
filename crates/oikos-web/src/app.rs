@@ -132,12 +132,10 @@ pub fn App() -> impl IntoView {
     provide_context(cameras);
     crate::cameras::load_cameras(cameras);
     provide_context(crate::cameras::install_page_visible());
-    // Dashboards are not pushed over the socket, so the shell fetches them once at start-up.
-    leptos::task::spawn_local(async move {
-        match crate::api::fetch_dashboards().await {
-            Ok(list) => house.dashboards.set(list),
-            Err(err) => toasts.push(dashboards_load_failed(lang.get_untracked(), &err.error)),
-        }
+    // Dashboards are not pushed over the socket: the shell fetches them at start-up, and the
+    // socket again on each reconnect.
+    house.refresh_dashboards(move |err| {
+        toasts.push(dashboards_load_failed(lang.get_untracked(), &err))
     });
     install_nav();
     crate::alerts::install_alerts_badge(house);

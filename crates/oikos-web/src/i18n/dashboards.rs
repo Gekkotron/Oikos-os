@@ -64,6 +64,7 @@ pub fn group_state(lang: Lang, s: GroupState) -> String {
 /// Words of the dashboard screen, its edit mode, its sheets and the widget library.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DashText {
+    LoadingDashboard,
     UnknownDashboard,
     BackToHome,
     // Edit toolbar.
@@ -116,6 +117,7 @@ pub enum DashText {
 pub fn dash_text(lang: Lang, k: DashText) -> &'static str {
     use DashText as T;
     let (en, fr) = match k {
+        T::LoadingDashboard => ("Loading…", "Chargement…"),
         T::UnknownDashboard => ("Unknown dashboard.", "Tableau de bord inconnu."),
         T::BackToHome => ("Back to House", "Retour à l'accueil"),
         T::ToggleEdit => ("Toggle edit mode", "Activer ou désactiver le mode édition"),
@@ -295,6 +297,7 @@ mod tests {
     fn every_dash_text_has_two_languages() {
         use DashText as T;
         const ALL: &[DashText] = &[
+            T::LoadingDashboard,
             T::UnknownDashboard,
             T::BackToHome,
             T::ToggleEdit,

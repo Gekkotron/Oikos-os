@@ -19,35 +19,32 @@ fn button_name(title: Option<String>, flow_name: &str) -> String {
 pub fn FlowButtonWidget(
     flow_id: String,
     flow_name: String,
-    title: Option<String>,
+    #[prop(into)] title: Signal<Option<String>>,
     /// Why the flow cannot run, when it cannot.
     invalid: Option<String>,
 ) -> impl IntoView {
     let toasts = expect_context::<Toasts>();
     let lang = use_lang();
-    let name = button_name(title, &flow_name);
+    let name = Memo::new(move |_| button_name(title.get(), &flow_name));
     let running = RwSignal::new(false);
     let runnable = invalid.is_none();
-    let on_run = {
-        let name = name.clone();
-        move |_| {
-            let (id, name) = (flow_id.clone(), name.clone());
-            running.set(true);
-            spawn_local(async move {
-                match api::run_flow(&id).await {
-                    Ok(_) => toasts.push(flow_started(lang(), &name)),
-                    Err(e) => toasts.push(e.error),
-                }
-                running.set(false);
-            });
-        }
+    let on_run = move |_| {
+        let (id, name) = (flow_id.clone(), name.get_untracked());
+        running.set(true);
+        spawn_local(async move {
+            match api::run_flow(&id).await {
+                Ok(_) => toasts.push(flow_started(lang(), &name)),
+                Err(e) => toasts.push(e.error),
+            }
+            running.set(false);
+        });
     };
 
     view! {
         <article class="card widget-flow" class:card--pending=move || running.get()>
             <div class="widget-flow__head">
                 <span class="widget-flow__icon" inner_html=PLAY></span>
-                <span class="widget-flow__name" title=name.clone()>{name.clone()}</span>
+                <span class="widget-flow__name" title=name>{name}</span>
             </div>
             <button
                 type="button"

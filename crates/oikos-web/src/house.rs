@@ -41,8 +41,12 @@ pub struct House {
     pub ambiance_reports: RwSignal<BTreeMap<String, ApplyReport>>,
     /// The hand-made groups by id (without the `group_` prefix), for the member counts on Home.
     pub groups: RwSignal<BTreeMap<String, GroupView>>,
-    /// The dashboards, fetched once at start-up: the hub does not push their structure.
+    /// The dashboards, fetched at start-up and on each reconnect: the hub does not push their
+    /// structure.
     pub dashboards: RwSignal<Vec<DashboardView>>,
+    /// Whether the first dashboards fetch has answered (with a list or an error); a dashboard
+    /// opened by its address shows a loading state until then.
+    pub dashboards_loaded: RwSignal<bool>,
     /// The last rejected command as `(entity id, reason)`.
     pub command_failed: RwSignal<Option<(String, String)>>,
     /// Unix seconds of the user's last visit to the Alerts tab. The nav badge counts alerts
@@ -76,6 +80,7 @@ impl House {
             ambiance_reports: RwSignal::new(BTreeMap::new()),
             groups: RwSignal::new(BTreeMap::new()),
             dashboards: RwSignal::new(Vec::new()),
+            dashboards_loaded: RwSignal::new(false),
             command_failed: RwSignal::new(None),
             last_alerts_seen: RwSignal::new(0),
             climate_rev: RwSignal::new(0),
@@ -145,6 +150,23 @@ impl House {
         leptos::task::spawn_local(async move {
             if let Ok(settings) = crate::api::home::get_home_settings().await {
                 home_settings.set(settings);
+            }
+        });
+    }
+
+    /// Fetches the dashboards into [`House::dashboards`]; a failure leaves the last list and is
+    /// handed to `on_error`. Either way the first answer sets [`House::dashboards_loaded`].
+    pub fn refresh_dashboards(&self, on_error: impl FnOnce(String) + 'static) {
+        let dashboards = self.dashboards;
+        let loaded = self.dashboards_loaded;
+        leptos::task::spawn_local(async move {
+            match crate::api::fetch_dashboards().await {
+                Ok(list) => dashboards.set(list),
+                Err(err) => on_error(err.error),
+            }
+            // Set once, so a reconnect does not wake what waits on the first answer.
+            if !loaded.get_untracked() {
+                loaded.set(true);
             }
         });
     }
