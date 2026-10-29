@@ -419,7 +419,7 @@
       "keepalive": 60,
       "maximum_packet_size": 1048576,
       "reject_unauthorized": true,
-      "server": "mqtt://192.168.1.91",
+      "server": "mqtt://192.168.1.20",
       "user": "***",
       "version": 4
     },
@@ -1682,7 +1682,7 @@
   },
   "log_level": "info",
   "mqtt": {
-    "server": "mqtt://192.168.1.91:1883",
+    "server": "mqtt://192.168.1.20:1883",
     "version": 4
   },
   "network": {

@@ -96,7 +96,7 @@ fn numeric_looking_env_strings_stay_strings() {
         jail.set_env("OIKOS_MQTT__PASSWORD", "123456");
         jail.set_env("OIKOS_MQTT__CLIENT_ID", "1");
         jail.set_env("OIKOS_MQTT__USER", "007");
-        jail.set_env("OIKOS_MQTT__HOST", "192.168.1.91");
+        jail.set_env("OIKOS_MQTT__HOST", "192.168.1.20");
         jail.set_env("OIKOS_MQTT__HA_STATUS_TOPIC", "42");
         jail.set_env("OIKOS_TOPICS__UI_PREFIX", "7");
         jail.set_env("OIKOS_TOPICS__Z2M_BASE", "0123");
@@ -115,7 +115,7 @@ fn numeric_looking_env_strings_stay_strings() {
         assert_eq!(cfg.mqtt.password.as_deref(), Some("123456"));
         assert_eq!(cfg.mqtt.client_id, "1");
         assert_eq!(cfg.mqtt.user.as_deref(), Some("007"));
-        assert_eq!(cfg.mqtt.host, "192.168.1.91");
+        assert_eq!(cfg.mqtt.host, "192.168.1.20");
         Ok(())
     });
 }
@@ -185,12 +185,12 @@ fn history_url_from_env_stays_a_string() {
     Jail::expect_with(|jail| {
         jail.set_env(
             "OIKOS_HISTORY__URL",
-            "postgres://oikos:s3cret@192.168.1.91:5432/oikos",
+            "postgres://oikos:s3cret@192.168.1.20:5432/oikos",
         );
         let cfg = Config::load(None)?;
         assert_eq!(
             cfg.history.url,
-            "postgres://oikos:s3cret@192.168.1.91:5432/oikos"
+            "postgres://oikos:s3cret@192.168.1.20:5432/oikos"
         );
         assert!(cfg.history.enabled());
         Ok(())
@@ -202,7 +202,7 @@ fn history_debug_masks_password() {
     Jail::expect_with(|jail| {
         jail.create_file(
             "oikos.toml",
-            "[history]\nurl = \"postgres://oikos:s3cret@192.168.1.91:5432/oikos\"\n",
+            "[history]\nurl = \"postgres://oikos:s3cret@192.168.1.20:5432/oikos\"\n",
         )?;
         let cfg = Config::load(None)?;
         let text = format!("{:?}", cfg.history);
@@ -248,14 +248,14 @@ fn push_keys_are_read() {
         jail.create_file(
             "oikos.toml",
             "[push]\nprefix = \"home/push\"\nlegacy_prefix = \"\"\n\
-             credentials = \"/etc/oikos/fcm.json\"\nretry_interval = 30\n",
+             credentials = \"/srv/keys/fcm.json\"\nretry_interval = 30\n",
         )?;
         let push = Config::load(None)?.push;
         assert_eq!(push.prefix, "home/push");
         assert_eq!(push.legacy_prefix, "");
         assert_eq!(
             push.credentials.as_deref(),
-            Some(std::path::Path::new("/etc/oikos/fcm.json"))
+            Some(std::path::Path::new("/srv/keys/fcm.json"))
         );
         assert_eq!(push.retry_interval, 30);
         jail.set_env("OIKOS_PUSH__CREDENTIALS", "/tmp/key.json");
@@ -306,11 +306,11 @@ fn explicit_push_credentials_win_over_the_secrets_folder() {
         jail.create_file("secrets/firebase.json", "{}")?;
         jail.create_file(
             "oikos.toml",
-            "[push]\ncredentials = \"/etc/oikos/fcm.json\"\n",
+            "[push]\ncredentials = \"/srv/keys/fcm.json\"\n",
         )?;
         assert_eq!(
             Config::load(None)?.push.credentials.as_deref(),
-            Some(std::path::Path::new("/etc/oikos/fcm.json"))
+            Some(std::path::Path::new("/srv/keys/fcm.json"))
         );
         jail.set_env("OIKOS_PUSH__CREDENTIALS", "/tmp/key.json");
         assert_eq!(
@@ -340,11 +340,11 @@ fn old_push_keys_are_rejected() {
 }
 
 #[test]
-fn example_config_loads() {
+fn legacy_config_still_loads() {
     Jail::expect_with(|_jail| {
         let path = std::path::Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../oikos.example.toml"
+            "/tests/fixtures/legacy-oikos.toml"
         ));
         let cfg = Config::load(Some(path))?;
         assert_eq!(cfg.push.prefix, "oikos/push");

@@ -13,3 +13,4 @@ oikos.toml
 secrets/
 .env
 *.log
+data/

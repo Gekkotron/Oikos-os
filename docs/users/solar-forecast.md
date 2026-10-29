@@ -18,27 +18,21 @@ Solar is **off by default**. While it is off, the hub makes no request to anyone
 
 ## Turn it on
 
-1. Put the API key, on one line, in `secrets/solcast.key` next to `oikos.toml`. The file is git-ignored; nothing else needs the key. Docker reads the same folder through `compose.yml`.
-2. Add a `[solcast]` section to `oikos.toml` and restart the hub:
+Open **Settings → Solar forecast** (or the Solar forecast card in the Services step of the setup wizard), switch **Enabled** on and fill in:
 
-```toml
-[solcast]
-enabled = true
-sites = ["<rooftop resource id>"]
-daily_limit = 10
-```
+- **API key**: your Solcast key. It is stored in the hub's database and is write-only: once saved, the page shows only that one is set, and typing a new key replaces it. Nothing needs copying onto the host.
+- **Rooftop site ids**: one or more rooftop resource ids. Only letters, digits, `-` and `_` are accepted in an id.
+- **Calls per day**: this hub's share of the account's daily requests. Keep the default of 10 when the hub is the only tool using the account.
 
-- `sites` lists one or more rooftop resource ids. Only letters, digits, `-` and `_` are accepted in an id.
-- `daily_limit` is this hub's share of the account's daily requests. Keep the default of 10 when the hub is the only tool using the account.
-- `api_key_file` is optional. It replaces `secrets/solcast.key` with another path.
+**Test (uses 1 call)** checks the key against Solcast before you save. Saving restarts the hub. An empty site list, an id with other characters, or a calls-per-day value below the number of sites is refused when you save, with the reason, and nothing is changed.
 
-An empty `sites`, an id with other characters, a `daily_limit` below the number of sites, or a missing or empty key file stops the hub at start with a message naming the key, as for `[weather]`.
+The home location (see [Weather](weather.md)) places the sun for the refresh times below; set it in **Settings → Location**.
 
-See [Configuration](../reference/configuration.md#solcast) for every key and environment variable.
+See the [Settings reference](../reference/configuration.md#solcast) for the stored fields. An assistant can read and change them with `get_settings` and `set_settings` ([MCP tools](../reference/mcp-tools.md)).
 
 ### Sharing the account with another tool
 
-If another tool polls the same Solcast account, its calls count against the same daily limit. Set `daily_limit` to the account limit minus what the other tool uses. For example, if another tool makes 2 calls a day, use `daily_limit = 8`: the hub then has 8 calls, of which 2 stay in reserve, so it refreshes 6 times a day. With two rooftop sites the same budget gives 3 refreshes a day, because each refresh calls both sites.
+If another tool polls the same Solcast account, its calls count against the same daily limit. Set **Calls per day** to the account limit minus what the other tool uses. For example, if another tool makes 2 calls a day, use 8: the hub then has 8 calls, of which 2 stay in reserve, so it refreshes 6 times a day. With two rooftop sites the same budget gives 3 refreshes a day, because each refresh calls both sites.
 
 The hub always keeps 2 calls in reserve for restarts and surprises. If the numbers are off anyway and Solcast answers "quota exceeded", the hub stops calling until 00:05 UTC.
 
@@ -50,14 +44,14 @@ The refreshes are spread over daylight:
 - The others evenly spaced until about an hour before sunset.
 - None at night.
 
-Sunrise and sunset come from the latitude and longitude in `[flows]`, the same place your flows use for sun triggers. Without them the hub uses Paris.
+Sunrise and sunset come from your home location, the same place your flows use for sun triggers. Without a location the hub uses Paris.
 
 Each refresh keeps the periods of the day that have already passed, so "forecast today" stays the energy of the whole day, not just what is left. The latest forecast and the call count are kept as a retained document on the broker (`oikos/solar/cache`). A restart reads it back, so restarting the hub does not spend calls.
 
-If Solcast refuses the key (401 or 403), the hub logs one error and stops calling until it restarts. Fix the key file, then restart.
+If Solcast refuses the key (401 or 403), the hub logs one error and stops calling until it restarts. Save a working key in Settings; saving restarts the hub.
 
 :::warning
-Enable `[solcast]` on one hub only per Solcast account and broker. A second hub with it off clears the first one's retained cache, and two enabled hubs share the daily budget badly.
+Turn the solar forecast on in one hub only per Solcast account and broker. A second hub with it off clears the first one's retained cache, and two enabled hubs share the daily budget badly.
 :::
 
 ## The entities
@@ -112,7 +106,7 @@ Open it from the card, or at `/solar`. A **Back** link leads out. The page has:
   - **Forecast peak**: today's highest expected power and when.
   - **Best hours**: the longest run at or above 60 % of today's peak, with that floor ("above 0.8 kW").
   - **Gap**: measured against forecast so far, in percent.
-  - **Sun**: sunrise and sunset, from the location in `[flows]`. Hidden while `[flows]` has no location.
+  - **Sun**: sunrise and sunset, from your home location. Hidden while no location is set.
   - **Yesterday**: measured against the first forecast made for that day, with the gap. A forecast made more than an hour after sunrise is shown as "forecast at HH:MM".
   - **7-day accuracy**: the mean error of the morning forecasts, as "± N %". It needs at least 3 days with a morning forecast above 0.5 kWh.
   - **Roofs**: each rooftop's forecast for today ("Roof 1 5.1 · Roof 2 7.3"), only with two or more rooftop sites.
@@ -122,7 +116,7 @@ Open it from the card, or at `/solar`. A **Back** link leads out. The page has:
 
 Each tile hides when its data is missing. **Gap**, **Yesterday**, **7-day accuracy** and **This month** need measured production, so they need a Solar-role entity with history.
 
-With solar disabled, the page says that the forecast is unavailable, and how to enable it: `[solcast]` in `oikos.toml`, and the API key in `secrets/solcast.key`.
+With solar disabled, the page says that the forecast is unavailable, and to turn it on in **Settings → Solar forecast** with the API key and a rooftop site.
 
 ## Flow idea
 
@@ -136,7 +130,7 @@ Build it in the flow editor, or with `set_flow` through [MCP](assistants-mcp.md)
 
 ## Privacy
 
-While `[solcast] enabled` is `true`, the hub sends the **rooftop resource ids** and the **API key** to Solcast, once per planned refresh. Solcast sees your public IP address, as any web service does. Nothing else leaves the house: no device names, no entity states, no address. While solar is disabled, nothing is sent.
+While the solar forecast is enabled, the hub sends the **rooftop resource ids** and the **API key** to Solcast, once per planned refresh. Solcast sees your public IP address, as any web service does. Nothing else leaves the house: no device names, no entity states, no address. While solar is disabled, nothing is sent.
 
 ## Credit
 

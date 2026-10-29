@@ -10,6 +10,7 @@ use oikos_os::config::{AclSource, Config, LogConfig};
 use oikos_os::history::History;
 use oikos_os::hub::Hub;
 use oikos_os::setup::boot::{Boot, resolve, spawn_location_lookup};
+use oikos_os::setup::bundled::{self, InitOutcome};
 use oikos_os::setup::{HubFile, SetupCtx, banner, import};
 use oikos_os::weather::open_meteo::Endpoints;
 use oikos_os::{http, logging, mcp, mqtt};
@@ -154,6 +155,28 @@ async fn main() -> anyhow::Result<ExitCode> {
             }
             http_task.abort();
             tracing::info!("stopped");
+            Ok(ExitCode::SUCCESS)
+        }
+        Cli::InitBundled { data_dir, config } => {
+            logging::init(&LogConfig::default());
+            match bundled::init_bundled(&data_dir, config.as_deref())? {
+                InitOutcome::Created => println!(
+                    "bundled credentials created in {}",
+                    data_dir.join(bundled::BUNDLED_FILE).display()
+                ),
+                InitOutcome::Kept => println!("bundled credentials already exist; nothing changed"),
+                InitOutcome::HubConfigured => {
+                    println!("this hub is already set up; no bundled credentials created")
+                }
+                InitOutcome::DatabaseWithoutCredentials => {
+                    eprintln!(
+                        "data/timescaledb already holds a database but data/bundled.json is gone; \
+                         its password may still be in data/bundled/db-password; restore \
+                         bundled.json or delete data/timescaledb to start over"
+                    );
+                    return Ok(ExitCode::from(1));
+                }
+            }
             Ok(ExitCode::SUCCESS)
         }
         Cli::McpStdio { server, data_dir } => {

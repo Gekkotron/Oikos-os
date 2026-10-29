@@ -93,4 +93,5 @@ for topic in sorted(msgs):
 write("topics.txt", "\n".join(rec))
 print("recorded", len(rec), "topics")
 PY
+# shellcheck disable=SC2012 # plain file names, count only
 for d in discovery states ui; do echo "$d: $(ls "$OUT/$d" | wc -l | tr -d ' ') files"; done

@@ -7,7 +7,8 @@ use clap::{Parser, Subcommand};
 struct RawCli {
     #[command(subcommand)]
     command: Option<RawCommand>,
-    /// Config file used when no subcommand is given (same as `run --config`).
+    /// Config file used when no subcommand is given (same as `run --config`); `init-bundled`
+    /// treats an existing one as a hub that is already set up.
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
     /// Folder holding `hub.json` and the settings cache.
@@ -31,6 +32,8 @@ enum RawCommand {
         #[arg(long)]
         server: String,
     },
+    /// Create the bundled broker and database credentials, then exit.
+    InitBundled,
 }
 
 /// Resolved command line.
@@ -43,6 +46,10 @@ pub enum Cli {
     McpStdio {
         server: String,
         data_dir: PathBuf,
+    },
+    InitBundled {
+        data_dir: PathBuf,
+        config: Option<PathBuf>,
     },
 }
 
@@ -68,6 +75,10 @@ impl Cli {
             Some(RawCommand::McpStdio { server }) => Cli::McpStdio {
                 server,
                 data_dir: raw.data_dir,
+            },
+            Some(RawCommand::InitBundled) => Cli::InitBundled {
+                data_dir: raw.data_dir,
+                config: raw.config,
             },
         }
     }
@@ -167,6 +178,50 @@ mod tests {
                     data_dir: "d".into(),
                 }
             );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn init_bundled_takes_data() {
+        figment::Jail::expect_with(|_| {
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "init-bundled"]).unwrap(),
+                Cli::InitBundled {
+                    data_dir: "./data".into(),
+                    config: None,
+                }
+            );
+            assert_eq!(
+                Cli::try_parse_from(["oikos-os", "--data", "/data", "init-bundled"]).unwrap(),
+                Cli::InitBundled {
+                    data_dir: "/data".into(),
+                    config: None,
+                }
+            );
+            // `--config` parses before or after the subcommand.
+            for args in [
+                [
+                    "oikos-os",
+                    "--config",
+                    "/checkout/oikos.toml",
+                    "init-bundled",
+                ],
+                [
+                    "oikos-os",
+                    "init-bundled",
+                    "--config",
+                    "/checkout/oikos.toml",
+                ],
+            ] {
+                assert_eq!(
+                    Cli::try_parse_from(args).unwrap(),
+                    Cli::InitBundled {
+                        data_dir: "./data".into(),
+                        config: Some("/checkout/oikos.toml".into()),
+                    }
+                );
+            }
             Ok(())
         });
     }

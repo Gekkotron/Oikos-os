@@ -29,16 +29,17 @@ Oikos-os is a home-automation hub written in Rust. It runs on the home server ne
 
 ## Quick start
 
-On a Linux host with Docker, Mosquitto and Zigbee2MQTT:
+On a Linux host with Docker (the stack brings its own broker and database):
 
 ```sh
 git clone https://github.com/Gekkotron/Oikos-os.git
 cd Oikos-os
-cp oikos.example.toml oikos.toml   # set the [mqtt] credentials
 docker compose up -d --build
 ```
 
-Open `http://<host>:8081`, then connect an assistant:
+Already run a broker or database? See [Bring your own broker and database](https://gekkotron.github.io/Oikos-os/docs/users/install-on-linux#bring-your-own-broker-and-database).
+
+`docker compose logs hub` prints the address to open (`Open http://<ip>:8081 to set up your home`); a browser wizard does the rest. Then connect an assistant:
 
 ```sh
 claude mcp add --transport http oikos http://<host>:8081/mcp
@@ -54,7 +55,7 @@ From source, see [Getting started](https://gekkotron.github.io/Oikos-os/docs/use
 The site at **[gekkotron.github.io/Oikos-os](https://gekkotron.github.io/Oikos-os/)** is built from [`docs/`](docs/) by Docusaurus in [`website/`](website/):
 
 - [User guide](docs/users/): install, Zigbee2MQTT, the web UI, flows, groups, MCP, push, cameras, climate, history, watchdogs, security.
-- [Reference](docs/reference/): `oikos.toml`, the HTTP API, MCP tools, flow nodes, entity types, MQTT topics.
+- [Reference](docs/reference/): configuration, the HTTP API, MCP tools, flow nodes, entity types, MQTT topics.
 - [Contributors](docs/contributors/): development, architecture, adding a device.
 
 To preview it: `cd website && npm ci && npm start`.

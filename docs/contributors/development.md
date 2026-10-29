@@ -36,11 +36,10 @@ The script needs `mosquitto_sub` and `python3`. It listens for six seconds to `h
 ## Run the hub
 
 ```sh
-cp oikos.example.toml oikos.toml   # then edit the [mqtt] credentials
-cargo run -p oikos-os -- run
+cargo run -p oikos-os
 ```
 
-`oikos.toml` is git-ignored. See [Configuration](../reference/configuration.md) for every key.
+The hub keeps its data in `./data` (`--data <dir>` picks another folder) and serves the setup wizard at `http://localhost:8081/setup` on a first start. For a local broker and database, start the bundled ones: `cargo run -p oikos-os -- init-bundled && docker compose up -d --no-deps mosquitto timescaledb` (host networking needs Linux, or Docker Desktop's host networking enabled on macOS), then use the credentials in `data/bundled.json` in the wizard. See [Configuration](../reference/configuration.md) for every key.
 
 ## Web UI
 
@@ -89,7 +88,7 @@ The other tests under `crates/oikos-web/tests` (cards, flow canvas, group wizard
 
 ## `tools/restart.sh`
 
-[`tools/restart.sh`](https://github.com/Gekkotron/Oikos-os/blob/main/tools/restart.sh) builds the web UI and the hub, stops the running hub and starts the new one, detached, from the repo root so it reads `./oikos.toml`. It waits up to 20 seconds for `/health`, and logs to `<cargo target dir>/oikos-os.log` (set `OIKOS_LOG` to log elsewhere).
+[`tools/restart.sh`](https://github.com/Gekkotron/Oikos-os/blob/main/tools/restart.sh) builds the web UI and the hub, stops the running hub and starts the new one, detached, from the repo root so it reads `./data`. It waits up to 20 seconds for `/health`, and logs to `<cargo target dir>/oikos-os.log` (set `OIKOS_LOG` to log elsewhere).
 
 | Flag | Effect |
 | --- | --- |

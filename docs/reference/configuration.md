@@ -1,303 +1,257 @@
 ---
-title: Configuration (oikos.toml)
+title: Settings reference
 sidebar_position: 1
-description: Every oikos.toml section and key with its type, default and meaning, plus the environment overrides.
+description: Where the hub keeps its settings, every section and field with its default, how secrets are handled, the environment variables that still apply and the one-time import of an old oikos.toml.
 ---
 
-The hub reads `oikos.toml` from the working directory. `oikos-os run --config <path>` reads another file. A missing file is fine: every key has a default. [`oikos.example.toml`](https://github.com/Gekkotron/Oikos-os/blob/main/oikos.example.toml) is the annotated starting point, and the structs are in [`crates/oikos-os/src/config.rs`](https://github.com/Gekkotron/Oikos-os/blob/main/crates/oikos-os/src/config.rs).
+The hub is configured in the browser: the setup wizard on a first start, then the **Settings** pages. There is no file to edit. This page is the reference behind those screens: where each value is stored, every field with its default, and the few things that still come from the command line or the environment. The structs are in [`crates/oikos-os/src/config.rs`](https://github.com/Gekkotron/Oikos-os/blob/main/crates/oikos-os/src/config.rs) and the sections in [`crates/oikos-os/src/setup/sections.rs`](https://github.com/Gekkotron/Oikos-os/blob/main/crates/oikos-os/src/setup/sections.rs).
 
-## Layers and overrides
+Other pages write a field as `[topics] ui_prefix` or `watchdog.acl.enabled`. That is the field `ui_prefix` of `topics`, or `acl.enabled` of `watchdog`, inside the **advanced** section below.
 
-Settings are layered: built-in defaults, then `oikos.toml`, then environment variables. Each later layer wins.
+## Where settings live
 
-Every key can be set from the environment as `OIKOS_<SECTION>__<KEY>`, with two underscores between nesting levels and the names in upper case:
+Two places, split by what the hub needs before it can reach anything:
 
-```sh
-OIKOS_MQTT__PASSWORD='<password>' cargo run -p oikos-os -- run
-OIKOS_WATCHDOG__GATEWAY__ENABLED=true
-OIKOS_HISTORY__BUFFER_ROWS=50000
-```
+| Where | What it holds |
+| --- | --- |
+| `data/hub.json` | The bootstrap settings: the MQTT connection, the database URL, the home location, the HTTP bind address, the log level, the wizard's progress and a "setup finished" flag. The hub writes it, one wizard step at a time, with mode `0600`. You do not edit it, except for the rare field with no screen (below). |
+| The `settings` table in the database | Everything else, one JSON row per section: `weather`, `solcast`, `frigate`, `push`, `climate` and `advanced`. Secrets are stored in the same rows. |
+| `data/settings-cache.json` | A copy of the settings the hub last read, mode `0600`. If the database is down when the hub starts, it starts from this copy with a warning, so the house keeps running. |
+| `data/bundled.json` | Written by the compose `init` service (`oikos-os init-bundled`): the credentials of the Mosquitto and TimescaleDB that come with Oikos, `mqtt_user`, `mqtt_password`, `db_user`, `db_password` and `db_name`, mode `0600`. The wizard reads it to pre-fill the MQTT and Database steps. It is not used once those steps are saved. |
 
-String keys keep the raw text of the variable, so `OIKOS_MQTT__PASSWORD=007` stays `"007"` and is not read as a number. Numbers and booleans are parsed. For a list, use array syntax: `OIKOS_TOPICS__DISCOVERY_PREFIXES='["oikos", "homeassistant"]'`.
+The documents the hub keeps on the broker (home settings, alarm, climate schedules, flows, groups, dashboards, ambiances) are not part of this: they are edited on their own screens and routes.
 
-Logging has one more rule: if `RUST_LOG` is set and valid, it wins over `[log] level`. If it is unset or invalid, `[log] level` applies; if that is invalid too, the level is `info`.
+You read and change the section rows with **Settings**, with `GET`/`PUT /api/v1/settings/{section}` ([HTTP API](http-api.md#setup-and-settings)) or with the `get_settings` and `set_settings` MCP tools ([MCP tools](mcp-tools.md#home-settings)). A change is checked the way the hub checks its settings at start, then saved, and the hub restarts to apply it. A value it could not start with is refused with the reason, and nothing is saved.
 
-At start the hub also checks `[flows]` (coordinates), `[watchdog]`, `[climate]`, `[weather]` and `[solcast]`. A bad value stops it with `invalid config: <reason>`.
+The folder is `./data` by default. `oikos-os --data <dir>` (or `OIKOS_DATA_DIR`) picks another one; in the Docker image it is `/data`, mounted from `./data`. The compose file also mounts the checkout read-only at `/checkout` and starts the hub with `--config /checkout/oikos.toml`, which only matters for a host whose `oikos.toml` has not moved into `./data` yet.
 
-Secrets (`[mqtt] password`, `[frigate] password`, the password inside `[history] url`) are masked when the config is logged. Keep `oikos.toml` out of git; it is git-ignored in this repo.
+## Secrets
 
-## `[mqtt]`
+A secret is write-only. A read shows `{"set": true}` or `{"set": false}`, never the value. A write sets it with a string, clears it with `null`, and keeps it when the field is absent, `""` or sent back as `{"set": true}`. So a form that posts an empty password field never wipes the stored one.
 
-The broker connection. The hub keeps a persistent MQTT session under `client_id`, so a write queued just before a connection blip is retransmitted on reconnect. Two hubs on one broker must not share a `client_id`: the broker would bounce them off each other and hand one the other's session.
+- Changing the address a secret goes to (the MQTT or database host and port, the Frigate address) needs the secret sent again. Otherwise anyone on the LAN could point the hub at their own machine and collect the stored password.
+- The secrets are the MQTT and database passwords, the Solcast API key, the Frigate password and the Firebase service-account key. No log line, error or API reply carries one; a URL that holds a password is masked when logged.
+- A login written inside a Frigate address is refused (use the user and password fields).
 
-| Key | Default | Description |
+See [Security](../users/security.md#settings-and-secrets) for what is and is not protected.
+
+## Bootstrap settings (`hub.json`)
+
+The location, the database and the MQTT connection have a screen in the wizard and in **Settings**. The HTTP and log settings do not: set them with the `OIKOS_*` variables below, or in `hub.json` while the hub is stopped.
+
+### Home location
+
+**Settings → Location**, or the first wizard step. It replaces the old `[flows]` and `[weather]` city fields.
+
+| Field | Default | Description |
 | --- | --- | --- |
-| `host` | `"localhost"` | Broker host name or address. |
-| `port` | `1883` | Broker port. |
-| `user` | none | Broker user. Leave out for an open broker. |
-| `password` | none | Broker password. |
-| `client_id` | `"oikos-os"` | MQTT client id and session key. |
-| `send_ha_birth` | `false` | When `true`, publish `online` (not retained) on `ha_status_topic` each time the hub connects, so bridges re-publish their discovery. |
-| `ha_status_topic` | `"homeassistant/status"` | Topic of the birth message. |
+| `city` | none | The place's name. Required. |
+| `country` | none | Optional ISO 3166-1 alpha-2 code such as `FR`, exactly two letters (stored in upper case). |
+| `latitude` | none | Degrees, north positive, -90 to 90. |
+| `longitude` | none | Degrees, east positive, -180 to 180. |
+| `timezone` | none | IANA zone name (`Europe/Paris`). `trigger.schedule` runs in it. |
 
-```toml
-[mqtt]
-host = "<host>"
-port = 1883
-user = "oikos"
-password = "<password>"
-```
+The wizard looks the city up and fills the rest, which you can correct. Sun nodes, `is_dark`, the solar forecast and the weather all use these coordinates. With no location, sun nodes and `is_dark` use Paris (48.8566, 2.3522), saving a flow that reads the sun reports a warning, and schedules run in the system's zone (UTC if it cannot be read; an unknown zone falls back to UTC with a warning). See [Flow nodes](flow-nodes.md).
 
-## `[topics]`
+### Database and broker
+
+**Settings → Database** and **Settings → Broker** (the MQTT connection).
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `mqtt.host` | `"localhost"` | Broker host name or address. |
+| `mqtt.port` | `1883` | Broker port. |
+| `mqtt.user` | none | Broker user. A password needs a user. |
+| `mqtt.password` | none | Broker password (a secret). |
+| `mqtt.client_id` | `"oikos-os"` | MQTT client id and session key. Two hubs on one broker must not share one: the broker would bounce them off each other and hand one the other's session. |
+| `z2m_base` | `"zigbee2mqtt"` | Zigbee2MQTT base topic; the hub reads `<z2m_base>/bridge/devices`, `/info` and `/state`. Under Advanced in the wizard. |
+| `database_url` | none | The Postgres URL, built from the Database page's host, port (5432 for the bundled one), database, user and password. TimescaleDB 2.17+ on Postgres 17 with the `timescaledb` extension. Without it the hub stays in setup mode. |
+
+The hub keeps a persistent MQTT session under `client_id`, so a write queued just before a connection blip is retransmitted on reconnect.
+
+Two more MQTT fields have no screen. Set them in the `mqtt` object of `data/hub.json` while the hub is stopped, or with the environment variables below.
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `mqtt.send_ha_birth` | `false` | When `true`, publish `online` (not retained) on `ha_status_topic` each time the hub connects, so bridges re-publish their discovery. |
+| `mqtt.ha_status_topic` | `"homeassistant/status"` | Topic of the birth message. |
+
+### HTTP and log
+
+No screen. Set with `OIKOS_HTTP__BIND`, `OIKOS_LOG__LEVEL` and `OIKOS_LOG__JSON`, or in the `http` and `log` objects of `data/hub.json` while the hub is stopped.
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `http.bind` | `"0.0.0.0:8081"` | Address the HTTP server listens on: the [HTTP API](http-api.md), the WebSocket, the MCP server and the web UI share it. 8081 sits next to Jeedom on 80 and clear of Zigbee2MQTT on 8080 on the same server. The Docker image sets it with `OIKOS_HTTP__BIND`. |
+| `log.level` | `"info"` | A `tracing` filter: a level (`debug`) or a directive list (`oikos_os=debug,rumqttc=warn`). `RUST_LOG` wins when it is set and valid; if it is unset or invalid, `log.level` applies, and if that is invalid too, the level is `info`. |
+| `log.json` | `false` | `true` writes JSON lines; otherwise a human-readable format. Logs go to stderr. |
+
+## Environment variables and flags
+
+`OIKOS_*` variables override the **bootstrap** values only: the MQTT connection, the database URL, the HTTP bind address and the log settings. They are the only way to set them without the wizard, so an unattended install can script them. They win over `hub.json` at every start.
+
+| Variable | Overrides |
+| --- | --- |
+| `OIKOS_MQTT__HOST`, `OIKOS_MQTT__PORT`, `OIKOS_MQTT__USER`, `OIKOS_MQTT__PASSWORD`, `OIKOS_MQTT__CLIENT_ID`, `OIKOS_MQTT__SEND_HA_BIRTH`, `OIKOS_MQTT__HA_STATUS_TOPIC` | `mqtt.*`. Setting any one of them makes the MQTT connection complete from the environment. |
+| `OIKOS_HISTORY__URL` | `database_url`. |
+| `OIKOS_HTTP__BIND` | `http.bind`. |
+| `OIKOS_LOG__LEVEL`, `OIKOS_LOG__JSON` | `log.level`, `log.json`. |
+| `OIKOS_DATA_DIR` | The data folder, like `--data`. |
+| `RUST_LOG` | The log level, ahead of `log.level`. |
+
+Two underscores separate the levels, and the names are upper case. String values keep the raw text of the variable, so `OIKOS_MQTT__PASSWORD=007` stays `"007"` and is not read as a number; numbers and booleans are parsed. In Docker, put them in a git-ignored `.env` next to `compose.yml`. Variables for any other section (`OIKOS_WEATHER__ENABLED` and the like) are ignored: those settings live in the database.
+
+Command line:
+
+| | |
+| --- | --- |
+| `oikos-os` or `oikos-os run` | Run the hub. |
+| `oikos-os mcp-stdio --server <url>` | Serve MCP over stdio, proxying to a running hub (for example `http://localhost:8081`). It reads the log level from `data/hub.json` when that exists. |
+| `oikos-os init-bundled` | Create the bundled broker and database credentials in `data/` and exit. The compose `init` service runs it; it changes nothing once `data/bundled.json` exists. |
+| `--data <dir>` | The data folder (default `./data`, or `OIKOS_DATA_DIR`). Works with every command. |
+| `--config <path>` | A file to import once (see below). Used by `run`; `init-bundled` treats an existing one as a hub that is already set up. |
+
+## Weather
+
+**Settings → Weather.** Outdoor weather from [Open-Meteo](https://open-meteo.com), a free service with no API key. Off by default: while `enabled` is `false` the hub makes no request at all. See [Weather](../users/weather.md).
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Turn the weather on. Needs the home location. While `false`, `GET /api/v1/weather` answers 503 and `get_weather` answers `weather unavailable`. |
+| `refresh_minutes` | `15` | Minutes between two fetches, with about 10 % random jitter. Between 10 and 1440 when enabled. |
+
+The city, country and coordinates come from the home location. An enabled weather with a refresh below 10 or above 1440 is refused when you save, and so is enabling it with no home location.
+
+## Solcast
+
+**Settings → Solar forecast.** The Solcast rooftop solar forecast. Off by default: while `enabled` is `false` the hub makes no request at all. See [Solar forecast](../users/solar-forecast.md).
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Turn the solar forecast on. While `false`, `GET /api/v1/solar` answers 503 and `get_solar` answers `solar unavailable`. |
+| `sites` | `[]` | Rooftop resource ids from the Solcast Toolkit, one or more. Each id may hold only letters, digits, `-` and `_`. One request per site per refresh. |
+| `daily_limit` | `10` | This hub's share of the account's requests per UTC day (the form calls it Calls per day). The hobbyist limit is 10. Refreshes per day are `(daily_limit - 2) / number of sites`, at least 1; 2 calls are kept in reserve. Must be at least the number of sites. |
+| `api_key` | none | The Solcast API key (a secret). Required when enabled. |
+
+When enabled, no site, an empty or invalid id, a `daily_limit` below the number of sites, or no key is refused when you save. The key is never written to a log line, an API response or MQTT.
+
+## Frigate
+
+**Settings → Cameras.** Frigate, for alert media and the event bridge. See [Cameras (Frigate)](../users/cameras.md).
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `url` | none | Frigate origin. With it set, media on that origin is served by the hub at `/api/v1/media`, so the browser never sees the login. Any other origin is refused. A blank string counts as unset. |
+| `user` | none | Frigate login, for its login port (8971). Leave `user` and `password` out for the unauthenticated port (5000). |
+| `password` | none | Frigate password (a secret). |
+| `media_url` | none | Base URL the phone fetches snapshots and clips from; `url` when unset. Use the unauthenticated port (5000): the app sends no login. |
+| `bridge` | `false` | Turn `<topic_prefix>/events` into `camera` push alerts. Needs `url` or `media_url`. The topic is subscribed only when the bridge is on. |
+| `labels` | `[]` | Object labels to alert on. Empty: all. |
+| `cameras` | `[]` | Cameras to alert on. Empty: all. |
+| `live` | `false` | Serve live camera frames at `/api/v1/cameras/{id}/latest.jpg` and `/stream` (the dashboard Camera widget). Every device on the LAN can read them once it is on. Needs `url`. |
+| `zones` | `[]` | No screen. Alert only once the object enters one of these zones. Empty: any. |
+| `cooldown` | `0` | No screen. Seconds to ignore new events on a camera after an alert. |
+| `severity` | `"warning"` | No screen. Severity of the alerts: `info`, `warning` or `critical`. |
+| `ttl` | `43200` | No screen. Time to live of the alerts, in seconds. |
+| `topic_prefix` | `"frigate"` | No screen. Frigate's MQTT `topic_prefix`. |
+
+The hub also keeps a connection timeout (5000 ms) that no screen or route sets. The broker user needs read on `<topic_prefix>/events`. Frigate needs `snapshots.enabled: true`, and event clips retained (`record.enabled`) for the clip update.
+
+## Push
+
+**Settings → Notifications.** Push notifications, sent by the hub through Firebase Cloud Messaging. Without a key the hub keeps the alert history and sends nothing, with one warning at start. See [Push notifications](../users/push-notifications.md).
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `service_account` | none | The Firebase service-account key JSON (a secret). A key with no `project_id` is refused. A read also shows `project_id`. |
+| `prefix` | `"oikos/push"` | No screen. Topic prefix: `<prefix>/notification/<source>`, `<prefix>/tokens/<installId>`, `<prefix>/responses`, `<prefix>/history`. |
+| `legacy_prefix` | `"oikos-push"` | No screen. OikosPush's topics, still read during the switch-over. An empty string turns them off. |
+| `retry_interval` | `60` | No screen. Seconds between two passes of the retry queue. |
+| `max_retries` | `10` | No screen. Attempts before a queued alert is given up. |
+| `history_size` | `100` | No screen. Alerts kept in the history. |
+| `history_days` | `7` | No screen. Days an alert stays in the history. |
+
+## Climate
+
+The climate engine (beta, still being tested). Switched on from the Climate card of the wizard's Services step. Everything except these two fields is edited through MCP, REST and the web Climate screen, as retained JSON under `prefix`. See [Climate](../users/climate.md).
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `enabled` | `false` | Turn the engine on. While `false`, `GET /api/v1/climate` answers 503 and the climate MCP tools answer `climate disabled`. |
+| `prefix` | `"oikos/climate"` | No screen. Topic prefix of the climate documents. When enabled it must not be empty or only `/`, and must not contain `+` or `#`. |
+
+## Advanced
+
+The low-level knobs, with no screen. Read the section with `GET /api/v1/settings/advanced` (or `get_settings`), change what you need and send the whole document back with `PUT /api/v1/settings/advanced` (or `set_settings`): what you leave out takes its default.
+
+### `topics`
 
 Where the hub looks for discovery and where it keeps its own retained documents. See [MQTT topics](mqtt-topics.md) for what lives under each prefix.
 
-| Key | Default | Description |
+| Field | Default | Description |
 | --- | --- | --- |
 | `discovery_prefixes` | `["oikos"]` | Home Assistant discovery prefixes the hub subscribes to (`<prefix>/#`). The first one is also where the hub publishes the discovery of its own virtual entities and groups. |
 | `ui_prefix` | `"oikos/ui"` | Entity overrides (`<ui_prefix>/<id>`), rooms (`<ui_prefix>/_areas`), the type table (`<ui_prefix>/_types`) and dashboards (`<ui_prefix>/dashboards/<id>`). |
-| `z2m_base` | `"zigbee2mqtt"` | Zigbee2MQTT base topic; the hub reads `<z2m_base>/bridge/devices`, `/info` and `/state`. |
+| `z2m_base` | `"zigbee2mqtt"` | Zigbee2MQTT base topic. The one in `hub.json` (the MQTT step's Advanced field) wins when it is set. |
 | `automation_prefix` | `"oikos/automation"` | Flow definitions: one retained JSON document per flow at `<automation_prefix>/<flow id>`. |
 
-Until Zigbee2MQTT publishes under `oikos`, list the Home Assistant prefix next to it so the discovery topics it still retains under `homeassistant/` are picked up too:
+Until Zigbee2MQTT publishes under `oikos`, list the Home Assistant prefix next to it so the discovery topics it still retains under `homeassistant/` are picked up too: `"discovery_prefixes": ["oikos", "homeassistant"]`.
 
-```toml
-[topics]
-discovery_prefixes = ["oikos", "homeassistant"]
-```
+### `commands`
 
-## `[http]`
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `bind` | `"0.0.0.0:8081"` | Address the HTTP server listens on: the [HTTP API](http-api.md), the WebSocket, the MCP server and the web UI share it. 8081 sits next to Jeedom on 80 and clear of Zigbee2MQTT on 8080 on the same server. |
-
-## `[commands]`
-
-| Key | Default | Description |
+| Field | Default | Description |
 | --- | --- | --- |
 | `confirm_timeout_ms` | `5000` | How long a command waits for the entity's state echo before it reports `accepted: false`. Flow `command` nodes and `send_command` use it. |
 | `subscription_debounce_ms` | `500` | How long the MQTT task waits after the set of state topics changes before it re-diffs its subscriptions. |
 
-## `[automation]`
+### `automation`
 
 The flow engine.
 
-| Key | Default | Description |
+| Field | Default | Description |
 | --- | --- | --- |
 | `runs_kept` | `20` | Recent runs remembered per flow, newest first. Runs live in memory only; a restart forgets them. A value of 0 is treated as 1. |
 
-## `[flows]`
+### `groups`
 
-Flow scheduling and the house position used by sun nodes. See [Flow nodes](flow-nodes.md).
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `timezone` | system zone | IANA zone `trigger.schedule` runs in (`"Europe/Paris"`). Absent: the system's zone, or UTC if it cannot be read. An unknown name falls back to UTC with a warning. |
-| `latitude` | none | House latitude in degrees, north positive, -90 to 90. |
-| `longitude` | none | House longitude in degrees, east positive, -180 to 180. |
-
-`latitude` and `longitude` go together: setting only one, or a value outside the range, stops the hub at start. With neither set, `trigger.sun` and `if` with `op: is_dark` use Paris (48.8566, 2.3522), and saving a flow that reads the sun reports a warning.
-
-```toml
-[flows]
-timezone = "Europe/Paris"
-latitude = 48.8566
-longitude = 2.3522
-```
-
-## `[groups]`
-
-| Key | Default | Description |
+| Field | Default | Description |
 | --- | --- | --- |
 | `enabled` | `false` | Kill switch for [flexible groups](../users/groups-and-virtual-entities.md). While `false`, `GET /api/v1/groups`, `PUT`/`DELETE /api/v1/groups/{id}` and the MCP group tools answer `groups disabled` (503 over HTTP), group commands are rejected, and the one-shot room-group migration is skipped. |
 
-```toml
-[groups]
-enabled = true
-```
+### `alarm`
 
-## `[log]`
+The native alarm's topic prefix. The alarm itself is switched on in its settings document (**Settings → Alarm**, [MCP](mcp-tools.md#alarm), [HTTP](http-api.md#alarm)), so there is no `enabled` field here. See [Alarm](../users/alarm.md).
 
-| Key | Default | Description |
-| --- | --- | --- |
-| `level` | `"info"` | A `tracing` filter: a level (`debug`) or a directive list (`oikos_os=debug,rumqttc=warn`). `RUST_LOG` wins. |
-| `json` | `false` | `true` writes JSON lines; otherwise a human-readable format. Logs go to stderr. |
-
-## `[push]`
-
-Push notifications, sent by the hub through Firebase Cloud Messaging. When `credentials` is not set (in the file or as `OIKOS_PUSH__CREDENTIALS`), the hub uses `secrets/firebase.json` in the config file's folder if that file exists. Without a key the hub keeps the alert history and sends nothing, with one warning at start; a key file that is unreadable is the same, and the warning names its path. The hub starts either way. See [Push notifications](../users/push-notifications.md).
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `prefix` | `"oikos/push"` | Topic prefix: `<prefix>/notification/<source>`, `<prefix>/tokens/<installId>`, `<prefix>/responses`, `<prefix>/history`. |
-| `legacy_prefix` | `"oikos-push"` | OikosPush's topics, still read during the switch-over. An empty string turns them off. |
-| `credentials` | `secrets/firebase.json` next to the config file, when it exists | Path of the Firebase service-account JSON key. Only the path is ever logged. |
-| `retry_interval` | `60` | Seconds between two passes of the retry queue. |
-| `max_retries` | `10` | Attempts before a queued alert is given up. |
-| `history_size` | `100` | Alerts kept in the history. |
-| `history_days` | `7` | Days an alert stays in the history. |
-
-```toml
-[push]
-prefix = "oikos/push"
-legacy_prefix = "oikos-push"
-credentials = "/path/to/firebase-service-account.json"
-```
-
-:::warning
-`[push]` refuses unknown keys. The old `history_topic` and `responses_topic` keys stop the hub at start with an error that names the keys `[push]` accepts. Remove them: the history and responses topics are now always `<prefix>/history` and `<prefix>/responses`.
-:::
-
-## `[frigate]`
-
-Frigate, for alert media and the event bridge. See [Cameras (Frigate)](../users/cameras.md).
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `url` | none | Frigate origin. With it set, media on that origin is served by the hub at `/api/v1/media`, so the browser never sees the login. Any other origin is refused. A blank string counts as unset. |
-| `user` | none | Frigate login, for its login port (8971). Leave `user` and `password` out for the unauthenticated port (5000). |
-| `password` | none | Frigate password. |
-| `connect_timeout_ms` | `5000` | How long a connection to Frigate may take before the media request fails. |
-| `bridge` | `false` | Turn `<topic_prefix>/events` into `camera` push alerts. Needs `url` or `media_url`. The topic is subscribed only when the bridge is on. |
-| `media_url` | none | Base URL the phone fetches snapshots and clips from; `url` when unset. Use the unauthenticated port (5000): the app sends no login. |
-| `labels` | `[]` | Object labels to alert on. Empty: all. |
-| `cameras` | `[]` | Cameras to alert on. Empty: all. |
-| `zones` | `[]` | Alert only once the object enters one of these zones. Empty: any. |
-| `cooldown` | `0` | Seconds to ignore new events on a camera after an alert. |
-| `severity` | `"warning"` | Severity of the alerts: `info`, `warning` or `critical`. |
-| `ttl` | `43200` | Time to live of the alerts, in seconds. |
-| `topic_prefix` | `"frigate"` | Frigate's MQTT `topic_prefix`. |
-| `live` | `false` | Serve live camera frames at `/api/v1/cameras/{id}/latest.jpg` and `/stream` (the dashboard Camera widget). Every device on the LAN can read them once it is on. Needs `url`. |
-
-```toml
-[frigate]
-url = "http://<frigate-host>:8971"
-user = "oikos"
-password = "<password>"
-bridge = true
-media_url = "http://<frigate-host>:5000"
-labels = ["person", "car"]
-```
-
-The broker user needs read on `<topic_prefix>/events`. Frigate needs `snapshots.enabled: true`, and event clips retained (`record.enabled`) for the clip update.
-
-## `[watchdog.gateway]`
-
-Alerts when a component under `<prefix>/` turns non-ok or recovers. Off by default.
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `enabled` | `false` | Subscribe to `<prefix>/+`. |
-| `prefix` | `"encryption-gateway/health"` | Topic prefix where the gateway publishes one retained state per component. Must not be empty when enabled. |
-
-## `[watchdog.acl]`
-
-Alerts on Mosquitto `Denied PUBLISH/SUBSCRIBE/UNSUBSCRIBE` log lines. Off by default.
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `enabled` | `false` | Turn the watchdog on. |
-| `source` | `"topic"` | `"topic"` reads `log_topic` (needs `log_dest topic` in `mosquitto.conf`); `"file"` tails `log_file`. |
-| `log_topic` | `"$SYS/broker/log/#"` | Topic read when `source = "topic"`. Must not be empty in that case. |
-| `log_file` | none | Mosquitto log path, required when `source = "file"`. |
-| `cooldown` | `300` | Seconds during which repeats of one denial are held back; later denials are counted in the next alert. |
-
-```toml
-[watchdog.gateway]
-enabled = true
-prefix = "encryption-gateway/health"
-
-[watchdog.acl]
-enabled = true
-source = "topic"
-cooldown = 300
-```
-
-See [Watchdogs](../users/watchdogs.md) for the alert wording and the broker permissions each source needs.
-
-## `[history]`
-
-TimescaleDB connection for the entity-state history. See [History](../users/history.md).
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `url` | `""` | Postgres URL. Empty turns history off: the house keeps running and the `/api/v1/history/*` routes answer 503. |
-| `buffer_rows` | `100000` | States the writer keeps while the database is unreachable, before it drops the oldest (one warning per outage). |
-
-```toml
-[history]
-url = "postgres://oikos:<password>@<host>:5432/oikos"
-buffer_rows = 100000
-```
-
-## `[climate]`
-
-The climate engine (beta, still being tested). Everything except these two keys is edited through MCP, REST and the web Climate screen, as retained JSON under `prefix`. See [Climate](../users/climate.md).
-
-| Key | Default | Description |
-| --- | --- | --- |
-| `enabled` | `false` | Turn the engine on. While `false`, `GET /api/v1/climate` answers 503 and the climate MCP tools answer `climate disabled`. |
-| `prefix` | `"oikos/climate"` | Topic prefix of the climate documents. When enabled it must not be empty or only `/`, and must not contain `+` or `#`. |
-
-```toml
-[climate]
-enabled = true
-prefix = "oikos/climate"
-```
-
-## `[alarm]`
-
-The native alarm's topic prefix. The alarm itself is switched on in its settings document (**Settings → Alarm**, [MCP](mcp-tools.md#alarm), [HTTP](http-api.md#alarm)), so there is no `enabled` key here. See [Alarm](../users/alarm.md).
-
-| Key | Default | Description |
+| Field | Default | Description |
 | --- | --- | --- |
 | `prefix` | `"oikos/alarm"` | Topic prefix of the alarm's retained documents (`<prefix>/settings`, `<prefix>/state`) and of its panel topics. Must not be empty or only `/`, and must not contain `+` or `#`. |
 
-```toml
-[alarm]
-prefix = "oikos/alarm"
-```
+### `watchdog`
 
-## `[weather]`
+Two opt-in watchdogs that raise `system` alerts, both off by default. See [Watchdogs](../users/watchdogs.md) for the alert wording and the broker permissions each source needs.
 
-Outdoor weather from [Open-Meteo](https://open-meteo.com), a free service with no API key. Off by default: while `enabled` is `false` the hub makes no request at all. See [Weather](../users/weather.md).
-
-| Key | Default | Description |
+| Field | Default | Description |
 | --- | --- | --- |
-| `enabled` | `false` | Turn the weather on. While `false`, `GET /api/v1/weather` answers 503 and `get_weather` answers `weather unavailable`. |
-| `city` | `""` | The city to look up. Required (not empty or blank) when enabled. |
-| `country` | none | Optional ISO 3166-1 alpha-2 filter for the lookup, such as `FR`, so `Paris` is not Paris, Texas. Exactly two letters. |
-| `refresh_minutes` | `15` | Minutes between two fetches, with about 10 % random jitter. Between 10 and 1440 when enabled. |
+| `gateway.enabled` | `false` | Subscribe to `<prefix>/+`. |
+| `gateway.prefix` | `"encryption-gateway/health"` | Topic prefix where the gateway publishes one retained state per component. Must not be empty when enabled. |
+| `acl.enabled` | `false` | Alert on Mosquitto `Denied PUBLISH/SUBSCRIBE/UNSUBSCRIBE` log lines. |
+| `acl.source` | `"topic"` | `"topic"` reads `log_topic` (needs `log_dest topic` in `mosquitto.conf`); `"file"` tails `log_file`. |
+| `acl.log_topic` | `"$SYS/broker/log/#"` | Topic read when `source` is `"topic"`. Must not be empty in that case. |
+| `acl.log_file` | none | Mosquitto log path, required when `source` is `"file"`. |
+| `acl.cooldown` | `300` | Seconds during which repeats of one denial are held back; later denials are counted in the next alert. |
 
-When enabled, an empty `city`, a `country` that is not two letters or a `refresh_minutes` below 10 or above 1440 stops the hub at start with `invalid config: [weather] …`. `OIKOS_WEATHER__ENABLED`, `OIKOS_WEATHER__CITY`, `OIKOS_WEATHER__COUNTRY` and `OIKOS_WEATHER__REFRESH_MINUTES` work like the other sections; the city and country stay text even when they look like numbers.
+### `history_buffer_rows`
 
-```toml
-[weather]
-enabled = true
-city = "Lyon"
-country = "FR"
-refresh_minutes = 15
-```
-
-## `[solcast]`
-
-The Solcast rooftop solar forecast. Off by default: while `enabled` is `false` the hub makes no request at all. See [Solar forecast](../users/solar-forecast.md).
-
-| Key | Default | Description |
+| Field | Default | Description |
 | --- | --- | --- |
-| `enabled` | `false` | Turn the solar forecast on. While `false`, `GET /api/v1/solar` answers 503 and `get_solar` answers `solar unavailable`. |
-| `sites` | `[]` | Rooftop resource ids from the Solcast Toolkit, one or more. Each id may hold only letters, digits, `-` and `_`. One request per site per refresh. |
-| `daily_limit` | `10` | This hub's share of the account's requests per UTC day. The hobbyist limit is 10. Refreshes per day are `(daily_limit - 2) / number of sites`, at least 1; 2 calls are kept in reserve. Must be at least the number of sites. |
-| `api_key_file` | `secrets/solcast.key` next to `oikos.toml` | The file holding the API key, on one line. Only the path is logged. |
+| `history_buffer_rows` | `100000` | States the history writer keeps while the database is unreachable, before it drops the oldest (one warning per outage). See [History](../users/history.md). |
 
-When enabled, no site, an empty or invalid id, a `daily_limit` below the number of sites, or an unreadable or empty key file stops the hub at start with `invalid config: [solcast] …`. `OIKOS_SOLCAST__ENABLED`, `OIKOS_SOLCAST__SITES`, `OIKOS_SOLCAST__DAILY_LIMIT` and `OIKOS_SOLCAST__API_KEY_FILE` work like the other sections; the sites are a list, so use array syntax: `OIKOS_SOLCAST__SITES='["<resource id>"]'`.
+## Importing an old `oikos.toml`
 
-The API key is never written to `oikos.toml`, a log line, an API response or MQTT.
+Older installs were configured by an `oikos.toml` and key files in `secrets/`. The hub reads neither any more, except once. When there is no `data/hub.json` yet, the first start looks for a file to import, in this order: the `--config` file if it exists, `data/oikos.toml`, then (with no `--config`) `oikos.toml` in the working directory. It loads and validates that file as the old hub did, then maps it into the new shape without asking anything:
 
-```toml
-[solcast]
-enabled = true
-sites = ["<rooftop resource id>"]
-daily_limit = 10
-```
+- the broker connection and `[history] url` go to `hub.json`; the other sections go to the settings rows, with the home location built from `[flows]` (or the weather coordinates) and the city from `[weather]`;
+- the push and Solcast key files (`secrets/firebase.json` and `secrets/solcast.key` next to the TOML, or the paths it names) are read into the settings, so no key file is needed afterwards;
+- a login written inside a Frigate address moves into the user and password fields.
+
+When it is done the hub logs `oikos.toml imported into the database; it is no longer read and can be deleted`. A hub that already has a `data/hub.json` never imports; a hub still in setup mode that finds an `oikos.toml` in its working directory warns that the file is not read. A file that does not load or validate stops the hub at start with the reason, and nothing is written. The migration steps for a Docker install are in [Upgrading from `oikos.toml`](../users/install-on-linux.md#upgrading-from-oikostoml).

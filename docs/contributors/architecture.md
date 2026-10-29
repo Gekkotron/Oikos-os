@@ -59,7 +59,7 @@ Oikos-os is one Cargo workspace (`crates/*`) with one binary, `oikos-os`. The hu
 1. A client sends a command (`POST /api/v1/entities/{id}/command`, `send_command`, a flow `command` node or a group fan-out).
 2. The hub maps it to one or more MQTT publishes using the entity's discovery config, and refuses it before publishing if the entity is unknown, offline or cannot take it.
 3. The publishes go to the MQTT task through a bounded queue.
-4. The hub waits up to `[commands] confirm_timeout_ms` for the entity's value to change. The reply is `accepted: true` with the new state once the echo arrives, or `accepted: false` with the reason.
+4. The hub waits up to the `commands.confirm_timeout_ms` setting for the entity's value to change. The reply is `accepted: true` with the new state once the echo arrives, or `accepted: false` with the reason.
 
 Overrides, areas, flows, groups, virtual entities and dashboards follow a shorter path: the hub publishes the retained document and applies it locally at once, so the reply already reflects it. The broker's echo is then a no-op.
 
@@ -73,8 +73,8 @@ The flow store keeps the decoded definitions read from `<automation_prefix>/#` a
 
 ### History writer
 
-The ingest path offers each changed state to a bounded channel with `try_send`, so a slow database never blocks the house. The writer task batches rows into TimescaleDB, retrying with backoff while the database is down and dropping the oldest pending rows past `[history] buffer_rows`. A rollup task keeps an hourly table for the chart queries behind `/api/v1/history/*`. Secret entities are never offered to it.
+The ingest path offers each changed state to a bounded channel with `try_send`, so a slow database never blocks the house. The writer task batches rows into TimescaleDB, retrying with backoff while the database is down and dropping the oldest pending rows past the `history_buffer_rows` setting (advanced section). A rollup task keeps an hourly table for the chart queries behind `/api/v1/history/*`. Secret entities are never offered to it.
 
 ### Climate engine
 
-With `[climate] enabled`, the hub holds the retained documents under `[climate] prefix` and runs an evaluation loop. Per zone, `oikos-climate` decides from a priority tree (safety, override, holiday, away, schedule); the hub commands the devices through the normal command path, tells a hand change on a device from the engine's own echo, and raises safety alerts through push. A learner reads history, proposes a schedule, and nothing applies until it is approved. See [Climate](../users/climate.md).
+With the climate engine on, the hub holds the retained documents under the climate `prefix` and runs an evaluation loop. Per zone, `oikos-climate` decides from a priority tree (safety, override, holiday, away, schedule); the hub commands the devices through the normal command path, tells a hand change on a device from the engine's own echo, and raises safety alerts through push. A learner reads history, proposes a schedule, and nothing applies until it is approved. See [Climate](../users/climate.md).

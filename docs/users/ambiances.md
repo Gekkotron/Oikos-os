@@ -64,7 +64,7 @@ Alarm codes are refused in an ambiance, because the broker would store them in c
 
 ### Climate
 
-A climate action needs the climate engine on (`[climate] enabled = true`, see [Climate](climate.md)). While it is off, saving an ambiance with a climate action is refused. If the engine is turned off later, the action is reported as skipped.
+A climate action needs the climate engine on (see [Climate](climate.md)). While it is off, saving an ambiance with a climate action is refused. If the engine is turned off later, the action is reported as skipped.
 
 - `zone` is a zone id, or `null` for every zone that is active when the ambiance is applied.
 - `setpoint` is a temperature in °C, or `"off"`. `mode` is `heat` or `cool`. Give at least one of them, with `hours` (1 to 720) as the duration of the hold.

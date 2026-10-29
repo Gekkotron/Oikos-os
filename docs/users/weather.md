@@ -10,23 +10,16 @@ Weather is **off by default**. While it is off, the hub makes no request to anyo
 
 ## Turn it on
 
-Add a `[weather]` section to `oikos.toml` and restart the hub:
+Set the home location first (the city step of the setup wizard, or **Settings → Location**): the weather uses it. Then open **Settings → Weather** (or the Services step of the setup wizard), switch **Enabled** on and save. The hub restarts to pick the change up.
 
-```toml
-[weather]
-enabled = true
-city = "Lyon"
-country = "FR"
-refresh_minutes = 15
-```
+- **Enabled** is off by default.
+- **Refresh every (minutes)** is 15 by default and must be between 10 and 1440 when weather is on.
+- The city and country come from your home location: the city is required, and the country is an optional two-letter code (`FR`) that keeps the lookup to one country, so `Paris` is not Paris, Texas.
+- A value the hub cannot run with (a refresh below 10, a three-letter country) is refused when you save, and nothing is changed.
 
-- `city` is required. `country` is optional: two letters (`FR`), it keeps the lookup to one country, so `Paris` is not Paris, Texas.
-- `refresh_minutes` is 15 by default and must be between 10 and 1440.
-- A mistake (an empty city, a three-letter country, a refresh below 10) stops the hub at start with a message naming the key.
+With a home location set, the hub uses its coordinates and makes no lookup. A city imported from an old `oikos.toml` without coordinates is looked up once at start, and the hub logs the place it chose (name, region, country and coordinates). If it finds nothing, it logs an error naming the city and the weather stays unavailable until you fix the location in Settings. If the lookup fails because of the network, the hub retries after 30 seconds, then waits twice as long each time, up to 15 minutes between tries. The rest of the house keeps running either way.
 
-At start the hub looks the city up once and logs the place it chose (name, region, country and coordinates). If it finds nothing, it logs an error naming the city and the weather stays unavailable until you fix the name and restart. If the lookup fails because of the network, the hub retries after 30 seconds, then waits twice as long each time, up to 15 minutes between tries. The rest of the house keeps running either way.
-
-See [Configuration](../reference/configuration.md#weather) for every key and environment variable.
+See the [Settings reference](../reference/configuration.md#weather) for the stored fields, and `get_settings` / `set_settings` in [MCP tools](../reference/mcp-tools.md) to change them from an assistant.
 
 ## In the web UI
 
@@ -36,7 +29,7 @@ The weather document also carries the next five days, starting tomorrow. Each da
 
 Tap the card to open the weather page (`/weather`), from the same data as the document above. It opens on **Now**: a big temperature with the condition and the feels-like temperature, and on the right today's low and high, the lowest temperature tonight and whether rain is expected within the hour. Under it are tiles for **Wind** (speed, an arrow showing where it blows to, the compass point and gusts), **Humidity**, **Pressure**, **Clouds**, **Rain** (today's total and chance), **Max gusts**, **UV index** (with its level) and **Sun** (sunset and sunrise).
 
-Under the tiles, a **Forecast** strip shows **Today** and the next five days, each with its condition, high, low and chance of rain. Tap a day to see that day on the same page, with the tiles showing its values (the address becomes `/weather?day=<date>`); tap **Today** to come back. The footer gives the place the hub found, the update time and the Open-Meteo credit, plus "Data from HH:MM" when the data is stale. With weather off, the page says the weather is unavailable and to enable `[weather]` in `oikos.toml`. The header rules and the page layout are in [The web UI](web-ui.md#home-header).
+Under the tiles, a **Forecast** strip shows **Today** and the next five days, each with its condition, high, low and chance of rain. Tap a day to see that day on the same page, with the tiles showing its values (the address becomes `/weather?day=<date>`); tap **Today** to come back. The footer gives the place the hub found, the update time and the Open-Meteo credit, plus "Data from HH:MM" when the data is stale. With weather off, the page says the weather is unavailable and to turn it on in **Settings → Weather**. The header rules and the page layout are in [The web UI](web-ui.md#home-header).
 
 ## The entities
 
@@ -92,7 +85,7 @@ See [Flows](flows.md) for the nodes.
 
 ## Privacy
 
-While `[weather] enabled` is `true`, the hub sends the **city name** (and the country, if set) to Open-Meteo's geocoding service, then the **coordinates of the place it found** with each forecast request. Open-Meteo sees your public IP address, as any web service does. Nothing else leaves the house: no device names, no entity states. While weather is disabled, nothing is sent.
+While weather is enabled, the hub sends the **city name** (and the country, if set) to Open-Meteo's geocoding service, then the **coordinates of the place it found** with each forecast request. Open-Meteo sees your public IP address, as any web service does. Nothing else leaves the house: no device names, no entity states. While weather is disabled, nothing is sent.
 
 ## Credit
 

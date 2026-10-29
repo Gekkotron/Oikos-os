@@ -34,7 +34,7 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
 - **Triggers** start a run:
   - `trigger.state`: an entity's state changes.
   - `trigger.signal`: a remote press, an event entity or a tag scan.
-  - `trigger.schedule`: a five-field cron expression in the house time zone (`[flows] timezone`, the hub's system zone when unset).
+  - `trigger.schedule`: a five-field cron expression in the house time zone (the time zone of your home location, set in the setup wizard or **Settings → Location**; the hub's system zone when none is set).
   - `trigger.sun`: sunrise, sunset, dusk or dawn, with an optional `offset_minutes`.
   - `trigger.manual`: a button you press on the card (see [Manual trigger](#manual-trigger)). It has an optional `value`: an on/off bool, a number or text.
 - **Checks** branch:
@@ -48,7 +48,7 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
 - **Waits** pause the run:
   - `delay` waits for `for`, for example `90s`, `5m` or `1h30m`. With an optional `up_to` it waits a random time between the two.
 
-The sun nodes and `is_dark` read the house location. Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`, both or neither; without them the hub uses Paris, and the web UI shows a "Paris fallback" badge on sun cards. See [Configuration](../reference/configuration.md).
+The sun nodes and `is_dark` read the house location. Set your home location in the setup wizard or **Settings → Location**; without one the hub uses Paris, and the web UI shows a "Paris fallback" badge on sun cards. See the [Settings reference](../reference/configuration.md#home-location).
 
 ### Branch on several values
 
@@ -108,7 +108,7 @@ The scalar is the one value of a state that triggers and `if` compare: the on/of
 
 `mode` says what a trigger does while a run of the same flow is still active. `single` (the default) ignores the new trigger and records a skipped run. `restart` cancels the active run and starts a new one, which is what makes "5 minutes after the last motion" work: motion coming back cancels the pending `delay`.
 
-Two config keys: `[topics] automation_prefix` (default `oikos/automation`) and `[automation] runs_kept` (recent runs remembered per flow, default 20). Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker.
+Two low-level settings, in the `advanced` section (see the [Settings reference](../reference/configuration.md#advanced)): `topics.automation_prefix` (default `oikos/automation`) and `automation.runs_kept` (recent runs remembered per flow, default 20). Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker.
 
 ## Manual trigger
 

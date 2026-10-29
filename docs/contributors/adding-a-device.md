@@ -41,12 +41,7 @@ Discovery topic:
 
 Between the component and `config` there is one or two segments. None may be empty. The default prefix is `oikos`.
 
-A bridge that publishes under `homeassistant` works once the hub lists that prefix:
-
-```toml
-[topics]
-discovery_prefixes = ["oikos", "homeassistant"]
-```
+A bridge that publishes under `homeassistant` works once the hub lists that prefix: add `"homeassistant"` to `topics.discovery_prefixes` in the `advanced` section (`["oikos", "homeassistant"]`), with `PUT /api/v1/settings/advanced` or the `set_settings` MCP tool. See the [Settings reference](../reference/configuration.md#advanced).
 
 Rules:
 
@@ -139,7 +134,7 @@ Without them the card falls back to the mode. The target stepper appears only wi
 
 ### Restarts
 
-With `[mqtt] send_ha_birth = true` (off by default), the hub publishes `online` (not retained) on `[mqtt] ha_status_topic` (default `homeassistant/status`) each time it connects. A bridge subscribes to that topic and re-publishes its discovery and state when it sees `online`.
+With `mqtt.send_ha_birth` on (off by default; set it in the `mqtt` object of `data/hub.json` while the hub is stopped, or with `OIKOS_MQTT__SEND_HA_BIRTH=true`), the hub publishes `online` (not retained) on `mqtt.ha_status_topic` (default `homeassistant/status`) each time it connects. A bridge subscribes to that topic and re-publishes its discovery and state when it sees `online`.
 
 Retained configs cover most restarts. The birth message covers a broker that lost its retained messages.
 

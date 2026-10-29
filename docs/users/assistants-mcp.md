@@ -52,4 +52,4 @@ You can ask in plain words, for example:
 - "Show me the energy the house used today."
 - "Hold the bedroom at 19 degrees for the next two hours."
 
-Flows made this way appear on the [Flows](flows.md) page. Energy questions need `[history]` set, and climate requests need `[climate] enabled = true`; without them the tools answer with an error.
+Flows made this way appear on the [Flows](flows.md) page. Energy questions need the database connected (it is, after setup), and climate requests need the climate engine on (see [Climate](climate.md)); without them the tools answer with an error. An assistant can also read and change the service settings (weather, solar forecast, cameras, notifications, climate and the advanced ones) with `get_settings` and `set_settings`; see [MCP tools](../reference/mcp-tools.md).

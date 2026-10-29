@@ -4,7 +4,7 @@ sidebar_position: 6
 description: Every MQTT topic the hub reads or writes, with its direction, retention, payload and the setting that moves it.
 ---
 
-The table lists every topic the hub reads or writes, with its default prefix. "In" means the hub subscribes; "out" means the hub publishes. A prefix is shown in `<angle brackets>` or as its default, and the last column names the `oikos.toml` key that moves it (see [Configuration](configuration.md)). The broker user in `[mqtt] user` needs read and/or write on each topic accordingly.
+The table lists every topic the hub reads or writes, with its default prefix. "In" means the hub subscribes; "out" means the hub publishes. A prefix is shown in `<angle brackets>` or as its default, and the last column names the setting that moves it (see the [Settings reference](configuration.md)). Settings in the last column are written `[section] field`: `[topics]`, `[watchdog.gateway]` and `[watchdog.acl]` are in the **advanced** settings, `[groups]` and `[alarm]` too (see the [Settings reference](configuration.md#advanced)); `[weather]` is **Settings → Weather**, `[solcast]` **Settings → Solar forecast**, `[frigate]` **Settings → Cameras**, `[push]` **Settings → Notifications**, `[climate]` the Climate card of the setup wizard; `[mqtt] send_ha_birth` and `ha_status_topic` are in the `mqtt` object of `data/hub.json`. The broker user (the MQTT user of **Settings → Broker**) needs read and/or write on each topic accordingly.
 
 | Topic | Direction | Retained | Payload | Moved by |
 | --- | --- | --- | --- | --- |

@@ -18,7 +18,7 @@ The alarm has no code or PIN. The hub has no authentication yet (see [Security](
 
 ## Turn it on
 
-The alarm is switched on in its settings, not in `oikos.toml`. Open **Settings → Alarm** in the [web UI](web-ui.md), or use the [MCP tools](../reference/mcp-tools.md#alarm) or the [HTTP API](../reference/http-api.md#alarm). The only `oikos.toml` key is the topic prefix, which you rarely change (see [Configuration](../reference/configuration.md#alarm)).
+The alarm is switched on in its own settings, not in the service settings. Open **Settings → Alarm** in the [web UI](web-ui.md), or use the [MCP tools](../reference/mcp-tools.md#alarm) or the [HTTP API](../reference/http-api.md#alarm). The only other setting is the topic prefix, which you rarely change (see the [Settings reference](../reference/configuration.md#alarm)).
 
 The page has an **Enable the alarm** switch and the sections **Sensors**, **Sirens**, **Remotes**, **Presence** and **Timing**. Nothing is applied until you press **Save**, and a toast says **Saved**. If the hub refuses the settings, the page shows the reason and the previous settings stay in force. A line at the top lists chosen entities the house no longer has.
 

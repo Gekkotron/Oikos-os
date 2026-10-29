@@ -4,7 +4,7 @@ sidebar_position: 2
 description: Every route of the hub's REST API and WebSocket, with bodies, replies and status codes.
 ---
 
-The hub listens on `[http] bind` (default `0.0.0.0:8081`). It answers JSON, with CORS open to any origin and no authentication in v1: keep it on the LAN. The router is in [`crates/oikos-os/src/http`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/http) and the wire types in [`crates/oikos-api`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-api).
+The hub listens on the HTTP bind address (default `0.0.0.0:8081`, see the [Settings reference](configuration.md#bootstrap-settings-hubjson)). It answers JSON, with CORS open to any origin and no authentication in v1: keep it on the LAN. The router is in [`crates/oikos-os/src/http`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-os/src/http) and the wire types in [`crates/oikos-api`](https://github.com/Gekkotron/Oikos-os/tree/main/crates/oikos-api).
 
 Besides the JSON API, the same port serves:
 
@@ -22,11 +22,33 @@ Ids in paths are the entity, flow, group or dashboard ids the API returns. Bodie
 | `GET /api/v1/snapshot` | The whole house: connection, bridge, areas, devices, entities with their state, ignored topics, alerts, flows and `generated_at` (unix seconds). The same document is the MCP resource `oikos://snapshot`. |
 | `GET /api/v1/ignored` | The discovery topics that did not become an entity, each `{topic, reason}`. |
 
+## Setup and settings
+
+The routes the setup wizard and the Settings pages use. They answer in both modes: a hub that has not finished its MQTT and database setup is in **setup mode** and serves only these routes, `/health` and the web UI; once both are saved it is **running** and serves everything. Like the rest of the API they have no login. Secrets never appear in a reply: a stored secret reads `{"set": true}` (or `false`). To send one, give a string; to clear it, send `null`; leave it out (or send `""` or `{"set": true}` back) to keep it. See the [Settings reference](configuration.md) for what each section holds.
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/setup` | `{mode, step, finished, bundled, location, mqtt, database, restarting}` (`200`). `mode` is `setup` or `running`; `step` is `welcome`, `mqtt`, `database`, `devices`, `services` or `done`; `bundled` says `data/bundled.json` exists; `mqtt` shows the connection (`host`, `port`, `user`, `client_id`, `z2m_base`, `password: {"set": bool}`) and `database` its `host`, `port`, `database`, `user` and `password: {"set": bool}`, pre-filled from the bundled stack while nothing is saved. |
+| `GET /api/v1/setup/geocode?city=…&country=…` | Up to five places `{name, admin, country, latitude, longitude, timezone}` for the city (`country` is an optional two-letter filter). An empty city gives `[]`. `502` when the lookup fails. |
+| `PUT /api/v1/setup/location` | Saves the home location `{city, country, latitude, longitude, timezone}` and returns the setup status. `422` for an empty city, coordinates out of range, an unknown time zone or a country that is not two letters. Restarts a running hub. |
+| `POST /api/v1/setup/test/mqtt` | Body `{host, port, user, password, client_id, z2m_base}`: connects with it and returns `{ok, message, detail}` (`200`, also when `ok` is `false`). `422` when the user is missing for a password, or the password is not sent again for a new address. |
+| `PUT /api/v1/setup/mqtt` | The same body: tests, then saves it and returns the setup status. `422` (with the test result as the body) when the test fails. Restarts a running hub, and a hub that has just become complete. |
+| `POST /api/v1/setup/test/database` | Body `{host, port, database, user, password}`: connects, checks the `timescaledb` extension and prepares the tables; `{ok, message, detail}` as above. `detail.history_since` says since when the database already holds history (or `null`). `422` as for MQTT. |
+| `PUT /api/v1/setup/database` | The same body: tests, then saves it as the database URL. Same statuses as `PUT /api/v1/setup/mqtt`. |
+| `PUT /api/v1/setup/step` | `{"step": "services"}`: records where the wizard stands and returns the status. Never restarts. |
+| `POST /api/v1/setup/finish` | Marks the setup finished and returns the status. `409` while MQTT and the database are not both saved. |
+| `GET /api/v1/settings/{section}` | One section as the Settings page shows it (`200`): `weather`, `solcast`, `frigate`, `push`, `climate` or `advanced`. `404` for another name. |
+| `PUT /api/v1/settings/{section}` | Replaces the section with the body, checks it the way the hub checks its settings at start, saves it and restarts the hub. Returns `{"restarting": true}` (`200`). What the body leaves out takes its default, so read the section first and send the whole of it back. `404` unknown section, `409` in setup mode, `422` for a body that does not validate (the reason is fixed text, never a secret), `500` when the settings cache cannot be written, `503` while a restart is pending or the database is unreachable. |
+| `POST /api/v1/setup/test/solcast` | Body as for `PUT /api/v1/settings/solcast`: checks the key with one Solcast call (`{ok, message, detail}`, `200`; `detail.sites` lists the rooftop sites). Without a key anywhere it answers `ok: false`. |
+| `POST /api/v1/setup/test/frigate` | Body as for `PUT /api/v1/settings/frigate`: logs into Frigate at the address (`{ok, message, detail}`, `200`; `detail.cameras` lists the enabled cameras). Without an address it answers `ok: false`. `422` for an address that is not valid or carries a login. |
+
+The setup `PUT`s and `POST /api/v1/setup/finish` also answer `500` `{"error": "cannot save hub.json"}` when the file cannot be written, and the location, MQTT and database `PUT`s answer `422` with the reason, on a running hub, when the change would leave settings the hub cannot start with (the same check as `PUT /api/v1/settings/{section}`); nothing is saved then. Every write that restarts the hub answers first; the hub is back a few seconds later (poll `GET /health`). Writes answer `503` `{"error": "restarting"}` meanwhile. The same two settings operations exist over MCP as `get_settings` and `set_settings` ([MCP tools](mcp-tools.md#home-settings)).
+
 ## Entities
 
 | Route | What it does |
 | --- | --- |
-| `POST /api/v1/entities/{id}/command` | Sends a command (`{"type": "turn_on", …}`) and reports `{accepted, reason, state}`: `accepted` is `true` once the entity's state echo confirms it within `[commands] confirm_timeout_ms`, `false` with a `reason` when nothing came back in time. `404` for an unknown entity, `422` for a command the entity cannot take or an offline entity, `503` while the broker link is down. |
+| `POST /api/v1/entities/{id}/command` | Sends a command (`{"type": "turn_on", …}`) and reports `{accepted, reason, state}`: `accepted` is `true` once the entity's state echo confirms it within the `commands.confirm_timeout_ms` setting (default 5000), `false` with a `reason` when nothing came back in time. `404` for an unknown entity, `422` for a command the entity cannot take or an offline entity, `503` while the broker link is down. |
 | `PATCH /api/v1/entities/{id}/override` | Changes fields of the entity's `oikos/ui/<id>` override and returns the entity as it now appears. The body is a partial override; `null` clears a field. `400` for an unknown field or a bad value (the error names the valid ones), `404`, `503`. The fields are listed in [Entity types](entity-types.md#overrides). |
 | `DELETE /api/v1/entities/{id}/override` | Removes the override (`204`). |
 | `GET /api/v1/entities/{id}/picture` | The picture of a camera or image entity: the stored bytes, or the bytes of its URL fetched by the hub now (10 s timeout, 5 MiB cap, no redirects followed). The reply is served as an image or as an opaque download, with `X-Content-Type-Options: nosniff`. `404` when the entity has no picture, `502` when the URL cannot be fetched. |
@@ -47,7 +69,7 @@ Ids in paths are the entity, flow, group or dashboard ids the API returns. Bodie
 
 ## Groups
 
-Groups need `[groups] enabled = true`; while it is `false` every route here answers `503` with `groups disabled`. See [Groups and virtual entities](../users/groups-and-virtual-entities.md).
+Groups need `groups.enabled` in the advanced settings ([Settings reference](configuration.md#groups)); while it is off every route here answers `503` with `groups disabled`. See [Groups and virtual entities](../users/groups-and-virtual-entities.md).
 
 | Route | What it does |
 | --- | --- |
@@ -101,7 +123,7 @@ See [Flow nodes](flow-nodes.md) for the document format.
 | `POST /api/v1/flows/{id}/run` | Starts a run by hand; `202` with the run. Optional JSON body `{"node": "<card id>"}` starts from that `trigger.manual` card and the run carries its value. `422` when the flow is disabled, invalid or already running (a card press on a `restart` flow replaces the active run instead), or when `<card id>` is not a manual trigger of this flow. |
 | `POST /api/v1/flows/{id}/area` | `{"area": "<id>" \| null}` sets the room the flow is listed under (`null` clears it; the key is required); returns the flow. `422` for an unknown room, a body without `area` or an invalid flow, `404` for an unknown flow. |
 | `GET /api/v1/schedule?cron=…&count=…` | Previews a 5-field cron in the house time zone: `{timezone, next: […]}` with the next `count` ticks as RFC 3339 (default 3, at most 10). `422` for a bad cron. |
-| `GET /api/v1/config/flows` | The `[flows]` settings as the UI needs them: `{latitude, longitude, timezone, fallback_active}`. |
+| `GET /api/v1/config/flows` | The home location as the UI needs it: `{latitude, longitude, timezone, fallback_active}`. |
 
 ## Alerts and push
 
@@ -109,14 +131,14 @@ See [Flow nodes](flow-nodes.md) for the document format.
 | --- | --- |
 | `GET /api/v1/alerts` | The push alerts the hub keeps in its retained history (`oikos/push/history`), newest first. |
 | `POST /api/v1/alerts/{id}/actions/{action}` | Publishes the reply the app publishes when a button is tapped (`{"id","action","install_id":"oikos-web","ts"}` on `oikos/push/responses`); `202`, or `404` for an unknown alert or action, `503` while the broker link is down. |
-| `GET /api/v1/push` | Push status: `{"state","installs","queued"}`. `state` is `off` (no usable Firebase key: neither `[push] credentials` nor `secrets/firebase.json`), `syncing` (rebuilding the token map after a connect) or `ready`; `installs` counts the registered app installs, `queued` the alerts waiting in the retry queue. |
+| `GET /api/v1/push` | Push status: `{"state","installs","queued"}`. `state` is `off` (no usable Firebase key saved in **Settings → Notifications**), `syncing` (rebuilding the token map after a connect) or `ready`; `installs` counts the registered app installs, `queued` the alerts waiting in the retry queue. |
 
 ## Media
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/v1/media?url=…` | A Frigate snapshot or clip fetched by the hub with the Frigate login (`[frigate]`). `Range` is passed through so clips seek. `400` without a valid absolute `url`, `403` off the Frigate origin or without a `[frigate] url`, `502` when Frigate is unreachable or refuses the login. |
-| `GET /api/v1/cameras` | `{ "live": bool, "cameras": [{ "id", "name" }] }`: Frigate's enabled cameras (from its `/api/config`, cached about a minute) and the `[frigate] live` switch. An empty list without `[frigate] url` or when Frigate is unreachable. |
+| `GET /api/v1/media?url=…` | A Frigate snapshot or clip fetched by the hub with the Frigate login (**Settings → Cameras**). `Range` is passed through so clips seek. `400` without a valid absolute `url`, `403` off the Frigate origin or without a Frigate address, `502` when Frigate is unreachable or refuses the login. |
+| `GET /api/v1/cameras` | `{ "live": bool, "cameras": [{ "id", "name" }] }`: Frigate's enabled cameras (from its `/api/config`, cached about a minute) and the live view switch. An empty list without a Frigate address or when Frigate is unreachable. |
 | `GET /api/v1/cameras/{id}/latest.jpg?h=` | One live frame of camera `id`, `h` pixels high (default 360, at most 1080), with `cache-control: no-store`. `403` while `live` is off, `404` for an id Frigate does not list, `502` when Frigate is unreachable. |
 | `GET /api/v1/cameras/{id}/stream?h=` | The camera's MJPEG stream (`multipart/x-mixed-replace`), with no total timeout; the hub drops it when the browser disconnects. Same answers as `latest.jpg`. |
 
@@ -124,7 +146,7 @@ When alerts point at Frigate's login port (8971) the browser cannot load them, s
 
 ## History
 
-Available when `[history] url` is set. See [History](../users/history.md).
+Available when the database is connected (**Settings → Database**). See [History](../users/history.md).
 
 | Route | What it does |
 | --- | --- |
@@ -134,11 +156,11 @@ Available when `[history] url` is set. See [History](../users/history.md).
 | `GET /api/v1/history/last_change?entity=&entity=…` | Last change time of 1 to 50 entities, in request order: `{items: [{changed_at, recorded}, …]}`. |
 | `GET /api/v1/history/grid_day?date=YYYY-MM-DD` | What crossed the grid meter on one house-local day (today when `date` is absent): `{date, today, first_date, day_slots, slots: [{start, local, off_peak, peak, export}, …], bands: [[from, to], …], totals: {off_peak, peak, export}, has_export, tariffs}`. Slots are half hours of real time from local midnight (46, 48 or 50 a day, `day_slots`; today stops at the current one), `start` in unix seconds and `local` as `HH:MM`; kWh are counter increases, bought split by the off-peak windows in force that day (`bands`, unix seconds). The counters are those paired with the `grid` role (bought) and their export twin or `grid_export` (sold). `400 bad_request` for a bad or future date, `404 no_grid_meter` without a grid counter, `503 history_unavailable`. |
 
-Errors are `400 bad_request` (a missing entity, an unknown range, `days` other than 7, 30 or 365, an unknown `kind`, or no `entity` at all), `404 not_recorded` (the entity has no rows) and `503 history_unavailable` (`[history] url` not set, or the database is down).
+Errors are `400 bad_request` (a missing entity, an unknown range, `days` other than 7, 30 or 365, an unknown `kind`, or no `entity` at all), `404 not_recorded` (the entity has no rows) and `503 history_unavailable` (the database is not connected, or is down).
 
 ## Climate
 
-Available when `[climate] enabled = true`; otherwise these routes answer `503`. See [Climate](../users/climate.md).
+Available when the climate engine is on; otherwise these routes answer `503`. See [Climate](../users/climate.md).
 
 | Route | What it does |
 | --- | --- |
@@ -166,11 +188,11 @@ The native alarm is off until its settings have `enabled` true; the routes answe
 
 ## Weather
 
-Available when `[weather] enabled = true`. See [Weather](../users/weather.md).
+Available when weather is on in **Settings → Weather**. See [Weather](../users/weather.md).
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/v1/weather` | The outdoor weather as one document (below). `503` while `[weather]` is off, the city was not found, or no fetch has succeeded yet. |
+| `GET /api/v1/weather` | The outdoor weather as one document (below). `503` while weather is off, the city was not found, or no fetch has succeeded yet. |
 
 ```json
 {
@@ -204,11 +226,11 @@ Units are metric: °C, km/h, mm, hPa and %. `fetched_at` is unix seconds. Any nu
 
 ## Solar
 
-Available when `[solcast] enabled = true`. See [Solar forecast](../users/solar-forecast.md).
+Available when the solar forecast is on in **Settings → Solar forecast**. See [Solar forecast](../users/solar-forecast.md).
 
 | Route | What it does |
 | --- | --- |
-| `GET /api/v1/solar` | The solar forecast as one document (below). `503` with `solar unavailable` while `[solcast]` is off or before the first fetch. |
+| `GET /api/v1/solar` | The solar forecast as one document (below). `503` with `solar unavailable` while the solar forecast is off or before the first fetch. |
 
 ```json
 {
@@ -231,7 +253,7 @@ Available when `[solcast] enabled = true`. See [Solar forecast](../users/solar-f
 }
 ```
 
-Energies are kWh (the day figures), powers kW (the period values, the means over each period), times Unix seconds and dates `YYYY-MM-DD` in the house's time zone. Any number may be `null`. `next_refresh_at` is `null` when no call is planned (budget spent, key refused). `days` holds the next seven days, starting tomorrow. `periods` are the 30-minute forecast periods from local midnight today to the end of tomorrow, each with its mean power in kW (`estimate`, `low`, `high`) and its `minutes` length. `sites` never carries the resource id; `index` is its position in `[solcast] sites`. `best_hours` is the longest run today where the estimate is at least 60 % of the peak, or `null` on a day with no production. `history.forecasts` lists the morning forecast of each of the 7 local days before today, oldest first, and is empty when history is off. `stale` is `true` when a planned refresh has failed for over an hour or the last success is older than 18 hours.
+Energies are kWh (the day figures), powers kW (the period values, the means over each period), times Unix seconds and dates `YYYY-MM-DD` in the house's time zone. Any number may be `null`. `next_refresh_at` is `null` when no call is planned (budget spent, key refused). `days` holds the next seven days, starting tomorrow. `periods` are the 30-minute forecast periods from local midnight today to the end of tomorrow, each with its mean power in kW (`estimate`, `low`, `high`) and its `minutes` length. `sites` never carries the resource id; `index` is its position in the solar forecast's site list. `best_hours` is the longest run today where the estimate is at least 60 % of the peak, or `null` on a day with no production. `history.forecasts` lists the morning forecast of each of the 7 local days before today, oldest first, and is empty when history is off. `stale` is `true` when a planned refresh has failed for over an hour or the last success is older than 18 hours.
 
 ## WebSocket
 
@@ -272,6 +294,6 @@ Errors are `{"error": "…"}` with one of these statuses:
 | `404` | An unknown entity, alert, action, flow, area, dashboard, group, virtual entity, ambiance or route. |
 | `422` | A command refused, a bad virtual or group id or spec, a flow that is invalid, disabled or already running, an unknown room, a dashboard that does not validate, or an ambiance that does not validate, names something the house does not know, or is already running. |
 | `502` | A picture URL or Frigate media that cannot be fetched. |
-| `503` | The broker link is down, so the write was refused and nothing was applied; or the feature is off (`[groups]`, `[climate]`, `[history]`). The same publish refusal is an in-band tool error over MCP. |
+| `503` | The broker link is down, so the write was refused and nothing was applied; or the feature is off (groups, climate, history). The same publish refusal is an in-band tool error over MCP. |
 
 History routes use short codes as the message: `bad_request`, `not_recorded` and `history_unavailable`.

@@ -29,7 +29,7 @@ Status: v1 hub with its web UI: registry, API, WebSocket, MCP and the browser ap
 - [Install on Linux](users/install-on-linux.md): the Docker install on a Linux host.
 - [Flows](users/flows.md): automations built from triggers, checks, waits and actions.
 - [Talking to the house (MCP)](users/assistants-mcp.md): connect an AI assistant.
-- [Configuration](reference/configuration.md): every key in `oikos.toml`.
+- [Settings reference](reference/configuration.md): where the settings live and every field.
 - [Development](contributors/development.md): build, test and work on the code.
 
 ## License
