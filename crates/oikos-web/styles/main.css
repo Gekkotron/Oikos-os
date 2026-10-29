@@ -7223,6 +7223,22 @@ html:has(.flow-canvas-screen) {
   }
 }
 
+/* A shorter one shrinks it to fit (the bar's own class wins over the phone sizes below), and one
+   too short for any text shows none: tapping it still shows its times and temperature. */
+@container (max-height: 23px) {
+  .climate-timeline__bar .climate-timeline__temp {
+    padding-top: 0;
+    font-size: 11px;
+    line-height: 12px;
+  }
+}
+
+@container (max-height: 11px) {
+  .climate-timeline__bar .climate-timeline__temp {
+    visibility: hidden;
+  }
+}
+
 .climate-timeline__now {
   position: absolute;
   left: 0;
