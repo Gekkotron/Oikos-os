@@ -202,3 +202,106 @@
 .devices__actions {
   gap: 8px;
 }
+
+/* Services step: one collapsible card per service. */
+.svc__list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.svc {
+  margin: 0 0 8px;
+  border: 1px solid var(--chip-border);
+  border-radius: 12px;
+}
+
+.svc__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.svc__head:focus-visible {
+  outline: 2px solid var(--accent-amber);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+.svc__icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+
+.svc__icon svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+}
+
+.svc__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.svc__title {
+  font-weight: 600;
+}
+
+.svc__desc {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.svc__pill {
+  flex: none;
+  padding: 2px 10px;
+  border: 1px solid var(--chip-border);
+  border-radius: 999px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.svc__pill--set {
+  border-color: var(--accent-mint);
+  color: var(--accent-mint);
+}
+
+.svc__body {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--chip-border);
+}
+
+.svc__form {
+  padding-top: 12px;
+}
+
+.svc__skip {
+  margin-top: 12px;
+}
+
+@media (max-width: 480px) {
+  .svc__head {
+    flex-wrap: wrap;
+  }
+
+  .svc__text {
+    flex-basis: calc(100% - 48px);
+  }
+
+  .svc__pill {
+    margin-left: 36px;
+  }
+}

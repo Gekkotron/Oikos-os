@@ -22,6 +22,7 @@ use crate::screens::alarm_settings::{AlarmSettingsPage, settings_status};
 use crate::screens::entity_sheet::availability_class;
 use crate::screens::home_settings_panel::HomeSettingsPanel;
 use crate::setup::connection::{DatabaseForm, MqttForm};
+use crate::setup::services::basic::WeatherForm;
 use crate::setup::welcome::LocationForm;
 use crate::theme::Theme;
 
@@ -190,6 +191,7 @@ fn EnergyViewSwitch() -> impl IntoView {
 pub enum SettingsPage {
     Home,
     Location,
+    Weather,
     Alarm,
     Appearance,
     Zigbee2mqtt,
@@ -201,9 +203,10 @@ pub enum SettingsPage {
 
 impl SettingsPage {
     /// In the order the Settings list shows them.
-    pub const ALL: [SettingsPage; 9] = [
+    pub const ALL: [SettingsPage; 10] = [
         SettingsPage::Home,
         SettingsPage::Location,
+        SettingsPage::Weather,
         SettingsPage::Alarm,
         SettingsPage::Appearance,
         SettingsPage::Zigbee2mqtt,
@@ -217,6 +220,7 @@ impl SettingsPage {
         match self {
             SettingsPage::Home => "home",
             SettingsPage::Location => "location",
+            SettingsPage::Weather => "weather",
             SettingsPage::Alarm => "alarm",
             SettingsPage::Appearance => "appearance",
             SettingsPage::Zigbee2mqtt => "zigbee2mqtt",
@@ -236,6 +240,7 @@ impl SettingsPage {
         match self {
             SettingsPage::Home => Key::HomeSection,
             SettingsPage::Location => Key::Location,
+            SettingsPage::Weather => Key::Weather,
             SettingsPage::Alarm => Key::Alarm,
             SettingsPage::Appearance => Key::Appearance,
             SettingsPage::Zigbee2mqtt => Key::Zigbee2mqtt,
@@ -256,6 +261,7 @@ impl SettingsPage {
             match self {
                 SettingsPage::Home => T::HintHome,
                 SettingsPage::Location => T::HintLocation,
+                SettingsPage::Weather => T::HintWeather,
                 SettingsPage::Alarm => T::HintAlarm,
                 SettingsPage::Appearance => T::HintAppearance,
                 SettingsPage::Zigbee2mqtt => T::HintZigbee,
@@ -321,7 +327,7 @@ pub fn SettingsScreen() -> impl IntoView {
         });
     });
     let status = move |page: SettingsPage| match page {
-        SettingsPage::Home | SettingsPage::Location => String::new(),
+        SettingsPage::Home | SettingsPage::Location | SettingsPage::Weather => String::new(),
         SettingsPage::Alarm => alarm
             .get()
             .map(|v| settings_status(&v, lang()))
@@ -400,6 +406,7 @@ pub fn SettingsPageScreen() -> impl IntoView {
             {move || match page.get() {
                 Some(SettingsPage::Home) => view! { <HomeSettingsPanel /> }.into_any(),
                 Some(SettingsPage::Location) => view! { <LocationPage /> }.into_any(),
+                Some(SettingsPage::Weather) => view! { <WeatherPage /> }.into_any(),
                 Some(SettingsPage::Alarm) => view! { <AlarmSettingsPage /> }.into_any(),
                 Some(SettingsPage::Appearance) => view! { <AppearancePage /> }.into_any(),
                 Some(SettingsPage::Zigbee2mqtt) => view! { <ZigbeePage /> }.into_any(),
@@ -466,6 +473,16 @@ fn LocationPage() -> impl IntoView {
                         Err(e) => load_failed(lang(), e).into_any(),
                     })
             }}
+        </section>
+    }
+}
+
+/// The weather switch and refresh interval, edited with the wizard's form.
+#[component]
+fn WeatherPage() -> impl IntoView {
+    view! {
+        <section class="sheet__panel">
+            <WeatherForm applying_target="/settings/weather".to_owned() />
         </section>
     }
 }

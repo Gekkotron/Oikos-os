@@ -196,6 +196,7 @@ const UPDATE: &str = svg!(r#"<path d="M12 4v11m-4-4 4 4 4-4"/><path d="M5 20h14"
 pub const SHIELD: &str = CHANNEL_SECURITY;
 pub const THERMOMETER: &str = CHANNEL_CLIMATE;
 pub const BOLT: &str = CHANNEL_ENERGY;
+pub const CAMERA: &str = CHANNEL_CAMERA;
 pub const DROP: &str = HUMIDITY;
 pub const WATER_HEATER_GLYPH: &str = WATER_HEATER;
 // Weather conditions (clear reuses SUN and MOON).

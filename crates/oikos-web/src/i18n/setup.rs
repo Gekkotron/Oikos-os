@@ -84,6 +84,39 @@ pub enum SetupText {
     Skip,
     /// Shown when moving a device to a room failed for some of its entities; `{error}` is the hub's text.
     RoomMoveIncomplete,
+    /// The Services step's title and lead line.
+    ServicesTitle,
+    ServicesLead,
+    /// A service card's state pill.
+    CardSetUp,
+    CardNotSetUp,
+    CardSkipped,
+    /// The service cards' titles.
+    SvcWeather,
+    SvcSolar,
+    SvcEnergy,
+    SvcCameras,
+    SvcPush,
+    SvcClimate,
+    SvcAlarm,
+    /// The service cards' one-line descriptions; `{place}` is the home's place.
+    DescWeatherPlace,
+    DescWeatherNoPlace,
+    DescSolar,
+    DescEnergy,
+    DescCameras,
+    DescPush,
+    DescClimate,
+    DescAlarm,
+    /// The enabled switch's label.
+    SvcEnabled,
+    RefreshMinutes,
+    /// The weather form's problem message.
+    MinutesInvalid,
+    ClimateBeta,
+    AlarmOpenSettings,
+    /// Body of a service card whose form is not built yet.
+    ComingSoon,
 }
 
 pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
@@ -206,6 +239,62 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
             "The move is incomplete, some entities were not moved: {error}",
             "Le déplacement est incomplet, certaines entités n'ont pas été déplacées : {error}",
         ),
+        SetupText::ServicesTitle => ("Services", "Services"),
+        SetupText::ServicesLead => (
+            "Turn on what you use. Each one can be set up later in Settings.",
+            "Activez ce que vous utilisez. Chacun pourra être configuré plus tard dans les Réglages.",
+        ),
+        SetupText::CardSetUp => ("Set up", "Configuré"),
+        SetupText::CardNotSetUp => ("Not set up", "Non configuré"),
+        SetupText::CardSkipped => ("Skipped", "Passé"),
+        SetupText::SvcWeather => ("Weather", "Météo"),
+        SetupText::SvcSolar => ("Solar forecast", "Prévision solaire"),
+        SetupText::SvcEnergy => ("Energy", "Énergie"),
+        SetupText::SvcCameras => ("Cameras", "Caméras"),
+        SetupText::SvcPush => ("Notifications", "Notifications"),
+        SetupText::SvcClimate => ("Climate", "Climat"),
+        SetupText::SvcAlarm => ("Alarm", "Alarme"),
+        SetupText::DescWeatherPlace => (
+            "Uses your home location: {place}",
+            "Utilise l'emplacement de votre maison : {place}",
+        ),
+        SetupText::DescWeatherNoPlace => (
+            "Needs your home location",
+            "Nécessite l'emplacement de votre maison",
+        ),
+        SetupText::DescSolar => (
+            "Solcast forecast for your panels",
+            "Prévision Solcast pour vos panneaux",
+        ),
+        SetupText::DescEnergy => (
+            "Which devices measure your house",
+            "Quels appareils mesurent votre maison",
+        ),
+        SetupText::DescCameras => (
+            "Frigate events and snapshots",
+            "Événements et images de Frigate",
+        ),
+        SetupText::DescPush => ("Alerts on your phone", "Alertes sur votre téléphone"),
+        SetupText::DescClimate => (
+            "Heating schedules and eco mode",
+            "Programmes de chauffage et mode éco",
+        ),
+        SetupText::DescAlarm => (
+            "Sensors, sirens and remotes",
+            "Capteurs, sirènes et télécommandes",
+        ),
+        SetupText::SvcEnabled => ("Enabled", "Activé"),
+        SetupText::RefreshMinutes => ("Refresh every (minutes)", "Actualiser toutes les (minutes)"),
+        SetupText::MinutesInvalid => (
+            "Enter a whole number of minutes, 1 or more.",
+            "Saisissez un nombre entier de minutes, 1 ou plus.",
+        ),
+        SetupText::ClimateBeta => (
+            "Beta: it drives your heating. Check your schedules before turning it on.",
+            "Bêta : il pilote votre chauffage. Vérifiez vos programmes avant de l'activer.",
+        ),
+        SetupText::AlarmOpenSettings => ("Alarm settings", "Réglages de l'alarme"),
+        SetupText::ComingSoon => ("Coming soon.", "Bientôt disponible."),
     };
     match lang {
         Lang::En => en,
@@ -288,6 +377,32 @@ mod tests {
                 SetupText::BackToMqtt,
                 SetupText::Skip,
                 SetupText::RoomMoveIncomplete,
+                SetupText::ServicesTitle,
+                SetupText::ServicesLead,
+                SetupText::CardSetUp,
+                SetupText::CardNotSetUp,
+                SetupText::CardSkipped,
+                SetupText::SvcWeather,
+                SetupText::SvcSolar,
+                SetupText::SvcEnergy,
+                SetupText::SvcCameras,
+                SetupText::SvcPush,
+                SetupText::SvcClimate,
+                SetupText::SvcAlarm,
+                SetupText::DescWeatherPlace,
+                SetupText::DescWeatherNoPlace,
+                SetupText::DescSolar,
+                SetupText::DescEnergy,
+                SetupText::DescCameras,
+                SetupText::DescPush,
+                SetupText::DescClimate,
+                SetupText::DescAlarm,
+                SetupText::SvcEnabled,
+                SetupText::RefreshMinutes,
+                SetupText::MinutesInvalid,
+                SetupText::ClimateBeta,
+                SetupText::AlarmOpenSettings,
+                SetupText::ComingSoon,
             ],
             setup_text,
             &[
@@ -298,6 +413,8 @@ mod tests {
                 SetupText::Longitude,
                 SetupText::Port,
                 SetupText::Z2mBase,
+                SetupText::ServicesTitle,
+                SetupText::SvcPush,
             ],
         );
     }
