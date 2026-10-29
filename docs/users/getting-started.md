@@ -22,15 +22,15 @@ This builds the hub and starts a broker and a database beside it. The log shows 
 The wizard has six steps. Each one saves when you press Next, so closing the tab loses nothing, and Back is always allowed.
 
 1. **Welcome**: pick the language (English or French) and your home's city and country. The hub looks up the latitude, longitude and time zone, which you can correct. Sun-based automations need this even when weather is off.
-2. **MQTT**: host, port, user and password of the broker. They are pre-filled for the broker that came with Oikos. **Test connection** must succeed before Next. The client id and the Zigbee2MQTT base topic are under Advanced.
+2. **MQTT broker**: host, port, user and password of the broker. They are pre-filled for the broker that came with Oikos. **Test connection** must succeed before Next. The client id and the Zigbee2MQTT base topic are under Advanced.
 3. **Database**: the TimescaleDB connection, pre-filled for the bundled one. The test checks the connection and the `timescaledb` extension and prepares the tables. This step cannot be skipped, because the hub keeps its settings and history there.
 4. **Devices**: what the hub has found through MQTT discovery, with a live count. You can name devices and set their rooms here. With nothing found, check that Zigbee2MQTT publishes to this broker and under the base topic shown; see [Zigbee2MQTT](zigbee2mqtt.md).
-5. **Services**: optional features as cards, each Set up, Not set up or Skipped: Weather, Solar forecast, Energy, Cameras, Push notifications, Climate and Alarm. Do only the ones you want.
+5. **Services**: optional features as cards, each Set up, Not set up or Skipped: Weather, Solar forecast, Energy, Cameras, Notifications, Climate and Alarm. Do only the ones you want.
 6. **Done**: a summary and **Open my house**.
 
 Everything can be changed later in Settings. **Run setup again** there reopens the wizard and never wipes anything.
 
-If you already have an `oikos.toml`, the hub imports it on its first start and skips the wizard: see [Upgrading from `oikos.toml`](install-on-linux.md#upgrading-from-oikostoml).
+If you already have an `oikos.toml`, the hub imports it on its first start and skips the wizard. If the file has no `[history] url`, it imports only MQTT and the location and opens the wizard at the Database step. See [Upgrading from `oikos.toml`](install-on-linux.md#upgrading-from-oikostoml).
 
 ## Next steps
 

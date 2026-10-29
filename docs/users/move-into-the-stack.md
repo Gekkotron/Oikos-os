@@ -1,6 +1,6 @@
 ---
 title: Move an existing broker and database into the stack
-sidebar_position: 2
+sidebar_position: 2.5
 description: Replace a hand-run Mosquitto and TimescaleDB with the ones in Oikos-os's compose stack, keeping their data, with a backup and a rollback.
 ---
 
@@ -81,8 +81,15 @@ Because `data/hub.json` already exists on a configured hub, `init` writes no bun
    ```
 
 3. Make cold copies of both data folders now that nothing writes to them, for example `cp -a`. They are your safety net for the rollback.
-4. Remove the old autostart (compose project, systemd unit) so the old containers do not return after a reboot.
-5. Start the stack: `docker compose up -d`.
+4. Rename the old containers, because the new ones take the names `oikos-mosquitto` and `oikos-timescaledb` and `docker compose up` fails with "container name already in use" otherwise (skip a container whose name is different):
+
+   ```bash
+   docker rename <old-mosquitto> <old-mosquitto>-retired
+   docker rename <old-timescaledb> <old-timescaledb>-retired
+   ```
+
+5. Remove the old autostart (compose project, systemd unit) so the old containers do not return after a reboot.
+6. Start the stack: `docker compose up -d`.
 
 ## Check
 
@@ -99,7 +106,7 @@ If anything looks wrong:
 
 1. `docker compose down`
 2. Rename the override: `mv compose.override.yml compose.override.yml.off`.
-3. Re-enable and start the old containers: `docker update --restart=unless-stopped <old-mosquitto> <old-timescaledb>`, then `docker start <old-timescaledb> <old-mosquitto>`.
+3. Rename the old containers back (`docker rename <old-mosquitto>-retired <old-mosquitto>`, same for the database), or start them under the retired names. Re-enable them with `docker update --restart=unless-stopped <name> <name>`, then start the database and the broker.
 4. If the new stack changed the data folders in a way you do not trust, put the cold copies back before starting.
 
 Once the checks pass, keep the backups for a few days, then delete the old containers.

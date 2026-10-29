@@ -51,7 +51,7 @@ Everything the stack writes lives in `./data/` next to `compose.yml`:
 | `data/bundled.json` | The generated broker and database passwords, readable only by its owner (mode 0600). The wizard pre-fills them from here. |
 | `data/mosquitto/` | The broker's config, retained messages and log. |
 | `data/timescaledb/` | The database files. |
-| `data/secrets/` | Keys you upload in the wizard (push key, Solcast key). |
+| `data/secrets/` | Only on upgraded installs: the old key files moved from `secrets/` (see [Upgrading from `oikos.toml`](#upgrading-from-oikostoml)). Keys you upload in the wizard are stored in the database, not here. |
 
 Back up `./data/`. Without `bundled.json` the database can no longer be unlocked, and `init` refuses to write a new password for a database that already exists.
 
@@ -101,7 +101,7 @@ The script runs `git pull --rebase`, then re-runs itself from the pulled version
 - the whole stack (`docker compose up -d --build`) when `data/bundled.json` or a `compose.override.yml` exists, or on a fresh install;
 - the hub only (`docker compose up -d --build hub`) when you have `data/oikos.toml` or `data/hub.json` but no bundled stack, which means you run your own broker and database.
 
-Force one with `tools/update.sh --all` or `tools/update.sh --hub-only`. It ends by printing the last lines of the hub's log.
+Force one with `tools/update.sh --all` or `tools/update.sh --hub-only`. If you run your own broker and database but have not finished the first start yet, there is no `hub.json` or `oikos.toml` to go by, so the script would pick the full stack: use `tools/update.sh --hub-only`. It ends by printing the last lines of the hub's log.
 
 ## Upgrading from `oikos.toml`
 
@@ -113,10 +113,13 @@ Older installs were configured by `oikos.toml` and kept keys in `secrets/`. The 
 It uses `sudo` for these moves when `data/` is owned by root, which Docker did on older installs. To do it by hand:
 
 ```bash
-mkdir -p data/secrets
-mv oikos.toml data/oikos.toml
-mv secrets/firebase.json secrets/solcast.key data/secrets/
+sudo mkdir -p -m 700 data/secrets
+sudo mv -n oikos.toml data/oikos.toml
+sudo mv -n secrets/firebase.json data/secrets/    # one line per key file you actually have
+sudo mv -n secrets/solcast.key data/secrets/
 ```
+
+`sudo` is needed when `data/` is owned by root; drop it otherwise. Skip the lines for files you do not have.
 
 On its first start the hub imports `data/oikos.toml` into its database without asking anything, and logs:
 
@@ -124,7 +127,7 @@ On its first start the hub imports `data/oikos.toml` into its database without a
 oikos.toml imported into the database; it is no longer read and can be deleted
 ```
 
-After that line you can delete the file. The push and Solcast keys are found in `data/secrets/` by default. If your TOML names key files under `/etc/oikos/secrets`, change those paths to `/data/secrets/...` or delete the lines; `update.sh` warns when it sees them.
+After that line you can delete the file. The import reads the push and Solcast keys from `data/secrets/` once, by default, and stores them in the database. If the old file has no `[history] url`, the hub imports only MQTT and the location, then opens the wizard at the Database step so you can finish there. If your TOML names key files under `/etc/oikos/secrets`, change those paths to `/data/secrets/...` or delete the lines; `update.sh` warns when it sees them.
 
 If you run your own broker and database, keep using `docker compose up -d --build hub` (or `tools/update.sh`, which picks it). A plain `docker compose up` would start a second broker and database next to yours.
 
