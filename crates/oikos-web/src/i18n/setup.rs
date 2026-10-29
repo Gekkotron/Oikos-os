@@ -45,6 +45,33 @@ pub enum SetupText {
     TimeZoneUnknown,
     Next,
     Save,
+    Back,
+    /// The MQTT step's title and lead line.
+    MqttTitle,
+    MqttLead,
+    DatabaseTitle,
+    DatabaseLead,
+    TestConnection,
+    Testing,
+    /// The disclosure that holds the rarely changed fields.
+    Advanced,
+    Host,
+    Port,
+    User,
+    Password,
+    ClientId,
+    Z2mBase,
+    DatabaseName,
+    /// Placeholder of a password field whose value is stored; the field stays empty to keep it.
+    SecretSaved,
+    /// "This database already holds Oikos history since {date}".
+    HistorySince,
+    PortInvalid,
+    FieldRequired,
+    /// The Database step's note: it has no Skip.
+    NoSkipDatabase,
+    /// The Settings pages' note when the stored values could not be read.
+    LoadFailed,
 }
 
 pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
@@ -105,6 +132,51 @@ pub fn setup_text(lang: Lang, k: SetupText) -> &'static str {
         ),
         SetupText::Next => ("Next", "Suivant"),
         SetupText::Save => ("Save", "Enregistrer"),
+        SetupText::Back => ("Back", "Retour"),
+        SetupText::MqttTitle => ("Connect to your MQTT broker", "Connectez votre broker MQTT"),
+        SetupText::MqttLead => (
+            "Oikos talks to your devices through MQTT. Filled in for the broker that came with Oikos.",
+            "Oikos parle à vos appareils via MQTT. Pré-rempli pour le broker fourni avec Oikos.",
+        ),
+        SetupText::DatabaseTitle => ("Connect to the database", "Connectez la base de données"),
+        SetupText::DatabaseLead => (
+            "TimescaleDB keeps your history and settings. Filled in for the database that came with Oikos.",
+            "TimescaleDB conserve votre historique et vos réglages. Pré-rempli pour la base fournie avec Oikos.",
+        ),
+        SetupText::TestConnection => ("Test connection", "Tester la connexion"),
+        SetupText::Testing => ("Testing…", "Test en cours…"),
+        SetupText::Advanced => ("Advanced", "Avancé"),
+        SetupText::Host => ("Host", "Hôte"),
+        SetupText::Port => ("Port", "Port"),
+        SetupText::User => ("User", "Utilisateur"),
+        SetupText::Password => ("Password", "Mot de passe"),
+        SetupText::ClientId => ("Client id", "Identifiant client"),
+        SetupText::Z2mBase => ("Zigbee2MQTT base topic", "Topic de base Zigbee2MQTT"),
+        SetupText::DatabaseName => ("Database", "Base de données"),
+        SetupText::SecretSaved => (
+            "Saved, enter a new one to replace it",
+            "Enregistré, saisissez-en un nouveau pour le remplacer",
+        ),
+        SetupText::HistorySince => (
+            "This database already holds Oikos history since {date}.",
+            "Cette base contient déjà l'historique d'Oikos depuis le {date}.",
+        ),
+        SetupText::PortInvalid => (
+            "The port is a number from 1 to 65535.",
+            "Le port est un nombre de 1 à 65535.",
+        ),
+        SetupText::FieldRequired => (
+            "Fill in the host, the database and the user.",
+            "Renseignez l'hôte, la base et l'utilisateur.",
+        ),
+        SetupText::NoSkipDatabase => (
+            "No Skip here: the database is required.",
+            "Pas de Passer ici : la base de données est obligatoire.",
+        ),
+        SetupText::LoadFailed => (
+            "Could not read the current values:",
+            "Impossible de lire les valeurs actuelles :",
+        ),
     };
     match lang {
         Lang::En => en,
@@ -158,6 +230,27 @@ mod tests {
                 SetupText::TimeZoneUnknown,
                 SetupText::Next,
                 SetupText::Save,
+                SetupText::Back,
+                SetupText::MqttTitle,
+                SetupText::MqttLead,
+                SetupText::DatabaseTitle,
+                SetupText::DatabaseLead,
+                SetupText::TestConnection,
+                SetupText::Testing,
+                SetupText::Advanced,
+                SetupText::Host,
+                SetupText::Port,
+                SetupText::User,
+                SetupText::Password,
+                SetupText::ClientId,
+                SetupText::Z2mBase,
+                SetupText::DatabaseName,
+                SetupText::SecretSaved,
+                SetupText::HistorySince,
+                SetupText::PortInvalid,
+                SetupText::FieldRequired,
+                SetupText::NoSkipDatabase,
+                SetupText::LoadFailed,
             ],
             setup_text,
             &[
@@ -166,6 +259,8 @@ mod tests {
                 SetupText::LangFrench,
                 SetupText::Latitude,
                 SetupText::Longitude,
+                SetupText::Port,
+                SetupText::Z2mBase,
             ],
         );
     }

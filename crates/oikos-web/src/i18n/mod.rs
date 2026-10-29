@@ -160,6 +160,7 @@ pub enum Key {
     MyRooms,
     HomeSection,
     Location,
+    Database,
     Energy,
     Security,
     Climate,
@@ -299,6 +300,7 @@ impl Key {
         Key::MyRooms,
         Key::HomeSection,
         Key::Location,
+        Key::Database,
         Key::Energy,
         Key::Security,
         Key::Climate,
@@ -439,6 +441,7 @@ pub fn text(lang: Lang, key: Key) -> &'static str {
         Key::MyRooms => ("My rooms", "Mes pièces"),
         Key::HomeSection => ("Home", "Maison"),
         Key::Location => ("Location", "Localisation"),
+        Key::Database => ("Database", "Base de données"),
         Key::Energy => ("Energy", "Énergie"),
         Key::Security => ("Security", "Sécurité"),
         Key::Climate => ("Climate", "Climat"),
@@ -711,6 +714,7 @@ mod tests {
             | Key::MyRooms
             | Key::HomeSection
             | Key::Location
+            | Key::Database
             | Key::Energy
             | Key::Security
             | Key::Climate
@@ -844,7 +848,7 @@ mod tests {
         for &k in Key::ALL {
             assert!(listed(k));
         }
-        assert_eq!(Key::ALL.len(), 134);
+        assert_eq!(Key::ALL.len(), 135);
     }
     #[test]
     fn every_key_differs_between_languages() {

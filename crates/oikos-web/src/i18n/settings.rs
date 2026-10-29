@@ -14,6 +14,7 @@ pub enum SettingsText {
     HintAppearance,
     HintZigbee,
     HintBroker,
+    HintDatabase,
     HintMcp,
     HintAbout,
     NoSuchPage,
@@ -79,6 +80,7 @@ impl SettingsText {
         SettingsText::HintAppearance,
         SettingsText::HintZigbee,
         SettingsText::HintBroker,
+        SettingsText::HintDatabase,
         SettingsText::HintMcp,
         SettingsText::HintAbout,
         SettingsText::NoSuchPage,
@@ -159,6 +161,7 @@ pub fn settings_text(lang: Lang, k: SettingsText) -> &'static str {
             "Passerelle, mises à jour du micrologiciel et appareils",
         ),
         T::HintBroker => ("MQTT connection", "Connexion MQTT"),
+        T::HintDatabase => ("TimescaleDB connection", "Connexion à TimescaleDB"),
         T::HintMcp => (
             "Connect Claude, Codex and other assistants",
             "Connecter Claude, Codex et d'autres assistants",
@@ -323,7 +326,7 @@ mod tests {
     #[test]
     fn all_lists_every_variant() {
         // The match in `settings_text` is exhaustive, so a new variant only needs listing here.
-        assert_eq!(SettingsText::ALL.len(), 61);
+        assert_eq!(SettingsText::ALL.len(), 62);
     }
 
     #[test]

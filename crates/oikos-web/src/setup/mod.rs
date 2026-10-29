@@ -1,5 +1,6 @@
 //! The onboarding wizard: shared state and the rules for when to send the browser to it.
 
+pub mod connection;
 pub mod welcome;
 pub mod wizard;
 

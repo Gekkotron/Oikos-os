@@ -107,3 +107,28 @@
   flex: none;
   min-width: 120px;
 }
+
+.conn__result {
+  min-height: 1.2em;
+  margin: 8px 0;
+}
+
+.conn__line {
+  margin: 0;
+}
+
+.conn__line--ok {
+  color: var(--accent-mint);
+}
+
+.conn__line--bad {
+  color: var(--danger);
+}
+
+.conn__actions {
+  gap: 8px;
+}
+
+.conn__actions .conn__test {
+  margin-right: auto;
+}
