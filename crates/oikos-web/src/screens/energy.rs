@@ -1,7 +1,8 @@
 //! The Energy screen: the live power flow of the house, a port of the app's Energy tab.
 //!
-//! The diagram is one inline SVG; the glyphs are `<foreignObject>` spans holding the icon
-//! constants, so the same strings serve the cards and the diagram.
+//! The live diagram is Classic's glowing circles (`energy_circles`) or the Flux Sankey
+//! (`energy_flux`); the glyphs are the icon constants, so the same strings serve the cards and
+//! both diagrams.
 
 use std::collections::BTreeMap;
 
@@ -10,14 +11,13 @@ use leptos::task::spawn_local;
 use oikos_api::{ConnectionStatus, EnergyKind};
 use oikos_core::energy::{
     ARC_SLOTS, ConsumerOrder, EnergyEntity, EnergyFlow, EnergyHint, EnergyMeters, EnergyNode,
-    EnergyRole, EnergyUi, Flow, NodeKind, NodeStatus,
+    EnergyRole, EnergyUi, NodeKind, NodeStatus,
 };
 
 use crate::api::history::fetch_today;
 use crate::energy::{
-    CLEARANCE, HouseTodayParts, Layout, NODE_R, VIEW_H, aria_sentence, derived_house_today, edge,
-    energy_entities, energy_text, meter_text, node_label, node_value_text, now_ms, plus_minus_ids,
-    positions, power_text, should_fire_mount, speed, stroke,
+    HouseTodayParts, derived_house_today, energy_entities, energy_text, meter_text, node_label,
+    node_value_text, now_ms, plus_minus_ids, should_fire_mount,
 };
 use crate::energy_view::{EnergyView, energy_view};
 use crate::house::House;
@@ -26,15 +26,14 @@ use crate::i18n::energy::{
 };
 use crate::i18n::{Key, Lang, text, use_lang};
 use crate::icons::{consumer_icon, role_icon};
+use crate::screens::energy_circles::CirclesDiagram;
 use crate::screens::energy_day::GridDayCard;
 use crate::screens::energy_flux::{FluxDiagram, flux_folded};
 
-/// Where a node's labels end, below its centre, plus a gap: where solar's edge starts.
-const LABELS_BOTTOM: f64 = NODE_R + 29.0;
 /// Longest label drawn before it is ellipsised.
 const LABEL_CHARS: usize = 12;
 
-fn kind_class(kind: NodeKind) -> &'static str {
+pub(crate) fn kind_class(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Solar => "solar",
         NodeKind::Grid => "grid",
@@ -54,7 +53,7 @@ pub(crate) fn short(label: String) -> String {
     }
 }
 
-fn glyph(n: &EnergyNode) -> &'static str {
+pub(crate) fn glyph(n: &EnergyNode) -> &'static str {
     match n.kind {
         NodeKind::Consumer => consumer_icon(n.icon),
         kind => role_icon(kind),
@@ -78,128 +77,21 @@ fn card_total(lang: Lang, n: &EnergyNode) -> String {
     }
 }
 
-/// The drawing for the window, read once when the screen is built: the wide one from the width
-/// where the day chart widens too.
-fn layout() -> Layout {
+/// Whether the window is phone-sized, read once when the screen is built: below 600 px, the
+/// width where the day chart widens too.
+fn narrow() -> bool {
     #[cfg(target_arch = "wasm32")]
     {
         let width = web_sys::window()
             .and_then(|w| w.inner_width().ok())
             .and_then(|w| w.as_f64())
             .unwrap_or(1024.0);
-        if width < 600.0 {
-            return Layout::NARROW;
-        }
+        width < 600.0
     }
-    Layout::WIDE
-}
-
-type Positions = Memo<BTreeMap<String, (f64, f64)>>;
-
-#[component]
-fn DiagramEdge(id: String, kind: NodeKind, ui: Memo<EnergyUi>, pos: Positions) -> impl IntoView {
-    let node = Memo::new(move |_| ui.with(|u| u.diagram.iter().find(|n| n.id == id).cloned()));
-    let path = move || {
-        let n = node.get()?;
-        pos.with(|p| {
-            let at = *p.get(&n.id)?;
-            let hub = *p.get("house")?;
-            let below = (n.kind == NodeKind::Solar).then_some(at.1 + LABELS_BOTTOM);
-            Some(edge(at, hub, CLEARANCE, below).path())
-        })
-    };
-    let flow = move || node.get().map_or(Flow::Idle, |n| n.flow);
-    view! {
-        <path
-            class=format!("energy-edge energy-edge--{}", kind_class(kind))
-            class:energy-edge--idle=move || flow() == Flow::Idle
-            class:energy-edge--out=move || flow() == Flow::Out
-            d=move || path().unwrap_or_default()
-            style=move || {
-                node.get()
-                    .map(|n| {
-                        format!(
-                            "stroke-width: {}px; animation-duration: {}s",
-                            stroke(n.value, n.flow),
-                            1.0 / speed(n.value),
-                        )
-                    })
-                    .unwrap_or_default()
-            }
-        />
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        false
     }
-}
-
-#[component]
-fn DiagramNode(
-    id: String,
-    ui: Memo<EnergyUi>,
-    pos: Positions,
-    open: Callback<String>,
-    expanded: RwSignal<bool>,
-) -> impl IntoView {
-    let lang = use_lang();
-    let node = Memo::new(move |_| ui.with(|u| u.diagram.iter().find(|n| n.id == id).cloned()));
-    let Some(first) = node.get_untracked() else {
-        return ().into_any();
-    };
-    let kind = first.kind;
-    let transform = move || {
-        node.get()
-            .and_then(|n| pos.with(|p| p.get(&n.id).copied()))
-            .map(|(x, y)| format!("translate({x} {y})"))
-            .unwrap_or_default()
-    };
-    let off = move || {
-        node.get()
-            .is_some_and(|n| n.status == NodeStatus::Unavailable)
-    };
-    let on_click = move |_| {
-        let Some(n) = node.get_untracked() else {
-            return;
-        };
-        if n.kind == NodeKind::More {
-            expanded.update(|e| *e = !*e);
-        } else if let [only] = n.sensor_ids.as_slice() {
-            open.run(only.clone());
-        }
-    };
-    let clickable = kind == NodeKind::More || !first.sensor_ids.is_empty();
-    view! {
-        <g
-            class=format!("energy-node energy-node--{}", kind_class(kind))
-            class:energy-node--off=off
-            class:energy-node--click=clickable
-            transform=transform
-            on:click=on_click
-        >
-            <circle class="energy-node__disc" r=NODE_R />
-            <foreignObject x=-10 y=-10 width=20 height=20>
-                <span
-                    class="energy-node__glyph"
-                    inner_html=move || node.get().map(|n| glyph(&n)).unwrap_or_default()
-                ></span>
-            </foreignObject>
-            // The app's order: the value under the disc, the name under the value.
-            <text class="energy-node__label" y=NODE_R + 23.0 text-anchor="middle">
-                {move || node.get().map(|n| short(node_label(lang(), &n))).unwrap_or_default()}
-            </text>
-            <text class="energy-node__value" y=NODE_R + 11.0 text-anchor="middle">
-                {move || {
-                    node.get()
-                        .map(|n| {
-                            if n.kind == NodeKind::More {
-                                power_text(lang(), n.value)
-                            } else {
-                                node_value_text(lang(), &n)
-                            }
-                        })
-                        .unwrap_or_default()
-                }}
-            </text>
-        </g>
-    }
-    .into_any()
 }
 
 #[component]
@@ -437,10 +329,8 @@ pub fn EnergyScreen() -> impl IntoView {
         order.set_value(built.order.clone());
         built
     });
-    let layout = layout();
-    let narrow = layout == Layout::NARROW;
+    let narrow = narrow();
     let classic = move || energy_view(house) == EnergyView::Classic;
-    let pos: Positions = Memo::new(move |_| ui.with(|u| positions(&u.diagram, &layout)));
     let names = Memo::new(move |_| {
         house.entities.with(|m| {
             m.values()
@@ -455,18 +345,7 @@ pub fn EnergyScreen() -> impl IntoView {
 
     let subtitle = move || ui.with(|u| live_subtitle(lang(), u.self_consumption));
     let hint = move || ui.with(|u| u.hint == Some(EnergyHint::CheckSign));
-    let edges = move || {
-        ui.with(|u| {
-            u.diagram
-                .iter()
-                .filter(|n| !matches!(n.kind, NodeKind::House | NodeKind::Water))
-                .map(|n| (n.id.clone(), n.kind))
-                .collect::<Vec<_>>()
-        })
-    };
-    let nodes = move || ui.with(|u| u.diagram.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
     let cards = move || ui.with(|u| u.cards.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
-    let description = move || ui.with(|u| aria_sentence(lang(), u));
     let folded = move || {
         ui.with(|u| {
             if classic() {
@@ -521,41 +400,7 @@ pub fn EnergyScreen() -> impl IntoView {
                             }
                         }
                     >
-                        <div
-                            class="energy-diagram"
-                            class:energy-diagram--wide=layout == Layout::WIDE
-                        >
-                            <svg
-                                class="energy-diagram__svg"
-                                viewBox=format!("0 0 {} {VIEW_H}", layout.view_w)
-                                role="img"
-                                aria-label=description
-                            >
-                                <title>{description}</title>
-                                <For
-                                    each=edges
-                                    key=|(id, _)| id.clone()
-                                    children=move |(id, kind)| {
-                                        view! { <DiagramEdge id=id kind=kind ui=ui pos=pos /> }
-                                    }
-                                />
-                                <For
-                                    each=nodes
-                                    key=|id| id.clone()
-                                    children=move |id| {
-                                        view! {
-                                            <DiagramNode
-                                                id=id
-                                                ui=ui
-                                                pos=pos
-                                                open=open
-                                                expanded=expanded
-                                            />
-                                        }
-                                    }
-                                />
-                            </svg>
-                        </div>
+                        <CirclesDiagram ui=ui narrow=narrow open=open expanded=expanded />
                     </Show>
                     <Show when=folded>
                         <button

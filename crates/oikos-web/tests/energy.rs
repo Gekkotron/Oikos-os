@@ -606,3 +606,195 @@ async fn flux_narrow_runs_top_to_bottom() {
     assert!(names.contains("Heat pump"), "{names}");
     assert!(!names.contains("Air conditioning unit"));
 }
+
+fn edges(host: &Element) -> Vec<Element> {
+    let all = host.query_selector_all(".energy-edge").unwrap();
+    (0..all.length())
+        .filter_map(|i| all.item(i))
+        .map(|n| n.unchecked_into::<Element>())
+        .collect()
+}
+
+fn edge(host: &Element, selector: &str) -> Element {
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}"))
+}
+
+#[wasm_bindgen_test]
+async fn circles_wire_solar_only_to_the_house() {
+    let host = mount(vec![
+        sensor("solar", "Solar power", "W", 3000.0, role("solar")),
+        sensor("grid", "Grid power", "W", -1500.0, role("grid")),
+        sensor("oven", "Oven", "W", 900.0, role("consumer")),
+        sensor("pump", "Heat pump", "W", 600.0, role("consumer")),
+    ]);
+    tick().await;
+    let all = edges(&host);
+    assert!(!all.is_empty());
+    let from_solar: Vec<_> = all
+        .iter()
+        .filter(|e| e.get_attribute("data-from").as_deref() == Some("solar"))
+        .collect();
+    assert_eq!(from_solar.len(), 1);
+    for e in &all {
+        let ends = (
+            e.get_attribute("data-from").unwrap_or_default(),
+            e.get_attribute("data-to").unwrap_or_default(),
+        );
+        if ends.0 == "solar" {
+            assert_eq!(ends.1, "house");
+        }
+        let pair = [ends.0.as_str(), ends.1.as_str()];
+        assert!(
+            !(pair.contains(&"solar") && pair.contains(&"grid")),
+            "{pair:?}"
+        );
+    }
+    let grid = edge(&host, ".energy-edge--grid");
+    assert_eq!(grid.get_attribute("data-from").as_deref(), Some("house"));
+    assert_eq!(grid.get_attribute("data-to").as_deref(), Some("grid"));
+    let class = grid.get_attribute("class").unwrap_or_default();
+    assert!(class.contains("energy-tone--export"), "{class}");
+}
+
+#[wasm_bindgen_test]
+async fn export_flips_the_grid_wire_in_place() {
+    let house = House::new();
+    for e in [
+        sensor("solar", "Solar power", "W", 600.0, role("solar")),
+        sensor("grid", "Grid power", "W", 400.0, role("grid")),
+        sensor("oven", "Oven", "W", 900.0, role("consumer")),
+    ] {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Classic);
+    tick().await;
+    let before = edge(&host, ".energy-edge--grid");
+    assert_eq!(before.get_attribute("data-from").as_deref(), Some("grid"));
+    house.apply(WsEvent::EntityUpserted(sensor(
+        "grid",
+        "Grid power",
+        "W",
+        -800.0,
+        role("grid"),
+    )));
+    tick().await;
+    let after = edge(&host, ".energy-edge--grid");
+    assert!(before.is_same_node(Some(&after)));
+    assert_eq!(after.get_attribute("data-from").as_deref(), Some("house"));
+    assert_eq!(after.get_attribute("data-to").as_deref(), Some("grid"));
+}
+
+#[wasm_bindgen_test]
+async fn house_shows_the_solar_share() {
+    let host = mount(vec![
+        sensor("solar", "Solar power", "W", 600.0, role("solar")),
+        sensor("grid", "Grid power", "W", 200.0, role("grid")),
+    ]);
+    tick().await;
+    assert_eq!(
+        text(&host, ".energy-node--house .energy-node__share"),
+        "75% solar"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn circle_opens_its_sensor_from_the_keyboard() {
+    let host = mount(vec![
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("oven", "Oven", "W", 1200.0, role("consumer")),
+    ]);
+    tick().await;
+    let oven = node_with(&host, "Oven");
+    assert_eq!(oven.get_attribute("tabindex").as_deref(), Some("0"));
+    assert_eq!(oven.get_attribute("role").as_deref(), Some("button"));
+    let init = KeyboardEventInit::new();
+    init.set_key("Enter");
+    init.set_cancelable(true);
+    let ev = KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    oven.dispatch_event(&ev).unwrap();
+    tick().await;
+    assert!(ev.default_prevented());
+    let path = web_sys::window().unwrap().location().pathname().unwrap();
+    assert_eq!(path, "/entity/oven");
+}
+
+#[wasm_bindgen_test]
+async fn dots_move_and_stop_when_the_diagram_unmounts() {
+    let map: std::collections::BTreeMap<String, EntityView> = [
+        sensor("solar", "Solar power", "W", 2000.0, role("solar")),
+        sensor("oven", "Oven", "W", 1200.0, role("consumer")),
+    ]
+    .into_iter()
+    .map(|e| (e.id.clone(), e))
+    .collect();
+    let ui = Memo::new(move |_| {
+        oikos_core::energy::EnergyFlow::build(&oikos_web::energy::energy_entities(&map), 0, None)
+    });
+    let document = web_sys::window().unwrap().document().unwrap();
+    let host = document.create_element("div").unwrap();
+    document.body().unwrap().append_child(&host).unwrap();
+    let handle = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(RwSignal::new(Lang::En));
+        view! {
+            <oikos_web::screens::energy_circles::CirclesDiagram
+                ui=ui
+                narrow=false
+                open=Callback::new(|_: String| {})
+                expanded=RwSignal::new(false)
+            />
+        }
+    });
+    let wait = |ms| gloo_timers::future::TimeoutFuture::new(ms);
+    wait(150).await;
+    let layer = host
+        .query_selector(".energy-circles__dots")
+        .unwrap()
+        .expect("dots layer");
+    let cx = || {
+        layer
+            .query_selector("circle")
+            .unwrap()
+            .and_then(|c| c.get_attribute("cx"))
+    };
+    let first = cx().expect("dots drawn");
+    wait(150).await;
+    assert_ne!(cx().unwrap(), first, "dots move");
+
+    drop(handle);
+    wait(50).await;
+    let parked = cx();
+    wait(200).await;
+    assert_eq!(cx(), parked, "the loop stops on unmount");
+}
+
+#[wasm_bindgen_test]
+async fn switching_to_flux_stops_the_dots() {
+    let house = House::new();
+    for e in flux_fixture(1200.0) {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Classic);
+    let wait = |ms| gloo_timers::future::TimeoutFuture::new(ms);
+    wait(150).await;
+    let layer = host
+        .query_selector(".energy-circles__dots")
+        .unwrap()
+        .expect("dots layer");
+    let cx = || {
+        layer
+            .query_selector("circle")
+            .unwrap()
+            .and_then(|c| c.get_attribute("cx"))
+    };
+    assert!(cx().is_some(), "dots drawn");
+    house
+        .home_settings
+        .update(|s| s.energy_view = EnergyView::Flux);
+    wait(50).await;
+    assert_eq!(count(&host, ".energy-circles"), 0);
+    let parked = cx();
+    wait(200).await;
+    assert_eq!(cx(), parked, "the loop stops when Classic leaves");
+}
