@@ -52,15 +52,6 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 - **Final** overlapping learning sequences / manual learn_climate_zone bypasses claim_run — Ruling: practically unreachable, conclude is serialised — deferred.
 - **Final** one failed re-assert right after reconnect turns drift into a hold after ~121 s — Ruling: never fights the user; frost overrides — deferred.
 
-## Climate screen redesign (landed on `feat/climate-screen-full-width-redesign`, 2026-10-24)
-
-Deferred minors from the final review.
-
-### P3 — cosmetic
-
-- The button reads "Edit rules" where the spec says "Edit schedule".
-- The now line and today marker use `--danger`; add a `--now` token (for example `var(--accent-rose)`) so retuning danger does not recolour them.
-
 ## Other backlog ideas (unrelated to dashboards)
 
 ### Homey-gap features

@@ -36,6 +36,8 @@
   --grid-export: #ffc457;
   --tariff-band: rgb(143 208 245 / 9%);
   --danger: #ff7a9a;
+  /* The climate calendar's today marker and now line, apart from --danger. */
+  --now: var(--accent-rose);
 
   /* Lit-room (active) and picker-selection accents layered on surfaces. */
   --accent-soft: rgb(255 196 87 / 22%);
@@ -133,6 +135,7 @@
   --grid-export: #d9a53f;
   --tariff-band: rgb(56 115 143 / 8%);
   --danger: #ac512b;
+  --now: var(--accent-rose);
   --accent-soft: #fbf0d4;
   --accent-ring: rgb(201 151 61 / 45%);
   --select: #4f6b4a;
