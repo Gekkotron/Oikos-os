@@ -1,40 +1,42 @@
 ---
 title: Getting started
 sidebar_position: 1
-description: Run the hub from source, understand its configuration and open the web UI.
+description: Install the hub with one command, set up your home in the browser wizard and open the web UI.
 ---
 
-You need a Rust toolchain (the repo's `rust-toolchain.toml` sets the version) and an MQTT broker the hub can reach, normally Mosquitto with Zigbee2MQTT publishing to it.
+You need a Linux host with Docker and its Compose plugin. Zigbee2MQTT can run on that host or elsewhere on your network.
 
-Copy the example configuration and run the hub from the repository root:
+## Install
 
 ```sh
-cp oikos.example.toml oikos.toml   # then edit the [mqtt] credentials
-cargo run -p oikos-os -- run
+git clone https://github.com/Gekkotron/Oikos-os.git
+cd Oikos-os
+docker compose up -d --build
+docker compose logs hub
 ```
 
-`oikos.toml` is git-ignored and read from the working directory (`run --config <path>` reads another file). Every key can be overridden from the environment as `OIKOS_<SECTION>__<KEY>`, for example `OIKOS_MQTT__PASSWORD=… cargo run -p oikos-os -- run`; `RUST_LOG` wins over `[log] level`. The full list of keys is in [Configuration](../reference/configuration.md).
+This builds the hub and starts a broker and a database beside it. The log shows `Open http://<ip>:8081 to set up your home`: open that address in a browser. The details, and what to do if you already run a broker or a database, are in [Install on Linux](install-on-linux.md).
 
-The hub keeps a persistent MQTT session under `[mqtt] client_id` (default `oikos-os`), so a write queued just before a connection blip is retransmitted on reconnect. Two hubs on the same broker must not share a `client_id`: the broker would bounce them off each other and hand one the other's session.
+## The setup wizard
 
-Until Zigbee2MQTT publishes under `oikos`, list the Home Assistant prefix next to it so the discovery topics it still retains under `homeassistant/` are picked up too:
+The wizard has six steps. Each one saves when you press Next, so closing the tab loses nothing, and Back is always allowed.
 
-```toml
-[topics]
-discovery_prefixes = ["oikos", "homeassistant"]
-```
+1. **Welcome**: pick the language (English or French) and your home's city and country. The hub looks up the latitude, longitude and time zone, which you can correct. Sun-based automations need this even when weather is off.
+2. **MQTT**: host, port, user and password of the broker. They are pre-filled for the broker that came with Oikos. **Test connection** must succeed before Next. The client id and the Zigbee2MQTT base topic are under Advanced.
+3. **Database**: the TimescaleDB connection, pre-filled for the bundled one. The test checks the connection and the `timescaledb` extension and prepares the tables. This step cannot be skipped, because the hub keeps its settings and history there.
+4. **Devices**: what the hub has found through MQTT discovery, with a live count. You can name devices and set their rooms here. With nothing found, check that Zigbee2MQTT publishes to this broker and under the base topic shown; see [Zigbee2MQTT](zigbee2mqtt.md).
+5. **Services**: optional features as cards, each Set up, Not set up or Skipped: Weather, Solar forecast, Energy, Cameras, Push notifications, Climate and Alarm. Do only the ones you want.
+6. **Done**: a summary and **Open my house**.
 
-## Open the web UI
+Everything can be changed later in Settings. **Run setup again** there reopens the wizard and never wipes anything.
 
-Open `http://<host>:8081` in a browser. The hub serves the web UI on the same port as its API.
-
-Release builds embed the web UI, so build the UI before the hub. A binary built before the UI was built serves a 503 page that says the UI has not been built. The build steps are in [Development](../contributors/development.md).
+If you already have an `oikos.toml`, the hub imports it on its first start and skips the wizard: see [Upgrading from `oikos.toml`](install-on-linux.md#upgrading-from-oikostoml).
 
 ## Next steps
 
 - [Zigbee2MQTT](zigbee2mqtt.md): point Zigbee2MQTT's discovery at the hub.
 - [The web UI](web-ui.md): the screens the hub serves.
-- [Install on Linux](install-on-linux.md): run the hub in Docker on a Linux host.
 - [Talking to the house (MCP)](assistants-mcp.md): connect an AI assistant.
 - [Cameras (Frigate)](cameras.md), [Push notifications](push-notifications.md) and [History](history.md): the optional parts.
 - [Security](security.md): read this before the hub is reachable from anywhere but your LAN.
+- Running from source instead of Docker: [Development](../contributors/development.md).
