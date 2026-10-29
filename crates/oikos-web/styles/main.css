@@ -4948,6 +4948,12 @@ html:has(.flow-canvas-screen) {
   stroke-width: 4;
 }
 
+/* The house has no rim: its ring's track widens past the arcs and takes the focus colour. */
+.energy-node--click:focus-visible .energy-node__track {
+  stroke: var(--select);
+  stroke-width: 12;
+}
+
 .energy-node--off {
   opacity: 0.42;
 }
@@ -4992,7 +4998,7 @@ html:has(.flow-canvas-screen) {
 .energy-node__small,
 .energy-node__value,
 .energy-node__label {
-  fill: var(--flux-muted);
+  fill: var(--muted);
   font: 600 11px var(--font-body);
 }
 
@@ -5016,11 +5022,6 @@ html:has(.flow-canvas-screen) {
   stroke: var(--bg);
   stroke-width: 3px;
   stroke-linejoin: round;
-}
-
-:root[data-theme="light"] .energy-node__label,
-:root[data-theme="light"] .energy-node__value {
-  fill: color-mix(in srgb, var(--ink) 70%, transparent);
 }
 
 :root[data-theme="light"] .energy-circles--narrow .energy-node__label,
