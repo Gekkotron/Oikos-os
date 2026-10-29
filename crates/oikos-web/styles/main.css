@@ -4982,7 +4982,8 @@ html:has(.flow-canvas-screen) {
 .energy-orbite__arc {
   filter: drop-shadow(0 0 6px currentColor);
   transition:
-    d 0.6s var(--ease),
+    stroke-dasharray 0.6s var(--ease),
+    stroke-dashoffset 0.6s var(--ease),
     opacity 0.25s;
 }
 
@@ -5058,19 +5059,28 @@ html:has(.flow-canvas-screen) {
   min-width: 0;
 }
 
+.energy-orbite__list {
+  width: 100%;
+  max-width: 300px;
+}
+
 .energy-orbite__list--in {
   grid-column: 1;
   grid-row: 1;
+  justify-self: end;
 }
 
 .energy-orbite__list--out {
   grid-column: 3;
   grid-row: 1;
+  justify-self: start;
 }
 
 .energy-orbite--narrow .energy-orbite__list--in,
 .energy-orbite--narrow .energy-orbite__list--out {
   grid-column: 1;
+  max-width: none;
+  justify-self: stretch;
 }
 
 .energy-orbite--narrow .energy-orbite__list--in {
@@ -5351,7 +5361,7 @@ html:has(.flow-canvas-screen) {
 }
 
 .energy-node__share {
-  fill: var(--solar);
+  fill: var(--energy-solar);
   font: 600 11px var(--font-body);
 }
 

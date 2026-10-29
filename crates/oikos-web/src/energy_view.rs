@@ -1,4 +1,4 @@
-//! Energy view switch: the Classic diagram or the Flux (Sankey) one. The choice lives in the
+//! Energy view switch: the Classic, Flux (Sankey) or Orbite diagram. The choice lives in the
 //! hub's home settings, so every browser draws the same one.
 
 use leptos::prelude::*;

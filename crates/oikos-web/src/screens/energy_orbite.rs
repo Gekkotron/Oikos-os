@@ -8,7 +8,7 @@ use leptos::prelude::*;
 use oikos_core::energy::EnergyUi;
 
 use crate::energy::{aria_sentence, power_text};
-use crate::energy_orbite::{Arc, Ring, Rings, arc_path, colour_var, rings};
+use crate::energy_orbite::{Arc, Ring, Rings, colour_var, rings};
 use crate::energy_sankey::{Sankey, SankeyRole, build};
 use crate::i18n::energy::{EnergyText, energy_text as word, solar_share_line};
 use crate::i18n::{Lang, use_lang};
@@ -58,16 +58,29 @@ fn run_dots(
     layer: web_sys::Element,
     arcs: StoredValue<DotArcs>,
 ) -> std::rc::Rc<std::cell::Cell<bool>> {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
+    use std::collections::HashMap;
     use std::rc::Rc;
 
     use leptos::prelude::request_animation_frame;
 
-    use crate::energy_orbite::{arc_dots, point};
+    use crate::energy_orbite::{advance_phase, arc_dots, point};
+
+    /// Where each arc's dots are, in turns, and when they were last moved.
+    #[derive(Default)]
+    struct Phases {
+        by_id: HashMap<String, f64>,
+        last_ms: Option<f64>,
+    }
 
     const SVG_NS: &str = "http://www.w3.org/2000/svg";
 
-    fn frame(layer: web_sys::Element, arcs: StoredValue<DotArcs>, alive: Rc<Cell<bool>>) {
+    fn frame(
+        layer: web_sys::Element,
+        arcs: StoredValue<DotArcs>,
+        alive: Rc<Cell<bool>>,
+        phases: Rc<RefCell<Phases>>,
+    ) {
         if !alive.get() {
             return;
         }
@@ -75,10 +88,17 @@ fn run_dots(
         if !hidden {
             // The store is gone once the view is: end the chain rather than touch it.
             let Some(dots) = arcs.try_with_value(|list| {
-                let t = js_sys::Date::now() / 1000.0;
+                let now = js_sys::Date::now();
+                let mut ph = phases.borrow_mut();
+                let dt = ph.last_ms.map_or(0.0, |l| (now - l) / 1000.0);
+                ph.last_ms = Some(now);
+                ph.by_id
+                    .retain(|id, _| list.iter().any(|(a, _, _)| a.id == *id));
                 let mut dots = Vec::new();
                 for (arc, radius, width) in list {
-                    for (deg, opacity) in arc_dots(arc, t) {
+                    let phase = ph.by_id.entry(arc.id.clone()).or_insert(0.0);
+                    *phase = advance_phase(*phase, dt, arc);
+                    for (deg, opacity) in arc_dots(arc, *phase) {
                         let (x, y) = point(CENTRE, CENTRE, *radius, deg);
                         dots.push((x, y, opacity, width * DOT_R));
                     }
@@ -89,7 +109,7 @@ fn run_dots(
             };
             draw(&layer, &dots);
         }
-        request_animation_frame(move || frame(layer, arcs, alive));
+        request_animation_frame(move || frame(layer, arcs, alive, phases));
     }
 
     fn draw(layer: &web_sys::Element, dots: &[(f64, f64, f64, f64)]) {
@@ -120,7 +140,7 @@ fn run_dots(
     }
 
     let alive = Rc::new(Cell::new(true));
-    frame(layer, arcs, alive.clone());
+    frame(layer, arcs, alive.clone(), Rc::default());
     alive
 }
 
@@ -197,13 +217,7 @@ fn OrbiteArc(
     };
     let can_click = clickable(&first);
     let (radius, width) = geometry(first.ring);
-    let path = move || {
-        arc.with(|a| {
-            a.as_ref()
-                .map(|a| arc_path(CENTRE, CENTRE, radius, a.a0, a.a1))
-                .unwrap_or_default()
-        })
-    };
+    let circumference = std::f64::consts::TAU * radius;
     let colour = move || {
         let (role, slot) = arc.with(|a| {
             a.as_ref()
@@ -211,11 +225,20 @@ fn OrbiteArc(
         });
         format!("var({})", colour_var(role, slot))
     };
-    let style = move || format!("d: path(\"{}\"); color: {}", path(), colour());
+    // The arc is a dash of a full circle, so a new angle glides round the ring.
+    let style = move || {
+        let (a0, a1) = arc.with(|a| a.as_ref().map_or((0.0, 0.0), |a| (a.a0, a.a1)));
+        format!(
+            "stroke-dasharray:{:.2} {circumference:.2};stroke-dashoffset:{:.2};color:{}",
+            (a1 - a0) / 360.0 * circumference,
+            -a0 / 360.0 * circumference,
+            colour()
+        )
+    };
     let hot_id = id.clone();
     let enter_id = id.clone();
     view! {
-        <path
+        <circle
             class="energy-orbite__arc"
             class:energy-orbite__arc--click=can_click
             class:energy-orbite__arc--hot=move || hot.get().as_deref() == Some(hot_id.as_str())
@@ -224,7 +247,10 @@ fn OrbiteArc(
             fill="none"
             stroke=colour
             stroke-width=width
-            d=path
+            cx=CENTRE
+            cy=CENTRE
+            r=radius
+            transform=format!("rotate(-90 {CENTRE} {CENTRE})")
             style=style
             on:mouseenter=move |_| hot.set(Some(enter_id.clone()))
             on:mouseleave=move |_| hot.set(None)
@@ -281,6 +307,8 @@ fn OrbiteRow(
             class="energy-orbite__row"
             class:energy-orbite__row--hot=move || hot.get().as_deref() == Some(hot_id.as_str())
             data-id=id
+            aria-expanded=(first.role == SankeyRole::Others)
+                .then(|| expanded.get().to_string())
             class:energy-orbite__row--static=!can_click
             on:mouseenter=move |_| hot.set(Some(enter_id.clone()))
             on:mouseleave=move |_| hot.set(None)
@@ -328,9 +356,10 @@ pub fn OrbiteDiagram(
 
     let house = move || {
         model.with(|m| {
-            m.house_w.map(
-                |w| view! { <b class="energy-orbite__house">{power_text(lang(), Some(w))}</b> },
-            )
+            let shown = m
+                .house_w
+                .map_or_else(|| "—".to_string(), |w| power_text(lang(), Some(w)));
+            view! { <b class="energy-orbite__house">{shown}</b> }
         })
     };
     let mix = move || {
@@ -353,7 +382,11 @@ pub fn OrbiteDiagram(
             class="energy-orbite"
             class:energy-orbite--narrow=narrow
             class:energy-orbite--empty=empty
-            class:energy-orbite--dim=move || hot.with(Option::is_some)
+            class:energy-orbite--dim=move || {
+                hot.with(|h| {
+                    h.as_ref().is_some_and(|id| ring_set.with(|r| find(r, id).is_some()))
+                })
+            }
         >
             <div class="energy-orbite__ring">
                 <svg

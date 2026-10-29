@@ -1,8 +1,8 @@
 //! The Energy screen: the live power flow of the house, a port of the app's Energy tab.
 //!
 //! The live diagram is Classic's glowing circles (`energy_circles`), the Flux Sankey
-//! (`energy_flux`) or the Orbite rings (`energy_orbite`); the glyphs are the icon constants, so the same strings serve the cards and
-//! both diagrams.
+//! (`energy_flux`) or the Orbite rings (`energy_orbite`); the glyphs are the icon constants, so
+//! the same strings serve the cards and all three diagrams.
 
 use std::collections::BTreeMap;
 
@@ -331,7 +331,7 @@ pub fn EnergyScreen() -> impl IntoView {
         built
     });
     let narrow = narrow();
-    let view_choice = move || energy_view(house);
+    let view_choice = Memo::new(move |_| energy_view(house));
     let names = Memo::new(move |_| {
         house.entities.with(|m| {
             m.values()
@@ -348,7 +348,7 @@ pub fn EnergyScreen() -> impl IntoView {
     let hint = move || ui.with(|u| u.hint == Some(EnergyHint::CheckSign));
     let cards = move || ui.with(|u| u.cards.iter().map(|n| n.id.clone()).collect::<Vec<_>>());
     let folded = move || {
-        ui.with(|u| match view_choice() {
+        ui.with(|u| match view_choice.get() {
             EnergyView::Classic => u.consumers.len() > ARC_SLOTS,
             EnergyView::Flux | EnergyView::Orbite => flux_folded(u, narrow),
         })
@@ -390,7 +390,7 @@ pub fn EnergyScreen() -> impl IntoView {
                     <Show when=hint>
                         <p class="energy__hint">{move || word(lang(), EnergyText::CheckSign)}</p>
                     </Show>
-                    {move || match view_choice() {
+                    {move || match view_choice.get() {
                         EnergyView::Classic => {
                             view! {
                                 <CirclesDiagram ui=ui narrow=narrow open=open expanded=expanded />

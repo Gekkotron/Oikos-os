@@ -1247,3 +1247,35 @@ async fn orbite_follows_the_language() {
     let all = host.text_content().unwrap_or_default();
     assert!(all.contains("Entrant") && all.contains("Sortant"), "{all}");
 }
+
+#[wasm_bindgen_test]
+async fn an_unrelated_home_setting_keeps_the_diagram() {
+    let house = House::new();
+    for e in flux_fixture(1200.0) {
+        house.apply(WsEvent::EntityUpserted(e));
+    }
+    let host = mount_house(house, RwSignal::new(Lang::En), EnergyView::Orbite);
+    tick().await;
+    let before = host.query_selector(".energy-orbite").unwrap().unwrap();
+    house.home_settings.update(|s| s.eco_setpoint = Some(17.0));
+    tick().await;
+    let after = host.query_selector(".energy-orbite").unwrap().unwrap();
+    assert!(before.is_same_node(Some(&after)));
+    // A real change of view still swaps it.
+    house
+        .home_settings
+        .update(|s| s.energy_view = EnergyView::Flux);
+    tick().await;
+    assert_eq!(count(&host, ".energy-orbite"), 0);
+    assert_eq!(count(&host, ".energy-flux"), 1);
+}
+
+#[wasm_bindgen_test]
+async fn orbite_arcs_are_dashes_of_a_full_circle() {
+    let host = mount_view(flux_fixture(1200.0), EnergyView::Orbite);
+    tick().await;
+    let arc = orbite_arc(&host, "solar");
+    assert_eq!(arc.tag_name().to_lowercase(), "circle");
+    let style = arc.get_attribute("style").unwrap();
+    assert!(style.contains("stroke-dasharray") && style.contains("stroke-dashoffset"));
+}

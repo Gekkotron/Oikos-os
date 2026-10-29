@@ -151,18 +151,27 @@ pub fn dot_speed(watts: f64) -> f64 {
     10.0 + 0.9 * watts.max(0.0).sqrt()
 }
 
-/// The dots on an arc at time `t_s`: (angle in degrees, opacity 0..=1). Dots fade in and out at
+/// `phase` (a turn of the arc, 0..1) after `dt_s` seconds on `arc`. The phase is kept per arc, so
+/// a new reading changes how fast the dots go, never where they are.
+pub fn advance_phase(phase: f64, dt_s: f64, arc: &Arc) -> f64 {
+    let span = arc.a1 - arc.a0;
+    if span <= 0.0 {
+        return phase;
+    }
+    (phase + dt_s.clamp(0.0, 0.1) * dot_speed(arc.watts) / span).rem_euclid(1.0)
+}
+
+/// The dots on an arc at `phase`: (angle in degrees, opacity 0..=1). Dots fade in and out at
 /// the arc's ends.
-pub fn arc_dots(arc: &Arc, t_s: f64) -> Vec<(f64, f64)> {
+pub fn arc_dots(arc: &Arc, phase: f64) -> Vec<(f64, f64)> {
     let span = arc.a1 - arc.a0;
     if matches!(arc.role, SankeyRole::Others | SankeyRole::Unitemised) || span < MIN_DOT_ARC_DEG {
         return Vec::new();
     }
     let n = ((span / 42.0).round() as usize).max(1);
-    let speed = dot_speed(arc.watts);
     (0..n)
         .map(|j| {
-            let f = (t_s * speed / span + j as f64 / n as f64).rem_euclid(1.0);
+            let f = (phase + j as f64 / n as f64).rem_euclid(1.0);
             let opacity = (f.min(1.0 - f) * span / 6.0).clamp(0.0, 1.0);
             (arc.a0 + f * span, opacity)
         })
@@ -322,10 +331,10 @@ mod tests {
     #[test]
     fn dots_stay_inside_their_arc() {
         let r = rings(&balanced());
-        let mut t = 0.0;
+        let mut t: f64 = 0.0;
         while t < 10.0 {
             for a in r.inner.iter().chain(&r.outer) {
-                for (deg, op) in arc_dots(a, t) {
+                for (deg, op) in arc_dots(a, t.rem_euclid(1.0)) {
                     assert!(deg >= a.a0 - 1e-9 && deg <= a.a1 + 1e-9, "{deg} in {a:?}");
                     assert!((0.0..=1.0).contains(&op));
                 }
@@ -340,6 +349,52 @@ mod tests {
             ..r.inner[0].clone()
         };
         assert!(arc_dots(&short, 1.0).is_empty());
+    }
+
+    #[test]
+    fn a_new_reading_changes_the_speed_not_the_place() {
+        let r = rings(&balanced());
+        let a = r.outer[1].clone();
+        let phase = advance_phase(0.0, 0.05, &a);
+        let busier = Arc {
+            watts: a.watts * 3.0,
+            a0: a.a0 + 2.0,
+            a1: a.a1 + 8.0,
+            ..a.clone()
+        };
+        // Same phase, so the dots stay at the same share of their arc.
+        let frac = |arc: &Arc| {
+            arc_dots(arc, phase)
+                .iter()
+                .map(|(deg, _)| (deg - arc.a0) / (arc.a1 - arc.a0))
+                .collect::<Vec<_>>()
+        };
+        for (x, y) in frac(&a).iter().zip(frac(&busier)) {
+            assert!((x - y).abs() < 1e-9);
+        }
+        // More power moves the phase faster; a long pause moves it a bounded step.
+        assert!(advance_phase(0.0, 0.05, &busier) > 0.0);
+        assert!(advance_phase(0.0, 60.0, &a) <= advance_phase(0.0, 0.1, &a) + 1e-12);
+    }
+
+    #[test]
+    fn night_grid_only_fills_both_rings() {
+        let s = build(
+            &ui(
+                &[
+                    node("grid", NodeKind::Grid, 300.0, Flow::In),
+                    node("house", NodeKind::House, 300.0, Flow::In),
+                ],
+                &[],
+            ),
+            FOLD_WIDE,
+        );
+        let r = rings(&s);
+        assert_eq!(ids(&r.inner), ["grid"]);
+        assert_eq!(ids(&r.outer), ["unitemised"]);
+        for a in r.inner.iter().chain(&r.outer) {
+            assert_eq!((a.a0, a.a1), (0.0, 360.0));
+        }
     }
 
     #[test]
