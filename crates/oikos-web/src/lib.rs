@@ -16,6 +16,7 @@ pub mod energy;
 pub mod energy_circles;
 pub mod energy_day;
 pub mod energy_dots;
+pub mod energy_orbite;
 pub mod energy_sankey;
 pub mod energy_view;
 pub mod entity_picker;
