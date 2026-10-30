@@ -6877,6 +6877,87 @@ html:has(.flow-canvas-screen) {
 }
 
 /* The Climate screen takes the whole content width, not the 1200 px other screens keep. */
+/* A modal popup (components/popup.rs): a titled card over a scrim. No padding on the dialog,
+   so a click on the dialog itself is a click on the backdrop. */
+dialog.popup {
+  box-sizing: border-box;
+  width: min(640px, 100vw - 32px);
+  max-height: min(760px, 100vh - 64px);
+  padding: 0;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--menu-bg);
+  color: var(--ink);
+  box-shadow: var(--menu-shadow);
+  overflow: hidden;
+}
+
+dialog.popup.popup--small {
+  width: min(380px, 100vw - 32px);
+}
+
+dialog.popup[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.popup::backdrop {
+  background: var(--scrim);
+}
+
+.popup__bar {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding: 14px 16px 8px;
+}
+
+.popup__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: var(--type-card-value);
+}
+
+.popup__close {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: var(--type-body);
+  cursor: pointer;
+}
+
+.popup__close:hover {
+  background: var(--select-soft);
+}
+
+.popup__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+}
+
+@media (max-width: 640px) {
+  dialog.popup:not(.popup--small) {
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
 .screen:has(.climate-screen),
 .shell__content:has(.climate-screen) > .content-header {
   max-width: none;
