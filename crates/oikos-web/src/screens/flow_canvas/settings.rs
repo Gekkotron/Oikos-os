@@ -324,6 +324,11 @@ fn result_names(draft: RwSignal<Flow>) -> Memo<Vec<String>> {
     })
 }
 
+/// `value` when it is a number, else 0: what a math result is compared with.
+fn number_or_zero(value: Option<&serde_json::Value>) -> serde_json::Value {
+    after_entity_change(value, &ValueInput::Number { unit: None }).unwrap_or_else(|| 0.into())
+}
+
 fn node_editor_body(
     form: Form,
     selected: RwSignal<Option<Selection>>,
@@ -915,6 +920,8 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     form.update(&entity_id, |n| {
                         if let NodeKind::If(ref mut i) = n.kind {
                             i.result = Some(name.clone());
+                            // A result is a number: text or on/off values do not compare.
+                            i.value = Some(number_or_zero(i.value.as_ref()));
                             i.entity = None;
                             i.average = None;
                             i.missing = None;
@@ -1154,6 +1161,9 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         c.entity = value.unwrap_or_default();
                         if let Some(actions) = &actions {
                             c.command = retarget(&c.command, actions);
+                            if command_with_number(&c.command, 0.0).is_none() {
+                                c.value_from = None;
+                            }
                         }
                     }
                 });
@@ -1171,6 +1181,10 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             let command_write = Callback::new(move |cmd: Command| {
                 form.update(&cmd_id, |n| {
                     if let NodeKind::Command(ref mut c) = n.kind {
+                        // A link to a result only fits a command that has a number.
+                        if command_with_number(&cmd, 0.0).is_none() {
+                            c.value_from = None;
+                        }
                         c.command = cmd;
                     }
                 });
@@ -1560,6 +1574,9 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
             form.update(&entity_id, |n| {
                 if let NodeKind::Switch(ref mut s) = n.kind {
                     s.result = Some(name.clone());
+                    for r in &mut s.rules {
+                        r.value = number_or_zero(Some(&r.value));
+                    }
                     s.entity = None;
                     s.average = None;
                 }

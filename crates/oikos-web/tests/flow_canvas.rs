@@ -2304,12 +2304,15 @@ fn result_view() -> FlowView {
         { "id": "set", "type": "command",
           "params": { "entity": "number.target", "command": { "type": "set_number", "value": 7 } } },
         { "id": "check", "type": "if", "params": { "op": "gt", "value": 300, "average": "15m" } },
+        { "id": "plug", "type": "command",
+          "params": { "entity": "switch.plug", "command": { "type": "turn_on" }, "value_from": "half" } },
         { "id": "note", "type": "notify", "params": { "title": "Hi" } }
       ],
       "edges": [
         { "from": "power", "to": "half" },
         { "from": "half", "to": "set" },
         { "from": "half", "to": "check" },
+        { "from": "half", "to": "plug" },
         { "from": "check", "port": "true", "to": "note" }
       ]
     }"#;
@@ -2337,8 +2340,21 @@ async fn editing_results() -> (web_sys::Element, Box<dyn std::any::Any>, House) 
         },
         ..table_lamp()
     };
+    let plug = oikos_api::EntityView {
+        id: "switch.plug".into(),
+        name: "Plug".into(),
+        kind: Kind::Switch,
+        protocol_kind: Kind::Switch,
+        component: Kind::Switch.component().to_string(),
+        state: EntityState {
+            value: StateValue::OnOff(false),
+            ..Default::default()
+        },
+        ..table_lamp()
+    };
     house.entities.update(|m| {
         m.insert(target.id.clone(), target);
+        m.insert(plug.id.clone(), plug);
     });
     (host, mounted, house)
 }
@@ -2457,4 +2473,71 @@ async fn notify_inserts_result() {
     let node = saved_node(&host, "note").await;
     assert_eq!(node["params"]["body"], "{half}", "{node}");
     settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn changing_the_action_drops_the_result_link() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "plug").await;
+    assert_eq!(count(&host, ".flow-drawer select.value-from"), 1);
+    // The Action select is the one that offers "Turn off".
+    let all = host
+        .query_selector_all(".flow-drawer select option")
+        .unwrap();
+    let off: web_sys::Element = (0..all.length())
+        .filter_map(|i| all.item(i))
+        .map(|n| n.unchecked_into::<web_sys::Element>())
+        .find(|o| o.text_content().unwrap_or_default().contains("Turn off"))
+        .unwrap_or_else(|| panic!("no Turn off: {}", host.inner_html()));
+    let action: web_sys::HtmlSelectElement = off.parent_element().unwrap().unchecked_into();
+    action.set_value(&off.get_attribute("value").unwrap());
+    change(&action);
+    tick().await;
+    let node = saved_node(&host, "plug").await;
+    assert_eq!(node["params"]["command"]["type"], "turn_off", "{node}");
+    assert!(node["params"].get("value_from").is_none(), "{node}");
+}
+
+/// Picks the math result `half` on card `id` of a flow whose If and Switch compare the text
+/// entity `sensor.mode` with "idle", then returns the card as the next Save sends it.
+async fn pick_half_on_a_text_comparison(id: &str) -> serde_json::Value {
+    const TEXTY: &str = r#"{
+      "id": "living_led_motion", "name": "Texty", "enabled": true, "mode": "single",
+      "nodes": [
+        { "id": "power", "type": "trigger.state", "params": { "entity": "sensor.power" } },
+        { "id": "half", "type": "math", "params": { "inputs": [], "formula": "1", "name": "half" } },
+        { "id": "check", "type": "if", "params": { "op": "eq", "value": "idle", "entity": "sensor.mode" } },
+        { "id": "pick", "type": "switch", "params": { "entity": "sensor.mode", "rules": [ { "op": "eq", "value": "idle" } ] } }
+      ],
+      "edges": [ { "from": "power", "to": "half" }, { "from": "half", "to": "check" }, { "from": "half", "to": "pick" } ]
+    }"#;
+    let view = FlowView {
+        definition: Flow::decode(TEXTY.as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let (host, _mounted, _) = editing(view).await;
+    select_card(&host, id).await;
+    open_entity_picker(&host).await;
+    let row: web_sys::HtmlElement = element(&host, "[id$='-opt-half']").unchecked_into();
+    row.click();
+    tick().await;
+    let node = saved_node(&host, id).await;
+    settle_history().await;
+    node
+}
+
+#[wasm_bindgen_test]
+async fn if_result_makes_the_value_a_number() {
+    let check = pick_half_on_a_text_comparison("check").await;
+    assert_eq!(check["params"]["result"], "half", "{check}");
+    assert!(check["params"]["value"].is_number(), "{check}");
+}
+
+#[wasm_bindgen_test]
+async fn switch_result_makes_the_rule_values_numbers() {
+    let pick = pick_half_on_a_text_comparison("pick").await;
+    assert_eq!(pick["params"]["result"], "half", "{pick}");
+    assert!(pick["params"]["rules"][0]["value"].is_number(), "{pick}");
 }
