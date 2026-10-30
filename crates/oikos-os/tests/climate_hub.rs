@@ -2457,7 +2457,8 @@ mod engine {
             outdoor_mean: None,
             home: true,
             applied: true,
-            at: rig.t0 - 3600,
+            // Stepped 5 min before the restart: the next step still waits interval_min (15).
+            at: rig.t0 - 300,
             entities: BTreeMap::from([(
                 rig.id.clone(),
                 DeviceTarget {
