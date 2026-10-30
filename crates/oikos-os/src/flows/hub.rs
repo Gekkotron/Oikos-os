@@ -516,6 +516,12 @@ impl Hub {
                         node.id
                     )));
                 }
+                NodeKind::TriggerSilent(_) if signal_source || found.kind == Kind::Button => {
+                    return Err(HubError::InvalidFlow(format!(
+                        "node `{}`: `{entity}` never reports state, so it cannot go silent",
+                        node.id
+                    )));
+                }
                 NodeKind::TriggerSignal(params) => {
                     if !signal_source {
                         return Err(HubError::InvalidFlow(format!(

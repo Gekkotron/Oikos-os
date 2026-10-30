@@ -887,6 +887,11 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     return;
                 };
                 let m = (m as u32).clamp(1, oikos_core::flow::MAX_LIMIT);
+                // Show the value that was kept, so a typed 500 reads 100 in the field.
+                let input = event_target::<web_sys::HtmlInputElement>(&ev);
+                if input.value() != m.to_string() {
+                    input.set_value(&m.to_string());
+                }
                 form.update(&max_id, |n| {
                     if let NodeKind::Limit(ref mut l) = n.kind {
                         l.max = m;

@@ -1493,6 +1493,40 @@ async fn state_trigger_on_a_remote_is_rejected() {
     }
 }
 
+fn silent_flow(entity: &str) -> Flow {
+    Flow::decode(
+        serde_json::json!({
+            "id": "alive", "name": "Alive", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "quiet", "type": "trigger.silent", "params": { "entity": entity, "for": "50m" } },
+                { "id": "on", "type": "command",
+                  "params": { "entity": LED_ID, "command": { "type": "turn_on" } } }
+            ],
+            "edges": [{ "from": "quiet", "to": "on" }]
+        })
+        .to_string()
+        .as_bytes(),
+    )
+    .expect("silent flow")
+}
+
+#[tokio::test]
+async fn silent_trigger_on_an_entity_that_never_reports_is_rejected() {
+    let (hub, _publisher, _engine) = hub_with_button().await;
+    add_remote(&hub);
+    for entity in [REMOTE_ID, BUTTON_ID] {
+        match hub.set_flow(silent_flow(entity)).await {
+            Err(HubError::InvalidFlow(reason)) => {
+                assert!(reason.contains("never reports"), "{entity}: {reason}");
+            }
+            other => panic!("expected InvalidFlow for {entity}, got {other:?}"),
+        }
+    }
+    hub.set_flow(silent_flow(LED_ID))
+        .await
+        .expect("a light reports state");
+}
+
 #[tokio::test]
 async fn repeated_signal_records_last_and_at_every_time() {
     let (hub, _publisher) = hub_with_entities();

@@ -155,8 +155,8 @@ A smoke or battery sensor is only useful while it is alive. A **Silent for** car
 
 - The card fires once per silence, and again only after the entity reports and goes quiet for the duration again. `{trigger}` prints the duration.
 - The clock starts when the flow is saved or enabled, not from the entity's last report, so enabling a check on a sensor that has been quiet for hours waits the full duration first.
-- While the broker link is down nothing can be reported, so the clocks are frozen and restart when the link returns.
-- **Limit** lets at most `max` runs through in any rolling window (`per`); past that the run ends there. The window slides, so there is no reset at midnight.
+- While the broker link is down nothing can be reported, so the clocks are frozen and restart when the link returns. A link that reconnects more often than the duration keeps restarting them.
+- **Limit** lets at most `max` runs through in any rolling window (`per`); past that the run ends there. Every run that reaches it counts, even one cancelled later or started by hand, so put it right before the action. The window slides, so there is no reset at midnight.
 - Silence clocks and Limit counts are kept in memory: a hub restart starts them again.
 
 A **When** card with a value (`to`) also fires when that value first appears after being unknown, for a sensor that only includes its alarm field once it is set; see [`trigger.state`](../reference/flow-nodes.md#triggerstate).

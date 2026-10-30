@@ -89,7 +89,7 @@ Outputs: one. The run carries the entity's new value.
 - The replayed value after boot or reconnect arms the entity silently. It never fires on that replay, on an availability-only change, or on an equal-value report. A change needs a known previous value and a known new one.
 - A **button** (a virtual or discovered `button`) has no value: a press is an event and fires the trigger with the value `PRESS`. A button trigger takes no `to` or `from`, and a retained message is a replay, never a press.
 - The trigger is refused on entities that send signals (remotes, events, tags): use `trigger.signal`.
-- **Unknown, then a value.** A trigger with a `to` and no `from` also fires when its value was unknown and then becomes `to`. The unknown must have been confirmed by a report the hub received while the flow was watching it (a report that carried no value, such as a detector that omits its alarm field until it is set). The value vanishing again and returning fires again. It stays silent on the first value seen after boot or a reconnect, on a value restored from the recorded history, at flow save, when the value goes away, and for any trigger without `to` or with a `from`.
+- **Unknown, then a value.** A trigger with a `to` and no `from` also fires when its value was unknown and then becomes `to`. The unknown must have been confirmed by a report the hub received while the flow was watching it (any state message on the entity's topic, even one that carried no value for it, such as a detector that sends `null` or omits its alarm field until it is set). The value vanishing again and returning fires again. It stays silent on the first value seen after boot or a reconnect, on a value restored from the recorded history, at flow save, when the value goes away, and for any trigger without `to` or with a `from`.
 
 ## `trigger.signal`
 
@@ -156,11 +156,12 @@ Starts a run when an entity has sent no report for a while: a sensor whose batte
 
 Outputs: one. The trigger value is the `for` text (`50m`), so `{trigger}` in a notify prints it; the trigger entity is the silent entity. The step detail reads `<entity> silent for <for>`.
 
-- A report is any state message the hub receives for the entity, changed or not. A value restored from the recorded history at boot is not a report.
+- A report is any state message the hub receives on one of the entity's state topics, changed or not, and even when it carries no value for the entity (a `null` field, a missing key). A message on an availability-only topic is not a report. A value restored from the recorded history at boot is not a report.
 - The trigger fires once per silence. It fires again only after the entity reports and then stays silent for `for` again.
 - Each clock starts when the node is armed: when the hub starts, when the flow is saved or enabled, and when the broker link comes back. Saving a flow without changing the node's `entity` or `for` keeps its clock; changing either restarts it. Nothing fires at boot, on a save or on enable before `for` has elapsed.
-- While the broker link is down nothing can be reported, so the clocks are frozen: nothing fires, and every clock restarts when the link returns. If the hub misses reports because it is overloaded, every clock restarts too.
-- With `mode: single`, a fire that finds a run active is recorded as skipped and uses up that silence: the trigger stays quiet until the entity reports again.
+- While the broker link is down nothing can be reported, so the clocks are frozen: nothing fires, and every clock restarts when the link returns. If the hub misses reports because it is overloaded, every clock restarts too. A broker link that reconnects more often than `for` therefore keeps restarting the clocks, and nothing ever fires.
+- With `mode: single`, a due clock whose flow still has a run active does not fire and is not recorded as skipped: it fires once that run ends, unless the entity reports first.
+- The trigger is refused on entities that never report state: buttons and entities that send signals (remotes, events, tags).
 - Clocks live in memory and start again after a hub restart.
 
 ```json
@@ -178,7 +179,7 @@ Lets a run through at most a given number of times in a rolling window; past tha
 
 Outputs: one, with no port.
 
-- A run reaching the node passes when fewer than `max` runs passed it in the last `per`. The window is rolling, not reset at midnight. A pass is counted when it happens.
+- A run reaching the node passes when fewer than `max` runs passed it in the last `per`. The window is rolling, not reset at midnight. A pass is counted when a run reaches the node, whatever happens after it: a run cancelled later, or a manual run, still used up a pass. Put the node right before the action it protects.
 - Over the limit, the run ends at this node with status `done`, and nothing after it runs. The step has outcome `ok` and the detail `limited: 4 in the last 24h`; a pass reads `passed (2 of 4 in the last 24h)`.
 - The count is kept per flow and node, in memory: a hub restart forgets it. Saving the flow keeps it while the node exists with the same `max` and `per`; removing or changing the node, or deleting the flow, drops it. Disabling a flow keeps it.
 
