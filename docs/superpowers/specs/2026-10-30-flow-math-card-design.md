@@ -203,6 +203,15 @@ The step detail lists the inputs read, then the result and the save, for example
     inputs (results of other math cards preview as `?`). An `average` input previews with
     its current value and the line says so ("now, not the 1m average"); the editor does
     not fetch history for it (my call).
+  - **Picking functions and names** (user's choice: both ways):
+    - chips under the formula for each input name (and `trigger`), tapping one inserts it
+      at the cursor;
+    - an **ƒ Functions** chip opening a menu, one line per function with what it does
+      (EN/FR); tapping one inserts it at the cursor with its argument slots, e.g.
+      `clamp(▢, ▢, ▢)`, the cursor in the first slot;
+    - suggestions while typing: after two letters of a word, matching functions, input
+      names and other math results pop up under the field; Tab, Enter or a tap inserts,
+      Escape closes.
   - **Result name**.
   - **Save to** (optional): the entity picker limited to number entities.
 - The canvas sentence for the card reads like the others, e.g.
@@ -212,6 +221,8 @@ The step detail lists the inputs read, then the result and the save, for example
 - If / Switch cards: the value picker lists the flow's math results alongside entities.
 - Notify: the **＋ Value** button lists the flow's math results too.
 - EN and FR strings.
+
+Mockup (approved 2026-10-30): `2026-10-30-flow-math-card-mockup.html` next to this file.
 
 ## Interfaces
 

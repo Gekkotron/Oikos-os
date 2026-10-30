@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Flow math card mockup</title>
+<style>body{margin:0;padding:24px;background:#faf8f3;color:#1f1b16;font-family:system-ui,sans-serif}.subtitle{opacity:.7}.options{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}.option{border:1px solid #ddd;border-radius:12px;padding:14px;display:flex;gap:10px}.letter{font-weight:700}</style></head><body>
+<style>
+  .ng { --bg:#0b1020; --ink:#e8ecff; --muted:rgb(232 236 255 / 65%); --line:rgb(232 236 255 / 14%);
+        --glass:rgb(255 255 255 / 6%); --amber:#ffc457; --mint:#6ff0bf; --red:#ff7a7a;
+        background:radial-gradient(120% 90% at 50% 0%, #1d2b55 0%, #0b1020 100%); color:var(--ink);
+        font-family:Inter, system-ui, sans-serif; border-radius:16px; padding:18px; }
+  .ng .mute { color:var(--muted); font-size:12px; }
+  .ng .drawer { background:rgb(20 28 56 / 92%); border:1px solid var(--line); border-radius:18px; padding:16px 18px; max-width:460px; }
+  .ng .drawer h4 { margin:0 0 2px; font-size:17px; display:flex; gap:8px; align-items:center; }
+  .ng .sec { border-top:1px solid var(--line); padding:12px 0; }
+  .ng .sec:first-of-type { border-top:none; }
+  .ng .lbl { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:6px; }
+  .ng .fld { background:var(--glass); border:1px solid var(--line); border-radius:12px; padding:8px 11px; font-size:13px; }
+  .ng .mono { font-family:"JetBrains Mono", ui-monospace, monospace; font-size:13px; }
+  .ng .row { display:grid; grid-template-columns: 90px 1fr 70px 22px; gap:6px; align-items:center; margin-bottom:6px; }
+  .ng .x { color:var(--muted); text-align:center; }
+  .ng .add { color:var(--amber); font-size:13px; }
+  .ng .chip { display:inline-block; border:1px solid var(--line); background:var(--glass); border-radius:999px; padding:4px 10px; font-size:12px; margin:0 4px 6px 0; }
+  .ng .chip.name { border-color:rgb(111 240 191 / 45%); color:var(--mint); }
+  .ng .chip.fn { border-color:rgb(255 196 87 / 45%); color:var(--amber); }
+  .ng .ok { color:var(--mint); font-size:12.5px; margin-top:6px; }
+  .ng .err { color:var(--red); font-size:12.5px; margin-top:6px; }
+  .ng .menu { background:#18213f; border:1px solid var(--line); border-radius:12px; padding:6px; margin-top:6px; }
+  .ng .menu div { padding:6px 8px; border-radius:8px; font-size:12.5px; display:flex; justify-content:space-between; gap:10px; }
+  .ng .menu .hl { background:rgb(255 196 87 / 14%); }
+  .ng .menu small { color:var(--muted); }
+  .ng .node { display:inline-block; border:1px solid var(--line); background:var(--glass); border-radius:12px; padding:8px 12px; font-size:12.5px; margin:4px 6px 4px 0; }
+  .ng .node b { color:var(--amber); font-weight:600; }
+  .ng .arrow { color:var(--muted); margin-right:6px; }
+  .ng .caret { display:inline-block; width:1px; height:14px; background:var(--amber); vertical-align:middle; animation:bl 1s steps(1) infinite; }
+  @keyframes bl { 50% { opacity:0; } }
+  table.fns { border-collapse:collapse; width:100%; font-size:13px; }
+  table.fns td, table.fns th { border-bottom:1px solid var(--border, #ddd); padding:7px 8px; text-align:left; vertical-align:top; }
+  table.fns code { font-size:12.5px; }
+</style>
+
+<h2>Math card — editor design</h2>
+<p class="subtitle">Night Glass theme. The water-heater flow is used as the example throughout.</p>
+
+<div class="section">
+<h3>1 · On the canvas</h3>
+<div class="ng">
+  <span class="node">⚡ When <b>Réseau</b> changes</span><span class="arrow">→</span>
+  <span class="node">If <b>Tank</b> &gt; 72</span><span class="arrow">→ false →</span>
+  <span class="node">If <b>Force heating</b> is on</span><span class="arrow">→ false →</span><br>
+  <span class="node">ƒ <b>desired</b> = clamp(heater − 100 − grid, 0, 1650)</span><span class="arrow">→</span>
+  <span class="node">ƒ <b>smoothed</b> = if(abs(desired − prev) &gt; 300, …) → Heater target</span><span class="arrow">→</span>
+  <span class="node">ƒ <b>slider</b> = round(interp(smoothed, …)) → Water heater power</span>
+  <div class="mute" style="margin-top:8px">The card shows its result name in amber, the formula, and “→ entity” when it saves.</div>
+</div>
+</div>
+
+<div class="section">
+<h3>2 · The settings drawer (tap a Math card)</h3>
+<div class="ng">
+<div class="drawer">
+  <h4>ƒ Math</h4>
+  <div class="mute">Compute a number from your devices.</div>
+
+  <div class="sec">
+    <div class="lbl">Inputs</div>
+    <div class="row"><div class="fld mono">grid</div><div class="fld">Réseau · 1 330 W</div><div class="fld mute">now ▾</div><div class="x">✕</div></div>
+    <div class="row"><div class="fld mono">heater</div><div class="fld">Chauffe eau · 5 W</div><div class="fld mute">now ▾</div><div class="x">✕</div></div>
+    <div class="add">＋ Input</div>
+    <div class="mute" style="margin-top:4px">“now ▾” switches to an average (1m, 5m, 15m, 1h…).</div>
+  </div>
+
+  <div class="sec">
+    <div class="lbl">Formula</div>
+    <div class="fld mono">clamp(heater - 100 - grid, 0, 1650)<span class="caret"></span></div>
+    <div style="margin-top:8px">
+      <span class="chip name">grid</span><span class="chip name">heater</span><span class="chip name">trigger</span>
+      <span class="chip fn">ƒ Functions ▾</span>
+    </div>
+    <div class="ok">= 0 &nbsp;<span class="mute">with now’s values (heater 5 − 100 − grid 1 330 = −1 425, clamped to 0)</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="lbl">Result name</div>
+    <div class="fld mono">desired</div>
+    <div class="mute" style="margin-top:4px">Later cards use it: a Command “value from desired”, an If on desired, {desired} in a notification.</div>
+  </div>
+
+  <div class="sec">
+    <div class="lbl">Save to <span style="text-transform:none">(optional)</span></div>
+    <div class="fld mute">— not saved — ▾</div>
+  </div>
+</div>
+</div>
+<p class="subtitle" style="margin-top:8px">Errors show in red under the formula as you type, e.g. <code>unknown name “gird”</code>, <code>missing )</code>, <code>interp: x must increase</code>. Save is refused while it is red.</p>
+</div>
+
+<div class="section">
+<h3>3 · How do you want to pick functions?</h3>
+<p class="subtitle">Click the one you prefer (you can say “several” in the terminal).</p>
+<div class="options">
+  <div class="option" data-choice="menu" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>“ƒ Functions” menu</h3>
+      <p>A button under the formula opens a list, each line with what it does and an example. Tapping one inserts it at the cursor with placeholders, e.g. <code>clamp(▢, ▢, ▢)</code>.</p>
+      <div class="ng" style="padding:10px;margin-top:8px">
+        <div class="menu">
+          <div class="hl"><span class="mono">clamp(x, low, high)</span><small>keep x between low and high</small></div>
+          <div><span class="mono">interp(x, [..], [..])</span><small>lookup table, linear</small></div>
+          <div><span class="mono">if(cond, a, b)</span><small>a when cond, else b</small></div>
+          <div><span class="mono">round(x, n)</span><small>n decimals</small></div>
+          <div class="mute" style="justify-content:center">… min · max · abs · floor · ceil</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="option" data-choice="autocomplete" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Suggestions while typing</h3>
+      <p>Type two letters and matching functions and input names pop up under the field; Tab or tap inserts. No separate button.</p>
+      <div class="ng" style="padding:10px;margin-top:8px">
+        <div class="fld mono">heater - cl<span class="caret"></span></div>
+        <div class="menu">
+          <div class="hl"><span class="mono">clamp(x, low, high)</span><small>keep x between low and high</small></div>
+          <div><span class="mono">ceil(x)</span><small>round up</small></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="option" data-choice="both" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Both</h3>
+      <p>The ƒ Functions menu for browsing, plus suggestions while typing for speed. Most work, most comfortable on a phone and a desktop.</p>
+    </div>
+  </div>
+</div>
+</div>
+
+<div class="section">
+<h3>4 · The functions</h3>
+<table class="fns">
+  <tr><th>Function</th><th>What it does</th><th>Example</th></tr>
+  <tr><td><code>+ − * / %</code></td><td>arithmetic, parentheses, unary −</td><td><code>heater - 100 - grid</code></td></tr>
+  <tr><td><code>&lt; &lt;= &gt; &gt;= == !=</code></td><td>compare: 1 if true, 0 if false</td><td><code>tank &gt; 72</code></td></tr>
+  <tr><td><code>and  or  not</code></td><td>combine conditions</td><td><code>tank &lt; 40 and force</code></td></tr>
+  <tr><td><code>min(a, b, …)</code> / <code>max(a, b, …)</code></td><td>smallest / largest</td><td><code>max(0, heater - grid)</code></td></tr>
+  <tr><td><code>clamp(x, low, high)</code></td><td>keep x between low and high</td><td><code>clamp(desired, 0, 1650)</code></td></tr>
+  <tr><td><code>abs(x)</code></td><td>value without its sign</td><td><code>abs(desired - prev)</code></td></tr>
+  <tr><td><code>round(x)</code>, <code>round(x, n)</code></td><td>nearest whole number / n decimals</td><td><code>round(slider)</code></td></tr>
+  <tr><td><code>floor(x)</code> / <code>ceil(x)</code></td><td>round down / up</td><td><code>floor(watts / 100)</code></td></tr>
+  <tr><td><code>if(cond, a, b)</code></td><td>a when cond is true, else b (only one side is computed)</td><td><code>if(abs(d) &gt; 300, 0.9*d, 0.4*d)</code></td></tr>
+  <tr><td><code>interp(x, [xs], [ys])</code></td><td>lookup table with straight lines between points; flat beyond the ends</td><td><code>interp(w, [0, 38, 81], [0, 10, 15])</code></td></tr>
+</table>
+<p class="subtitle">Reads: input names, other Math cards’ result names, and <code>trigger</code> (the value that started the run).</p>
+</div>
+
+</body></html>
