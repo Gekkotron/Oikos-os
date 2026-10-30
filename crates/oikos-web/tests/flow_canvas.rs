@@ -2291,3 +2291,170 @@ async fn input_chip_inserts_name() {
     assert_eq!(count(&host, ".math-input"), 1);
     settle_history().await;
 }
+
+// ---- Cards that read a math result ----------------------------------------------------------
+
+/// A flow with a math card `half`, a number command, a comparison and a push.
+fn result_view() -> FlowView {
+    const WITH_MATH: &str = r#"{
+      "id": "living_led_motion", "name": "Half", "enabled": true, "mode": "single",
+      "nodes": [
+        { "id": "power", "type": "trigger.state", "params": { "entity": "sensor.power" } },
+        { "id": "half", "type": "math", "params": { "inputs": [], "formula": "trigger / 2", "name": "half" } },
+        { "id": "set", "type": "command",
+          "params": { "entity": "number.target", "command": { "type": "set_number", "value": 7 } } },
+        { "id": "check", "type": "if", "params": { "op": "gt", "value": 300, "average": "15m" } },
+        { "id": "note", "type": "notify", "params": { "title": "Hi" } }
+      ],
+      "edges": [
+        { "from": "power", "to": "half" },
+        { "from": "half", "to": "set" },
+        { "from": "half", "to": "check" },
+        { "from": "check", "port": "true", "to": "note" }
+      ]
+    }"#;
+    FlowView {
+        definition: Flow::decode(WITH_MATH.as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    }
+}
+
+/// An editing canvas over [`result_view`] with a number entity for the command.
+async fn editing_results() -> (web_sys::Element, Box<dyn std::any::Any>, House) {
+    use oikos_core::model::{EntityState, Kind, StateValue};
+    let (host, mounted, house) = editing(result_view()).await;
+    let target = oikos_api::EntityView {
+        id: "number.target".into(),
+        name: "Target".into(),
+        kind: Kind::Number,
+        protocol_kind: Kind::Number,
+        component: Kind::Number.component().to_string(),
+        state: EntityState {
+            value: StateValue::Number(3.0),
+            ..Default::default()
+        },
+        ..table_lamp()
+    };
+    house.entities.update(|m| {
+        m.insert(target.id.clone(), target);
+    });
+    (host, mounted, house)
+}
+
+fn change(el: &web_sys::Element) {
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    el.dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+}
+
+/// The node `id` of the flow the next Save sends.
+async fn saved_node(host: &web_sys::Element, id: &str) -> serde_json::Value {
+    let fetch = FakeFetch::answer(&write_outcome(&result_view()));
+    click(host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let sent = puts(&fetch);
+    let (_, _, body) = sent
+        .last()
+        .unwrap_or_else(|| panic!("no save: {}", host.inner_html()));
+    let flow: serde_json::Value = serde_json::from_str(body).unwrap();
+    flow["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == id)
+        .unwrap_or_else(|| panic!("no node {id}: {body}"))
+        .clone()
+}
+
+#[wasm_bindgen_test]
+async fn command_value_from_result() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "set").await;
+    assert_eq!(count(&host, ".flow-drawer input[type=number]"), 1);
+    let select: web_sys::HtmlSelectElement =
+        element(&host, ".flow-drawer select.value-from").unchecked_into();
+    assert_eq!(select.value(), "");
+    select.set_value("half");
+    change(&select);
+    tick().await;
+    // The number box gives way while a result feeds the command.
+    assert_eq!(
+        count(&host, ".flow-drawer input[type=number]"),
+        0,
+        "{}",
+        host.inner_html()
+    );
+    assert_eq!(
+        text(&host, "[data-node=set] .flow-node__title"),
+        "Set Target to half"
+    );
+    let node = saved_node(&host, "set").await;
+    assert_eq!(node["params"]["value_from"], "half", "{node}");
+    // The literal stays for when the link is cleared.
+    assert_eq!(node["params"]["command"]["value"], 7.0, "{node}");
+}
+
+#[wasm_bindgen_test]
+async fn value_from_is_offered_only_with_math_and_a_number() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "set").await;
+    assert_eq!(count(&host, ".flow-drawer select.value-from"), 1);
+    // A flow with no math card offers nothing to pick.
+    let (plain, _m2, _) = editing(reference_view(None, vec![])).await;
+    select_card(&plain, "on").await;
+    assert_eq!(count(&plain, ".flow-drawer select.value-from"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn if_compares_a_result() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "check").await;
+    open_entity_picker(&host).await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-half']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no result row: {}", host.inner_html()))
+        .unchecked_into();
+    row.click();
+    tick().await;
+    let field = text(&host, ".flow-drawer button.picker-field");
+    assert!(field.contains("half"), "{field}");
+    assert_eq!(
+        text(&host, "[data-node=check] .flow-node__title"),
+        "half > 300?"
+    );
+    let node = saved_node(&host, "check").await;
+    assert_eq!(node["params"]["result"], "half", "{node}");
+    assert!(node["params"].get("entity").is_none(), "{node}");
+    // Choosing a result drops the average the card had.
+    assert!(node["params"].get("average").is_none(), "{node}");
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn notify_inserts_result() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "note").await;
+    // The body's ＋ Value is the second button.
+    let add: web_sys::HtmlElement = host
+        .query_selector_all(".flow-drawer .node-editor__add-value")
+        .unwrap()
+        .item(1)
+        .unwrap()
+        .unchecked_into();
+    add.click();
+    tick().await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-half']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no result row: {}", host.inner_html()))
+        .unchecked_into();
+    row.click();
+    tick().await;
+    let node = saved_node(&host, "note").await;
+    assert_eq!(node["params"]["body"], "{half}", "{node}");
+    settle_history().await;
+}

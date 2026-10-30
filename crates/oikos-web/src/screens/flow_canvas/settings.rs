@@ -4,8 +4,8 @@
 
 use leptos::prelude::*;
 use oikos_core::flow::{
-    IfParams, MAX_SWITCH_RULES, Missing, Node, NodeKind, OffPeakEdge, Op, RuleOp, Scalar,
-    SwitchParams, SwitchRule, TimeBetweenParams,
+    Flow, IfParams, MAX_SWITCH_RULES, Missing, Node, NodeKind, OffPeakEdge, Op, RuleOp, Scalar,
+    SwitchParams, SwitchRule, TimeBetweenParams, command_with_number, math_names,
 };
 use oikos_core::model::{Command, Kind};
 
@@ -311,6 +311,19 @@ fn switch_op(i: &mut IfParams, op: Op, stash: &mut IfStash) {
     i.op = op;
 }
 
+/// The names of the draft's math cards, in order, for the lists that offer them. A memo, so a
+/// field that holds focus is not rebuilt by an unrelated edit.
+fn result_names(draft: RwSignal<Flow>) -> Memo<Vec<String>> {
+    Memo::new(move |_| {
+        draft.with(|f| {
+            math_names(f)
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+    })
+}
+
 fn node_editor_body(
     form: Form,
     selected: RwSignal<Option<Selection>>,
@@ -536,6 +549,7 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
         });
     };
     let draft = form.editor.draft;
+    let results = Signal::from(result_names(draft));
     let notify_of = move |id: &str, read: fn(&oikos_core::flow::NotifyParams) -> String| {
         draft.with(|f| match f.node(id).map(|n| &n.kind) {
             Some(NodeKind::Notify(p)) => read(p),
@@ -573,6 +587,7 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
     view! {
         <TemplateField
             label=word(FlowText::TitleLabel)
+            results=results
             initial=p.title
             placeholder=word(FlowText::TitleExample)
             optional=false
@@ -580,6 +595,7 @@ fn notify_fields(form: Form, id: String, p: oikos_core::flow::NotifyParams) -> i
         />
         <TemplateField
             label=word(FlowText::BodyLabel)
+            results=results
             initial=p.body.unwrap_or_default()
             placeholder=word(FlowText::NoneParen)
             optional=true
@@ -848,6 +864,19 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             });
             let house = expect_context::<House>();
             let draft = form.editor.draft;
+            let names = result_names(draft);
+            // The math result the card compares, when it compares one.
+            let result_value = Signal::derive({
+                let id = id.clone();
+                move || {
+                    draft.with(|f| match f.node(&id).map(|n| &n.kind) {
+                        Some(NodeKind::If(i)) => i.result.clone().filter(|r| !r.is_empty()),
+                        _ => None,
+                    })
+                }
+            });
+            let source_value =
+                Signal::derive(move || result_value.get().or_else(|| entity_value.get()));
             // The entity the value is compared with: the card's own, else its state trigger's.
             let resolved = {
                 let id = id.clone();
@@ -856,13 +885,43 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     house.entities.with(|m| m.get(&target).cloned())
                 }
             };
+            // A result is a number, whatever the trigger is.
             let compared = Memo::new({
                 let resolved = resolved.clone();
-                move |_| resolved(entity_value.get())
+                move |_| {
+                    result_value
+                        .with(Option::is_none)
+                        .then(|| resolved(entity_value.get()))
+                        .flatten()
+                }
             });
-            let manual = manual_input(draft, id.clone());
+            let manual = {
+                let manual = manual_input(draft, id.clone());
+                Signal::derive(move || {
+                    if result_value.with(Option::is_some) {
+                        Some(ValueInput::Number { unit: None })
+                    } else {
+                        manual.get()
+                    }
+                })
+            };
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
+                if let Some(name) = value
+                    .as_ref()
+                    .filter(|v| names.with_untracked(|n| n.contains(v)))
+                {
+                    // A result stands in for the entity, so what only an entity has goes.
+                    form.update(&entity_id, |n| {
+                        if let NodeKind::If(ref mut i) = n.kind {
+                            i.result = Some(name.clone());
+                            i.entity = None;
+                            i.average = None;
+                            i.missing = None;
+                        }
+                    });
+                    return;
+                }
                 let next = untrack(|| resolved(value.clone()));
                 let input = untrack(|| {
                     compared_input(
@@ -877,6 +936,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     if let NodeKind::If(ref mut i) = n.kind {
                         i.value = after_entity_change(i.value.as_ref(), &input);
                         i.entity = value;
+                        i.result = None;
                     }
                 });
             });
@@ -963,12 +1023,14 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     />
                     <EntityPickField
                         label=word(FlowText::EntityDefaults)
-                        value=entity_value
+                        value=source_value
                         on_change=entity_write
                         pinned=Some(word(FlowText::TriggerValue))
+                        results=Some(Signal::from(names))
                         compact=true
                         class=Some("node-editor__field".to_owned())
                     />
+                    <Show when=move || result_value.with(Option::is_none)>
                     <TextField
                         label=word(FlowText::AverageOver)
                         initial=live.run(()).and_then(|i| i.average).unwrap_or_default()
@@ -996,6 +1058,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                                 .collect_view()}
                         </select>
                     </label>
+                    </Show>
                 </Show>
             }
             .into_any()
@@ -1103,6 +1166,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     _ => p.command.clone(),
                 })
             });
+            let value_from_id = id.clone();
             let cmd_id = id;
             let command_write = Callback::new(move |cmd: Command| {
                 form.update(&cmd_id, |n| {
@@ -1129,6 +1193,32 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     />
                 }
             };
+            let names = result_names(draft);
+            let from_id = value_from_id;
+            let value_from = Signal::derive({
+                let from_id = from_id.clone();
+                move || {
+                    draft.with(|f| match f.node(&from_id).map(|n| &n.kind) {
+                        Some(NodeKind::Command(c)) => {
+                            c.value_from.clone().filter(|v| !v.is_empty())
+                        }
+                        _ => None,
+                    })
+                }
+            });
+            // Only a command with a number can take one from a result.
+            let takes_number =
+                Memo::new(move |_| command.with(|c| command_with_number(c, 0.0).is_some()));
+            let on_value_from = move |ev: web_sys::Event| {
+                let value = Some(event_target_value(&ev)).filter(|v| !v.is_empty());
+                form.update(&from_id, |n| {
+                    if let NodeKind::Command(ref mut c) = n.kind {
+                        c.value_from = value;
+                    }
+                });
+            };
+            let replaced =
+                Signal::derive(move || value_from.with(Option::is_some) && takes_number.get());
             view! {
                 <EntityPickField
                     label=word(FlowText::Entity)
@@ -1141,6 +1231,37 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     compact=true
                     class=Some("node-editor__field".to_owned())
                 />
+                <Show when=move || takes_number.get() && (names.with(|n| !n.is_empty()) || value_from.with(Option::is_some))>
+                    <label class="node-editor__field">
+                        <span class="node-editor__label">{move || t(FlowText::ValueFromResult)}</span>
+                        <select class="field value-from" on:change=on_value_from.clone()>
+                            <option value="" selected=move || value_from.with(Option::is_none)>
+                                "—"
+                            </option>
+                            // A link to a card that is gone stays visible, so it can be cleared.
+                            {move || {
+                                let mut all = names.get();
+                                if let Some(v) = value_from.get().filter(|v| !all.contains(v)) {
+                                    all.push(v);
+                                }
+                                all.into_iter()
+                                    .map(|n| {
+                                        let is = n.clone();
+                                        let text = n.clone();
+                                        view! {
+                                            <option
+                                                value=n
+                                                selected=move || value_from.get().as_deref() == Some(is.as_str())
+                                            >
+                                                {text}
+                                            </option>
+                                        }
+                                    })
+                                    .collect_view()
+                            }}
+                        </select>
+                    </label>
+                </Show>
                 <Show when=move || entity.with(Option::is_some) fallback=json_box>
                     <CommandFields
                         command=command
@@ -1148,6 +1269,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         write=command_write
                         style=FieldStyle::Node
                         advanced=ViewFn::from(json_box)
+                        numbers_replaced=replaced
                     />
                 </Show>
             }
@@ -1396,13 +1518,54 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
             house.entities.with(|m| m.get(&target).cloned())
         }
     };
+    let names = result_names(draft);
+    // The math result the card switches on, when it does.
+    let result_value = Signal::derive({
+        let id = id.clone();
+        move || {
+            draft.with(|f| match f.node(&id).map(|n| &n.kind) {
+                Some(NodeKind::Switch(s)) => s.result.clone().filter(|r| !r.is_empty()),
+                _ => None,
+            })
+        }
+    });
+    let source_value = Signal::derive(move || result_value.get().or_else(|| entity_value.get()));
+    // A result is a number, whatever the trigger is.
     let compared = Memo::new({
         let resolved = resolved.clone();
-        move |_| resolved(entity_value.get())
+        move |_| {
+            result_value
+                .with(Option::is_none)
+                .then(|| resolved(entity_value.get()))
+                .flatten()
+        }
     });
-    let manual = manual_input(draft, id.clone());
+    let manual = {
+        let manual = manual_input(draft, id.clone());
+        Signal::derive(move || {
+            if result_value.with(Option::is_some) {
+                Some(ValueInput::Number { unit: None })
+            } else {
+                manual.get()
+            }
+        })
+    };
     let entity_id = id.clone();
     let entity_write = Callback::new(move |value: Option<String>| {
+        if let Some(name) = value
+            .as_ref()
+            .filter(|v| names.with_untracked(|n| n.contains(v)))
+        {
+            // A result stands in for the entity, so the average goes.
+            form.update(&entity_id, |n| {
+                if let NodeKind::Switch(ref mut s) = n.kind {
+                    s.result = Some(name.clone());
+                    s.entity = None;
+                    s.average = None;
+                }
+            });
+            return;
+        }
         let next = untrack(|| resolved(value.clone()));
         let input = untrack(|| {
             compared_input(
@@ -1421,6 +1584,7 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
                     }
                 }
                 s.entity = value;
+                s.result = None;
             }
         });
     });
@@ -1484,19 +1648,22 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
     view! {
         <EntityPickField
             label=word(FlowText::EntityDefaults)
-            value=entity_value
+            value=source_value
             on_change=entity_write
             pinned=Some(word(FlowText::TriggerValue))
+            results=Some(Signal::from(names))
             compact=true
             class=Some("node-editor__field".to_owned())
         />
-        <TextField
-            label=word(FlowText::AverageOver)
-            initial=p.average.unwrap_or_default()
-            placeholder=word(FlowText::AverageHint)
-            optional=true
-            write=average_write
-        />
+        <Show when=move || result_value.with(Option::is_none)>
+            <TextField
+                label=word(FlowText::AverageOver)
+                initial=p.average.clone().unwrap_or_default()
+                placeholder=word(FlowText::AverageHint)
+                optional=true
+                write=average_write
+            />
+        </Show>
         <div class="rule-list">{rows}</div>
         <button
             type="button"

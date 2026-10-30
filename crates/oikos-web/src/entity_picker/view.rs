@@ -203,6 +203,10 @@ pub fn PickerBody(
     #[prop(optional_no_strip)] pool: Option<Keep>,
     #[prop(optional_no_strip)] suggest: Option<Suggest>,
     #[prop(optional_no_strip)] pinned: Option<Pinned>,
+    /// Names listed first, after the pinned row (a flow's math results); a pick reports
+    /// `Some(name)` like an entity does. They narrow with the search box and hide under a room.
+    #[prop(optional_no_strip)]
+    results: Option<Signal<Vec<String>>>,
     /// Single: the pick (`None` is the pinned row). Multi: `Some(id)` toggles `id`.
     on_pick: Callback<Option<String>>,
     /// No room column at any width (the group wizard).
@@ -227,6 +231,15 @@ pub fn PickerBody(
     let suggest_keep = suggest.as_ref().map(|s| s.keep.clone());
     let suggest_text = suggest.as_ref().map(|s| s.text);
     let has_pinned = pinned.is_some();
+    let named = Memo::new(move |_| {
+        let q = query.get().trim().to_lowercase();
+        if room.with(Option::is_some) {
+            return Vec::new();
+        }
+        results
+            .map(|r| r.with(|r| r.iter().filter(|n| n.contains(&q)).cloned().collect()))
+            .unwrap_or_default()
+    });
 
     // Equal listings do not redraw: a state echo changes no row.
     let list = Memo::new(move |_| {
@@ -261,6 +274,7 @@ pub fn PickerBody(
         if has_pinned {
             out.push(None);
         }
+        named.with(|n| out.extend(n.iter().cloned().map(Some)));
         list.with(|l| {
             out.extend(l.missing.iter().cloned().map(Some));
             for s in &l.sections {
@@ -322,7 +336,9 @@ pub fn PickerBody(
         _ => {}
     };
 
-    let empty = move || list.with(|l| l.missing.is_empty() && l.sections.is_empty());
+    let empty = move || {
+        named.with(Vec::is_empty) && list.with(|l| l.missing.is_empty() && l.sections.is_empty())
+    };
     let can_widen = suggest.is_some();
     let rooms = move || list.with(|l| l.rooms.clone());
     let missing = move || list.with(|l| l.missing.clone());
@@ -441,6 +457,39 @@ pub fn PickerBody(
                             }
                         })}
                     <For
+                        each=move || named.get()
+                        key=|name| name.clone()
+                        children={
+                            let prefix = prefix.clone();
+                            move |name| {
+                                let dom = dom_id(&prefix, Some(&name));
+                                let selected = {
+                                    let name = name.clone();
+                                    move || current.with(|c| c.contains(&name)).to_string()
+                                };
+                                let is_active = {
+                                    let dom = dom.clone();
+                                    move || active.with(|a| a.as_deref() == Some(dom.as_str()))
+                                };
+                                let click = name.clone();
+                                view! {
+                                    <div
+                                        id=dom
+                                        role="option"
+                                        class="picker__row picker__row--result"
+                                        class:picker__row--active=is_active
+                                        aria-selected=selected
+                                        on:click=move |_| on_pick.run(Some(click.clone()))
+                                    >
+                                        <span class="picker__row-main">
+                                            <span class="picker__row-title">{name}</span>
+                                        </span>
+                                    </div>
+                                }
+                            }
+                        }
+                    />
+                    <For
                         each=missing
                         key=|id| id.clone()
                         children={
@@ -548,6 +597,7 @@ pub fn EntityPicker(
     #[prop(optional_no_strip)] pool: Option<Keep>,
     #[prop(optional_no_strip)] suggest: Option<Suggest>,
     #[prop(optional_no_strip)] pinned: Option<Pinned>,
+    #[prop(optional_no_strip)] results: Option<Signal<Vec<String>>>,
     on_pick: Callback<Option<String>>,
 ) -> impl IntoView {
     let lang = use_lang();
@@ -640,6 +690,7 @@ pub fn EntityPicker(
                                     pool=pool.clone()
                                     suggest=suggest.clone()
                                     pinned=pinned.clone()
+                                    results=results
                                     on_pick=body_pick
                                 />
                             }
