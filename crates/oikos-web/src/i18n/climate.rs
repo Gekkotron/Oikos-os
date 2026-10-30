@@ -30,6 +30,7 @@ pub enum ClimateText {
     SrcHoliday,
     SrcAway,
     SrcEco,
+    SrcEmpty,
     SrcSchedule,
     Tomorrow,
     Until,
@@ -119,6 +120,13 @@ pub enum ClimateText {
     CorrectionMaxBelow,
     CorrectionMaxAbove,
     CorrectionQuiet,
+    RoomPresenceTitle,
+    RoomPresenceSensors,
+    RoomPresenceEmptyAfter,
+    RoomPresenceBackAfter,
+    RoomPresenceSetback,
+    RoomPresenceOccupied,
+    RoomPresenceNoSensor,
     UnitHours,
     EcoUntilDate,
     EcoUntilTime,
@@ -152,6 +160,7 @@ impl ClimateText {
         ClimateText::SrcHoliday,
         ClimateText::SrcAway,
         ClimateText::SrcEco,
+        ClimateText::SrcEmpty,
         ClimateText::SrcSchedule,
         ClimateText::Tomorrow,
         ClimateText::Until,
@@ -246,6 +255,13 @@ impl ClimateText {
         ClimateText::CorrectionMaxBelow,
         ClimateText::CorrectionMaxAbove,
         ClimateText::CorrectionQuiet,
+        ClimateText::RoomPresenceTitle,
+        ClimateText::RoomPresenceSensors,
+        ClimateText::RoomPresenceEmptyAfter,
+        ClimateText::RoomPresenceBackAfter,
+        ClimateText::RoomPresenceSetback,
+        ClimateText::RoomPresenceOccupied,
+        ClimateText::RoomPresenceNoSensor,
         ClimateText::UnitHours,
     ];
 }
@@ -295,6 +311,7 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
         T::SrcHoliday => ("Holiday", "Vacances"),
         T::SrcAway => ("Away", "Absence"),
         T::SrcEco => ("Eco", "Éco"),
+        T::SrcEmpty => ("Empty room", "Pièce vide"),
         T::SrcSchedule => ("Schedule", "Programmation"),
         T::Tomorrow => ("tomorrow", "demain"),
         T::Until => ("until", "jusqu'à"),
@@ -365,6 +382,16 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
         T::CorrectionMaxBelow => ("Max below target", "Max sous la cible"),
         T::CorrectionMaxAbove => ("Max above target", "Max au-dessus de la cible"),
         T::CorrectionQuiet => ("Quiet limit", "Silence maximal"),
+        T::RoomPresenceTitle => ("Room presence", "Présence dans la pièce"),
+        T::RoomPresenceSensors => ("Presence sensors", "Détecteurs de présence"),
+        T::RoomPresenceEmptyAfter => ("Empty after", "Vide après"),
+        T::RoomPresenceBackAfter => ("Occupied again after", "Occupée de nouveau après"),
+        T::RoomPresenceSetback => ("Lower by", "Baisser de"),
+        T::RoomPresenceOccupied => ("Occupied", "Occupée"),
+        T::RoomPresenceNoSensor => (
+            "Pick a presence sensor: without one the room counts as occupied",
+            "Choisissez un détecteur : sans lui, la pièce compte comme occupée",
+        ),
         T::UnitHours => ("h", "h"),
         T::UnitDays => ("days", "jours"),
         T::UnitZeroToOne => ("0 to 1", "0 à 1"),
@@ -461,6 +488,15 @@ pub fn automatic_with(lang: Lang, what: &str) -> String {
         lang,
         format!("Automatic · {what}"),
         format!("Automatique · {what}"),
+    )
+}
+
+/// Since when a room counts as empty ("Empty since 14:20").
+pub fn empty_since(lang: Lang, clock: &str) -> String {
+    pick(
+        lang,
+        format!("Empty since {clock}"),
+        format!("Vide depuis {clock}"),
     )
 }
 

@@ -510,6 +510,49 @@ impl FeedbackSettings {
     }
 }
 
+/// Room presence setback: lowers a block's setpoint while nobody is detected in the room.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct PresenceSettings {
+    pub enabled: bool,
+    /// The room's presence sensors (binary sensors); any one on means someone is there.
+    pub sensors: Vec<String>,
+    /// Minutes with no detection before the room counts as empty.
+    pub empty_after_min: u32,
+    /// Minutes of presence before an empty room counts as occupied again.
+    pub back_after_min: u32,
+    /// How far the block's setpoint moves while the room is empty, in degrees (positive).
+    pub setback: f64,
+}
+
+impl Default for PresenceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            sensors: Vec::new(),
+            empty_after_min: 30,
+            back_after_min: 5,
+            setback: 2.0,
+        }
+    }
+}
+
+impl PresenceSettings {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.empty_after_min == 0 {
+            return Err("presence.empty_after_min must be above 0".into());
+        }
+        if self.back_after_min == 0 {
+            return Err("presence.back_after_min must be above 0".into());
+        }
+        if !(self.setback.is_finite() && self.setback > 0.0) {
+            return Err("presence.setback must be above 0".into());
+        }
+        Ok(())
+    }
+}
+
 /// Settings of one zone (`<prefix>/zone/<zone>/settings`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -521,6 +564,7 @@ pub struct ZoneSettings {
     pub manual_hold_max_min: u32,
     pub rules: Rules,
     pub feedback: FeedbackSettings,
+    pub presence: PresenceSettings,
     pub approved_at: Option<u64>,
     pub approved_proposal: Option<String>,
     pub rejected: Vec<Rejection>,
@@ -535,6 +579,7 @@ impl Default for ZoneSettings {
             manual_hold_max_min: 240,
             rules: Rules::default(),
             feedback: FeedbackSettings::default(),
+            presence: PresenceSettings::default(),
             approved_at: None,
             approved_proposal: None,
             rejected: Vec::new(),
@@ -548,6 +593,7 @@ impl ZoneSettings {
             return Err("manual_hold_max_min must be above 0".into());
         }
         self.feedback.validate()?;
+        self.presence.validate()?;
         self.rules.validate()
     }
 }
@@ -585,6 +631,8 @@ pub enum Source {
     Eco,
     /// Nobody home: eco for the whole house.
     Away,
+    /// Nobody in the room: the block is set back.
+    Empty,
     Schedule,
     Idle,
 }
@@ -925,6 +973,40 @@ mod tests {
         bad(|f| f.quiet_limit_min = 0);
         bad(|f| f.max_below = -1.0);
         bad(|f| f.max_above = -0.5);
+    }
+
+    #[test]
+    fn presence_defaults_and_old_documents() {
+        let z: ZoneSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(z.presence, PresenceSettings::default());
+        assert!(!z.presence.enabled);
+        assert!(z.presence.sensors.is_empty());
+        assert_eq!(z.presence.empty_after_min, 30);
+        assert_eq!(z.presence.back_after_min, 5);
+        assert_eq!(z.presence.setback, 2.0);
+    }
+
+    #[test]
+    fn presence_validation() {
+        assert!(ZoneSettings::default().validate().is_ok());
+        let bad = |f: fn(&mut PresenceSettings)| {
+            let mut z = ZoneSettings::default();
+            f(&mut z.presence);
+            assert!(z.validate().is_err());
+        };
+        bad(|p| p.empty_after_min = 0);
+        bad(|p| p.back_after_min = 0);
+        bad(|p| p.setback = 0.0);
+        bad(|p| p.setback = f64::NAN);
+    }
+
+    #[test]
+    fn empty_source_round_trips() {
+        assert_eq!(serde_json::to_string(&Source::Empty).unwrap(), "\"empty\"");
+        assert_eq!(
+            serde_json::from_str::<Source>("\"empty\"").unwrap(),
+            Source::Empty
+        );
     }
 
     #[test]

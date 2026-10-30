@@ -8,12 +8,13 @@ use chrono_tz::Tz;
 use oikos_climate::decide::{Device, DeviceCaps, SafetyMemory, ZoneInputs};
 use oikos_climate::doc::{HouseSettings, Mode, Override, RoomEco, SafetyCause, ZoneSettings};
 use oikos_climate::feedback::{FeedbackState, UNKNOWN_AGE_S};
+use oikos_climate::presence::{PresenceState, Sensed, track};
 use oikos_climate::schedule::{Reading, ReadingSource, room_reading, season_mode};
 use oikos_climate::view::ThermometerReading;
 use oikos_core::model::{Availability, Entity, EntityCategory, EntityState, Kind, StateValue};
 
-use super::GROUP_PREFIX;
 use super::hub::zone_devices;
+use super::{ClimateRuntime, GROUP_PREFIX};
 use crate::alarm::ALARM_ENTITY_ID;
 use crate::hub::Hub;
 
@@ -48,6 +49,8 @@ pub(crate) struct OwnedZoneInputs {
     pub thermometer: Option<ReadingSource>,
     /// The thermometer correction's state from the previous tick.
     pub feedback: Option<FeedbackState>,
+    /// The room presence state after this tick; `None` while presence is off.
+    pub presence: Option<PresenceState>,
 }
 
 impl OwnedZoneInputs {
@@ -70,6 +73,7 @@ impl OwnedZoneInputs {
             room_eco: self.room_eco.as_ref(),
             thermometer: self.thermometer,
             feedback: self.feedback.as_ref(),
+            room_empty: self.presence.is_some_and(|p| p.is_empty()),
         }
     }
 }
@@ -224,6 +228,61 @@ pub(crate) fn presence_home_now(hub: &Hub, house: &HouseSettings) -> HomeNow {
     } else {
         HomeNow::Away
     }
+}
+
+/// Whether a presence sensor detects someone: `None` when it is unreachable or has no on/off
+/// value.
+pub(crate) fn detecting(state: &EntityState) -> Option<bool> {
+    if state.availability == Availability::Offline {
+        return None;
+    }
+    match &state.value {
+        StateValue::OnOff(on) => Some(*on),
+        _ => None,
+    }
+}
+
+/// Notes what a presence sensor reports at `now`: on, or turning off (it was on until now), is
+/// a detection; an idle sensor reporting off again is not.
+pub(crate) fn note_detection(rt: &mut ClimateRuntime, id: &str, on: Option<bool>, now: u64) {
+    let Some(on) = on else {
+        return;
+    };
+    let was_on = rt.sensor_on.insert(id.to_owned(), on).unwrap_or(false);
+    if on || was_on {
+        rt.detected_at.insert(id.to_owned(), now);
+    }
+}
+
+/// The room presence of `zone` after this tick, from its sensors as they are now.
+fn presence_now(hub: &Hub, zone: &str, settings: &ZoneSettings, now: u64) -> Option<PresenceState> {
+    let p = &settings.presence;
+    if !p.enabled {
+        return None;
+    }
+    let readings: Vec<(&str, Option<bool>)> = {
+        let reg = hub.read();
+        p.sensors
+            .iter()
+            .map(|id| (id.as_str(), reg.state(id).and_then(detecting)))
+            .collect()
+    };
+    let mut rt = hub.climate_runtime();
+    let mut usable = false;
+    let mut latest = None;
+    for (id, on) in readings {
+        note_detection(&mut rt, id, on, now);
+        if on.is_some() {
+            usable = true;
+            latest = latest.max(rt.detected_at.get(id).copied());
+        }
+    }
+    let sensed = if usable {
+        Sensed::Seen(latest)
+    } else {
+        Sensed::NoSensor
+    };
+    Some(track(rt.presence.get(zone), p, sensed, now))
 }
 
 fn holiday_now(hub: &Hub, house: &HouseSettings) -> bool {
@@ -425,6 +484,7 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
     let outdoor_mean = outdoor_mean(hub, now);
     let home_now = presence_home_now(hub, &house);
     let holiday = holiday_now(hub, &house);
+    let presence = presence_now(hub, zone, &settings, now);
     let (mode, home, safety_memory, feedback) = {
         let rt = hub.climate_runtime();
         let grace_s = u64::from(house.away_grace_min) * 60;
@@ -461,6 +521,7 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
         room_eco,
         thermometer,
         feedback,
+        presence,
     })
 }
 

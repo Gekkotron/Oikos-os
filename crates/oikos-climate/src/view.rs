@@ -52,6 +52,9 @@ pub struct ZoneView {
     /// When the thermometer correction last changed its offset (Unix seconds).
     #[serde(default)]
     pub correction_step_at: Option<u64>,
+    /// The room's presence while its setback is on; `None` when it is off.
+    #[serde(default)]
+    pub presence: Option<PresenceView>,
     pub decision: Option<Decision>,
     pub overrides: Vec<Override>,
     /// The zone's own eco, while set.
@@ -68,6 +71,14 @@ pub struct ThermometerReading {
     pub entity: String,
     pub value: f64,
     pub age_s: u64,
+}
+
+/// Whether the room counts as empty, and since when.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct PresenceView {
+    /// When the room became empty (Unix seconds); `None` while it counts as occupied.
+    pub empty_since: Option<u64>,
 }
 
 /// The whole engine as one document.
@@ -192,6 +203,7 @@ mod tests {
         let view: ZoneView = serde_json::from_value(json).expect("old json parses");
         assert!(view.thermometer.is_none());
         assert!(view.correction_step_at.is_none());
+        assert!(view.presence.is_none());
     }
 
     #[test]

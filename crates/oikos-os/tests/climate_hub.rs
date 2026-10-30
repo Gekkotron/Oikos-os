@@ -394,6 +394,7 @@ mod engine {
     use oikos_climate::doc::{
         Decision, DeviceTarget, HouseSettings, Mode, Override, OverrideOrigin, Source,
     };
+    use oikos_climate::view::PresenceView;
 
     use super::*;
 
@@ -2185,6 +2186,179 @@ mod engine {
         let zone = rig.zone();
         assert_eq!(zone.room_sensor.as_deref(), Some(thermometer.as_str()));
         assert_eq!(zone.reading, Some(19.5));
+    }
+
+    const OCCUPANCY_STATE: &str = "zigbee2mqtt/rooms/living/motion_south";
+
+    /// Reports the occupancy sensor `on` or not.
+    fn occupancy(hub: &Hub, on: bool) {
+        hub.ingest(
+            OCCUPANCY_STATE,
+            serde_json::json!({ "occupancy": on })
+                .to_string()
+                .as_bytes(),
+        );
+    }
+
+    /// The recorded occupancy sensor, placed in `area` and reporting `on`; returns its id.
+    async fn feed_occupancy(hub: &Hub, area: &str, on: bool) -> String {
+        hub.ingest(
+            "oikos/binary_sensor/0x00158d00044c4d4c/occupancy/config",
+            &fixture("binary_sensor__0x00158d00044c4d4c__occupancy.json"),
+        );
+        let id = place(hub, "0x00158d00044c4d4c_occupancy", area).await;
+        occupancy(hub, on);
+        id
+    }
+
+    /// An active heating zone with a 19 °C block all day over a 15 °C base, presence on with one
+    /// occupancy sensor that reports nobody. Returns the rig and the sensor's id.
+    async fn presence_rig() -> (Rig, String) {
+        let mut rig = Rig::new(None).await;
+        rig.sim.set(&rig.hub, 0, "heat", 19.0, 20.0);
+        let sensor = feed_occupancy(&rig.hub, "living", false).await;
+        let mut settings = heat_rules(15.0);
+        settings.rules.heat.as_mut().unwrap().blocks.push(Block {
+            days: Day::ALL.to_vec(),
+            from: HhMm(0),
+            to: HhMm(1440),
+            setpoint: Setpoint::Temp(19.0),
+            evidence: None,
+        });
+        settings.presence.enabled = true;
+        settings.presence.sensors = vec![sensor.clone()];
+        rig.settings(settings);
+        (rig, sensor)
+    }
+
+    /// The registry's current state of `id`, as a `StateChanged` event carries it.
+    fn state_of(hub: &Hub, id: &str) -> oikos_core::model::EntityState {
+        hub.snapshot()
+            .entities
+            .into_iter()
+            .find(|e| e.id == id)
+            .expect("entity")
+            .state
+    }
+
+    /// The sensor reports `on` at `t0 + at`, and the engine sees the change, as its loop does.
+    fn detect(rig: &Rig, sensor: &str, on: bool, at: u64) {
+        occupancy(&rig.hub, on);
+        let state = state_of(&rig.hub, sensor);
+        rig.hub.observe_presence(sensor, &state, rig.t0 + at);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pulse_handled_late_still_counts() {
+        let (mut rig, sensor) = presence_rig().await;
+        rig.pass(0).await;
+        // Both events of a short pulse wait behind a slow pass: by the time they are handled
+        // the registry already says off again, but each event carries its own state.
+        occupancy(&rig.hub, true);
+        let on = state_of(&rig.hub, &sensor);
+        occupancy(&rig.hub, false);
+        let off = state_of(&rig.hub, &sensor);
+        rig.hub.observe_presence(&sensor, &on, rig.t0 + 1700);
+        rig.hub.observe_presence(&sensor, &off, rig.t0 + 1740);
+        rig.pass(1800).await;
+        assert_eq!(rig.sim.units[&0].1, 19.0);
+        rig.pass(3540).await;
+        assert_eq!(rig.sim.units[&0].1, 17.0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_empty_room_is_set_back_after_30_min() {
+        let (mut rig, _) = presence_rig().await;
+        rig.pass(0).await;
+        assert_eq!(rig.sim.units[&0].1, 19.0);
+        rig.pass(1799).await;
+        assert_eq!(rig.sim.units[&0].1, 19.0);
+        rig.pass(1800).await;
+        assert_eq!(rig.sim.units[&0].1, 17.0);
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Empty);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_pulse_between_passes_counts() {
+        let (mut rig, sensor) = presence_rig().await;
+        rig.pass(0).await;
+        detect(&rig, &sensor, true, 1700);
+        detect(&rig, &sensor, false, 1740);
+        rig.pass(1800).await;
+        assert_eq!(rig.sim.units[&0].1, 19.0);
+        rig.pass(3539).await;
+        assert_eq!(rig.sim.units[&0].1, 19.0);
+        rig.pass(3540).await;
+        assert_eq!(rig.sim.units[&0].1, 17.0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_reports_are_not_detections() {
+        let (mut rig, sensor) = presence_rig().await;
+        rig.pass(0).await;
+        for at in [600, 1200] {
+            detect(&rig, &sensor, false, at);
+        }
+        rig.pass(1800).await;
+        assert_eq!(rig.sim.units[&0].1, 17.0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn staying_brings_it_back() {
+        let (mut rig, sensor) = presence_rig().await;
+        rig.pass(0).await;
+        rig.pass(1800).await;
+        assert_eq!(rig.sim.units[&0].1, 17.0);
+        // Someone comes in and stays; the change triggers a pass, as the loop's debounce does.
+        detect(&rig, &sensor, true, 1900);
+        rig.pass(1900).await;
+        rig.pass(2140).await;
+        assert_eq!(rig.sim.units[&0].1, 17.0);
+        rig.pass(2200).await;
+        assert_eq!(rig.sim.units[&0].1, 19.0);
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Schedule);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn empty_decision_is_stable() {
+        let (mut rig, _) = presence_rig().await;
+        rig.pass(0).await;
+        let first = rig.pass(1800).await;
+        assert_eq!(decisions_published(&first), 1, "{first:?}");
+        let second = rig.pass(1860).await;
+        assert_eq!(decisions_published(&second), 0, "{second:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn view_shows_room_presence() {
+        let (mut rig, _) = presence_rig().await;
+        rig.pass(0).await;
+        assert_eq!(
+            rig.zone().presence,
+            Some(PresenceView { empty_since: None })
+        );
+        rig.pass(1800).await;
+        assert_eq!(
+            rig.zone().presence,
+            Some(PresenceView {
+                empty_since: Some(rig.t0 + 1800)
+            })
+        );
+        let mut settings = rig.zone().settings;
+        settings.presence.enabled = false;
+        rig.settings(settings);
+        assert_eq!(rig.zone().presence, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn unavailable_sensor_keeps_the_room_occupied() {
+        let (mut rig, _) = presence_rig().await;
+        rig.hub
+            .ingest("zigbee2mqtt/bridge/state", br#"{"state":"offline"}"#);
+        rig.pass(0).await;
+        rig.pass(3600).await;
+        assert_eq!(rig.sim.units[&0].1, 19.0);
+        assert_eq!(rig.zone().decision.unwrap().source, Source::Schedule);
     }
 
     /// An active heating zone at 19 °C with the correction on and a room thermometer at `room`.
