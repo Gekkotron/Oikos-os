@@ -55,11 +55,11 @@ pub struct Correction {
 pub fn correct(input: &CorrectionInput) -> Correction {
     let s = input.settings;
     let target = input.target;
-    let previous = input
-        .previous
-        .filter(|p| (p.target - target).abs() <= SAME_TARGET);
-    let (start, since, last_step_at) = match previous {
-        Some(p) => (p.offset, p.since, p.last_step_at),
+    // A new target keeps the offset: it measures how far the unit reads from the room, whatever
+    // the target. Only the warm-up starts over.
+    let (start, since, last_step_at) = match input.previous {
+        Some(p) if (p.target - target).abs() <= SAME_TARGET => (p.offset, p.since, p.last_step_at),
+        Some(p) => (p.offset, input.now, p.last_step_at),
         None => (0.0, input.now, None),
     };
 
@@ -185,11 +185,16 @@ impl FeedbackState {
             return None;
         };
         let offset = decision.adjust.unwrap_or(0.0);
-        let state = match previous.filter(|p| (p.target - target).abs() <= SAME_TARGET) {
+        let state = match previous {
             Some(p) => FeedbackState {
                 target,
                 offset,
-                since: p.since,
+                // A new target restarts the warm-up; the offset and the step clock carry over.
+                since: if (p.target - target).abs() <= SAME_TARGET {
+                    p.since
+                } else {
+                    now
+                },
                 last_step_at: if (offset - p.offset).abs() > f64::EPSILON {
                     Some(now)
                 } else {
@@ -294,10 +299,26 @@ mod tests {
     }
 
     #[test]
-    fn new_target_resets() {
+    fn new_target_keeps_offset_and_restarts_warmup() {
+        // The step clock carries over: no extra step right after the change.
         let p = state(19.0, -1.0, NOW - 7200, Some(NOW - 60));
         let c = run(Mode::Heat, 17.0, Some(15.0), 21.6, 0, Some(&p), false);
-        assert_eq!(c.offset, -0.5);
+        assert_eq!(c.offset, -1.0);
+        // The setback ending: 17 → 19 with the room on the band edge keeps -1.5.
+        let p = state(17.0, -1.5, NOW - 7200, Some(NOW - 900));
+        let c = heat(19.5, Some(&p));
+        assert_eq!(c.offset, -1.5);
+        assert_eq!(
+            c.note.as_deref(),
+            Some("room near 19.0 °C: AC 17.5 °C (-1.5)")
+        );
+        // The new target's limits still apply: base 15 under target 17 allows -2 at most.
+        let p = state(19.0, -3.0, NOW - 7200, Some(NOW - 7200));
+        let c = run(Mode::Heat, 17.0, Some(15.0), 17.0, 0, Some(&p), false);
+        assert_eq!(c.offset, -2.0);
+        // The warm-up starts over: too cold under a new target does not raise yet.
+        let p = state(17.0, 0.0, NOW - 7200, None);
+        assert_eq!(heat(18.0, Some(&p)).offset, 0.0);
     }
 
     #[test]
@@ -394,10 +415,14 @@ mod tests {
         let prev = state(19.0, -0.5, 500, Some(900));
         let s = FeedbackState::after(Some(&prev), &d, true, NOW).unwrap();
         assert_eq!(s.last_step_at, Some(900));
-        // new target starts over
-        let d2 = decision(Source::Schedule, Some(Setpoint::Temp(17.0)), None);
+        // a new target restarts the warm-up and keeps the step clock while the offset holds
+        let d2 = decision(Source::Schedule, Some(Setpoint::Temp(17.0)), Some(-0.5));
         let s = FeedbackState::after(Some(&prev), &d2, true, NOW).unwrap();
-        assert_eq!(s, state(17.0, 0.0, NOW, None));
+        assert_eq!(s, state(17.0, -0.5, NOW, Some(900)));
+        // and records a step when the offset moved
+        let d2 = decision(Source::Schedule, Some(Setpoint::Temp(17.0)), Some(-1.0));
+        let s = FeedbackState::after(Some(&prev), &d2, true, NOW).unwrap();
+        assert_eq!(s, state(17.0, -1.0, NOW, Some(NOW)));
         // a first tick that already steps records the step
         let d3 = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), Some(-0.5));
         let s = FeedbackState::after(None, &d3, true, NOW).unwrap();
@@ -412,14 +437,15 @@ mod tests {
         let d = decision(Source::Empty, Some(Setpoint::Temp(17.0)), None);
         let s = FeedbackState::after(None, &d, true, NOW).unwrap();
         assert_eq!(s.target, 17.0);
-        // The setback starting moves the target: the correction starts over.
+        // The setback starting moves the target: the offset carries over, the warm-up restarts.
         let prev = state(19.0, -0.5, 500, Some(900));
+        let d = decision(Source::Empty, Some(Setpoint::Temp(17.0)), Some(-0.5));
         let s = FeedbackState::after(Some(&prev), &d, true, NOW).unwrap();
-        assert_eq!(s, state(17.0, 0.0, NOW, None));
+        assert_eq!(s, state(17.0, -0.5, NOW, Some(900)));
         // And so does it ending.
-        let back = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), None);
-        let s = FeedbackState::after(Some(&state(17.0, -0.5, 500, Some(900))), &back, true, NOW);
-        assert_eq!(s, Some(state(19.0, 0.0, NOW, None)));
+        let back = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), Some(-1.5));
+        let s = FeedbackState::after(Some(&state(17.0, -1.5, 500, Some(900))), &back, true, NOW);
+        assert_eq!(s, Some(state(19.0, -1.5, NOW, Some(900))));
     }
 
     #[test]
