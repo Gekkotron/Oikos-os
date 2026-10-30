@@ -85,9 +85,10 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
 
     // Rows are rebuilt when the draft's number of inputs changes (add, remove, undo, redo), not
     // on every edit; each row reads its fields from the draft.
-    let count = Signal::derive({
+    // A memo, so the rows are rebuilt only when the number changes, not on every draft edit.
+    let count = Memo::new({
         let id = id.clone();
-        move || params_of(form, &id).map_or(0, |p| p.inputs.len())
+        move |_| params_of(form, &id).map_or(0, |p| p.inputs.len())
     });
     let rows = {
         let id = id.clone();

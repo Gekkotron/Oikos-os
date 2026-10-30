@@ -2162,3 +2162,28 @@ async fn math_inputs_follow_undo_and_redo() {
     let window: web_sys::HtmlSelectElement = element(&host, ".math-input__window").unchecked_into();
     assert_eq!(window.value(), "now");
 }
+
+#[wasm_bindgen_test]
+async fn math_row_keeps_focus_while_typing() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    click(&host, ".math-inputs__add");
+    tick().await;
+    let name = input_named(&host, ".math-input__name");
+    name.focus().unwrap();
+    type_into(&name, "inputx", "input");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 1);
+    let active = web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .active_element();
+    assert_eq!(
+        active.as_ref(),
+        Some(name.unchecked_ref::<web_sys::Element>()),
+        "focus moved: {}",
+        host.inner_html()
+    );
+    assert!(name.is_connected());
+}
