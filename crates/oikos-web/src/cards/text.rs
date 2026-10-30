@@ -22,11 +22,7 @@ pub fn decimal(lang: Lang, v: f64) -> String {
     }
 }
 
-/// A light's 0–255 brightness as a percentage; never 0 while the light gives any light.
-pub fn brightness_percent(level: u8) -> u8 {
-    let percent = (f64::from(level) * 100.0 / 255.0).round() as u8;
-    if level > 0 { percent.max(1) } else { 0 }
-}
+pub use oikos_core::flow::brightness_percent;
 
 /// "On · 14 %" / "Allumé · 14 %", "Off" / "Éteint", "—" while unknown.
 pub fn light_state_line(lang: Lang, on: Option<bool>, brightness: Option<u8>) -> String {
@@ -254,14 +250,6 @@ mod tests {
         assert_eq!(decimal(Lang::Fr, 20.0), "20");
         assert_eq!(decimal(Lang::Fr, 20.66), "20,7");
         assert_eq!(decimal(Lang::En, 19.97), "20");
-    }
-
-    #[test]
-    fn brightness_percent_rounds() {
-        assert_eq!(brightness_percent(0), 0);
-        assert_eq!(brightness_percent(1), 1);
-        assert_eq!(brightness_percent(36), 14);
-        assert_eq!(brightness_percent(255), 100);
     }
 
     #[test]
