@@ -4,6 +4,7 @@
 mod clock;
 mod duration;
 mod graph;
+pub mod math;
 mod model;
 mod scalar;
 mod schedule;
@@ -14,6 +15,10 @@ mod validate;
 
 pub use clock::{in_time_range, parse_clock};
 pub use duration::{DurationError, format_duration, parse_duration, pick_duration};
+pub use math::{
+    FUNCTIONS, Formula, FormulaError, Function, MAX_DEPTH, MAX_FORMULA_CHARS, MAX_INPUTS,
+    MAX_TABLE_POINTS, fit_to_entity, is_valid_name, parse_formula,
+};
 pub use model::{
     CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, MAX_AVERAGE_SECS,
     MAX_SWITCH_RULES, Missing, Node, NodeKind, NotifyParams, OffPeakEdge, Op, Position, RuleOp,
