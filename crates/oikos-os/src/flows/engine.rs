@@ -75,6 +75,7 @@ pub(super) async fn run_with(
         flows: Vec::new(),
         known: BTreeMap::new(),
         watched: BTreeSet::new(),
+        confirmed_unknown: BTreeSet::new(),
         active: BTreeMap::new(),
         keep: BTreeSet::new(),
         tasks: JoinSet::new(),
@@ -171,6 +172,10 @@ struct Engine {
     /// disconnect empties `known` while the watched set stays: those values must stay
     /// unseeded until the broker's replay shows them, not be re-seeded from stale values.
     watched: BTreeSet<Watched>,
+    /// Watched values that a report of their entity showed to be unknown, as opposed to unknown
+    /// because nothing was seen yet. A value appearing out of this state is a real first value
+    /// and fires a `trigger.state` with a `to`. Cleared with `known`.
+    confirmed_unknown: BTreeSet<Watched>,
     active: BTreeMap<String, Active>,
     /// `(flow, run)` pairs whose run disabled its own flow with a `flow.enable` node: that run
     /// survives the reload the disable causes. Forgotten when the run ends.
@@ -230,6 +235,7 @@ impl Engine {
             .collect();
         let watched = self.watched_values();
         self.known.retain(|key, _| watched.contains(key));
+        self.confirmed_unknown.retain(|key| watched.contains(key));
         // Seed only what became watched now, and only while the link is up: otherwise the
         // registry may hold pre-drop values and the broker's replay would look like a change.
         let online = *self.hub.connection().borrow() == ConnectionStatus::Online;
@@ -486,6 +492,7 @@ impl Engine {
     /// seeded again by its next report, or a minute later.
     fn events_lagged(&mut self) {
         self.known.clear();
+        self.confirmed_unknown.clear();
         if self.off_peak_device().is_some() {
             self.off_peak_base = None;
         }
@@ -632,6 +639,7 @@ impl Engine {
             // is only recorded, never acted on.
             WsEvent::ConnectionChanged(status) if status != ConnectionStatus::Online => {
                 self.known.clear();
+                self.confirmed_unknown.clear();
                 self.off_peak_lost();
             }
             _ => {}
@@ -709,6 +717,15 @@ impl Engine {
                 let scalar = self.hub.entity_value(id, key.1.as_deref());
                 self.known.insert(key, scalar);
             }
+            // The entity reported while this value was unknown: a value that shows up in a
+            // later report is a first value, not a replay.
+            let unknown: Vec<Watched> = self
+                .watched
+                .iter()
+                .filter(|key| key.0 == id && self.known.get(*key) == Some(&None))
+                .cloned()
+                .collect();
+            self.confirmed_unknown.extend(unknown);
         }
         if seen.epoch == self.hub.link_epoch()
             && self.off_peak_base.is_none()
@@ -718,9 +735,11 @@ impl Engine {
         }
     }
 
-    /// Fires the triggers an entity's change satisfies, value by watched value. Only a change
-    /// between two present, different values counts: a first sighting, an availability-only
-    /// report (same value) and a value appearing or vanishing are recorded silently.
+    /// Fires the triggers an entity's change satisfies, value by watched value. A change between
+    /// two present, different values counts, and so does a value appearing after a report
+    /// showed it unknown (only for a trigger with a `to` and no `from`). A first sighting, an
+    /// availability-only report (same value), a restore and a value vanishing are recorded
+    /// silently.
     fn state_changed(&mut self, id: &str, state: &StateValue) {
         let keys: Vec<Watched> = self
             .watched
@@ -744,17 +763,20 @@ impl Engine {
             let Some(previous) = self.known.insert(key.clone(), next.clone()) else {
                 continue;
             };
-            let (Some(previous), Some(next)) = (previous, next) else {
-                continue;
+            let confirmed = next.is_some() && self.confirmed_unknown.remove(&key);
+            let (previous, next) = match (previous, next) {
+                (Some(previous), Some(next)) => (Some(previous), next),
+                (None, Some(next)) if confirmed => (None, next),
+                _ => continue,
             };
-            if previous == next {
+            if previous.as_ref() == Some(&next) {
                 continue;
             }
             let trigger = TriggerInfo {
                 entity: Some(id.to_owned()),
                 field: key.1.clone(),
                 value: next.to_json(),
-                previous: previous.to_json(),
+                previous: previous.as_ref().map_or(Value::Null, Scalar::to_json),
             };
             for flow in &self.flows {
                 for node in flow.triggers() {
@@ -765,7 +787,10 @@ impl Engine {
                         && params.field == key.1
                         && !fires.iter().any(|(f, _, _)| f.id == flow.id)
                         && filter_matches(params.to.as_ref(), &next)
-                        && filter_matches(params.from.as_ref(), &previous)
+                        && match &previous {
+                            Some(previous) => filter_matches(params.from.as_ref(), previous),
+                            None => params.from.is_none() && params.to.is_some(),
+                        }
                     {
                         fires.push((flow.clone(), node.id.clone(), trigger.clone()));
                     }
@@ -1586,6 +1611,7 @@ mod tests {
             flows: Vec::new(),
             known: BTreeMap::new(),
             watched: BTreeSet::new(),
+            confirmed_unknown: BTreeSet::new(),
             active: BTreeMap::new(),
             keep: BTreeSet::new(),
             tasks: JoinSet::new(),
@@ -2508,5 +2534,152 @@ mod tests {
             engine.hub.entity_value(&id, None),
             Some(Scalar::Text("unlocked".into()))
         );
+    }
+
+    /// An online Paris engine with a binary sensor `det` whose alarm is the `alarm` key of the
+    /// JSON on `test/det`: `{"alarm":"yes"}` is on, `{}` leaves the alarm unknown.
+    fn alarm_engine() -> (Engine, String) {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/binary_sensor/det/alarm/config",
+            br#"{"unique_id":"alarm","state_topic":"test/det","value_template":"{{ value_json.alarm }}","payload_on":"yes","payload_off":"no"}"#,
+        );
+        engine.hub.set_connection(ConnectionStatus::Online);
+        let id = engine.hub.snapshot().entities[0].id.clone();
+        (engine, id)
+    }
+
+    /// Publishes `payload` on the detector's topic and hands the engine what the hub would: the
+    /// change event when the value moved, then the report.
+    fn alarm_report(engine: &mut Engine, id: &str, payload: &str) {
+        let changes = engine.hub.ingest("test/det", payload.as_bytes());
+        if changes
+            .iter()
+            .any(|c| matches!(c, oikos_core::registry::Change::StateChanged(_)))
+        {
+            let state = engine.hub.read().state(id).cloned().expect("state");
+            engine.handle_event(WsEvent::StateChanged {
+                id: id.to_owned(),
+                state,
+            });
+        }
+        let epoch = engine.hub.link_epoch();
+        engine.state_seen(&StateSeen {
+            id: id.to_owned(),
+            epoch,
+        });
+    }
+
+    /// Lets every spawned run end, as the engine loop would.
+    async fn finish_runs(engine: &mut Engine) {
+        while let Some(joined) = engine.tasks.join_next_with_id().await {
+            engine.run_finished(joined);
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_then_value_fires_after_a_confirming_report() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, "{}");
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 1);
+        let trigger = engine.hub.flow("a").unwrap().runs[0]
+            .trigger
+            .clone()
+            .unwrap();
+        assert_eq!(trigger.value, serde_json::json!(true));
+        assert_eq!(trigger.previous, serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn first_report_with_the_value_is_silent() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 0);
+    }
+
+    #[tokio::test]
+    async fn restore_of_the_to_value_does_not_fire() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        engine
+            .hub
+            .restore_recorded_states(vec![(id.clone(), 0, StateValue::OnOff(true))]);
+        let state = engine.hub.read().state(&id).cloned().expect("state");
+        engine.handle_event(WsEvent::StateChanged {
+            id: id.clone(),
+            state,
+        });
+        assert_eq!(run_count(&engine, "a"), 0);
+    }
+
+    #[tokio::test]
+    async fn from_or_no_to_stays_silent() {
+        for params in [
+            serde_json::json!({ "to": true, "from": false }),
+            serde_json::json!({}),
+        ] {
+            let (mut engine, id) = alarm_engine();
+            let mut params = params;
+            params["entity"] = serde_json::json!(id);
+            state_flow(&engine, "a", params.clone());
+            engine.reload();
+            alarm_report(&mut engine, &id, "{}");
+            alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+            assert_eq!(run_count(&engine, "a"), 0, "{params}");
+        }
+    }
+
+    #[tokio::test]
+    async fn vanish_and_return_fires_again() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, "{}");
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 1);
+        finish_runs(&mut engine).await;
+        alarm_report(&mut engine, &id, r#"{"alarm":null}"#);
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 2);
+    }
+
+    #[tokio::test]
+    async fn link_drop_clears_the_mark() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, "{}");
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        }));
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Online));
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 0);
     }
 }
