@@ -7064,7 +7064,6 @@ dialog.popup::backdrop {
 
 .climate-status,
 .climate-week,
-.climate-learn-card,
 .climate-decisions {
   display: flex;
   flex-direction: column;
@@ -7096,7 +7095,6 @@ dialog.popup::backdrop {
 }
 
 .climate-status__label,
-.climate-status__reason,
 .climate-screen__empty,
 .climate-learn__text,
 .climate-field__label {
@@ -7107,10 +7105,6 @@ dialog.popup::backdrop {
 .climate-status__reading {
   font: var(--type-display);
   letter-spacing: var(--type-display-spacing);
-}
-
-.climate-status__target {
-  font: 700 22px/28px var(--font-display);
 }
 
 /* The room's target with − / + (climate/target_stepper.rs). */
@@ -7165,50 +7159,133 @@ dialog.popup::backdrop {
   gap: 8px;
 }
 
-.climate-status__why {
+/* The room card (climate/room_card.rs): ⚙, target on the right, why, holds, actions. */
+.climate-card__gear,
+.climate-card__clear {
   display: flex;
-  flex-wrap: wrap;
+  flex: none;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 
-.climate-status__state {
-  align-self: flex-start;
+.climate-card__gear {
+  width: 36px;
+  height: 36px;
+  margin-left: auto;
+  border: 1px solid var(--chip-border);
+  font: 400 18px/1 var(--font-body);
 }
 
-.climate-hold,
-.climate-learn,
-.climate-overrides,
-.climate-eco {
+.climate-card__clear {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  font: var(--type-label);
+}
+
+.climate-card__gear:hover,
+.climate-card__clear:hover {
+  background: var(--select-soft);
+}
+
+.climate-card__gear:focus-visible,
+.climate-card__clear:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 0;
+}
+
+.climate-card__target {
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.climate-card__why {
+  margin: 0;
+  font: var(--type-label);
+  color: var(--muted);
+}
+
+.climate-card__holds,
+.climate-card__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.climate-hold__setpoint {
-  flex: 0 0 90px;
-  width: 90px;
+.climate-card__hold {
+  color: var(--accent-amber);
+  cursor: default;
+}
+
+/* The room settings popup (climate/room_settings.rs): sections split by a rule. */
+.climate-room-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.climate-room-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--card-border);
+}
+
+.climate-room-settings__section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.climate-room-settings__heading {
+  margin: 0;
+  font: var(--type-body);
+  font-weight: 600;
+}
+
+/* The room's cards read as plain sections inside the popup. */
+.climate-room-settings .card {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.climate-correction__more > summary {
+  font: var(--type-label);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.climate-correction__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+
+.climate-status__state {
+  align-self: flex-start;
+}
+
+.climate-learn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Buttons keep their own width on wide screens (`.btn` grows by default). */
 .climate-panel .btn {
   flex: none;
   padding-inline: 16px;
-}
-
-.climate-hold__short {
-  display: none;
-}
-
-.climate-overrides {
-  color: var(--accent-amber);
-}
-
-.climate-overrides__list {
-  flex: 1 1 auto;
-  margin: 0;
-  padding-left: 18px;
 }
 
 .climate-eco__field {
@@ -7274,17 +7351,6 @@ dialog.popup::backdrop {
   margin-right: 6px;
   border-radius: 4px;
   vertical-align: middle;
-}
-
-.climate-panel__lower {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 12px;
-}
-
-.climate-decisions > .chip {
-  align-self: flex-start;
 }
 
 .climate-decisions__list {
@@ -7642,8 +7708,7 @@ dialog.popup::backdrop {
 
 /* Narrow: the rooms become a row of chips above the panel, and everything stacks. */
 @media (max-width: 1099px) {
-  .climate-screen__body,
-  .climate-panel__lower {
+  .climate-screen__body {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -7700,24 +7765,6 @@ dialog.popup::backdrop {
 
   .climate-status__state > .chip {
     flex: 1;
-  }
-
-  .climate-hold__long {
-    display: none;
-  }
-
-  .climate-hold > .btn {
-    flex: 1;
-    min-width: 0;
-  }
-
-  /* "Prochain changement" does not fit beside the other three: it takes its own row. */
-  .climate-hold > .climate-hold__next {
-    flex: 1 1 100%;
-  }
-
-  .climate-hold__short {
-    display: inline;
   }
 
   .climate-timeline__cal {

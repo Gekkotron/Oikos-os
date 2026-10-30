@@ -402,60 +402,59 @@ async fn the_room_follows_the_language_without_a_remount() {
     tick().await;
     let text = || host.text_content().unwrap_or_default();
     for french in [
-        "Consigne",
+        "Consigne ·",
+        "Chauffage",
+        "18,5°",
         "Maintenant",
-        "Chauffage 18,5°",
         "Programmation",
         "Aucune programmation approuvée pour l'instant",
         "Cette semaine",
-        "Apprendre maintenant",
-        "Décisions récentes",
         "Active",
         "Arrêt",
         "En attente",
     ] {
         assert!(text().contains(french), "{french} in {}", text());
     }
-    for english in [
+    for hidden in [
         "Target",
         "Now",
-        "Heat 18",
+        "Heat",
         "This week",
-        "Learn now",
-        "Recent decisions",
         "Pending",
+        // In the room settings, behind the ⚙.
+        "Apprendre maintenant",
+        "Décisions récentes",
     ] {
-        assert!(!text().contains(english), "{english} in {}", text());
+        assert!(!text().contains(hidden), "{hidden} in {}", text());
     }
-    let hold: HtmlInputElement = host
-        .query_selector(".climate-hold__setpoint")
+    let raise: HtmlElement = host
+        .query_selector(".climate-stepper__step:last-of-type")
         .unwrap()
-        .expect("hold field")
+        .expect("+ button")
         .unchecked_into();
     assert_eq!(
-        hold.get_attribute("aria-label").as_deref(),
-        Some("Température à maintenir")
+        raise.get_attribute("aria-label").as_deref(),
+        Some("Monter la consigne")
     );
 
     lang.set(Lang::En);
     tick().await;
-    for english in [
-        "Target",
-        "Now",
-        "Heat 18.5",
-        "This week",
-        "Learn now",
-        "Recent decisions",
-        "Pending",
-    ] {
+    for english in ["Target ·", "Now", "Heat", "18.5°", "This week", "Pending"] {
         assert!(text().contains(english), "{english} in {}", text());
     }
-    for french in ["Consigne", "Maintenant", "Chauffage", "Cette semaine"] {
-        assert!(!text().contains(french), "{french} in {}", text());
+    for hidden in [
+        "Consigne",
+        "Maintenant",
+        "Chauffage",
+        "Cette semaine",
+        "Learn now",
+        "Recent decisions",
+    ] {
+        assert!(!text().contains(hidden), "{hidden} in {}", text());
     }
     assert_eq!(
-        hold.get_attribute("aria-label").as_deref(),
-        Some("Hold temperature")
+        raise.get_attribute("aria-label").as_deref(),
+        Some("Raise target")
     );
 }
 
@@ -725,4 +724,192 @@ async fn a_running_eco_cancels_in_one_tap() {
 async fn an_off_room_has_no_eco_pill() {
     let host = mount_eco(zone("living-room", "Living room", ZoneState::Off, None)).await;
     assert!(host.query_selector(".climate-eco-pill").unwrap().is_none());
+}
+
+/// The client ends a query with "&".
+const DECISIONS_URL: &str = "/api/v1/climate/zones/living-room/decisions?limit=50&";
+
+/// One room's panel, in English, over a zone the test can change.
+async fn mount_panel(current: RwSignal<ZoneView>) -> Element {
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(House::new());
+        provide_context(oikos_web::components::now::install_now());
+        provide_context(RwSignal::new(Lang::En));
+        view! {
+            <RoomPanel
+                zone=current.into()
+                tz=Signal::from(chrono_tz::Tz::UTC)
+                on_changed=Callback::new(|_| {})
+            />
+        }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+    host
+}
+
+fn reply_decisions(stub: &FetchStub) {
+    let decision = zone("living-room", "Living room", ZoneState::Active, Some(19.0))
+        .decision
+        .unwrap();
+    let log = oikos_climate::view::DecisionLog {
+        recent: vec![decision],
+        older: vec![],
+    };
+    stub.reply(
+        "GET",
+        DECISIONS_URL,
+        200,
+        &serde_json::to_string(&log).unwrap(),
+    );
+}
+
+async fn open_room_settings(host: &Element) -> Element {
+    host.query_selector(".climate-card__gear")
+        .unwrap()
+        .expect("the room's ⚙")
+        .unchecked_into::<HtmlElement>()
+        .click();
+    settle().await;
+    host.query_selector("dialog.popup")
+        .unwrap()
+        .expect("the room settings")
+}
+
+#[wasm_bindgen_test]
+async fn the_gear_opens_the_room_settings() {
+    let stub = FetchStub::install();
+    reply_decisions(&stub);
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let host = mount_panel(current).await;
+    assert!(host.query_selector("dialog").unwrap().is_none());
+    assert_eq!(
+        requests_to(&stub, "GET", DECISIONS_URL),
+        0,
+        "fetched on open"
+    );
+
+    let dialog = open_room_settings(&host).await;
+    let text = dialog.text_content().unwrap_or_default();
+    for word in [
+        "Room settings · Living room",
+        "Room thermometer",
+        "Learn now",
+        "Recent decisions",
+    ] {
+        assert!(text.contains(word), "{word} in {text}");
+    }
+    assert!(
+        dialog
+            .query_selector(".climate-correction-card [role=switch]")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(requests_to(&stub, "GET", DECISIONS_URL), 1);
+}
+
+#[wasm_bindgen_test]
+async fn a_refetch_keeps_the_room_settings_open() {
+    let stub = FetchStub::install();
+    reply_decisions(&stub);
+    let base = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    let current = RwSignal::new(base.clone());
+    let host = mount_panel(current).await;
+    open_room_settings(&host).await;
+    assert!(
+        host.query_selector(".climate-decisions__list li")
+            .unwrap()
+            .is_some()
+    );
+
+    current.set(ZoneView {
+        reading: Some(18.0),
+        ..base
+    });
+    settle().await;
+    assert!(
+        host.query_selector("dialog.popup[open]").unwrap().is_some(),
+        "still open"
+    );
+    assert!(
+        host.query_selector(".climate-decisions__list li")
+            .unwrap()
+            .is_some(),
+        "the decisions stay"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn an_override_shows_as_a_chip_and_clears() {
+    let stub = FetchStub::install();
+    stub.reply("DELETE", OVERRIDE_URL, 200, "{}");
+    let mut z = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    z.overrides = vec![oikos_climate::doc::Override {
+        entity: None,
+        setpoint: Some(Setpoint::Temp(21.0)),
+        mode: None,
+        until: 4_000_000_000,
+        origin: oikos_climate::doc::OverrideOrigin::User,
+    }];
+    let host = mount_panel(RwSignal::new(z)).await;
+    let holds = host.query_selector_all(".climate-card__hold").unwrap();
+    assert_eq!(holds.length(), 1);
+    let text = holds.item(0).unwrap().text_content().unwrap_or_default();
+    assert!(text.contains("21°") && text.contains("set here"), "{text}");
+
+    host.query_selector(".climate-card__holds button[aria-label='Clear']")
+        .unwrap()
+        .expect("the ✕")
+        .unchecked_into::<HtmlElement>()
+        .click();
+    settle().await;
+    assert_eq!(requests_to(&stub, "DELETE", OVERRIDE_URL), 1);
+}
+
+#[wasm_bindgen_test]
+async fn correction_fields_fold_under_advanced() {
+    let stub = FetchStub::install();
+    reply_decisions(&stub);
+    let mut base = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    base.settings.feedback.enabled = true;
+    base.room_sensor = Some("sensor.living_room_temperature".into());
+    let current = RwSignal::new(base.clone());
+    let host = mount_panel(current).await;
+    let dialog = open_room_settings(&host).await;
+    let text = dialog.text_content().unwrap_or_default();
+    assert!(
+        text.contains("Step 0.5 °C · tolerance 0.5 °C · every 15 min"),
+        "{text}"
+    );
+    let fold = dialog
+        .query_selector("details.climate-correction__more")
+        .unwrap()
+        .expect("the Advanced settings fold");
+    assert!(!fold.has_attribute("open"), "folded by default");
+    assert!(
+        fold.text_content()
+            .unwrap_or_default()
+            .contains("Advanced settings (7)")
+    );
+    assert_eq!(fold.query_selector_all("input.field").unwrap().length(), 7);
+
+    // Opened, it stays open through a refetch (each saved field refetches).
+    fold.set_attribute("open", "").unwrap();
+    current.set(ZoneView {
+        reading: Some(18.0),
+        ..base
+    });
+    settle().await;
+    let fold = host
+        .query_selector("details.climate-correction__more")
+        .unwrap()
+        .expect("still there");
+    assert!(fold.has_attribute("open"), "still open");
 }
