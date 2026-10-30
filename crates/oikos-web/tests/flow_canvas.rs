@@ -2123,3 +2123,42 @@ async fn math_preview_uses_house_values() {
     assert!(line.contains("= 42") && line.contains("5m"), "{line}");
     settle_history().await;
 }
+
+#[wasm_bindgen_test]
+async fn math_inputs_follow_undo_and_redo() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    click(&host, ".math-inputs__add");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 1);
+    click(&host, ".math-inputs__add");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 2);
+    click(&host, ".flow-toolbar button[aria-label=Undo]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(count(&host, ".math-input"), 1, "{}", host.inner_html());
+    assert_eq!(input_named(&host, ".math-input__name").value(), "input");
+    press(&body(), "z", true, true);
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(count(&host, ".math-input"), 2, "{}", host.inner_html());
+    // Undoing a remove brings the row back.
+    click(&host, ".math-input__remove");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 1);
+    click(&host, ".flow-toolbar button[aria-label=Undo]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(count(&host, ".math-input"), 2, "{}", host.inner_html());
+    // A window change is undone in the select too.
+    let window: web_sys::HtmlSelectElement = element(&host, ".math-input__window").unchecked_into();
+    window.set_value("5m");
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    window
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+    tick().await;
+    click(&host, ".flow-toolbar button[aria-label=Undo]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let window: web_sys::HtmlSelectElement = element(&host, ".math-input__window").unchecked_into();
+    assert_eq!(window.value(), "now");
+}

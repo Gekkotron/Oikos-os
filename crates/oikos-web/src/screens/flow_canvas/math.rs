@@ -83,8 +83,8 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
         on_cleanup(move || blocked.0.set(false));
     }
 
-    // Rows are rebuilt when inputs come or go, not on every edit.
-    let version = RwSignal::new(0_u32);
+    // Rows are rebuilt when the draft's number of inputs changes (add, remove, undo, redo), not
+    // on every edit; each row reads its fields from the draft.
     let count = Signal::derive({
         let id = id.clone();
         move || params_of(form, &id).map_or(0, |p| p.inputs.len())
@@ -92,10 +92,12 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
     let rows = {
         let id = id.clone();
         move || {
-            version.track();
-            (0..count.get_untracked())
-                .map(|i| input_row(form, id.clone(), i, version))
-                .collect_view()
+            let n = count.get();
+            untrack(|| {
+                (0..n)
+                    .map(|i| input_row(form, id.clone(), i))
+                    .collect_view()
+            })
         }
     };
     let add_id = id.clone();
@@ -111,7 +113,6 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
                 });
             }
         });
-        version.update(|v| *v += 1);
     };
 
     let formula_id = id.clone();
@@ -250,16 +251,20 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
 }
 
 /// One input row: its name, the entity it reads, the window it averages over and a remove button.
-fn input_row(form: Form, id: String, index: usize, version: RwSignal<u32>) -> impl IntoView {
+fn input_row(form: Form, id: String, index: usize) -> impl IntoView {
     let t = use_flow_text();
     let lang = use_lang();
     let house = expect_context::<House>();
     let current = move |id: &str| params_of(form, id).and_then(|p| p.inputs.get(index).cloned());
-    let initial = current(&id).unwrap_or_else(|| MathInput {
-        name: String::new(),
-        entity: String::new(),
-        average: None,
+    let window = Signal::derive({
+        let id = id.clone();
+        move || current(&id).and_then(|i| i.average)
     });
+    // A window the list lacks (the hub accepts any up to 24h) is listed too.
+    let extra = window
+        .get_untracked()
+        .filter(|w| !WINDOWS.contains(&w.as_str()))
+        .into_iter();
 
     let name = Signal::derive({
         let id = id.clone();
@@ -324,14 +329,8 @@ fn input_row(form: Form, id: String, index: usize, version: RwSignal<u32>) -> im
                 p.inputs.remove(index);
             }
         });
-        version.update(|v| *v += 1);
     };
 
-    let held = initial.average.clone();
-    let extra = held
-        .clone()
-        .filter(|w| !WINDOWS.contains(&w.as_str()))
-        .into_iter();
     let windows = WINDOWS.iter().map(|w| (*w).to_owned()).chain(extra);
     view! {
         <div class="math-input">
@@ -353,12 +352,13 @@ fn input_row(form: Form, id: String, index: usize, version: RwSignal<u32>) -> im
                 class=Some("math-input__entity".to_owned())
             />
             <select class="field math-input__window" on:change=on_window>
-                <option value="now" selected=held.is_none()>
+                <option value="now" selected=move || window.get().is_none()>
                     {move || t(FlowText::MathNow)}
                 </option>
                 {windows
                     .map(|w| {
-                        let chosen = held.as_deref() == Some(w.as_str());
+                        let mine = w.clone();
+                        let chosen = move || window.get().as_deref() == Some(mine.as_str());
                         view! { <option value=w.clone() selected=chosen>{w.clone()}</option> }
                     })
                     .collect_view()}
