@@ -497,9 +497,75 @@
   }
 }
 
+/* One side brush at the front right: still unless cleaning, then it spins inward. */
+.robot__brush-reach {
+  fill: none;
+  stroke: none;
+}
+
+.robot__brush-arms {
+  fill: none;
+  stroke: var(--accent-cyan);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.robot__brush-hub {
+  fill: var(--accent-cyan);
+}
+
+.robot__brush-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.robot--cleaning .robot__brush-spin {
+  animation: robot-brush 0.7s linear infinite reverse;
+}
+
+@keyframes robot-brush {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Dust drawn in under the robot: each speck fades in, heads for the centre, fades out. */
+.robot__dust {
+  fill: var(--robot-dust);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: robot-dust 1.8s ease-in infinite;
+}
+
+@keyframes robot-dust {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(1);
+  }
+
+  20% {
+    opacity: 0.95;
+  }
+
+  75% {
+    opacity: 0.8;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) scale(0.6);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .robot--cleaning .robot__ring {
+  .robot--cleaning .robot__ring,
+  .robot--cleaning .robot__brush-spin {
     animation: none;
+  }
+
+  .robot__dust {
+    display: none;
   }
 }
 
