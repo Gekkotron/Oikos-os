@@ -5,10 +5,11 @@ use std::collections::BTreeMap;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::command::command_name;
 use oikos_core::flow::{
-    Node, NodeKind, OffPeakEdge, Op, RuleOp, SunWhich, command_with_number, parse_duration,
+    Node, NodeKind, OffPeakEdge, Op, RuleOp, SunWhich, command_with_number, fields, parse_duration,
     template,
 };
 use oikos_core::model::{Command, Hs, Kind};
+use oikos_core::vocabulary::Reports;
 use serde_json::Value;
 
 use crate::flows::{humanise, value_text};
@@ -139,6 +140,30 @@ fn unit_of<'a>(id: &str, ctx: &'a Ctx) -> Option<&'a str> {
     ctx.entities.get(id).and_then(|e| e.unit.as_deref())
 }
 
+/// What a card reads, as its sentence names it: the entity, followed by the field's name when
+/// it reads one ("Roborock · Battery"), with the unit of that value.
+fn read_text(id: &str, field: Option<&str>, ctx: &Ctx) -> (String, Option<String>) {
+    let e = entity_text(id, ctx);
+    let Some(field) = field else {
+        return (e, unit_of(id, ctx).map(str::to_owned));
+    };
+    let unit = ctx.entities.get(id).and_then(|entity| {
+        fields(
+            entity.kind,
+            &entity.component,
+            &entity.capabilities,
+            entity.unit.as_deref(),
+        )
+        .into_iter()
+        .find(|f| f.name == field)
+        .and_then(|f| match f.reports {
+            Reports::Number { unit, .. } => unit,
+            _ => None,
+        })
+    });
+    (format!("{e} · {}", t::field_label(ctx.lang, field)), unit)
+}
+
 /// A generic control as a sentence: "Lock Front door", "Set Bedroom fan percentage to 60",
 /// "Activate Scene 1" (a press has no value).
 fn control_sentence(lang: Lang, control: &str, value: Option<&Value>, e: &str) -> String {
@@ -265,7 +290,7 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
     let lang = ctx.lang;
     match &node.kind {
         NodeKind::TriggerState(p) => {
-            let e = entity_text(&p.entity, ctx);
+            let (e, unit) = read_text(&p.entity, p.field.as_deref(), ctx);
             let entity = ctx.entities.get(&p.entity);
             match &p.to {
                 None => t::when_changes(lang, &e),
@@ -276,11 +301,9 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
                     entity.is_some_and(|x| x.kind == Kind::Light),
                     &bool_word(lang, entity, *b),
                 ),
-                Some(v) => t::when_becomes(
-                    lang,
-                    &e,
-                    &value_words(lang, v, unit_of(&p.entity, ctx), entity),
-                ),
+                Some(v) => {
+                    t::when_becomes(lang, &e, &value_words(lang, v, unit.as_deref(), entity))
+                }
             }
         }
         NodeKind::TriggerSignal(p) => {
@@ -299,16 +322,20 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         NodeKind::If(p) if p.op == Op::IsDark => t::is_dark_sentence(lang, p.dark_offset()),
         NodeKind::If(p) if p.op == Op::IsOffPeak => flow_text(lang, FlowText::IsOffPeak).to_owned(),
         NodeKind::If(p) => {
-            let (e, unit, entity) = match (&p.result, &p.entity) {
-                (Some(name), _) => (name.clone(), None, None),
-                (None, Some(id)) => (entity_text(id, ctx), unit_of(id, ctx), ctx.entities.get(id)),
+            let ((e, unit), entity) = match (&p.result, &p.entity) {
+                (Some(name), _) => ((name.clone(), None), None),
+                (None, Some(id)) => (read_text(id, p.field.as_deref(), ctx), ctx.entities.get(id)),
                 (None, None) => (
-                    flow_text(lang, FlowText::TriggerValue).to_owned(),
-                    None,
+                    (flow_text(lang, FlowText::TriggerValue).to_owned(), None),
                     None,
                 ),
             };
-            let v = value_words(lang, p.value.as_ref().unwrap_or(&Value::Null), unit, entity);
+            let v = value_words(
+                lang,
+                p.value.as_ref().unwrap_or(&Value::Null),
+                unit.as_deref(),
+                entity,
+            );
             let e = match p.average.as_deref() {
                 Some(window) => t::average_of(lang, &e, &duration_words(window)),
                 None => e,
@@ -333,7 +360,7 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         NodeKind::Switch(p) => {
             let e = match (&p.result, &p.entity) {
                 (Some(name), _) => name.clone(),
-                (None, Some(id)) => entity_text(id, ctx),
+                (None, Some(id)) => read_text(id, p.field.as_deref(), ctx).0,
                 (None, None) => flow_text(lang, FlowText::TriggerValue).to_owned(),
             };
             let e = match p.average.as_deref() {
@@ -389,7 +416,11 @@ pub fn exit_label(lang: Lang, kind: &NodeKind, port: &str, ctx: &Ctx) -> String 
                 return String::new();
             };
             let entity = p.entity.as_deref().and_then(|id| ctx.entities.get(id));
-            let unit = p.entity.as_deref().and_then(|id| unit_of(id, ctx));
+            let unit = p
+                .entity
+                .as_deref()
+                .and_then(|id| read_text(id, p.field.as_deref(), ctx).1);
+            let unit = unit.as_deref();
             let words = |v: &Value| value_words(lang, v, unit, entity);
             let sign = match rule.op {
                 RuleOp::Eq => "=",
@@ -549,6 +580,7 @@ mod tests {
             ent("led", "LED", Some("LED strip"), Kind::Light, None),
             ent("p1", "Power 1", None, Kind::Number, Some("%")),
             ent("mot", "Motion", None, Kind::BinarySensor, None),
+            ent("robo", "Roborock", None, Kind::Vacuum, None),
         ]
         .into_iter()
         .map(|e| (e.id.clone(), e))
@@ -734,6 +766,25 @@ mod tests {
         let n =
             r#"{"id":"a","type":"if","name":"  ","params":{"entity":"l1","op":"eq","value":true}}"#;
         assert_eq!(text(n), "Lumière TV is on?");
+    }
+
+    #[test]
+    fn if_sentence_names_the_field() {
+        let n = r#"{"id":"a","type":"if","params":{"entity":"robo","field":"battery","op":"lte","value":55}}"#;
+        assert_eq!(text(n), "Roborock · Battery ≤ 55\u{a0}%?");
+        assert_eq!(
+            text_in(Lang::Fr, n),
+            "Roborock · Batterie ≤ 55\u{a0}%\u{a0}?"
+        );
+        let when =
+            r#"{"id":"a","type":"trigger.state","params":{"entity":"robo","field":"battery"}}"#;
+        assert_eq!(text(when), "When Roborock · Battery changes");
+        let switch = r#"{"id":"a","type":"switch","params":{"entity":"robo","field":"battery","rules":[{"op":"lte","value":20}]}}"#;
+        assert_eq!(text(switch), switch_on_text("Roborock · Battery"));
+    }
+
+    fn switch_on_text(e: &str) -> String {
+        crate::i18n::flows::switch_on(Lang::En, e)
     }
 
     #[test]
@@ -1034,6 +1085,7 @@ mod generic_tests {
                 op: Op::Lte,
                 value: Some(json!(19)),
                 entity: Some("Temperature".into()),
+                field: None,
                 missing: None,
                 average: average.map(Into::into),
                 offset_minutes: None,

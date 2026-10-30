@@ -226,6 +226,7 @@ async fn lists_the_expected_tools() {
     assert!(instructions.contains("set_override"), "{instructions}");
     assert!(instructions.contains("send_command"), "{instructions}");
     assert!(instructions.contains("send_notification"), "{instructions}");
+    assert!(instructions.contains("optional `field`"), "{instructions}");
     assert!(instructions.contains("list_alerts"), "{instructions}");
     assert!(instructions.contains("`notify`"), "{instructions}");
     assert!(instructions.contains("climate_status"), "{instructions}");

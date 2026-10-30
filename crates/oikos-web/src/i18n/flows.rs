@@ -174,6 +174,7 @@ pub enum FlowText {
     OnlyAfter,
     AnySignal,
     EntityDefaults,
+    ValueOf,
     MissingFail,
     MissingTrue,
     MissingFalse,
@@ -445,6 +446,7 @@ impl FlowText {
         FlowText::OnlyAfter,
         FlowText::AnySignal,
         FlowText::EntityDefaults,
+        FlowText::ValueOf,
         FlowText::MissingFail,
         FlowText::MissingTrue,
         FlowText::MissingFalse,
@@ -895,6 +897,7 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::SevCritical => ("critical", "critique"),
         T::OpIsDark => ("is dark", "fait nuit"),
         T::WhenUnknown => ("When the value is unknown", "Quand la valeur est inconnue"),
+        T::ValueOf => ("Value of", "Valeur de"),
         T::AverageOver => ("Average over", "Moyenne sur"),
         T::AverageHint => (
             "empty = current value \u{b7} e.g. 15m",
@@ -961,6 +964,36 @@ pub fn ask(lang: Lang, s: &str) -> String {
         Lang::En => format!("{s}?"),
         Lang::Fr => format!("{s}{NBSP}?"),
     }
+}
+
+/// The name of a value inside an entity's state ("Battery" / "Batterie"); a type-table field
+/// without a translation reads as its name with spaces, capitalised.
+pub fn field_label(lang: Lang, name: &str) -> String {
+    let [en, fr] = match name {
+        "battery" => ["Battery", "Batterie"],
+        "fan_speed" => ["Fan speed", "Vitesse d'aspiration"],
+        "brightness" => ["Brightness", "Luminosité"],
+        "color_temp" => ["Colour temperature", "Température de couleur"],
+        "effect" => ["Effect", "Effet"],
+        "position" => ["Position", "Position"],
+        "current" => ["Current temperature", "Température actuelle"],
+        "target" => ["Target temperature", "Consigne"],
+        "fan_mode" => ["Fan mode", "Mode de ventilation"],
+        "action" => ["Activity", "Activité"],
+        other => {
+            let spaced = other.replace('_', " ");
+            let mut chars = spaced.chars();
+            return chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect())
+                .unwrap_or_default();
+        }
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+    .to_owned()
 }
 
 /// "Temperature avg 15 min" / "Temperature moy. 15 min": the entity's average over a window.

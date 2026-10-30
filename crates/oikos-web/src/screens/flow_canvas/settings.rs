@@ -28,8 +28,9 @@ use crate::i18n::picker::PickerText;
 use crate::i18n::states::{kind_word, on_off};
 use crate::i18n::{Lang, use_lang};
 use crate::if_value::{
-    ValueInput, after_entity_change, compared_input, manual_value_input, upstream_manual_value,
-    upstream_trigger_entity,
+    ValueInput, ValueOf, after_entity_change, average_allowed, compared_input, manual_value_input,
+    upstream_manual_value, upstream_trigger_entity, upstream_trigger_field, value_input_of,
+    value_of_choices,
 };
 use crate::screens::flow_schedule::ScheduleField;
 
@@ -663,12 +664,78 @@ fn node_entity(
     })
 }
 
+/// The option value of a "Value of" entry.
+fn value_of_key(of: &ValueOf) -> String {
+    match of {
+        ValueOf::Headline => String::new(),
+        ValueOf::Field(name) => format!("field:{name}"),
+        ValueOf::Sibling(id) => format!("sibling:{id}"),
+    }
+}
+
+/// "Value of": which value of the card's entity it reads, its headline value, a field of its
+/// state or another entity of the same device. Shown once the entity reports more than one.
+#[component]
+fn ValueOfField(
+    entity: Signal<Option<String>>,
+    field: Signal<Option<String>>,
+    on_pick: Callback<ValueOf>,
+) -> impl IntoView {
+    let t = use_flow_text();
+    let lang = use_lang();
+    let house = expect_context::<House>();
+    let choices = Memo::new(move |_| {
+        let Some(id) = entity.get() else {
+            return Vec::new();
+        };
+        house.entities.with(|m| {
+            m.get(&id)
+                .map(|e| value_of_choices(lang(), m, e))
+                .unwrap_or_default()
+        })
+    });
+    let on_change = move |ev: web_sys::Event| {
+        let picked = event_target_value(&ev);
+        let of = choices.with_untracked(|list| {
+            list.iter()
+                .find(|c| value_of_key(&c.of) == picked)
+                .map(|c| c.of.clone())
+        });
+        if let Some(of) = of {
+            on_pick.run(of);
+        }
+    };
+    view! {
+        <Show when=move || choices.with(|list| list.len() > 1)>
+            <label class="node-editor__field">
+                <span class="node-editor__label">{move || t(FlowText::ValueOf)}</span>
+                <select class="field" aria-label=move || t(FlowText::ValueOf) on:change=on_change>
+                    {move || {
+                        let current = value_of_key(
+                            &field.get().map_or(ValueOf::Headline, ValueOf::Field),
+                        );
+                        choices
+                            .get()
+                            .into_iter()
+                            .map(|c| {
+                                let key = value_of_key(&c.of);
+                                let selected = key == current;
+                                view! { <option value=key selected=selected>{c.label}</option> }
+                            })
+                            .collect_view()
+                    }}
+                </select>
+            </label>
+        </Show>
+    }
+}
+
 fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
     let t = use_flow_text();
     let lang = use_lang();
     match kind {
         NodeKind::Math(_) => math_fields(form, id).into_any(),
-        NodeKind::TriggerState(p) => {
+        NodeKind::TriggerState(_) => {
             let entity_value = node_entity(form, id.clone(), |k| match k {
                 NodeKind::TriggerState(t) => Some(t.entity.clone()),
                 _ => None,
@@ -677,7 +744,42 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             let entity_write = Callback::new(move |value: Option<String>| {
                 form.update(&entity_id, |n| {
                     if let NodeKind::TriggerState(ref mut t) = n.kind {
-                        t.entity = value.unwrap_or_default();
+                        let next = value.unwrap_or_default();
+                        // What the card compares changed: the old value filters no longer fit.
+                        if t.entity != next {
+                            t.entity = next;
+                            t.field = None;
+                            t.to = None;
+                            t.from = None;
+                        }
+                    }
+                });
+            });
+            let field_value = Signal::derive({
+                let id = id.clone();
+                move || {
+                    form.editor
+                        .draft
+                        .with(|f| match f.node(&id).map(|n| &n.kind) {
+                            Some(NodeKind::TriggerState(t)) => t.field.clone(),
+                            _ => None,
+                        })
+                }
+            });
+            let pick_id = id.clone();
+            let pick = Callback::new(move |of: ValueOf| {
+                form.update(&pick_id, |n| {
+                    if let NodeKind::TriggerState(ref mut t) = n.kind {
+                        match of {
+                            ValueOf::Headline => t.field = None,
+                            ValueOf::Field(name) => t.field = Some(name),
+                            ValueOf::Sibling(id) => {
+                                t.entity = id;
+                                t.field = None;
+                            }
+                        }
+                        t.to = None;
+                        t.from = None;
                     }
                 });
             });
@@ -689,7 +791,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     }
                 });
             });
-            let from_id = id;
+            let from_id = id.clone();
             let from_write = Callback::new(move |value: Option<serde_json::Value>| {
                 form.update(&from_id, |n| {
                     if let NodeKind::TriggerState(ref mut t) = n.kind {
@@ -697,6 +799,32 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     }
                 });
             });
+            // The filters re-mount when what the card reads changes, showing the cleared values.
+            let reads = Memo::new(move |_| (entity_value.get(), field_value.get()));
+            let filters_id = id;
+            let filters = move || {
+                reads.track();
+                let (to, from) = form.editor.draft.with_untracked(|f| {
+                    match f.node(&filters_id).map(|n| &n.kind) {
+                        Some(NodeKind::TriggerState(t)) => (t.to.clone(), t.from.clone()),
+                        _ => (None, None),
+                    }
+                });
+                view! {
+                    <JsonField
+                        label=word(FlowText::FiresWhen)
+                        initial=to.unwrap_or(serde_json::Value::Null)
+                        optional=true
+                        write=to_write
+                    />
+                    <JsonField
+                        label=word(FlowText::OnlyAfter)
+                        initial=from.unwrap_or(serde_json::Value::Null)
+                        optional=true
+                        write=from_write
+                    />
+                }
+            };
             view! {
                 <EntityPickField
                     label=word(FlowText::Entity)
@@ -706,18 +834,8 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     compact=true
                     class=Some("node-editor__field".to_owned())
                 />
-                <JsonField
-                    label=word(FlowText::FiresWhen)
-                    initial=p.to.unwrap_or(serde_json::Value::Null)
-                    optional=true
-                    write=to_write
-                />
-                <JsonField
-                    label=word(FlowText::OnlyAfter)
-                    initial=p.from.unwrap_or(serde_json::Value::Null)
-                    optional=true
-                    write=from_write
-                />
+                <ValueOfField entity=entity_value field=field_value on_pick=pick />
+                {filters}
             }
             .into_any()
         }
@@ -900,6 +1018,23 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         .flatten()
                 }
             });
+            let field_value = Signal::derive({
+                let id = id.clone();
+                move || {
+                    draft.with(|f| match f.node(&id).map(|n| &n.kind) {
+                        Some(NodeKind::If(i)) => i.field.clone(),
+                        _ => None,
+                    })
+                }
+            });
+            // The field compared: the card's own with its own entity, else its trigger's.
+            let compared_field = Memo::new({
+                let id = id.clone();
+                move |_| match entity_value.get() {
+                    Some(_) => field_value.get(),
+                    None => draft.with(|f| upstream_trigger_field(f, &id)),
+                }
+            });
             let manual = {
                 let manual = manual_input(draft, id.clone());
                 Signal::derive(move || {
@@ -912,6 +1047,9 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             };
             let entity_id = id.clone();
             let entity_write = Callback::new(move |value: Option<String>| {
+                if untrack(|| source_value.get()) == value {
+                    return;
+                }
                 if let Some(name) = value
                     .as_ref()
                     .filter(|v| names.with_untracked(|n| n.contains(v)))
@@ -923,6 +1061,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                             // A result is a number: text or on/off values do not compare.
                             i.value = Some(number_or_zero(i.value.as_ref()));
                             i.entity = None;
+                            i.field = None;
                             i.average = None;
                             i.missing = None;
                         }
@@ -944,9 +1083,45 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         i.value = after_entity_change(i.value.as_ref(), &input);
                         i.entity = value;
                         i.result = None;
+                        i.field = None;
                     }
                 });
             });
+            let pick_id = id.clone();
+            let pick = Callback::new(move |of: ValueOf| {
+                let field = match of {
+                    ValueOf::Sibling(sibling) => return entity_write.run(Some(sibling)),
+                    ValueOf::Headline => None,
+                    ValueOf::Field(name) => Some(name),
+                };
+                let e = untrack(|| compared.get());
+                let input = untrack(|| value_input_of(lang(), e.as_ref(), field.as_deref()));
+                let averages = average_allowed(e.as_ref(), field.as_deref());
+                form.update(&pick_id, |n| {
+                    if let NodeKind::If(ref mut i) = n.kind {
+                        i.value = after_entity_change(i.value.as_ref(), &input);
+                        if !averages {
+                            i.average = None;
+                        }
+                        i.field = field;
+                    }
+                });
+            });
+            // An average the value cannot have stays on screen until cleared; the hub refuses it.
+            let average_set = Signal::derive({
+                let id = id.clone();
+                move || {
+                    draft.with(|f| {
+                        matches!(f.node(&id).map(|n| &n.kind), Some(NodeKind::If(i)) if i.average.is_some())
+                    })
+                }
+            });
+            let averages = move || {
+                average_set.get()
+                    || compared.with(|e| {
+                        compared_field.with(|f| average_allowed(e.as_ref(), f.as_deref()))
+                    })
+            };
             let value_id = id.clone();
             let stored_value = Signal::derive(move || {
                 draft.with(|f| match f.node(&value_id).map(|n| &n.kind) {
@@ -1027,6 +1202,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         entity=Signal::from(compared)
                         write=Callback::new(move |v| value_write.run(Some(v)))
                         fallback=manual
+                        field=compared_field
                     />
                     <EntityPickField
                         label=word(FlowText::EntityDefaults)
@@ -1038,13 +1214,16 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         class=Some("node-editor__field".to_owned())
                     />
                     <Show when=move || result_value.with(Option::is_none)>
-                    <TextField
-                        label=word(FlowText::AverageOver)
-                        initial=live.run(()).and_then(|i| i.average).unwrap_or_default()
-                        placeholder=word(FlowText::AverageHint)
-                        optional=true
-                        write=average_write
-                    />
+                    <ValueOfField entity=entity_value field=field_value on_pick=pick />
+                    <Show when=averages>
+                        <TextField
+                            label=word(FlowText::AverageOver)
+                            initial=live.run(()).and_then(|i| i.average).unwrap_or_default()
+                            placeholder=word(FlowText::AverageHint)
+                            optional=true
+                            write=average_write
+                        />
+                    </Show>
                     <label class="node-editor__field">
                         <span class="node-editor__label">{move || t(FlowText::WhenUnknown)}</span>
                         <select class="field" on:change=move |ev| on_missing.run(ev)>
@@ -1358,13 +1537,21 @@ fn update_rule(form: Form, id: &str, index: usize, mutate: impl FnOnce(&mut Swit
 }
 
 /// One rule of a switch: operator, value (and upper bound for `between`), move and delete.
+/// What a switch's rules compare with: the entity, its field and, without an entity, the input
+/// a Manual card upstream gives.
+#[derive(Clone, Copy)]
+struct Compared {
+    entity: Memo<Option<oikos_api::EntityView>>,
+    field: Memo<Option<String>>,
+    manual: Signal<Option<ValueInput>>,
+}
+
 fn rule_row(
     form: Form,
     id: String,
     index: usize,
     count: usize,
-    compared: Memo<Option<oikos_api::EntityView>>,
-    manual: Signal<Option<ValueInput>>,
+    compared: Compared,
     bump: Callback<usize>,
 ) -> impl IntoView {
     let lang = use_lang();
@@ -1450,9 +1637,10 @@ fn rule_row(
             </select>
             <IfValueField
                 value=value
-                entity=Signal::from(compared)
+                entity=Signal::from(compared.entity)
                 write=value_write
-                fallback=manual
+                fallback=compared.manual
+                field=compared.field
             />
             <Show when=move || is_between.get()>
                 <span class="command-field__number">
@@ -1554,6 +1742,23 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
                 .flatten()
         }
     });
+    let field_value = Signal::derive({
+        let id = id.clone();
+        move || {
+            draft.with(|f| match f.node(&id).map(|n| &n.kind) {
+                Some(NodeKind::Switch(s)) => s.field.clone(),
+                _ => None,
+            })
+        }
+    });
+    // The field compared: the card's own with its own entity, else its trigger's.
+    let compared_field = Memo::new({
+        let id = id.clone();
+        move |_| match entity_value.get() {
+            Some(_) => field_value.get(),
+            None => draft.with(|f| upstream_trigger_field(f, &id)),
+        }
+    });
     let manual = {
         let manual = manual_input(draft, id.clone());
         Signal::derive(move || {
@@ -1566,11 +1771,14 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
     };
     let entity_id = id.clone();
     let entity_write = Callback::new(move |value: Option<String>| {
+        if untrack(|| source_value.get()) == value {
+            return;
+        }
         if let Some(name) = value
             .as_ref()
             .filter(|v| names.with_untracked(|n| n.contains(v)))
         {
-            // A result stands in for the entity, so the average goes.
+            // A result stands in for the entity, so the field and the average go.
             form.update(&entity_id, |n| {
                 if let NodeKind::Switch(ref mut s) = n.kind {
                     s.result = Some(name.clone());
@@ -1578,6 +1786,7 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
                         r.value = number_or_zero(Some(&r.value));
                     }
                     s.entity = None;
+                    s.field = None;
                     s.average = None;
                 }
             });
@@ -1602,9 +1811,56 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
                 }
                 s.entity = value;
                 s.result = None;
+                s.field = None;
             }
         });
     });
+    let pick_id = id.clone();
+    let pick = Callback::new(move |of: ValueOf| {
+        let field = match of {
+            ValueOf::Sibling(sibling) => return entity_write.run(Some(sibling)),
+            ValueOf::Headline => None,
+            ValueOf::Field(name) => Some(name),
+        };
+        let e = untrack(|| compared.get());
+        let input = untrack(|| value_input_of(lang(), e.as_ref(), field.as_deref()));
+        let averages = average_allowed(e.as_ref(), field.as_deref());
+        form.update(&pick_id, |n| {
+            if let NodeKind::Switch(ref mut s) = n.kind {
+                for r in &mut s.rules {
+                    if let Some(v) = after_entity_change(Some(&r.value), &input) {
+                        r.value = v;
+                    }
+                }
+                if !averages {
+                    s.average = None;
+                }
+                s.field = field;
+            }
+        });
+    });
+    // An average the value cannot have stays on screen until cleared; the hub refuses it.
+    let average_set = Signal::derive({
+        let id = id.clone();
+        move || {
+            draft.with(|f| {
+                matches!(f.node(&id).map(|n| &n.kind), Some(NodeKind::Switch(s)) if s.average.is_some())
+            })
+        }
+    });
+    let averages = move || {
+        average_set.get()
+            || compared.with(|e| compared_field.with(|f| average_allowed(e.as_ref(), f.as_deref())))
+    };
+    let average_initial = {
+        let id = id.clone();
+        move || {
+            draft.with_untracked(|f| match f.node(&id).map(|n| &n.kind) {
+                Some(NodeKind::Switch(s)) => s.average.clone().unwrap_or_default(),
+                _ => String::new(),
+            })
+        }
+    };
     let average_id = id.clone();
     let average_write = Callback::new(move |value: Option<String>| {
         form.update(&average_id, |n| {
@@ -1613,6 +1869,11 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
             }
         });
     });
+    let rules_compare = Compared {
+        entity: compared,
+        field: compared_field,
+        manual,
+    };
     // Rows are rebuilt when the rules change in number or order, not on every value edit.
     let version = RwSignal::new(0_u32);
     let removed = RwSignal::new(0_usize);
@@ -1635,7 +1896,7 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
             version.track();
             let n = count.get_untracked();
             (0..n)
-                .map(|i| rule_row(form, id.clone(), i, n, compared, manual, bump))
+                .map(|i| rule_row(form, id.clone(), i, n, rules_compare, bump))
                 .collect_view()
         }
     };
@@ -1672,10 +1933,11 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
             compact=true
             class=Some("node-editor__field".to_owned())
         />
-        <Show when=move || result_value.with(Option::is_none)>
+        <ValueOfField entity=entity_value field=field_value on_pick=pick />
+        <Show when=averages>
             <TextField
                 label=word(FlowText::AverageOver)
-                initial=p.average.clone().unwrap_or_default()
+                initial=average_initial()
                 placeholder=word(FlowText::AverageHint)
                 optional=true
                 write=average_write
@@ -2000,6 +2262,7 @@ mod tests {
             op: Op::Eq,
             value: Some(json!(true)),
             entity: Some("x".into()),
+            field: None,
             missing: Some(Missing::True),
             average: Some("15m".into()),
             offset_minutes: None,
@@ -2027,6 +2290,7 @@ mod tests {
             op: Op::Eq,
             value: Some(json!(true)),
             entity: Some("x".into()),
+            field: None,
             missing: Some(Missing::True),
             average: Some("15m".into()),
             offset_minutes: None,
@@ -2065,6 +2329,7 @@ mod tests {
             op: Op::IsDark,
             value: None,
             entity: None,
+            field: None,
             missing: None,
             average: None,
             offset_minutes: Some(-30),
@@ -2084,6 +2349,7 @@ mod tests {
             op: Op::IsDark,
             value: None,
             entity: None,
+            field: None,
             missing: None,
             average: None,
             offset_minutes: Some(-30),
@@ -2103,6 +2369,7 @@ mod tests {
             op: Op::Eq,
             value: Some(json!(1)),
             entity: None,
+            field: None,
             missing: None,
             average: None,
             offset_minutes: None,

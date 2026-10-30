@@ -3,6 +3,7 @@
 
 mod clock;
 mod duration;
+mod field;
 mod graph;
 pub mod math;
 mod model;
@@ -15,6 +16,7 @@ mod validate;
 
 pub use clock::{in_time_range, parse_clock};
 pub use duration::{DurationError, format_duration, parse_duration, pick_duration};
+pub use field::{FieldInfo, brightness_percent, field_scalar, fields, headline_scalar};
 pub use math::{
     FUNCTIONS, Formula, FormulaError, Function, MAX_DEPTH, MAX_FORMULA_CHARS, MAX_INPUTS,
     MAX_TABLE_POINTS, fit_to_entity, is_valid_name, parse_formula,

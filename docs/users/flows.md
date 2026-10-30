@@ -53,6 +53,25 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
 
 The sun nodes and `is_dark` read the house location. Set your home location in the setup wizard or **Settings → Location**; without one the hub uses Paris, and the web UI shows a "Paris fallback" badge on sun cards. See the [Settings reference](../reference/configuration.md#home-location).
 
+### Value of: every value a device reports
+
+The When, If and Switch cards read their entity's headline value: on or off, a measurement, a state such as Cleaning. Under the entity, the **Value of** menu lists everything else the device reports, each with its current value:
+
+- the entity's other fields: a vacuum's Battery and Fan speed, a light's Brightness, a cover's Position, a climate's current and target temperature;
+- the device's other entities, diagnostic ones included: a smoke detector's Battery, Battery low or Link quality.
+
+To run something when the vacuum's battery is low, add an If card on the vacuum, pick **Battery (62 %)** in **Value of**, then **≤** and `55`. The card reads "Roborock · Battery ≤ 55 %?". In JSON a field is the `field` param:
+
+```json
+{ "id": "low", "type": "if", "params": { "entity": "vacuum_roborock", "field": "battery", "op": "lte", "value": 55 } }
+```
+
+A Zigbee device's battery is an entity of its own. Picking it in **Value of** sets the card's entity to it, the same as `"entity": "0x00158d0001a2b3c4_battery_zigbee2mqtt"` in JSON.
+
+A When card on a field fires only when that value changes: a battery trigger ignores the vacuum going from Cleaning to Docked, and a trigger on the vacuum ignores battery reports. An If or Switch card with no entity after it compares the same field. Picking another entity resets **Value of** to the headline value and clears the compared value.
+
+**Average over** works on a field only when history records it: a cover's position or a current temperature. For other fields, a vacuum's battery or a light's brightness, the card hides it.
+
 ### Branch on several values
 
 An `if` has two outputs. A `switch` has one output per rule, so one card can sort a value into bands. Each rule is a comparison (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`, or `between`, which includes both ends). The outputs are named `1`, `2`, ... after the rules, and `otherwise` when you turn it on.

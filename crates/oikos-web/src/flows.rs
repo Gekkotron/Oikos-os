@@ -526,6 +526,7 @@ mod tests {
         // The device that decided rides along as the entity; the line still names the edge.
         run.trigger = Some(TriggerInfo {
             entity: Some("sensor.tariff".into()),
+            field: None,
             value: serde_json::json!("start"),
             previous: serde_json::json!("end"),
         });
@@ -540,6 +541,7 @@ mod tests {
         );
         run.trigger = Some(TriggerInfo {
             entity: None,
+            field: None,
             value: serde_json::json!("end"),
             previous: serde_json::json!("start"),
         });
@@ -552,6 +554,7 @@ mod tests {
         let mut run = running(vec![step("motion", StepOutcome::Ok, "")]);
         run.trigger = Some(TriggerInfo {
             entity: Some("m".into()),
+            field: None,
             value: serde_json::json!(true),
             previous: serde_json::json!(false),
         });
@@ -560,6 +563,7 @@ mod tests {
         let lamps: BTreeMap<_, _> = [("m".to_owned(), lamp)].into();
         run.trigger = Some(TriggerInfo {
             entity: Some("m".into()),
+            field: None,
             value: serde_json::json!(true),
             previous: serde_json::json!(false),
         });
@@ -575,6 +579,7 @@ mod tests {
         // A press on a Manual card with a value starts the run with it, with no entity.
         run.trigger = Some(TriggerInfo {
             entity: None,
+            field: None,
             value: serde_json::json!(true),
             previous: serde_json::Value::Null,
         });

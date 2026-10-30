@@ -2,16 +2,19 @@
 //! lists them from discovery, worded for the screen; plus the rules the card follows when the
 //! value is typed by hand or the entity changes.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use oikos_api::EntityView;
-use oikos_core::flow::{Flow, NodeKind, Scalar};
+use oikos_core::flow::{Flow, NodeKind, Scalar, field_scalar, fields};
 use oikos_core::model::{Kind, StateValue};
+use oikos_core::types::{Placement, type_def};
 use oikos_core::vocabulary::{Reports, reports};
 use serde_json::Value;
 
+use crate::format::{entity_value, shown_name, type_word};
 use crate::i18n::Lang;
-use crate::i18n::format::parse_decimal;
+use crate::i18n::flows::field_label;
+use crate::i18n::format::{number, parse_decimal, with_unit};
 use crate::i18n::states::{StateCtx, on_off, state_word};
 
 /// One entry of the value list: what is stored and what the user reads.
@@ -34,7 +37,45 @@ pub fn value_input(lang: Lang, e: Option<&EntityView>) -> ValueInput {
     let Some(e) = e else {
         return ValueInput::Text;
     };
-    match reports(e.kind, &e.component, &e.capabilities, e.unit.as_deref()) {
+    input_for(
+        lang,
+        e,
+        reports(e.kind, &e.component, &e.capabilities, e.unit.as_deref()),
+    )
+}
+
+/// The input for comparing `field` of `e` (its headline value when `None`); a text box when
+/// the entity is unknown or does not report the field.
+pub fn value_input_of(lang: Lang, e: Option<&EntityView>, field: Option<&str>) -> ValueInput {
+    let (Some(e), Some(field)) = (e, field) else {
+        return value_input(lang, e);
+    };
+    match entity_fields(e).into_iter().find(|f| f.name == field) {
+        Some(info) => input_for(lang, e, info.reports),
+        None => ValueInput::Text,
+    }
+}
+
+/// Whether a card on `field` of `e` may average: always on the headline value, else only on
+/// the field the history records for the entity.
+pub fn average_allowed(e: Option<&EntityView>, field: Option<&str>) -> bool {
+    let Some(field) = field else {
+        return true;
+    };
+    e.is_some_and(|e| {
+        entity_fields(e)
+            .iter()
+            .any(|info| info.name == field && info.recorded)
+    })
+}
+
+fn entity_fields(e: &EntityView) -> Vec<oikos_core::flow::FieldInfo> {
+    fields(e.kind, &e.component, &e.capabilities, e.unit.as_deref())
+}
+
+/// The input for a value of `e` that reports `what`.
+fn input_for(lang: Lang, e: &EntityView, what: Reports) -> ValueInput {
+    match what {
         Reports::Values { values } => ValueInput::List(
             values
                 .iter()
@@ -53,6 +94,80 @@ pub fn value_input(lang: Lang, e: Option<&EntityView>) -> ValueInput {
             _ => ValueInput::Text,
         },
     }
+}
+
+/// What a flow card reads from a device: the entity's headline value, a field of its state, or
+/// another entity of the same device.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ValueOf {
+    Headline,
+    Field(String),
+    Sibling(String),
+}
+
+/// One entry of the "Value of" menu.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ValueOfChoice {
+    pub of: ValueOf,
+    pub label: String,
+}
+
+/// "Battery (62 %)": a label with the current value, the bare label while it is unknown.
+fn labelled_now(label: String, current: Option<String>) -> String {
+    match current.filter(|v| v != "—") {
+        Some(v) => format!("{label} ({v})"),
+        None => label,
+    }
+}
+
+/// Every value the device of `e` reports: `e`'s headline value, its fields, then the device's
+/// other entities (diagnostic ones included, those announced disabled by default such as link
+/// quality last, signal ones left out), each labelled with its current value.
+pub fn value_of_choices(
+    lang: Lang,
+    entities: &BTreeMap<String, EntityView>,
+    e: &EntityView,
+) -> Vec<ValueOfChoice> {
+    let mut list = vec![ValueOfChoice {
+        of: ValueOf::Headline,
+        label: labelled_now(type_word(lang, e), Some(entity_value(lang, e))),
+    }];
+    for info in entity_fields(e) {
+        let unit = match &info.reports {
+            Reports::Number { unit, .. } => unit.clone(),
+            _ => None,
+        };
+        let current = field_scalar(&e.state.value, &info.name).map(|v| match v {
+            Scalar::Number(n) => with_unit(number(lang, n), unit.as_deref()),
+            other => label(lang, e, &other.to_json()),
+        });
+        list.push(ValueOfChoice {
+            label: labelled_now(field_label(lang, &info.name), current),
+            of: ValueOf::Field(info.name),
+        });
+    }
+    let Some(device) = e.device_id.as_deref() else {
+        return list;
+    };
+    let mut siblings: Vec<(bool, ValueOfChoice)> = entities
+        .values()
+        .filter(|s| s.id != e.id && s.device_id.as_deref() == Some(device))
+        .filter(|s| {
+            type_def(&s.component).is_none_or(|def| def.placement != Placement::Signal)
+                && reports(s.kind, &s.component, &s.capabilities, s.unit.as_deref())
+                    != Reports::Nothing
+        })
+        .map(|s| {
+            let choice = ValueOfChoice {
+                of: ValueOf::Sibling(s.id.clone()),
+                label: labelled_now(shown_name(lang, s).to_owned(), Some(entity_value(lang, s))),
+            };
+            (!s.enabled_by_default, choice)
+        })
+        .collect();
+    siblings.sort_by(|(a_off, a), (b_off, b)| (a_off, &a.label).cmp(&(b_off, &b.label)));
+    list.extend(siblings.into_iter().map(|(_, choice)| choice));
+    list
 }
 
 /// The word for a value of `e`: on/off worded by its kind, a state word in its vocabulary.
@@ -181,6 +296,26 @@ pub fn upstream_trigger_entity(flow: &Flow, node_id: &str) -> Option<String> {
     }
 }
 
+/// The field of the state trigger whose value reaches `node_id`: set when every path back from
+/// the node starts at state triggers reading the same field of the same entity.
+pub fn upstream_trigger_field(flow: &Flow, node_id: &str) -> Option<String> {
+    let reads: BTreeSet<Option<(String, Option<String>)>> = upstream_triggers(flow, node_id)
+        .into_iter()
+        .map(|kind| match kind {
+            NodeKind::TriggerState(t) => Some((t.entity.clone(), t.field.clone())),
+            _ => None,
+        })
+        .collect();
+    match reads.len() {
+        1 => reads
+            .into_iter()
+            .next()
+            .flatten()
+            .and_then(|(_, field)| field),
+        _ => None,
+    }
+}
+
 /// The value a run carries to `node_id` when every path back from it starts at a Manual card
 /// with a value of the same kind (on/off, number or text): the first card's value. `None` when a
 /// path starts at another trigger, or at a card with no value or another kind of value.
@@ -262,6 +397,155 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn upstream_trigger_field_follows_the_one_state_trigger() {
+        let battery = node(
+            "t",
+            NodeKind::TriggerState(TriggerStateParams {
+                entity: "robo".into(),
+                field: Some("battery".into()),
+                ..Default::default()
+            }),
+        );
+        let flow = |nodes: Vec<Node>| Flow {
+            edges: nodes
+                .iter()
+                .filter(|n| n.id != "check")
+                .map(|n| Edge {
+                    from: n.id.clone(),
+                    to: "check".into(),
+                    port: None,
+                })
+                .collect(),
+            nodes,
+            ..Flow::decode(br#"{"id":"f","name":"F"}"#).unwrap()
+        };
+        let one = flow(vec![battery.clone(), plain("check")]);
+        assert_eq!(
+            upstream_trigger_field(&one, "check").as_deref(),
+            Some("battery")
+        );
+        let plain_state = flow(vec![state("t", "robo"), plain("check")]);
+        assert_eq!(upstream_trigger_field(&plain_state, "check"), None);
+        let mixed = flow(vec![battery, state("u", "robo"), plain("check")]);
+        assert_eq!(upstream_trigger_field(&mixed, "check"), None);
+    }
+
+    fn vacuum() -> EntityView {
+        let mut e = ent(Kind::Vacuum);
+        e.id = "robo".into();
+        e.name = "Roborock".into();
+        e.device_id = Some("robo_dev".into());
+        e.capabilities.fan_speeds = vec!["Silent".into(), "Turbo".into()];
+        e.state.value = StateValue::Vacuum(oikos_core::model::VacuumState {
+            state: Some("cleaning".into()),
+            battery: Some(62),
+            fan_speed: Some("Turbo".into()),
+        });
+        e
+    }
+
+    fn house(list: Vec<EntityView>) -> std::collections::BTreeMap<String, EntityView> {
+        list.into_iter().map(|e| (e.id.clone(), e)).collect()
+    }
+
+    #[test]
+    fn vacuum_value_of_lists_fields_then_siblings() {
+        let e = vacuum();
+        let entities = house(vec![e.clone()]);
+        let choices = value_of_choices(Lang::En, &entities, &e);
+        let of: Vec<ValueOf> = choices.iter().map(|c| c.of.clone()).collect();
+        assert_eq!(
+            of,
+            [
+                ValueOf::Headline,
+                ValueOf::Field("battery".into()),
+                ValueOf::Field("fan_speed".into()),
+            ]
+        );
+        assert_eq!(choices[1].label, "Battery (62\u{a0}%)");
+        let fr = value_of_choices(Lang::Fr, &entities, &e);
+        assert_eq!(fr[1].label, "Batterie (62\u{a0}%)");
+    }
+
+    #[test]
+    fn zigbee_value_of_lists_diagnostic_siblings() {
+        let mut smoke = ent(Kind::BinarySensor);
+        smoke.id = "0xabc_smoke".into();
+        smoke.name = "Smoke".into();
+        smoke.device_id = Some("0xabc".into());
+        let mut battery = ent(Kind::Sensor);
+        battery.id = "0xabc_battery".into();
+        battery.name = "Battery".into();
+        battery.device_id = Some("0xabc".into());
+        battery.unit = Some("%".into());
+        battery.category = EntityCategory::Diagnostic;
+        battery.state.value = StateValue::Number(80.0);
+        // Zigbee2MQTT announces link quality disabled by default: listed, after the others.
+        let mut link = ent(Kind::Sensor);
+        link.id = "0xabc_linkquality".into();
+        link.name = "Linkquality".into();
+        link.device_id = Some("0xabc".into());
+        link.category = EntityCategory::Diagnostic;
+        link.enabled_by_default = false;
+        let mut other = ent(Kind::Sensor);
+        other.id = "0xdef_battery".into();
+        other.device_id = Some("0xdef".into());
+        let entities = house(vec![smoke.clone(), link, battery, other]);
+        let choices = value_of_choices(Lang::En, &entities, &smoke);
+        let of: Vec<ValueOf> = choices.iter().map(|c| c.of.clone()).collect();
+        assert_eq!(
+            of,
+            [
+                ValueOf::Headline,
+                ValueOf::Sibling("0xabc_battery".into()),
+                ValueOf::Sibling("0xabc_linkquality".into()),
+            ]
+        );
+        assert_eq!(choices[1].label, "Battery (80\u{a0}%)");
+    }
+
+    #[test]
+    fn entity_without_device_has_no_siblings() {
+        let mut lone = ent(Kind::Sensor);
+        lone.id = "lone".into();
+        let mut other = ent(Kind::Sensor);
+        other.id = "other".into();
+        let entities = house(vec![lone.clone(), other]);
+        let choices = value_of_choices(Lang::En, &entities, &lone);
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].of, ValueOf::Headline);
+    }
+
+    #[test]
+    fn battery_field_input_is_a_percent_number() {
+        let e = vacuum();
+        assert_eq!(
+            value_input_of(Lang::En, Some(&e), Some("battery")),
+            ValueInput::Number {
+                unit: Some("%".into())
+            }
+        );
+        assert!(matches!(
+            value_input_of(Lang::En, Some(&e), Some("fan_speed")),
+            ValueInput::List(list) if list.len() == 2
+        ));
+        assert_eq!(
+            value_input_of(Lang::En, Some(&e), None),
+            value_input(Lang::En, Some(&e))
+        );
+    }
+
+    #[test]
+    fn average_only_on_recorded_fields() {
+        let e = vacuum();
+        let climate = ent(Kind::Climate);
+        assert!(average_allowed(Some(&e), None));
+        assert!(!average_allowed(Some(&e), Some("battery")));
+        assert!(average_allowed(Some(&climate), Some("current")));
+        assert!(!average_allowed(Some(&climate), Some("target")));
     }
 
     fn node(id: &str, kind: NodeKind) -> Node {

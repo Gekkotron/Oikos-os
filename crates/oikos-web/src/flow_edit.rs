@@ -499,6 +499,7 @@ mod tests {
             op: Op::Eq,
             value: Some(json!(true)),
             entity: None,
+            field: None,
             missing: None,
             average: None,
             offset_minutes: None,

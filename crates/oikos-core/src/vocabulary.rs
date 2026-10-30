@@ -131,21 +131,22 @@ pub fn reports(kind: Kind, component: &str, caps: &Capabilities, unit: Option<&s
             },
             None => Reports::Text,
         },
-        Kind::Generic => generic_reports(component, caps, unit),
+        Kind::Generic => match type_def(component).and_then(|def| def.primary.as_deref()) {
+            Some(primary) => field_reports(component, caps, unit, primary),
+            None => Reports::Nothing,
+        },
         Kind::Button => Reports::Nothing,
     }
 }
 
-/// A type-table entity reports its primary field.
-fn generic_reports(component: &str, caps: &Capabilities, unit: Option<&str>) -> Reports {
-    let Some(def) = type_def(component) else {
-        return Reports::Nothing;
-    };
-    let Some((name, field)) = def
-        .primary
-        .as_deref()
-        .and_then(|name| def.fields.get(name).map(|f| (name, f)))
-    else {
+/// What field `name` of a type-table entity reports.
+pub fn field_reports(
+    component: &str,
+    caps: &Capabilities,
+    unit: Option<&str>,
+    name: &str,
+) -> Reports {
+    let Some(field) = type_def(component).and_then(|def| def.fields.get(name)) else {
         return Reports::Nothing;
     };
     let generic = caps.generic.as_ref();

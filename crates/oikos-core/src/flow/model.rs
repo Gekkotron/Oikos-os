@@ -242,6 +242,9 @@ impl NodeKind {
 pub struct TriggerStateParams {
     /// Entity id (from `search` / `list_entities`).
     pub entity: String,
+    /// A value inside the entity's state (`battery`, `position` …); absent reads its headline value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
     /// Only trigger when the new value equals this (a JSON value such as `true`, `"ON"`, `21.5`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<Value>,
@@ -361,6 +364,9 @@ pub struct IfParams {
     /// The entity whose current value is read; when absent the value that fired the trigger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entity: Option<String>,
+    /// A value inside the entity's state (`battery`, `position` …); absent reads its headline value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
     /// What to do when the value is missing (unknown or unavailable); absent behaves as `fail`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub missing: Option<Missing>,
@@ -446,6 +452,9 @@ pub struct SwitchParams {
     /// The entity whose current value is read; when absent the value that fired the trigger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entity: Option<String>,
+    /// A value inside the entity's state (`battery`, `position` …); absent reads its headline value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
     /// Compare the mean of the entity's readings over this window (`15m`, `1h`) instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub average: Option<String>,
@@ -715,6 +724,23 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn if_without_field_serialises_as_before() {
+        let text = r#"{"op":"lte","value":55,"entity":"r"}"#;
+        let p: IfParams = serde_json::from_str(text).unwrap();
+        assert_eq!(p.field, None);
+        assert_eq!(serde_json::to_string(&p).unwrap(), text);
+    }
+
+    #[test]
+    fn if_field_round_trips() {
+        let text = r#"{"op":"lte","value":55,"entity":"r","field":"battery"}"#;
+        let p: IfParams = serde_json::from_str(text).unwrap();
+        assert_eq!(p.field.as_deref(), Some("battery"));
+        assert!(p.extra.is_empty());
+        assert_eq!(serde_json::to_string(&p).unwrap(), text);
+    }
 
     #[test]
     fn area_round_trips_and_is_omitted_when_none() {

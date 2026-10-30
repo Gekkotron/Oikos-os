@@ -140,12 +140,20 @@ The engine is stateless per pass today; the offset lives in the hub's climate ru
 `{ offset, last_step_at, scheduled_at_start, block_started_at }`.
 
 The offset goes back to 0, and `last_step_at` and the warm-up restart, when:
-- the **target** changes: a new block or the base, or a presence setback starting or ending
-  (someone coming back gets the full scheduled value at once, not a leftover negative offset);
 - the Schedule row stops applying (safety, override, eco, away, holiday, idle);
-- the zone's correction settings change, or the feature is switched off;
-- the hub restarts. *Claude's call:* the first steps after a restart are cheap to redo, and this
-  avoids persisting more state.
+- the zone's correction settings change, or the feature is switched off.
+
+When the **target** changes (a new block or the base, or a presence setback starting or ending)
+the offset carries over, held within the new target's limits: it measures how far the unit reads
+from the room, whatever the target. Only the warm-up restarts. *Changed 2026-10-30 (PR #113):*
+resetting it threw away the Salon's -2 °C at every presence toggle.
+
+A **hub restart** picks the offset up from the zone's retained decision (`adjust`), when that
+decision was a Schedule or Empty temperature and the correction is still on. The warm-up and the
+step clock start at the decision's `at`: a decision is republished only when its outcome changes,
+so that is about when the offset last stepped. The retained offset is used whatever its age.
+*Changed 2026-10-30:* a reset sent the plain target after each restart and the room overshot
+until the correction stepped back down.
 
 ### 6.3 Quiet thermometers
 
@@ -283,8 +291,8 @@ still holds the device.
    under the setback value, bounded by the rules' base (§6.1).
 3. The upward limit is target + 0.5 °C, so the correction never cancels a presence setback (§6.1).
 4. A 60-minute warm-up after a block starts before the correction may raise the setpoint (§6.1).
-5. The offset resets whenever the target changes, including the setback starting or ending, and
-   after a hub restart (§6.2).
+5. The offset carries over when the target changes, including the setback starting or ending, and
+   a hub restart picks it up from the retained decision (§6.2).
 6. The step is the largest device step in the zone; held devices are left out; all held freezes
    the offset (§6.1).
 7. Correction on a room without a thermometer is accepted and stays inactive (§6.3).
