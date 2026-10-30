@@ -86,6 +86,7 @@ pub(super) async fn run_with(
         now: timer_clock(),
         schedules: BTreeMap::new(),
         silents: BTreeMap::new(),
+        silent_epoch: hub.link_epoch(),
         sun_timers: BTreeMap::new(),
         off_peak_base: None,
         off_peak_timer: None,
@@ -161,8 +162,8 @@ struct Silent {
     for_: String,
     period: chrono::Duration,
     since: chrono::DateTime<chrono::Utc>,
-    /// Set when the clock fired; cleared by the next report. A fire that `single` mode skipped
-    /// still sets it, so the trigger stays latched until the entity reports again.
+    /// Set when the clock fired; cleared by the next report. A due clock whose flow is busy in
+    /// `single` mode does not fire (and stays unset) until that run ends.
     fired: bool,
 }
 
@@ -175,6 +176,9 @@ struct Engine {
     schedules: BTreeMap<String, Armed>,
     /// Armed silent nodes, keyed `"{flow}/{node}"`.
     silents: BTreeMap<String, Silent>,
+    /// The hub's [`Hub::link_epoch`] the silent clocks were last restarted in. A different one
+    /// while online means the link bounced and the clocks are from before it.
+    silent_epoch: u64,
     /// Armed sun nodes, keyed `"{flow}/{node}"`.
     sun_timers: BTreeMap<String, ArmedSun>,
     /// The off-peak answer `trigger.off_peak` compares against; `None` until seeded. Seeding
@@ -409,15 +413,25 @@ impl Engine {
 
     /// Fires every silent node whose entity stayed silent for its duration, once. Nothing fires
     /// while the broker link is not online: no report could arrive.
+    ///
+    /// A link that bounced since the clocks last restarted (the `Online` event may be handled
+    /// late or lost) restarts them instead of firing: no report could arrive while it was down.
+    /// A due clock whose flow is busy in `single` mode waits for that run to end.
     fn tick_silents(&mut self) {
         if !self.online() {
+            return;
+        }
+        if self.silent_epoch != self.hub.link_epoch() {
+            self.restart_silents();
             return;
         }
         let now = (self.now)();
         let due: Vec<String> = self
             .silents
             .iter()
-            .filter(|(_, armed)| !armed.fired && armed.since + armed.period <= now)
+            .filter(|(key, armed)| {
+                !armed.fired && armed.since + armed.period <= now && !self.silent_blocked(key)
+            })
             .map(|(key, _)| key.clone())
             .collect();
         for key in due {
@@ -440,8 +454,20 @@ impl Engine {
         }
     }
 
+    /// Whether the flow of silent clock `key` is running in `single` mode, so a fire would only
+    /// be recorded as skipped.
+    fn silent_blocked(&self, key: &str) -> bool {
+        let flow_id = key.split('/').next().unwrap_or_default();
+        self.active.contains_key(flow_id)
+            && self
+                .flows
+                .iter()
+                .any(|f| f.id == flow_id && f.mode == FlowMode::Single)
+    }
+
     /// Restarts every silent clock from now: the link came back or reports may have been lost.
     fn restart_silents(&mut self) {
+        self.silent_epoch = self.hub.link_epoch();
         let now = (self.now)();
         for armed in self.silents.values_mut() {
             armed.since = now;
@@ -510,14 +536,21 @@ impl Engine {
     /// When the timer branch should wake: the earliest armed tick, sun event or silent clock, as
     /// a tokio instant.
     fn next_deadline(&self) -> Option<tokio::time::Instant> {
-        let silent = if self.online() {
-            self.silents
-                .values()
-                .filter(|armed| !armed.fired)
-                .map(|armed| armed.since + armed.period)
-                .min()
-        } else {
+        let silent = if !self.online() {
             None
+        } else if self.silent_epoch != self.hub.link_epoch() {
+            // The next tick restarts the clocks.
+            Some((self.now)())
+        } else {
+            self.silents
+                .iter()
+                .filter(|(key, armed)| {
+                    let due = armed.since + armed.period;
+                    // A due clock behind a busy `single` flow wakes up when the run ends.
+                    !armed.fired && !(due <= (self.now)() && self.silent_blocked(key))
+                })
+                .map(|(_, armed)| armed.since + armed.period)
+                .min()
         };
         let at = self
             .schedules
@@ -630,6 +663,8 @@ impl Engine {
     /// Events were missed: values seen before may be stale. A device's answer is forgotten and
     /// seeded again by its next report, or a minute later.
     fn events_lagged(&mut self) {
+        // The `Online` event may be among the missed ones.
+        self.restart_silents();
         self.known.clear();
         self.confirmed_unknown.clear();
         if self.off_peak_device().is_some() {
@@ -1201,11 +1236,13 @@ async fn run_node(
             };
             (StepOutcome::Ok, detail, Vec::new())
         }
-        NodeKind::TriggerSilent(params) => (
-            StepOutcome::Ok,
-            format!("{} silent for {}", params.entity, params.for_),
-            Vec::new(),
-        ),
+        NodeKind::TriggerSilent(params) => {
+            let detail = match trigger {
+                Some(_) => format!("{} silent for {}", params.entity, params.for_),
+                None => "manual".to_owned(),
+            };
+            (StepOutcome::Ok, detail, Vec::new())
+        }
         NodeKind::Limit(params) => match window(&params.per) {
             Ok(per) => match hub.limit_pass(flow_id, &node.id, params.max, per, now()) {
                 Ok(passes) => (
@@ -1789,6 +1826,7 @@ mod tests {
             now: Arc::new(move || fixed),
             schedules: BTreeMap::new(),
             silents: BTreeMap::new(),
+            silent_epoch: 0,
             sun_timers: BTreeMap::new(),
             off_peak_base: None,
             off_peak_timer: None,
@@ -3125,8 +3163,8 @@ mod tests {
         assert_eq!(run_count(&engine, "s"), 1);
     }
 
-    #[tokio::test]
-    async fn skipped_fire_stays_latched() {
+    #[tokio::test(start_paused = true)]
+    async fn skipped_fire_retries_after_the_run_ends() {
         let (mut engine, id, clock) = clocked_engine();
         // The first run sleeps for an hour of real time and stays active.
         silent_flow(&engine, "s", "s", "50m", "1h", &id);
@@ -3137,15 +3175,44 @@ mod tests {
         at(&clock, 60);
         report(&mut engine, &id);
         at(&clock, 110);
+        // Due, but the single-mode run is still active: no skipped run, no busy loop.
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+        assert!(engine.next_deadline().is_none());
+        finish_runs(&mut engine).await;
+        assert!(engine.next_deadline().is_some());
         engine.tick_silents();
         assert_eq!(run_count(&engine, "s"), 2);
-        assert_eq!(
+        assert_ne!(
             engine.hub.flow("s").unwrap().runs[0].status,
             RunStatus::Skipped
         );
+        finish_runs(&mut engine).await;
         at(&clock, 400);
         engine.tick_silents();
         assert_eq!(run_count(&engine, "s"), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_link_that_came_back_unseen_restarts_the_clocks() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 10);
+        // The hub's link bounced but the engine has not handled the Online event yet.
+        engine.hub.set_connection(ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        });
+        engine.hub.set_connection(ConnectionStatus::Online);
+        at(&clock, 60);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 109);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 110);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
     }
 
     /// Stores flow `id`: a manual trigger, a limit of `max` per `per`, then a delay of 1s.

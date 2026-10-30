@@ -80,8 +80,9 @@ warning push*; and a detector whose alarm field was unknown still fires its alar
   otherwise record a skipped run per detector).
 - The trigger value is the `for` text (`"50m"`), so `{trigger}` in a notify prints it.
   The run's trigger info names the entity.
-- Mode `single` applies as for any trigger. A fire that `single` records as skipped still
-  uses up the one shot: the trigger stays latched until the entity reports again (*my call*).
+- Mode `single` applies as for any trigger, except that a fire is never recorded as skipped:
+  while the flow's run is active the due clock stays unfired and fires once that run ends, so
+  a silent detector is never lost behind a busy run (*my call*).
 - **Lost reports:** when the engine's `StateSeen` receiver lags, reports may have been missed,
   so every silent clock restarts from that moment instead of risking a false "silent"
   (*my call*; the lag hook today ignores `Lagged` on that channel).
