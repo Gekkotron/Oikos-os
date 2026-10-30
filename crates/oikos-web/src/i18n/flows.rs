@@ -894,6 +894,36 @@ pub fn ask(lang: Lang, s: &str) -> String {
     }
 }
 
+/// The name of a value inside an entity's state ("Battery" / "Batterie"); a type-table field
+/// without a translation reads as its name with spaces, capitalised.
+pub fn field_label(lang: Lang, name: &str) -> String {
+    let [en, fr] = match name {
+        "battery" => ["Battery", "Batterie"],
+        "fan_speed" => ["Fan speed", "Vitesse d'aspiration"],
+        "brightness" => ["Brightness", "Luminosité"],
+        "color_temp" => ["Colour temperature", "Température de couleur"],
+        "effect" => ["Effect", "Effet"],
+        "position" => ["Position", "Position"],
+        "current" => ["Current temperature", "Température actuelle"],
+        "target" => ["Target temperature", "Consigne"],
+        "fan_mode" => ["Fan mode", "Mode de ventilation"],
+        "action" => ["Activity", "Activité"],
+        other => {
+            let spaced = other.replace('_', " ");
+            let mut chars = spaced.chars();
+            return chars
+                .next()
+                .map(|first| first.to_uppercase().chain(chars).collect())
+                .unwrap_or_default();
+        }
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+    .to_owned()
+}
+
 /// "Temperature avg 15 min" / "Temperature moy. 15 min": the entity's average over a window.
 pub fn average_of(lang: Lang, e: &str, window: &str) -> String {
     pick(
