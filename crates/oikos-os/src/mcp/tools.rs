@@ -487,6 +487,7 @@ impl OikosMcp {
             history,
             &self.hub.grid_counters(),
             &self.hub.off_peak_history(),
+            self.hub.home_settings().off_peak_device.as_ref(),
             date,
             crate::clock::now_micros(),
         )

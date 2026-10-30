@@ -288,6 +288,83 @@ impl Db {
         Ok(row.map(|r| r.get(0)))
     }
 
+    /// `entity`'s last value before `from` and its values in `[from, to)`, oldest first, text
+    /// included; rows that no longer decode are skipped.
+    pub async fn states_between(
+        &self,
+        entity: &str,
+        from: Micros,
+        to: Micros,
+    ) -> Result<(Option<StateValue>, Vec<(Micros, StateValue)>), sqlx::Error> {
+        let carry = sqlx::query(
+            "SELECT value FROM entity_state
+             WHERE entity_id = $1 AND time < $2
+             ORDER BY time DESC, seq DESC LIMIT 1",
+        )
+        .bind(entity)
+        .bind(micros_to_dt(from))
+        .fetch_optional(&self.pool)
+        .await?
+        .and_then(|row| serde_json::from_value::<StateValue>(row.get::<Json, _>(0)).ok());
+        let rows = sqlx::query(
+            "SELECT time, value FROM entity_state
+             WHERE entity_id = $1 AND time >= $2 AND time < $3
+             ORDER BY time, seq",
+        )
+        .bind(entity)
+        .bind(micros_to_dt(from))
+        .bind(micros_to_dt(to))
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .filter_map(|row| {
+            let t: DateTime<Utc> = row.get(0);
+            let value = serde_json::from_value::<StateValue>(row.get::<Json, _>(1)).ok()?;
+            Some((dt_to_micros(t), value))
+        })
+        .collect();
+        Ok((carry, rows))
+    }
+
+    /// `entity`'s last availability before `from` and its changes in `[from, to)`, oldest first.
+    pub async fn availability_between(
+        &self,
+        entity: &str,
+        from: Micros,
+        to: Micros,
+    ) -> Result<(Option<Availability>, Vec<(Micros, Availability)>), sqlx::Error> {
+        let carry = sqlx::query(
+            "SELECT availability FROM entity_availability
+             WHERE entity_id = $1 AND time < $2
+             ORDER BY time DESC, seq DESC LIMIT 1",
+        )
+        .bind(entity)
+        .bind(micros_to_dt(from))
+        .fetch_optional(&self.pool)
+        .await?
+        .and_then(|row| parse_availability(&row.get::<String, _>(0)));
+        let rows = sqlx::query(
+            "SELECT time, availability FROM entity_availability
+             WHERE entity_id = $1 AND time >= $2 AND time < $3
+             ORDER BY time, seq",
+        )
+        .bind(entity)
+        .bind(micros_to_dt(from))
+        .bind(micros_to_dt(to))
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .filter_map(|row| {
+            let t: DateTime<Utc> = row.get(0);
+            Some((
+                dt_to_micros(t),
+                parse_availability(&row.get::<String, _>(1))?,
+            ))
+        })
+        .collect();
+        Ok((carry, rows))
+    }
+
     /// Oldest value time over `entities`, if any: one indexed `ORDER BY time LIMIT 1` per id,
     /// so the answer never scans an entity's history.
     pub async fn first_time_of(&self, entities: &[String]) -> Result<Option<Micros>, sqlx::Error> {

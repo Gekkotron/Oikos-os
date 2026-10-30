@@ -9,10 +9,13 @@ use oikos_api::{
     GridDay, GridSlot, GridTotals, HistoryDaily, HistoryRange, HistorySeries, HistoryToday,
     LastChange, LastChangeItem,
 };
-use oikos_core::energy::{GridCounters, OffPeakEntry, is_off_peak, windows_for};
+use oikos_core::energy::{
+    GridCounters, OffPeakDevice, OffPeakEntry, device_off_peak, is_off_peak, windows_for,
+};
 use oikos_core::history::buckets::{Bucket, EnergyKind, Sample, fill, kwh, merge, rollup, round3};
 use oikos_core::history::grid_day::{HALF_HOUR, fill_slots, increases, slot_starts};
 use oikos_core::history::{HOUR, Micros};
+use oikos_core::model::{Availability, StateValue};
 
 use super::{History, HistoryError};
 
@@ -105,6 +108,70 @@ pub struct DayInput<'a> {
     pub readings: &'a DayReadings,
     pub has_export: bool,
     pub now: Micros,
+    /// What the off-peak device said through the day, when one is set; a moment no span
+    /// answers for is split by the windows.
+    pub device: Option<&'a [DeviceSpan]>,
+}
+
+/// `[from, to)` during which the off-peak device said `off_peak`; `None` when its reading was
+/// not usable then.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceSpan {
+    pub from: Micros,
+    pub to: Micros,
+    pub off_peak: Option<bool>,
+}
+
+/// A carried reading (the last before the day) and the readings within it, oldest first.
+pub type Readings<T> = (Option<T>, Vec<(Micros, T)>);
+
+/// The device's answer over `[day_start, until)` from its value and availability rows: one span
+/// per change of either, equal neighbours merged. Empty when `until <= day_start`.
+pub fn device_spans(
+    device: &OffPeakDevice,
+    day_start: Micros,
+    until: Micros,
+    values: Readings<StateValue>,
+    availability: Readings<Availability>,
+) -> Vec<DeviceSpan> {
+    if until <= day_start {
+        return Vec::new();
+    }
+    let (value_carry, value_rows) = values;
+    let (avail_carry, avail_rows) = availability;
+    let mut points: Vec<Micros> = std::iter::once(day_start)
+        .chain(value_rows.iter().map(|(t, _)| *t))
+        .chain(avail_rows.iter().map(|(t, _)| *t))
+        .filter(|t| (day_start..until).contains(t))
+        .collect();
+    points.sort_unstable();
+    points.dedup();
+    let in_force = |at: Micros| {
+        let value = value_rows
+            .iter()
+            .rev()
+            .find(|(t, _)| *t <= at)
+            .map(|(_, v)| v)
+            .or(value_carry.as_ref());
+        let avail = avail_rows
+            .iter()
+            .rev()
+            .find(|(t, _)| *t <= at)
+            .map(|(_, a)| *a)
+            .or(avail_carry)
+            .unwrap_or_default();
+        value.and_then(|v| device_off_peak(device, v, avail))
+    };
+    let mut spans: Vec<DeviceSpan> = Vec::new();
+    for (i, from) in points.iter().copied().enumerate() {
+        let to = points.get(i + 1).copied().unwrap_or(until);
+        let off_peak = in_force(from);
+        match spans.last_mut() {
+            Some(last) if last.off_peak == off_peak => last.to = to,
+            _ => spans.push(DeviceSpan { from, to, off_peak }),
+        }
+    }
+    spans
 }
 
 /// The grid day from its readings: half-hour slots to now, split by the windows in force on
@@ -113,7 +180,15 @@ pub fn build_grid_day(input: &DayInput) -> GridDay {
     let zone = input.zone;
     let (day_start, day_end) = day_bounds(zone, input.date);
     let windows = windows_for(input.history, input.date);
-    let off_peak_at = |at: Micros| is_off_peak(windows, local_minute(zone, at));
+    let spans = input.device.unwrap_or_default();
+    let off_peak_at = |at: Micros| {
+        spans
+            .iter()
+            .find(|s| (s.from..s.to).contains(&at))
+            .and_then(|s| s.off_peak)
+            .unwrap_or_else(|| is_off_peak(windows, local_minute(zone, at)))
+    };
+    let tariffs = !windows.is_empty() || input.device.is_some();
 
     let rises = |counters: &[CounterDay]| -> Vec<(Micros, f64)> {
         counters
@@ -134,7 +209,7 @@ pub fn build_grid_day(input: &DayInput) -> GridDay {
     );
 
     let mut bands: Vec<(i64, i64)> = Vec::new();
-    if !windows.is_empty() {
+    if tariffs {
         let mut open: Option<Micros> = None;
         let mut t = day_start;
         while t < day_end {
@@ -179,7 +254,7 @@ pub fn build_grid_day(input: &DayInput) -> GridDay {
         bands,
         totals,
         has_export: input.has_export,
-        tariffs: !windows.is_empty(),
+        tariffs,
     }
 }
 
@@ -188,6 +263,7 @@ pub async fn grid_day(
     h: &History,
     counters: &GridCounters,
     history: &[OffPeakEntry],
+    device: Option<&OffPeakDevice>,
     date: Option<NaiveDate>,
     now: Micros,
 ) -> Result<GridDay, HistoryError> {
@@ -231,6 +307,20 @@ pub async fn grid_day(
         bought: read(&counters.bought).await.map_err(unavailable)?,
         sold: read(&counters.sold).await.map_err(unavailable)?,
     };
+    let spans = match device {
+        Some(device) => {
+            let values = db
+                .states_between(&device.entity, day_start, until)
+                .await
+                .map_err(unavailable)?;
+            let availability = db
+                .availability_between(&device.entity, day_start, until)
+                .await
+                .map_err(unavailable)?;
+            Some(device_spans(device, day_start, until, values, availability))
+        }
+        None => None,
+    };
     let first_date = db
         .first_time_of(&counters.bought)
         .await
@@ -244,6 +334,7 @@ pub async fn grid_day(
         readings: &readings,
         has_export: !counters.sold.is_empty(),
         now,
+        device: spans.as_deref(),
     }))
 }
 
@@ -539,7 +630,159 @@ mod tests {
             readings,
             has_export: true,
             now,
+            device: None,
         }
+    }
+
+    fn windows_from_jan(ws: &[(&str, &str)]) -> Vec<OffPeakEntry> {
+        vec![OffPeakEntry {
+            since: "2026-01-01".to_owned(),
+            windows: ws
+                .iter()
+                .map(|(a, b)| OffPeakWindow {
+                    start: (*a).to_owned(),
+                    end: (*b).to_owned(),
+                })
+                .collect(),
+        }]
+    }
+
+    fn span(from: Micros, to: Micros, off_peak: Option<bool>) -> DeviceSpan {
+        DeviceSpan { from, to, off_peak }
+    }
+
+    fn secs(s: &str) -> i64 {
+        at(s) / 1_000_000
+    }
+
+    #[test]
+    fn device_span_splits_a_slot() {
+        let h = Vec::new();
+        let end = at("2026-10-24 00:00:00");
+        let spans = [
+            span(
+                at("2026-10-23 00:00:00"),
+                at("2026-10-23 00:10:00"),
+                Some(false),
+            ),
+            span(at("2026-10-23 00:10:00"), end, Some(true)),
+        ];
+        let r = DayReadings {
+            bought: vec![kwh(
+                Some(100.0),
+                vec![
+                    sample("2026-10-23 00:05:00", 100.2),
+                    sample("2026-10-23 00:20:00", 100.5),
+                ],
+            )],
+            sold: vec![],
+        };
+        let day = build_grid_day(&DayInput {
+            device: Some(&spans),
+            ..input("2026-10-23", &h, &r, at("2026-10-24 09:00:00"))
+        });
+        assert_eq!((day.slots[0].peak, day.slots[0].off_peak), (0.2, 0.3));
+        assert!(day.tariffs);
+        assert_eq!(day.bands, [(secs("2026-10-23 00:10:00"), end / 1_000_000)]);
+    }
+
+    #[test]
+    fn device_gap_falls_back_to_windows() {
+        let h = windows_from_jan(&[("00:00", "06:00")]);
+        let spans = [
+            span(
+                at("2026-10-23 00:00:00"),
+                at("2026-10-23 01:00:00"),
+                Some(false),
+            ),
+            span(at("2026-10-23 01:00:00"), at("2026-10-23 02:00:00"), None),
+            span(
+                at("2026-10-23 02:00:00"),
+                at("2026-10-24 00:00:00"),
+                Some(false),
+            ),
+        ];
+        let r = DayReadings {
+            bought: vec![kwh(
+                Some(10.0),
+                vec![
+                    sample("2026-10-23 00:30:00", 10.1),
+                    sample("2026-10-23 01:30:00", 10.3),
+                    sample("2026-10-23 03:00:00", 10.7),
+                ],
+            )],
+            sold: vec![],
+        };
+        let day = build_grid_day(&DayInput {
+            device: Some(&spans),
+            ..input("2026-10-23", &h, &r, at("2026-10-24 09:00:00"))
+        });
+        assert_eq!((day.totals.off_peak, day.totals.peak), (0.2, 0.5));
+    }
+
+    #[test]
+    fn rest_of_today_uses_windows() {
+        let h = windows_from_jan(&[("22:00", "06:00")]);
+        let r = DayReadings::default();
+        let spans = [span(
+            at("2026-10-23 00:00:00"),
+            at("2026-10-23 12:00:00"),
+            Some(false),
+        )];
+        let day = build_grid_day(&DayInput {
+            device: Some(&spans),
+            ..input("2026-10-23", &h, &r, at("2026-10-23 12:00:00"))
+        });
+        assert_eq!(
+            day.bands,
+            [(secs("2026-10-23 22:00:00"), secs("2026-10-24 00:00:00"))]
+        );
+    }
+
+    #[test]
+    fn day_without_device_readings_matches_windows_only() {
+        let h = history();
+        let r = readings();
+        let now = at("2026-10-24 09:00:00");
+        let without = build_grid_day(&input("2026-10-23", &h, &r, now));
+        let with = build_grid_day(&DayInput {
+            device: Some(&[]),
+            ..input("2026-10-23", &h, &r, now)
+        });
+        assert_eq!(with, without);
+    }
+
+    #[test]
+    fn device_spans_merge_value_and_availability() {
+        use oikos_core::energy::OffPeakDevice;
+        use oikos_core::model::{Availability, StateValue};
+        let device = OffPeakDevice {
+            entity: "sensor.tariff".to_owned(),
+            values: vec!["OFF".to_owned()],
+        };
+        let (start, until) = (at("2026-10-23 00:00:00"), at("2026-10-23 12:00:00"));
+        let spans = device_spans(
+            &device,
+            start,
+            until,
+            (Some(StateValue::Text("OFF".to_owned())), Vec::new()),
+            (
+                None,
+                vec![
+                    (at("2026-10-23 03:00:00"), Availability::Offline),
+                    (at("2026-10-23 04:00:00"), Availability::Online),
+                ],
+            ),
+        );
+        assert_eq!(
+            spans,
+            [
+                span(start, at("2026-10-23 03:00:00"), Some(true)),
+                span(at("2026-10-23 03:00:00"), at("2026-10-23 04:00:00"), None),
+                span(at("2026-10-23 04:00:00"), until, Some(true)),
+            ]
+        );
+        assert!(device_spans(&device, until, start, (None, vec![]), (None, vec![])).is_empty());
     }
 
     #[test]

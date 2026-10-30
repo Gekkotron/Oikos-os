@@ -1101,6 +1101,7 @@ async fn history_grid_day(
             history,
             &hub.grid_counters(),
             &hub.off_peak_history(),
+            hub.home_settings().off_peak_device.as_ref(),
             date,
             now_micros(),
         )
