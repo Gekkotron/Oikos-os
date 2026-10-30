@@ -177,7 +177,8 @@ pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, Field> {
         hot_above: parse_number(&draft.hot, Field::Hot)?,
         off_peak: off_peak_windows(&draft.off_peak),
         off_peak_history: Vec::new(),
-        // Not on this panel: Save puts the stored choice back.
+        // Not on this panel: Save puts the stored choices back.
+        off_peak_device: None,
         energy_view: Default::default(),
     })
 }
@@ -314,6 +315,9 @@ pub fn HomeSettingsPanel() -> impl IntoView {
         let settings = match draft_to_settings(&merged) {
             Ok(s) => HomeSettings {
                 energy_view: house.home_settings.with_untracked(|s| s.energy_view),
+                off_peak_device: house
+                    .home_settings
+                    .with_untracked(|s| s.off_peak_device.clone()),
                 ..s
             },
             Err(field) => {

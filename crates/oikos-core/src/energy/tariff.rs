@@ -1,8 +1,12 @@
 //! Off-peak windows: the house-local wall-clock periods billed at the off-peak rate, and the
-//! dated history the hub keeps of them so a past day is split with the windows of that day.
+//! dated history the hub keeps of them so a past day is split with the windows of that day,
+//! and the optional device whose state says off-peak, the windows being its backup.
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+
+use crate::flow::Scalar;
+use crate::model::{Availability, StateValue};
 
 /// One off-peak period, `start` to `end` as `HH:MM` local wall clock; `end < start` crosses
 /// midnight.
@@ -19,6 +23,15 @@ pub struct OffPeakWindow {
 pub struct OffPeakEntry {
     pub since: String,
     pub windows: Vec<OffPeakWindow>,
+}
+
+/// The entity whose state says off-peak, and the state values that mean it; any other value
+/// means peak.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct OffPeakDevice {
+    pub entity: String,
+    pub values: Vec<String>,
 }
 
 const DAY_MINUTES: u16 = 24 * 60;
@@ -78,6 +91,50 @@ pub fn is_off_peak(ws: &[OffPeakWindow], minute: u16) -> bool {
             .iter()
             .any(|&(a, b)| (a..b).contains(&minute))
     })
+}
+
+/// A reading as the text an [`OffPeakDevice`] value is matched against: `on`/`off`, the
+/// shortest number (`1.0` reads `1`) or the text itself.
+pub fn reading_text(value: &Scalar) -> String {
+    match value {
+        Scalar::Bool(true) => "on".to_owned(),
+        Scalar::Bool(false) => "off".to_owned(),
+        Scalar::Number(n) => n.to_string(),
+        Scalar::Text(t) => t.clone(),
+    }
+}
+
+/// What the device says: `Some(true)` off-peak, `Some(false)` peak, `None` when its reading is
+/// not usable (offline, no value, or an empty, `unknown` or `unavailable` state), so the
+/// windows decide.
+pub fn device_off_peak(
+    device: &OffPeakDevice,
+    value: &StateValue,
+    availability: Availability,
+) -> Option<bool> {
+    if availability == Availability::Offline {
+        return None;
+    }
+    let text = reading_text(&Scalar::of_state(value)?);
+    if matches!(text.as_str(), "" | "unknown" | "unavailable") {
+        return None;
+    }
+    Some(device.values.contains(&text))
+}
+
+/// Off-peak at `minute` of the day: the device's answer when it has one, else the windows.
+pub fn resolve_off_peak(device: Option<bool>, windows: &[OffPeakWindow], minute: u16) -> bool {
+    device.unwrap_or_else(|| is_off_peak(windows, minute))
+}
+
+/// Minutes from `minute` (1 to 1440) to the next window start or end, `None` without windows.
+pub fn next_boundary(windows: &[OffPeakWindow], minute: u16) -> Option<u16> {
+    windows
+        .iter()
+        .filter_map(minutes)
+        .flat_map(|(start, end)| [start, end])
+        .map(|edge| (edge + DAY_MINUTES - minute - 1) % DAY_MINUTES + 1)
+        .min()
 }
 
 fn since(e: &OffPeakEntry) -> Option<NaiveDate> {
@@ -171,6 +228,108 @@ mod tests {
         assert!(is_off_peak(&ws, 12 * 60 + 5));
         assert!(!is_off_peak(&ws, 14 * 60 + 34));
         assert!(!is_off_peak(&[], 100));
+    }
+
+    fn device(values: &[&str]) -> OffPeakDevice {
+        OffPeakDevice {
+            entity: "sensor.tariff".to_owned(),
+            values: values.iter().map(|v| (*v).to_owned()).collect(),
+        }
+    }
+
+    fn text(s: &str) -> StateValue {
+        StateValue::Text(s.to_owned())
+    }
+
+    #[test]
+    fn device_value_in_list_is_off_peak() {
+        let dev = device(&["OFF"]);
+        assert_eq!(
+            device_off_peak(&dev, &text("OFF"), Availability::Online),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn unknown_code_is_peak() {
+        let dev = device(&["OFF"]);
+        assert_eq!(
+            device_off_peak(&dev, &text("NEW"), Availability::Online),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn offline_unknown_and_empty_are_not_usable() {
+        let dev = device(&["OFF", "", "unknown", "unavailable"]);
+        assert_eq!(
+            device_off_peak(&dev, &text("OFF"), Availability::Offline),
+            None
+        );
+        for value in [
+            StateValue::Unknown,
+            text(""),
+            text("unknown"),
+            text("unavailable"),
+        ] {
+            assert_eq!(
+                device_off_peak(&dev, &value, Availability::Online),
+                None,
+                "{value:?}"
+            );
+        }
+        // Most entities never announce availability: unknown availability is still usable.
+        assert_eq!(
+            device_off_peak(&dev, &text("OFF"), Availability::Unknown),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn bool_and_number_match_their_text_form() {
+        assert_eq!(
+            device_off_peak(
+                &device(&["on"]),
+                &StateValue::OnOff(true),
+                Availability::Online
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            device_off_peak(
+                &device(&["on"]),
+                &StateValue::OnOff(false),
+                Availability::Online
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            device_off_peak(
+                &device(&["1"]),
+                &StateValue::Number(1.0),
+                Availability::Online
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn resolve_prefers_device_then_windows() {
+        let ws = [w("22:00", "06:00")];
+        assert!(!resolve_off_peak(Some(false), &ws, 23 * 60));
+        assert!(resolve_off_peak(None, &ws, 23 * 60));
+        assert!(!resolve_off_peak(None, &[], 0));
+        assert!(resolve_off_peak(Some(true), &[], 12 * 60));
+    }
+
+    #[test]
+    fn next_boundary_wraps() {
+        let ws = [w("22:00", "06:00")];
+        assert_eq!(next_boundary(&ws, 21 * 60), Some(60));
+        assert_eq!(next_boundary(&ws, 23 * 60), Some(7 * 60));
+        assert_eq!(next_boundary(&ws, 6 * 60), Some(16 * 60));
+        assert_eq!(next_boundary(&ws, 22 * 60), Some(8 * 60));
+        assert_eq!(next_boundary(&[], 0), None);
     }
 
     #[test]

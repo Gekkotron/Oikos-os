@@ -99,6 +99,20 @@ pub fn validate(settings: &HomeSettings, reg: &Registry) -> Result<(), String> {
             None => return Err(format!("indoor_entity `{id}` is not an entity")),
         }
     }
+    if let Some(device) = &settings.off_peak_device {
+        if device.entity.is_empty() {
+            return Err("off_peak_device needs an entity".to_owned());
+        }
+        if reg.entity(&device.entity).is_none() {
+            return Err(format!(
+                "off_peak_device `{}` is not an entity",
+                device.entity
+            ));
+        }
+        if device.values.is_empty() {
+            return Err("off_peak_device needs at least one off-peak value".to_owned());
+        }
+    }
     Ok(())
 }
 
@@ -179,7 +193,7 @@ impl Hub {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
-    use oikos_core::energy::OffPeakWindow;
+    use oikos_core::energy::{OffPeakDevice, OffPeakWindow};
     use oikos_core::registry::RegistryConfig;
 
     const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../oikos-core/tests/fixtures/");
@@ -313,6 +327,31 @@ mod tests {
 
     fn day(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn off_peak_device_must_name_an_entity_and_values() {
+        let reg = registry();
+        let sensor = id_where(&reg, |e| e.unique_id.contains("temperature"));
+        let with = |entity: &str, values: &[&str]| HomeSettings {
+            off_peak_device: Some(OffPeakDevice {
+                entity: entity.to_owned(),
+                values: values.iter().map(|v| (*v).to_owned()).collect(),
+            }),
+            ..HomeSettings::default()
+        };
+        for bad in [
+            with("sensor.nope", &["OFF"]),
+            with("", &["OFF"]),
+            with(&sensor, &[]),
+        ] {
+            let err = validate(&bad, &reg).expect_err("refused");
+            assert!(err.starts_with("off_peak_device"), "{err}");
+        }
+        // A device alone is enough: the windows are optional.
+        let ok = with(&sensor, &["OFF"]);
+        assert!(ok.off_peak.is_empty());
+        assert_eq!(validate(&ok, &reg), Ok(()));
     }
 
     #[test]

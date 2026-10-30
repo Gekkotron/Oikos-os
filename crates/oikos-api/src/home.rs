@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub use oikos_core::energy::{OffPeakEntry, OffPeakWindow};
+pub use oikos_core::energy::{OffPeakDevice, OffPeakEntry, OffPeakWindow};
 
 /// What the home header needs from the user. Every field is optional.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -24,6 +24,10 @@ pub struct HomeSettings {
     pub off_peak: Vec<OffPeakWindow>,
     /// The dated windows of past days, kept by the hub: a client's value is ignored.
     pub off_peak_history: Vec<OffPeakEntry>,
+    /// The entity whose state says off-peak, and the values that mean it; the windows are the
+    /// backup when it has no reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub off_peak_device: Option<OffPeakDevice>,
     /// How the web Energy page draws the live power, the same for every browser.
     pub energy_view: EnergyView,
 }
@@ -85,5 +89,24 @@ mod tests {
             json!("orbite")
         );
         assert!(serde_json::from_value::<HomeSettings>(json!({"energy_view": "orbit"})).is_err());
+    }
+
+    #[test]
+    fn off_peak_device_round_trips_and_is_omitted_when_none() {
+        let s: HomeSettings = serde_json::from_value(json!({"eco_setpoint": 15.0})).unwrap();
+        assert_eq!(s.off_peak_device, None);
+        let wire = serde_json::to_value(&s).unwrap();
+        assert!(wire.get("off_peak_device").is_none(), "{wire}");
+        let device = json!({"entity": "sensor.tariff", "values": ["OFF"]});
+        let s: HomeSettings =
+            serde_json::from_value(json!({"off_peak_device": device.clone()})).unwrap();
+        assert_eq!(
+            s.off_peak_device,
+            Some(OffPeakDevice {
+                entity: "sensor.tariff".to_owned(),
+                values: vec!["OFF".to_owned()],
+            })
+        );
+        assert_eq!(serde_json::to_value(&s).unwrap()["off_peak_device"], device);
     }
 }
