@@ -4,10 +4,13 @@
 //! registry so it never becomes an override.
 
 use chrono::NaiveDate;
+use chrono::{DateTime, Timelike};
+use chrono_tz::Tz;
 use oikos_api::{HomeSettings, WsEvent};
 use oikos_core::command::Publish;
 use oikos_core::energy::{
-    EnergyMeters, GridCounters, OffPeakEntry, record_change, validate_windows,
+    EnergyMeters, GridCounters, OffPeakEntry, device_off_peak, next_boundary, record_change,
+    resolve_off_peak, validate_windows, windows_for,
 };
 use oikos_core::model::Kind;
 use oikos_core::registry::Registry;
@@ -116,7 +119,45 @@ pub fn validate(settings: &HomeSettings, reg: &Registry) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether it is off-peak at a moment, and what said so.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OffPeakNow {
+    pub off_peak: bool,
+    /// The device entity when its reading decided; `None` when the windows did.
+    pub device: Option<String>,
+    /// The next window start or end; `None` without windows.
+    pub next_boundary: Option<DateTime<Tz>>,
+}
+
 impl Hub {
+    /// Off-peak at `now`: the off-peak device's reading when usable, else the windows in force
+    /// that day.
+    pub fn off_peak_now(&self, now: DateTime<Tz>) -> OffPeakNow {
+        let settings = self.home_settings();
+        let reading = settings.off_peak_device.as_ref().and_then(|device| {
+            let reg = self.read();
+            let state = reg.state(&device.entity)?;
+            device_off_peak(device, &state.value, state.availability)
+        });
+        let today = now.date_naive();
+        let history = effective_history(&settings, today);
+        let windows = windows_for(&history, today);
+        let minute = (now.hour() * 60 + now.minute()) as u16;
+        let next_boundary = next_boundary(windows, minute).map(|ahead| {
+            let start_of_minute = now
+                - chrono::Duration::seconds(i64::from(now.second()))
+                - chrono::Duration::nanoseconds(i64::from(now.nanosecond()));
+            start_of_minute + chrono::Duration::minutes(i64::from(ahead))
+        });
+        OffPeakNow {
+            off_peak: resolve_off_peak(reading, windows, minute),
+            device: reading
+                .and(settings.off_peak_device)
+                .map(|device| device.entity),
+            next_boundary,
+        }
+    }
+
     fn home_slot(&self) -> MutexGuard<'_, HomeSettings> {
         self.home_settings
             .lock()
