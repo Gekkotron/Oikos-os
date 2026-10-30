@@ -790,6 +790,58 @@ async fn set_flow_reports_validation_in_band() {
 }
 
 #[tokio::test]
+async fn set_flow_accepts_a_math_card() {
+    let server = Server::start_with_flows().await;
+    let client = server.client().await;
+    json_of(
+        "set_virtual",
+        &call(
+            &client,
+            "set_virtual",
+            json!({ "id": "heater_target", "spec": { "kind": "number", "name": "Heater target",
+                "min": 0, "max": 2200, "step": 1 } }),
+        )
+        .await,
+    );
+
+    let flow = json!({ "id": "water", "name": "Heater target from grid", "nodes": [
+        { "id": "grid", "type": "trigger.state", "params": { "entity": LINKQUALITY_ID } },
+        { "id": "target", "type": "math", "params": {
+            "inputs": [{ "name": "grid", "entity": LINKQUALITY_ID }],
+            "formula": "clamp(0 - grid, 0, 2200)",
+            "name": "desired",
+            "save_to": "virtual_heater_target" } }
+    ], "edges": [{ "from": "grid", "to": "target" }] });
+    let set = json_of(
+        "set_flow",
+        &call(&client, "set_flow", json!({ "flow": flow.clone() })).await,
+    );
+    assert_eq!(set["flow"]["invalid"], Value::Null, "{set}");
+
+    let got = json_of(
+        "get_flow",
+        &call(&client, "get_flow", json!({ "id": "water" })).await,
+    );
+    let math = &got["definition"]["nodes"][1];
+    assert_eq!(math["type"], "math", "{got}");
+    assert_eq!(math["params"]["name"], "desired");
+    assert_eq!(math["params"]["save_to"], "virtual_heater_target");
+
+    // A saved result must go to a number entity: a sensor is refused in band.
+    let mut bad = flow;
+    bad["nodes"][1]["params"]["save_to"] = json!(LINKQUALITY_ID);
+    let refused = call(&client, "set_flow", json!({ "flow": bad })).await;
+    assert_eq!(refused.is_error, Some(true));
+    assert!(
+        text_of(&refused).contains("is not a number entity"),
+        "{}",
+        text_of(&refused)
+    );
+
+    client.cancel().await.expect("close");
+}
+
+#[tokio::test]
 async fn set_flow_enabled_and_run_flow() {
     let server = Server::start_with_flows().await;
     let client = server.client().await;

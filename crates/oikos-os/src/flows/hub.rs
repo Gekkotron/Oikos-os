@@ -13,7 +13,7 @@ use oikos_api::{
 use oikos_core::command::{Publish, map_command};
 use oikos_core::flow::template::parse;
 use oikos_core::flow::{
-    Flow, FlowMode, NodeKind, Reading, Scalar, field_scalar, fields, headline_scalar,
+    Flow, FlowMode, NodeKind, Reading, Scalar, field_scalar, fields, headline_scalar, math_names,
     uses_sun_or_is_dark, validate,
 };
 use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
@@ -341,6 +341,16 @@ impl Hub {
         }
     }
 
+    /// The `(min, max, step)` of a number entity, `None` when it is unknown.
+    pub(crate) fn number_limits(
+        &self,
+        id: &str,
+    ) -> Option<(Option<f64>, Option<f64>, Option<f64>)> {
+        let reg = self.read();
+        let caps = &reg.entity(id)?.capabilities;
+        Some((caps.min, caps.max, caps.step))
+    }
+
     fn broadcast_run(&self, flow_id: &str, run: &RunView) {
         self.broadcast(WsEvent::FlowRunChanged {
             flow_id: flow_id.to_owned(),
@@ -377,7 +387,33 @@ impl Hub {
     /// Checks every entity a node names exists and every command maps; publishes nothing.
     fn check_house(&self, flow: &Flow) -> Result<(), HubError> {
         let reg = self.read();
+        let results = math_names(flow);
         for node in &flow.nodes {
+            if let NodeKind::Math(params) = &node.kind {
+                if reg.entity(&params.name).is_some() {
+                    return Err(HubError::InvalidFlow(format!(
+                        "node `{}`: result name `{}` is an entity id",
+                        node.id, params.name
+                    )));
+                }
+                let inputs = params.inputs.iter().map(|input| &input.entity);
+                for entity in inputs.chain(params.save_to.as_ref()) {
+                    if reg.entity(entity).is_none() {
+                        return Err(HubError::InvalidFlow(format!(
+                            "unknown entity `{entity}` in node `{}`",
+                            node.id
+                        )));
+                    }
+                }
+                if let Some(target) = &params.save_to
+                    && reg.entity(target).is_some_and(|e| e.kind != Kind::Number)
+                {
+                    return Err(HubError::InvalidFlow(format!(
+                        "node `{}`: `{target}` is not a number entity",
+                        node.id
+                    )));
+                }
+            }
             if let NodeKind::Notify(params) = &node.kind {
                 // `validate` already refused a text that does not parse.
                 let texts = [Some(&params.title), params.body.as_ref()];
@@ -385,7 +421,7 @@ impl Hub {
                     if let Some(id) = template
                         .entities()
                         .into_iter()
-                        .find(|id| reg.entity(id).is_none())
+                        .find(|id| !results.contains(id) && reg.entity(id).is_none())
                     {
                         return Err(HubError::InvalidFlow(format!(
                             "unknown entity `{id}` in node `{}`",
@@ -418,7 +454,8 @@ impl Hub {
                 | NodeKind::TriggerSchedule(_)
                 | NodeKind::TriggerSun(_)
                 | NodeKind::TriggerOffPeak(_)
-                | NodeKind::TriggerManual(_) => None,
+                | NodeKind::TriggerManual(_)
+                | NodeKind::Math(_) => None,
             };
             let Some(entity) = entity else { continue };
             let Some(found) = reg.entity(entity) else {

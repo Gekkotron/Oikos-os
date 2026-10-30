@@ -52,6 +52,10 @@ pub fn EntityPickField(
     /// Without it the field is required (no pinned row, closed text = `PickerText::Choose`).
     #[prop(optional_no_strip)]
     pinned: Option<Signal<String>>,
+    /// Names offered before the entities (a flow's math results); a `value` that is one of
+    /// them shows as the plain name.
+    #[prop(optional_no_strip)]
+    results: Option<Signal<Vec<String>>>,
     #[prop(optional)] compact: bool,
     /// CSS class of the wrapping element, so a host keeps its own field layout.
     #[prop(optional_no_strip)]
@@ -67,6 +71,12 @@ pub fn EntityPickField(
             let text = pinned.map_or_else(|| t(PickerText::Choose).to_owned(), |p| p.get());
             view! { <span class="picker-field__text">{text}</span> }.into_any()
         }
+        Some(id) if results.is_some_and(|r| r.with(|r| r.contains(&id))) => view! {
+            <span class="picker__row-main">
+                <span class="picker__row-title">{id}</span>
+            </span>
+        }
+        .into_any(),
         Some(id) => match row.get() {
             Some(r) => view! {
                 {(!compact)
@@ -112,6 +122,7 @@ pub fn EntityPickField(
                 pool=pool
                 suggest=suggest
                 pinned=pinned.map(|text| Pinned { text })
+                results=results
                 on_pick=Callback::new(move |id| on_change.run(id))
             />
         </div>

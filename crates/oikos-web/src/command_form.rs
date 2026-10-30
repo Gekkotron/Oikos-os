@@ -265,6 +265,9 @@ pub fn CommandFields(
     /// An extra class on the Action select (the ambiance form's tests find it by it).
     #[prop(optional)]
     action_class: &'static str,
+    /// While true the number inputs are left out: a math result supplies the number.
+    #[prop(optional)]
+    numbers_replaced: Option<Signal<bool>>,
 ) -> impl IntoView {
     let lang = crate::i18n::use_lang();
     let (wrap, caption, input, select) = style.classes();
@@ -503,7 +506,14 @@ pub fn CommandFields(
             if advanced_open.get() {
                 return advanced.as_ref().map(|v| v.run()).into_any();
             }
-            current_params.get().into_iter().map(param_view).collect_view().into_any()
+            let replaced = numbers_replaced.is_some_and(|r| r.get());
+            current_params
+                .get()
+                .into_iter()
+                .filter(|p| !(replaced && matches!(p, Param::Number { .. })))
+                .map(param_view)
+                .collect_view()
+                .into_any()
         }}
     }
 }

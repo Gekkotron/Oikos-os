@@ -2082,6 +2082,495 @@ async fn manual_value_reaches_notify_text() {
     assert_eq!(title, "?");
 }
 
+// ---- math cards ----
+
+const METER_ID: &str = "virtual_meter";
+const TARGET_ID: &str = "virtual_target";
+const METER_TOPIC: &str = "oikos/virtual/meter";
+const TARGET_TOPIC: &str = "oikos/virtual/target";
+
+async fn add_virtual_number(hub: &Hub, id: &str, min: f64, max: f64) {
+    let spec = oikos_api::VirtualSpec {
+        kind: oikos_api::VirtualKind::Number,
+        name: id.to_owned(),
+        min: Some(min),
+        max: Some(max),
+        step: Some(1.0),
+        unit: None,
+        options: None,
+        initial: None,
+    };
+    hub.set_virtual(id, spec).await.expect("virtual number");
+}
+
+/// A hub with the engine, a `meter` (-5000..5000) and a `target` (0..100) virtual number.
+async fn math_hub() -> (
+    Arc<Hub>,
+    mpsc::Receiver<Publish>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (hub, mut publisher, engine) = engine_hub();
+    add_virtual_number(&hub, "meter", -5000.0, 5000.0).await;
+    add_virtual_number(&hub, "target", 0.0, 100.0).await;
+    while publisher.try_recv().is_ok() {}
+    (hub, publisher, engine)
+}
+
+/// Plays the broker for virtual entities: every publish is logged as `(topic, payload)` and,
+/// unless its topic is in `mute`, comes back as the retained state.
+fn math_echo(
+    mut publisher: mpsc::Receiver<Publish>,
+    hub: Arc<Hub>,
+    mute: &'static [&'static str],
+) -> Arc<Mutex<Vec<(String, String)>>> {
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&log);
+    tokio::spawn(async move {
+        while let Some(publish) = publisher.recv().await {
+            sink.lock()
+                .expect("log")
+                .push((publish.topic.clone(), publish.payload.clone()));
+            if publish.topic.starts_with("oikos/virtual/")
+                && !mute.contains(&publish.topic.as_str())
+            {
+                hub.ingest_message(&publish.topic, publish.payload.as_bytes(), true);
+            }
+        }
+    });
+    log
+}
+
+fn sent_to(log: &Arc<Mutex<Vec<(String, String)>>>, topic: &str) -> Vec<String> {
+    log.lock()
+        .expect("log")
+        .iter()
+        .filter(|(t, _)| t == topic)
+        .map(|(_, p)| p.clone())
+        .collect()
+}
+
+fn math_node(
+    id: &str,
+    inputs: serde_json::Value,
+    formula: &str,
+    name: &str,
+    save_to: Option<&str>,
+) -> serde_json::Value {
+    let mut params = serde_json::json!({ "inputs": inputs, "formula": formula, "name": name });
+    if let Some(save_to) = save_to {
+        params["save_to"] = save_to.into();
+    }
+    serde_json::json!({ "id": id, "type": "math", "params": params })
+}
+
+fn meter_input() -> serde_json::Value {
+    serde_json::json!([{ "name": "meter", "entity": METER_ID }])
+}
+
+/// A flow triggered by `meter` with `nodes` and `edges` after the trigger node `t`.
+fn math_flow_json(
+    id: &str,
+    nodes: Vec<serde_json::Value>,
+    edges: Vec<serde_json::Value>,
+) -> String {
+    let mut all = vec![serde_json::json!(
+        { "id": "t", "type": "trigger.state", "params": { "entity": METER_ID } }
+    )];
+    all.extend(nodes);
+    serde_json::json!({
+        "id": id, "name": id, "enabled": true, "mode": "single", "nodes": all, "edges": edges
+    })
+    .to_string()
+}
+
+fn edge(from: &str, to: &str) -> serde_json::Value {
+    serde_json::json!({ "from": from, "to": to })
+}
+
+fn port_edge(from: &str, port: &str, to: &str) -> serde_json::Value {
+    serde_json::json!({ "from": from, "port": port, "to": to })
+}
+
+/// Saves a flow (the meter already holds its initial -5000, so any other reading is a change)
+/// and returns the events.
+async fn arm_math_flow(hub: &Arc<Hub>, json: String) -> tokio::sync::broadcast::Receiver<WsEvent> {
+    hub.ingest("oikos/automation/m", json.as_bytes());
+    settle().await;
+    hub.subscribe()
+}
+
+fn target_state(hub: &Hub) -> Option<oikos_core::model::StateValue> {
+    hub.entity_view(TARGET_ID).map(|view| view.state.value)
+}
+
+fn target_number(hub: &Hub) -> f64 {
+    match target_state(hub) {
+        Some(oikos_core::model::StateValue::Number(n)) => n,
+        other => panic!("target is not a number: {other:?}"),
+    }
+}
+
+async fn run_single_math(
+    formula: &str,
+    save_to: Option<&str>,
+    reading: &[u8],
+) -> (RunView, Arc<Mutex<Vec<(String, String)>>>, Arc<Hub>) {
+    let (hub, publisher, engine) = math_hub().await;
+    drop(engine); // dropping a JoinHandle detaches the task
+    let log = math_echo(publisher, Arc::clone(&hub), &[]);
+    let json = math_flow_json(
+        "m",
+        vec![math_node("calc", meter_input(), formula, "slider", save_to)],
+        vec![edge("t", "calc")],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, reading, true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+    (run, log, hub)
+}
+
+#[tokio::test]
+async fn math_saves_rounded_result() {
+    let (run, log, hub) = run_single_math("meter / 2", Some(TARGET_ID), b"95").await;
+    assert_eq!(run.status, RunStatus::Done, "{:?}", run.steps);
+    let detail = &run.steps.last().expect("step").detail;
+    assert!(
+        detail.ends_with("→ slider = 47.5 → virtual_target = 48"),
+        "{detail}"
+    );
+    assert_eq!(sent_to(&log, TARGET_TOPIC), ["48"]);
+    settle().await;
+    assert_eq!(target_number(&hub), 48.0);
+}
+
+#[tokio::test]
+async fn math_clamps_and_says_so() {
+    let (run, _log, hub) = run_single_math("meter", Some(TARGET_ID), b"500").await;
+    assert_eq!(run.status, RunStatus::Done, "{:?}", run.steps);
+    let detail = &run.steps.last().expect("step").detail;
+    assert!(detail.contains("(kept in range)"), "{detail}");
+    settle().await;
+    assert_eq!(target_number(&hub), 100.0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn math_result_feeds_command_if_and_notify() {
+    let (hub, publisher, _engine) = math_hub().await;
+    push_ready(&hub).await;
+    let log = math_echo(publisher, Arc::clone(&hub), &[]);
+    let notify = serde_json::json!({ "id": "n", "type": "notify",
+        "params": { "title": "T", "body": "Half {half:0}" } });
+    let command = serde_json::json!({ "id": "set", "type": "command", "params": {
+        "entity": TARGET_ID, "value_from": "half", "command": { "type": "set_number", "value": 0 } } });
+    let check = serde_json::json!({ "id": "big", "type": "if",
+        "params": { "result": "half", "op": "gt", "value": 10 } });
+    let json = math_flow_json(
+        "m",
+        vec![
+            math_node("calc", meter_input(), "meter / 2", "half", None),
+            check,
+            command,
+            notify,
+        ],
+        vec![
+            edge("t", "calc"),
+            edge("calc", "big"),
+            port_edge("big", "true", "set"),
+            edge("set", "n"),
+        ],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"60", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Done, "{:?}", run.steps);
+    assert_eq!(step_nodes(&run), ["t", "calc", "big", "set", "n"]);
+    assert_eq!(sent_to(&log, TARGET_TOPIC), ["30"]);
+    settle().await;
+    assert_eq!(target_number(&hub), 30.0);
+    let history = sent_to(&log, "oikos/push/history");
+    let list: serde_json::Value =
+        serde_json::from_str(history.last().expect("history")).expect("json");
+    assert_eq!(list[0]["body"], "Half 30", "{list}");
+}
+
+#[tokio::test]
+async fn unknown_input_fails_the_step() {
+    let (hub, publisher, _engine) = math_hub().await;
+    let log = math_echo(publisher, Arc::clone(&hub), &[]);
+    hub.ingest(
+        TEMP_CONFIG_TOPIC,
+        &fixture("discovery/sensor__0x00124b0008fd6568__temperature_1.json"),
+    );
+    let inputs = serde_json::json!([{ "name": "meter", "entity": TEMP_ID }]);
+    let json = math_flow_json(
+        "m",
+        vec![math_node(
+            "calc",
+            inputs,
+            "meter",
+            "slider",
+            Some(TARGET_ID),
+        )],
+        vec![edge("t", "calc")],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"5", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Failed);
+    assert_eq!(run.steps.last().expect("step").detail, "meter is unknown");
+    settle().await;
+    assert!(sent_to(&log, TARGET_TOPIC).is_empty());
+}
+
+#[tokio::test]
+async fn unknown_input_in_the_untaken_branch_is_not_read() {
+    let (hub, publisher, _engine) = math_hub().await;
+    let _log = math_echo(publisher, Arc::clone(&hub), &[]);
+    hub.ingest(
+        TEMP_CONFIG_TOPIC,
+        &fixture("discovery/sensor__0x00124b0008fd6568__temperature_1.json"),
+    );
+    let inputs = serde_json::json!([
+        { "name": "meter", "entity": METER_ID },
+        { "name": "ghost", "entity": TEMP_ID },
+        { "name": "unused", "entity": TEMP_ID },
+    ]);
+    let json = math_flow_json(
+        "m",
+        vec![math_node(
+            "calc",
+            inputs,
+            "if(meter > 0, meter * 2, ghost)",
+            "slider",
+            None,
+        )],
+        vec![edge("t", "calc")],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"7", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Done, "{:?}", run.steps);
+    let detail = &run.steps.last().expect("step").detail;
+    assert_eq!(detail, "meter=7, ghost=?, unused=? → slider = 14");
+}
+
+#[tokio::test]
+async fn command_value_from_is_kept_in_the_entity_range() {
+    let (hub, publisher, _engine) = math_hub().await;
+    let log = math_echo(publisher, Arc::clone(&hub), &[]);
+    let command = serde_json::json!({ "id": "set", "type": "command", "params": {
+        "entity": TARGET_ID, "value_from": "big", "command": { "type": "set_number", "value": 0 } } });
+    let json = math_flow_json(
+        "m",
+        vec![
+            math_node("calc", meter_input(), "meter * 10", "big", None),
+            command,
+        ],
+        vec![edge("t", "calc"), edge("calc", "set")],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"50", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Done, "{:?}", run.steps);
+    assert_eq!(sent_to(&log, TARGET_TOPIC), ["100"]);
+    assert_eq!(
+        run.steps.last().expect("step").detail,
+        "accepted (kept in range)"
+    );
+}
+
+#[tokio::test]
+async fn text_input_fails_the_step() {
+    let (hub, publisher, _engine) = math_hub().await;
+    let _log = math_echo(publisher, Arc::clone(&hub), &[]);
+    let select = oikos_api::VirtualSpec {
+        kind: oikos_api::VirtualKind::Select,
+        name: "Mode".to_owned(),
+        min: None,
+        max: None,
+        step: None,
+        unit: None,
+        options: Some(vec!["eco".to_owned(), "comfort".to_owned()]),
+        initial: None,
+    };
+    hub.set_virtual("mode", select).await.expect("select");
+    let inputs = serde_json::json!([{ "name": "mode", "entity": "virtual_mode" }]);
+    let json = math_flow_json(
+        "m",
+        vec![math_node("calc", inputs, "mode", "slider", None)],
+        vec![edge("t", "calc")],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"5", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Failed);
+    assert_eq!(
+        run.steps.last().expect("step").detail,
+        "mode is not a number"
+    );
+}
+
+#[tokio::test]
+async fn refused_save_stops_the_run() {
+    let (hub, publisher, _engine) = math_hub().await;
+    let log = math_echo(publisher, Arc::clone(&hub), &[TARGET_TOPIC]);
+    let json = math_flow_json(
+        "m",
+        vec![
+            math_node("calc", meter_input(), "meter", "slider", Some(TARGET_ID)),
+            turn("on", "turn_on"),
+        ],
+        vec![edge("t", "calc"), edge("calc", "on")],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"5", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Failed);
+    assert_eq!(step_nodes(&run), ["t", "calc"]);
+    assert_eq!(run.steps[1].outcome, StepOutcome::Failed);
+    let detail = &run.steps[1].detail;
+    assert!(
+        detail.starts_with("meter=5 → slider = 5 → virtual_target = 5 → "),
+        "{detail}"
+    );
+    assert!(
+        detail.len() > "meter=5 → slider = 5 → virtual_target = 5 → ".len(),
+        "the refusal reason follows: {detail}"
+    );
+    assert!(
+        sent_to(&log, LED_COMMAND_TOPIC).is_empty(),
+        "the command after the refused save never ran"
+    );
+}
+
+#[tokio::test]
+async fn division_by_zero_fails() {
+    let (run, _log, _hub) = run_single_math("meter / (meter - meter)", None, b"7").await;
+    assert_eq!(run.status, RunStatus::Failed);
+    assert_eq!(run.steps.last().expect("step").detail, "division by zero");
+}
+
+#[tokio::test]
+async fn result_missing_on_path_fails() {
+    let (hub, publisher, _engine) = math_hub().await;
+    let _log = math_echo(publisher, Arc::clone(&hub), &[]);
+    let command = serde_json::json!({ "id": "set", "type": "command", "params": {
+        "entity": TARGET_ID, "value_from": "half", "command": { "type": "set_number", "value": 0 } } });
+    let check = serde_json::json!({ "id": "big", "type": "if",
+        "params": { "entity": METER_ID, "op": "gt", "value": 10 } });
+    let json = math_flow_json(
+        "m",
+        vec![
+            check,
+            math_node("calc", meter_input(), "meter / 2", "half", None),
+            command,
+        ],
+        vec![
+            edge("t", "big"),
+            port_edge("big", "true", "calc"),
+            port_edge("big", "false", "set"),
+            edge("calc", "set"),
+        ],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"5", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Failed, "{:?}", run.steps);
+    assert_eq!(
+        run.steps.last().expect("step").detail,
+        "no result half in this run"
+    );
+}
+
+#[tokio::test]
+async fn trigger_in_formula() {
+    let (run, _log, _hub) = run_single_math("trigger * 2", None, b"21").await;
+    assert_eq!(run.status, RunStatus::Done, "{:?}", run.steps);
+    assert!(
+        run.steps
+            .last()
+            .expect("step")
+            .detail
+            .ends_with("→ slider = 42")
+    );
+
+    let (hub, publisher, _engine) = math_hub().await;
+    let _log = math_echo(publisher, Arc::clone(&hub), &[]);
+    let manual = serde_json::json!({ "id": "go", "type": "trigger.manual", "params": {} });
+    let json = serde_json::json!({
+        "id": "m", "name": "m", "enabled": true, "mode": "single",
+        "nodes": [manual, math_node("calc", serde_json::json!([]), "trigger * 2", "slider", None)],
+        "edges": [edge("go", "calc")]
+    })
+    .to_string();
+    hub.ingest("oikos/automation/m", json.as_bytes());
+    settle().await;
+    let mut events = hub.subscribe();
+    hub.run_flow("m").expect("run");
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+    assert_eq!(run.status, RunStatus::Failed);
+    assert_eq!(
+        run.steps.last().expect("step").detail,
+        "trigger has no number"
+    );
+}
+
+#[tokio::test]
+async fn set_flow_refuses_bad_math_targets() {
+    let (hub, _publisher, _engine) = math_hub().await;
+    let try_flow = |node: serde_json::Value| {
+        let json = math_flow_json("m", vec![node], vec![edge("t", "calc")]);
+        Flow::decode(json.as_bytes()).expect("flow")
+    };
+
+    let flow = try_flow(math_node(
+        "calc",
+        meter_input(),
+        "meter",
+        "slider",
+        Some(LED_ID),
+    ));
+    match hub.set_flow(flow).await {
+        Err(HubError::InvalidFlow(reason)) => {
+            assert!(reason.contains("is not a number entity"), "{reason}");
+        }
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+
+    let flow = try_flow(math_node("calc", meter_input(), "meter", METER_ID, None));
+    match hub.set_flow(flow).await {
+        Err(HubError::InvalidFlow(reason)) => {
+            assert!(reason.contains("is an entity id"), "{reason}");
+        }
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+
+    let inputs = serde_json::json!([{ "name": "meter", "entity": "nope" }]);
+    let flow = try_flow(math_node("calc", inputs, "meter", "slider", None));
+    match hub.set_flow(flow).await {
+        Err(HubError::InvalidFlow(reason)) => {
+            assert!(reason.contains("unknown entity"), "{reason}")
+        }
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+
+    let flow = try_flow(math_node(
+        "calc",
+        meter_input(),
+        "meter",
+        "slider",
+        Some(TARGET_ID),
+    ));
+    hub.set_flow(flow).await.expect("a valid math flow saves");
+}
+
 const VACUUM_ID: &str = "roborock_40313ca8b964";
 const CLIMATE_ID: &str = "daikin_192_168_1_150";
 

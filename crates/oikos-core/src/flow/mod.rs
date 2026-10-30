@@ -5,6 +5,7 @@ mod clock;
 mod duration;
 mod field;
 mod graph;
+pub mod math;
 mod model;
 mod scalar;
 mod schedule;
@@ -16,12 +17,16 @@ mod validate;
 pub use clock::{in_time_range, parse_clock};
 pub use duration::{DurationError, format_duration, parse_duration, pick_duration};
 pub use field::{FieldInfo, brightness_percent, field_scalar, fields, headline_scalar};
+pub use math::{
+    FUNCTIONS, Formula, FormulaError, Function, MAX_DEPTH, MAX_FORMULA_CHARS, MAX_INPUTS,
+    MAX_TABLE_POINTS, fit_to_entity, is_valid_name, parse_formula,
+};
 pub use model::{
     CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, MAX_AVERAGE_SECS,
-    MAX_SWITCH_RULES, Missing, Node, NodeKind, NotifyParams, OffPeakEdge, Op, Position, RuleOp,
-    SunWhich, SwitchParams, SwitchRule, TimeBetweenParams, TriggerManualParams,
-    TriggerOffPeakParams, TriggerScheduleParams, TriggerSignalParams, TriggerStateParams,
-    TriggerSunParams, uses_sun_or_is_dark,
+    MAX_SWITCH_RULES, MathInput, MathParams, Missing, Node, NodeKind, NotifyParams, OffPeakEdge,
+    Op, Position, RuleOp, SunWhich, SwitchParams, SwitchRule, TimeBetweenParams,
+    TriggerManualParams, TriggerOffPeakParams, TriggerScheduleParams, TriggerSignalParams,
+    TriggerStateParams, TriggerSunParams, command_with_number, math_names, uses_sun_or_is_dark,
 };
 pub use scalar::{CompareError, Scalar, compare};
 pub use schedule::{Schedule, ScheduleError};
@@ -32,8 +37,8 @@ pub use sun::{
 pub use switch::switch_exits;
 pub use template::{Lang, Reading, Template, TemplateError};
 pub use validate::{
-    FlowError, NOTIFY_CHANNELS, NOTIFY_SEVERITIES, is_valid_flow_id, is_valid_node_id,
-    notify_channel_error, notify_severity_error, validate,
+    FlowError, NOTIFY_CHANNELS, NOTIFY_SEVERITIES, check_math_card, is_valid_flow_id,
+    is_valid_node_id, notify_channel_error, notify_severity_error, validate,
 };
 
 /// Shared fixture for the flow tests: the reference flow of the design.

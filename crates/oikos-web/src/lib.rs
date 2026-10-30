@@ -23,6 +23,7 @@ pub mod entity_picker;
 pub mod flow_edit;
 pub mod flow_layout;
 pub mod flow_list;
+pub mod flow_math;
 pub mod flow_picker;
 pub mod flow_text;
 pub mod flow_viewport;

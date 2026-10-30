@@ -163,7 +163,11 @@ fn instructions() -> String {
          run time: `{{entity_id}}` is the entity's value with its unit (`{{weather_temperature}}` \
          → `10.1 °C`), `{{trigger}}` the value that started the run, `:N` rounds to N decimals \
          (`{{weather_temperature:0}}`), and `+ - * /` with spaces around them plus parentheses do \
-         maths (`{{weather_today_max - weather_today_min:1}}`). Text and on/off values are \
+         maths (`{{weather_today_max - weather_today_min:1}}`). A `math` card computes one number \
+         from its `inputs` (entity readings, optionally `average`) with a `formula` such as \
+         `clamp(heater - 100 - grid, 0, 1650)` and a result `name`; `save_to` (a number entity) \
+         receives it. Later `if` and `switch` cards compare it with `result`, a `command` sends it \
+         with `value_from`, and a notify text prints it as `{{name}}`, all within the same run. Text and on/off values are \
          written in `lang` (`en`, the default, or `fr`: pass the language the user writes in). \
          `{{{{` and `}}}}` are literal braces; a value that is unknown at run time prints `?`. \
          `if`, `switch` and `trigger.state` take an optional `field` naming a value inside the \
@@ -322,7 +326,15 @@ mod tests {
     #[test]
     fn instructions_mention_flows() {
         let text = instructions();
-        for needle in ["set_flow", "restart", "oikos/automation", "run_flow"] {
+        for needle in [
+            "set_flow",
+            "restart",
+            "oikos/automation",
+            "run_flow",
+            "`math`",
+            "value_from",
+            "{name}",
+        ] {
             assert!(text.contains(needle), "{needle} missing");
         }
     }

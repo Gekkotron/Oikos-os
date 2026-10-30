@@ -42,6 +42,9 @@ pub fn TemplateField(
     placeholder: Signal<String>,
     optional: bool,
     write: Callback<Option<String>>,
+    /// The flow's math results, offered first in the picker.
+    #[prop(optional)]
+    results: Option<Signal<Vec<String>>>,
 ) -> impl IntoView {
     let t = use_flow_text();
     let raw = RwSignal::new(initial);
@@ -121,6 +124,7 @@ pub fn TemplateField(
             pinned=Some(Pinned {
                 text: Signal::derive(move || t(FlowText::TriggerValueRow).to_owned()),
             })
+            results=results
             on_pick=on_pick
         />
     }

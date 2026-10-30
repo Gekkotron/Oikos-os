@@ -1083,7 +1083,7 @@ async fn library_open_in_edit_mode() {
     let html = host.inner_html();
     assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
     assert_eq!(count(&host, ".flow-library"), 1, "{html}");
-    assert_eq!(count(&host, ".flow-library__item"), 12, "{html}");
+    assert_eq!(count(&host, ".flow-library__item"), 13, "{html}");
     assert_eq!(count(&host, ".flow-picker-wrap"), 0, "{html}");
 }
 
@@ -2006,6 +2006,338 @@ async fn manual_number_box_keeps_what_is_typed() {
     assert_eq!(go["params"]["value"], serde_json::json!(-1.5), "{body}");
 }
 
+// ---- Math card ------------------------------------------------------------------------------
+
+/// A power sensor reading 21, for the math card's preview.
+fn power_sensor() -> oikos_api::EntityView {
+    use oikos_core::model::{EntityState, Kind, StateValue};
+    oikos_api::EntityView {
+        id: "sensor.power".into(),
+        name: "Power meter".into(),
+        kind: Kind::Sensor,
+        protocol_kind: Kind::Sensor,
+        component: Kind::Sensor.component().to_string(),
+        unit: Some("W".into()),
+        state: EntityState {
+            value: StateValue::Number(21.0),
+            ..Default::default()
+        },
+        ..table_lamp()
+    }
+}
+
+/// Adds a Math card from the library and opens its drawer.
+async fn open_math_drawer(host: &web_sys::Element) {
+    add_row(host, "Math").await;
+    select_card(host, "math_1").await;
+    // Field values are set by effects.
+    gloo_timers::future::TimeoutFuture::new(50).await;
+}
+
+fn input_named(host: &web_sys::Element, selector: &str) -> web_sys::HtmlInputElement {
+    element(host, selector).unchecked_into()
+}
+
+#[wasm_bindgen_test]
+async fn math_card_from_library_opens_its_drawer() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    let drawer = text(&host, ".flow-drawer");
+    for word in ["Inputs", "Formula", "Result name", "Save to"] {
+        assert!(drawer.contains(word), "{word}: {drawer}");
+    }
+    // The card is named with the first free result name.
+    assert_eq!(input_named(&host, ".math-name").value(), "result");
+    assert_eq!(count(&host, ".math-input"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn math_formula_error_shows_and_blocks_save() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    let formula = input_named(&host, ".math-formula");
+    type_into(&formula, "gird + 1", "input");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(
+        text(&host, ".math-line.node-editor__error"),
+        "unknown name `gird`",
+        "{html}"
+    );
+    let save = element(&host, ".flow-toolbar button[aria-label=Save]");
+    assert!(save.has_attribute("disabled"), "{html}");
+    let fetch = FakeFetch::answer(&write_outcome(&reference_view(None, vec![])));
+    click(&host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert!(puts(&fetch).is_empty(), "{:?}", puts(&fetch));
+    // A formula that reads fine lifts the block.
+    type_into(&formula, "1 + 1", "input");
+    tick().await;
+    assert!(
+        !element(&host, ".flow-toolbar button[aria-label=Save]").has_attribute("disabled"),
+        "{}",
+        host.inner_html()
+    );
+    assert_eq!(text(&host, ".math-line__value"), "= 2");
+}
+
+#[wasm_bindgen_test]
+async fn math_runtime_failure_shows_but_keeps_save_enabled() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    type_into(&input_named(&host, ".math-formula"), "1 / 0", "input");
+    tick().await;
+    let html = host.inner_html();
+    assert!(text(&host, ".math-line--fails").contains("Fails"), "{html}");
+    assert!(
+        !element(&host, ".flow-toolbar button[aria-label=Save]").has_attribute("disabled"),
+        "{html}"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn math_preview_uses_house_values() {
+    let (host, _mounted, house) = editing(reference_view(None, vec![])).await;
+    let sensor = power_sensor();
+    house.entities.update(|m| {
+        m.insert(sensor.id.clone(), sensor);
+    });
+    open_math_drawer(&host).await;
+    click(&host, ".math-inputs__add");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 1);
+    open_entity_picker(&host).await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-sensor.power']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no sensor row: {}", host.inner_html()))
+        .unchecked_into();
+    row.click();
+    tick().await;
+    // The input is named from the entity, then renamed by hand.
+    assert_eq!(
+        input_named(&host, ".math-input__name").value(),
+        "power_meter"
+    );
+    type_into(&input_named(&host, ".math-input__name"), "p", "input");
+    type_into(&input_named(&host, ".math-formula"), "p * 2", "input");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(text(&host, ".math-line__value"), "= 42", "{html}");
+    // An average window reads the current value in the preview and says so.
+    let window: web_sys::HtmlSelectElement = element(&host, ".math-input__window").unchecked_into();
+    window.set_value("5m");
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    window
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+    tick().await;
+    let line = text(&host, ".math-line");
+    assert!(line.contains("= 42") && line.contains("5m"), "{line}");
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn math_inputs_follow_undo_and_redo() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    click(&host, ".math-inputs__add");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 1);
+    click(&host, ".math-inputs__add");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 2);
+    click(&host, ".flow-toolbar button[aria-label=Undo]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(count(&host, ".math-input"), 1, "{}", host.inner_html());
+    assert_eq!(input_named(&host, ".math-input__name").value(), "input");
+    press(&body(), "z", true, true);
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(count(&host, ".math-input"), 2, "{}", host.inner_html());
+    // Undoing a remove brings the row back.
+    click(&host, ".math-input__remove");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 1);
+    click(&host, ".flow-toolbar button[aria-label=Undo]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(count(&host, ".math-input"), 2, "{}", host.inner_html());
+    // A window change is undone in the select too.
+    let window: web_sys::HtmlSelectElement = element(&host, ".math-input__window").unchecked_into();
+    window.set_value("5m");
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    window
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+    tick().await;
+    click(&host, ".flow-toolbar button[aria-label=Undo]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let window: web_sys::HtmlSelectElement = element(&host, ".math-input__window").unchecked_into();
+    assert_eq!(window.value(), "now");
+}
+
+#[wasm_bindgen_test]
+async fn math_row_keeps_focus_while_typing() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    click(&host, ".math-inputs__add");
+    tick().await;
+    let name = input_named(&host, ".math-input__name");
+    name.focus().unwrap();
+    type_into(&name, "inputx", "input");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 1);
+    let active = web_sys::window()
+        .unwrap()
+        .document()
+        .unwrap()
+        .active_element();
+    assert_eq!(
+        active.as_ref(),
+        Some(name.unchecked_ref::<web_sys::Element>()),
+        "focus moved: {}",
+        host.inner_html()
+    );
+    assert!(name.is_connected());
+}
+
+#[wasm_bindgen_test]
+async fn functions_menu_inserts_with_slots() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    assert_eq!(count(&host, ".math-functions__item"), 0);
+    click(&host, ".math-functions__toggle");
+    tick().await;
+    assert_eq!(count(&host, ".math-functions__item"), 9);
+    let items = host.query_selector_all(".math-functions__item").unwrap();
+    let clamp: web_sys::HtmlElement = (0..items.length())
+        .filter_map(|i| items.item(i))
+        .find(|n| {
+            n.text_content()
+                .unwrap_or_default()
+                .contains("clamp(x, low, high)")
+        })
+        .unwrap_or_else(|| panic!("no clamp: {}", host.inner_html()))
+        .unchecked_into();
+    clamp.click();
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let formula = input_named(&host, ".math-formula");
+    assert_eq!(formula.value(), "clamp(▢, ▢, ▢)");
+    // The first slot is selected, in UTF-16 units.
+    assert_eq!(formula.selection_start().unwrap(), Some(6));
+    assert_eq!(formula.selection_end().unwrap(), Some(7));
+    assert_eq!(
+        text(&host, ".math-line.node-editor__error"),
+        "fill in the ▢ slots"
+    );
+    assert_eq!(count(&host, ".math-functions__item"), 0, "menu closes");
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn typing_suggests_and_tab_accepts() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    let formula = input_named(&host, ".math-formula");
+    formula.focus().unwrap();
+    type_into(&formula, "cl", "input");
+    tick().await;
+    assert_eq!(text(&host, ".math-suggestions__item"), "clamp");
+    // Typing normally is not intercepted: a letter key is left alone.
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key("Tab");
+    init.set_cancelable(true);
+    let tab = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    formula.dispatch_event(&tab).unwrap();
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert!(tab.default_prevented());
+    assert_eq!(formula.value(), "clamp(▢, ▢, ▢)");
+    assert_eq!(count(&host, ".math-suggestions__item"), 0);
+    // With no suggestion, Tab keeps its normal job.
+    let tab = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    formula.dispatch_event(&tab).unwrap();
+    assert!(!tab.default_prevented());
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn escape_closes_suggestions() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    let formula = input_named(&host, ".math-formula");
+    type_into(&formula, "ma", "input");
+    tick().await;
+    assert_eq!(count(&host, ".math-suggestions__item"), 1);
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key("Escape");
+    formula
+        .dispatch_event(
+            &web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap(),
+        )
+        .unwrap();
+    tick().await;
+    assert_eq!(count(&host, ".math-suggestions__item"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn input_chip_inserts_name() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    click(&host, ".math-inputs__add");
+    tick().await;
+    type_into(&input_named(&host, ".math-input__name"), "grid", "input");
+    let formula = input_named(&host, ".math-formula");
+    type_into(&formula, "1 + ", "input");
+    tick().await;
+    let chips = text(&host, ".math-chips");
+    assert!(
+        chips.contains("grid") && chips.contains("trigger"),
+        "{chips}"
+    );
+    click(&host, ".math-chips__name");
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(formula.value(), "1 + grid");
+    // The input rows were not rebuilt.
+    assert_eq!(count(&host, ".math-input"), 1);
+    settle_history().await;
+}
+
+// ---- Cards that read a math result ----------------------------------------------------------
+
+/// A flow with a math card `half`, a number command, a comparison and a push.
+fn result_view() -> FlowView {
+    const WITH_MATH: &str = r#"{
+      "id": "living_led_motion", "name": "Half", "enabled": true, "mode": "single",
+      "nodes": [
+        { "id": "power", "type": "trigger.state", "params": { "entity": "sensor.power" } },
+        { "id": "half", "type": "math", "params": { "inputs": [], "formula": "trigger / 2", "name": "half" } },
+        { "id": "set", "type": "command",
+          "params": { "entity": "number.target", "command": { "type": "set_number", "value": 7 } } },
+        { "id": "check", "type": "if", "params": { "op": "gt", "value": 300, "average": "15m" } },
+        { "id": "plug", "type": "command",
+          "params": { "entity": "switch.plug", "command": { "type": "turn_on" }, "value_from": "half" } },
+        { "id": "note", "type": "notify", "params": { "title": "Hi" } }
+      ],
+      "edges": [
+        { "from": "power", "to": "half" },
+        { "from": "half", "to": "set" },
+        { "from": "half", "to": "check" },
+        { "from": "half", "to": "plug" },
+        { "from": "check", "port": "true", "to": "note" }
+      ]
+    }"#;
+    FlowView {
+        definition: Flow::decode(WITH_MATH.as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    }
+}
+
 // ---- Value of ----------------------------------------------------------------------------
 
 /// A vacuum `vacuum.robo` at 62 % battery.
@@ -2044,11 +2376,222 @@ fn line_view(nodes: &str) -> FlowView {
     }
 }
 
+/// An editing canvas over [`result_view`] with a number entity for the command.
+async fn editing_results() -> (web_sys::Element, Box<dyn std::any::Any>, House) {
+    use oikos_core::model::{EntityState, Kind, StateValue};
+    let (host, mounted, house) = editing(result_view()).await;
+    let target = oikos_api::EntityView {
+        id: "number.target".into(),
+        name: "Target".into(),
+        kind: Kind::Number,
+        protocol_kind: Kind::Number,
+        component: Kind::Number.component().to_string(),
+        state: EntityState {
+            value: StateValue::Number(3.0),
+            ..Default::default()
+        },
+        ..table_lamp()
+    };
+    let plug = oikos_api::EntityView {
+        id: "switch.plug".into(),
+        name: "Plug".into(),
+        kind: Kind::Switch,
+        protocol_kind: Kind::Switch,
+        component: Kind::Switch.component().to_string(),
+        state: EntityState {
+            value: StateValue::OnOff(false),
+            ..Default::default()
+        },
+        ..table_lamp()
+    };
+    house.entities.update(|m| {
+        m.insert(target.id.clone(), target);
+        m.insert(plug.id.clone(), plug);
+    });
+    (host, mounted, house)
+}
+
 fn change(el: &web_sys::Element) {
     let init = web_sys::EventInit::new();
     init.set_bubbles(true);
     el.dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
         .unwrap();
+}
+
+/// The node `id` of the flow the next Save sends.
+async fn saved_node(host: &web_sys::Element, id: &str) -> serde_json::Value {
+    let fetch = FakeFetch::answer(&write_outcome(&result_view()));
+    click(host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let sent = puts(&fetch);
+    let (_, _, body) = sent
+        .last()
+        .unwrap_or_else(|| panic!("no save: {}", host.inner_html()));
+    let flow: serde_json::Value = serde_json::from_str(body).unwrap();
+    flow["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == id)
+        .unwrap_or_else(|| panic!("no node {id}: {body}"))
+        .clone()
+}
+
+#[wasm_bindgen_test]
+async fn command_value_from_result() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "set").await;
+    assert_eq!(count(&host, ".flow-drawer input[type=number]"), 1);
+    let select: web_sys::HtmlSelectElement =
+        element(&host, ".flow-drawer select.value-from").unchecked_into();
+    assert_eq!(select.value(), "");
+    select.set_value("half");
+    change(&select);
+    tick().await;
+    // The number box gives way while a result feeds the command.
+    assert_eq!(
+        count(&host, ".flow-drawer input[type=number]"),
+        0,
+        "{}",
+        host.inner_html()
+    );
+    assert_eq!(
+        text(&host, "[data-node=set] .flow-node__title"),
+        "Set Target to half"
+    );
+    let node = saved_node(&host, "set").await;
+    assert_eq!(node["params"]["value_from"], "half", "{node}");
+    // The literal stays for when the link is cleared.
+    assert_eq!(node["params"]["command"]["value"], 7.0, "{node}");
+}
+
+#[wasm_bindgen_test]
+async fn value_from_is_offered_only_with_math_and_a_number() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "set").await;
+    assert_eq!(count(&host, ".flow-drawer select.value-from"), 1);
+    // A flow with no math card offers nothing to pick.
+    let (plain, _m2, _) = editing(reference_view(None, vec![])).await;
+    select_card(&plain, "on").await;
+    assert_eq!(count(&plain, ".flow-drawer select.value-from"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn if_compares_a_result() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "check").await;
+    open_entity_picker(&host).await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-half']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no result row: {}", host.inner_html()))
+        .unchecked_into();
+    row.click();
+    tick().await;
+    let field = text(&host, ".flow-drawer button.picker-field");
+    assert!(field.contains("half"), "{field}");
+    assert_eq!(
+        text(&host, "[data-node=check] .flow-node__title"),
+        "half > 300?"
+    );
+    let node = saved_node(&host, "check").await;
+    assert_eq!(node["params"]["result"], "half", "{node}");
+    assert!(node["params"].get("entity").is_none(), "{node}");
+    // Choosing a result drops the average the card had.
+    assert!(node["params"].get("average").is_none(), "{node}");
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn notify_inserts_result() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "note").await;
+    // The body's ＋ Value is the second button.
+    let add: web_sys::HtmlElement = host
+        .query_selector_all(".flow-drawer .node-editor__add-value")
+        .unwrap()
+        .item(1)
+        .unwrap()
+        .unchecked_into();
+    add.click();
+    tick().await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-half']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no result row: {}", host.inner_html()))
+        .unchecked_into();
+    row.click();
+    tick().await;
+    let node = saved_node(&host, "note").await;
+    assert_eq!(node["params"]["body"], "{half}", "{node}");
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn changing_the_action_drops_the_result_link() {
+    let (host, _mounted, _) = editing_results().await;
+    select_card(&host, "plug").await;
+    assert_eq!(count(&host, ".flow-drawer select.value-from"), 1);
+    // The Action select is the one that offers "Turn off".
+    let all = host
+        .query_selector_all(".flow-drawer select option")
+        .unwrap();
+    let off: web_sys::Element = (0..all.length())
+        .filter_map(|i| all.item(i))
+        .map(|n| n.unchecked_into::<web_sys::Element>())
+        .find(|o| o.text_content().unwrap_or_default().contains("Turn off"))
+        .unwrap_or_else(|| panic!("no Turn off: {}", host.inner_html()));
+    let action: web_sys::HtmlSelectElement = off.parent_element().unwrap().unchecked_into();
+    action.set_value(&off.get_attribute("value").unwrap());
+    change(&action);
+    tick().await;
+    let node = saved_node(&host, "plug").await;
+    assert_eq!(node["params"]["command"]["type"], "turn_off", "{node}");
+    assert!(node["params"].get("value_from").is_none(), "{node}");
+}
+
+/// Picks the math result `half` on card `id` of a flow whose If and Switch compare the text
+/// entity `sensor.mode` with "idle", then returns the card as the next Save sends it.
+async fn pick_half_on_a_text_comparison(id: &str) -> serde_json::Value {
+    const TEXTY: &str = r#"{
+      "id": "living_led_motion", "name": "Texty", "enabled": true, "mode": "single",
+      "nodes": [
+        { "id": "power", "type": "trigger.state", "params": { "entity": "sensor.power" } },
+        { "id": "half", "type": "math", "params": { "inputs": [], "formula": "1", "name": "half" } },
+        { "id": "check", "type": "if", "params": { "op": "eq", "value": "idle", "entity": "sensor.mode" } },
+        { "id": "pick", "type": "switch", "params": { "entity": "sensor.mode", "rules": [ { "op": "eq", "value": "idle" } ] } }
+      ],
+      "edges": [ { "from": "power", "to": "half" }, { "from": "half", "to": "check" }, { "from": "half", "to": "pick" } ]
+    }"#;
+    let view = FlowView {
+        definition: Flow::decode(TEXTY.as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    };
+    let (host, _mounted, _) = editing(view).await;
+    select_card(&host, id).await;
+    open_entity_picker(&host).await;
+    let row: web_sys::HtmlElement = element(&host, "[id$='-opt-half']").unchecked_into();
+    row.click();
+    tick().await;
+    let node = saved_node(&host, id).await;
+    settle_history().await;
+    node
+}
+
+#[wasm_bindgen_test]
+async fn if_result_makes_the_value_a_number() {
+    let check = pick_half_on_a_text_comparison("check").await;
+    assert_eq!(check["params"]["result"], "half", "{check}");
+    assert!(check["params"]["value"].is_number(), "{check}");
+}
+
+#[wasm_bindgen_test]
+async fn switch_result_makes_the_rule_values_numbers() {
+    let pick = pick_half_on_a_text_comparison("pick").await;
+    assert_eq!(pick["params"]["result"], "half", "{pick}");
+    assert!(pick["params"]["rules"][0]["value"].is_number(), "{pick}");
 }
 
 /// Saves the draft and returns the nodes the PUT sent.

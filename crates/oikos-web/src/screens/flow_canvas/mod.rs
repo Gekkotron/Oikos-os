@@ -9,6 +9,7 @@ mod drawer;
 mod graph;
 mod library;
 mod manual;
+mod math;
 mod settings;
 pub(crate) mod sun;
 mod template_field;

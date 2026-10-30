@@ -42,6 +42,8 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
   - `switch` compares one value with up to 10 rules and has one output per rule (see [Branch on several values](#branch-on-several-values)).
   - `time.between` is true inside a daily range of the clock (see [Only at certain hours](#only-at-certain-hours)).
   - `if` compares a value with `value` using `op` (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`), or uses `op: is_dark`, which is true between civil dusk and civil dawn at the configured point, or `op: is_off_peak`, which is true during off-peak hours. Give `is_dark` an `offset_minutes` (the card's Shift field) to move that window: `-30` makes it dark 30 minutes before civil dusk and keeps it dark until 30 minutes after civil dawn. The two outputs are `true` and `false`. Add `average` (for example `15m`, at most `24h`) to compare the mean of the entity's readings over that window, the newest included, instead of its current value: a temperature whose 30-minute average is 19 or less, rather than one noisy reading.
+- **Computes** a value:
+  - `math` works out a number from entity readings and earlier results, with a formula, and can save it to a number entity (see [Compute a value](#compute-a-value)).
 - **Actions** do something:
   - `command` sends a command to an entity.
   - `notify` sends a phone push notification.
@@ -115,6 +117,7 @@ A `notify` card's title and body can show live values. In the editor, **＋ Valu
 
 - A placeholder reads an entity's value with its unit. `:N` rounds to N decimals (0 to 6); without it a number shows at most 2 decimals.
 - Maths uses `+ - * /` and parentheses. Put spaces around operators: `a-b` is a valid entity id, `a - b` is a subtraction.
+- `{name}`, where `name` is a `math` card's name, prints that card's result from the run, with no unit; `:N` rounds it as for entity values (see [Compute a value](#compute-a-value)).
 - On/off and text values are translated (open/closed, detected/clear, weather conditions, cover, alarm and climate states).
 - A value that is unknown when the step runs prints `?`; the push is still sent. `{trigger}` prints `?` in a run that no state change started (a schedule, the sun, **Run now**). In a run started from a Manual card with a value, `{trigger}` prints that value, with no unit (a text value is worded like any trigger text).
 - The language is the web app's language when the flow is saved, stored as the card's `lang` (`en` or `fr`).
@@ -145,6 +148,53 @@ A `trigger.manual` card starts a run when you press its ▶ button, like Node-RE
 - A flow with several Manual cards can run from any of them: pass the card's id, as `{"node": "test_on"}` in the body of `POST /api/v1/flows/{id}/run` or as the `node` argument of the `run_flow` MCP tool. An id that is not a Manual card of that flow is refused. Without `node`, the run starts from the first trigger node, and carries its value if that node is a Manual card.
 - A disabled, invalid or unknown flow is refused, as for **Run now**.
 - In the editor, the card's settings have an optional **Value** field (No value, On, Off, Number or Text). The ▶ button is greyed out in edit mode ("Save to run from here"), since the saved flow is what runs, and on a disabled flow.
+
+## Compute a value
+
+A `math` card turns house values into one number. Take a water heater that should use only the solar surplus: the power it may draw is what the heater already draws, plus what the meter exports, less a 100 W margin. A `math` card has four parts:
+
+- **Inputs** name the readings the formula uses. `grid` is the power at the meter (negative when the house exports), `heater` is the heater's power, averaged over one minute so one reading does not move the result.
+- **Formula** `clamp(heater - 100 - grid, 0, 1650)` keeps that surplus between 0 and 1650 W. It takes numbers, names, `+ - * / %`, comparisons, `and`, `or`, `not`, `min`, `max`, `abs`, `floor`, `ceil`, `round`, `clamp`, `if` and `interp` (a lookup table, for a curve from one value to another). The [formula grammar](../reference/flow-nodes.md#formula-grammar) lists every rule.
+- **Name** `desired` is how later cards refer to the result.
+- **Save to** writes the result to a number entity, rounded to its step and kept in its range. Leave it out to use the result only inside the run.
+
+This flow heats with the surplus, and does not heat when the tank is already above 72 °C:
+
+```json
+{
+  "id": "water_heater_solar", "name": "Water heater from solar surplus", "enabled": true, "mode": "single",
+  "nodes": [
+    { "id": "grid", "type": "trigger.state", "params": { "entity": "sensor_grid_power" } },
+    { "id": "hot", "type": "if", "params": { "entity": "sensor_tank_temperature", "op": "gt", "value": 72, "missing": "true" } },
+    { "id": "cut", "type": "command", "params": { "entity": "virtual_heater_target", "command": { "type": "set_number", "value": 0 } } },
+    { "id": "target", "type": "math", "params": {
+        "inputs": [
+          { "name": "grid", "entity": "sensor_grid_power" },
+          { "name": "heater", "entity": "sensor_heater_power", "average": "1m" }
+        ],
+        "formula": "clamp(heater - 100 - grid, 0, 1650)",
+        "name": "desired",
+        "save_to": "virtual_heater_target" } }
+  ],
+  "edges": [
+    { "from": "grid", "to": "hot" },
+    { "from": "hot", "port": "true", "to": "cut" },
+    { "from": "hot", "port": "false", "to": "target" }
+  ]
+}
+```
+
+Each run reads the meter. The `if` card takes its `true` output when the tank is above 72, and the `command` card then sets the target to 0. `missing` is `true` so that a tank sensor with no reading counts as too hot: the flow fails safe and never heats blind. Otherwise the `math` card computes `desired` and saves it to `virtual_heater_target`, a [virtual number](groups-and-virtual-entities.md) in watts (0 to 1650). A group of 0 to 100 % channels would need the watts converted to a percentage first, with an `interp` step.
+
+A result can be used by other cards of the same run:
+
+- A `command` card sends it: give the command `"value_from": "desired"`. The number in the command is then ignored, and the result replaces it (for `set_number`, `set_temperature`, `set_position` or a light's brightness).
+- An `if` or `switch` card compares it: `{ "id": "any", "type": "if", "params": { "result": "desired", "op": "gt", "value": 0 } }`.
+- A **notify** text prints it: `{desired:0}` shows the result with no decimals.
+
+A result lasts for one run. A card that reads a result must sit after the card that computes it, on the same path; otherwise the run stops with `no result desired in this run`.
+
+To remember a value between runs, save it to a [virtual number](groups-and-virtual-entities.md) and read that number back as an input on the next run, for example `{ "name": "prev", "entity": "virtual_heater_target" }`. The formula can then smooth the new value with the previous one.
 
 ## Rooms
 

@@ -80,6 +80,7 @@ fn summary_label(lang: Lang, node: &Node) -> String {
         NodeKind::Notify(_) => flow_text(lang, FlowText::Notify).into(),
         NodeKind::Switch(_) => flow_text(lang, FlowText::SwitchCard).into(),
         NodeKind::TimeBetween(_) => flow_text(lang, FlowText::TimeCard).into(),
+        NodeKind::Math(_) => flow_text(lang, FlowText::MathCard).into(),
     }
 }
 

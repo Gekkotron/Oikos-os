@@ -17,15 +17,16 @@ use std::sync::Arc;
 use chrono::Timelike;
 
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
+use oikos_core::flow::math::{fit_to_entity, parse_formula};
 use oikos_core::flow::sun::is_dark_with_offset;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
-    Flow, FlowMode, Missing, Node, NodeKind, OffPeakEdge, Op, Reading, Scalar, Schedule, compare,
-    field_scalar, format_duration, headline_scalar, in_time_range, parse_clock, parse_duration,
-    pick_duration, switch_exits,
+    Flow, FlowMode, MathParams, Missing, Node, NodeKind, OffPeakEdge, Op, Reading, Scalar,
+    Schedule, command_with_number, compare, field_scalar, format_duration, headline_scalar,
+    in_time_range, parse_clock, parse_duration, pick_duration, switch_exits,
 };
 use oikos_core::history::buckets::{Sample, readings_mean};
-use oikos_core::model::StateValue;
+use oikos_core::model::{Command, StateValue};
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, JoinSet};
@@ -939,6 +940,8 @@ pub(super) async fn execute(
     trigger: Option<TriggerInfo>,
 ) -> RunStatus {
     let mut stack = vec![start];
+    // The results of the run's math cards, by name; every branch reads and writes this one map.
+    let mut results: BTreeMap<String, f64> = BTreeMap::new();
     while let Some(id) = stack.pop() {
         let Some(node) = flow.node(&id) else {
             let step = step(&id, StepOutcome::Failed, "unknown node".to_owned(), None);
@@ -947,8 +950,16 @@ pub(super) async fn execute(
             }
             return RunStatus::Failed;
         };
-        let (outcome, detail, ports) =
-            run_node(&hub, &now, &flow.id, &run_id, node, trigger.as_ref()).await;
+        let (outcome, detail, ports) = run_node(
+            &hub,
+            &now,
+            &flow.id,
+            &run_id,
+            node,
+            trigger.as_ref(),
+            &mut results,
+        )
+        .await;
         let branching = matches!(
             node.kind,
             NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_)
@@ -993,6 +1004,7 @@ async fn run_node(
     run_id: &str,
     node: &Node,
     trigger: Option<&TriggerInfo>,
+    results: &mut BTreeMap<String, f64>,
 ) -> (StepOutcome, String, Vec<String>) {
     let failed = |detail: String| (StepOutcome::Failed, detail, Vec::new());
     match &node.kind {
@@ -1059,6 +1071,10 @@ async fn run_node(
                 Err(err) => failed(err.to_string()),
             }
         }
+        NodeKind::Math(params) => match run_math(hub, now, params, trigger, results).await {
+            Ok(detail) => (StepOutcome::Ok, detail, Vec::new()),
+            Err(reason) => failed(reason),
+        },
         NodeKind::TimeBetween(params) => {
             let (Ok(from), Ok(to)) = (parse_clock(&params.from), parse_clock(&params.to)) else {
                 return failed("time is not HH:MM".to_owned());
@@ -1083,7 +1099,9 @@ async fn run_node(
                 params.entity.as_deref(),
                 params.field.as_deref(),
                 params.average.as_deref(),
+                params.result.as_deref(),
                 trigger,
+                results,
             )
             .await
             {
@@ -1110,7 +1128,17 @@ async fn run_node(
         }
         NodeKind::Notify(params) => {
             let lang = params.lang.unwrap_or_default();
-            let lookup = |id: &str| hub.reading(id);
+            // A math result of this run wins over an entity of the same name.
+            let lookup = |id: &str| {
+                results
+                    .get(id)
+                    .map(|value| Reading {
+                        value: Scalar::Number(*value),
+                        unit: None,
+                        device_class: None,
+                    })
+                    .or_else(|| hub.reading(id))
+            };
             // The value the trigger carried, with the unit and words of its entity.
             let trigger = trigger.and_then(|t| {
                 let value = Scalar::from_json(&t.value)?;
@@ -1188,7 +1216,9 @@ async fn run_node(
                 params.entity.as_deref(),
                 params.field.as_deref(),
                 params.average.as_deref(),
+                params.result.as_deref(),
                 trigger,
+                results,
             )
             .await
             {
@@ -1247,12 +1277,37 @@ async fn run_node(
             Err(reason) => failed(reason),
         },
         NodeKind::Command(params) => {
-            match hub
-                .send_command(&params.entity, params.command.clone())
-                .await
-            {
+            let mut kept_in_range = false;
+            let command = match &params.value_from {
+                Some(name) => {
+                    let value = match result_of(results, name) {
+                        Ok(value) => value,
+                        Err(reason) => return failed(reason),
+                    };
+                    match command_with_number(&params.command, value) {
+                        // A number entity takes what fits its range and step, as `save_to` does.
+                        Some(Command::SetNumber { value }) => {
+                            let Some((min, max, step)) = hub.number_limits(&params.entity) else {
+                                return failed(format!("unknown entity `{}`", params.entity));
+                            };
+                            let (fitted, clamped) = fit_to_entity(value, min, max, step);
+                            kept_in_range = clamped;
+                            Command::SetNumber { value: fitted }
+                        }
+                        Some(command) => command,
+                        None => return failed("this command takes no number".to_owned()),
+                    }
+                }
+                None => params.command.clone(),
+            };
+            match hub.send_command(&params.entity, command).await {
                 Ok(response) if response.accepted => {
-                    (StepOutcome::Ok, "accepted".to_owned(), Vec::new())
+                    let detail = if kept_in_range {
+                        "accepted (kept in range)"
+                    } else {
+                        "accepted"
+                    };
+                    (StepOutcome::Ok, detail.to_owned(), Vec::new())
                 }
                 Ok(response) => failed(
                     response
@@ -1265,6 +1320,107 @@ async fn run_node(
     }
 }
 
+/// The result a math card of this run stored under `name`.
+fn result_of(results: &BTreeMap<String, f64>, name: &str) -> Result<f64, String> {
+    results
+        .get(name)
+        .copied()
+        .ok_or_else(|| format!("no result {name} in this run"))
+}
+
+/// A number as shown in a step detail: at most 2 decimals, trailing zeros trimmed.
+fn number_text(value: f64) -> String {
+    let text = format!("{value:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text == "-0" {
+        "0".to_owned()
+    } else {
+        text.to_owned()
+    }
+}
+
+/// Runs a math card: reads its inputs, evaluates the formula, keeps the result under the
+/// card's name for the rest of the run and, with `save_to`, writes it to that number entity
+/// (rounded to its step, kept in its range). Returns the step detail.
+async fn run_math(
+    hub: &Hub,
+    now: &Now,
+    params: &MathParams,
+    trigger: Option<&TriggerInfo>,
+    results: &mut BTreeMap<String, f64>,
+) -> Result<String, String> {
+    let formula = parse_formula(&params.formula).map_err(|err| err.to_string())?;
+    // Each input is read now but fails the step only if the formula reads it (an unused input
+    // or one in an untaken `if` branch never does), so the editor's preview and the hub agree.
+    let mut inputs: Vec<(&str, Result<f64, String>)> = Vec::new();
+    for input in &params.inputs {
+        let value = match &input.average {
+            Some(window) => window_average(hub, &input.entity, None, window, now())
+                .await
+                .map(Scalar::Number),
+            None => hub.entity_scalar(&input.entity),
+        };
+        let number = match value {
+            Some(Scalar::Number(n)) => Ok(n),
+            Some(Scalar::Bool(b)) => Ok(f64::from(u8::from(b))),
+            Some(Scalar::Text(_)) => Err(format!("{} is not a number", input.name)),
+            None => Err(format!("{} is unknown", input.name)),
+        };
+        inputs.push((input.name.as_str(), number));
+    }
+    let trigger_number = trigger.and_then(|t| match &t.value {
+        Value::Number(n) => n.as_f64(),
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        _ => None,
+    });
+    let value = formula.eval(&|name| {
+        if let Some((_, value)) = inputs.iter().find(|(input, _)| *input == name) {
+            value.clone()
+        } else if name == "trigger" {
+            trigger_number.ok_or_else(|| "trigger has no number".to_owned())
+        } else {
+            result_of(results, name)
+        }
+    })?;
+    results.insert(params.name.clone(), value);
+    let shown = inputs
+        .iter()
+        .map(|(name, value)| match value {
+            Ok(value) => format!("{name}={}", number_text(*value)),
+            Err(_) => format!("{name}=?"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut detail = if shown.is_empty() {
+        String::new()
+    } else {
+        format!("{shown} → ")
+    };
+    detail.push_str(&format!("{} = {}", params.name, number_text(value)));
+    let Some(target) = &params.save_to else {
+        return Ok(detail);
+    };
+    let Some((min, max, step)) = hub.number_limits(target) else {
+        return Err(format!("{detail} → unknown entity `{target}`"));
+    };
+    let (saved, clamped) = fit_to_entity(value, min, max, step);
+    detail.push_str(&format!(" → {target} = {}", number_text(saved)));
+    if clamped {
+        detail.push_str(" (kept in range)");
+    }
+    let refusal = match hub
+        .send_command(target, Command::SetNumber { value: saved })
+        .await
+    {
+        Ok(response) if response.accepted => return Ok(detail),
+        Ok(response) => response
+            .reason
+            .unwrap_or_else(|| "command not accepted".to_owned()),
+        Err(err) => err.to_string(),
+    };
+    Err(format!("{detail} → {refusal}"))
+}
+
 /// A scalar as shown in a step detail.
 fn scalar_text(value: &Scalar) -> String {
     match value {
@@ -1274,17 +1430,23 @@ fn scalar_text(value: &Scalar) -> String {
     }
 }
 
-/// The value an `if` or `switch` node compares: `field` of `entity` (else the value that fired
-/// the trigger), as its current value or, with `average`, the mean of its readings over that
-/// window. `Ok(None)` when the value is unknown; `Err` carries the failure reason.
+/// The value an `if` or `switch` node compares: the math result `result`, else `field` of
+/// `entity` (else the value that fired the trigger), as its current value or, with `average`,
+/// the mean of its readings over that window. `Ok(None)` when the value is unknown; `Err` carries the failure reason.
+#[allow(clippy::too_many_arguments)]
 async fn node_left(
     hub: &Hub,
     now: &Now,
     entity: Option<&str>,
     field: Option<&str>,
     average: Option<&str>,
+    result: Option<&str>,
     trigger: Option<&TriggerInfo>,
+    results: &BTreeMap<String, f64>,
 ) -> Result<Option<Scalar>, String> {
+    if let Some(name) = result {
+        return result_of(results, name).map(|value| Some(Scalar::Number(value)));
+    }
     let (entity, field) = match (entity, trigger) {
         (Some(entity), _) => (entity, field),
         (None, Some(trigger)) => match trigger.entity.as_deref() {
@@ -1317,6 +1479,21 @@ fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
             })
             .collect();
         for node in &flow.nodes {
+            if let NodeKind::Math(params) = &node.kind {
+                for input in &params.inputs {
+                    let Some(window) = input
+                        .average
+                        .as_deref()
+                        .and_then(|w| parse_duration(w).ok())
+                    else {
+                        continue;
+                    };
+                    let micros = i64::try_from(window.as_micros()).unwrap_or(i64::MAX);
+                    let longest = windows.entry(input.entity.clone()).or_insert(micros);
+                    *longest = (*longest).max(micros);
+                }
+                continue;
+            }
             let (entity, average) = match &node.kind {
                 NodeKind::If(params) => (&params.entity, &params.average),
                 NodeKind::Switch(params) => (&params.entity, &params.average),
@@ -1669,8 +1846,16 @@ mod tests {
         let check = node(serde_json::json!({
             "id": "c", "type": "if", "params": { "op": "is_off_peak" }
         }));
-        let (outcome, detail, ports) =
-            run_node(&engine.hub, &engine.now, "f", "r", &check, None).await;
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &check,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(ports, ["true"]);
         assert_eq!(detail, "is_off_peak → true");
@@ -1690,7 +1875,16 @@ mod tests {
             "id": "check", "type": "if", "params": params
         }))
         .unwrap();
-        run_node(&engine.hub, &engine.now, "f", "r", &node, None).await
+        run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await
     }
 
     #[tokio::test]
@@ -1745,8 +1939,16 @@ mod tests {
             value: serde_json::json!(17),
             previous: serde_json::json!(20),
         };
-        let (outcome, detail, port) =
-            run_node(&engine.hub, &engine.now, "avg", "r", &node, Some(&trigger)).await;
+        let (outcome, detail, port) = run_node(
+            &engine.hub,
+            &engine.now,
+            "avg",
+            "r",
+            &node,
+            Some(&trigger),
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(detail, "average 30m = 19.0 → true");
         assert_eq!(port, ["true"]);
@@ -1789,12 +1991,38 @@ mod tests {
             "r",
             &node,
             Some(&trigger),
+            &mut BTreeMap::new(),
         )
         .await;
         assert_eq!(outcome, StepOutcome::Ok);
         // The mean is 19, not the current 17 (which would take rule 1).
         assert_eq!(detail, "average 30m = 19.0 → 2");
         assert_eq!(ports, ["2"]);
+    }
+
+    #[test]
+    fn math_input_average_registers_the_window() {
+        let flow = Flow::decode(
+            serde_json::json!({
+                "id": "m", "name": "m", "enabled": true, "mode": "single",
+                "nodes": [
+                    { "id": "t", "type": "trigger.schedule", "params": { "cron": "* * * * *" } },
+                    { "id": "calc", "type": "math", "params": {
+                        "inputs": [
+                            { "name": "a", "entity": "sensor_a", "average": "15m" },
+                            { "name": "b", "entity": "sensor_b" }
+                        ],
+                        "formula": "a + b", "name": "sum" } }
+                ],
+                "edges": [{ "from": "t", "to": "calc" }]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+        let windows = averaged_windows(&[flow]);
+        assert_eq!(windows.len(), 1, "{windows:?}");
+        assert_eq!(windows["sensor_a"], 15 * 60 * 1_000_000);
     }
 
     /// Reports a numeric sensor and returns its entity id.
@@ -1826,8 +2054,16 @@ mod tests {
                 { "op": "between", "value": 18, "to": 22 },
                 { "op": "gt", "value": 22 } ] }
         }));
-        let (outcome, detail, ports) =
-            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(ports, ["2"]);
         assert!(detail.ends_with("→ 2"), "{detail}");
@@ -1841,8 +2077,16 @@ mod tests {
                 "entity": "nobody", "otherwise": true,
                 "rules": [{ "op": "gt", "value": 1 }] }
         }));
-        let (outcome, detail, ports) =
-            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(ports, ["otherwise"]);
         assert_eq!(detail, "unknown → otherwise");
@@ -1856,7 +2100,16 @@ mod tests {
             "id": "s", "type": "switch", "params": {
                 "entity": entity, "rules": [{ "op": "gt", "value": 99 }] }
         }));
-        let (_, detail, ports) = run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        let (_, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert!(ports.is_empty());
         assert_eq!(detail, "20 → none");
     }
@@ -1920,9 +2173,17 @@ mod tests {
         let node = node(serde_json::json!({
             "id": "tm", "type": "time.between", "params": { "from": from, "to": to }
         }));
-        run_node(&engine.hub, &engine.now, "f", "r", &node, None)
-            .await
-            .2
+        run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await
+        .2
     }
 
     #[tokio::test]
@@ -2111,8 +2372,16 @@ mod tests {
             value: serde_json::json!(55),
             previous: serde_json::json!(62),
         };
-        let (outcome, detail, port) =
-            run_node(&engine.hub, &engine.now, "f", "r", &node, Some(&trigger)).await;
+        let (outcome, detail, port) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            Some(&trigger),
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok, "{detail}");
         assert_eq!(port, ["true"]);
     }
@@ -2125,8 +2394,16 @@ mod tests {
             "id": "check", "type": "if",
             "params": { "entity": id, "field": "battery", "op": "lte", "value": 55 }
         }));
-        let (outcome, detail, port) =
-            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        let (outcome, detail, port) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok, "{detail}");
         assert_eq!(port, ["true"]);
     }
@@ -2139,8 +2416,16 @@ mod tests {
             "id": "s", "type": "switch", "params": { "entity": id, "field": "battery",
                 "rules": [{ "op": "lte", "value": 20 }, { "op": "lte", "value": 60 }] }
         }));
-        let (outcome, detail, ports) =
-            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok, "{detail}");
         assert_eq!(ports, ["2"]);
     }
@@ -2173,8 +2458,16 @@ mod tests {
             );
         }
         let node = engine.flows[0].nodes[1].clone();
-        let (outcome, detail, port) =
-            run_node(&engine.hub, &engine.now, "avg", "r", &node, None).await;
+        let (outcome, detail, port) = run_node(
+            &engine.hub,
+            &engine.now,
+            "avg",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok, "{detail}");
         assert_eq!(detail, "average 30m = 19.0 → true");
         assert_eq!(port, ["true"]);

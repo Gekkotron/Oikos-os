@@ -1,6 +1,6 @@
 //! Structural validation of a flow.
 
-use super::{Flow, template};
+use super::{Flow, MathParams, NodeKind, command_with_number, math_names, template};
 
 /// Why a flow is not structurally valid.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -49,6 +49,8 @@ pub enum FlowError {
     BadOperand { node: String, reason: String },
     #[error("node `{node}`: {reason}")]
     BadNotify { node: String, reason: String },
+    #[error("node `{node}`: {reason}")]
+    BadMath { node: String, reason: String },
 }
 
 /// The push channels. Mirrors `oikos_push::normalize::CHANNELS` (`oikos-push` depends on this
@@ -190,6 +192,8 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     Some("missing")
                 } else if p.average.is_some() {
                     Some("average")
+                } else if p.result.is_some() {
+                    Some("result")
                 } else {
                     None
                 };
@@ -212,6 +216,7 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     ("entity", p.entity.is_some()),
                     ("missing", p.missing.is_some()),
                     ("average", p.average.is_some()),
+                    ("result", p.result.is_some()),
                     ("offset_minutes", p.offset_minutes.is_some()),
                 ]
                 .into_iter()
@@ -242,6 +247,12 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     });
                 }
                 Some(value) => {
+                    if p.result.is_some() && !value.is_number() {
+                        return Err(FlowError::BadOperand {
+                            node: node.id.clone(),
+                            reason: "value must be a number with result".to_owned(),
+                        });
+                    }
                     if let Some(window) = &p.average {
                         let bad = |reason: String| FlowError::BadOperand {
                             node: node.id.clone(),
@@ -304,6 +315,9 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                         }
                         (_, None) => {}
                     }
+                    if p.result.is_some() && !rule.value.is_number() {
+                        return Err(bad(format!("rule {n}: value must be a number with result")));
+                    }
                     if p.average.is_some() && !rule.value.is_number() {
                         return Err(bad(format!(
                             "rule {n}: value must be a number with average"
@@ -324,9 +338,11 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     return Err(bad("from and to must differ".to_owned()));
                 }
             }
+            NodeKind::Math(p) => check_math_card(&node.id, p, flow)?,
             _ => {}
         }
     }
+    check_math_references(flow)?;
     for (edge_index, edge) in flow.edges.iter().enumerate() {
         for end in [&edge.from, &edge.to] {
             if flow.node(end).is_none() {
@@ -375,6 +391,116 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     check_ifs_after_valueless_triggers(flow)
 }
 
+/// The per-card rules of a math card: inputs, names, averages and the formula. The hub runs it
+/// at save time and the web editor for its live error line, so they never disagree.
+pub fn check_math_card(node_id: &str, params: &MathParams, flow: &Flow) -> Result<(), FlowError> {
+    use super::{MAX_AVERAGE_SECS, MAX_INPUTS, is_valid_name, parse_duration, parse_formula};
+
+    let bad = |reason: String| FlowError::BadMath {
+        node: node_id.to_owned(),
+        reason,
+    };
+    if params.inputs.len() > MAX_INPUTS {
+        return Err(bad(format!("at most {MAX_INPUTS} inputs")));
+    }
+    let mut input_names = std::collections::HashSet::new();
+    for input in &params.inputs {
+        if !is_valid_name(&input.name) {
+            return Err(bad(format!("`{}` is not a valid name", input.name)));
+        }
+        if !input_names.insert(input.name.as_str()) {
+            return Err(bad(format!("input `{}` is used twice", input.name)));
+        }
+        if let Some(window) = &input.average {
+            match parse_duration(window) {
+                Err(e) => return Err(bad(format!("average: {e}"))),
+                Ok(d) if d.as_secs() > MAX_AVERAGE_SECS => {
+                    return Err(bad("average must be at most 24h".to_owned()));
+                }
+                Ok(_) => {}
+            }
+        }
+    }
+    if !is_valid_name(&params.name) {
+        return Err(bad(format!("`{}` is not a valid name", params.name)));
+    }
+    let formula = parse_formula(&params.formula).map_err(|e| bad(e.reason))?;
+    let others: std::collections::BTreeSet<&str> = flow
+        .nodes
+        .iter()
+        .filter(|n| n.id != node_id)
+        .filter_map(|n| match &n.kind {
+            NodeKind::Math(p) => Some(p.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    for name in formula.names() {
+        if input_names.contains(name) || name == "trigger" {
+            continue;
+        }
+        if name == params.name {
+            return Err(bad(format!(
+                "a math card cannot read its own result `{name}`"
+            )));
+        }
+        if !others.contains(name) {
+            return Err(bad(format!("unknown name `{name}`")));
+        }
+    }
+    Ok(())
+}
+
+/// The links to math results: a command's `value_from`, an `if` or `switch`'s `result`.
+fn check_math_references(flow: &Flow) -> Result<(), FlowError> {
+    let names = math_names(flow);
+    for node in &flow.nodes {
+        let bad = |reason: String| FlowError::BadMath {
+            node: node.id.clone(),
+            reason,
+        };
+        let no_card = |name: &str| bad(format!("no math card is named `{name}`"));
+        match &node.kind {
+            NodeKind::Command(p) => {
+                if let Some(name) = &p.value_from {
+                    if !names.contains(name.as_str()) {
+                        return Err(no_card(name));
+                    }
+                    if command_with_number(&p.command, 0.0).is_none() {
+                        return Err(bad(
+                            "value_from works with set_number, set_temperature, set_position and turn_on"
+                                .to_owned(),
+                        ));
+                    }
+                }
+            }
+            NodeKind::If(p) => {
+                if let Some(name) = &p.result {
+                    if !names.contains(name.as_str()) {
+                        return Err(no_card(name));
+                    }
+                    if p.entity.is_some() || p.average.is_some() || p.missing.is_some() {
+                        return Err(bad(RESULT_CLASH.to_owned()));
+                    }
+                }
+            }
+            NodeKind::Switch(p) => {
+                if let Some(name) = &p.result {
+                    if !names.contains(name.as_str()) {
+                        return Err(no_card(name));
+                    }
+                    if p.entity.is_some() || p.average.is_some() {
+                        return Err(bad(RESULT_CLASH.to_owned()));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+const RESULT_CLASH: &str = "result cannot be combined with entity, average or missing";
+
 /// A schedule, a sun event or a manual trigger without a value has no trigger value, so an `if`
 /// or a `switch` reachable from one must read an entity, unless the `if` is `op: is_dark`, which
 /// reads the sun, or `op: is_off_peak`, which reads the tariff. `time.between` reads the clock and needs none. A manual trigger with a value
@@ -394,13 +520,14 @@ fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
         .collect();
     for node in reachable(flow, valueless) {
         if matches!(&node.kind, NodeKind::If(p)
-            if p.entity.is_none() && !matches!(p.op, Op::IsDark | Op::IsOffPeak))
+            if p.entity.is_none() && p.result.is_none()
+                && !matches!(p.op, Op::IsDark | Op::IsOffPeak))
         {
             return Err(FlowError::IfNeedsEntity {
                 node: node.id.clone(),
             });
         }
-        if matches!(&node.kind, NodeKind::Switch(p) if p.entity.is_none()) {
+        if matches!(&node.kind, NodeKind::Switch(p) if p.entity.is_none() && p.result.is_none()) {
             return Err(FlowError::SwitchNeedsEntity {
                 node: node.id.clone(),
             });
@@ -499,7 +626,8 @@ fn find_cycle(flow: &Flow) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::flow::{Edge, Node, NodeKind, reference_flow};
+    use crate::flow::{Edge, MathParams, Node, NodeKind, reference_flow};
+    use crate::flow::{command_with_number, parse_formula};
 
     fn edge(from: &str, to: &str, port: Option<&str>) -> Edge {
         Edge {
@@ -1132,6 +1260,7 @@ mod tests {
             ("entity", r#"{"op":"is_dark","entity":"e"}"#),
             ("missing", r#"{"op":"is_dark","missing":"true"}"#),
             ("average", r#"{"op":"is_dark","average":"15m"}"#),
+            ("result", r#"{"op":"is_dark","result":"x"}"#),
         ] {
             let err = validate(&flow_with_if_params_json(patch)).unwrap_err();
             assert!(
@@ -1181,6 +1310,7 @@ mod tests {
             ("entity", r#"{"op":"is_off_peak","entity":"e"}"#),
             ("missing", r#"{"op":"is_off_peak","missing":"true"}"#),
             ("average", r#"{"op":"is_off_peak","average":"15m"}"#),
+            ("result", r#"{"op":"is_off_peak","result":"x"}"#),
             (
                 "offset_minutes",
                 r#"{"op":"is_off_peak","offset_minutes":5}"#,
@@ -1317,6 +1447,28 @@ mod tests {
                 time_edges()
             )),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn if_and_switch_result_need_a_number_value() {
+        let reason = |json: &str| match validate(&flow_with_if_params_json(json)) {
+            Err(FlowError::BadOperand { node, reason }) if node == "chk" => reason,
+            other => panic!("expected BadOperand on chk, got {other:?}"),
+        };
+        assert_eq!(
+            reason(r#"{"op":"eq","result":"x","value":"on"}"#),
+            "value must be a number with result"
+        );
+        assert_eq!(
+            reason(r#"{"op":"eq","result":"x","value":true}"#),
+            "value must be a number with result"
+        );
+        assert_eq!(
+            switch_reason(serde_json::json!({
+                "result": "x", "rules": [{ "op": "lt", "value": 1 }, { "op": "eq", "value": "on" }]
+            })),
+            "rule 2: value must be a number with result"
         );
     }
 
@@ -1488,5 +1640,339 @@ mod tests {
             )),
             Ok(())
         );
+    }
+
+    const INTERP: &str = "round(interp(smoothed, [0, 38, 81, 160, 274, 438, 621, 843, 1062, 1270, 1450, 1650, 1947, 2100, 2180, 2200], [0, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100]))";
+
+    /// A state trigger feeding one math card `m` with the given params, then nothing.
+    fn math_flow(params: serde_json::Value) -> Flow {
+        Flow::decode(
+            serde_json::json!({
+                "id": "f", "name": "F",
+                "nodes": [
+                    { "id": "t", "type": "trigger.state", "params": { "entity": "e" } },
+                    { "id": "m", "type": "math", "params": params }
+                ],
+                "edges": [{ "from": "t", "to": "m" }]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    fn math_reason(params: serde_json::Value) -> String {
+        match validate(&math_flow(params)) {
+            Err(FlowError::BadMath { node, reason }) => {
+                assert_eq!(node, "m");
+                reason
+            }
+            other => panic!("expected BadMath, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn math_input_rules() {
+        let many: Vec<_> = (0..11)
+            .map(|i| serde_json::json!({ "name": format!("a{i}"), "entity": "e" }))
+            .collect();
+        assert_eq!(
+            math_reason(serde_json::json!({ "inputs": many, "formula": "1", "name": "r" })),
+            "at most 10 inputs"
+        );
+        assert_eq!(
+            math_reason(serde_json::json!({
+                "inputs": [{ "name": "Bad", "entity": "e" }], "formula": "1", "name": "r"
+            })),
+            "`Bad` is not a valid name"
+        );
+        assert_eq!(
+            math_reason(serde_json::json!({ "formula": "1", "name": "min" })),
+            "`min` is not a valid name"
+        );
+        assert_eq!(
+            math_reason(serde_json::json!({
+                "inputs": [{ "name": "a", "entity": "e" }, { "name": "a", "entity": "f" }],
+                "formula": "a", "name": "r"
+            })),
+            "input `a` is used twice"
+        );
+    }
+
+    #[test]
+    fn math_input_average_follows_the_if_rules() {
+        let with = |average: &str| {
+            math_reason(serde_json::json!({
+                "inputs": [{ "name": "a", "entity": "e", "average": average }],
+                "formula": "a", "name": "r"
+            }))
+        };
+        assert_eq!(with("25h"), "average must be at most 24h");
+        assert!(with("soon").starts_with("average: "));
+    }
+
+    #[test]
+    fn math_formula_rules() {
+        let parse_reason = parse_formula("1 +").unwrap_err().reason;
+        assert_eq!(
+            math_reason(serde_json::json!({ "formula": "1 +", "name": "r" })),
+            parse_reason
+        );
+        assert_eq!(
+            math_reason(serde_json::json!({ "formula": "x + 1", "name": "r" })),
+            "unknown name `x`"
+        );
+        assert_eq!(
+            math_reason(serde_json::json!({ "formula": "r + 1", "name": "r" })),
+            "a math card cannot read its own result `r`"
+        );
+    }
+
+    #[test]
+    fn math_card_may_read_trigger_and_another_card() {
+        let mut flow = math_flow(serde_json::json!({ "formula": "trigger", "name": "a" }));
+        flow.nodes.push(Node {
+            id: "n".into(),
+            name: None,
+            position: None,
+            kind: NodeKind::Math(MathParams {
+                formula: "a + 1".into(),
+                name: "b".into(),
+                ..MathParams::default()
+            }),
+            extra: Default::default(),
+        });
+        flow.edges.push(edge("m", "n", None));
+        assert_eq!(validate(&flow), Ok(()));
+        // Two cards may share a name, and an input may shadow nothing it does not own.
+        flow.nodes[2].kind = NodeKind::Math(MathParams {
+            formula: "1".into(),
+            name: "a".into(),
+            ..MathParams::default()
+        });
+        assert_eq!(validate(&flow), Ok(()));
+    }
+
+    /// A trigger, a math card `slider`, then `after` (a node JSON) fed by it.
+    fn linked_flow(after: serde_json::Value) -> Flow {
+        let mut after = after;
+        after["id"] = "x".into();
+        Flow::decode(
+            serde_json::json!({
+                "id": "f", "name": "F",
+                "nodes": [
+                    { "id": "t", "type": "trigger.state", "params": { "entity": "e" } },
+                    { "id": "m", "type": "math",
+                      "params": { "formula": "trigger", "name": "slider" } },
+                    after
+                ],
+                "edges": [{ "from": "t", "to": "m" }, { "from": "m", "to": "x" }]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    fn bad_math(flow: &Flow, node: &str, reason: &str) {
+        assert_eq!(
+            validate(flow),
+            Err(FlowError::BadMath {
+                node: node.into(),
+                reason: reason.into()
+            })
+        );
+    }
+
+    fn command_node(value_from: &str, command: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "type": "command", "params": {
+            "entity": "n", "command": command, "value_from": value_from } })
+    }
+
+    #[test]
+    fn value_from_rules() {
+        let set_number = serde_json::json!({ "type": "set_number", "value": 0 });
+        assert_eq!(
+            validate(&linked_flow(command_node("slider", set_number.clone()))),
+            Ok(())
+        );
+        bad_math(
+            &linked_flow(command_node("nope", set_number)),
+            "x",
+            "no math card is named `nope`",
+        );
+        bad_math(
+            &linked_flow(command_node(
+                "slider",
+                serde_json::json!({ "type": "toggle" }),
+            )),
+            "x",
+            "value_from works with set_number, set_temperature, set_position and turn_on",
+        );
+    }
+
+    #[test]
+    fn result_rules_on_if_and_switch() {
+        let if_with = |extra: serde_json::Value| {
+            let mut params = serde_json::json!({ "op": "gt", "value": 3, "result": "slider" });
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            linked_flow(serde_json::json!({ "type": "if", "params": params }))
+        };
+        assert_eq!(validate(&if_with(serde_json::json!({}))), Ok(()));
+        let clash = "result cannot be combined with entity, average or missing";
+        bad_math(&if_with(serde_json::json!({ "entity": "e" })), "x", clash);
+        bad_math(&if_with(serde_json::json!({ "average": "5m" })), "x", clash);
+        bad_math(
+            &if_with(serde_json::json!({ "missing": "true" })),
+            "x",
+            clash,
+        );
+        bad_math(
+            &if_with(serde_json::json!({ "result": "nope" })),
+            "x",
+            "no math card is named `nope`",
+        );
+        let switch_with = |extra: serde_json::Value| {
+            let mut params = serde_json::json!({
+                "rules": [{ "op": "gt", "value": 3 }], "result": "slider" });
+            params
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            linked_flow(serde_json::json!({ "type": "switch", "params": params }))
+        };
+        assert_eq!(validate(&switch_with(serde_json::json!({}))), Ok(()));
+        bad_math(
+            &switch_with(serde_json::json!({ "entity": "e" })),
+            "x",
+            clash,
+        );
+        bad_math(
+            &switch_with(serde_json::json!({ "result": "nope" })),
+            "x",
+            "no math card is named `nope`",
+        );
+    }
+
+    #[test]
+    fn result_counts_as_naming_the_value_after_a_schedule() {
+        let flow = Flow::decode(
+            br#"{ "id": "f", "name": "F", "nodes": [
+              { "id": "t", "type": "trigger.schedule", "params": { "cron": "0 * * * *" } },
+              { "id": "m", "type": "math", "params": { "formula": "1", "name": "r" } },
+              { "id": "i", "type": "if", "params": { "op": "gt", "value": 0, "result": "r" } }
+            ], "edges": [{ "from": "t", "to": "m" }, { "from": "m", "to": "i" }] }"#,
+        )
+        .unwrap();
+        assert_eq!(validate(&flow), Ok(()));
+    }
+
+    #[test]
+    fn renamed_math_card_refuses_stale_value_from() {
+        let mut flow = linked_flow(command_node(
+            "slider",
+            serde_json::json!({ "type": "set_number", "value": 0 }),
+        ));
+        assert_eq!(validate(&flow), Ok(()));
+        if let NodeKind::Math(p) = &mut flow.nodes[1].kind {
+            p.name = "percent".into();
+        }
+        bad_math(&flow, "x", "no math card is named `slider`");
+    }
+
+    #[test]
+    fn math_flow_is_valid() {
+        let flow = Flow::decode(
+            serde_json::json!({
+                "id": "heater", "name": "Heater", "mode": "single",
+                "nodes": [
+                    { "id": "t", "type": "trigger.state", "params": { "entity": "grid" } },
+                    { "id": "d", "type": "math", "params": {
+                        "inputs": [
+                            { "name": "grid", "entity": "g" },
+                            { "name": "heater", "entity": "h", "average": "1m" }],
+                        "formula": "clamp(heater - 100 - grid, 0, 1650)", "name": "desired" } },
+                    { "id": "s", "type": "math", "params": {
+                        "inputs": [{ "name": "prev", "entity": "virtual_target" }],
+                        "formula": "if(abs(desired - prev) > 300, 0.1 * prev + 0.9 * desired, 0.6 * prev + 0.4 * desired)",
+                        "name": "smoothed", "save_to": "virtual_target" } },
+                    { "id": "p", "type": "math", "params": {
+                        "formula": INTERP, "name": "slider", "save_to": "group_heater" } },
+                    { "id": "c", "type": "command", "params": {
+                        "entity": "group_heater",
+                        "command": { "type": "set_number", "value": 0 }, "value_from": "slider" } },
+                    { "id": "i", "type": "if", "params": {
+                        "op": "gt", "value": 300, "result": "desired" } }
+                ],
+                "edges": [
+                    { "from": "t", "to": "d" }, { "from": "d", "to": "s" },
+                    { "from": "s", "to": "p" }, { "from": "p", "to": "c" },
+                    { "from": "c", "to": "i" }
+                ]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(validate(&flow), Ok(()));
+    }
+
+    #[test]
+    fn math_round_trips() {
+        let flow = math_flow(serde_json::json!({
+            "inputs": [{ "name": "a", "entity": "e", "average": "5m", "tag": "kept too" }],
+            "formula": "a", "name": "r", "save_to": "virtual_x", "note": "kept"
+        }));
+        let NodeKind::Math(p) = &flow.nodes[1].kind else {
+            panic!("not a math card");
+        };
+        assert_eq!(p.inputs[0].average.as_deref(), Some("5m"));
+        assert_eq!(
+            p.inputs[0].extra.get("tag"),
+            Some(&serde_json::json!("kept too"))
+        );
+        assert_eq!(p.save_to.as_deref(), Some("virtual_x"));
+        assert_eq!(p.extra.get("note"), Some(&serde_json::json!("kept")));
+        assert_eq!(Flow::decode(flow.encode().as_bytes()).unwrap(), flow);
+        assert_eq!(flow.nodes[1].kind.type_name(), "math");
+        assert!(flow.nodes[1].kind.ports().is_empty());
+        assert!(!flow.nodes[1].kind.is_trigger());
+    }
+
+    #[test]
+    fn command_with_number_cases() {
+        use crate::model::{Command, Hs};
+        assert_eq!(
+            command_with_number(&Command::SetPosition { position: 0 }, 104.6),
+            Some(Command::SetPosition { position: 100 })
+        );
+        assert_eq!(
+            command_with_number(&Command::SetNumber { value: 0.0 }, 2.5),
+            Some(Command::SetNumber { value: 2.5 })
+        );
+        assert_eq!(
+            command_with_number(&Command::SetTemperature { temperature: 0.0 }, 19.5),
+            Some(Command::SetTemperature { temperature: 19.5 })
+        );
+        let colour = Hs { h: 10.0, s: 20.0 };
+        assert_eq!(
+            command_with_number(
+                &Command::TurnOn {
+                    brightness: None,
+                    color: Some(colour),
+                    effect: None
+                },
+                127.5
+            ),
+            Some(Command::TurnOn {
+                brightness: Some(128),
+                color: Some(colour),
+                effect: None
+            })
+        );
+        assert_eq!(command_with_number(&Command::Toggle, 1.0), None);
     }
 }

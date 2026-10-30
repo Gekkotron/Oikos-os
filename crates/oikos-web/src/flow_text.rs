@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use oikos_api::{AreaView, EntityView};
 use oikos_core::command::command_name;
 use oikos_core::flow::{
-    Node, NodeKind, OffPeakEdge, Op, RuleOp, SunWhich, fields, parse_duration, template,
+    Node, NodeKind, OffPeakEdge, Op, RuleOp, SunWhich, command_with_number, fields, parse_duration,
+    template,
 };
 use oikos_core::model::{Command, Hs, Kind};
 use oikos_core::vocabulary::Reports;
@@ -43,7 +44,10 @@ pub fn role(kind: &NodeKind) -> Role {
         | NodeKind::TriggerSignal(_)
         | NodeKind::TriggerOffPeak(_) => Role::Trigger,
         NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_) => Role::Check,
-        NodeKind::Command(_) | NodeKind::FlowEnable(_) | NodeKind::Notify(_) => Role::Action,
+        NodeKind::Command(_)
+        | NodeKind::FlowEnable(_)
+        | NodeKind::Notify(_)
+        | NodeKind::Math(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
     }
 }
@@ -318,9 +322,10 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         NodeKind::If(p) if p.op == Op::IsDark => t::is_dark_sentence(lang, p.dark_offset()),
         NodeKind::If(p) if p.op == Op::IsOffPeak => flow_text(lang, FlowText::IsOffPeak).to_owned(),
         NodeKind::If(p) => {
-            let ((e, unit), entity) = match &p.entity {
-                Some(id) => (read_text(id, p.field.as_deref(), ctx), ctx.entities.get(id)),
-                None => (
+            let ((e, unit), entity) = match (&p.result, &p.entity) {
+                (Some(name), _) => ((name.clone(), None), None),
+                (None, Some(id)) => (read_text(id, p.field.as_deref(), ctx), ctx.entities.get(id)),
+                (None, None) => (
                     (flow_text(lang, FlowText::TriggerValue).to_owned(), None),
                     None,
                 ),
@@ -346,11 +351,17 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             &duration_words(&p.for_),
             p.up_to.as_deref().map(duration_words).as_deref(),
         ),
-        NodeKind::Command(p) => command_sentence(&p.command, &p.entity, ctx),
+        NodeKind::Command(p) => match &p.value_from {
+            Some(name) if command_with_number(&p.command, 0.0).is_some() => {
+                t::set_to(lang, &entity_text(&p.entity, ctx), name)
+            }
+            _ => command_sentence(&p.command, &p.entity, ctx),
+        },
         NodeKind::Switch(p) => {
-            let e = match &p.entity {
-                Some(id) => read_text(id, p.field.as_deref(), ctx).0,
-                None => flow_text(lang, FlowText::TriggerValue).to_owned(),
+            let e = match (&p.result, &p.entity) {
+                (Some(name), _) => name.clone(),
+                (None, Some(id)) => read_text(id, p.field.as_deref(), ctx).0,
+                (None, None) => flow_text(lang, FlowText::TriggerValue).to_owned(),
             };
             let e = match p.average.as_deref() {
                 Some(window) => t::average_of(lang, &e, &duration_words(window)),
@@ -359,6 +370,13 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             t::switch_on(lang, &e)
         }
         NodeKind::TimeBetween(p) => t::time_between(lang, &p.from, &p.to),
+        NodeKind::Math(p) => {
+            let head = format!("{} = {}", p.name, p.formula);
+            match &p.save_to {
+                Some(id) => format!("{head} → {}", entity_text(id, ctx)),
+                None => head,
+            }
+        }
         NodeKind::Notify(p) => {
             // Placeholders show the entity's name; a text that does not parse shows as typed.
             let name = |id: &str| ctx.entities.get(id).map(|e| entity_title(lang, e));
@@ -884,6 +902,22 @@ mod tests {
         assert_eq!(subline(&n, &ctx), None);
         assert_eq!(role(&n.kind), Role::Wait);
     }
+
+    #[test]
+    fn cards_that_read_a_math_result_name_it() {
+        let set = r#"{"id":"a","type":"command","params":{"entity":"led","command":{"type":"set_number","value":0},"value_from":"half"}}"#;
+        assert_eq!(text(set), "Set LED to half");
+        assert_eq!(text_in(Lang::Fr, set), "Régler LED sur half");
+        let cmp = r#"{"id":"a","type":"if","params":{"result":"half","op":"gt","value":300}}"#;
+        assert_eq!(text(cmp), "half > 300?");
+        assert_eq!(text_in(Lang::Fr, cmp), "half > 300\u{a0}?");
+        let switch = r#"{"id":"s","type":"switch","params":{"result":"half","rules":[{"op":"lt","value":18}]}}"#;
+        assert_eq!(text(switch), "Switch on half");
+        assert_eq!(text_in(Lang::Fr, switch), "Commuter selon half");
+        // A command with no number ignores a stale link.
+        let off = r#"{"id":"a","type":"command","params":{"entity":"led","command":{"type":"turn_off"},"value_from":"half"}}"#;
+        assert_eq!(text(off), "Turn off LED");
+    }
 }
 
 #[cfg(test)]
@@ -1055,6 +1089,7 @@ mod generic_tests {
                 missing: None,
                 average: average.map(Into::into),
                 offset_minutes: None,
+                result: None,
                 extra: Default::default(),
             }),
             extra: Default::default(),

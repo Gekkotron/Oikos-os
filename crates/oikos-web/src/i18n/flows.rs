@@ -58,6 +58,23 @@ pub enum FlowText {
     SwitchSub,
     TimeCard,
     TimeSub,
+    MathCard,
+    MathSub,
+    MathInputs,
+    MathAddInput,
+    MathRemoveInput,
+    MathInputName,
+    MathNow,
+    MathAverageNote,
+    MathFormula,
+    MathResultName,
+    MathResultHint,
+    MathNameInvalid,
+    MathSaveTo,
+    MathNotSaved,
+    MathFunctions,
+    MathNames,
+    MathSuggestions,
     Otherwise,
     Outside,
     WaitCard,
@@ -170,6 +187,7 @@ pub enum FlowText {
     BackToList,
     Action,
     NoneChoice,
+    ValueFromResult,
     ColourCustom,
     AdvancedJson,
     ParamPosition,
@@ -314,6 +332,23 @@ impl FlowText {
         FlowText::SwitchSub,
         FlowText::TimeCard,
         FlowText::TimeSub,
+        FlowText::MathCard,
+        FlowText::MathSub,
+        FlowText::MathInputs,
+        FlowText::MathAddInput,
+        FlowText::MathRemoveInput,
+        FlowText::MathInputName,
+        FlowText::MathNow,
+        FlowText::MathAverageNote,
+        FlowText::MathFormula,
+        FlowText::MathResultName,
+        FlowText::MathResultHint,
+        FlowText::MathNameInvalid,
+        FlowText::MathSaveTo,
+        FlowText::MathNotSaved,
+        FlowText::MathFunctions,
+        FlowText::MathNames,
+        FlowText::MathSuggestions,
         FlowText::Otherwise,
         FlowText::Outside,
         FlowText::WaitCard,
@@ -424,6 +459,7 @@ impl FlowText {
         FlowText::BackToList,
         FlowText::Action,
         FlowText::NoneChoice,
+        FlowText::ValueFromResult,
         FlowText::ColourCustom,
         FlowText::AdvancedJson,
         FlowText::ParamPosition,
@@ -590,6 +626,38 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
             "Plusieurs sorties, une par règle",
         ),
         T::TimeCard => ("Time of day", "Plage horaire"),
+        T::MathCard => ("Math", "Calcul"),
+        T::MathSub => (
+            "Compute a number from your devices",
+            "Calculer un nombre à partir de vos appareils",
+        ),
+        T::MathInputs => ("Inputs", "Entrées"),
+        T::MathAddInput => ("＋ Input", "＋ Entrée"),
+        T::MathRemoveInput => ("Remove input", "Retirer l'entrée"),
+        T::MathInputName => ("Input name", "Nom de l'entrée"),
+        T::MathNow => ("now", "maintenant"),
+        T::MathAverageNote => (
+            "\u{201c}now\u{201d} switches to an average (1m, 5m, 15m, 1h)",
+            "« maintenant » passe à une moyenne (1m, 5m, 15m, 1h)",
+        ),
+        T::MathFormula => ("Formula", "Formule"),
+        T::MathResultName => ("Result name", "Nom du résultat"),
+        T::MathResultHint => (
+            "Later cards use it: a Command's value, an If or {name} in a notification",
+            "Les cartes suivantes l'utilisent : la valeur d'une Commande, un Si ou {name} dans une notification",
+        ),
+        T::MathNameInvalid => (
+            "Lowercase letters, digits and _, starting with a letter",
+            "Minuscules, chiffres et _, en commençant par une lettre",
+        ),
+        T::MathFunctions => ("ƒ Functions", "ƒ Fonctions"),
+        T::MathNames => ("Names you can use", "Noms utilisables"),
+        T::MathSuggestions => ("Suggestions", "Propositions"),
+        T::MathSaveTo => ("Save to (optional)", "Enregistrer dans (facultatif)"),
+        T::MathNotSaved => (
+            "\u{2014} not saved \u{2014}",
+            "\u{2014} non enregistré \u{2014}",
+        ),
         T::TimeSub => (
             "Inside or outside two times",
             "Dans ou hors d'une plage horaire",
@@ -734,6 +802,7 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::BackToList => ("Back to the list", "Revenir à la liste"),
         T::Action => ("Action", "Action"),
         T::NoneChoice => ("None", "Aucun"),
+        T::ValueFromResult => ("Value from result", "Valeur d'un résultat"),
         T::ColourCustom => ("Custom", "Personnalisée"),
         T::AdvancedJson => ("Advanced (JSON)", "Avancé (JSON)"),
         T::ParamPosition => ("Position", "Position"),
@@ -1234,6 +1303,75 @@ pub fn time_between(lang: Lang, from: &str, to: &str) -> String {
         format!("Between {from} and {to}"),
         format!("Entre {from} et {to}"),
     )
+}
+
+/// The value after "=" under the formula, in the language's number form. Keeps up to three
+/// decimals, so a result like 47.6 is not rounded to 48.
+pub fn math_value(lang: Lang, value: f64) -> String {
+    let rounded = (value * 1000.0).round() / 1000.0;
+    if rounded.fract() == 0.0 || rounded.abs() >= 1000.0 {
+        crate::i18n::format::number(lang, rounded)
+    } else {
+        let text = format!("{rounded}");
+        match lang {
+            Lang::Fr => text.replace('.', ","),
+            Lang::En => text,
+        }
+    }
+}
+
+/// The note beside the preview of a formula whose input averages over `window`: it reads the
+/// current value, not the average.
+pub fn math_averaged_note(lang: Lang, window: &str) -> String {
+    match lang {
+        Lang::En => format!("now, not the {window} average"),
+        Lang::Fr => format!("maintenant, pas la moyenne sur {window}"),
+    }
+}
+
+/// The one-line description of formula function `name` in the Functions menu.
+pub fn function_help(lang: Lang, name: &str) -> &'static str {
+    let (en, fr) = match name {
+        "min" => ("smallest of the values", "la plus petite des valeurs"),
+        "max" => ("largest of the values", "la plus grande des valeurs"),
+        "clamp" => ("keep x between low and high", "garde x entre bas et haut"),
+        "abs" => ("value without its sign", "valeur sans son signe"),
+        "round" => (
+            "nearest whole number, or n decimals",
+            "entier le plus proche, ou n décimales",
+        ),
+        "floor" => ("round down", "arrondi par défaut"),
+        "ceil" => ("round up", "arrondi par excès"),
+        "if" => (
+            "a when the condition is true, else b",
+            "a si la condition est vraie, sinon b",
+        ),
+        "interp" => (
+            "lookup table, straight lines between points",
+            "table de correspondance, droites entre les points",
+        ),
+        _ => ("", ""),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
+    }
+}
+
+/// The warning when the formula fails with the readings as they are now.
+pub fn math_fails(lang: Lang, reason: &str) -> String {
+    match lang {
+        Lang::En => format!("Fails with the readings now: {reason}"),
+        Lang::Fr => format!("Échoue avec les valeurs actuelles : {reason}"),
+    }
+}
+
+/// Why the formula shows no preview: `name` has no value in the editor.
+pub fn math_unknown(lang: Lang, name: &str) -> String {
+    match lang {
+        Lang::En => format!("No preview: {name} has no value here"),
+        Lang::Fr => format!("Pas d'aperçu : {name} n'a pas de valeur ici"),
+    }
 }
 
 /// The note under the rule list after a delete or an Otherwise toggle took wires with it:

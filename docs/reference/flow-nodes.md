@@ -171,6 +171,7 @@ Branches on a comparison.
 | `missing` | `fail`, `true` or `false`, optional | What to do when the value is unknown. Refused with `is_dark` and `is_off_peak`. |
 | `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window instead of its current value. `value` must then be a number. Refused with `is_dark` and `is_off_peak`. |
 | `offset_minutes` | integer in [-720, 720], optional | With `is_dark` only. Moves civil dusk by this many minutes and civil dawn by the opposite. Absent means 0. Refused with every other op. |
+| `result` | string, optional | The `name` of a [`math`](#math) card. Its result of this run is compared instead of an entity's value, as a number. Refused together with `entity`, `average` or `missing`; `value` must then be a number. A result missing from the run fails the node (`no result x in this run`); `missing` does not apply to it. |
 
 Outputs: two ports, `true` and `false`. Every edge leaving an `if` names one.
 
@@ -201,6 +202,7 @@ Branches on several values at once: one output per rule, tried in order. It is a
 | `entity` | string, optional | The entity whose current scalar is read, live. Absent: the entity that triggered the run. |
 | `field` | string, optional | A value inside `entity`'s state, with the same rules as the [`if`](#if) `field`. |
 | `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window, as for the [`if`](#if) `average`. Every rule `value` (and `to`) must then be a number. |
+| `result` | string, optional | The `name` of a [`math`](#math) card. Its result of this run is switched on instead of an entity's value. Refused together with `entity` or `average`; every rule's `value` must then be a number. A result missing from the run fails the node. |
 | `otherwise` | bool, default `false` | Adds an `otherwise` port, taken when no rule matches. |
 | `all` | bool, default `false` | Take every matching rule instead of the first one only. |
 
@@ -239,6 +241,75 @@ Example: three bands of temperature, with a fallback.
 Edges leave it with `"port": "1"`, `"2"`, `"3"` or `"otherwise"`. A reading of 22 takes port `2`; a reading of 22.5 takes port `3`; an unknown reading takes `otherwise`.
 
 A `switch` refuses to save when `rules` is empty or has more than 10 entries, a rule has a `value` that is not a bool, number or string, `to` is missing with `between` or present with another op, `between` is given non-numbers or `to` is less than `value`, or `average` is badly formed, over `24h`, or used with a non-numeric rule value.
+
+## `math`
+
+Computes one number from entity readings and from the results of earlier `math` cards, and can save it to a number entity. The result is kept for the rest of the run, so a later `command` (`value_from`), `if` or `switch` (`result`) or `notify` text (`{name}`) can use it.
+
+| Param | Type | Description |
+| --- | --- | --- |
+| `inputs` | list, 0 to 10 | Each `{name, entity, average?}`. `name` is how the formula refers to the entity's value: `[a-z][a-z0-9_]{0,31}`, unique within the card. `average` (optional) is a window such as `15m` or `1h`, at most `24h`, that reads the mean of the entity's readings instead of its current value, on the same terms as an `if`'s `average`. |
+| `formula` | string, 1 to 500 characters | The expression, see the grammar below. |
+| `name` | string | The result's name, used by later cards. The same form as an input name, and not a function name or one of `and`, `or`, `not`, `trigger`. |
+| `save_to` | string, optional | A `number` entity (a device, a `virtual_*` or a `group_*` number) the result is written to with `set_number`. |
+
+A formula can read:
+
+- its own inputs, by name;
+- the result of any **other** `math` card of the same flow, by that card's `name`;
+- `trigger`: the run's trigger value, when it is a number (a bool reads as 1 or 0). A run with no number in its trigger (a schedule, a sun event, a Manual card without a value) fails the step with `trigger has no number`.
+
+An input reads a number as itself and an on/off value as 1 or 0. An unknown or unavailable entity, a text value, or an `average` with no numeric reading fails the step (`grid is unknown`, or `grid is not a number` for text).
+
+### Formula grammar
+
+- Numbers (`12`, `0.5`, `-3`), names and parentheses.
+- Arithmetic `+ - * / %` and unary `-`, with the usual precedence, left-associative.
+- Comparisons `< <= > >= == !=` give 1 or 0. `and`, `or` and `not` treat a non-zero value as true and give 1 or 0.
+- Whitespace is optional: names are plain identifiers, so `heater-100-grid` is a subtraction. Write spaces for readability.
+
+| Function | Result |
+| --- | --- |
+| `min(a, b, …)`, `max(a, b, …)` | The least or the greatest argument. One or more arguments. |
+| `abs(x)`, `floor(x)`, `ceil(x)` | The absolute value, the value rounded down, the value rounded up. |
+| `round(x)`, `round(x, n)` | Rounds to `n` decimals, 0 to 6 (0 when absent), halves away from zero. |
+| `clamp(x, low, high)` | `x` kept between `low` and `high`. Refused on save when both bounds are numbers and `low` is above `high`. |
+| `if(condition, then, else)` | `then` when the condition is non-zero, else `else`. Only the taken branch is evaluated, so `if(b != 0, a / b, 0)` never divides by zero. |
+| `interp(x, [x0, x1, …], [y0, y1, …])` | Linear interpolation in a lookup table: below `x0` gives `y0`, above the last `x` gives the last `y`. The two lists are literals of the same length, 2 to 50 points, with `x` strictly increasing. |
+
+A formula is at most 500 characters, nested at most 32 levels deep, and a card has at most 10 inputs.
+
+### Saving and refusing
+
+A flow is refused on save when:
+
+- a `name` or an input `name` is not a valid name, or an input name is used twice;
+- an `average` is badly formed or over `24h`;
+- the formula does not parse, uses a function or a list it does not accept, or names something that is neither an input, `trigger` nor another math card's `name` (`unknown name x`); a card cannot read its own `name`;
+- an `interp` table is malformed, or a `clamp` has literal bounds with `low` above `high`;
+- an input `entity` or `save_to` is not in the house (`unknown entity`), or `save_to` is not a number entity;
+- the card's `name` is also an entity id of the house, so a `{name}` placeholder is never ambiguous.
+
+### Behaviour in a run
+
+- The step runs its inputs, evaluates the formula and keeps the result under `name`. A later card of the same run reads it. Results do not outlive the run.
+- A card that runs again in the same run (in a loop path) overwrites its earlier result. Two cards may share a `name` when they sit on different branches and compute the same result. A card after a fork sees the results of sibling branches that ran before it, in edge order, so compute a value on the path that needs it.
+- A step fails, and the run ends as `failed`, on: division or `%` by zero, a result that is not a finite number, a `clamp` whose bounds have crossed at run time, `round` with `n` outside 0 to 6, an input the formula reads that is unknown or not a number (an input in the untaken branch of `if`, or one the formula never names, does not fail the step), a `trigger` with no number, or a name whose math card did not run on this path (`no result desired in this run`).
+- With `save_to`, the card then sends `set_number` to that entity. The value is rounded to the entity's `step` and kept inside its `min` and `max` when the entity announces them; the step detail adds `(kept in range)` when it was clamped. The step succeeds only when the command is accepted, like a `command` card, and fails with the entity's refusal reason otherwise. The result kept for the run is the exact computed value, before rounding.
+- Saving to a virtual number and reading it back as an input on the next run is how a flow remembers a value (for example, to smooth a target from one run to the next).
+
+The step detail shows the inputs read, the result and the save, for example `grid=-412, heater=820 → desired = 1132 → virtual_heater_target = 1132`.
+
+```json
+{ "id": "target", "type": "math", "params": {
+    "inputs": [
+      { "name": "grid", "entity": "sensor_grid_power" },
+      { "name": "heater", "entity": "sensor_heater_power", "average": "1m" }
+    ],
+    "formula": "clamp(heater - 100 - grid, 0, 1650)",
+    "name": "desired",
+    "save_to": "virtual_heater_target" } }
+```
 
 ## `time.between`
 
@@ -286,6 +357,9 @@ Sends a command to an entity.
 | --- | --- | --- |
 | `entity` | string | The entity id. |
 | `command` | object | The same JSON as the API's `Command`, for example `{"type": "turn_on", "brightness": 200}`. See [MCP tools](mcp-tools.md#commands). |
+| `value_from` | string, optional | The `name` of a [`math`](#math) card. Its result replaces the command's number: `set_number`'s `value`, `set_temperature`'s `temperature`, `set_position`'s `position` (rounded, kept between 0 and 100) or `turn_on`'s `brightness` (rounded, kept between 0 and 255). Refused on save with any other command type, and with a name that is no math card of the flow. |
+
+With `value_from`, the number in `command` stays in the JSON (the web editor shows it when the option is switched off) and is ignored. A result that is missing from the run fails the node (`no result x in this run`). On a `set_number` command the number is fitted to the target entity like a math card's `save_to`: rounded to its `step` and kept inside its `min` and `max`, and the step detail reads `accepted (kept in range)` when it was clamped.
 
 Outputs: one. The command goes through the hub's command path, confirmed by the entity's state echo within the `commands.confirm_timeout_ms` setting (default 5000), exactly like `send_command`. No echo, a rejection or an offline entity fails the node.
 
@@ -308,6 +382,8 @@ Sends a phone push notification.
 | `lang` | string, optional | The language placeholder values are written in: `en` (default) or `fr`. The web editor sets it on save. |
 
 Outputs: one. The step fails if the push service rejects the alert.
+
+A placeholder named after a [`math`](#math) card (`{name}`, or `{name:2}` to round) prints that card's result from this run; a result the run did not compute prints `?`. A math result wins over an entity of the same name, and the hub refuses a math `name` that is an entity id, so the two never clash.
 
 ## `flow.enable`
 
