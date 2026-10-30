@@ -35,6 +35,16 @@ pub fn power_pair_of(entities: &BTreeMap<String, EntityView>, id: &str) -> Optio
     EnergyMeters::counter_power(&ee, &all).map(|p| p.id.clone())
 }
 
+/// The entity whose last 24 hours stand for `id`, as its history chart draws them: an energy
+/// counter's paired power sensor, else `id` itself.
+pub fn day_curve_of(entities: &BTreeMap<String, EntityView>, id: &str) -> String {
+    entities
+        .get(id)
+        .filter(|e| flavor_for_unit(e.unit.as_deref()) == Flavor::Counter)
+        .and_then(|_| power_pair_of(entities, id))
+        .unwrap_or_else(|| id.to_owned())
+}
+
 /// Parse the `range` query parameter (`1h`, `6h`, `24h`, `7d`, `30d`, `1y`); default `24h`.
 pub fn parse_range(raw: Option<String>) -> HistoryRange {
     raw.as_deref()
@@ -212,6 +222,60 @@ mod tests {
         assert_eq!(flavor_for_unit(Some("W")), Flavor::Series);
         assert_eq!(flavor_for_unit(Some("°C")), Flavor::Series);
         assert_eq!(flavor_for_unit(None), Flavor::Series);
+    }
+
+    fn sensor(id: &str, label: &str, class: &str, unit: &str) -> EntityView {
+        use oikos_core::model::{Capabilities, EntityCategory, EntityState, Kind, UiOverride};
+        EntityView {
+            id: id.into(),
+            device_id: Some("inverter".into()),
+            name: label.into(),
+            device_name: Some("Inverter".into()),
+            label: Some(label.into()),
+            kind: Kind::Sensor,
+            component: Kind::Sensor.component().to_string(),
+            protocol_kind: Kind::Sensor,
+            device_class: Some(class.into()),
+            unit: Some(unit.into()),
+            icon: None,
+            category: EntityCategory::Primary,
+            enabled_by_default: true,
+            area: "garage".into(),
+            part_of: None,
+            capabilities: Capabilities::default(),
+            ui: UiOverride::default(),
+            state: EntityState::default(),
+        }
+    }
+
+    #[test]
+    fn day_curve_of_a_counter_is_its_paired_power_sensor() {
+        let entities: BTreeMap<String, EntityView> = [
+            sensor("inverter_energy_1", "Energy panel 1", "energy", "Wh"),
+            sensor("inverter_power_1", "Power panel 1", "power", "W"),
+            sensor("inverter_temp", "Temperature", "temperature", "°C"),
+        ]
+        .into_iter()
+        .map(|e| (e.id.clone(), e))
+        .collect();
+        assert_eq!(
+            day_curve_of(&entities, "inverter_energy_1"),
+            "inverter_power_1"
+        );
+        assert_eq!(
+            day_curve_of(&entities, "inverter_power_1"),
+            "inverter_power_1"
+        );
+        assert_eq!(day_curve_of(&entities, "inverter_temp"), "inverter_temp");
+        assert_eq!(day_curve_of(&entities, "gone"), "gone");
+
+        // A counter without a power sensor keeps its own curve.
+        let mut alone = entities;
+        alone.remove("inverter_power_1");
+        assert_eq!(
+            day_curve_of(&alone, "inverter_energy_1"),
+            "inverter_energy_1"
+        );
     }
 
     #[test]
