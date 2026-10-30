@@ -378,6 +378,22 @@ async fn vacuum_tile_is_wide_with_sentence() {
 }
 
 #[wasm_bindgen_test]
+async fn vacuum_drawing_sweeps_dust_only_while_cleaning() {
+    let count = |host: &web_sys::Element, selector: &str| {
+        host.query_selector_all(selector).unwrap().length()
+    };
+    let host = mount(vacuum("cleaning"), None);
+    tick().await;
+    assert_eq!(count(&host, "svg.robot--cleaning .robot__brush"), 1);
+    assert_eq!(count(&host, "svg.robot .robot__dust"), 22);
+    // Docked: the brush is still drawn, the dust is gone.
+    let host = mount(vacuum("docked"), None);
+    tick().await;
+    assert_eq!(count(&host, "svg.robot .robot__brush"), 1);
+    assert_eq!(count(&host, "svg.robot .robot__dust"), 0);
+}
+
+#[wasm_bindgen_test]
 async fn vacuum_sheet_has_full_controls() {
     let host = mount(vacuum("cleaning"), Some(CardPlace::Sheet));
     tick().await;

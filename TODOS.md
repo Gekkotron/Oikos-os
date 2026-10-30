@@ -35,8 +35,6 @@ Spec: `docs/superpowers/specs/2026-10-22-climate-engine-design.md`. Plan: `docs/
 ### Hub & web polish
 
 - [ ] Dashboard-wide search bar — the current search is only on the Z2M diagnostics screen (`screens/devices.rs`); add an equivalent on the dashboard/Home so any entity can be found by name across rooms.
-- [ ] Card titles break mid-word on the entity sheet readout card.
-- [ ] Vacuum card animation — while the vacuum is cleaning, show a small brush in the card's top-right corner that moves (spins or sweeps), idle otherwise. See `cards/vacuum.rs`, `components/robot.rs` and the vacuum rules in `styles/cards.css`; respect `prefers-reduced-motion`.
 - [ ] Address the ~47 deferred minors from the flow-canvas redesign SDD ledger (`.superpowers/sdd/2026-10-20-flow-canvas-redesign/`).
 - [ ] Housekeeping: cap/clean `target/` so it stops filling the disk.
 - [ ] System health screen + uptime history — record the hub's uptime, CPU, RAM, disk and temperature over time (and the broker / Z2M / database up or down), and add a screen that shows the current values and their history. Today `oikos-watchdog` only pushes gateway and ACL alerts; nothing is stored or shown.
