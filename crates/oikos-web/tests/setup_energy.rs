@@ -196,6 +196,52 @@ async fn off_peak_from_the_card_keeps_the_rest_of_home_settings() {
     assert_eq!(sent, expected);
 }
 
+#[wasm_bindgen_test]
+async fn off_peak_card_saves_the_device_and_keeps_the_rest() {
+    let stub = FetchStub::install();
+    let doc = r#"{"eco_setpoint":17.5,"mode_entity":null,"indoor_entity":null,"cold_below":null,"hot_above":null,"energy_view":"orbite","off_peak":[],"off_peak_history":[],"off_peak_device":{"entity":"sensor.tariff","values":["OFF"]}}"#;
+    stub.reply("GET", "/api/v1/home/settings", 200, doc);
+    stub.reply("PUT", "/api/v1/home/settings", 200, doc);
+    let host = mount(house_with(vec![sensor("sensor.tariff", "enum", None)]));
+    settle().await;
+    // With a device set, the windows read as its backup.
+    let text = host.text_content().unwrap_or_default();
+    assert!(text.contains("Backup windows"), "{text}");
+    let save: web_sys::HtmlElement = host
+        .query_selector(".home-settings__save")
+        .unwrap()
+        .expect("save button")
+        .unchecked_into();
+    save.click();
+    settle().await;
+    let puts: Vec<serde_json::Value> = stub
+        .requests()
+        .into_iter()
+        .filter(|r| r.method == "PUT" && r.url == "/api/v1/home/settings")
+        .map(|r| serde_json::from_str(&r.body).unwrap())
+        .collect();
+    let expected: serde_json::Value = serde_json::from_str(doc).unwrap();
+    assert_eq!(puts.last(), Some(&expected));
+
+    let remove: web_sys::HtmlElement = host
+        .query_selector(".home-settings__device-clear")
+        .unwrap()
+        .expect("remove device button")
+        .unchecked_into();
+    remove.click();
+    tick().await;
+    save.click();
+    settle().await;
+    let sent: serde_json::Value = stub
+        .requests()
+        .into_iter()
+        .rfind(|r| r.method == "PUT")
+        .map(|r| serde_json::from_str(&r.body).unwrap())
+        .unwrap();
+    assert!(sent.get("off_peak_device").is_none(), "{sent}");
+    assert_eq!(sent["off_peak"], serde_json::json!([]));
+}
+
 fn with_role(e: &EntityView, role: Option<&str>) -> String {
     let mut e = e.clone();
     e.ui.energy_role = role.map(Into::into);

@@ -9,7 +9,9 @@ use serde_json::json;
 use crate::house::House;
 use crate::i18n::setup::{SetupText, setup_text, use_setup_text};
 use crate::i18n::{HomeText, Lang, home_text, use_lang};
-use crate::screens::home_settings_panel::{Draft, OffPeakEditor, off_peak_windows};
+use crate::screens::home_settings_panel::{
+    Draft, OffPeakEditor, off_peak_device, off_peak_windows,
+};
 
 /// Sensors that can stand for a role: those that read energy or power, sorted by name.
 pub fn role_candidates(entities: &[EntityView]) -> Vec<EntityView> {
@@ -212,7 +214,8 @@ pub fn EnergyPanel() -> impl IntoView {
 }
 
 /// The off-peak editor with its own Save. A save reads the settings document again and puts
-/// it back with only `off_peak` replaced, so the other home settings travel unchanged.
+/// it back with only `off_peak` and `off_peak_device` replaced, so the other home settings
+/// travel unchanged.
 #[component]
 fn OffPeakCard() -> impl IntoView {
     let house = use_context::<House>();
@@ -233,7 +236,11 @@ fn OffPeakCard() -> impl IntoView {
     leptos::task::spawn_local(async move {
         match crate::api::home::get_home_settings().await {
             Ok(s) => {
-                draft.try_update(|d| d.off_peak = Draft::new(Lang::En, &s).off_peak);
+                let fresh = Draft::new(Lang::En, &s);
+                draft.try_update(|d| {
+                    d.off_peak = fresh.off_peak;
+                    d.off_peak_device = fresh.off_peak_device;
+                });
                 loaded.try_set(Some(Ok(())));
             }
             Err(e) => {
@@ -248,11 +255,14 @@ fn OffPeakCard() -> impl IntoView {
         saving.set(true);
         saved.set(false);
         problem.set(None);
-        let rows = draft.get_untracked().off_peak;
+        let edited = draft.get_untracked();
+        let rows = edited.off_peak.clone();
+        let device = off_peak_device(&edited);
         leptos::task::spawn_local(async move {
             let result = async {
                 let mut settings = crate::api::home::get_home_settings().await?;
                 settings.off_peak = off_peak_windows(&rows);
+                settings.off_peak_device = device;
                 crate::api::home::put_home_settings(&settings).await
             }
             .await;
