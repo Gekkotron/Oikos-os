@@ -1000,6 +1000,7 @@ mod generic_tests {
                 op: Op::Lte,
                 value: Some(json!(19)),
                 entity: Some("Temperature".into()),
+                field: None,
                 missing: None,
                 average: average.map(Into::into),
                 offset_minutes: None,

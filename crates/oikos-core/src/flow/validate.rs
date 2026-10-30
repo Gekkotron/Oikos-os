@@ -39,6 +39,8 @@ pub enum FlowError {
     SwitchNeedsEntity { node: String },
     #[error("node `{node}`: an average after a manual trigger must name an entity")]
     AverageNeedsEntity { node: String },
+    #[error("node `{node}`: a field needs an entity")]
+    FieldWithoutEntity { node: String },
     #[error("node `{node}`: `{flow}` is not a valid flow id")]
     BadFlowTarget { node: String, flow: String },
     #[error("node `{node}`: offset_minutes {offset_minutes} is outside [-720, 720]")]
@@ -115,6 +117,16 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
         }
     }
     for node in &flow.nodes {
+        let field_without_entity = match &node.kind {
+            NodeKind::If(p) => p.field.is_some() && p.entity.is_none(),
+            NodeKind::Switch(p) => p.field.is_some() && p.entity.is_none(),
+            _ => false,
+        };
+        if field_without_entity {
+            return Err(FlowError::FieldWithoutEntity {
+                node: node.id.clone(),
+            });
+        }
         match &node.kind {
             NodeKind::Delay(p) => {
                 if let Err(reason) = p.bounds() {
@@ -637,6 +649,34 @@ mod tests {
             err.to_string(),
             "node `moving`: value must be a boolean, a number or a string"
         );
+    }
+
+    #[test]
+    fn field_without_entity_is_refused() {
+        let flow = |kind: &str, params: serde_json::Value| {
+            let text = serde_json::json!({
+                "id": "f", "name": "F",
+                "nodes": [
+                    { "id": "t", "type": "trigger.state", "params": { "entity": "r" } },
+                    { "id": "mid", "type": kind, "params": params }
+                ],
+                "edges": [{ "from": "t", "to": "mid" }]
+            });
+            Flow::decode(text.to_string().as_bytes()).unwrap()
+        };
+        let if_flow = flow(
+            "if",
+            serde_json::json!({ "op": "lte", "value": 55, "field": "battery" }),
+        );
+        let switch_flow = flow(
+            "switch",
+            serde_json::json!({ "field": "battery", "rules": [{ "op": "lte", "value": 55 }] }),
+        );
+        for f in [if_flow, switch_flow] {
+            let err = validate(&f).unwrap_err();
+            assert_eq!(err, FlowError::FieldWithoutEntity { node: "mid".into() });
+            assert_eq!(err.to_string(), "node `mid`: a field needs an entity");
+        }
     }
 
     #[test]

@@ -554,6 +554,7 @@ impl Engine {
             if online {
                 let trigger = TriggerInfo {
                     entity: now.device.clone(),
+                    field: None,
                     value: Value::String(edge.wire_name().to_owned()),
                     previous: Value::String(other.to_owned()),
                 };
@@ -633,6 +634,7 @@ impl Engine {
         }
         let trigger = TriggerInfo {
             entity: Some(id.to_owned()),
+            field: None,
             value: Value::String("PRESS".to_owned()),
             previous: Value::Null,
         };
@@ -659,6 +661,7 @@ impl Engine {
         }
         let trigger = TriggerInfo {
             entity: Some(id.to_owned()),
+            field: None,
             value: Value::String(signal.to_owned()),
             previous: Value::Null,
         };
@@ -726,6 +729,7 @@ impl Engine {
         }
         let trigger = TriggerInfo {
             entity: Some(id.to_owned()),
+            field: None,
             value: next.to_json(),
             previous: previous.to_json(),
         };
@@ -873,6 +877,7 @@ pub(crate) fn manual_trigger(flow: &Flow, node: &str) -> Option<TriggerInfo> {
     };
     Some(TriggerInfo {
         entity: None,
+        field: None,
         value: params.value.as_ref()?.to_json(),
         previous: Value::Null,
     })
@@ -1692,6 +1697,7 @@ mod tests {
         let node = engine.flows[0].nodes[1].clone();
         let trigger = TriggerInfo {
             entity: Some(entity.clone()),
+            field: None,
             value: serde_json::json!(17),
             previous: serde_json::json!(20),
         };
@@ -1728,6 +1734,7 @@ mod tests {
         let node = engine.flows[0].nodes[1].clone();
         let trigger = TriggerInfo {
             entity: Some(entity.clone()),
+            field: None,
             value: serde_json::json!(17),
             previous: serde_json::json!(20),
         };
