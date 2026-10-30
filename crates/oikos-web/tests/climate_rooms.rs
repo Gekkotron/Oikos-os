@@ -9,6 +9,7 @@ use oikos_climate::view::{LearnStatus, ZoneView};
 use oikos_web::climate::proposal::RulesPanel;
 use oikos_web::climate::room_list::RoomList;
 use oikos_web::climate::room_panel::RoomPanel;
+use oikos_web::climate::target_stepper::TargetStepper;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
 use oikos_web::i18n::Lang;
@@ -455,4 +456,175 @@ async fn the_room_follows_the_language_without_a_remount() {
         hold.get_attribute("aria-label").as_deref(),
         Some("Hold temperature")
     );
+}
+
+const OVERRIDE_URL: &str = "/api/v1/climate/zones/living-room/override";
+
+/// The − / + stepper alone, in English, over a zone the test can change.
+async fn mount_stepper(current: RwSignal<ZoneView>) -> Element {
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(RwSignal::new(Lang::En));
+        view! {
+            <TargetStepper
+                zone=current.into()
+                now=Signal::from((Day::Mon, 0))
+                on_changed=Callback::new(|_| {})
+            />
+        }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+    host
+}
+
+fn stepper_value(host: &Element) -> String {
+    host.query_selector(".climate-stepper__value")
+        .unwrap()
+        .expect("target value")
+        .text_content()
+        .unwrap_or_default()
+}
+
+fn step_button(host: &Element, label: &str) -> HtmlElement {
+    let all = host.query_selector_all(".climate-stepper__step").unwrap();
+    (0..all.length())
+        .filter_map(|i| all.item(i))
+        .map(|n| n.unchecked_into::<HtmlElement>())
+        .find(|b| b.get_attribute("aria-label").as_deref() == Some(label))
+        .unwrap_or_else(|| panic!("no {label} button"))
+}
+
+fn posts(stub: &FetchStub) -> Vec<String> {
+    stub.requests()
+        .into_iter()
+        .filter(|r| r.method == "POST" && r.url == OVERRIDE_URL)
+        .map(|r| r.body)
+        .collect()
+}
+
+async fn past_the_pause() {
+    gloo_timers::future::TimeoutFuture::new(1_600).await;
+    settle().await;
+}
+
+#[wasm_bindgen_test]
+async fn taps_send_one_hold_after_the_pause() {
+    let stub = FetchStub::install();
+    stub.reply("POST", OVERRIDE_URL, 200, "{}");
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let host = mount_stepper(current).await;
+    assert_eq!(stepper_value(&host), "19°");
+
+    let raise = step_button(&host, "Raise target");
+    for _ in 0..3 {
+        raise.click();
+        tick().await;
+    }
+    assert_eq!(stepper_value(&host), "20.5°");
+    assert!(posts(&stub).is_empty(), "nothing sent while tapping");
+
+    past_the_pause().await;
+    let sent = posts(&stub);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(sent[0].contains("\"setpoint\":20.5"), "{}", sent[0]);
+    assert!(sent[0].contains("\"minutes\":120"), "{}", sent[0]);
+    let chips = host
+        .query_selector(".climate-stepper__chips")
+        .unwrap()
+        .expect("duration chips");
+    let text = chips.text_content().unwrap_or_default();
+    assert!(text.contains("1 h") && text.contains("2 h"), "{text}");
+    assert!(!text.contains("Until next change"), "{text}");
+}
+
+#[wasm_bindgen_test]
+async fn a_refetch_during_the_wait_keeps_the_new_target() {
+    let stub = FetchStub::install();
+    stub.reply("POST", OVERRIDE_URL, 200, "{}");
+    let base = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    let current = RwSignal::new(base.clone());
+    let host = mount_stepper(current).await;
+
+    step_button(&host, "Raise target").click();
+    tick().await;
+    assert_eq!(stepper_value(&host), "19.5°");
+    current.set(ZoneView {
+        reading: Some(18.0),
+        ..base.clone()
+    });
+    settle().await;
+    assert_eq!(stepper_value(&host), "19.5°", "a refetch before the send");
+
+    past_the_pause().await;
+    assert_eq!(posts(&stub).len(), 1);
+    assert_eq!(stepper_value(&host), "19.5°", "sent, not yet refetched");
+    current.set(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.5),
+    ));
+    settle().await;
+    assert_eq!(stepper_value(&host), "19.5°");
+    current.set(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(18.0),
+    ));
+    settle().await;
+    assert_eq!(stepper_value(&host), "18°", "the hub's value again");
+}
+
+#[wasm_bindgen_test]
+async fn a_chip_resends_with_its_duration() {
+    let stub = FetchStub::install();
+    stub.reply("POST", OVERRIDE_URL, 200, "{}");
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let host = mount_stepper(current).await;
+    step_button(&host, "Raise target").click();
+    past_the_pause().await;
+    assert_eq!(posts(&stub).len(), 1);
+
+    find_button(&host, "1 h").expect("1 h chip").click();
+    settle().await;
+    let sent = posts(&stub);
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert!(sent[1].contains("\"setpoint\":19.5"), "{}", sent[1]);
+    assert!(sent[1].contains("\"minutes\":60"), "{}", sent[1]);
+    assert!(
+        host.query_selector(".climate-stepper__chips")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn a_pending_room_cannot_step() {
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Pending,
+        Some(19.0),
+    ));
+    let host = mount_stepper(current).await;
+    assert_eq!(stepper_value(&host), "19°");
+    for label in ["Lower target", "Raise target"] {
+        assert!(
+            step_button(&host, label).has_attribute("disabled"),
+            "{label}"
+        );
+    }
 }

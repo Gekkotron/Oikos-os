@@ -7113,6 +7113,58 @@ dialog.popup::backdrop {
   font: 700 22px/28px var(--font-display);
 }
 
+/* The room's target with − / + (climate/target_stepper.rs). */
+.climate-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.climate-stepper__step {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  padding: 0;
+  border: 1px solid var(--chip-border);
+  border-radius: 50%;
+  background: var(--card-bg);
+  color: var(--ink);
+  font: 400 20px/1 var(--font-body);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--motion-short) var(--ease);
+}
+
+.climate-stepper__step:hover:not(:disabled) {
+  background: var(--select-soft);
+}
+
+.climate-stepper__step:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 0;
+}
+
+.climate-stepper__step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.climate-stepper__value {
+  min-width: 3.5ch;
+  font: var(--type-display);
+  letter-spacing: var(--type-display-spacing);
+  text-align: center;
+}
+
+.climate-stepper__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .climate-status__why {
   display: flex;
   flex-wrap: wrap;

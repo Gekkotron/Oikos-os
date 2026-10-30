@@ -7,6 +7,7 @@ pub mod proposal;
 pub mod room_list;
 pub mod room_panel;
 pub mod settings_sheet;
+pub mod target_stepper;
 pub mod timeline;
 
 use chrono::{DateTime, Datelike, Timelike};
