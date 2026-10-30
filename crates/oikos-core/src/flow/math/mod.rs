@@ -110,7 +110,12 @@ impl Formula {
     /// Evaluates the formula; `read` gives a name's value or why it has none. Fails, never
     /// yields 0, when no finite number comes out.
     pub fn eval(&self, read: &dyn Fn(&str) -> Result<f64, String>) -> Result<f64, String> {
-        eval::eval(&self.expr, read)
+        let value = eval::eval(&self.expr, read)?;
+        if value.is_finite() {
+            Ok(value)
+        } else {
+            Err("result is not a finite number".into())
+        }
     }
 }
 
@@ -184,14 +189,19 @@ pub fn fit_to_entity(
     }
     let clamped = v != before;
     if let Some(s) = step {
-        let decimals = format!("{s}")
-            .split_once('.')
-            .map_or(0, |(_, d)| d.len())
-            .min(10);
+        let decimals = decimals_of(s).max(min.map_or(0, decimals_of));
         let scale = 10f64.powi(decimals as i32);
         v = (v * scale).round() / scale;
     }
     (v, clamped)
+}
+
+/// How many decimals a number is written with (at most 10).
+fn decimals_of(n: f64) -> usize {
+    format!("{n}")
+        .split_once('.')
+        .map_or(0, |(_, d)| d.len())
+        .min(10)
 }
 
 #[cfg(test)]
@@ -260,6 +270,20 @@ mod tests {
         assert_eq!(at(-10.0), 0.0);
         assert_eq!(at(5000.0), 60.0);
         assert_eq!(at(38.0), 10.0);
+    }
+
+    #[test]
+    fn interp_overflow_is_an_error() {
+        // Exponent notation is not in the grammar and a 500-character formula cannot spell two
+        // 1e308 literals, so build the tree directly.
+        let f = Formula {
+            expr: Expr::Interp {
+                x: Box::new(Expr::Num(0.5)),
+                xs: vec![0.0, 1.0],
+                ys: vec![-1e308, 1e308],
+            },
+        };
+        assert_eq!(f.eval(&none), Err("result is not a finite number".into()));
     }
 
     #[test]
@@ -375,5 +399,6 @@ mod tests {
         );
         assert_eq!(fit(12.34, None, None, None), (12.34, false));
         assert_eq!(fit(19.3, Some(10.0), Some(30.0), Some(0.5)), (19.5, false));
+        assert_eq!(fit(1.6, Some(0.5), None, Some(1.0)), (1.5, false));
     }
 }
