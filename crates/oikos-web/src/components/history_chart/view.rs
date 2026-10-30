@@ -17,6 +17,7 @@ use super::geom::{
 };
 use crate::api::history::{HistoryApiError, fetch_daily, fetch_series};
 use crate::components::now::Now;
+use crate::house::House;
 use crate::i18n::format as fmt;
 use crate::i18n::history::{
     HistoryText, counter_legend, history_text, kwh, load_error, min_max, range_name, total_line,
@@ -129,9 +130,22 @@ pub fn HistoryChart(
         });
     }
 
+    // A counter's day ranges draw its paired power sensor, so the labels take that one's unit.
+    let house = use_context::<House>();
+    let drawn_unit = Memo::new(move |_| {
+        let id = entity_id.get();
+        let plan = plan_fetch(&id, range.get(), flavor.get(), power_pair.get().as_deref());
+        drawn_unit(&plan, &id, unit.get(), |other| {
+            house.and_then(|h| {
+                h.entities
+                    .with(|m| m.get(other).and_then(|e| e.unit.clone()))
+            })
+        })
+    });
+
     // Each render reads `state` and composes the right view.
     let kind_rx = kind;
-    let unit_rx = unit;
+    let unit_rx = drawn_unit;
     let range_rx = range;
     let lang = use_lang();
     view! {
@@ -198,6 +212,20 @@ pub fn plan_fetch(
             }
         }
         (Flavor::Counter, _) => FetchPlan::Daily(entity.to_owned(), daily_days_for(range)),
+    }
+}
+
+/// The unit of the line `plan` draws for `entity`: `unit` for the entity's own series, else the
+/// drawn entity's (`unit_of`).
+pub fn drawn_unit(
+    plan: &FetchPlan,
+    entity: &str,
+    unit: Option<String>,
+    unit_of: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    match plan {
+        FetchPlan::Series(drawn) if drawn != entity => unit_of(drawn),
+        _ => unit,
     }
 }
 
@@ -589,6 +617,34 @@ mod tests {
                 FetchPlan::Series("sensor.power".into())
             );
         }
+    }
+
+    #[test]
+    fn drawn_unit_is_the_paired_power_sensors_for_a_counter_day_chart() {
+        let unit_of = |id: &str| (id == "sensor.power").then(|| "W".to_owned());
+        let wh = || Some("Wh".to_owned());
+        let paired = plan_fetch(
+            "counter.e",
+            HistoryRange::Day,
+            Flavor::Counter,
+            Some("sensor.power"),
+        );
+        assert_eq!(
+            drawn_unit(&paired, "counter.e", wh(), unit_of),
+            Some("W".into())
+        );
+        let own = plan_fetch(
+            "counter.e",
+            HistoryRange::Week,
+            Flavor::Counter,
+            Some("sensor.power"),
+        );
+        assert_eq!(drawn_unit(&own, "counter.e", wh(), unit_of), wh());
+        let temp = plan_fetch("sensor.t", HistoryRange::Day, Flavor::Series, None);
+        assert_eq!(
+            drawn_unit(&temp, "sensor.t", Some("°C".into()), unit_of),
+            Some("°C".into())
+        );
     }
 
     #[test]

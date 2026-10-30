@@ -15,6 +15,7 @@ use crate::house::House;
 use crate::i18n::use_lang;
 use crate::icons::DROP;
 use crate::rooms::shows_on_home;
+use crate::screens::history_detail::day_curve_of;
 
 /// The text a sensor shows: the value with its unit, "—" while unknown or unavailable.
 pub fn sensor_text(lang: crate::i18n::Lang, state: &EntityState, unit: Option<&str>) -> String {
@@ -176,15 +177,18 @@ fn humidity_body(entity: &EntityView) -> impl IntoView + use<> {
     }
 }
 
-/// The curve of a numeric sensor's last 24 hours, opening its history chart. Nothing for a sensor
-/// that reports text: it has no curve to draw.
+/// The curve of a numeric sensor's last 24 hours, opening its history chart: an energy counter
+/// draws its paired power sensor, like the chart. Nothing for a sensor that reports text: it has
+/// no curve to draw.
 fn value_spark(entity: &EntityView) -> Option<impl IntoView + use<>> {
     numeric(&entity.state)?;
     let href = history_href(&entity.id);
+    let house = expect_context::<House>();
     let id = entity.id.clone();
+    let curve = Memo::new(move |_| house.entities.with(|m| day_curve_of(m, &id)));
     Some(view! {
         <A href=href attr:class="value__spark">
-            <Sparkline entity_id=id />
+            {move || view! { <Sparkline entity_id=curve.get() /> }}
         </A>
     })
 }
