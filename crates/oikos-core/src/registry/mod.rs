@@ -132,6 +132,9 @@ pub struct Registry {
     /// is not in `produced`/`origin`: many topics contribute to it.
     device_automation_actions: BTreeMap<String, (String, String)>,
     template_failures: BTreeSet<String>,
+    /// Entities a message on one of their state topics reached since boot, whether it read a
+    /// value or not: [`Self::restore_state`] leaves them alone.
+    spoken: BTreeSet<String>,
 }
 
 impl Registry {
@@ -154,6 +157,7 @@ impl Registry {
             origin: BTreeMap::new(),
             device_automation_actions: BTreeMap::new(),
             template_failures: BTreeSet::new(),
+            spoken: BTreeSet::new(),
         }
     }
 
@@ -253,9 +257,10 @@ impl Registry {
     }
 
     /// Puts a recorded value back on an entity that has never spoken since boot: it exists,
-    /// its value is [`StateValue::Unknown`] and `last_update` is `None`. `at_secs` is when the
-    /// value was recorded, not now. Anything else (an unknown id, a value already read, a
-    /// message that rendered nothing) is left alone. Availability is not touched.
+    /// its value is [`StateValue::Unknown`], `last_update` is `None` and no message reached its
+    /// state topic. `at_secs` is when the value was recorded, not now. Anything else (an
+    /// unknown id, a value already read, a message that rendered nothing) is left alone.
+    /// Availability is not touched.
     pub fn restore_state(
         &mut self,
         unique_id: &str,
@@ -268,7 +273,10 @@ impl Registry {
         let Some(state) = self.states.get_mut(unique_id) else {
             return Vec::new();
         };
-        if state.value != StateValue::Unknown || state.last_update.is_some() {
+        if state.value != StateValue::Unknown
+            || state.last_update.is_some()
+            || self.spoken.contains(unique_id)
+        {
             return Vec::new();
         }
         state.value = value;
@@ -431,6 +439,9 @@ impl Registry {
             else {
                 continue;
             };
+            if !entity.bindings.is_availability_only(topic) {
+                self.spoken.insert(id.clone());
+            }
             let before = state.clone();
             let reported = match apply_parts(entity, state, topic, text, at, &self.templates) {
                 Ok(parts) => {

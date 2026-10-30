@@ -555,7 +555,7 @@ impl Hub {
             } else {
                 Vec::new()
             };
-            // Every entity the message reached, including those that read nothing from it.
+            // The entities the message reached but read nothing from (`StateTouched`).
             let touched_unread: Vec<String> = if is_state {
                 changes
                     .iter()

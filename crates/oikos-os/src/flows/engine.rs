@@ -133,8 +133,9 @@ pub(super) async fn run_with(
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
             },
-            // After the events, so a change is stored by `StateChanged` first. This one only
-            // re-seeds an entity whose report was identical to its last state (no event).
+            // After the events, so a change is stored by `StateChanged` first. Every message on
+            // an entity's state topic, read or not: it re-seeds an unseeded value, restarts that
+            // entity's silent clocks and confirms a value that is still unknown.
             seen = seen.recv() => match seen {
                 Ok(seen) => engine.state_touched(&seen),
                 // Reports may have been missed: no entity can be called silent from here.
@@ -2832,6 +2833,34 @@ mod tests {
         alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":null}"#);
         alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
         assert_eq!(run_count(&engine, "a"), 1);
+    }
+
+    /// At boot the restore waits for the broker's replay: a message that read nothing lands
+    /// first and confirms the unknown, so a recorded value put back after it would look like a
+    /// first value. The registry refuses to restore over an entity that spoke.
+    #[tokio::test]
+    async fn restore_after_a_null_report_does_not_fire() {
+        for (recorded, to) in [(true, true), (false, false)] {
+            let (mut engine, id) = smoke_engine();
+            state_flow(&engine, "a", serde_json::json!({ "entity": id, "to": to }));
+            engine.reload();
+            alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":null}"#);
+            let restored = engine.hub.restore_recorded_states(vec![(
+                id.clone(),
+                0,
+                StateValue::OnOff(recorded),
+            )]);
+            assert_eq!(restored, 0, "recorded {recorded}");
+            let state = engine.hub.read().state(&id).cloned().expect("state");
+            assert_eq!(state.value, StateValue::Unknown);
+            assert_eq!(run_count(&engine, "a"), 0, "recorded {recorded}");
+            alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
+            assert_eq!(
+                run_count(&engine, "a"),
+                usize::from(to),
+                "recorded {recorded}"
+            );
+        }
     }
 
     #[tokio::test]

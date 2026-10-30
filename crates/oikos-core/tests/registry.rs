@@ -1141,6 +1141,22 @@ fn restore_state_ignores_an_unknown_id() {
     );
 }
 
+/// A message that reached the entity but read nothing (still unknown) means it has spoken
+/// since boot: an old recorded value must not come back over it.
+#[test]
+fn restore_state_skips_an_entity_touched_since_boot() {
+    let mut registry = switch_registry();
+    let inbound = registry.route("zigbee2mqtt/test", b"maybe".to_vec(), AT);
+    assert_eq!(
+        registry.apply(inbound),
+        vec![Change::StateTouched("test_switch".to_owned())]
+    );
+    let changes = registry.restore_state("test_switch", StateValue::OnOff(true), AT - 100);
+    assert!(changes.is_empty(), "{changes:?}");
+    let state = registry.state("test_switch").expect("state");
+    assert_eq!(state.value, StateValue::Unknown);
+}
+
 #[test]
 fn restore_state_keeps_a_value_already_read() {
     let mut registry = switch_registry();
