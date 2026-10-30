@@ -342,6 +342,9 @@ fn node_editor_body(
         NodeKind::TriggerSchedule(_) => FlowText::Schedule,
         NodeKind::TriggerSun(_) => FlowText::NodeSun,
         NodeKind::TriggerOffPeak(_) => FlowText::NodeOffPeak,
+        // Placeholders until the Silent and Limit cards get their words.
+        NodeKind::TriggerSilent(_) => FlowText::NodeTrigger,
+        NodeKind::Limit(_) => FlowText::NodeDelay,
         NodeKind::TriggerManual(_) => FlowText::NodeManual,
         NodeKind::TriggerSignal(_) => FlowText::NodeSignal,
         NodeKind::If(_) => FlowText::NodeIf,
@@ -1278,6 +1281,8 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             sun_sheet(node, cfg).into_any()
         }
         NodeKind::TriggerOffPeak(p) => off_peak_fields(form, id, p.edge).into_any(),
+        // Placeholders until the Silent and Limit sheets exist.
+        NodeKind::TriggerSilent(_) | NodeKind::Limit(_) => ().into_any(),
         NodeKind::TriggerManual(p) => manual_fields(form, id, p.value).into_any(),
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Notify(p) => notify_fields(form, id, p).into_any(),

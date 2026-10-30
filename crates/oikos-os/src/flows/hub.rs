@@ -433,6 +433,7 @@ impl Hub {
             let entity = match &node.kind {
                 NodeKind::TriggerState(params) => Some(&params.entity),
                 NodeKind::TriggerSignal(params) => Some(&params.entity),
+                NodeKind::TriggerSilent(params) => Some(&params.entity),
                 NodeKind::If(params) => params.entity.as_ref(),
                 NodeKind::Switch(params) => params.entity.as_ref(),
                 NodeKind::Command(params) => Some(&params.entity),
@@ -449,6 +450,7 @@ impl Hub {
                     None
                 }
                 NodeKind::Delay(_)
+                | NodeKind::Limit(_)
                 | NodeKind::Notify(_)
                 | NodeKind::TimeBetween(_)
                 | NodeKind::TriggerSchedule(_)
@@ -624,4 +626,35 @@ fn announced_signals(entity: &oikos_core::model::Entity) -> Vec<String> {
         names.extend(options.iter().cloned());
     }
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn silent_names_an_existing_entity() {
+        let (tx, _rx) = tokio::sync::mpsc::channel::<Publish>(8);
+        let hub = Hub::new(&crate::config::Config::default(), tx);
+        let flow = Flow::decode(
+            serde_json::json!({
+                "id": "quiet", "name": "quiet", "enabled": true, "mode": "single",
+                "nodes": [
+                    { "id": "t", "type": "trigger.silent",
+                      "params": { "entity": "binary_sensor.smoke", "for": "50m" } },
+                    { "id": "w", "type": "delay", "params": { "for": "1s" } },
+                ],
+                "edges": [{ "from": "t", "to": "w" }]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+        match hub.set_flow(flow).await {
+            Err(HubError::InvalidFlow(reason)) => {
+                assert_eq!(reason, "unknown entity `binary_sensor.smoke` in node `t`");
+            }
+            other => panic!("expected InvalidFlow, got {other:?}"),
+        }
+    }
 }

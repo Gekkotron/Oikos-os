@@ -84,6 +84,20 @@ pub fn format_duration(duration: Duration) -> String {
     text
 }
 
+/// The shortest `for` of `trigger.silent` and `per` of `limit`.
+pub const MIN_WINDOW: Duration = Duration::from_secs(60);
+/// The longest `for` of `trigger.silent` and `per` of `limit`.
+pub const MAX_WINDOW: Duration = Duration::from_secs(168 * 3600);
+
+/// Parses a `trigger.silent` `for` or a `limit` `per`: a duration from `1m` to `168h`.
+pub fn window(text: &str) -> Result<Duration, String> {
+    let d = parse_duration(text).map_err(|e| e.to_string())?;
+    if !(MIN_WINDOW..=MAX_WINDOW).contains(&d) {
+        return Err(format!("`{text}` is outside 1m to 168h"));
+    }
+    Ok(d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

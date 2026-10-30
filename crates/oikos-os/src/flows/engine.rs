@@ -1022,6 +1022,13 @@ async fn run_node(
             };
             (StepOutcome::Ok, detail, Vec::new())
         }
+        NodeKind::TriggerSilent(params) => (
+            StepOutcome::Ok,
+            format!("{} silent for {}", params.entity, params.for_),
+            Vec::new(),
+        ),
+        // Placeholder until the limit counts live in the hub.
+        NodeKind::Limit(_) => (StepOutcome::Ok, "passed".to_owned(), Vec::new()),
         NodeKind::TriggerSchedule(params) => (
             StepOutcome::Ok,
             format!("schedule {}", params.cron),

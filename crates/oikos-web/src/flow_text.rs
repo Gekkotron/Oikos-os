@@ -42,13 +42,14 @@ pub fn role(kind: &NodeKind) -> Role {
         | NodeKind::TriggerSun(_)
         | NodeKind::TriggerManual(_)
         | NodeKind::TriggerSignal(_)
-        | NodeKind::TriggerOffPeak(_) => Role::Trigger,
+        | NodeKind::TriggerOffPeak(_)
+        | NodeKind::TriggerSilent(_) => Role::Trigger,
         NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_) => Role::Check,
         NodeKind::Command(_)
         | NodeKind::FlowEnable(_)
         | NodeKind::Notify(_)
         | NodeKind::Math(_) => Role::Action,
-        NodeKind::Delay(_) => Role::Wait,
+        NodeKind::Delay(_) | NodeKind::Limit(_) => Role::Wait,
     }
 }
 
@@ -312,6 +313,9 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(p) => sun_summary(lang, p.which, p.offset()),
         NodeKind::TriggerOffPeak(p) => flow_text(lang, off_peak_edge_text(p.edge)).to_owned(),
+        // Placeholders until the Silent and Limit cards get their words.
+        NodeKind::TriggerSilent(_) => flow_text(lang, FlowText::NodeTrigger).to_owned(),
+        NodeKind::Limit(_) => flow_text(lang, FlowText::NodeDelay).to_owned(),
         NodeKind::TriggerManual(p) => {
             let head = flow_text(lang, FlowText::NodeManual);
             match &p.value {

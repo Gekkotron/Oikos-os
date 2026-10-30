@@ -25,6 +25,8 @@ pub enum FlowError {
     NoTrigger,
     #[error("node `{node}`: {reason}")]
     BadDuration { node: String, reason: String },
+    #[error("node `{node}`: {reason}")]
+    BadLimit { node: String, reason: String },
     #[error("node `{node}`: value must be a boolean, a number or a string")]
     BadValue { node: String },
     #[error("node `{node}`: {reason}")]
@@ -102,8 +104,8 @@ pub fn is_valid_node_id(id: &str) -> bool {
 /// cycle. It does not look at entities, which only the hub can resolve.
 pub fn validate(flow: &Flow) -> Result<(), FlowError> {
     use super::{
-        MAX_AVERAGE_SECS, MAX_SWITCH_RULES, NodeKind, Op, RuleOp, Scalar, Schedule, parse_clock,
-        parse_duration,
+        MAX_AVERAGE_SECS, MAX_LIMIT, MAX_SWITCH_RULES, NodeKind, Op, RuleOp, Scalar, Schedule,
+        parse_clock, parse_duration, window,
     };
 
     if !is_valid_flow_id(&flow.id) {
@@ -135,6 +137,28 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     return Err(FlowError::BadDuration {
                         node: node.id.clone(),
                         reason,
+                    });
+                }
+            }
+            NodeKind::TriggerSilent(p) => {
+                if let Err(reason) = window(&p.for_) {
+                    return Err(FlowError::BadDuration {
+                        node: node.id.clone(),
+                        reason: format!("for: {reason}"),
+                    });
+                }
+            }
+            NodeKind::Limit(p) => {
+                if let Err(reason) = window(&p.per) {
+                    return Err(FlowError::BadDuration {
+                        node: node.id.clone(),
+                        reason: format!("per: {reason}"),
+                    });
+                }
+                if !(1..=MAX_LIMIT).contains(&p.max) {
+                    return Err(FlowError::BadLimit {
+                        node: node.id.clone(),
+                        reason: format!("max {} is outside 1 to {MAX_LIMIT}", p.max),
                     });
                 }
             }
@@ -1323,6 +1347,80 @@ mod tests {
                 "{field}: {err:?}"
             );
         }
+    }
+
+    fn silent_flow(for_: &str) -> Flow {
+        decode_flow(
+            serde_json::json!([
+                { "id": "quiet", "type": "trigger.silent",
+                  "params": { "entity": "binary_sensor.smoke", "for": for_ } },
+                { "id": "wait", "type": "delay", "params": { "for": "1s" } },
+            ]),
+            serde_json::json!([{ "from": "quiet", "to": "wait" }]),
+        )
+    }
+
+    fn limit_flow(max: u32, per: &str, port: Option<&str>) -> Flow {
+        let mut edge = serde_json::json!({ "from": "cap", "to": "wait" });
+        if let Some(port) = port {
+            edge["port"] = serde_json::json!(port);
+        }
+        decode_flow(
+            serde_json::json!([
+                { "id": "go", "type": "trigger.manual", "params": {} },
+                { "id": "cap", "type": "limit", "params": { "max": max, "per": per } },
+                { "id": "wait", "type": "delay", "params": { "for": "1s" } },
+            ]),
+            serde_json::json!([{ "from": "go", "to": "cap" }, edge]),
+        )
+    }
+
+    #[test]
+    fn silent_is_a_trigger() {
+        assert_eq!(validate(&silent_flow("50m")), Ok(()));
+    }
+
+    #[test]
+    fn window_bounds() {
+        for bad in ["59s", "169h", "5", "0m"] {
+            assert!(
+                matches!(validate(&silent_flow(bad)), Err(FlowError::BadDuration { ref node, .. }) if node == "quiet"),
+                "silent {bad}"
+            );
+            assert!(
+                matches!(validate(&limit_flow(1, bad, None)), Err(FlowError::BadDuration { ref node, .. }) if node == "cap"),
+                "limit {bad}"
+            );
+        }
+        for good in ["1m", "168h"] {
+            assert_eq!(validate(&silent_flow(good)), Ok(()), "silent {good}");
+            assert_eq!(validate(&limit_flow(1, good, None)), Ok(()), "limit {good}");
+        }
+    }
+
+    #[test]
+    fn limit_max_bounds() {
+        for bad in [0, 101] {
+            assert!(
+                matches!(validate(&limit_flow(bad, "1h", None)), Err(FlowError::BadLimit { ref node, .. }) if node == "cap"),
+                "max {bad}"
+            );
+        }
+        for good in [1, 100] {
+            assert_eq!(
+                validate(&limit_flow(good, "1h", None)),
+                Ok(()),
+                "max {good}"
+            );
+        }
+    }
+
+    #[test]
+    fn limit_edge_has_no_port() {
+        assert_eq!(
+            validate(&limit_flow(2, "1h", Some("x"))),
+            Err(FlowError::UnexpectedPort { node: "cap".into() })
+        );
     }
 
     #[test]
