@@ -354,3 +354,116 @@ async fn room_with_an_accented_or_spaced_id_is_highlighted() {
         assert_eq!(crumb, [format!("Room {id}")]);
     }
 }
+
+/// The ids of the cards in `section`, in the order on screen.
+fn card_ids(section: &web_sys::Element) -> Vec<String> {
+    let list = section.query_selector_all("[data-card-id]").unwrap();
+    (0..list.length())
+        .filter_map(|i| {
+            list.item(i)?
+                .unchecked_into::<web_sys::Element>()
+                .get_attribute("data-card-id")
+        })
+        .collect()
+}
+
+fn click(host: &web_sys::Element, selector: &str) {
+    host.query_selector(selector)
+        .unwrap()
+        .unwrap_or_else(|| panic!("no {selector}"))
+        .unchecked_into::<web_sys::HtmlElement>()
+        .click();
+}
+
+fn key(el: &web_sys::Element, key: &str) {
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key(key);
+    init.set_bubbles(true);
+    let event =
+        web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    el.dispatch_event(&event).unwrap();
+}
+
+/// The pencil opens the room's edit mode: a grip on every card, which the arrow keys move one
+/// place; Cancel puts the Home order back and closes it.
+#[wasm_bindgen_test]
+async fn a_room_in_edit_mode_reorders_its_cards_until_cancelled() {
+    let (m, house) = mount_with("/rooms/a", true).await;
+    house.entities.update(|map| {
+        for (id, name) in [("light.a2", "Lamp a2"), ("light.a3", "Lamp a3")] {
+            map.insert(id.into(), entity(id, name, Kind::Light, "a"));
+        }
+    });
+    tick().await;
+    let room = m.host.query_selector(".room").unwrap().unwrap();
+    assert_eq!(card_ids(&room), ["light.a", "light.a2", "light.a3"]);
+    assert!(m.host.query_selector(".room-card__grip").unwrap().is_none());
+
+    click(&m.host, ".room__rename");
+    tick().await;
+    assert!(room.class_list().contains("room--editing"));
+    assert!(m.host.query_selector(".room__field").unwrap().is_some());
+    assert_eq!(
+        m.host
+            .query_selector_all(".room-card__grip")
+            .unwrap()
+            .length(),
+        3
+    );
+
+    let grip = m.host.query_selector(".room-card__grip").unwrap().unwrap();
+    key(&grip, "ArrowRight");
+    tick().await;
+    assert_eq!(card_ids(&room), ["light.a2", "light.a", "light.a3"]);
+
+    click(&m.host, ".room__form button[type=\"button\"]");
+    tick().await;
+    assert!(!room.class_list().contains("room--editing"));
+    assert_eq!(card_ids(&room), ["light.a", "light.a2", "light.a3"]);
+    assert!(m.host.query_selector(".room-card__grip").unwrap().is_none());
+}
+
+/// Cards follow the stored `order` the edit mode saves; a card with none comes after them.
+#[wasm_bindgen_test]
+async fn a_room_lists_its_cards_by_their_saved_place() {
+    let (m, house) = mount_with("/rooms/a", true).await;
+    house.entities.update(|map| {
+        for (id, name, order) in [
+            ("light.a2", "Lamp a2", Some(2)),
+            ("light.a3", "Lamp a3", Some(1)),
+        ] {
+            let mut lamp = entity(id, name, Kind::Light, "a");
+            lamp.ui.order = order;
+            map.insert(id.into(), lamp);
+        }
+    });
+    tick().await;
+    let room = m.host.query_selector(".room").unwrap().unwrap();
+    assert_eq!(card_ids(&room), ["light.a3", "light.a2", "light.a"]);
+}
+
+/// Unassigned can be reordered but not renamed; Favorites mixes rooms and has no pencil.
+#[wasm_bindgen_test]
+async fn unassigned_reorders_without_a_name_and_favorites_cannot_be_edited() {
+    let m = mount(&format!("/rooms/{UNASSIGNED_AREA}")).await;
+    click(&m.host, ".room__rename");
+    tick().await;
+    assert!(m.host.query_selector(".room--editing").unwrap().is_some());
+    assert!(m.host.query_selector(".room__field").unwrap().is_none());
+    assert_eq!(
+        m.host
+            .query_selector_all(".room-card__grip")
+            .unwrap()
+            .length(),
+        1
+    );
+
+    let (m, house) = mount_with("/dashboards/house", true).await;
+    house.entities.update(|map| {
+        map.get_mut("light.a").unwrap().ui.favorite = true;
+    });
+    tick().await;
+    let favorites = m.host.query_selector(".room").unwrap().unwrap();
+    assert_eq!(texts(&favorites, ".room__title"), ["Favorites"]);
+    assert!(favorites.query_selector(".room__rename").unwrap().is_none());
+}
