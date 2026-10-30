@@ -214,12 +214,6 @@ pub fn clear_field(draft: &mut UiOverride, key: &str) {
     }
 }
 
-/// The position field: empty (automatic) or a whole number from 0 to 9999, as the app allows.
-pub fn order_valid(text: &str) -> bool {
-    let text = text.trim();
-    text.is_empty() || text.parse::<u16>().is_ok_and(|n| n <= 9999)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,15 +453,5 @@ mod tests {
         clear_field(&mut d, "securityAsk");
         assert!(d.security_ask);
         assert!(other_saved(&d, &shown(&light, &d)).is_empty());
-    }
-
-    #[test]
-    fn order_bounds() {
-        for ok in ["", " 7 ", "0", "9999"] {
-            assert!(order_valid(ok), "{ok:?}");
-        }
-        for bad in ["-1", "10000", "1.5", "x"] {
-            assert!(!order_valid(bad), "{bad:?}");
-        }
     }
 }

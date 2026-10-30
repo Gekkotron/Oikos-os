@@ -907,7 +907,8 @@ a.chip {
 }
 
 .room__heading .room__field {
-  flex: 1 1 auto;
+  flex: 1 1 0;
+  min-width: 0;
   width: auto;
   font: var(--type-card-value);
 }
@@ -915,6 +916,111 @@ a.chip {
 .room__heading .room__action {
   flex: none;
   padding: 0 16px;
+}
+
+/* Room edit mode: the hint takes its own line under the name and the buttons. */
+.room__form {
+  flex-wrap: wrap;
+}
+
+.room__hint {
+  order: 1;
+  flex-basis: 100%;
+  font: var(--type-label);
+  color: var(--muted);
+}
+
+/* A room's cards, dragged into a new order while the room is edited (`RoomCard`). Outside edit
+   mode the wrapper takes no box, so the card is the grid item as before; while editing it is the
+   grid item and carries the wide card's span. */
+.room-card {
+  display: contents;
+}
+
+.room--editing .room-card {
+  position: relative;
+  display: grid;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.room--editing .room-card:has(> .card--wide) {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 720px) {
+  .room--editing .room-card:has(> .card--wide) {
+    grid-column: span 2;
+  }
+}
+
+/* Above the card so its own controls cannot fire; below the grip. */
+.room-card__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--radius-card);
+  cursor: grab;
+}
+
+/* Room above each row for the grip, which floats on the card's top edge, clear of the badges
+   cards keep in their corners. */
+.room--editing .grid--home {
+  row-gap: 28px;
+  padding-top: 14px;
+}
+
+.room-card__grip {
+  position: absolute;
+  top: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--card-border);
+  border-radius: 50%;
+  background: var(--menu-bg);
+  box-shadow: var(--menu-shadow);
+  color: var(--ink);
+  cursor: grab;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.room-card__grip svg {
+  width: 18px;
+  height: 18px;
+}
+
+.room-card__grip:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 1px;
+}
+
+.grid--dragging,
+.grid--dragging .room-card__overlay,
+.grid--dragging .room-card__grip {
+  cursor: grabbing;
+}
+
+/* The dragged card follows the pointer (`translate`, set inline) and lets pointer events
+   through, so the card under it can be found; that one is outlined. */
+.room-card--dragging {
+  z-index: 3;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.room-card--dragging > .card {
+  box-shadow: 0 0 0 2px var(--accent-amber), var(--shadow);
+}
+
+.room-card--drop-target > .card {
+  box-shadow: 0 0 0 2px var(--accent-amber);
 }
 
 .room__empty {

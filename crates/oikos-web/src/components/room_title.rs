@@ -1,37 +1,38 @@
-//! The Home room heading, renamed in place: the name is saved to the hub's areas document.
+//! The Home room heading. Its pencil opens the room's edit mode (see `RoomSection`): the name
+//! turns into a field, saved with the card order by one Save.
 
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 
-use crate::api::rename_area;
-use crate::components::toast::Toasts;
-use crate::house::House;
-use crate::i18n::current_lang;
-use crate::i18n::devices::{DeviceText, device_text, use_device_text};
+use crate::i18n::devices::{DeviceText, use_device_text};
 use crate::icons;
 
-/// The room heading. `id` is `None` for a chip that is not a room (Favorites, Unassigned), which
-/// gets no rename button.
+/// The heading's edit mode, owned by the room section, which also arranges the cards.
+#[derive(Clone, Copy)]
+pub struct RoomEdit {
+    pub editing: RwSignal<bool>,
+    pub busy: RwSignal<bool>,
+    /// The name being typed.
+    pub draft: RwSignal<String>,
+    /// Opens the edit mode with the room's current name and card order.
+    pub start: Callback<()>,
+    pub save: Callback<()>,
+    pub cancel: Callback<()>,
+}
+
+/// The room heading. `id` is `None` for a chip that is not a room (Favorites, Unassigned): it
+/// has no name field. `edit` is `None` where nothing can be edited (Favorites): no pencil.
 #[component]
 pub fn RoomTitle(
     #[prop(into)] id: Signal<Option<String>>,
     #[prop(into)] name: Signal<String>,
+    edit: Option<RoomEdit>,
 ) -> impl IntoView {
-    let house = expect_context::<House>();
-    let toasts = expect_context::<Toasts>();
     let t = use_device_text();
-    let editing = RwSignal::new(false);
-    let busy = RwSignal::new(false);
-    let draft = RwSignal::new(String::new());
     let input = NodeRef::<leptos::html::Input>::new();
+    let editing = move || edit.is_some_and(|e| e.editing.get());
 
-    // Picking another chip drops an unsaved rename.
     Effect::new(move |_| {
-        id.track();
-        editing.set(false);
-    });
-    Effect::new(move |_| {
-        if editing.get()
+        if editing()
             && let Some(input) = input.get()
         {
             let _ = input.focus();
@@ -40,48 +41,30 @@ pub fn RoomTitle(
     });
 
     let start = move |_| {
-        draft.set(name.get_untracked());
-        editing.set(true);
+        if let Some(e) = edit {
+            e.start.run(());
+        }
     };
-    let save = move || {
-        let Some(id) = id.get_untracked() else {
-            return;
-        };
-        let next = draft.get_untracked().trim().to_owned();
-        if next.is_empty() {
-            toasts.push(device_text(current_lang(), DeviceText::RoomNeedsName));
-            return;
+    let busy = move || edit.is_some_and(|e| e.busy.get());
+    let cancel = move || {
+        if let Some(e) = edit {
+            e.cancel.run(());
         }
-        if next == name.get_untracked() {
-            editing.set(false);
-            return;
-        }
-        busy.set(true);
-        spawn_local(async move {
-            match rename_area(&id, &next).await {
-                Ok(areas) => {
-                    house.areas.set(areas);
-                    editing.set(false);
-                }
-                Err(e) => toasts.push(e.error),
-            }
-            busy.set(false);
-        });
     };
 
     view! {
         <Show
-            when=move || editing.get()
+            when=editing
             fallback=move || {
                 view! {
                     <div class="room__heading">
                         <h1 class="room__title">{move || name.get()}</h1>
-                        <Show when=move || id.with(Option::is_some)>
+                        <Show when=move || edit.is_some()>
                             <button
                                 type="button"
                                 class="btn btn--round btn--icon room__rename"
-                                aria-label=move || t(DeviceText::RenameRoom)
-                                title=move || t(DeviceText::RenameRoom)
+                                aria-label=move || t(DeviceText::EditRoom)
+                                title=move || t(DeviceText::EditRoom)
                                 on:click=start
                                 inner_html=icons::PENCIL
                             ></button>
@@ -94,27 +77,39 @@ pub fn RoomTitle(
                 class="room__heading room__form"
                 on:submit=move |ev| {
                     ev.prevent_default();
-                    save();
+                    if let Some(e) = edit {
+                        e.save.run(());
+                    }
                 }
             >
-                <input
-                    node_ref=input
-                    class="field room__field"
-                    type="text"
-                    aria-label=move || t(DeviceText::RoomName)
-                    prop:value=move || draft.get()
-                    prop:disabled=move || busy.get()
-                    on:input=move |ev| draft.set(event_target_value(&ev))
-                    on:keydown=move |ev| {
-                        if ev.key() == "Escape" {
-                            editing.set(false);
+                <Show
+                    when=move || id.with(Option::is_some)
+                    fallback=move || view! { <h1 class="room__title">{move || name.get()}</h1> }
+                >
+                    <input
+                        node_ref=input
+                        class="field room__field"
+                        type="text"
+                        aria-label=move || t(DeviceText::RoomName)
+                        prop:value=move || edit.map(|e| e.draft.get()).unwrap_or_default()
+                        prop:disabled=busy
+                        on:input=move |ev| {
+                            if let Some(e) = edit {
+                                e.draft.set(event_target_value(&ev));
+                            }
                         }
-                    }
-                />
-                <button type="submit" class="btn room__action" disabled=move || busy.get()>
+                        on:keydown=move |ev| {
+                            if ev.key() == "Escape" {
+                                cancel();
+                            }
+                        }
+                    />
+                </Show>
+                <span class="room__hint">{move || t(DeviceText::DragToReorder)}</span>
+                <button type="submit" class="btn room__action" disabled=busy>
                     {move || t(DeviceText::Save)}
                 </button>
-                <button type="button" class="btn room__action" on:click=move |_| editing.set(false)>
+                <button type="button" class="btn room__action" disabled=busy on:click=move |_| cancel()>
                     {move || t(DeviceText::Cancel)}
                 </button>
             </form>
