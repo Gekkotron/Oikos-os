@@ -177,6 +177,12 @@ pub enum HomeText {
     BadTime,
     StartEqualsEnd,
     WindowsOverlap,
+    OffPeakDevice,
+    OffPeakDeviceHint,
+    OffPeakValues,
+    OffPeakAddValue,
+    OffPeakBackup,
+    OffPeakClearDevice,
 }
 
 /// A fixed word of the Home panel.
@@ -218,6 +224,18 @@ pub fn home_text(lang: Lang, k: HomeText) -> &'static str {
             "Celles de votre contrat d'électricité. Le graphique Énergie sépare vos achats selon ces heures ; les jours passés gardent les leurs.",
         ),
         AddWindow => ("Add a period", "Ajouter une plage"),
+        OffPeakDevice => ("Follow a device", "Suivre un appareil"),
+        OffPeakDeviceHint => (
+            "Pick the entity that reports the tariff, then the values that mean off-peak.",
+            "Choisissez l'entité qui indique le tarif, puis les valeurs qui signifient heures creuses.",
+        ),
+        OffPeakValues => ("Off-peak values", "Valeurs heures creuses"),
+        OffPeakAddValue => ("Add a value", "Ajouter une valeur"),
+        OffPeakBackup => (
+            "Backup windows — used when the device has no reading",
+            "Plages de secours — utilisées quand l'appareil ne donne rien",
+        ),
+        OffPeakClearDevice => ("Remove device", "Retirer l'appareil"),
         RemoveWindow => ("Remove", "Retirer"),
         BadTime => ("Enter a time as HH:MM", "Saisissez une heure HH:MM"),
         StartEqualsEnd => (
@@ -444,6 +462,12 @@ mod tests {
             HomeText::BadTime,
             HomeText::StartEqualsEnd,
             HomeText::WindowsOverlap,
+            HomeText::OffPeakDevice,
+            HomeText::OffPeakDeviceHint,
+            HomeText::OffPeakValues,
+            HomeText::OffPeakAddValue,
+            HomeText::OffPeakBackup,
+            HomeText::OffPeakClearDevice,
         ];
         crate::i18n::assert_table(ALL, home_text, &[]);
     }

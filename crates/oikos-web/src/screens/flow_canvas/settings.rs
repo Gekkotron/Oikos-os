@@ -4,8 +4,8 @@
 
 use leptos::prelude::*;
 use oikos_core::flow::{
-    IfParams, MAX_SWITCH_RULES, Missing, Node, NodeKind, Op, RuleOp, Scalar, SwitchParams,
-    SwitchRule, TimeBetweenParams,
+    IfParams, MAX_SWITCH_RULES, Missing, Node, NodeKind, OffPeakEdge, Op, RuleOp, Scalar,
+    SwitchParams, SwitchRule, TimeBetweenParams,
 };
 use oikos_core::model::{Command, Kind};
 
@@ -91,10 +91,12 @@ fn op_str(op: Op) -> &'static str {
         Op::Gte => "gte",
         Op::Lte => "lte",
         Op::IsDark => "is_dark",
+        Op::IsOffPeak => "is_off_peak",
     }
 }
 
-/// What a comparison reads as in the Compare list: a sign, or words for `is_dark`.
+/// What a comparison reads as in the Compare list: a sign, or words for `is_dark` and
+/// `is_off_peak`.
 fn op_label(lang: Lang, op: &str) -> &'static str {
     match op {
         "eq" => "=",
@@ -103,8 +105,14 @@ fn op_label(lang: Lang, op: &str) -> &'static str {
         "lt" => "<",
         "gte" => "≥",
         "lte" => "≤",
+        "is_off_peak" => flow_text(lang, FlowText::OpIsOffPeak),
         _ => flow_text(lang, FlowText::OpIsDark),
     }
+}
+
+/// Whether the card shows the value, entity, average and unknown fields for `op`.
+fn takes_operands(op: Op) -> bool {
+    !matches!(op, Op::IsDark | Op::IsOffPeak)
 }
 
 fn op_from(s: &str) -> Option<Op> {
@@ -116,6 +124,7 @@ fn op_from(s: &str) -> Option<Op> {
         "gte" => Some(Op::Gte),
         "lte" => Some(Op::Lte),
         "is_dark" => Some(Op::IsDark),
+        "is_off_peak" => Some(Op::IsOffPeak),
         _ => None,
     }
 }
@@ -277,26 +286,26 @@ struct IfStash {
     offset_minutes: Option<i32>,
 }
 
-/// Changes an `if`'s op. `is_dark` reads the sun, so the validator rejects any operand: they
-/// are set aside on the way in and restored on the way out.
+/// Changes an `if`'s op. `is_dark` reads the sun and `is_off_peak` the tariff, so the
+/// validator rejects any operand: they are set aside on the way in and restored on the way out.
+/// The `is_dark` shift is set aside the same way when leaving `is_dark`.
 fn switch_op(i: &mut IfParams, op: Op, stash: &mut IfStash) {
-    let was_dark = i.op == Op::IsDark;
-    if op == Op::IsDark && !was_dark {
-        let offset_minutes = stash.offset_minutes.take();
-        *stash = IfStash {
-            value: i.value.take(),
-            entity: i.entity.take(),
-            missing: i.missing.take(),
-            average: i.average.take(),
-            offset_minutes: None,
-        };
-        i.offset_minutes = offset_minutes;
-    } else if was_dark && op != Op::IsDark {
+    let bare = |op: Op| matches!(op, Op::IsDark | Op::IsOffPeak);
+    if bare(op) && !bare(i.op) {
+        stash.value = i.value.take();
+        stash.entity = i.entity.take();
+        stash.missing = i.missing.take();
+        stash.average = i.average.take();
+    } else if !bare(op) && bare(i.op) {
         i.value = stash.value.take();
         i.entity = stash.entity.take();
         i.missing = stash.missing.take();
         i.average = stash.average.take();
+    }
+    if i.op == Op::IsDark && op != Op::IsDark {
         stash.offset_minutes = i.offset_minutes.take();
+    } else if op == Op::IsDark && i.op != Op::IsDark {
+        i.offset_minutes = stash.offset_minutes.take();
     }
     i.op = op;
 }
@@ -312,6 +321,7 @@ fn node_editor_body(
         NodeKind::TriggerState(_) => FlowText::NodeTrigger,
         NodeKind::TriggerSchedule(_) => FlowText::Schedule,
         NodeKind::TriggerSun(_) => FlowText::NodeSun,
+        NodeKind::TriggerOffPeak(_) => FlowText::NodeOffPeak,
         NodeKind::TriggerManual(_) => FlowText::NodeManual,
         NodeKind::TriggerSignal(_) => FlowText::NodeSignal,
         NodeKind::If(_) => FlowText::NodeIf,
@@ -792,7 +802,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     });
                 }
             };
-            let not_dark = move || op_signal.get() != Op::IsDark;
+            let not_dark = move || takes_operands(op_signal.get());
             let value_id = id.clone();
             let value_write = Callback::new(move |value: Option<serde_json::Value>| {
                 if let Some(v) = value {
@@ -899,7 +909,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 <label class="node-editor__field">
                     <span class="node-editor__label">{move || t(FlowText::NodeCompare)}</span>
                     <select class="field" on:change=on_op>
-                        {["eq", "ne", "gt", "lt", "gte", "lte", "is_dark"]
+                        {["eq", "ne", "gt", "lt", "gte", "lte", "is_dark", "is_off_peak"]
                             .into_iter()
                             .map(|o| {
                                 let selected = op_str(current_op) == o;
@@ -914,7 +924,12 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 </label>
                 <Show
                     when=not_dark
-                    fallback=move || view! {
+                    fallback=move || if op_signal.get() == Op::IsOffPeak {
+                        view! {
+                            <p class="node-editor__hint">{move || t(FlowText::IsOffPeakSub)}</p>
+                        }
+                        .into_any()
+                    } else { view! {
                         <p class="node-editor__hint">{move || t(FlowText::IsDark)}</p>
                         <label class="node-editor__field">
                             <span class="node-editor__label">{move || t(FlowText::DarkShift)}</span>
@@ -935,6 +950,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         <p class="node-editor__hint">{move || t(FlowText::DarkShiftHint)}</p>
                         <FallbackBadge cfg=cfg />
                     }
+                    .into_any() }
                 >
                     <IfValueField
                         value=stored_value
@@ -1009,6 +1025,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             let cfg = Signal::from(expect_context::<House>().flows_config);
             sun_sheet(node, cfg).into_any()
         }
+        NodeKind::TriggerOffPeak(p) => off_peak_fields(form, id, p.edge).into_any(),
         NodeKind::TriggerManual(p) => manual_fields(form, id, p.value).into_any(),
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Notify(p) => notify_fields(form, id, p).into_any(),
@@ -1574,6 +1591,43 @@ fn manual_kind_label(lang: Lang, kind: ManualKind) -> String {
 }
 
 /// The Manual card editor: one optional value, none, on/off, a number or text.
+/// The off-peak trigger's sheet: fire when off-peak starts or when it ends.
+fn off_peak_fields(form: Form, id: String, initial: OffPeakEdge) -> impl IntoView {
+    let lang = use_lang();
+    let edge = RwSignal::new(initial);
+    let choose = move |next: OffPeakEdge| {
+        edge.set(next);
+        form.update(&id, |n| {
+            if let NodeKind::TriggerOffPeak(ref mut p) = n.kind {
+                p.edge = next;
+            }
+        });
+    };
+    let chip = move |value: OffPeakEdge| {
+        let choose = choose.clone();
+        view! {
+            <button
+                type="button"
+                class="chip"
+                class:chip--selected=move || edge.get() == value
+                aria-pressed=move || if edge.get() == value { "true" } else { "false" }
+                on:click=move |_| choose(value)
+            >
+                {move || flow_text(lang(), crate::flow_text::off_peak_edge_text(value))}
+            </button>
+        }
+    };
+    view! {
+        <div class="node-editor__field" role="group">
+            <span class="node-editor__label">{move || flow_text(lang(), FlowText::OffPeakEdge)}</span>
+            <div class="chip-row">
+                {chip(OffPeakEdge::Start)}
+                {chip(OffPeakEdge::End)}
+            </div>
+        </div>
+    }
+}
+
 fn manual_fields(form: Form, id: String, initial: Option<Scalar>) -> impl IntoView {
     let lang = use_lang();
     let kind = RwSignal::new(ManualKind::of(initial.as_ref()));
@@ -1775,6 +1829,63 @@ mod tests {
         assert_eq!(i.value, Some(json!(true)));
         assert_eq!(i.entity.as_deref(), Some("x"));
         assert_eq!(i.missing, Some(Missing::True));
+    }
+
+    #[test]
+    fn flipping_to_is_off_peak_and_back_keeps_the_operands() {
+        assert_eq!(op_from("is_off_peak"), Some(Op::IsOffPeak));
+        assert_eq!(op_str(Op::IsOffPeak), "is_off_peak");
+        let mut i = IfParams {
+            op: Op::Eq,
+            value: Some(json!(true)),
+            entity: Some("x".into()),
+            missing: Some(Missing::True),
+            average: Some("15m".into()),
+            offset_minutes: None,
+            extra: Default::default(),
+        };
+        let mut stash = IfStash::default();
+        switch_op(&mut i, Op::IsOffPeak, &mut stash);
+        assert_eq!(
+            (
+                i.value.clone(),
+                i.entity.clone(),
+                i.missing,
+                i.average.clone()
+            ),
+            (None, None, None, None)
+        );
+        switch_op(&mut i, Op::Eq, &mut stash);
+        assert_eq!(i.value, Some(json!(true)));
+        assert_eq!(i.entity.as_deref(), Some("x"));
+        assert_eq!(i.average.as_deref(), Some("15m"));
+    }
+
+    #[test]
+    fn only_compare_ops_show_operand_fields() {
+        for op in [Op::Eq, Op::Ne, Op::Gt, Op::Lt, Op::Gte, Op::Lte] {
+            assert!(takes_operands(op), "{op:?}");
+        }
+        assert!(!takes_operands(Op::IsDark));
+        assert!(!takes_operands(Op::IsOffPeak));
+    }
+
+    #[test]
+    fn dark_to_off_peak_sets_the_shift_aside() {
+        let mut i = IfParams {
+            op: Op::IsDark,
+            value: None,
+            entity: None,
+            missing: None,
+            average: None,
+            offset_minutes: Some(-30),
+            extra: Default::default(),
+        };
+        let mut stash = IfStash::default();
+        switch_op(&mut i, Op::IsOffPeak, &mut stash);
+        assert_eq!(i.offset_minutes, None);
+        switch_op(&mut i, Op::IsDark, &mut stash);
+        assert_eq!(i.offset_minutes, Some(-30));
     }
 
     #[test]

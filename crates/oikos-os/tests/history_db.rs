@@ -899,7 +899,7 @@ async fn grid_day_totals_match_counter_increase_db() {
     };
     let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 23);
     let now = paris("2026-10-24 09:00:00");
-    let day = query::grid_day(&h, &counters, &off_peak_history(), date, now)
+    let day = query::grid_day(&h, &counters, &off_peak_history(), None, date, now)
         .await
         .unwrap();
     assert_eq!(day.slots.len(), 48);
@@ -911,14 +911,87 @@ async fn grid_day_totals_match_counter_increase_db() {
     assert_eq!(day.first_date.as_deref(), Some("2026-10-22"));
 
     let future = chrono::NaiveDate::from_ymd_opt(2026, 10, 25);
-    let err = query::grid_day(&h, &counters, &off_peak_history(), future, now)
+    let err = query::grid_day(&h, &counters, &off_peak_history(), None, future, now)
         .await
         .unwrap_err();
     assert_eq!(err.code(), "bad_request");
-    let err = query::grid_day(&h, &GridCounters::default(), &[], None, now)
+    let err = query::grid_day(&h, &GridCounters::default(), &[], None, None, now)
         .await
         .unwrap_err();
     assert_eq!(err.code(), "no_grid_meter");
+
+    tdb.drop_db().await;
+}
+
+#[tokio::test]
+async fn grid_day_reads_text_device_rows_db() {
+    use oikos_core::energy::{GridCounters, OffPeakDevice};
+    use oikos_os::history::{History, query};
+    let Some(tdb) = fresh_db().await else { return };
+    let text = |id: &str, at: i64, s: &str| ValueRow {
+        at,
+        id: id.into(),
+        value: StateValue::Text(s.into()),
+        num: None,
+    };
+    tdb.db
+        .insert(&Rows {
+            values: vec![
+                value_row("bought", paris("2026-10-22 23:50:00"), 100.0),
+                value_row("bought", paris("2026-10-23 01:30:00"), 100.4),
+                value_row("bought", paris("2026-10-23 03:30:00"), 101.0),
+                text("tariff", paris("2026-10-22 22:00:00"), "OFF"),
+                text("tariff", paris("2026-10-23 02:00:00"), "PEAK"),
+            ],
+            availability: vec![availability_row(
+                "tariff",
+                paris("2026-10-23 03:00:00"),
+                Availability::Offline,
+            )],
+        })
+        .await
+        .unwrap();
+    let (from, to) = (paris("2026-10-23 00:00:00"), paris("2026-10-24 00:00:00"));
+    let (carry, rows) = tdb.db.states_between("tariff", from, to).await.unwrap();
+    assert_eq!(carry, Some(StateValue::Text("OFF".into())));
+    assert_eq!(
+        rows,
+        [(
+            paris("2026-10-23 02:00:00"),
+            StateValue::Text("PEAK".into())
+        )]
+    );
+    let (carry, rows) = tdb
+        .db
+        .availability_between("tariff", from, to)
+        .await
+        .unwrap();
+    assert_eq!(carry, None);
+    assert_eq!(
+        rows,
+        [(paris("2026-10-23 03:00:00"), Availability::Offline)]
+    );
+
+    let h = History::with_db(
+        Db::connect_lazy(&tdb.url).unwrap(),
+        chrono_tz::Europe::Paris,
+    );
+    let counters = GridCounters {
+        bought: vec!["bought".into()],
+        ..GridCounters::default()
+    };
+    let device = OffPeakDevice {
+        entity: "tariff".into(),
+        values: vec!["OFF".into()],
+    };
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 23);
+    let now = paris("2026-10-24 09:00:00");
+    // No windows: 01:30 is off-peak by the device, 03:30 has no usable reading → peak.
+    let day = query::grid_day(&h, &counters, &[], Some(&device), date, now)
+        .await
+        .unwrap();
+    assert_eq!((day.totals.off_peak, day.totals.peak), (0.4, 0.6));
+    assert!(day.tariffs);
 
     tdb.drop_db().await;
 }

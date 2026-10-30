@@ -17,7 +17,7 @@ use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
 use oikos_core::flow::sun::is_dark_with_offset;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
-    Flow, FlowMode, Missing, Node, NodeKind, Op, Reading, Scalar, Schedule, compare,
+    Flow, FlowMode, Missing, Node, NodeKind, OffPeakEdge, Op, Reading, Scalar, Schedule, compare,
     format_duration, in_time_range, parse_clock, parse_duration, pick_duration, switch_exits,
 };
 use oikos_core::history::buckets::{Sample, readings_mean};
@@ -29,8 +29,12 @@ use super::EngineRequest;
 use super::schedule::{Armed, Now, now_in, rearm, timer_clock};
 use super::sun::{ArmedSun, next_sun_fire};
 use crate::clock;
+use crate::home::OffPeakNow;
 use crate::hub::{Hub, StateSeen};
 use oikos_api::ConnectionStatus;
+
+/// How long after the link comes back the off-peak base is seeded when no device report did.
+const OFF_PEAK_SETTLE: chrono::Duration = chrono::Duration::seconds(60);
 
 /// What a finished run task reports: the flow, the run and how it ended.
 type Finished = (String, String, RunStatus);
@@ -72,6 +76,9 @@ pub(super) async fn run_with(
         now: timer_clock(),
         schedules: BTreeMap::new(),
         sun_timers: BTreeMap::new(),
+        off_peak_base: None,
+        off_peak_timer: None,
+        off_peak_settle: None,
     };
     engine.reload();
     loop {
@@ -103,12 +110,13 @@ pub(super) async fn run_with(
             () = sleep_until_deadline(deadline), if deadline.is_some() => {
                 engine.tick();
                 engine.tick_suns();
+                engine.tick_off_peak();
             }
             event = events.recv() => match event {
                 Ok(event) => engine.handle_event(event),
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
                     tracing::warn!(missed, "flow engine lagged behind the events, forgetting values");
-                    engine.known.clear();
+                    engine.events_lagged();
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
             },
@@ -141,6 +149,13 @@ struct Engine {
     schedules: BTreeMap<String, Armed>,
     /// Armed sun nodes, keyed `"{flow}/{node}"`.
     sun_timers: BTreeMap<String, ArmedSun>,
+    /// The off-peak answer `trigger.off_peak` compares against; `None` until seeded. Seeding
+    /// never fires: boot, a reconnect replay, a flow save or a settings change only set it.
+    off_peak_base: Option<bool>,
+    /// The next off-peak window start or end, when the answer may change by the clock.
+    off_peak_timer: Option<chrono::DateTime<chrono_tz::Tz>>,
+    /// A minute after the link comes back: seeds the base if no device report did by then.
+    off_peak_settle: Option<chrono::DateTime<chrono_tz::Tz>>,
     /// Valid and enabled flows.
     flows: Vec<Flow>,
     /// The last value seen for every entity a trigger watches; `None` inside means the entity
@@ -225,6 +240,7 @@ impl Engine {
         }
         self.arm_schedules();
         self.arm_suns();
+        self.off_peak_reload();
     }
 
     /// Whether `active` is a run that disabled its own flow (announced by `KeepRun`) and whose
@@ -346,6 +362,8 @@ impl Engine {
             .values()
             .map(|armed| armed.at)
             .chain(self.sun_timers.values().map(|armed| armed.at))
+            .chain(self.off_peak_timer)
+            .chain(self.off_peak_settle)
             .min()?;
         let wait = (at.to_utc() - (self.now)())
             .to_std()
@@ -427,6 +445,142 @@ impl Engine {
         }
     }
 
+    /// The off-peak device's entity id, when one is set.
+    fn off_peak_device(&self) -> Option<String> {
+        self.hub
+            .home_settings()
+            .off_peak_device
+            .map(|device| device.entity)
+    }
+
+    fn online(&self) -> bool {
+        *self.hub.connection().borrow() == ConnectionStatus::Online
+    }
+
+    /// Resolves off-peak now and re-arms the boundary timer.
+    fn off_peak_resolve(&mut self) -> OffPeakNow {
+        let now = self.hub.off_peak_now(now_in(&self.now, self.zone));
+        self.off_peak_timer = now.next_boundary;
+        now
+    }
+
+    /// Events were missed: values seen before may be stale. A device's answer is forgotten and
+    /// seeded again by its next report, or a minute later.
+    fn events_lagged(&mut self) {
+        self.known.clear();
+        if self.off_peak_device().is_some() {
+            self.off_peak_base = None;
+        }
+        if self.online() {
+            self.off_peak_settle = Some(now_in(&self.now, self.zone) + OFF_PEAK_SETTLE);
+        }
+    }
+
+    /// The link dropped: the device's next reading may be a replay, so its answer is forgotten.
+    /// The windows' answer is kept (nothing replays a clock), so an edge during the outage is
+    /// recorded as skipped.
+    fn off_peak_lost(&mut self) {
+        if self.off_peak_device().is_some() {
+            self.off_peak_base = None;
+        }
+        self.off_peak_settle = None;
+    }
+
+    /// The answer to start from without firing, `None` to wait. Only while online. With a
+    /// device, only from a usable reading seen since the last seed: before its report the
+    /// windows (or a pre-drop registry value) may disagree with it, and its first report would
+    /// look like a change.
+    fn off_peak_seed_value(&self, now: &OffPeakNow) -> Option<bool> {
+        if !self.online() {
+            return None;
+        }
+        match self.off_peak_device() {
+            None => Some(now.off_peak),
+            Some(_) if self.off_peak_base.is_some() && now.device.is_some() => Some(now.off_peak),
+            Some(_) => None,
+        }
+    }
+
+    /// A settings change: takes the new answer as the starting point, never fires.
+    fn off_peak_reseed(&mut self) {
+        let now = self.off_peak_resolve();
+        self.off_peak_base = self.off_peak_seed_value(&now);
+    }
+
+    /// A flow save: re-arms the boundary timer and seeds an unseeded base; a seeded one is
+    /// kept, so an edge being processed is not swallowed.
+    fn off_peak_reload(&mut self) {
+        let now = self.off_peak_resolve();
+        if self.off_peak_base.is_none() {
+            self.off_peak_base = self.off_peak_seed_value(&now);
+        }
+    }
+
+    /// Re-reads the answer. Unseeded, it seeds when `seed` (a fresh device report); seeded, a
+    /// different answer fires the matching `trigger.off_peak` nodes.
+    fn off_peak_check(&mut self, seed: bool) {
+        let now = self.off_peak_resolve();
+        match self.off_peak_base {
+            None if seed => self.off_peak_base = Some(now.off_peak),
+            Some(previous) if previous != now.off_peak => {
+                self.off_peak_base = Some(now.off_peak);
+                self.fire_off_peak(&now);
+            }
+            _ => {}
+        }
+    }
+
+    /// Fires every enabled flow's `trigger.off_peak` on the edge `now` crossed, once per flow;
+    /// recorded as skipped while the broker link is not online, like a schedule tick.
+    fn fire_off_peak(&mut self, now: &OffPeakNow) {
+        let edge = if now.off_peak {
+            OffPeakEdge::Start
+        } else {
+            OffPeakEdge::End
+        };
+        let other = if now.off_peak { "end" } else { "start" };
+        let fires: Vec<(Flow, String)> = self
+            .flows
+            .iter()
+            .filter_map(|flow| {
+                let node = flow.triggers().into_iter().find(
+                    |node| matches!(&node.kind, NodeKind::TriggerOffPeak(p) if p.edge == edge),
+                )?;
+                Some((flow.clone(), node.id.clone()))
+            })
+            .collect();
+        let online = self.online();
+        for (flow, node) in fires {
+            if online {
+                let trigger = TriggerInfo {
+                    entity: now.device.clone(),
+                    value: Value::String(edge.wire_name().to_owned()),
+                    previous: Value::String(other.to_owned()),
+                };
+                self.fire(flow, node, Some(trigger));
+            } else {
+                self.hub
+                    .add_skipped_run_because(&flow.id, &node, "the broker link is offline");
+            }
+        }
+    }
+
+    /// Runs the off-peak timers that are due: the settle timer seeds a base no device report
+    /// set, the boundary timer re-reads the answer (seeding it when no device is set).
+    fn tick_off_peak(&mut self) {
+        let now = now_in(&self.now, self.zone);
+        if self.off_peak_settle.is_some_and(|at| at <= now) {
+            self.off_peak_settle = None;
+            if self.off_peak_base.is_none() && self.online() {
+                self.off_peak_check(true);
+            }
+        }
+        if self.off_peak_timer.is_some_and(|at| at <= now) {
+            let seed = self.online() && self.off_peak_device().is_none();
+            self.off_peak_check(seed);
+        }
+    }
+
     /// The entities some enabled flow triggers on.
     fn watched_entities(&self) -> BTreeSet<String> {
         self.flows
@@ -443,6 +597,13 @@ impl Engine {
         match event {
             WsEvent::StateChanged { id, state } => {
                 self.state_changed(&id, Scalar::of_state(&state.value));
+                if self.off_peak_device().as_deref() == Some(id.as_str()) {
+                    self.off_peak_check(true);
+                }
+            }
+            WsEvent::HomeSettingsChanged { .. } => self.off_peak_reseed(),
+            WsEvent::ConnectionChanged(ConnectionStatus::Online) => {
+                self.off_peak_settle = Some(now_in(&self.now, self.zone) + OFF_PEAK_SETTLE);
             }
             WsEvent::ButtonPressed { id } => self.button_pressed(&id),
             WsEvent::SignalReceived { id, signal } => self.signal_received(&id, &signal),
@@ -450,6 +611,7 @@ impl Engine {
             // is only recorded, never acted on.
             WsEvent::ConnectionChanged(status) if status != ConnectionStatus::Online => {
                 self.known.clear();
+                self.off_peak_lost();
             }
             _ => {}
         }
@@ -519,6 +681,12 @@ impl Engine {
         {
             let scalar = self.hub.entity_scalar(id);
             self.known.insert(id.to_owned(), scalar);
+        }
+        if seen.epoch == self.hub.link_epoch()
+            && self.off_peak_base.is_none()
+            && self.off_peak_device().as_deref() == Some(id)
+        {
+            self.off_peak_check(true);
         }
     }
 
@@ -811,6 +979,11 @@ async fn run_node(
             };
             (StepOutcome::Ok, detail, Vec::new())
         }
+        NodeKind::TriggerOffPeak(params) => (
+            StepOutcome::Ok,
+            format!("off-peak {}", params.edge.wire_name()),
+            Vec::new(),
+        ),
         NodeKind::TriggerSun(params) => (
             StepOutcome::Ok,
             format!(
@@ -942,6 +1115,15 @@ async fn run_node(
             }
         }
         NodeKind::If(params) => {
+            if params.op == Op::IsOffPeak {
+                let off_peak = hub.off_peak_now(now_in(now, hub.zone())).off_peak;
+                let port = if off_peak { "true" } else { "false" };
+                return (
+                    StepOutcome::Ok,
+                    format!("is_off_peak → {off_peak}"),
+                    vec![port.to_owned()],
+                );
+            }
             if params.op == Op::IsDark {
                 let (lat, lon) = hub.house_point();
                 let dark = is_dark_with_offset(lat, lon, now(), params.dark_offset());
@@ -1177,6 +1359,9 @@ mod tests {
             now: Arc::new(move || fixed),
             schedules: BTreeMap::new(),
             sun_timers: BTreeMap::new(),
+            off_peak_base: None,
+            off_peak_timer: None,
+            off_peak_settle: None,
         }
     }
 
@@ -1206,6 +1391,240 @@ mod tests {
             .ingest("oikos/automation/day", sun_flow("day", false).as_bytes());
         engine.reload();
         assert!(engine.sun_timers.is_empty());
+    }
+
+    /// A Paris engine, online, with a text sensor `tariff` (availability on its own topic) and
+    /// a clock the test moves. Returns the engine, the entity id and the clock.
+    fn tariff_engine(
+        utc: (i32, u32, u32, u32, u32),
+    ) -> (
+        Engine,
+        String,
+        Arc<std::sync::Mutex<chrono::DateTime<chrono::Utc>>>,
+    ) {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        let (y, mo, d, h, mi) = utc;
+        let clock = Arc::new(std::sync::Mutex::new(
+            chrono::Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap(),
+        ));
+        let read = Arc::clone(&clock);
+        engine.now = Arc::new(move || *read.lock().unwrap());
+        engine.hub.ingest(
+            "oikos/sensor/meter/tariff/config",
+            br#"{"unique_id":"tariff","state_topic":"test/tariff","availability_topic":"test/tariff/avail"}"#,
+        );
+        engine.hub.set_connection(ConnectionStatus::Online);
+        let id = engine.hub.snapshot().entities[0].id.clone();
+        (engine, id, clock)
+    }
+
+    fn off_peak_flow(engine: &Engine, id: &str, edge: &str) {
+        let flow = serde_json::json!({
+            "id": id, "name": id, "enabled": true, "mode": "single",
+            "nodes": [{ "id": "t", "type": "trigger.off_peak", "params": { "edge": edge } }],
+            "edges": []
+        });
+        engine.hub.ingest(
+            &format!("oikos/automation/{id}"),
+            flow.to_string().as_bytes(),
+        );
+    }
+
+    /// Stores home settings with the device (when `device`) and the windows, and tells the
+    /// engine as the hub's broadcast would.
+    fn off_peak_settings(engine: &mut Engine, device: Option<&str>, windows: &[(&str, &str)]) {
+        let windows: Vec<_> = windows
+            .iter()
+            .map(|(start, end)| serde_json::json!({ "start": start, "end": end }))
+            .collect();
+        let mut doc = serde_json::json!({ "off_peak": windows });
+        if let Some(id) = device {
+            doc["off_peak_device"] = serde_json::json!({ "entity": id, "values": ["OFF"] });
+        }
+        engine.hub.ingest_home(doc.to_string().as_bytes());
+        engine.handle_event(WsEvent::HomeSettingsChanged {
+            settings: engine.hub.home_settings(),
+        });
+    }
+
+    /// Publishes `payload` on the tariff's `topic` and hands the engine the change event.
+    fn tariff_report(engine: &mut Engine, id: &str, topic: &str, payload: &str) {
+        engine.hub.ingest(topic, payload.as_bytes());
+        let state = engine.hub.read().state(id).cloned().expect("tariff state");
+        engine.handle_event(WsEvent::StateChanged {
+            id: id.to_owned(),
+            state,
+        });
+    }
+
+    fn run_count(engine: &Engine, flow: &str) -> usize {
+        engine.hub.flow(flow).map_or(0, |f| f.runs.len())
+    }
+
+    #[tokio::test]
+    async fn device_change_fires_start_then_end() {
+        let (mut engine, id, _) = tariff_engine((2026, 1, 1, 12, 0));
+        off_peak_flow(&engine, "on", "start");
+        off_peak_flow(&engine, "off", "end");
+        engine.reload();
+        off_peak_settings(&mut engine, Some(&id), &[]);
+        tariff_report(&mut engine, &id, "test/tariff", "PEAK");
+        assert_eq!(
+            (run_count(&engine, "on"), run_count(&engine, "off")),
+            (0, 0)
+        );
+        tariff_report(&mut engine, &id, "test/tariff", "OFF");
+        assert_eq!(
+            (run_count(&engine, "on"), run_count(&engine, "off")),
+            (1, 0)
+        );
+        let trigger = engine.hub.flow("on").unwrap().runs[0]
+            .trigger
+            .clone()
+            .unwrap();
+        assert_eq!(trigger.entity.as_deref(), Some(id.as_str()));
+        assert_eq!(trigger.value, serde_json::json!("start"));
+        tariff_report(&mut engine, &id, "test/tariff", "PEAK");
+        assert_eq!(
+            (run_count(&engine, "on"), run_count(&engine, "off")),
+            (1, 1)
+        );
+    }
+
+    #[tokio::test]
+    async fn reconnect_replay_seeds_without_firing() {
+        let (mut engine, id, _) = tariff_engine((2026, 1, 1, 12, 0));
+        off_peak_flow(&engine, "on", "start");
+        off_peak_flow(&engine, "off", "end");
+        engine.reload();
+        off_peak_settings(&mut engine, Some(&id), &[]);
+        tariff_report(&mut engine, &id, "test/tariff", "PEAK");
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        }));
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Online));
+        tariff_report(&mut engine, &id, "test/tariff", "OFF");
+        assert_eq!(run_count(&engine, "on"), 0);
+        tariff_report(&mut engine, &id, "test/tariff", "PEAK");
+        assert_eq!(run_count(&engine, "off"), 1);
+    }
+
+    #[tokio::test]
+    async fn settings_change_never_fires() {
+        // 12:00 UTC is 13:00 in Paris.
+        let (mut engine, _, _) = tariff_engine((2026, 1, 1, 12, 0));
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_settings(&mut engine, None, &[("22:00", "06:00")]);
+        off_peak_settings(&mut engine, None, &[("12:00", "14:00")]);
+        assert_eq!(run_count(&engine, "on"), 0);
+    }
+
+    #[tokio::test]
+    async fn flow_save_never_fires() {
+        let (mut engine, _, _) = tariff_engine((2026, 1, 1, 12, 0));
+        off_peak_settings(&mut engine, None, &[("12:00", "14:00")]);
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_flow(&engine, "off", "end");
+        engine.reload();
+        assert_eq!(
+            (run_count(&engine, "on"), run_count(&engine, "off")),
+            (0, 0)
+        );
+    }
+
+    #[tokio::test]
+    async fn window_boundary_fires_without_device() {
+        // 20:59 UTC is 21:59 in Paris.
+        let (mut engine, _, clock) = tariff_engine((2026, 1, 1, 20, 59));
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_settings(&mut engine, None, &[("22:00", "06:00")]);
+        engine.tick_off_peak();
+        assert_eq!(run_count(&engine, "on"), 0);
+        *clock.lock().unwrap() = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 21, 0, 0).unwrap();
+        engine.tick_off_peak();
+        assert_eq!(run_count(&engine, "on"), 1);
+        let trigger = engine.hub.flow("on").unwrap().runs[0]
+            .trigger
+            .clone()
+            .unwrap();
+        assert_eq!(trigger.entity, None);
+        assert_eq!(trigger.value, serde_json::json!("start"));
+    }
+
+    #[tokio::test]
+    async fn fallback_without_windows_ends_once() {
+        let (mut engine, id, _) = tariff_engine((2026, 1, 1, 12, 0));
+        off_peak_flow(&engine, "off", "end");
+        engine.reload();
+        off_peak_settings(&mut engine, Some(&id), &[]);
+        tariff_report(&mut engine, &id, "test/tariff/avail", "online");
+        tariff_report(&mut engine, &id, "test/tariff", "OFF");
+        tariff_report(&mut engine, &id, "test/tariff/avail", "offline");
+        assert_eq!(run_count(&engine, "off"), 1);
+        tariff_report(&mut engine, &id, "test/tariff/avail", "offline");
+        assert_eq!(run_count(&engine, "off"), 1);
+    }
+
+    #[tokio::test]
+    async fn boot_flows_before_settings_then_first_report_never_fires() {
+        // At boot the flows can replay before the home settings, and both before the device.
+        let (mut engine, id, _) = tariff_engine((2026, 1, 1, 1, 0));
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_settings(&mut engine, Some(&id), &[]);
+        tariff_report(&mut engine, &id, "test/tariff", "OFF");
+        assert_eq!(run_count(&engine, "on"), 0);
+        tariff_report(&mut engine, &id, "test/tariff", "PEAK");
+        tariff_report(&mut engine, &id, "test/tariff", "OFF");
+        assert_eq!(run_count(&engine, "on"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_lag_keeps_the_next_window_edge() {
+        let (mut engine, _, clock) = tariff_engine((2026, 1, 1, 20, 59));
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_settings(&mut engine, None, &[("22:00", "06:00")]);
+        engine.events_lagged();
+        *clock.lock().unwrap() = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 21, 0, 0).unwrap();
+        engine.tick_off_peak();
+        assert_eq!(run_count(&engine, "on"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_window_edge_during_an_outage_is_recorded_skipped() {
+        let (mut engine, _, clock) = tariff_engine((2026, 1, 1, 20, 59));
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_settings(&mut engine, None, &[("22:00", "06:00")]);
+        let offline = ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        };
+        engine.hub.set_connection(offline.clone());
+        engine.handle_event(WsEvent::ConnectionChanged(offline));
+        *clock.lock().unwrap() = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 21, 0, 0).unwrap();
+        engine.tick_off_peak();
+        let runs = engine.hub.flow("on").unwrap().runs;
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, RunStatus::Skipped);
+    }
+
+    #[tokio::test]
+    async fn is_off_peak_reads_the_resolver() {
+        let (mut engine, id, _) = tariff_engine((2026, 1, 1, 12, 0));
+        off_peak_settings(&mut engine, Some(&id), &[]);
+        tariff_report(&mut engine, &id, "test/tariff", "OFF");
+        let check = node(serde_json::json!({
+            "id": "c", "type": "if", "params": { "op": "is_off_peak" }
+        }));
+        let (outcome, detail, ports) =
+            run_node(&engine.hub, &engine.now, "f", "r", &check, None).await;
+        assert_eq!(outcome, StepOutcome::Ok);
+        assert_eq!(ports, ["true"]);
+        assert_eq!(detail, "is_off_peak → true");
     }
 
     /// Runs one `if` node with `average` on an engine hub that has no history.

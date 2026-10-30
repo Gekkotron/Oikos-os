@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use oikos_api::{AreaView, EntityView};
 use oikos_core::command::command_name;
-use oikos_core::flow::{Node, NodeKind, Op, RuleOp, SunWhich, parse_duration, template};
+use oikos_core::flow::{
+    Node, NodeKind, OffPeakEdge, Op, RuleOp, SunWhich, parse_duration, template,
+};
 use oikos_core::model::{Command, Hs, Kind};
 use serde_json::Value;
 
@@ -37,7 +39,8 @@ pub fn role(kind: &NodeKind) -> Role {
         | NodeKind::TriggerSchedule(_)
         | NodeKind::TriggerSun(_)
         | NodeKind::TriggerManual(_)
-        | NodeKind::TriggerSignal(_) => Role::Trigger,
+        | NodeKind::TriggerSignal(_)
+        | NodeKind::TriggerOffPeak(_) => Role::Trigger,
         NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_) => Role::Check,
         NodeKind::Command(_) | NodeKind::FlowEnable(_) | NodeKind::Notify(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
@@ -241,7 +244,15 @@ fn op_words(op: Op) -> &'static str {
         Op::Lt => "<",
         Op::Gte => "≥",
         Op::Lte => "≤",
-        Op::Eq | Op::Ne | Op::IsDark => "",
+        Op::Eq | Op::Ne | Op::IsDark | Op::IsOffPeak => "",
+    }
+}
+
+/// "Off-peak starts" or "Off-peak ends".
+pub fn off_peak_edge_text(edge: OffPeakEdge) -> FlowText {
+    match edge {
+        OffPeakEdge::Start => FlowText::OffPeakStarts,
+        OffPeakEdge::End => FlowText::OffPeakEnds,
     }
 }
 
@@ -273,6 +284,7 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         }
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(p) => sun_summary(lang, p.which, p.offset()),
+        NodeKind::TriggerOffPeak(p) => flow_text(lang, off_peak_edge_text(p.edge)).to_owned(),
         NodeKind::TriggerManual(p) => {
             let head = flow_text(lang, FlowText::NodeManual);
             match &p.value {
@@ -281,6 +293,7 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             }
         }
         NodeKind::If(p) if p.op == Op::IsDark => t::is_dark_sentence(lang, p.dark_offset()),
+        NodeKind::If(p) if p.op == Op::IsOffPeak => flow_text(lang, FlowText::IsOffPeak).to_owned(),
         NodeKind::If(p) => {
             let (e, unit, entity) = match &p.entity {
                 Some(id) => (entity_text(id, ctx), unit_of(id, ctx), ctx.entities.get(id)),
@@ -684,6 +697,18 @@ mod tests {
             text(early),
             "Is it dark? (from 30\u{a0}min before civil dusk)"
         );
+    }
+
+    #[test]
+    fn off_peak_cards_read_as_sentences() {
+        let start = r#"{"id":"o","type":"trigger.off_peak","params":{"edge":"start"}}"#;
+        assert_eq!(text(start), "Off-peak starts");
+        let end = r#"{"id":"o","type":"trigger.off_peak","params":{"edge":"end"}}"#;
+        assert_eq!(text(end), "Off-peak ends");
+        assert_eq!(text_in(Lang::Fr, end), "Les heures creuses finissent");
+        let check = r#"{"id":"c","type":"if","params":{"op":"is_off_peak"}}"#;
+        assert_eq!(text(check), "Is it off-peak?");
+        assert_eq!(text_in(Lang::Fr, check), "Est-ce les heures creuses\u{a0}?");
     }
 
     #[test]

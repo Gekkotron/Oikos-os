@@ -16,9 +16,10 @@ pub use clock::{in_time_range, parse_clock};
 pub use duration::{DurationError, format_duration, parse_duration, pick_duration};
 pub use model::{
     CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, MAX_AVERAGE_SECS,
-    MAX_SWITCH_RULES, Missing, Node, NodeKind, NotifyParams, Op, Position, RuleOp, SunWhich,
-    SwitchParams, SwitchRule, TimeBetweenParams, TriggerManualParams, TriggerScheduleParams,
-    TriggerSignalParams, TriggerStateParams, TriggerSunParams, uses_sun_or_is_dark,
+    MAX_SWITCH_RULES, Missing, Node, NodeKind, NotifyParams, OffPeakEdge, Op, Position, RuleOp,
+    SunWhich, SwitchParams, SwitchRule, TimeBetweenParams, TriggerManualParams,
+    TriggerOffPeakParams, TriggerScheduleParams, TriggerSignalParams, TriggerStateParams,
+    TriggerSunParams, uses_sun_or_is_dark,
 };
 pub use scalar::{CompareError, Scalar, compare};
 pub use schedule::{Schedule, ScheduleError};

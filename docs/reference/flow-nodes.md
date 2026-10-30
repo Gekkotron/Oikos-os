@@ -112,7 +112,7 @@ Starts a run at each wall-clock tick while the flow is enabled.
 
 Outputs: one. The cron runs in the home location's time zone (the system zone when none is set). The first run is at the next tick. Ticks missed while the hub was busy or down are never replayed. `GET /api/v1/schedule?cron=…` previews the next ticks.
 
-An `if` or a `switch` reachable from a schedule trigger (or a sun trigger) must name an `entity`, because these triggers carry no value; the exception is an `if` with `op: is_dark`. A `time.between` reads the clock and needs none.
+An `if` or a `switch` reachable from a schedule trigger (or a sun trigger) must name an `entity`, because these triggers carry no value; the exceptions are an `if` with `op: is_dark` or `op: is_off_peak`. A `time.between` reads the clock and needs none.
 
 ## `trigger.sun`
 
@@ -126,6 +126,22 @@ Starts a run at a solar event.
 Outputs: one.
 
 The hub arms the next event within the coming week, in the house zone. Events missed while the hub was busy are never replayed: the next one is searched from now. Where the sun never crosses the threshold (polar night, midnight sun) nothing is armed. While the broker link is offline when the event is due, the run is recorded as skipped.
+
+## `trigger.off_peak`
+
+Starts a run when off-peak starts or ends.
+
+| Param | Type | Description |
+| --- | --- | --- |
+| `edge` | `start` or `end` | `start` fires when peak turns to off-peak, `end` when off-peak turns to peak. |
+
+Outputs: one. The trigger value is `"start"` or `"end"`; the trigger entity is the off-peak device when its reading decided, none when the windows did.
+
+Off-peak comes from the home settings (**Settings → Home**, `off_peak_device` and `off_peak` in the [HTTP API](http-api.md)): the device's reading when it is usable, else the windows in force that day, else never. A reading is not usable while the entity is offline, has no value, or reads empty, `unknown` or `unavailable`. With a device and no windows, no usable reading means peak.
+
+- The hub re-reads the answer when the device reports and at each window start or end. It fires only on a change it saw happen: never at boot, on the broker's replay after a reconnect, when a flow is saved, or when the home settings change (those only take the new answer as the starting point).
+- A device going offline while its windows disagree is a change, and fires.
+- While the broker link is offline at a window boundary, the run is recorded as skipped.
 
 ## `trigger.manual`
 
@@ -147,11 +163,11 @@ Branches on a comparison.
 
 | Param | Type | Description |
 | --- | --- | --- |
-| `op` | `eq`, `ne`, `gt`, `lt`, `gte`, `lte` or `is_dark` | The comparison. |
-| `value` | bool, number or string | The constant to compare with. Required for every op except `is_dark`, where it is refused. |
-| `entity` | string, optional | The entity whose current scalar is read, live. Absent: the entity that triggered the run. Refused with `is_dark`. |
-| `missing` | `fail`, `true` or `false`, optional | What to do when the value is unknown. Refused with `is_dark`. |
-| `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window instead of its current value. `value` must then be a number. Refused with `is_dark`. |
+| `op` | `eq`, `ne`, `gt`, `lt`, `gte`, `lte`, `is_dark` or `is_off_peak` | The comparison. |
+| `value` | bool, number or string | The constant to compare with. Required for every op except `is_dark` and `is_off_peak`, where it is refused. |
+| `entity` | string, optional | The entity whose current scalar is read, live. Absent: the entity that triggered the run. Refused with `is_dark` and `is_off_peak`. |
+| `missing` | `fail`, `true` or `false`, optional | What to do when the value is unknown. Refused with `is_dark` and `is_off_peak`. |
+| `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window instead of its current value. `value` must then be a number. Refused with `is_dark` and `is_off_peak`. |
 | `offset_minutes` | integer in [-720, 720], optional | With `is_dark` only. Moves civil dusk by this many minutes and civil dawn by the opposite. Absent means 0. Refused with every other op. |
 
 Outputs: two ports, `true` and `false`. Every edge leaving an `if` names one.
@@ -165,6 +181,7 @@ Outputs: two ports, `true` and `false`. Every edge leaving an `if` names one.
 :::
 - `average` is the plain mean of the readings received in the window ending now, the newest included. While a flow uses it the hub keeps every reading of that entity, repeats included; for the part of the window before that (after a hub restart, or right after the flow is saved) it reads history, which holds one row per change, so a repeated reading there counts once. With no reading in the window the current value is the mean. The value is unknown, so `missing` applies, when the entity is unknown, unavailable or not a number. History is optional: without it the average starts from the readings received since the flow was loaded. The run detail shows what was compared, for example `average 30m = 18.6 → true`.
 - `is_dark` is true between civil dusk and civil dawn (sun centre 6 degrees or more below the horizon) at the house position, now. It reads the sun, not an entity. With `offset_minutes: -30` it is true from 30 minutes before civil dusk until 30 minutes after civil dawn, which suits indoor spaces that get dark before the street does; a positive offset shortens the dark at both ends.
+- `is_off_peak` is true during off-peak, now, with the same rule as [`trigger.off_peak`](#triggeroff_peak): the off-peak device's usable reading, else the windows. It takes no operand. The run detail reads `is_off_peak → true` or `false`.
 
 Example: a temperature sensor averaging 19 or less over 30 minutes takes `true`, so a single noisy reading does not trigger the branch.
 

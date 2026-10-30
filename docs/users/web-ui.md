@@ -195,7 +195,7 @@ Roles come from the `energyRole` override (`solar`, `grid`, `grid_export`, `batt
 
 Between the diagram and the cards, the **grid day chart** (a "Today" card) shows what crossed the grid meter on one day, in half-hour bars. What you bought from the grid sits above the zero line, off-peak (light blue) under peak (dark blue); what you sold, the solar export, sits below it in yellow. The off-peak periods are shaded behind the bars. Above the chart, the day's totals: bought with its off-peak and peak split, and sold. ‹ and › move to the previous or next day, from the first day with data up to today; today's bars fill up as the day goes on, refreshed about once a minute while the page is open. Hover or tap a bar for its half hour and values.
 
-The chart reads the lifetime counters paired with the entities that carry the `grid` role (bought) and their export twin or a `grid_export` entity (sold), so it needs [history](history.md) and a grid meter with an energy counter. The split comes from the off-peak hours in Settings › Home; without them every bar is one colour ("Bought"). A day keeps the off-peak hours that were in force on it, so changing your contract does not recolour past days.
+The chart reads the lifetime counters paired with the entities that carry the `grid` role (bought) and their export twin or a `grid_export` entity (sold), so it needs [history](history.md) and a grid meter with an energy counter. The split comes from the off-peak setting in Settings › Home; without it every bar is one colour ("Bought"). With an off-peak device, each moment is split by what the device reported then (its recorded history), and the windows fill the gaps: before its first reading, while it was offline, and the rest of today. Without a device, a day keeps the off-peak hours that were in force on it, so changing your contract does not recolour past days.
 
 ## Security
 
@@ -274,6 +274,14 @@ The **Home** page (**Maison** in French, `/settings/home`) holds the settings of
 - **Mode selector**: the select entity behind the house mode pill. Choose "None" to hide the pill.
 - **Indoor sensor**: the temperature sensor for the indoor value, chosen with the [entity picker](#picking-an-entity), which opens on the thermometers. "Automatic (median of rooms)" uses the median of the room values.
 - **Off-peak hours**: the off-peak periods of your electricity contract, as start–end times (**Add a period**, **Remove**). A period may cross midnight (22:00–06:00); periods must not overlap. The same hours apply every day. A change applies from the start of the day you save it; earlier days keep the hours they had, and the first hours you set also cover the days recorded before them.
+- **Follow a device** (under the off-peak hours): for a meter or sensor that reports the tariff period itself. Pick the entity, then tick the values that mean off-peak: the chips offer what the entity reports and its current reading, and **Add a value** takes any other. An on/off entity starts with `on` ticked. **Remove device** goes back to the hours alone. With a device set, the hours are labelled **Backup windows** and are only used when the device has no reading. Both are optional:
+
+  | Device | Hours | Off-peak comes from |
+  | --- | --- | --- |
+  | none | none | nothing: a single tariff |
+  | none | set | the hours |
+  | set | none | the device; no reading counts as peak |
+  | set | set | the device; no reading falls back to the hours |
 
 ## Picking an entity
 

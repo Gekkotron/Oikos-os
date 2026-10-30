@@ -5,7 +5,7 @@ use leptos::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use leptos::task::spawn_local;
 
-use oikos_api::{HomeSettings, OffPeakWindow};
+use oikos_api::{EntityView, HomeSettings, OffPeakDevice, OffPeakWindow};
 use oikos_core::model::Kind;
 
 use crate::climate::entity_field::ThermometerField;
@@ -19,6 +19,7 @@ use crate::i18n::settings::{
     RULE_BAD_TIME, RULE_BETWEEN, RULE_LOWER_THAN, RULE_NOT_A, RULE_OVERLAP, RULE_START_EQUALS_END,
 };
 use crate::i18n::{HomeText, Lang, home_text};
+use crate::if_value::{ValueInput, value_input};
 use crate::setup::services::energy::EnergyPanel;
 
 /// A setting the panel edits, for pointing an error at its field.
@@ -42,6 +43,8 @@ pub struct Draft {
     pub cold: String,
     pub hot: String,
     pub off_peak: Vec<(String, String)>,
+    /// The off-peak device as picked: its entity id and the values that mean off-peak.
+    pub off_peak_device: Option<(String, Vec<String>)>,
 }
 
 /// A number as the field shows it, with the language's decimal mark.
@@ -63,6 +66,10 @@ impl Draft {
                 .iter()
                 .map(|w| (w.start.clone(), w.end.clone()))
                 .collect(),
+            off_peak_device: s
+                .off_peak_device
+                .as_ref()
+                .map(|d| (d.entity.clone(), d.values.clone())),
         }
     }
 }
@@ -113,6 +120,12 @@ pub fn merge(base: &Draft, draft: &Draft, latest: &Draft) -> Draft {
             &draft.off_peak
         } else {
             &latest.off_peak
+        }
+        .clone(),
+        off_peak_device: if draft.off_peak_device != base.off_peak_device {
+            &draft.off_peak_device
+        } else {
+            &latest.off_peak_device
         }
         .clone(),
     }
@@ -167,6 +180,57 @@ pub fn off_peak_windows(rows: &[(String, String)]) -> Vec<OffPeakWindow> {
         .collect()
 }
 
+/// The device to save: `None` without an entity; values trimmed, blanks and repeats dropped.
+pub fn off_peak_device(draft: &Draft) -> Option<OffPeakDevice> {
+    let (entity, typed) = draft.off_peak_device.as_ref()?;
+    if entity.is_empty() {
+        return None;
+    }
+    let mut values: Vec<String> = Vec::new();
+    for v in typed.iter().map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        if !values.iter().any(|kept| kept == v) {
+            values.push(v.to_owned());
+        }
+    }
+    Some(OffPeakDevice {
+        entity: entity.clone(),
+        values,
+    })
+}
+
+/// The values worth offering for `e` as off-peak: what discovery says it reports, then its
+/// current reading, as the hub matches them (`on`/`off`, plain numbers, the text).
+pub fn device_choices(e: &EntityView) -> Vec<String> {
+    use oikos_core::energy::reading_text;
+    use oikos_core::flow::Scalar;
+    let mut out: Vec<String> = Vec::new();
+    if let ValueInput::List(choices) = value_input(Lang::En, Some(e)) {
+        out.extend(
+            choices
+                .iter()
+                .filter_map(|c| Scalar::from_json(&c.value))
+                .map(|v| reading_text(&v)),
+        );
+    }
+    if let Some(now) = Scalar::of_state(&e.state.value).map(|v| reading_text(&v))
+        && !matches!(now.as_str(), "" | "unknown" | "unavailable")
+        && !out.contains(&now)
+    {
+        out.push(now);
+    }
+    out
+}
+
+/// The values preselected when `e` is picked: `on` for an on/off entity, none otherwise.
+fn device_defaults(e: &EntityView) -> Vec<String> {
+    match value_input(Lang::En, Some(e)) {
+        ValueInput::List(choices) if choices.iter().any(|c| c.value == serde_json::json!(true)) => {
+            vec!["on".to_owned()]
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// The settings document the draft stands for, or the first number that does not parse.
 pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, Field> {
     Ok(HomeSettings {
@@ -177,6 +241,7 @@ pub fn draft_to_settings(draft: &Draft) -> Result<HomeSettings, Field> {
         hot_above: parse_number(&draft.hot, Field::Hot)?,
         off_peak: off_peak_windows(&draft.off_peak),
         off_peak_history: Vec::new(),
+        off_peak_device: off_peak_device(draft),
         // Not on this panel: Save puts the stored choice back.
         energy_view: Default::default(),
     })
@@ -204,9 +269,14 @@ fn field_of_message(message: &str) -> Option<Field> {
 pub fn OffPeakEditor(draft: RwSignal<Draft>, children: Children) -> impl IntoView {
     let lang = use_context::<RwSignal<Lang>>();
     let t = move |k: HomeText| home_text(lang.map_or(Lang::En, |l| l.get()), k);
+    let has_device = move || draft.with(|d| d.off_peak_device.is_some());
     view! {
         <div class="climate-field home-settings__off-peak">
-            <span class="climate-field__label">{move || t(HomeText::OffPeakHours)}</span>
+            <span class="climate-field__label">
+                {move || {
+                    t(if has_device() { HomeText::OffPeakBackup } else { HomeText::OffPeakHours })
+                }}
+            </span>
             <p class="settings__hint">{move || t(HomeText::OffPeakHint)}</p>
             {move || {
                 let rows = draft.with(|d| d.off_peak.len());
@@ -273,7 +343,127 @@ pub fn OffPeakEditor(draft: RwSignal<Draft>, children: Children) -> impl IntoVie
             >
                 {move || t(HomeText::AddWindow)}
             </button>
+            <OffPeakDeviceRow draft=draft />
             {children()}
+        </div>
+    }
+}
+
+/// "Follow a device": the entity picker, then the values that mean off-peak as chips (what the
+/// entity reports and its current reading, plus any typed by hand).
+#[component]
+fn OffPeakDeviceRow(draft: RwSignal<Draft>) -> impl IntoView {
+    let lang = use_context::<RwSignal<Lang>>();
+    let t = move |k: HomeText| home_text(lang.map_or(Lang::En, |l| l.get()), k);
+    let house = use_context::<House>();
+    let entity_of = move |id: &str| house.and_then(|h| h.entities.with(|m| m.get(id).cloned()));
+    let entity = Signal::derive(move || {
+        draft.with(|d| d.off_peak_device.as_ref().map(|(id, _)| id.clone()))
+    });
+    let pick = Callback::new(move |id: Option<String>| {
+        let defaults = id
+            .as_deref()
+            .and_then(entity_of)
+            .map(|e| device_defaults(&e))
+            .unwrap_or_default();
+        draft.update(|d| d.off_peak_device = id.map(|id| (id, defaults)));
+    });
+    let values = move || {
+        draft.with(|d| {
+            d.off_peak_device
+                .as_ref()
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        })
+    };
+    let toggle = move |value: String| {
+        draft.update(|d| {
+            if let Some((_, values)) = d.off_peak_device.as_mut() {
+                match values.iter().position(|v| *v == value) {
+                    Some(i) => {
+                        values.remove(i);
+                    }
+                    None => values.push(value),
+                }
+            }
+        })
+    };
+    let typed = RwSignal::new(String::new());
+    let add = move || {
+        let value = typed.get_untracked().trim().to_owned();
+        if value.is_empty() {
+            return;
+        }
+        draft.update(|d| {
+            if let Some((_, values)) = d.off_peak_device.as_mut()
+                && !values.contains(&value)
+            {
+                values.push(value);
+            }
+        });
+        typed.set(String::new());
+    };
+    view! {
+        <div class="home-settings__device">
+            <EntityPickField
+                label=Signal::derive(move || t(HomeText::OffPeakDevice).to_owned())
+                value=entity
+                on_change=pick
+                pinned=Some(Signal::derive(move || t(HomeText::NoneChoice).to_owned()))
+            />
+            <p class="settings__hint">{move || t(HomeText::OffPeakDeviceHint)}</p>
+            {move || {
+                let id = entity.get()?;
+                let mut offered = entity_of(&id).map(|e| device_choices(&e)).unwrap_or_default();
+                for v in values() {
+                    if !offered.contains(&v) {
+                        offered.push(v);
+                    }
+                }
+                let chosen = values();
+                Some(view! {
+                    <span class="climate-field__label">{move || t(HomeText::OffPeakValues)}</span>
+                    <div class="chip-row" role="group">
+                        {offered
+                            .into_iter()
+                            .map(|v| {
+                                let on = chosen.contains(&v);
+                                let label = v.clone();
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="chip"
+                                        class:chip--selected=on
+                                        aria-pressed=if on { "true" } else { "false" }
+                                        on:click=move |_| toggle(v.clone())
+                                    >
+                                        {label}
+                                    </button>
+                                }
+                            })
+                            .collect_view()}
+                    </div>
+                    <div class="home-settings__window">
+                        <input
+                            class="field"
+                            type="text"
+                            aria-label=move || t(HomeText::OffPeakAddValue)
+                            prop:value=move || typed.get()
+                            on:input=move |ev| typed.set(event_target_value(&ev))
+                        />
+                        <button type="button" class="btn btn--compact" on:click=move |_| add()>
+                            {move || t(HomeText::OffPeakAddValue)}
+                        </button>
+                    </div>
+                    <button
+                        type="button"
+                        class="btn btn--compact home-settings__device-clear"
+                        on:click=move |_| draft.update(|d| d.off_peak_device = None)
+                    >
+                        {move || t(HomeText::OffPeakClearDevice)}
+                    </button>
+                })
+            }}
         </div>
     }
 }
@@ -468,7 +658,39 @@ mod tests {
             cold: cold.into(),
             hot: hot.into(),
             off_peak: vec![],
+            off_peak_device: None,
         }
+    }
+
+    #[test]
+    fn draft_device_round_trips() {
+        let device = oikos_api::OffPeakDevice {
+            entity: "sensor.tariff".into(),
+            values: vec!["OFF".into(), "OFF2".into()],
+        };
+        let settings = HomeSettings {
+            off_peak_device: Some(device.clone()),
+            ..HomeSettings::default()
+        };
+        let d = Draft::new(Lang::En, &settings);
+        assert_eq!(off_peak_device(&d), Some(device.clone()));
+        assert_eq!(draft_to_settings(&d).unwrap().off_peak_device, Some(device));
+        let blank = Draft {
+            off_peak_device: Some((String::new(), vec!["OFF".into()])),
+            ..Draft::default()
+        };
+        assert_eq!(off_peak_device(&blank), None);
+        let twice = Draft {
+            off_peak_device: Some((
+                "sensor.tariff".into(),
+                vec!["B".into(), " A ".into(), "B".into(), "".into()],
+            )),
+            ..Draft::default()
+        };
+        assert_eq!(
+            off_peak_device(&twice).unwrap().values,
+            ["B".to_owned(), "A".to_owned()]
+        );
     }
 
     #[test]
@@ -491,6 +713,7 @@ mod tests {
             cold: "15".into(),
             hot: "26".into(),
             off_peak: vec![],
+            off_peak_device: None,
         }
     }
 

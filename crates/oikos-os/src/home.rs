@@ -4,10 +4,13 @@
 //! registry so it never becomes an override.
 
 use chrono::NaiveDate;
+use chrono::{DateTime, TimeZone, Timelike};
+use chrono_tz::Tz;
 use oikos_api::{HomeSettings, WsEvent};
 use oikos_core::command::Publish;
 use oikos_core::energy::{
-    EnergyMeters, GridCounters, OffPeakEntry, record_change, validate_windows,
+    EnergyMeters, GridCounters, OffPeakEntry, device_off_peak, next_boundary, record_change,
+    resolve_off_peak, validate_windows, windows_for,
 };
 use oikos_core::model::Kind;
 use oikos_core::registry::Registry;
@@ -99,10 +102,77 @@ pub fn validate(settings: &HomeSettings, reg: &Registry) -> Result<(), String> {
             None => return Err(format!("indoor_entity `{id}` is not an entity")),
         }
     }
+    if let Some(device) = &settings.off_peak_device {
+        if device.entity.is_empty() {
+            return Err("off_peak_device needs an entity".to_owned());
+        }
+        if reg.entity(&device.entity).is_none() {
+            return Err(format!(
+                "off_peak_device `{}` is not an entity",
+                device.entity
+            ));
+        }
+        if device.values.is_empty() {
+            return Err("off_peak_device needs at least one off-peak value".to_owned());
+        }
+    }
     Ok(())
 }
 
+/// The moment the wall clock reads `ahead` minutes after `now`'s minute: on a DST day the
+/// windows still start and end at their local times. A time the clock skips (spring forward)
+/// is the first valid one after it; a time it reads twice (fall back) is the first of the two.
+pub fn boundary_at(now: DateTime<Tz>, ahead: u16) -> DateTime<Tz> {
+    let zone = now.timezone();
+    let mut local = now
+        .date_naive()
+        .and_hms_opt(now.hour(), now.minute(), 0)
+        .unwrap_or_default()
+        + chrono::Duration::minutes(i64::from(ahead));
+    // A skipped hour is at most a few, so this stops quickly.
+    for _ in 0..16 {
+        if let Some(at) = zone.from_local_datetime(&local).earliest() {
+            return at;
+        }
+        local += chrono::Duration::minutes(15);
+    }
+    now + chrono::Duration::minutes(i64::from(ahead))
+}
+
+/// Whether it is off-peak at a moment, and what said so.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OffPeakNow {
+    pub off_peak: bool,
+    /// The device entity when its reading decided; `None` when the windows did.
+    pub device: Option<String>,
+    /// The next window start or end; `None` without windows.
+    pub next_boundary: Option<DateTime<Tz>>,
+}
+
 impl Hub {
+    /// Off-peak at `now`: the off-peak device's reading when usable, else the windows in force
+    /// that day.
+    pub fn off_peak_now(&self, now: DateTime<Tz>) -> OffPeakNow {
+        let settings = self.home_settings();
+        let reading = settings.off_peak_device.as_ref().and_then(|device| {
+            let reg = self.read();
+            let state = reg.state(&device.entity)?;
+            device_off_peak(device, &state.value, state.availability)
+        });
+        let today = now.date_naive();
+        let history = effective_history(&settings, today);
+        let windows = windows_for(&history, today);
+        let minute = (now.hour() * 60 + now.minute()) as u16;
+        let next_boundary = next_boundary(windows, minute).map(|ahead| boundary_at(now, ahead));
+        OffPeakNow {
+            off_peak: resolve_off_peak(reading, windows, minute),
+            device: reading
+                .and(settings.off_peak_device)
+                .map(|device| device.entity),
+            next_boundary,
+        }
+    }
+
     fn home_slot(&self) -> MutexGuard<'_, HomeSettings> {
         self.home_settings
             .lock()
@@ -179,7 +249,7 @@ impl Hub {
 mod tests {
     use super::*;
     use chrono::NaiveDate;
-    use oikos_core::energy::OffPeakWindow;
+    use oikos_core::energy::{OffPeakDevice, OffPeakWindow};
     use oikos_core::registry::RegistryConfig;
 
     const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../oikos-core/tests/fixtures/");
@@ -313,6 +383,52 @@ mod tests {
 
     fn day(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn boundary_follows_the_wall_clock_across_dst() {
+        use chrono::TimeZone;
+        use chrono_tz::Europe::Paris;
+        // Spring forward: 2026-03-29 02:00 CET jumps to 03:00 CEST.
+        let now = Paris.with_ymd_and_hms(2026, 3, 29, 0, 30, 0).unwrap();
+        let at = boundary_at(now, 6 * 60 - 30);
+        assert_eq!(at, Paris.with_ymd_and_hms(2026, 3, 29, 6, 0, 0).unwrap());
+        // A boundary inside the gap is the first valid time after it.
+        let at = boundary_at(now, 2 * 60);
+        assert_eq!(at, Paris.with_ymd_and_hms(2026, 3, 29, 3, 0, 0).unwrap());
+        // Fall back: 2026-10-25 03:00 CEST goes back to 02:00 CET.
+        let now = Paris.with_ymd_and_hms(2026, 10, 25, 0, 30, 0).unwrap();
+        let at = boundary_at(now, 6 * 60 - 30);
+        assert_eq!(at, Paris.with_ymd_and_hms(2026, 10, 25, 6, 0, 0).unwrap());
+        // Past midnight.
+        let now = Paris.with_ymd_and_hms(2026, 1, 1, 23, 0, 30).unwrap();
+        let at = boundary_at(now, 7 * 60);
+        assert_eq!(at, Paris.with_ymd_and_hms(2026, 1, 2, 6, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn off_peak_device_must_name_an_entity_and_values() {
+        let reg = registry();
+        let sensor = id_where(&reg, |e| e.unique_id.contains("temperature"));
+        let with = |entity: &str, values: &[&str]| HomeSettings {
+            off_peak_device: Some(OffPeakDevice {
+                entity: entity.to_owned(),
+                values: values.iter().map(|v| (*v).to_owned()).collect(),
+            }),
+            ..HomeSettings::default()
+        };
+        for bad in [
+            with("sensor.nope", &["OFF"]),
+            with("", &["OFF"]),
+            with(&sensor, &[]),
+        ] {
+            let err = validate(&bad, &reg).expect_err("refused");
+            assert!(err.starts_with("off_peak_device"), "{err}");
+        }
+        // A device alone is enough: the windows are optional.
+        let ok = with(&sensor, &["OFF"]);
+        assert!(ok.off_peak.is_empty());
+        assert_eq!(validate(&ok, &reg), Ok(()));
     }
 
     #[test]

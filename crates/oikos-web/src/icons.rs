@@ -308,6 +308,7 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::TriggerState(_) => NODE_BOLT,
         NodeKind::TriggerSchedule(_) => NODE_CLOCK,
         NodeKind::TriggerSun(_) => SUN,
+        NodeKind::TriggerOffPeak(_) => NODE_BOLT,
         NodeKind::TriggerSignal(_) => NODE_BOLT,
         NodeKind::TriggerManual(_) => NODE_PLAY_CIRCLE,
         NodeKind::If(p) if p.op == oikos_core::flow::Op::IsDark => NODE_MOON,
@@ -331,6 +332,7 @@ pub fn trigger_icon(kind: crate::flow_list::TriggerKind) -> &'static str {
         TriggerKind::State => NODE_BOLT,
         TriggerKind::Schedule => NODE_CLOCK,
         TriggerKind::Sun => SUN,
+        TriggerKind::OffPeak => NODE_BOLT,
         TriggerKind::Signal => NODE_SIGNAL,
         TriggerKind::Manual => NODE_PLAY_CIRCLE,
     }
