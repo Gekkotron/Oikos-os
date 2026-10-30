@@ -116,8 +116,7 @@ pub(super) async fn run_with(
                 Ok(event) => engine.handle_event(event),
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
                     tracing::warn!(missed, "flow engine lagged behind the events, forgetting values");
-                    engine.known.clear();
-                    engine.off_peak_lost();
+                    engine.events_lagged();
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
             },
@@ -241,7 +240,7 @@ impl Engine {
         }
         self.arm_schedules();
         self.arm_suns();
-        self.off_peak_reseed();
+        self.off_peak_reload();
     }
 
     /// Whether `active` is a run that disabled its own flow (announced by `KeepRun`) and whose
@@ -465,19 +464,55 @@ impl Engine {
         now
     }
 
-    /// The link dropped or events were missed: the next reading may be a replay.
+    /// Events were missed: values seen before may be stale. A device's answer is forgotten and
+    /// seeded again by its next report, or a minute later.
+    fn events_lagged(&mut self) {
+        self.known.clear();
+        if self.off_peak_device().is_some() {
+            self.off_peak_base = None;
+        }
+        if self.online() {
+            self.off_peak_settle = Some(now_in(&self.now, self.zone) + OFF_PEAK_SETTLE);
+        }
+    }
+
+    /// The link dropped: the device's next reading may be a replay, so its answer is forgotten.
+    /// The windows' answer is kept (nothing replays a clock), so an edge during the outage is
+    /// recorded as skipped.
     fn off_peak_lost(&mut self) {
-        self.off_peak_base = None;
+        if self.off_peak_device().is_some() {
+            self.off_peak_base = None;
+        }
         self.off_peak_settle = None;
     }
 
-    /// Re-reads the answer without firing (a flow save, a settings change). Seeds only while
-    /// online, and with a device only once the base exists or its report has come: before
-    /// that, the registry may hold a pre-drop value the replay will contradict.
+    /// The answer to start from without firing, `None` to wait. Only while online. With a
+    /// device, only from a usable reading seen since the last seed: before its report the
+    /// windows (or a pre-drop registry value) may disagree with it, and its first report would
+    /// look like a change.
+    fn off_peak_seed_value(&self, now: &OffPeakNow) -> Option<bool> {
+        if !self.online() {
+            return None;
+        }
+        match self.off_peak_device() {
+            None => Some(now.off_peak),
+            Some(_) if self.off_peak_base.is_some() && now.device.is_some() => Some(now.off_peak),
+            Some(_) => None,
+        }
+    }
+
+    /// A settings change: takes the new answer as the starting point, never fires.
     fn off_peak_reseed(&mut self) {
         let now = self.off_peak_resolve();
-        if self.online() && (self.off_peak_base.is_some() || self.off_peak_device().is_none()) {
-            self.off_peak_base = Some(now.off_peak);
+        self.off_peak_base = self.off_peak_seed_value(&now);
+    }
+
+    /// A flow save: re-arms the boundary timer and seeds an unseeded base; a seeded one is
+    /// kept, so an edge being processed is not swallowed.
+    fn off_peak_reload(&mut self) {
+        let now = self.off_peak_resolve();
+        if self.off_peak_base.is_none() {
+            self.off_peak_base = self.off_peak_seed_value(&now);
         }
     }
 
@@ -1531,6 +1566,50 @@ mod tests {
         assert_eq!(run_count(&engine, "off"), 1);
         tariff_report(&mut engine, &id, "test/tariff/avail", "offline");
         assert_eq!(run_count(&engine, "off"), 1);
+    }
+
+    #[tokio::test]
+    async fn boot_flows_before_settings_then_first_report_never_fires() {
+        // At boot the flows can replay before the home settings, and both before the device.
+        let (mut engine, id, _) = tariff_engine((2026, 1, 1, 1, 0));
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_settings(&mut engine, Some(&id), &[]);
+        tariff_report(&mut engine, &id, "test/tariff", "OFF");
+        assert_eq!(run_count(&engine, "on"), 0);
+        tariff_report(&mut engine, &id, "test/tariff", "PEAK");
+        tariff_report(&mut engine, &id, "test/tariff", "OFF");
+        assert_eq!(run_count(&engine, "on"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_lag_keeps_the_next_window_edge() {
+        let (mut engine, _, clock) = tariff_engine((2026, 1, 1, 20, 59));
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_settings(&mut engine, None, &[("22:00", "06:00")]);
+        engine.events_lagged();
+        *clock.lock().unwrap() = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 21, 0, 0).unwrap();
+        engine.tick_off_peak();
+        assert_eq!(run_count(&engine, "on"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_window_edge_during_an_outage_is_recorded_skipped() {
+        let (mut engine, _, clock) = tariff_engine((2026, 1, 1, 20, 59));
+        off_peak_flow(&engine, "on", "start");
+        engine.reload();
+        off_peak_settings(&mut engine, None, &[("22:00", "06:00")]);
+        let offline = ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        };
+        engine.hub.set_connection(offline.clone());
+        engine.handle_event(WsEvent::ConnectionChanged(offline));
+        *clock.lock().unwrap() = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 21, 0, 0).unwrap();
+        engine.tick_off_peak();
+        let runs = engine.hub.flow("on").unwrap().runs;
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].status, RunStatus::Skipped);
     }
 
     #[tokio::test]

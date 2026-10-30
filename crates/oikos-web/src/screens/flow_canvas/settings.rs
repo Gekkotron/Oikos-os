@@ -110,6 +110,11 @@ fn op_label(lang: Lang, op: &str) -> &'static str {
     }
 }
 
+/// Whether the card shows the value, entity, average and unknown fields for `op`.
+fn takes_operands(op: Op) -> bool {
+    !matches!(op, Op::IsDark | Op::IsOffPeak)
+}
+
 fn op_from(s: &str) -> Option<Op> {
     match s {
         "eq" => Some(Op::Eq),
@@ -797,7 +802,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     });
                 }
             };
-            let not_dark = move || op_signal.get() != Op::IsDark;
+            let not_dark = move || takes_operands(op_signal.get());
             let value_id = id.clone();
             let value_write = Callback::new(move |value: Option<serde_json::Value>| {
                 if let Some(v) = value {
@@ -919,7 +924,12 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 </label>
                 <Show
                     when=not_dark
-                    fallback=move || view! {
+                    fallback=move || if op_signal.get() == Op::IsOffPeak {
+                        view! {
+                            <p class="node-editor__hint">{move || t(FlowText::IsOffPeakSub)}</p>
+                        }
+                        .into_any()
+                    } else { view! {
                         <p class="node-editor__hint">{move || t(FlowText::IsDark)}</p>
                         <label class="node-editor__field">
                             <span class="node-editor__label">{move || t(FlowText::DarkShift)}</span>
@@ -940,6 +950,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                         <p class="node-editor__hint">{move || t(FlowText::DarkShiftHint)}</p>
                         <FallbackBadge cfg=cfg />
                     }
+                    .into_any() }
                 >
                     <IfValueField
                         value=stored_value
@@ -1848,6 +1859,15 @@ mod tests {
         assert_eq!(i.value, Some(json!(true)));
         assert_eq!(i.entity.as_deref(), Some("x"));
         assert_eq!(i.average.as_deref(), Some("15m"));
+    }
+
+    #[test]
+    fn only_compare_ops_show_operand_fields() {
+        for op in [Op::Eq, Op::Ne, Op::Gt, Op::Lt, Op::Gte, Op::Lte] {
+            assert!(takes_operands(op), "{op:?}");
+        }
+        assert!(!takes_operands(Op::IsDark));
+        assert!(!takes_operands(Op::IsOffPeak));
     }
 
     #[test]

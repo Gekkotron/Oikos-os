@@ -4,7 +4,7 @@
 //! registry so it never becomes an override.
 
 use chrono::NaiveDate;
-use chrono::{DateTime, Timelike};
+use chrono::{DateTime, TimeZone, Timelike};
 use chrono_tz::Tz;
 use oikos_api::{HomeSettings, WsEvent};
 use oikos_core::command::Publish;
@@ -119,6 +119,26 @@ pub fn validate(settings: &HomeSettings, reg: &Registry) -> Result<(), String> {
     Ok(())
 }
 
+/// The moment the wall clock reads `ahead` minutes after `now`'s minute: on a DST day the
+/// windows still start and end at their local times. A time the clock skips (spring forward)
+/// is the first valid one after it; a time it reads twice (fall back) is the first of the two.
+pub fn boundary_at(now: DateTime<Tz>, ahead: u16) -> DateTime<Tz> {
+    let zone = now.timezone();
+    let mut local = now
+        .date_naive()
+        .and_hms_opt(now.hour(), now.minute(), 0)
+        .unwrap_or_default()
+        + chrono::Duration::minutes(i64::from(ahead));
+    // A skipped hour is at most a few, so this stops quickly.
+    for _ in 0..16 {
+        if let Some(at) = zone.from_local_datetime(&local).earliest() {
+            return at;
+        }
+        local += chrono::Duration::minutes(15);
+    }
+    now + chrono::Duration::minutes(i64::from(ahead))
+}
+
 /// Whether it is off-peak at a moment, and what said so.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OffPeakNow {
@@ -143,12 +163,7 @@ impl Hub {
         let history = effective_history(&settings, today);
         let windows = windows_for(&history, today);
         let minute = (now.hour() * 60 + now.minute()) as u16;
-        let next_boundary = next_boundary(windows, minute).map(|ahead| {
-            let start_of_minute = now
-                - chrono::Duration::seconds(i64::from(now.second()))
-                - chrono::Duration::nanoseconds(i64::from(now.nanosecond()));
-            start_of_minute + chrono::Duration::minutes(i64::from(ahead))
-        });
+        let next_boundary = next_boundary(windows, minute).map(|ahead| boundary_at(now, ahead));
         OffPeakNow {
             off_peak: resolve_off_peak(reading, windows, minute),
             device: reading
@@ -368,6 +383,27 @@ mod tests {
 
     fn day(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn boundary_follows_the_wall_clock_across_dst() {
+        use chrono::TimeZone;
+        use chrono_tz::Europe::Paris;
+        // Spring forward: 2026-03-29 02:00 CET jumps to 03:00 CEST.
+        let now = Paris.with_ymd_and_hms(2026, 3, 29, 0, 30, 0).unwrap();
+        let at = boundary_at(now, 6 * 60 - 30);
+        assert_eq!(at, Paris.with_ymd_and_hms(2026, 3, 29, 6, 0, 0).unwrap());
+        // A boundary inside the gap is the first valid time after it.
+        let at = boundary_at(now, 2 * 60);
+        assert_eq!(at, Paris.with_ymd_and_hms(2026, 3, 29, 3, 0, 0).unwrap());
+        // Fall back: 2026-10-25 03:00 CEST goes back to 02:00 CET.
+        let now = Paris.with_ymd_and_hms(2026, 10, 25, 0, 30, 0).unwrap();
+        let at = boundary_at(now, 6 * 60 - 30);
+        assert_eq!(at, Paris.with_ymd_and_hms(2026, 10, 25, 6, 0, 0).unwrap());
+        // Past midnight.
+        let now = Paris.with_ymd_and_hms(2026, 1, 1, 23, 0, 30).unwrap();
+        let at = boundary_at(now, 7 * 60);
+        assert_eq!(at, Paris.with_ymd_and_hms(2026, 1, 2, 6, 0, 0).unwrap());
     }
 
     #[test]

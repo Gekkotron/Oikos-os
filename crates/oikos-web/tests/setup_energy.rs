@@ -242,6 +242,48 @@ async fn off_peak_card_saves_the_device_and_keeps_the_rest() {
     assert_eq!(sent["off_peak"], serde_json::json!([]));
 }
 
+#[wasm_bindgen_test]
+async fn off_peak_value_box_survives_house_updates() {
+    let stub = FetchStub::install();
+    let doc = r#"{"off_peak":[],"off_peak_history":[],"off_peak_device":{"entity":"sensor.tariff","values":["OFF"]}}"#;
+    stub.reply("GET", "/api/v1/home/settings", 200, doc);
+    let house = house_with(vec![
+        sensor("sensor.tariff", "enum", None),
+        sensor("sensor.other", "power", None),
+    ]);
+    let host = mount(house);
+    settle().await;
+    let input: web_sys::HtmlInputElement = host
+        .query_selector("input[aria-label='Add a value']")
+        .unwrap()
+        .expect("value box")
+        .unchecked_into();
+    input.set_value("PEA");
+    input
+        .dispatch_event(&web_sys::Event::new("input").unwrap())
+        .unwrap();
+    tick().await;
+    // Any entity in the house changing state must not rebuild the box under the cursor.
+    house.entities.update(|m| {
+        if let Some(e) = m.get_mut("sensor.other") {
+            e.state.value = oikos_core::model::StateValue::Number(42.0);
+        }
+        // The device's own reading changes too, so the chips are drawn again.
+        if let Some(e) = m.get_mut("sensor.tariff") {
+            e.state.value = oikos_core::model::StateValue::Text("NEWCODE".into());
+        }
+    });
+    settle().await;
+    let text = host.text_content().unwrap_or_default();
+    assert!(text.contains("NEWCODE"), "the chips did not redraw: {text}");
+    let again = host
+        .query_selector("input[aria-label='Add a value']")
+        .unwrap()
+        .expect("value box");
+    assert!(again.is_same_node(Some(&input)), "the box was rebuilt");
+    assert_eq!(input.value(), "PEA");
+}
+
 fn with_role(e: &EntityView, role: Option<&str>) -> String {
     let mut e = e.clone();
     e.ui.energy_role = role.map(Into::into);
