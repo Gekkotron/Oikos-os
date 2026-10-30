@@ -24,7 +24,7 @@ use crate::i18n::states::switch_type_word;
 use crate::i18n::{Key, Lang, current_lang, text, use_lang, use_text};
 use crate::icons::consumer_icon;
 use crate::screens::alarm_settings::AlarmRoleLine;
-use crate::settings_rules::{Shown, clear_field, order_valid, other_saved, set_type, shown};
+use crate::settings_rules::{Shown, clear_field, other_saved, set_type, shown};
 
 /// The fields of `after` that differ from `before`, as a patch the hub accepts: camelCase keys,
 /// a cleared `Option` as `null`, flags as booleans, `order` and the brightness as numbers.
@@ -132,53 +132,6 @@ fn PresetsField(draft: Draft) -> impl IntoView {
                 }
             />
             <span class="override__hint">{move || t(DeviceText::PresetsHint)}</span>
-        </label>
-    }
-}
-
-/// The position (`order`): free text so a typo can be shown and blocks Save instead of being
-/// dropped. `valid` is false while the text is not empty or a whole number from 0 to 9999.
-#[component]
-fn PositionField(draft: Draft, valid: RwSignal<bool>) -> impl IntoView {
-    let t = use_device_text();
-    let text =
-        RwSignal::new(draft.with_untracked(|d| d.order.map(|n| n.to_string()).unwrap_or_default()));
-    // Follow an outside change (the draft taking over a newer stored override).
-    Effect::new(move |_| {
-        let order = draft.with(|d| d.order);
-        let shown = text.with_untracked(|t| t.trim().parse::<i32>().ok());
-        if shown != order && valid.get_untracked() {
-            text.set(order.map(|n| n.to_string()).unwrap_or_default());
-        }
-    });
-    view! {
-        <label class="override__field">
-            <span class="override__label">{move || t(DeviceText::Position)}</span>
-            <input
-                class="field"
-                type="text"
-                inputmode="numeric"
-                prop:value=move || text.get()
-                on:input=move |ev| {
-                    let raw = event_target_value(&ev);
-                    let ok = order_valid(&raw);
-                    valid.set(ok);
-                    if ok {
-                        let order = raw.trim().parse::<i32>().ok();
-                        draft.update(|d| d.order = order);
-                    }
-                    text.set(raw);
-                }
-            />
-            <span class="override__hint" class:override__hint--error=move || !valid.get()>
-                {move || {
-                    if valid.get() {
-                        t(DeviceText::PositionHint)
-                    } else {
-                        t(DeviceText::PositionError)
-                    }
-                }}
-            </span>
         </label>
     }
 }
@@ -698,7 +651,6 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
     let options_entity = entity.clone();
     let rules_entity = entity.clone();
     let shown = Memo::new(move |_| draft.with(|d| shown(&rules_entity, d)));
-    let order_ok = RwSignal::new(true);
     let group_label = text_signal(if entity.protocol_kind == Kind::Cover {
         DeviceText::GroupShutters
     } else {
@@ -722,7 +674,6 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 />
                 <AreaField draft=draft />
                 <FlagField label=tt(DeviceText::Favorite) draft=draft get=|d| d.favorite set=|d, v| d.favorite = v />
-                <PositionField draft=draft valid=order_ok />
                 <Show
                     when=move || shown.with(|s| s.show_on_home)
                     fallback=move || {
@@ -889,7 +840,7 @@ pub fn OverrideEditor(entity: EntityView) -> impl IntoView {
                 <button
                     type="button"
                     class="btn override__save"
-                    disabled=move || !dirty.get() || busy.get() || !order_ok.get()
+                    disabled=move || !dirty.get() || busy.get()
                     on:click=save
                 >
                     {move || t(DeviceText::Save)}
