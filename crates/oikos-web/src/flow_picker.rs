@@ -122,6 +122,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 op: Op::IsDark,
                 value: None,
                 entity: None,
+                field: None,
                 missing: None,
                 average: None,
                 offset_minutes: None,
@@ -136,6 +137,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 op: Op::IsOffPeak,
                 value: None,
                 entity: None,
+                field: None,
                 missing: None,
                 average: None,
                 offset_minutes: None,
@@ -278,6 +280,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 Group::And,
                 NodeKind::If(IfParams {
                     entity: Some(e.id.clone()),
+                    field: None,
                     op: Op::Eq,
                     value: Some(current.as_ref().map_or(Value::Bool(true), Scalar::to_json)),
                     missing: None,

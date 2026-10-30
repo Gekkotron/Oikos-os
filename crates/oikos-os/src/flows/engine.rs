@@ -7,6 +7,9 @@
 //! whenever the link drops or the engine falls behind the event stream. Every report of a
 //! watched entity (changed or not) missing from the map seeds it silently again, so an
 //! identical retained replay arms the entity without firing.
+//!
+//! Values are tracked per (entity, field): a trigger on a vacuum's battery and one on its state
+//! fire independently, each on a change of its own value.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -18,9 +21,11 @@ use oikos_core::flow::sun::is_dark_with_offset;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
     Flow, FlowMode, Missing, Node, NodeKind, OffPeakEdge, Op, Reading, Scalar, Schedule, compare,
-    format_duration, in_time_range, parse_clock, parse_duration, pick_duration, switch_exits,
+    field_scalar, format_duration, headline_scalar, in_time_range, parse_clock, parse_duration,
+    pick_duration, switch_exits,
 };
 use oikos_core::history::buckets::{Sample, readings_mean};
+use oikos_core::model::StateValue;
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, JoinSet};
@@ -158,18 +163,30 @@ struct Engine {
     off_peak_settle: Option<chrono::DateTime<chrono_tz::Tz>>,
     /// Valid and enabled flows.
     flows: Vec<Flow>,
-    /// The last value seen for every entity a trigger watches; `None` inside means the entity
-    /// had no value when last seen. Absent means never seen since the last reset.
-    known: BTreeMap<String, Option<Scalar>>,
-    /// The entities watched as of the last reload. Kept apart from `known` because a
-    /// disconnect empties `known` while the watched set stays: those entities must stay
+    /// The last value seen for every (entity, field) a trigger watches; `None` inside means
+    /// the value was absent when last seen. Absent means never seen since the last reset.
+    known: BTreeMap<Watched, Option<Scalar>>,
+    /// The values watched as of the last reload. Kept apart from `known` because a
+    /// disconnect empties `known` while the watched set stays: those values must stay
     /// unseeded until the broker's replay shows them, not be re-seeded from stale values.
-    watched: BTreeSet<String>,
+    watched: BTreeSet<Watched>,
     active: BTreeMap<String, Active>,
     /// `(flow, run)` pairs whose run disabled its own flow with a `flow.enable` node: that run
     /// survives the reload the disable causes. Forgotten when the run ends.
     keep: BTreeSet<(String, String)>,
     tasks: JoinSet<Finished>,
+}
+
+/// A value a trigger watches: an entity and a field of its state (`None` for its headline value).
+type Watched = (String, Option<String>);
+
+/// The value `field` names in `value` of an entity of discovery `component`: its headline value
+/// when `None`.
+fn watched_value(component: &str, value: &StateValue, field: Option<&str>) -> Option<Scalar> {
+    match field {
+        None => headline_scalar(component, value),
+        Some(field) => field_scalar(value, field),
+    }
 }
 
 /// Whether two definitions of a flow do the same thing: they may differ only in how the UI
@@ -210,15 +227,15 @@ impl Engine {
             .filter(|flow| flow.enabled)
             .cloned()
             .collect();
-        let watched = self.watched_entities();
-        self.known.retain(|id, _| watched.contains(id));
+        let watched = self.watched_values();
+        self.known.retain(|key, _| watched.contains(key));
         // Seed only what became watched now, and only while the link is up: otherwise the
         // registry may hold pre-drop values and the broker's replay would look like a change.
         let online = *self.hub.connection().borrow() == ConnectionStatus::Online;
         if online {
-            for id in watched.difference(&self.watched) {
-                let scalar = self.hub.entity_scalar(id);
-                self.known.insert(id.clone(), scalar);
+            for key in watched.difference(&self.watched) {
+                let scalar = self.hub.entity_value(&key.0, key.1.as_deref());
+                self.known.insert(key.clone(), scalar);
             }
         }
         self.watched = watched;
@@ -554,6 +571,7 @@ impl Engine {
             if online {
                 let trigger = TriggerInfo {
                     entity: now.device.clone(),
+                    field: None,
                     value: Value::String(edge.wire_name().to_owned()),
                     previous: Value::String(other.to_owned()),
                 };
@@ -581,13 +599,15 @@ impl Engine {
         }
     }
 
-    /// The entities some enabled flow triggers on.
-    fn watched_entities(&self) -> BTreeSet<String> {
+    /// The (entity, field) values some enabled flow triggers on.
+    fn watched_values(&self) -> BTreeSet<Watched> {
         self.flows
             .iter()
             .flat_map(|flow| flow.triggers())
             .filter_map(|node| match &node.kind {
-                NodeKind::TriggerState(params) => Some(params.entity.clone()),
+                NodeKind::TriggerState(params) => {
+                    Some((params.entity.clone(), params.field.clone()))
+                }
                 _ => None,
             })
             .collect()
@@ -596,7 +616,7 @@ impl Engine {
     fn handle_event(&mut self, event: WsEvent) {
         match event {
             WsEvent::StateChanged { id, state } => {
-                self.state_changed(&id, Scalar::of_state(&state.value));
+                self.state_changed(&id, &state.value);
                 if self.off_peak_device().as_deref() == Some(id.as_str()) {
                     self.off_peak_check(true);
                 }
@@ -633,6 +653,7 @@ impl Engine {
         }
         let trigger = TriggerInfo {
             entity: Some(id.to_owned()),
+            field: None,
             value: Value::String("PRESS".to_owned()),
             previous: Value::Null,
         };
@@ -659,6 +680,7 @@ impl Engine {
         }
         let trigger = TriggerInfo {
             entity: Some(id.to_owned()),
+            field: None,
             value: Value::String(signal.to_owned()),
             previous: Value::Null,
         };
@@ -675,12 +697,17 @@ impl Engine {
     /// the clear) and is ignored: its registry value is exactly the pre-drop one.
     fn state_seen(&mut self, seen: &StateSeen) {
         let id = seen.id.as_str();
-        if seen.epoch == self.hub.link_epoch()
-            && self.watched.contains(id)
-            && !self.known.contains_key(id)
-        {
-            let scalar = self.hub.entity_scalar(id);
-            self.known.insert(id.to_owned(), scalar);
+        if seen.epoch == self.hub.link_epoch() {
+            let unseeded: Vec<Watched> = self
+                .watched
+                .iter()
+                .filter(|key| key.0 == id && !self.known.contains_key(*key))
+                .cloned()
+                .collect();
+            for key in unseeded {
+                let scalar = self.hub.entity_value(id, key.1.as_deref());
+                self.known.insert(key, scalar);
+            }
         }
         if seen.epoch == self.hub.link_epoch()
             && self.off_peak_base.is_none()
@@ -690,47 +717,62 @@ impl Engine {
         }
     }
 
-    /// Fires the triggers an entity's change satisfies. Only a change between two present,
-    /// different values counts: a first sighting, an availability-only report (same value) and
-    /// a value appearing or vanishing are recorded silently.
-    fn state_changed(&mut self, id: &str, next: Option<Scalar>) {
-        let Some(slot) = self.known.get(id) else {
-            // Either not watched, or never seen since the last reset.
-            if self.watched.contains(id) {
-                self.known.insert(id.to_owned(), next);
-            }
-            return;
-        };
-        let previous = slot.clone();
-        self.known.insert(id.to_owned(), next.clone());
-        let (Some(previous), Some(next)) = (previous, next) else {
-            return;
-        };
-        if previous == next {
+    /// Fires the triggers an entity's change satisfies, value by watched value. Only a change
+    /// between two present, different values counts: a first sighting, an availability-only
+    /// report (same value) and a value appearing or vanishing are recorded silently.
+    fn state_changed(&mut self, id: &str, state: &StateValue) {
+        let keys: Vec<Watched> = self
+            .watched
+            .iter()
+            .filter(|key| key.0 == id)
+            .cloned()
+            .collect();
+        if keys.is_empty() {
             return;
         }
-        let mut fires = Vec::new();
-        for flow in &self.flows {
-            for node in flow.triggers() {
-                let NodeKind::TriggerState(params) = &node.kind else {
-                    continue;
-                };
-                if params.entity == id
-                    && !fires.iter().any(|(f, _): &(Flow, String)| f.id == flow.id)
-                    && filter_matches(params.to.as_ref(), &next)
-                    && filter_matches(params.from.as_ref(), &previous)
-                {
-                    fires.push((flow.clone(), node.id.clone()));
+        let component = self
+            .hub
+            .read()
+            .entity(id)
+            .map(|e| e.component.clone())
+            .unwrap_or_default();
+        let mut fires: Vec<(Flow, String, TriggerInfo)> = Vec::new();
+        for key in keys {
+            let next = watched_value(&component, state, key.1.as_deref());
+            // Never seen since the last reset: recorded, not acted on.
+            let Some(previous) = self.known.insert(key.clone(), next.clone()) else {
+                continue;
+            };
+            let (Some(previous), Some(next)) = (previous, next) else {
+                continue;
+            };
+            if previous == next {
+                continue;
+            }
+            let trigger = TriggerInfo {
+                entity: Some(id.to_owned()),
+                field: key.1.clone(),
+                value: next.to_json(),
+                previous: previous.to_json(),
+            };
+            for flow in &self.flows {
+                for node in flow.triggers() {
+                    let NodeKind::TriggerState(params) = &node.kind else {
+                        continue;
+                    };
+                    if params.entity == id
+                        && params.field == key.1
+                        && !fires.iter().any(|(f, _, _)| f.id == flow.id)
+                        && filter_matches(params.to.as_ref(), &next)
+                        && filter_matches(params.from.as_ref(), &previous)
+                    {
+                        fires.push((flow.clone(), node.id.clone(), trigger.clone()));
+                    }
                 }
             }
         }
-        let trigger = TriggerInfo {
-            entity: Some(id.to_owned()),
-            value: next.to_json(),
-            previous: previous.to_json(),
-        };
-        for (flow, node) in fires {
-            self.fire(flow, node, Some(trigger.clone()));
+        for (flow, node, trigger) in fires {
+            self.fire(flow, node, Some(trigger));
         }
     }
 
@@ -873,6 +915,7 @@ pub(crate) fn manual_trigger(flow: &Flow, node: &str) -> Option<TriggerInfo> {
     };
     Some(TriggerInfo {
         entity: None,
+        field: None,
         value: params.value.as_ref()?.to_json(),
         previous: Value::Null,
     })
@@ -1038,6 +1081,7 @@ async fn run_node(
                 hub,
                 now,
                 params.entity.as_deref(),
+                params.field.as_deref(),
                 params.average.as_deref(),
                 trigger,
             )
@@ -1142,6 +1186,7 @@ async fn run_node(
                 hub,
                 now,
                 params.entity.as_deref(),
+                params.field.as_deref(),
                 params.average.as_deref(),
                 trigger,
             )
@@ -1229,20 +1274,21 @@ fn scalar_text(value: &Scalar) -> String {
     }
 }
 
-/// The value an `if` or `switch` node compares: `entity` (else the one that fired the trigger),
-/// as its current value or, with `average`, the mean of its readings over that window.
-/// `Ok(None)` when the value is unknown; `Err` carries the failure reason.
+/// The value an `if` or `switch` node compares: `field` of `entity` (else the value that fired
+/// the trigger), as its current value or, with `average`, the mean of its readings over that
+/// window. `Ok(None)` when the value is unknown; `Err` carries the failure reason.
 async fn node_left(
     hub: &Hub,
     now: &Now,
     entity: Option<&str>,
+    field: Option<&str>,
     average: Option<&str>,
     trigger: Option<&TriggerInfo>,
 ) -> Result<Option<Scalar>, String> {
-    let entity = match (entity, trigger) {
-        (Some(entity), _) => entity,
+    let (entity, field) = match (entity, trigger) {
+        (Some(entity), _) => (entity, field),
         (None, Some(trigger)) => match trigger.entity.as_deref() {
-            Some(entity) => entity,
+            Some(entity) => (entity, trigger.field.as_deref()),
             // A Manual card's value: nothing to read, nothing to average.
             None if average.is_some() => return Err("no entity to average".to_owned()),
             None => return Ok(Scalar::from_json(&trigger.value)),
@@ -1250,10 +1296,10 @@ async fn node_left(
         (None, None) => return Err("no triggering entity".to_owned()),
     };
     Ok(match average {
-        Some(window) => window_average(hub, entity, window, now())
+        Some(window) => window_average(hub, entity, field, window, now())
             .await
             .map(Scalar::Number),
-        None => hub.entity_scalar(entity),
+        None => hub.entity_value(entity, field),
     })
 }
 
@@ -1293,17 +1339,20 @@ fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
     windows
 }
 
-/// The mean of the readings of `entity` over the `window` ending at `now`: the ones the hub
-/// kept, newest included, with history filling the part of the window before them (after a
-/// restart, or a flow saved since). With no reading in the window the value held throughout,
-/// the current one, is the mean. `None` when the entity is unknown, unavailable or not a number.
+/// The mean of the readings of `entity` (its recorded `field` when set) over the `window` ending
+/// at `now`: the ones the hub kept, newest included, with history filling the part of the window
+/// before them (after a restart, or a flow saved since). With no reading in the window the value
+/// held throughout, the current one, is the mean. `None` when the entity is unknown, unavailable or not a number.
 async fn window_average(
     hub: &Hub,
     entity: &str,
+    field: Option<&str>,
     window: &str,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Option<f64> {
-    let Scalar::Number(current) = hub.entity_scalar(entity)? else {
+    // A field is averaged only when it is the entity's recorded number, so its current value is
+    // the number the readings and the history hold.
+    let Scalar::Number(current) = hub.entity_value(entity, field)? else {
         return None;
     };
     let window = parse_duration(window).ok()?;
@@ -1692,6 +1741,7 @@ mod tests {
         let node = engine.flows[0].nodes[1].clone();
         let trigger = TriggerInfo {
             entity: Some(entity.clone()),
+            field: None,
             value: serde_json::json!(17),
             previous: serde_json::json!(20),
         };
@@ -1728,6 +1778,7 @@ mod tests {
         let node = engine.flows[0].nodes[1].clone();
         let trigger = TriggerInfo {
             entity: Some(entity.clone()),
+            field: None,
             value: serde_json::json!(17),
             previous: serde_json::json!(20),
         };
@@ -1957,5 +2008,205 @@ mod tests {
         assert_eq!(steps[1].node, "tm");
         assert_eq!(steps[1].outcome, StepOutcome::Failed);
         assert_eq!(steps[1].ports, None);
+    }
+
+    /// An online Paris engine with a vacuum `robo` reporting `{state, battery_level}` on
+    /// `test/robo`; returns the engine and the vacuum's id.
+    fn vacuum_engine() -> (Engine, String) {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/vacuum/robo/config",
+            br#"{"unique_id":"robo","state_topic":"test/robo","fan_speed_list":["Silent","Turbo"]}"#,
+        );
+        engine.hub.set_connection(ConnectionStatus::Online);
+        let id = engine.hub.snapshot().entities[0].id.clone();
+        (engine, id)
+    }
+
+    /// Publishes the vacuum's state and hands the engine the change event.
+    fn vacuum_report(engine: &mut Engine, id: &str, state: &str, battery: u8) {
+        let payload = format!(r#"{{"state":"{state}","battery_level":{battery}}}"#);
+        engine.hub.ingest("test/robo", payload.as_bytes());
+        let state = engine.hub.read().state(id).cloned().expect("vacuum state");
+        engine.handle_event(WsEvent::StateChanged {
+            id: id.to_owned(),
+            state,
+        });
+    }
+
+    /// A flow `id` triggered by `params` of a state trigger, with nothing after it.
+    fn state_flow(engine: &Engine, id: &str, params: serde_json::Value) {
+        let flow = serde_json::json!({
+            "id": id, "name": id, "enabled": true, "mode": "single",
+            "nodes": [{ "id": "t", "type": "trigger.state", "params": params }],
+            "edges": []
+        });
+        engine.hub.ingest(
+            &format!("oikos/automation/{id}"),
+            flow.to_string().as_bytes(),
+        );
+    }
+
+    #[tokio::test]
+    async fn field_trigger_fires_only_on_its_field() {
+        let (mut engine, id) = vacuum_engine();
+        state_flow(&engine, "plain", serde_json::json!({ "entity": id }));
+        state_flow(
+            &engine,
+            "battery",
+            serde_json::json!({ "entity": id, "field": "battery" }),
+        );
+        engine.reload();
+        vacuum_report(&mut engine, &id, "cleaning", 62);
+        vacuum_report(&mut engine, &id, "cleaning", 55);
+        assert_eq!(
+            (run_count(&engine, "plain"), run_count(&engine, "battery")),
+            (0, 1)
+        );
+        let trigger = engine.hub.flow("battery").unwrap().runs[0]
+            .trigger
+            .clone()
+            .unwrap();
+        assert_eq!(trigger.entity.as_deref(), Some(id.as_str()));
+        assert_eq!(trigger.field.as_deref(), Some("battery"));
+        assert_eq!(trigger.value, serde_json::json!(55.0));
+        assert_eq!(trigger.previous, serde_json::json!(62.0));
+        vacuum_report(&mut engine, &id, "docked", 55);
+        assert_eq!(
+            (run_count(&engine, "plain"), run_count(&engine, "battery")),
+            (1, 1)
+        );
+    }
+
+    #[tokio::test]
+    async fn field_trigger_seeds_silently_after_reconnect() {
+        let (mut engine, id) = vacuum_engine();
+        state_flow(
+            &engine,
+            "battery",
+            serde_json::json!({ "entity": id, "field": "battery" }),
+        );
+        engine.reload();
+        vacuum_report(&mut engine, &id, "cleaning", 62);
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        }));
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Online));
+        vacuum_report(&mut engine, &id, "cleaning", 55);
+        assert_eq!(run_count(&engine, "battery"), 0);
+        vacuum_report(&mut engine, &id, "cleaning", 50);
+        assert_eq!(run_count(&engine, "battery"), 1);
+    }
+
+    #[tokio::test]
+    async fn if_without_entity_reads_the_trigger_field() {
+        let (mut engine, id) = vacuum_engine();
+        vacuum_report(&mut engine, &id, "cleaning", 55);
+        let node = node(serde_json::json!({
+            "id": "check", "type": "if", "params": { "op": "lte", "value": 55 }
+        }));
+        let trigger = TriggerInfo {
+            entity: Some(id.clone()),
+            field: Some("battery".to_owned()),
+            value: serde_json::json!(55),
+            previous: serde_json::json!(62),
+        };
+        let (outcome, detail, port) =
+            run_node(&engine.hub, &engine.now, "f", "r", &node, Some(&trigger)).await;
+        assert_eq!(outcome, StepOutcome::Ok, "{detail}");
+        assert_eq!(port, ["true"]);
+    }
+
+    #[tokio::test]
+    async fn if_reads_entity_field() {
+        let (mut engine, id) = vacuum_engine();
+        vacuum_report(&mut engine, &id, "cleaning", 50);
+        let node = node(serde_json::json!({
+            "id": "check", "type": "if",
+            "params": { "entity": id, "field": "battery", "op": "lte", "value": 55 }
+        }));
+        let (outcome, detail, port) =
+            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        assert_eq!(outcome, StepOutcome::Ok, "{detail}");
+        assert_eq!(port, ["true"]);
+    }
+
+    #[tokio::test]
+    async fn switch_reads_entity_field() {
+        let (mut engine, id) = vacuum_engine();
+        vacuum_report(&mut engine, &id, "cleaning", 50);
+        let node = node(serde_json::json!({
+            "id": "s", "type": "switch", "params": { "entity": id, "field": "battery",
+                "rules": [{ "op": "lte", "value": 20 }, { "op": "lte", "value": 60 }] }
+        }));
+        let (outcome, detail, ports) =
+            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        assert_eq!(outcome, StepOutcome::Ok, "{detail}");
+        assert_eq!(ports, ["2"]);
+    }
+
+    #[tokio::test]
+    async fn if_average_reads_a_recorded_field() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/climate/clim/config",
+            br#"{"unique_id":"clim","mode_state_topic":"test/clim","mode_state_template":"{{ value_json.mode }}","current_temperature_topic":"test/clim","current_temperature_template":"{{ value_json.current }}","modes":["off","heat"]}"#,
+        );
+        let entity = engine.hub.snapshot().entities[0].id.clone();
+        let flow = serde_json::json!({
+            "id": "avg", "name": "avg", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "check", "type": "if", "params": { "entity": entity, "field": "current",
+                    "op": "lte", "value": 19, "average": "30m" } }
+            ],
+            "edges": [{ "from": "t", "to": "check" }]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/avg", flow.to_string().as_bytes());
+        engine.reload();
+        for t in [20, 20, 17] {
+            engine.hub.ingest(
+                "test/clim",
+                format!(r#"{{"mode":"heat","current":{t}}}"#).as_bytes(),
+            );
+        }
+        let node = engine.flows[0].nodes[1].clone();
+        let (outcome, detail, port) =
+            run_node(&engine.hub, &engine.now, "avg", "r", &node, None).await;
+        assert_eq!(outcome, StepOutcome::Ok, "{detail}");
+        assert_eq!(detail, "average 30m = 19.0 → true");
+        assert_eq!(port, ["true"]);
+    }
+
+    #[tokio::test]
+    async fn generic_headline_trigger_fires() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/lock/front/config",
+            br#"{"unique_id":"front","state_topic":"test/front"}"#,
+        );
+        engine.hub.set_connection(ConnectionStatus::Online);
+        let id = engine.hub.snapshot().entities[0].id.clone();
+        state_flow(
+            &engine,
+            "lock",
+            serde_json::json!({ "entity": id, "to": "unlocked" }),
+        );
+        engine.reload();
+        for payload in ["LOCKED", "UNLOCKED"] {
+            engine.hub.ingest("test/front", payload.as_bytes());
+            let state = engine.hub.read().state(&id).cloned().expect("lock state");
+            engine.handle_event(WsEvent::StateChanged {
+                id: id.clone(),
+                state,
+            });
+        }
+        assert_eq!(run_count(&engine, "lock"), 1);
+        assert_eq!(
+            engine.hub.entity_value(&id, None),
+            Some(Scalar::Text("unlocked".into()))
+        );
     }
 }

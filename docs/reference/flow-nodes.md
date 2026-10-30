@@ -80,6 +80,7 @@ Starts a run when an entity's scalar changes to a different value.
 | Param | Type | Description |
 | --- | --- | --- |
 | `entity` | string | The entity id (from `search` or `list_entities`). |
+| `field` | string, optional | A value inside the entity's state (vacuum `battery`, `fan_speed`; light `brightness` (in %), `color_temp`, `effect`; cover `position`; climate `current`, `target`, `fan_mode`, `action`; water heater `current`, `target`; a type-table entity's other fields). Absent: the entity's headline value. The trigger fires when that value changes, `to` and `from` compare it, and the run carries it as the trigger value. A field the entity does not report refuses the save: "node `x`: `entity` reports no field `f`". |
 | `to` | JSON value, optional | Fire only when the new scalar equals it (`true`, `"ON"`, `21.5`). |
 | `from` | JSON value, optional | Fire only when the previous scalar equalled it. |
 
@@ -166,6 +167,7 @@ Branches on a comparison.
 | `op` | `eq`, `ne`, `gt`, `lt`, `gte`, `lte`, `is_dark` or `is_off_peak` | The comparison. |
 | `value` | bool, number or string | The constant to compare with. Required for every op except `is_dark` and `is_off_peak`, where it is refused. |
 | `entity` | string, optional | The entity whose current scalar is read, live. Absent: the entity that triggered the run. Refused with `is_dark` and `is_off_peak`. |
+| `field` | string, optional | A value inside `entity`'s state, as for [`trigger.state`](#triggerstate); a brightness is compared in %. Needs `entity` ("node `x`: a field needs an entity"). With `average`, only the entity's recorded number: cover `position`, climate and water heater `current` ("node `x`: `f` of `entity` has no history to average"). Without `entity`, the field the trigger read is compared, and `average` is refused after a trigger on a field with no history. |
 | `missing` | `fail`, `true` or `false`, optional | What to do when the value is unknown. Refused with `is_dark` and `is_off_peak`. |
 | `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window instead of its current value. `value` must then be a number. Refused with `is_dark` and `is_off_peak`. |
 | `offset_minutes` | integer in [-720, 720], optional | With `is_dark` only. Moves civil dusk by this many minutes and civil dawn by the opposite. Absent means 0. Refused with every other op. |
@@ -197,6 +199,7 @@ Branches on several values at once: one output per rule, tried in order. It is a
 | --- | --- | --- |
 | `rules` | array of rules | 1 to 10 rules. Required. See below. |
 | `entity` | string, optional | The entity whose current scalar is read, live. Absent: the entity that triggered the run. |
+| `field` | string, optional | A value inside `entity`'s state, with the same rules as the [`if`](#if) `field`. |
 | `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window, as for the [`if`](#if) `average`. Every rule `value` (and `to`) must then be a number. |
 | `otherwise` | bool, default `false` | Adds an `otherwise` port, taken when no rule matches. |
 | `all` | bool, default `false` | Take every matching rule instead of the first one only. |

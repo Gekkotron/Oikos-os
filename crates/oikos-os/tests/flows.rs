@@ -2081,3 +2081,152 @@ async fn manual_value_reaches_notify_text() {
     let title = manual_notify_title(&hub, &mut publisher, "bare", serde_json::json!({})).await;
     assert_eq!(title, "?");
 }
+
+const VACUUM_ID: &str = "roborock_40313ca8b964";
+const CLIMATE_ID: &str = "daikin_192_168_1_150";
+
+/// A hub that knows a vacuum and a climate.
+fn hub_with_vacuum_and_climate() -> (Arc<Hub>, mpsc::Receiver<Publish>) {
+    let (hub, rx) = hub();
+    hub.ingest(
+        "oikos/vacuum/roborock_40313ca8b964/config",
+        &fixture("discovery/vacuum__roborock_40313ca8b964__roborock_40313ca8b964.json"),
+    );
+    hub.ingest(
+        "oikos/climate/daikin_192_168_1_150/config",
+        &fixture("discovery/climate__daikin_192_168_1_150__climate.json"),
+    );
+    (hub, rx)
+}
+
+/// A flow whose state trigger reads `params` of `entity`, then turns nothing on.
+fn field_flow(params: serde_json::Value) -> Flow {
+    let text = serde_json::json!({
+        "id": "fielded", "name": "Fielded", "enabled": true,
+        "nodes": [
+            { "id": "start", "type": "trigger.state", "params": params },
+            { "id": "wait", "type": "delay", "params": { "for": "1m" } }
+        ],
+        "edges": [{ "from": "start", "to": "wait" }]
+    });
+    Flow::decode(text.to_string().as_bytes()).expect("field flow")
+}
+
+/// A flow with an If reading `params`, after a plain trigger on the vacuum.
+fn field_if_flow(params: serde_json::Value) -> Flow {
+    let text = serde_json::json!({
+        "id": "fielded", "name": "Fielded", "enabled": true,
+        "nodes": [
+            { "id": "start", "type": "trigger.state", "params": { "entity": VACUUM_ID } },
+            { "id": "check", "type": "if", "params": params },
+            { "id": "wait", "type": "delay", "params": { "for": "1m" } }
+        ],
+        "edges": [
+            { "from": "start", "to": "check" },
+            { "from": "check", "port": "true", "to": "wait" }
+        ]
+    });
+    Flow::decode(text.to_string().as_bytes()).expect("field if flow")
+}
+
+fn invalid_reason(result: Result<oikos_api::FlowWriteOutcome, HubError>) -> String {
+    match result {
+        Err(HubError::InvalidFlow(reason)) => reason,
+        other => panic!("expected InvalidFlow, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn unknown_field_is_refused() {
+    let (hub, _publisher) = hub_with_vacuum_and_climate();
+    let flow = field_flow(serde_json::json!({ "entity": VACUUM_ID, "field": "brightness" }));
+    assert_eq!(
+        invalid_reason(hub.set_flow(flow).await),
+        format!("node `start`: `{VACUUM_ID}` reports no field `brightness`")
+    );
+    let flow = field_if_flow(serde_json::json!({
+        "entity": VACUUM_ID, "field": "position", "op": "gte", "value": 1
+    }));
+    assert_eq!(
+        invalid_reason(hub.set_flow(flow).await),
+        format!("node `check`: `{VACUUM_ID}` reports no field `position`")
+    );
+    let flow = field_flow(serde_json::json!({ "entity": VACUUM_ID, "field": "battery" }));
+    assert!(hub.set_flow(flow).await.is_ok());
+}
+
+#[tokio::test]
+async fn average_on_unrecorded_field_is_refused() {
+    let (hub, _publisher) = hub_with_vacuum_and_climate();
+    let flow = field_if_flow(serde_json::json!({
+        "entity": VACUUM_ID, "field": "battery", "op": "lte", "value": 55, "average": "15m"
+    }));
+    assert_eq!(
+        invalid_reason(hub.set_flow(flow).await),
+        format!("node `check`: `battery` of `{VACUUM_ID}` has no history to average")
+    );
+}
+
+#[tokio::test]
+async fn average_on_recorded_field_is_accepted() {
+    let (hub, _publisher) = hub_with_vacuum_and_climate();
+    let flow = field_if_flow(serde_json::json!({
+        "entity": CLIMATE_ID, "field": "current", "op": "lte", "value": 19, "average": "15m"
+    }));
+    assert!(hub.set_flow(flow).await.is_ok());
+}
+
+#[tokio::test]
+async fn entity_value_reads_the_field() {
+    let (hub, _publisher) = hub_with_vacuum_and_climate();
+    assert_eq!(hub.entity_value(VACUUM_ID, Some("battery")), None);
+    hub.ingest(
+        "roborock/ha/state",
+        br#"{"state": "cleaning", "battery_level": 62}"#,
+    );
+    assert_eq!(
+        hub.entity_value(VACUUM_ID, Some("battery")),
+        Some(oikos_core::flow::Scalar::Number(62.0))
+    );
+    assert_eq!(
+        hub.entity_value(VACUUM_ID, None),
+        Some(oikos_core::flow::Scalar::Text("cleaning".into()))
+    );
+    assert_eq!(hub.entity_value(VACUUM_ID, Some("fan_speed")), None);
+    assert_eq!(hub.entity_value("nope", Some("battery")), None);
+}
+
+/// A field trigger on `entity`, then an If with no entity that averages the trigger's value.
+fn averaged_after_field_flow(entity: &str, field: &str) -> Flow {
+    let text = serde_json::json!({
+        "id": "fielded", "name": "Fielded", "enabled": true,
+        "nodes": [
+            { "id": "start", "type": "trigger.state", "params": { "entity": entity, "field": field } },
+            { "id": "wait", "type": "delay", "params": { "for": "1m" } },
+            { "id": "check", "type": "if",
+              "params": { "op": "lte", "value": 19, "average": "15m" } }
+        ],
+        "edges": [
+            { "from": "start", "to": "wait" },
+            { "from": "wait", "to": "check" }
+        ]
+    });
+    Flow::decode(text.to_string().as_bytes()).expect("averaged flow")
+}
+
+#[tokio::test]
+async fn average_after_an_unrecorded_field_trigger_is_refused() {
+    let (hub, _publisher) = hub_with_vacuum_and_climate();
+    assert_eq!(
+        invalid_reason(
+            hub.set_flow(averaged_after_field_flow(VACUUM_ID, "battery"))
+                .await
+        ),
+        format!("node `check`: `battery` of `{VACUUM_ID}` has no history to average")
+    );
+    assert!(
+        hub.set_flow(averaged_after_field_flow(CLIMATE_ID, "current"))
+            .await
+            .is_ok()
+    );
+}

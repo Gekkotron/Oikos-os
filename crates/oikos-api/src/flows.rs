@@ -83,6 +83,9 @@ pub struct TriggerInfo {
     /// `None` for a run started from a Manual card that carries a value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entity: Option<String>,
+    /// The value inside the entity's state that changed (`battery` …); absent for its headline value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<String>,
     pub value: Value,
     pub previous: Value,
 }
@@ -132,6 +135,7 @@ mod tests {
             ended_at: None,
             trigger: Some(TriggerInfo {
                 entity: Some("motion".into()),
+                field: None,
                 value: json!(true),
                 previous: json!(false),
             }),

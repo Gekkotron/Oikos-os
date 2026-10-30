@@ -2005,3 +2005,156 @@ async fn manual_number_box_keeps_what_is_typed() {
         .unwrap_or_else(|| panic!("{body}"));
     assert_eq!(go["params"]["value"], serde_json::json!(-1.5), "{body}");
 }
+
+// ---- Value of ----------------------------------------------------------------------------
+
+/// A vacuum `vacuum.robo` at 62 % battery.
+fn robo() -> oikos_api::EntityView {
+    use oikos_core::model::{Kind, StateValue, VacuumState};
+    let mut robo = table_lamp();
+    robo.id = "vacuum.robo".into();
+    robo.name = "Roborock".into();
+    robo.kind = Kind::Vacuum;
+    robo.protocol_kind = Kind::Vacuum;
+    robo.component = "vacuum".into();
+    robo.state.value = StateValue::Vacuum(VacuumState {
+        state: Some("cleaning".into()),
+        battery: Some(62),
+        fan_speed: None,
+    });
+    robo
+}
+
+/// A flow `living_led_motion` of `nodes` wired in a line.
+fn line_view(nodes: &str) -> FlowView {
+    let nodes: Vec<serde_json::Value> = serde_json::from_str(nodes).unwrap();
+    let edges: Vec<serde_json::Value> = nodes
+        .windows(2)
+        .map(|w| serde_json::json!({ "from": w[0]["id"], "to": w[1]["id"], "port": (w[0]["type"] == "if").then_some("true") }))
+        .collect();
+    let flow = serde_json::json!({
+        "id": "living_led_motion", "name": "Line", "enabled": true, "mode": "single",
+        "nodes": nodes, "edges": edges
+    });
+    FlowView {
+        definition: Flow::decode(flow.to_string().as_bytes()).unwrap(),
+        invalid: None,
+        active_run: None,
+        runs: vec![],
+    }
+}
+
+fn change(el: &web_sys::Element) {
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    el.dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+}
+
+/// Saves the draft and returns the nodes the PUT sent.
+async fn saved_nodes(host: &web_sys::Element, view: &FlowView) -> Vec<serde_json::Value> {
+    let fetch = FakeFetch::answer(&write_outcome(view));
+    click(host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let requests = puts(&fetch);
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    let sent: serde_json::Value = serde_json::from_str(&requests[0].2).unwrap();
+    sent["nodes"].as_array().unwrap().clone()
+}
+
+#[wasm_bindgen_test]
+async fn if_card_value_of_sets_field() {
+    let view = line_view(
+        r#"[
+          { "id": "start", "type": "trigger.state", "params": { "entity": "vacuum.robo" } },
+          { "id": "check", "type": "if",
+            "params": { "entity": "vacuum.robo", "op": "eq", "value": "cleaning" } }
+        ]"#,
+    );
+    let (host, _mounted, house) = editing(view.clone()).await;
+    house.entities.update(|m| {
+        let robo = robo();
+        m.insert(robo.id.clone(), robo);
+    });
+    select_card(&host, "check").await;
+    let select: web_sys::HtmlSelectElement = host
+        .query_selector(".flow-drawer select[aria-label='Value of']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no Value of: {}", host.inner_html()))
+        .unchecked_into();
+    let battery = select
+        .query_selector("option[value='field:battery']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no battery option: {}", select.inner_html()));
+    assert!(battery.text_content().unwrap().contains("Battery"));
+    select.set_value("field:battery");
+    change(&select);
+    tick().await;
+    assert_eq!(
+        count(&host, ".flow-drawer input[type=number]"),
+        1,
+        "{}",
+        host.inner_html()
+    );
+    let nodes = saved_nodes(&host, &view).await;
+    assert_eq!(nodes[1]["params"]["field"], "battery");
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn entity_change_clears_field_value_to_from() {
+    let view = line_view(
+        r#"[
+          { "id": "start", "type": "trigger.state",
+            "params": { "entity": "vacuum.robo", "field": "battery", "to": 50, "from": 60 } },
+          { "id": "wait", "type": "delay", "params": { "for": "1m" } }
+        ]"#,
+    );
+    let (host, _mounted, house) = editing(view.clone()).await;
+    house.entities.update(|m| {
+        for e in [robo(), table_lamp()] {
+            m.insert(e.id.clone(), e);
+        }
+    });
+    select_card(&host, "start").await;
+    open_entity_picker(&host).await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-light.table']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no light row: {}", host.inner_html()))
+        .unchecked_into();
+    row.click();
+    tick().await;
+    let nodes = saved_nodes(&host, &view).await;
+    let params = &nodes[0]["params"];
+    assert_eq!(params["entity"], "light.table");
+    assert!(params.get("field").is_none(), "{params}");
+    assert!(params.get("to").is_none(), "{params}");
+    assert!(params.get("from").is_none(), "{params}");
+    settle_history().await;
+}
+
+/// An average the card's value cannot have stays on screen, so it can be cleared.
+#[wasm_bindgen_test]
+async fn a_set_average_stays_visible_when_the_field_has_no_history() {
+    let view = line_view(
+        r#"[
+          { "id": "start", "type": "trigger.state",
+            "params": { "entity": "light.table", "field": "brightness" } },
+          { "id": "check", "type": "if", "params": { "op": "gt", "value": 50, "average": "15m" } },
+          { "id": "plain", "type": "if", "params": { "op": "gt", "value": 50 } }
+        ]"#,
+    );
+    let (host, _mounted, house) = editing(view).await;
+    house.entities.update(|m| {
+        let lamp = table_lamp();
+        m.insert(lamp.id.clone(), lamp);
+    });
+    let average_boxes =
+        |host: &web_sys::Element| count(host, ".flow-drawer input[placeholder*='15m']");
+    select_card(&host, "check").await;
+    assert_eq!(average_boxes(&host), 1, "{}", host.inner_html());
+    select_card(&host, "plain").await;
+    assert_eq!(average_boxes(&host), 0, "{}", host.inner_html());
+    settle_history().await;
+}
