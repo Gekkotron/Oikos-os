@@ -92,14 +92,18 @@ fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {
 }
 
 /// Pick the room temperature: a fresh dedicated sensor wins, else the mean of the fresh device
-/// readings, else a stale value if anything was reported.
+/// readings, else a stale value if anything was reported. The sensor stays fresh up to `quiet_s`
+/// when that is longer than `stale_after_s`: a thermometer that only reports changes is silent
+/// for hours in a steady room.
 pub fn room_reading(
     sensor: Option<ReadingSource>,
     devices: &[ReadingSource],
     stale_after_s: u64,
+    quiet_s: u64,
 ) -> Reading {
     let fresh = |r: &&ReadingSource| r.age_s <= stale_after_s;
-    if let Some(s) = sensor.filter(|s| s.age_s <= stale_after_s) {
+    let sensor_limit_s = stale_after_s.max(quiet_s);
+    if let Some(s) = sensor.filter(|s| s.age_s <= sensor_limit_s) {
         return Reading::Fresh {
             value: s.value,
             age_s: s.age_s,
@@ -285,7 +289,7 @@ mod tests {
     #[test]
     fn reading_prefers_fresh_sensor() {
         assert_eq!(
-            room_reading(Some(src(20.0, 60)), &[src(15.0, 10)], 3600),
+            room_reading(Some(src(20.0, 60)), &[src(15.0, 10)], 3600, 0),
             Reading::Fresh {
                 value: 20.0,
                 age_s: 60,
@@ -296,12 +300,47 @@ mod tests {
     }
 
     #[test]
+    fn a_quiet_sensor_still_reads_the_room_within_its_limit() {
+        // A thermometer that only reports changes, silent for 4 h in a steady room.
+        assert_eq!(
+            room_reading(Some(src(17.4, 4 * 3600)), &[src(19.0, 30)], 3600, 6 * 3600),
+            Reading::Fresh {
+                value: 17.4,
+                age_s: 4 * 3600,
+                from_sensor: true,
+                sensor_stale: false
+            }
+        );
+        assert_eq!(
+            room_reading(Some(src(17.4, 4 * 3600)), &[], 3600, 6 * 3600),
+            Reading::Fresh {
+                value: 17.4,
+                age_s: 4 * 3600,
+                from_sensor: true,
+                sensor_stale: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_quiet_limit_below_stale_after_does_not_shorten_it() {
+        assert!(matches!(
+            room_reading(Some(src(20.0, 3000)), &[], 3600, 600),
+            Reading::Fresh {
+                from_sensor: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn reading_falls_back_to_devices_when_sensor_stale() {
         assert_eq!(
             room_reading(
                 Some(src(22.0, 4000)),
                 &[src(19.0, 30), src(21.0, 90), src(5.0, 9000)],
-                3600
+                3600,
+                0
             ),
             Reading::Fresh {
                 value: 20.0,
@@ -311,7 +350,7 @@ mod tests {
             }
         );
         assert_eq!(
-            room_reading(None, &[src(19.0, 30)], 3600),
+            room_reading(None, &[src(19.0, 30)], 3600, 0),
             Reading::Fresh {
                 value: 19.0,
                 age_s: 30,
@@ -324,18 +363,18 @@ mod tests {
     #[test]
     fn reading_at_exactly_stale_after_is_fresh() {
         assert!(matches!(
-            room_reading(Some(src(20.0, 3600)), &[], 3600),
+            room_reading(Some(src(20.0, 3600)), &[], 3600, 0),
             Reading::Fresh {
                 from_sensor: true,
                 ..
             }
         ));
         assert!(matches!(
-            room_reading(None, &[src(19.0, 3600)], 3600),
+            room_reading(None, &[src(19.0, 3600)], 3600, 0),
             Reading::Fresh { .. }
         ));
         assert_eq!(
-            room_reading(None, &[src(19.0, 3601)], 3600),
+            room_reading(None, &[src(19.0, 3601)], 3600, 0),
             Reading::Stale { last: Some(19.0) }
         );
     }
@@ -343,7 +382,7 @@ mod tests {
     #[test]
     fn reading_stale_keeps_the_newest_value() {
         assert_eq!(
-            room_reading(Some(src(22.0, 9000)), &[src(19.0, 5000)], 3600),
+            room_reading(Some(src(22.0, 9000)), &[src(19.0, 5000)], 3600, 0),
             Reading::Stale { last: Some(19.0) }
         );
     }
@@ -351,17 +390,17 @@ mod tests {
     #[test]
     fn reading_all_stale() {
         assert_eq!(
-            room_reading(Some(src(22.0, 4000)), &[src(19.0, 5000)], 3600),
+            room_reading(Some(src(22.0, 4000)), &[src(19.0, 5000)], 3600, 0),
             Reading::Stale { last: Some(22.0) }
         );
         assert_eq!(
-            room_reading(None, &[src(19.0, 5000), src(21.0, 5000)], 3600),
+            room_reading(None, &[src(19.0, 5000), src(21.0, 5000)], 3600, 0),
             Reading::Stale { last: Some(20.0) }
         );
     }
 
     #[test]
     fn reading_missing() {
-        assert_eq!(room_reading(None, &[], 3600), Reading::Missing);
+        assert_eq!(room_reading(None, &[], 3600, 0), Reading::Missing);
     }
 }

@@ -2409,6 +2409,18 @@ mod engine {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_quiet_room_thermometer_still_reads_the_room() {
+        // A thermometer that only reports changes, silent for 4 h in a steady room.
+        let mut rig = corrected_rig(17.4).await;
+        rig.pass(4 * 3600).await;
+        let decision = rig.zone().decision.unwrap();
+        assert_eq!(decision.source, Source::Schedule, "{}", decision.reason);
+        assert_eq!(decision.reading, Some(17.4));
+        assert_eq!(decision.reading_age_s, Some(4 * 3600));
+        assert!(!decision.reason.contains("silent"), "{}", decision.reason);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn correction_note_is_stable_while_the_reading_ages() {
         let mut rig = corrected_rig(21.6).await;
         // The thermometer reported 20 min ago: the note must not carry its age.

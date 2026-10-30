@@ -127,6 +127,7 @@ impl Hub {
                 zone.room_sensor.as_deref(),
                 &zone.entities,
                 stale_after_s,
+                u64::from(zone.settings.feedback.quiet_limit_min) * 60,
                 now,
                 &seen,
             );

@@ -363,11 +363,12 @@ pub(crate) fn view_reading(
     sensor: Option<&str>,
     entity_ids: &[String],
     stale_after_s: u64,
+    quiet_s: u64,
     now: u64,
     seen: &HashMap<String, u64>,
 ) -> (Option<f64>, Option<u64>) {
     let (sensor, devices) = reading_sources(hub, sensor, entity_ids, seen, now);
-    match room_reading(sensor, &devices, stale_after_s) {
+    match room_reading(sensor, &devices, stale_after_s, quiet_s) {
         Reading::Fresh { value, age_s, .. } => (Some(value), Some(age_s)),
         Reading::Stale { last } => {
             let youngest = sensor
@@ -479,7 +480,8 @@ pub(crate) fn zone_inputs_owned(hub: &Hub, zone: &str, now: u64) -> Option<Owned
     );
     let (sensor, device_readings) =
         reading_sources(hub, sensor.as_deref(), &entity_ids, &seen, now);
-    let reading = room_reading(sensor, &device_readings, stale_after_s);
+    let quiet_s = u64::from(settings.feedback.quiet_limit_min) * 60;
+    let reading = room_reading(sensor, &device_readings, stale_after_s, quiet_s);
     let thermometer = sensor;
     let outdoor_mean = outdoor_mean(hub, now);
     let home_now = presence_home_now(hub, &house);

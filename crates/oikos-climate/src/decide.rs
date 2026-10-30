@@ -219,10 +219,26 @@ pub fn decide(inp: &ZoneInputs) -> Decision {
         }
     ) && inp.settings.state != ZoneState::Off
     {
-        d.reason
-            .push_str("; the configured sensor is stale, using the devices' own readings");
+        // The limit, not the age, so the reason stays the same from one pass to the next.
+        let limit_min = inp
+            .house
+            .stale_after_min
+            .max(inp.settings.feedback.quiet_limit_min);
+        d.reason.push_str(&format!(
+            "; the room thermometer has been silent for over {}, using the devices' own readings",
+            duration(limit_min)
+        ));
     }
     d
+}
+
+/// A duration in minutes as "45 min", "6 h" or "6 h 10 min".
+fn duration(min: u32) -> String {
+    match (min / 60, min % 60) {
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    }
 }
 
 fn safety(inp: &ZoneInputs) -> Option<Decision> {
@@ -1142,16 +1158,17 @@ mod tests {
     }
 
     #[test]
-    fn stale_reading_but_quiet_thermometer_still_corrects() {
+    fn quiet_thermometer_reads_the_room_and_still_corrects() {
         let mut c = corrected(21.0, 2 * 3600);
         c.reading = Reading::Fresh {
-            value: 20.0,
-            age_s: 30,
-            from_sensor: false,
-            sensor_stale: true,
+            value: 21.0,
+            age_s: 2 * 3600,
+            from_sensor: true,
+            sensor_stale: false,
         };
         let d = c.run();
         assert_eq!(d.entities["trv"].setpoint, Some(18.5));
+        assert!(!d.reason.contains("silent for"), "{}", d.reason);
     }
 
     #[test]
@@ -1758,7 +1775,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_sensor_is_mentioned_in_reason() {
+    fn silent_sensor_is_mentioned_in_reason() {
         let mut c = Case::new();
         c.reading = Reading::Fresh {
             value: 19.0,
@@ -1768,8 +1785,20 @@ mod tests {
         };
         let d = c.run();
         assert_eq!(d.source, Source::Schedule);
-        assert!(d.reason.contains("configured sensor is stale"));
-        assert!(d.reason.contains("devices' own readings"));
+        assert!(
+            d.reason.ends_with(
+                "; the room thermometer has been silent for over 6 h, using the devices' own readings"
+            ),
+            "{}",
+            d.reason
+        );
+    }
+
+    #[test]
+    fn duration_reads_in_hours_and_minutes() {
+        assert_eq!(duration(45), "45 min");
+        assert_eq!(duration(360), "6 h");
+        assert_eq!(duration(370), "6 h 10 min");
     }
 
     #[test]

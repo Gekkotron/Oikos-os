@@ -144,7 +144,7 @@ The record also carries `entities: { "<id>": { "setpoint", "mode" } }`, what the
 
 ### 5.4 Readings and staleness
 
-The room reading is `sensor` if set, else a thermometer of the zone's area (a primary `temperature` sensor that is not on one of the zone's climate devices and is not `outdoor_entity`; the first by id), else the mean of the zone's climate entities' `current`. The read view names the sensor it used in `room_sensor`. A reading is stale when no state for it has been seen (`subscribe_state_seen`, which includes unchanged echoes) for `stale_after`. If the configured `sensor` is stale but the devices' own readings are fresh, the engine uses those and says so in the reason; only when every source is stale does the stale-sensor rule apply.
+The room reading is `sensor` if set, else a thermometer of the zone's area (a primary `temperature` sensor that is not on one of the zone's climate devices and is not `outdoor_entity`; the first by id), else the mean of the zone's climate entities' `current`. The read view names the sensor it used in `room_sensor`. A reading is stale when no state for it has been seen (`subscribe_state_seen`, which includes unchanged echoes) for `stale_after`. The room sensor stays fresh up to the zone's `feedback.quiet_limit_min` when that is longer than `stale_after` (thermometers that only report changes are silent for hours in a steady room). If the room sensor is older than that but the devices' own readings are fresh, the engine uses those and says so in the reason; only when every source is stale does the stale-sensor rule apply.
 
 ### 5.5 When it runs and when it commands
 
