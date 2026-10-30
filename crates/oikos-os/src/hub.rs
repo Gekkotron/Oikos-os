@@ -216,6 +216,9 @@ pub struct Hub {
     flow_store: Mutex<FlowStore>,
     /// Every reading of the entities an `if` averages; the engine sets which on reload.
     recent_readings: Mutex<crate::flows::readings::RecentReadings>,
+    /// The passes of every `limit` node still inside its window, by (flow, node). Runs execute
+    /// in tasks that only hold the hub, so the counts live here, not in the engine.
+    limits: Mutex<crate::flows::LimitCounts>,
     group_store: Mutex<GroupStore>,
     /// `[groups] enabled`: group writes and listing are refused while it is false.
     groups_enabled: bool,
@@ -361,6 +364,7 @@ impl Hub {
             }),
             flow_store: Mutex::new(FlowStore::new(cfg.automation.runs_kept)),
             recent_readings: Mutex::new(Default::default()),
+            limits: Mutex::new(Default::default()),
             group_store: Mutex::new(GroupStore::default()),
             groups_enabled: cfg.groups.enabled,
             climate: cfg
@@ -416,6 +420,13 @@ impl Hub {
     /// The recorder, when one is configured.
     pub fn history(&self) -> Option<&Arc<History>> {
         self.history.get()
+    }
+
+    /// The `limit` counts, taken as they are when a thread panicked while holding them.
+    pub(crate) fn limits(&self) -> MutexGuard<'_, crate::flows::LimitCounts> {
+        self.limits
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn recent_readings(&self) -> MutexGuard<'_, crate::flows::readings::RecentReadings> {

@@ -2,6 +2,7 @@
 
 pub mod engine;
 mod hub;
+pub(crate) use hub::LimitCounts;
 pub mod readings;
 pub mod schedule;
 mod store;
