@@ -2187,3 +2187,107 @@ async fn math_row_keeps_focus_while_typing() {
     );
     assert!(name.is_connected());
 }
+
+#[wasm_bindgen_test]
+async fn functions_menu_inserts_with_slots() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    assert_eq!(count(&host, ".math-functions__item"), 0);
+    click(&host, ".math-functions__toggle");
+    tick().await;
+    assert_eq!(count(&host, ".math-functions__item"), 9);
+    let items = host.query_selector_all(".math-functions__item").unwrap();
+    let clamp: web_sys::HtmlElement = (0..items.length())
+        .filter_map(|i| items.item(i))
+        .find(|n| {
+            n.text_content()
+                .unwrap_or_default()
+                .contains("clamp(x, low, high)")
+        })
+        .unwrap_or_else(|| panic!("no clamp: {}", host.inner_html()))
+        .unchecked_into();
+    clamp.click();
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    let formula = input_named(&host, ".math-formula");
+    assert_eq!(formula.value(), "clamp(▢, ▢, ▢)");
+    // The first slot is selected, in UTF-16 units.
+    assert_eq!(formula.selection_start().unwrap(), Some(6));
+    assert_eq!(formula.selection_end().unwrap(), Some(7));
+    assert_eq!(
+        text(&host, ".math-line.node-editor__error"),
+        "fill in the ▢ slots"
+    );
+    assert_eq!(count(&host, ".math-functions__item"), 0, "menu closes");
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn typing_suggests_and_tab_accepts() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    let formula = input_named(&host, ".math-formula");
+    formula.focus().unwrap();
+    type_into(&formula, "cl", "input");
+    tick().await;
+    assert_eq!(text(&host, ".math-suggestions__item"), "clamp");
+    // Typing normally is not intercepted: a letter key is left alone.
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key("Tab");
+    init.set_cancelable(true);
+    let tab = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    formula.dispatch_event(&tab).unwrap();
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert!(tab.default_prevented());
+    assert_eq!(formula.value(), "clamp(▢, ▢, ▢)");
+    assert_eq!(count(&host, ".math-suggestions__item"), 0);
+    // With no suggestion, Tab keeps its normal job.
+    let tab = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap();
+    formula.dispatch_event(&tab).unwrap();
+    assert!(!tab.default_prevented());
+    settle_history().await;
+}
+
+#[wasm_bindgen_test]
+async fn escape_closes_suggestions() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    let formula = input_named(&host, ".math-formula");
+    type_into(&formula, "ma", "input");
+    tick().await;
+    assert_eq!(count(&host, ".math-suggestions__item"), 1);
+    let init = web_sys::KeyboardEventInit::new();
+    init.set_key("Escape");
+    formula
+        .dispatch_event(
+            &web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init).unwrap(),
+        )
+        .unwrap();
+    tick().await;
+    assert_eq!(count(&host, ".math-suggestions__item"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn input_chip_inserts_name() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    click(&host, ".math-inputs__add");
+    tick().await;
+    type_into(&input_named(&host, ".math-input__name"), "grid", "input");
+    let formula = input_named(&host, ".math-formula");
+    type_into(&formula, "1 + ", "input");
+    tick().await;
+    let chips = text(&host, ".math-chips");
+    assert!(
+        chips.contains("grid") && chips.contains("trigger"),
+        "{chips}"
+    );
+    click(&host, ".math-chips__name");
+    tick().await;
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert_eq!(formula.value(), "1 + grid");
+    // The input rows were not rebuilt.
+    assert_eq!(count(&host, ".math-input"), 1);
+    settle_history().await;
+}

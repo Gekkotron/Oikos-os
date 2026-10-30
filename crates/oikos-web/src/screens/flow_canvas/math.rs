@@ -4,16 +4,23 @@
 //! formula.
 
 use leptos::prelude::*;
-use oikos_core::flow::{Flow, MAX_INPUTS, MathInput, MathParams, NodeKind, Scalar, is_valid_name};
+use oikos_core::flow::{
+    FUNCTIONS, Flow, MAX_INPUTS, MathInput, MathParams, NodeKind, Scalar, is_valid_name, math_names,
+};
 use oikos_core::model::Kind;
 
 use super::settings::{Form, word};
 use crate::entity_picker::EntityPickField;
 use crate::entity_picker::needs::keep;
-use crate::flow_math::{Preview, input_name_for, is_placeholder_name, preview};
+use crate::flow_math::{
+    Preview, accept, char_offset, function_snippet, input_name_for, insert_at, is_placeholder_name,
+    preview, suggestions, utf16_offset,
+};
 use crate::format::entity_title;
 use crate::house::House;
-use crate::i18n::flows::{FlowText, math_averaged_note, math_unknown, math_value, use_flow_text};
+use crate::i18n::flows::{
+    FlowText, function_help, math_averaged_note, math_unknown, math_value, use_flow_text,
+};
 use crate::i18n::use_lang;
 use crate::screens::flow_schedule::SaveBlocked;
 
@@ -116,10 +123,139 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
         });
     };
 
+    // Picking functions and names: the formula's caret (in chars), the suggestion list and the
+    // Functions menu. None of it touches the input rows.
+    let formula_ref = NodeRef::<leptos::html::Input>::new();
+    let caret = RwSignal::new(None::<usize>);
+    let dismissed = RwSignal::new(false);
+    let active = RwSignal::new(0usize);
+    let menu_open = RwSignal::new(false);
+    let formula = Signal::derive({
+        let id = id.clone();
+        move || params_of(form, &id).map(|p| p.formula).unwrap_or_default()
+    });
+    let remember_caret = move || {
+        if let Some(el) = formula_ref.get_untracked() {
+            let at = el
+                .selection_start()
+                .ok()
+                .flatten()
+                .map(|units| char_offset(&el.value(), units));
+            caret.set(at);
+        }
+    };
+    // The names the formula can read: the card's inputs (`chips`), then the other math cards'
+    // results (`names`); `trigger` ends both.
+    let chips = Memo::new({
+        let id = id.clone();
+        move |_| {
+            let mut names: Vec<String> = params_of(form, &id)
+                .map(|p| p.inputs.into_iter().map(|i| i.name).collect())
+                .unwrap_or_default();
+            names.retain(|n| !n.is_empty());
+            names.push("trigger".to_owned());
+            names
+        }
+    });
+    let names = Memo::new({
+        let id = id.clone();
+        move |_| {
+            let mut names = chips.get();
+            let own = params_of(form, &id).map(|p| p.name).unwrap_or_default();
+            draft.with(|f| {
+                names.extend(
+                    math_names(f)
+                        .into_iter()
+                        .filter(|n| *n != own)
+                        .map(str::to_owned),
+                );
+            });
+            names
+        }
+    });
+    let proposals = Memo::new(move |_| {
+        let at = caret.get();
+        if dismissed.get() {
+            return Vec::new();
+        }
+        let Some(at) = at else { return Vec::new() };
+        let names = names.get();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        suggestions(&formula.get(), at, &refs)
+    });
+    Effect::new(move |_| {
+        proposals.track();
+        active.set(0);
+    });
+    // Writes the edited formula and puts the selection where the helper says, once the field
+    // has taken the new value.
+    let apply = {
+        let id = id.clone();
+        Callback::new(move |(text, from, to): (String, usize, usize)| {
+            let (a, b) = (utf16_offset(&text, from), utf16_offset(&text, to));
+            update(form, &id, |p| p.formula = text);
+            caret.set(Some(to));
+            dismissed.set(true);
+            menu_open.set(false);
+            request_animation_frame(move || {
+                if let Some(el) = formula_ref.get_untracked() {
+                    let _ = el.focus();
+                    let _ = el.set_selection_range(a, b);
+                }
+            });
+        })
+    };
+    let insert = Callback::new(move |snippet: String| {
+        let text = formula.get_untracked();
+        let at = caret
+            .get_untracked()
+            .unwrap_or_else(|| text.chars().count());
+        apply.run(insert_at(&text, at, &snippet));
+    });
+    let accept_at = Callback::new(move |index: usize| {
+        let text = formula.get_untracked();
+        let at = caret
+            .get_untracked()
+            .unwrap_or_else(|| text.chars().count());
+        if let Some(s) = proposals.get_untracked().get(index) {
+            apply.run(accept(&text, at, s));
+        }
+    });
+    let on_key = move |ev: web_sys::KeyboardEvent| {
+        let len = proposals.get_untracked().len();
+        if len == 0 {
+            return;
+        }
+        match ev.key().as_str() {
+            "ArrowDown" => {
+                ev.prevent_default();
+                active.update(|a| *a = (*a + 1) % len);
+            }
+            "ArrowUp" => {
+                ev.prevent_default();
+                active.update(|a| *a = (*a + len - 1) % len);
+            }
+            _ if matches!(ev.key().to_lowercase().as_str(), "tab" | "enter") => {
+                ev.prevent_default();
+                accept_at.run(active.get_untracked());
+            }
+            "Escape" => {
+                // Closes the list, not the drawer.
+                ev.prevent_default();
+                ev.stop_propagation();
+                dismissed.set(true);
+            }
+            _ => {}
+        }
+    };
+
     let formula_id = id.clone();
     let on_formula = move |ev: web_sys::Event| {
         let text = event_target_value(&ev);
         update(form, &formula_id, |p| p.formula = text);
+        // Typing reopens the suggestions Escape or an insertion had closed.
+        dismissed.set(false);
+        remember_caret();
     };
     let window_note = {
         let id = id.clone();
@@ -159,10 +295,6 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
         })
     };
 
-    let formula = Signal::derive({
-        let id = id.clone();
-        move || params_of(form, &id).map(|p| p.formula).unwrap_or_default()
-    });
     let name_id = id.clone();
     let on_name = move |ev: web_sys::Event| {
         let text = event_target_value(&ev);
@@ -214,18 +346,112 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
             </button>
             <span class="node-editor__hint">{move || t(FlowText::MathAverageNote)}</span>
         </div>
-        <label class="node-editor__field">
-            <span class="node-editor__label">{move || t(FlowText::MathFormula)}</span>
-            <input
-                type="text"
-                class="field math-formula"
-                spellcheck="false"
-                autocomplete="off"
-                prop:value=move || formula.get()
-                on:input=on_formula
-            />
+        <div class="node-editor__field math-formula-box">
+            <label class="math-formula-label">
+                <span class="node-editor__label">{move || t(FlowText::MathFormula)}</span>
+                <input
+                    type="text"
+                    class="field math-formula"
+                    node_ref=formula_ref
+                    spellcheck="false"
+                    autocomplete="off"
+                    prop:value=move || formula.get()
+                    on:input=on_formula
+                    on:keydown=on_key
+                    on:keyup=move |_| remember_caret()
+                    on:click=move |_| remember_caret()
+                    on:select=move |_| remember_caret()
+                    on:blur=move |_| dismissed.set(true)
+                />
+            </label>
+            <Show when=move || !proposals.with(Vec::is_empty)>
+                <ul
+                    class="math-suggestions"
+                    role="listbox"
+                    aria-label=move || t(FlowText::MathSuggestions)
+                >
+                    {move || {
+                        proposals
+                            .get()
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, s)| {
+                                view! {
+                                    <li
+                                        class="math-suggestions__item"
+                                        class:math-suggestions__item--function=s.is_function
+                                        class:math-suggestions__item--active=move || active.get() == i
+                                        role="option"
+                                        aria-selected=move || (active.get() == i).to_string()
+                                        on:mousedown=|ev| ev.prevent_default()
+                                        on:click=move |_| accept_at.run(i)
+                                    >
+                                        {s.label}
+                                    </li>
+                                }
+                            })
+                            .collect_view()
+                    }}
+                </ul>
+            </Show>
+            <div class="math-chips chip-row" aria-label=move || t(FlowText::MathNames)>
+                {move || {
+                    chips
+                        .get()
+                        .into_iter()
+                        .map(|name| {
+                            let piece = name.clone();
+                            view! {
+                                <button
+                                    type="button"
+                                    class="chip math-chips__name"
+                                    on:mousedown=|ev| ev.prevent_default()
+                                    on:click=move |_| insert.run(piece.clone())
+                                >
+                                    {name}
+                                </button>
+                            }
+                        })
+                        .collect_view()
+                }}
+                <button
+                    type="button"
+                    class="chip math-functions__toggle"
+                    aria-haspopup="true"
+                    aria-expanded=move || menu_open.get().to_string()
+                    on:mousedown=|ev| ev.prevent_default()
+                    on:click=move |_| menu_open.update(|o| *o = !*o)
+                >
+                    {move || t(FlowText::MathFunctions)}
+                </button>
+            </div>
+            <Show when=move || menu_open.get()>
+                <ul class="math-functions" role="menu">
+                    {FUNCTIONS
+                        .iter()
+                        .map(|f| {
+                            view! {
+                                <li role="none">
+                                    <button
+                                        type="button"
+                                        role="menuitem"
+                                        class="math-functions__item"
+                                        on:mousedown=|ev| ev.prevent_default()
+                                        on:click=move |_| insert.run(function_snippet(f))
+                                    >
+                                        <code class="math-functions__signature">{f.signature}</code>
+                                        <span class="node-editor__hint">
+                                            {move || function_help(lang(), f.name)}
+                                        </span>
+                                    </button>
+                                </li>
+                            }
+                        })
+                        .collect_view()}
+                </ul>
+            </Show>
             {line}
-        </label>
+        </div>
         <label class="node-editor__field">
             <span class="node-editor__label">{move || t(FlowText::MathResultName)}</span>
             <input

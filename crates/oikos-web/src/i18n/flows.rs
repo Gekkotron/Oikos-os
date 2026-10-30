@@ -72,6 +72,9 @@ pub enum FlowText {
     MathNameInvalid,
     MathSaveTo,
     MathNotSaved,
+    MathFunctions,
+    MathNames,
+    MathSuggestions,
     Otherwise,
     Outside,
     WaitCard,
@@ -341,6 +344,9 @@ impl FlowText {
         FlowText::MathNameInvalid,
         FlowText::MathSaveTo,
         FlowText::MathNotSaved,
+        FlowText::MathFunctions,
+        FlowText::MathNames,
+        FlowText::MathSuggestions,
         FlowText::Otherwise,
         FlowText::Outside,
         FlowText::WaitCard,
@@ -640,6 +646,9 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
             "Lowercase letters, digits and _, starting with a letter",
             "Minuscules, chiffres et _, en commençant par une lettre",
         ),
+        T::MathFunctions => ("ƒ Functions", "ƒ Fonctions"),
+        T::MathNames => ("Names you can use", "Noms utilisables"),
+        T::MathSuggestions => ("Suggestions", "Propositions"),
         T::MathSaveTo => ("Save to (optional)", "Enregistrer dans (facultatif)"),
         T::MathNotSaved => (
             "\u{2014} not saved \u{2014}",
@@ -1281,6 +1290,35 @@ pub fn math_averaged_note(lang: Lang, window: &str) -> String {
     match lang {
         Lang::En => format!("now, not the {window} average"),
         Lang::Fr => format!("maintenant, pas la moyenne sur {window}"),
+    }
+}
+
+/// The one-line description of formula function `name` in the Functions menu.
+pub fn function_help(lang: Lang, name: &str) -> &'static str {
+    let (en, fr) = match name {
+        "min" => ("smallest of the values", "la plus petite des valeurs"),
+        "max" => ("largest of the values", "la plus grande des valeurs"),
+        "clamp" => ("keep x between low and high", "garde x entre bas et haut"),
+        "abs" => ("value without its sign", "valeur sans son signe"),
+        "round" => (
+            "nearest whole number, or n decimals",
+            "entier le plus proche, ou n décimales",
+        ),
+        "floor" => ("round down", "arrondi par défaut"),
+        "ceil" => ("round up", "arrondi par excès"),
+        "if" => (
+            "a when the condition is true, else b",
+            "a si la condition est vraie, sinon b",
+        ),
+        "interp" => (
+            "lookup table, straight lines between points",
+            "table de correspondance, droites entre les points",
+        ),
+        _ => ("", ""),
+    };
+    match lang {
+        Lang::En => en,
+        Lang::Fr => fr,
     }
 }
 
