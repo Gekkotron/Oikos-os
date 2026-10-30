@@ -36,7 +36,7 @@ use super::schedule::{Armed, Now, now_in, rearm, timer_clock};
 use super::sun::{ArmedSun, next_sun_fire};
 use crate::clock;
 use crate::home::OffPeakNow;
-use crate::hub::{Hub, StateSeen};
+use crate::hub::{Hub, StateTouched};
 use oikos_api::ConnectionStatus;
 
 /// How long after the link comes back the off-peak base is seeded when no device report did.
@@ -62,7 +62,7 @@ struct Active {
 /// starts it through `Hub::start_engine`, which subscribes earlier so no event is missed.
 pub async fn run(hub: Arc<Hub>, requests: mpsc::UnboundedReceiver<EngineRequest>) {
     let events = hub.subscribe();
-    let seen = hub.subscribe_state_seen();
+    let seen = hub.subscribe_state_touched();
     run_with(hub, events, seen, requests).await;
 }
 
@@ -70,7 +70,7 @@ pub async fn run(hub: Arc<Hub>, requests: mpsc::UnboundedReceiver<EngineRequest>
 pub(super) async fn run_with(
     hub: Arc<Hub>,
     mut events: broadcast::Receiver<WsEvent>,
-    mut seen: broadcast::Receiver<StateSeen>,
+    mut seen: broadcast::Receiver<StateTouched>,
     mut requests: mpsc::UnboundedReceiver<EngineRequest>,
 ) {
     let mut engine = Engine {
@@ -135,7 +135,7 @@ pub(super) async fn run_with(
             // After the events, so a change is stored by `StateChanged` first. This one only
             // re-seeds an entity whose report was identical to its last state (no event).
             seen = seen.recv() => match seen {
-                Ok(seen) => engine.state_seen(&seen),
+                Ok(seen) => engine.state_touched(&seen),
                 // Reports may have been missed: no entity can be called silent from here.
                 Err(broadcast::error::RecvError::Lagged(_)) => engine.seen_lagged(),
                 Err(broadcast::error::RecvError::Closed) => return,
@@ -449,7 +449,7 @@ impl Engine {
         }
     }
 
-    /// The `StateSeen` receiver lagged: reports of any entity may be missing.
+    /// The `StateTouched` receiver lagged: reports of any entity may be missing.
     fn seen_lagged(&mut self) {
         self.restart_silents();
     }
@@ -838,13 +838,15 @@ impl Engine {
         }
     }
 
-    /// A state topic of `id` was reported, changed or not. A watched entity missing from the
-    /// map is seeded silently from the registry: after a reconnect the retained replay is
-    /// usually identical to the last state, so the registry emits no `StateChanged` for it.
+    /// A message arrived on a state topic of `id`, whatever the entity read from it. A watched
+    /// entity missing from the map is seeded silently from the registry: after a reconnect the
+    /// retained replay is usually identical to the last state, so the registry emits no
+    /// `StateChanged` for it. A message that left the value unknown (`read` false) seeds only
+    /// keys the registry also has unknown, and still confirms an unknown value.
     ///
     /// A report from before the latest link drop is stale (the engine may only get to it after
     /// the clear) and is ignored: its registry value is exactly the pre-drop one.
-    fn state_seen(&mut self, seen: &StateSeen) {
+    fn state_touched(&mut self, seen: &StateTouched) {
         let id = seen.id.as_str();
         if seen.epoch == self.hub.link_epoch() {
             let now = (self.now)();
@@ -860,7 +862,9 @@ impl Engine {
                 .collect();
             for key in unseeded {
                 let scalar = self.hub.entity_value(id, key.1.as_deref());
-                self.known.insert(key, scalar);
+                if seen.read || scalar.is_none() {
+                    self.known.insert(key, scalar);
+                }
             }
             // The entity reported while this value was unknown: a value that shows up in a
             // later report is a first value, not a replay.
@@ -872,7 +876,8 @@ impl Engine {
                 .collect();
             self.confirmed_unknown.extend(unknown);
         }
-        if seen.epoch == self.hub.link_epoch()
+        if seen.read
+            && seen.epoch == self.hub.link_epoch()
             && self.off_peak_base.is_none()
             && self.off_peak_device().as_deref() == Some(id)
         {
@@ -2716,9 +2721,10 @@ mod tests {
         (engine, id)
     }
 
-    /// Publishes `payload` on the detector's topic and hands the engine what the hub would: the
-    /// change event when the value moved, then the report.
+    /// Publishes `payload` on the detector's topic and hands the engine what the hub sends: the
+    /// change event when the value moved, then every message signal the hub broadcast.
     fn alarm_report(engine: &mut Engine, id: &str, payload: &str) {
+        let mut touched = engine.hub.subscribe_state_touched();
         let changes = engine.hub.ingest("test/det", payload.as_bytes());
         if changes
             .iter()
@@ -2730,11 +2736,9 @@ mod tests {
                 state,
             });
         }
-        let epoch = engine.hub.link_epoch();
-        engine.state_seen(&StateSeen {
-            id: id.to_owned(),
-            epoch,
-        });
+        while let Ok(signal) = touched.try_recv() {
+            engine.state_touched(&signal);
+        }
     }
 
     /// Lets every spawned run end, as the engine loop would.
@@ -2762,6 +2766,61 @@ mod tests {
             .unwrap();
         assert_eq!(trigger.value, serde_json::json!(true));
         assert_eq!(trigger.previous, serde_json::Value::Null);
+    }
+
+    /// An online engine with the binary sensor a Zigbee2MQTT smoke detector announces: the
+    /// `smoke` key of the JSON on `test/det`, `true` on and `false` off.
+    fn smoke_engine() -> (Engine, String) {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/binary_sensor/det/smoke/config",
+            br#"{"unique_id":"smoke","state_topic":"test/det","value_template":"{{ value_json[\"smoke\"] }}","payload_on":true,"payload_off":false}"#,
+        );
+        engine.hub.set_connection(ConnectionStatus::Online);
+        let id = engine.hub.snapshot().entities[0].id.clone();
+        (engine, id)
+    }
+
+    #[tokio::test]
+    async fn null_reports_then_true_fires_once() {
+        let (mut engine, id) = smoke_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":null}"#);
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":null}"#);
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
+        assert_eq!(run_count(&engine, "a"), 1);
+    }
+
+    #[tokio::test]
+    async fn missing_key_reports_then_true_fires_once() {
+        let (mut engine, id) = smoke_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, r#"{"battery":13}"#);
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
+        assert_eq!(run_count(&engine, "a"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_first_true_without_a_prior_report_stays_silent() {
+        let (mut engine, id) = smoke_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
+        assert_eq!(run_count(&engine, "a"), 0);
     }
 
     #[tokio::test]
@@ -2885,12 +2944,13 @@ mod tests {
         );
     }
 
-    /// An entity report, as the engine's `StateSeen` branch gets it.
+    /// An entity report, as the engine's `StateTouched` branch gets it.
     fn report(engine: &mut Engine, id: &str) {
         let epoch = engine.hub.link_epoch();
-        engine.state_seen(&StateSeen {
+        engine.state_touched(&StateTouched {
             id: id.to_owned(),
             epoch,
+            read: true,
         });
     }
 
@@ -2914,6 +2974,22 @@ mod tests {
         assert_eq!(trigger.entity.as_deref(), Some(id.as_str()));
         assert_eq!(trigger.value, serde_json::json!("50m"));
         assert_eq!(run.steps[0].detail, format!("{id} silent for 50m"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn messages_that_read_nothing_restart_the_clock() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        for minutes in [40, 80, 120] {
+            at(&clock, minutes);
+            alarm_report(&mut engine, &id, r#"{"battery":13}"#);
+            engine.tick_silents();
+            assert_eq!(run_count(&engine, "s"), 0, "at {minutes}m");
+        }
+        at(&clock, 170);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
     }
 
     #[tokio::test(start_paused = true)]

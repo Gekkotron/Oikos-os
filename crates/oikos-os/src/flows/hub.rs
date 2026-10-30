@@ -626,7 +626,7 @@ impl Hub {
             return tokio::spawn(async {});
         };
         let events = self.subscribe();
-        let seen = self.subscribe_state_seen();
+        let seen = self.subscribe_state_touched();
         tokio::spawn(super::engine::run_with(
             Arc::clone(self),
             events,

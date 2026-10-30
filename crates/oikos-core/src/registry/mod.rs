@@ -95,6 +95,10 @@ pub enum Change {
     /// The entity read something from the message (so `last_update` moved) but nothing
     /// differs: a device echoing its state, or a re-delivered report.
     StateReported(String),
+    /// A message arrived on one of the entity's state topics but the entity read nothing from it
+    /// and nothing differs: the value stayed unknown (a `null` field, a missing key, a template
+    /// that renders nothing). The topic still spoke, which a liveness check cares about.
+    StateTouched(String),
     AreasChanged,
     DevicesChanged,
     BridgeChanged,
@@ -411,7 +415,8 @@ impl Registry {
 
     /// Hands the message to every entity reading `topic`: [`Change::StateChanged`] when its
     /// value, attributes or availability differ afterwards, [`Change::StateReported`] when
-    /// something was read but nothing differs. A template failure leaves the value `Unknown`
+    /// something was read but nothing differs, [`Change::StateTouched`] when nothing was read
+    /// and nothing differs. A template failure leaves the value `Unknown`
     /// and lists the entity in `template_failures`; it is cleared once the kind mapper stores
     /// a value again (an availability update on the same entity does not clear it).
     fn apply_state(&mut self, topic: &str, payload: &[u8], at: u64, changes: &mut Vec<Change>) {
@@ -444,6 +449,8 @@ impl Registry {
                 changes.push(Change::StateChanged(id.clone()));
             } else if reported {
                 changes.push(Change::StateReported(id.clone()));
+            } else {
+                changes.push(Change::StateTouched(id.clone()));
             }
         }
     }

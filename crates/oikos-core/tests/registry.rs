@@ -320,9 +320,13 @@ fn equal_value_report_is_reported_not_changed() {
         vec![Change::StateChanged("test_switch".to_owned())]
     );
 
-    // A message the mapper cannot read (neither ON nor OFF) is no report at all.
+    // A message the mapper cannot read (neither ON nor OFF) is no report: the topic spoke
+    // (touched) but `last_update` stays.
     let changes = registry.apply(state("maybe", AT + 3));
-    assert!(changes.is_empty(), "{changes:?}");
+    assert_eq!(
+        changes,
+        vec![Change::StateTouched("test_switch".to_owned())]
+    );
     assert_eq!(
         registry.state("test_switch").expect("state").last_update,
         Some(AT + 2)

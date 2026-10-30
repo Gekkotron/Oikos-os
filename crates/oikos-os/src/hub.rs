@@ -169,6 +169,17 @@ pub struct StateSeen {
     pub epoch: u64,
 }
 
+/// A message on a state topic of `id`, whatever the entity read from it. `read` is true when
+/// the entity read something (a [`StateSeen`] went out too) and false when the value stayed
+/// unknown (a `null` field, a missing key).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateTouched {
+    pub id: String,
+    /// [`Hub::link_epoch`] when the message arrived.
+    pub epoch: u64,
+    pub read: bool,
+}
+
 /// What [`Hub::run_group_migration_once`] did.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MigrationOutcome {
@@ -192,6 +203,10 @@ pub struct Hub {
     /// The ids whose state was reported, changed or not: Zigbee2MQTT echoes the whole device
     /// state on every `/set`, so a no-op command is confirmed by its echo.
     state_seen: broadcast::Sender<StateSeen>,
+    /// The ids a message arrived for on a state topic, including those whose value stayed
+    /// unknown. Only the flow engine's liveness checks read it; command confirmation and the
+    /// seeding consumers stay on `state_seen`.
+    state_touched: broadcast::Sender<StateTouched>,
     /// Woken when the set of topics to subscribe to may have changed outside a broker message
     /// (a local flow write); the MQTT task diffs its subscriptions on it.
     pub(crate) subscriptions_changed: Arc<tokio::sync::Notify>,
@@ -317,6 +332,7 @@ impl Hub {
         });
         let (events, _) = broadcast::channel(EVENT_CAPACITY);
         let (state_seen, _) = broadcast::channel(EVENT_CAPACITY);
+        let (state_touched, _) = broadcast::channel(EVENT_CAPACITY);
         let (connection, _) = watch::channel(ConnectionStatus::Connecting);
         let media = MediaProxy::new(cfg.frigate.clone());
         let alerts = AlertStore::with_media_origin(media.as_ref().map(|m| m.origin().to_owned()));
@@ -332,6 +348,7 @@ impl Hub {
             registry: RwLock::new(registry),
             events,
             state_seen,
+            state_touched,
             subscriptions_changed: Arc::new(tokio::sync::Notify::new()),
             link_epoch: AtomicU64::new(0),
             connection,
@@ -505,7 +522,7 @@ impl Hub {
         let at = clock::now();
         let at_micros = clock::now_micros();
         let history_feed_enabled = self.history.get().is_some();
-        let (changes, events, failing, seen, ignored, history_feed) = {
+        let (changes, events, failing, seen, touched_unread, ignored, history_feed) = {
             let mut reg = self.write();
             let inbound = reg.route(topic, payload.to_vec(), at);
             let is_state = matches!(inbound, Inbound::State { .. });
@@ -521,6 +538,10 @@ impl Hub {
             }
             // A message on a topic that only carries an entity's availability says nothing
             // about its state, so it does not count as the entity speaking.
+            let spoke = |id: &&String| {
+                reg.entity(id)
+                    .is_some_and(|entity| !entity.bindings.is_availability_only(topic))
+            };
             let seen: Vec<String> = if is_state {
                 changes
                     .iter()
@@ -528,10 +549,21 @@ impl Hub {
                         Change::StateChanged(id) | Change::StateReported(id) => Some(id),
                         _ => None,
                     })
-                    .filter(|id| {
-                        reg.entity(id)
-                            .is_some_and(|entity| !entity.bindings.is_availability_only(topic))
+                    .filter(spoke)
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            // Every entity the message reached, including those that read nothing from it.
+            let touched_unread: Vec<String> = if is_state {
+                changes
+                    .iter()
+                    .filter_map(|change| match change {
+                        Change::StateTouched(id) => Some(id),
+                        _ => None,
                     })
+                    .filter(spoke)
                     .cloned()
                     .collect()
             } else {
@@ -568,6 +600,7 @@ impl Hub {
                 events,
                 reg.template_failures().clone(),
                 seen,
+                touched_unread,
                 ignored,
                 history_feed,
             )
@@ -602,7 +635,20 @@ impl Hub {
             touched.insert(id.clone());
             // An error only means no command is waiting right now.
             let epoch = self.link_epoch();
+            let _ = self.state_touched.send(StateTouched {
+                id: id.clone(),
+                epoch,
+                read: true,
+            });
             let _ = self.state_seen.send(StateSeen { id, epoch });
+        }
+        for id in touched_unread {
+            let epoch = self.link_epoch();
+            let _ = self.state_touched.send(StateTouched {
+                id,
+                epoch,
+                read: false,
+            });
         }
         for id in &touched {
             self.on_member_state_change(id);
@@ -1141,6 +1187,12 @@ impl Hub {
     /// which the registry (it only emits real changes) does not announce.
     pub fn subscribe_state_seen(&self) -> broadcast::Receiver<StateSeen> {
         self.state_seen.subscribe()
+    }
+
+    /// A receiver of every id a state topic message arrived for, read or not (see
+    /// [`StateTouched`]).
+    pub fn subscribe_state_touched(&self) -> broadcast::Receiver<StateTouched> {
+        self.state_touched.subscribe()
     }
 
     /// Maps `cmd`, publishes it and waits up to `confirm_timeout_ms` for the entity's value to
@@ -2093,9 +2145,10 @@ fn events_for(reg: &Registry, changes: &[Change]) -> Vec<WsEvent> {
             }),
             Change::BridgeChanged => Some(WsEvent::BridgeChanged(reg.bridge().into())),
             // A report that changed nothing is not pushed to clients; it only confirms commands.
-            Change::StateReported(_) | Change::IgnoredChanged | Change::SubscriptionsChanged => {
-                None
-            }
+            Change::StateReported(_)
+            | Change::StateTouched(_)
+            | Change::IgnoredChanged
+            | Change::SubscriptionsChanged => None,
         })
         .collect()
 }
