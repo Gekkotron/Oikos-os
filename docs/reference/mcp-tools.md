@@ -58,7 +58,7 @@ See [Flow nodes](flow-nodes.md) for the document format.
 | `run_flow` | Starts a manual run and returns the run as it starts. Refused when the flow is disabled, invalid or already running, except that a card press (`node`) on a `restart` flow replaces the active run instead. Args: `id`, optional `node` (the id of a `trigger.manual` card to start from; the run carries its value, and a card that is not a manual trigger of the flow is refused). |
 
 :::note
-The argument schema of `set_flow` that the server advertises still describes four node types (`trigger.state`, `if`, `delay`, `command`). The server accepts all thirteen; the server instructions it sends name the others (`trigger.schedule`, `trigger.sun`, `trigger.off_peak`, `trigger.signal`, `trigger.manual`, `flow.enable`, `notify`, `switch`, `time.between`).
+The argument schema of `set_flow` that the server advertises describes the node types `trigger.state`, `if`, `switch`, `time.between`, `delay`, `command` and `math`. The server accepts all fourteen; the server instructions it sends name the others (`trigger.schedule`, `trigger.sun`, `trigger.off_peak`, `trigger.signal`, `trigger.manual`, `flow.enable`, `notify`).
 :::
 
 ## Groups

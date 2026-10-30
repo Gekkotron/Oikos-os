@@ -198,13 +198,16 @@ pub struct SetFlowParams {
     /// - `if` branches on a comparison. params: `op` (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`),
     ///   `value` (the constant to compare with) and optional `entity`. Without `entity` it
     ///   compares the triggering entity's live value, the one that fired the run; with it, that
-    ///   entity's current value. It has two output ports, `true` and `false`.
+    ///   entity's current value. It has two output ports, `true` and `false`. Instead of `entity`,
+    ///   `result` names a math card whose result of this run is compared (not with `entity`,
+    ///   `average` or `missing`).
     /// - `switch` branches on one value with 1 to 10 ordered rules. params: `rules`, a list of
     ///   `{"op": "eq"|"ne"|"gt"|"lt"|"gte"|"lte"|"between", "value": ..., "to": ...}` (`to` only
     ///   for `between`, which includes both ends), optional `entity` and `average` as for `if`,
-    ///   `otherwise` (`true` adds an `otherwise` port taken when no rule matches or the value is
-    ///   unknown) and `all` (`true` takes every matching rule, not only the first). Its output
-    ///   ports are `"1"` to `"n"` (the rule's 1-based position) and `"otherwise"`.
+    ///   or `result` (a math card's name, as for `if`), `otherwise` (`true` adds an `otherwise`
+    ///   port taken when no rule matches or the value is unknown) and `all` (`true` takes every
+    ///   matching rule, not only the first). Its output ports are `"1"` to `"n"` (the rule's
+    ///   1-based position) and `"otherwise"`.
     /// - `time.between` branches on the house-local time of day. params: `from` (included) and
     ///   `to` (excluded), both `HH:MM` 24-hour and different; `to` earlier than `from` crosses
     ///   midnight. Its output ports are `in` and `out`.
@@ -213,7 +216,30 @@ pub struct SetFlowParams {
     ///   `for`): each run then waits a random duration between `for` and `up_to`.
     /// - `command` sends a command to an entity. params: `entity` (an id) and `command`, the same
     ///   JSON as `send_command`'s, e.g. `{"type": "turn_on", "brightness": 200}` or
-    ///   `{"type": "turn_off"}`. The entity must exist and support the command.
+    ///   `{"type": "turn_off"}`. The entity must exist and support the command. Optional
+    ///   `value_from` (a math card's name) replaces the number of `set_number`, `set_temperature`,
+    ///   `set_position` or `turn_on`'s brightness with that card's result; the literal number
+    ///   stays in the JSON and is ignored then. Other commands refuse `value_from`.
+    /// - `math` computes one number and can save it. params: `inputs`, 0 to 10 of
+    ///   `{"name", "entity", "average"?}`: `name` is how the formula refers to the entity's value
+    ///   (`[a-z][a-z0-9_]{0,31}`, unique in the card), `average` (`15m`, at most `24h`) reads the
+    ///   mean of its readings instead of the current value, as for `if`. `formula` (1 to 500
+    ///   characters) is an expression over the inputs, the `trigger` value (when it is a number)
+    ///   and the results of other math cards by their names: numbers, `+ - * / %`, unary `-`,
+    ///   parentheses, comparisons (`< <= > >= == !=`, giving 1 or 0), `and`, `or`, `not`, and the
+    ///   functions `min(a, b, ...)`, `max(a, b, ...)`, `abs(x)`, `floor(x)`, `ceil(x)`,
+    ///   `round(x)` or `round(x, n)` (n from 0 to 6), `clamp(x, low, high)`, `if(c, a, b)` (only
+    ///   the taken branch is computed) and `interp(x, [x0, x1, ...], [y0, y1, ...])` (linear,
+    ///   2 to 50 points with increasing x). `name` (the result's name, the same form as an input
+    ///   name, not a function or keyword) is how later cards read it. Optional `save_to` (a
+    ///   number entity: device, `virtual_*` or `group_*`) receives the result with `set_number`,
+    ///   rounded to its step and kept in its range; the step succeeds only when the command is
+    ///   accepted. Division by zero, a result that is not finite, an unknown input or a result
+    ///   not computed in this run fails the run. Results last for one run only. It has no ports:
+    ///   its edge carries no `port`.
+    ///
+    /// Math results also feed `if` and `switch` (`result`, above) and `notify` text: `{name}`
+    /// prints a result, `{name:2}` rounds it, as for entity values.
     ///
     /// `edges` is a list of `{"from": "<node id>", "to": "<node id>"}` followed from a trigger.
     /// An edge leaving an `if` must also carry `"port": "true"` or `"port": "false"`, one leaving
@@ -393,6 +419,10 @@ mod tests {
             "entity",
             "op",
             "mode",
+            "math",
+            "value_from",
+            "result",
+            "save_to",
         ] {
             assert!(description.contains(needle), "`{needle}` is missing");
         }
