@@ -308,6 +308,7 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::TriggerState(_) => NODE_BOLT,
         NodeKind::TriggerSchedule(_) => NODE_CLOCK,
         NodeKind::TriggerSun(_) => SUN,
+        NodeKind::TriggerOffPeak(_) => NODE_BOLT,
         NodeKind::TriggerSignal(_) => NODE_BOLT,
         NodeKind::TriggerManual(_) => NODE_PLAY_CIRCLE,
         NodeKind::If(p) if p.op == oikos_core::flow::Op::IsDark => NODE_MOON,

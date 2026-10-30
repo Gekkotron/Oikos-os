@@ -37,7 +37,8 @@ pub fn role(kind: &NodeKind) -> Role {
         | NodeKind::TriggerSchedule(_)
         | NodeKind::TriggerSun(_)
         | NodeKind::TriggerManual(_)
-        | NodeKind::TriggerSignal(_) => Role::Trigger,
+        | NodeKind::TriggerSignal(_)
+        | NodeKind::TriggerOffPeak(_) => Role::Trigger,
         NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_) => Role::Check,
         NodeKind::Command(_) | NodeKind::FlowEnable(_) | NodeKind::Notify(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
@@ -241,7 +242,7 @@ fn op_words(op: Op) -> &'static str {
         Op::Lt => "<",
         Op::Gte => "≥",
         Op::Lte => "≤",
-        Op::Eq | Op::Ne | Op::IsDark => "",
+        Op::Eq | Op::Ne | Op::IsDark | Op::IsOffPeak => "",
     }
 }
 
@@ -273,6 +274,8 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         }
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(p) => sun_summary(lang, p.which, p.offset()),
+        // Placeholder until the off-peak cards get their words.
+        NodeKind::TriggerOffPeak(_) => flow_text(lang, FlowText::NodeTrigger).to_owned(),
         NodeKind::TriggerManual(p) => {
             let head = flow_text(lang, FlowText::NodeManual);
             match &p.value {

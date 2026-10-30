@@ -194,6 +194,23 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     });
                 }
             }
+            NodeKind::If(p) if p.op == Op::IsOffPeak => {
+                let offending = [
+                    ("value", p.value.is_some()),
+                    ("entity", p.entity.is_some()),
+                    ("missing", p.missing.is_some()),
+                    ("average", p.average.is_some()),
+                    ("offset_minutes", p.offset_minutes.is_some()),
+                ]
+                .into_iter()
+                .find_map(|(field, set)| set.then_some(field));
+                if let Some(field) = offending {
+                    return Err(FlowError::BadOperand {
+                        node: node.id.clone(),
+                        reason: format!("{field} is not allowed with op: is_off_peak"),
+                    });
+                }
+            }
             NodeKind::If(p) if p.offset_minutes.is_some() => {
                 return Err(FlowError::BadOperand {
                     node: node.id.clone(),
@@ -348,7 +365,7 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
 
 /// A schedule, a sun event or a manual trigger without a value has no trigger value, so an `if`
 /// or a `switch` reachable from one must read an entity, unless the `if` is `op: is_dark`, which
-/// reads the sun. `time.between` reads the clock and needs none. A manual trigger with a value
+/// reads the sun, or `op: is_off_peak`, which reads the tariff. `time.between` reads the clock and needs none. A manual trigger with a value
 /// does carry one, but an average of the trigger value has no history, so an `if` or a `switch`
 /// with an `average` reachable from it must name an entity too.
 fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
@@ -364,7 +381,9 @@ fn check_ifs_after_valueless_triggers(flow: &Flow) -> Result<(), FlowError> {
         })
         .collect();
     for node in reachable(flow, valueless) {
-        if matches!(&node.kind, NodeKind::If(p) if p.entity.is_none() && p.op != Op::IsDark) {
+        if matches!(&node.kind, NodeKind::If(p)
+            if p.entity.is_none() && !matches!(p.op, Op::IsDark | Op::IsOffPeak))
+        {
             return Err(FlowError::IfNeedsEntity {
                 node: node.id.clone(),
             });
@@ -1113,6 +1132,61 @@ mod tests {
         assert!(
             matches!(err, FlowError::BadOperand { ref reason, .. } if reason == "value is required for op lt")
         );
+    }
+
+    #[test]
+    fn op_is_off_peak_rejects_entity_value_missing_average_and_offset() {
+        for (field, patch) in [
+            ("value", r#"{"op":"is_off_peak","value":1}"#),
+            ("entity", r#"{"op":"is_off_peak","entity":"e"}"#),
+            ("missing", r#"{"op":"is_off_peak","missing":"true"}"#),
+            ("average", r#"{"op":"is_off_peak","average":"15m"}"#),
+            (
+                "offset_minutes",
+                r#"{"op":"is_off_peak","offset_minutes":5}"#,
+            ),
+        ] {
+            let err = validate(&flow_with_if_params_json(patch)).unwrap_err();
+            assert!(
+                matches!(err, FlowError::BadOperand { ref reason, .. }
+                    if *reason == format!("{field} is not allowed with op: is_off_peak")),
+                "{field}: {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn if_is_off_peak_is_valid_after_a_schedule() {
+        let flow = decode_flow(
+            serde_json::json!([
+                { "id": "tick", "type": "trigger.schedule", "params": { "cron": "0 * * * *" } },
+                { "id": "chk", "type": "if", "params": { "op": "is_off_peak" } },
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([
+                { "from": "tick", "to": "chk" },
+                { "from": "chk", "to": "act", "port": "true" },
+            ]),
+        );
+        assert_eq!(validate(&flow), Ok(()));
+    }
+
+    #[test]
+    fn if_after_trigger_off_peak_may_read_the_trigger_value() {
+        let flow = decode_flow(
+            serde_json::json!([
+                { "id": "op", "type": "trigger.off_peak", "params": { "edge": "end" } },
+                { "id": "chk", "type": "if", "params": { "op": "eq", "value": "end" } },
+                { "id": "act", "type": "command",
+                  "params": { "entity": "l", "command": { "type": "turn_on" } } },
+            ]),
+            serde_json::json!([
+                { "from": "op", "to": "chk" },
+                { "from": "chk", "to": "act", "port": "true" },
+            ]),
+        );
+        assert_eq!(validate(&flow), Ok(()));
     }
 
     #[test]

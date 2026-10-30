@@ -153,6 +153,9 @@ pub enum NodeKind {
     /// Starts a run when a remote, an event entity or a tag scanner sends a signal.
     #[serde(rename = "trigger.signal")]
     TriggerSignal(TriggerSignalParams),
+    /// Starts a run when off-peak starts or ends (from the off-peak device, else the windows).
+    #[serde(rename = "trigger.off_peak")]
+    TriggerOffPeak(TriggerOffPeakParams),
     /// Branches on a comparison of an entity (or the trigger value) with a constant.
     #[serde(rename = "if")]
     If(IfParams),
@@ -185,6 +188,7 @@ impl NodeKind {
             NodeKind::TriggerSun(_) => "trigger.sun",
             NodeKind::TriggerManual(_) => "trigger.manual",
             NodeKind::TriggerSignal(_) => "trigger.signal",
+            NodeKind::TriggerOffPeak(_) => "trigger.off_peak",
             NodeKind::If(_) => "if",
             NodeKind::Delay(_) => "delay",
             NodeKind::Command(_) => "command",
@@ -204,6 +208,7 @@ impl NodeKind {
                 | NodeKind::TriggerSun(_)
                 | NodeKind::TriggerManual(_)
                 | NodeKind::TriggerSignal(_)
+                | NodeKind::TriggerOffPeak(_)
         )
     }
 
@@ -306,6 +311,37 @@ impl TriggerSunParams {
     pub fn offset(&self) -> i32 {
         self.offset_minutes.unwrap_or(0)
     }
+}
+
+/// Which change of the off-peak state a `trigger.off_peak` fires on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum OffPeakEdge {
+    /// Peak to off-peak.
+    Start,
+    /// Off-peak to peak.
+    End,
+}
+
+impl OffPeakEdge {
+    /// The name this edge carries in the flow JSON, also the trigger value of a run.
+    pub fn wire_name(&self) -> &'static str {
+        match self {
+            OffPeakEdge::Start => "start",
+            OffPeakEdge::End => "end",
+        }
+    }
+}
+
+/// Params of `trigger.off_peak`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct TriggerOffPeakParams {
+    /// Fire when off-peak starts or when it ends.
+    pub edge: OffPeakEdge,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
 }
 
 /// Params of `if`.
@@ -566,6 +602,7 @@ pub enum Op {
     Gte,
     Lte,
     IsDark,
+    IsOffPeak,
 }
 
 impl Op {
@@ -579,6 +616,7 @@ impl Op {
             Op::Gte => "gte",
             Op::Lte => "lte",
             Op::IsDark => "is_dark",
+            Op::IsOffPeak => "is_off_peak",
         }
     }
 }
@@ -720,6 +758,37 @@ mod tests {
         let wire = serde_json::to_value(&node).unwrap();
         assert_eq!(wire["params"]["op"], json!("is_dark"));
         assert!(wire["params"].get("value").is_none());
+    }
+
+    #[test]
+    fn trigger_off_peak_round_trips() {
+        let raw = r#"{"id":"t","type":"trigger.off_peak","params":{"edge":"start"}}"#;
+        let node: Node = serde_json::from_str(raw).unwrap();
+        match &node.kind {
+            NodeKind::TriggerOffPeak(p) => assert_eq!(p.edge, OffPeakEdge::Start),
+            other => panic!("{other:?}"),
+        }
+        assert!(node.kind.is_trigger());
+        assert_eq!(node.kind.type_name(), "trigger.off_peak");
+        assert_eq!(
+            serde_json::to_value(&node).unwrap(),
+            serde_json::from_str::<Value>(raw).unwrap()
+        );
+        let bad = r#"{"id":"t","type":"trigger.off_peak","params":{"edge":"middle"}}"#;
+        assert!(serde_json::from_str::<Node>(bad).is_err());
+    }
+
+    #[test]
+    fn if_is_off_peak_round_trips() {
+        let node: Node =
+            serde_json::from_str(r#"{"id":"c","type":"if","params":{"op":"is_off_peak"}}"#)
+                .unwrap();
+        match &node.kind {
+            NodeKind::If(p) => assert_eq!(p.op, Op::IsOffPeak),
+            other => panic!("{other:?}"),
+        }
+        let wire = serde_json::to_value(&node).unwrap();
+        assert_eq!(wire["params"], json!({"op": "is_off_peak"}));
     }
 
     #[test]

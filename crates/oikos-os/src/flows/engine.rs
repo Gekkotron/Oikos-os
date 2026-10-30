@@ -811,6 +811,11 @@ async fn run_node(
             };
             (StepOutcome::Ok, detail, Vec::new())
         }
+        NodeKind::TriggerOffPeak(params) => (
+            StepOutcome::Ok,
+            format!("off-peak {}", params.edge.wire_name()),
+            Vec::new(),
+        ),
         NodeKind::TriggerSun(params) => (
             StepOutcome::Ok,
             format!(
@@ -942,6 +947,9 @@ async fn run_node(
             }
         }
         NodeKind::If(params) => {
+            if params.op == Op::IsOffPeak {
+                return failed("is_off_peak is not wired yet".to_owned());
+            }
             if params.op == Op::IsDark {
                 let (lat, lon) = hub.house_point();
                 let dark = is_dark_with_offset(lat, lon, now(), params.dark_offset());

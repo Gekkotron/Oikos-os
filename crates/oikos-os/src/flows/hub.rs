@@ -404,6 +404,7 @@ impl Hub {
                 | NodeKind::TimeBetween(_)
                 | NodeKind::TriggerSchedule(_)
                 | NodeKind::TriggerSun(_)
+                | NodeKind::TriggerOffPeak(_)
                 | NodeKind::TriggerManual(_) => None,
             };
             let Some(entity) = entity else { continue };

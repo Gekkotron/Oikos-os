@@ -86,6 +86,7 @@ pub fn compare(left: Option<&Scalar>, op: Op, right: &Scalar) -> Result<bool, Co
         Op::Eq => Ok(left == Some(right)),
         Op::Ne => Ok(left != Some(right)),
         Op::IsDark => unreachable!("is_dark is handled in the engine before compare"),
+        Op::IsOffPeak => unreachable!("is_off_peak is handled in the engine before compare"),
         Op::Gt | Op::Lt | Op::Gte | Op::Lte => match (left, right) {
             (None, _) => Ok(false),
             (Some(Scalar::Number(l)), Scalar::Number(r)) => Ok(match op {

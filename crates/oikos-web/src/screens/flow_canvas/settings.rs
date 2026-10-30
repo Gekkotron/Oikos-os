@@ -91,6 +91,7 @@ fn op_str(op: Op) -> &'static str {
         Op::Gte => "gte",
         Op::Lte => "lte",
         Op::IsDark => "is_dark",
+        Op::IsOffPeak => "is_off_peak",
     }
 }
 
@@ -312,6 +313,7 @@ fn node_editor_body(
         NodeKind::TriggerState(_) => FlowText::NodeTrigger,
         NodeKind::TriggerSchedule(_) => FlowText::Schedule,
         NodeKind::TriggerSun(_) => FlowText::NodeSun,
+        NodeKind::TriggerOffPeak(_) => FlowText::NodeTrigger,
         NodeKind::TriggerManual(_) => FlowText::NodeManual,
         NodeKind::TriggerSignal(_) => FlowText::NodeSignal,
         NodeKind::If(_) => FlowText::NodeIf,
@@ -1009,6 +1011,8 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
             let cfg = Signal::from(expect_context::<House>().flows_config);
             sun_sheet(node, cfg).into_any()
         }
+        // Placeholder until the off-peak sheet exists.
+        NodeKind::TriggerOffPeak(_) => ().into_any(),
         NodeKind::TriggerManual(p) => manual_fields(form, id, p.value).into_any(),
         NodeKind::FlowEnable(p) => flow_enable_fields(form, id, p).into_any(),
         NodeKind::Notify(p) => notify_fields(form, id, p).into_any(),
