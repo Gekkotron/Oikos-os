@@ -157,6 +157,7 @@ pub enum FlowText {
     OnlyAfter,
     AnySignal,
     EntityDefaults,
+    ValueOf,
     MissingFail,
     MissingTrue,
     MissingFalse,
@@ -410,6 +411,7 @@ impl FlowText {
         FlowText::OnlyAfter,
         FlowText::AnySignal,
         FlowText::EntityDefaults,
+        FlowText::ValueOf,
         FlowText::MissingFail,
         FlowText::MissingTrue,
         FlowText::MissingFalse,
@@ -826,6 +828,7 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::SevCritical => ("critical", "critique"),
         T::OpIsDark => ("is dark", "fait nuit"),
         T::WhenUnknown => ("When the value is unknown", "Quand la valeur est inconnue"),
+        T::ValueOf => ("Value of", "Valeur de"),
         T::AverageOver => ("Average over", "Moyenne sur"),
         T::AverageHint => (
             "empty = current value \u{b7} e.g. 15m",

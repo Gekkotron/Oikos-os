@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::i18n::flows::{FlowText, flow_text};
 use crate::i18n::format::parse_decimal;
 use crate::i18n::use_lang;
-use crate::if_value::{ValueInput, parse_other, value_input, with_current};
+use crate::if_value::{ValueInput, parse_other, value_input, value_input_of, with_current};
 
 /// The option value of "Other value…" in the list.
 const OTHER: &str = "other";
@@ -39,12 +39,16 @@ pub fn IfValueField(
     /// The input to use when there is no entity: what a Manual card upstream carries.
     #[prop(optional, into)]
     fallback: Option<Signal<Option<ValueInput>>>,
+    /// The value of `entity` compared: a field of its state, its headline value when absent.
+    #[prop(optional, into)]
+    field: Option<Signal<Option<String>>>,
 ) -> impl IntoView {
     let lang = use_lang();
     let other = RwSignal::new(false);
     let input = Memo::new(move |_| {
+        let field = field.and_then(|f| f.get());
         entity.with(|e| match e {
-            Some(_) => value_input(lang(), e.as_ref()),
+            Some(_) => value_input_of(lang(), e.as_ref(), field.as_deref()),
             None => fallback
                 .and_then(|f| f.get())
                 .unwrap_or_else(|| value_input(lang(), None)),

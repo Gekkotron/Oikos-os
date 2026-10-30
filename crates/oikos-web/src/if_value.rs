@@ -294,6 +294,26 @@ pub fn upstream_trigger_entity(flow: &Flow, node_id: &str) -> Option<String> {
     }
 }
 
+/// The field of the state trigger whose value reaches `node_id`: set when every path back from
+/// the node starts at state triggers reading the same field of the same entity.
+pub fn upstream_trigger_field(flow: &Flow, node_id: &str) -> Option<String> {
+    let reads: BTreeSet<Option<(String, Option<String>)>> = upstream_triggers(flow, node_id)
+        .into_iter()
+        .map(|kind| match kind {
+            NodeKind::TriggerState(t) => Some((t.entity.clone(), t.field.clone())),
+            _ => None,
+        })
+        .collect();
+    match reads.len() {
+        1 => reads
+            .into_iter()
+            .next()
+            .flatten()
+            .and_then(|(_, field)| field),
+        _ => None,
+    }
+}
+
 /// The value a run carries to `node_id` when every path back from it starts at a Manual card
 /// with a value of the same kind (on/off, number or text): the first card's value. `None` when a
 /// path starts at another trigger, or at a card with no value or another kind of value.
@@ -375,6 +395,40 @@ mod tests {
             ui: UiOverride::default(),
             state: EntityState::default(),
         }
+    }
+
+    #[test]
+    fn upstream_trigger_field_follows_the_one_state_trigger() {
+        let battery = node(
+            "t",
+            NodeKind::TriggerState(TriggerStateParams {
+                entity: "robo".into(),
+                field: Some("battery".into()),
+                ..Default::default()
+            }),
+        );
+        let flow = |nodes: Vec<Node>| Flow {
+            edges: nodes
+                .iter()
+                .filter(|n| n.id != "check")
+                .map(|n| Edge {
+                    from: n.id.clone(),
+                    to: "check".into(),
+                    port: None,
+                })
+                .collect(),
+            nodes,
+            ..Flow::decode(br#"{"id":"f","name":"F"}"#).unwrap()
+        };
+        let one = flow(vec![battery.clone(), plain("check")]);
+        assert_eq!(
+            upstream_trigger_field(&one, "check").as_deref(),
+            Some("battery")
+        );
+        let plain_state = flow(vec![state("t", "robo"), plain("check")]);
+        assert_eq!(upstream_trigger_field(&plain_state, "check"), None);
+        let mixed = flow(vec![battery, state("u", "robo"), plain("check")]);
+        assert_eq!(upstream_trigger_field(&mixed, "check"), None);
     }
 
     fn vacuum() -> EntityView {
