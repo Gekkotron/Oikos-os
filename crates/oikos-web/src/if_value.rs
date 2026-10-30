@@ -121,8 +121,8 @@ fn labelled_now(label: String, current: Option<String>) -> String {
 }
 
 /// Every value the device of `e` reports: `e`'s headline value, its fields, then the device's
-/// other entities (diagnostic ones included, disabled-by-default and signal ones left out),
-/// each labelled with its current value.
+/// other entities (diagnostic ones included, those announced disabled by default such as link
+/// quality last, signal ones left out), each labelled with its current value.
 pub fn value_of_choices(
     lang: Lang,
     entities: &BTreeMap<String, EntityView>,
@@ -149,22 +149,24 @@ pub fn value_of_choices(
     let Some(device) = e.device_id.as_deref() else {
         return list;
     };
-    let mut siblings: Vec<ValueOfChoice> = entities
+    let mut siblings: Vec<(bool, ValueOfChoice)> = entities
         .values()
         .filter(|s| s.id != e.id && s.device_id.as_deref() == Some(device))
-        .filter(|s| s.enabled_by_default)
         .filter(|s| {
             type_def(&s.component).is_none_or(|def| def.placement != Placement::Signal)
                 && reports(s.kind, &s.component, &s.capabilities, s.unit.as_deref())
                     != Reports::Nothing
         })
-        .map(|s| ValueOfChoice {
-            of: ValueOf::Sibling(s.id.clone()),
-            label: labelled_now(shown_name(lang, s).to_owned(), Some(entity_value(lang, s))),
+        .map(|s| {
+            let choice = ValueOfChoice {
+                of: ValueOf::Sibling(s.id.clone()),
+                label: labelled_now(shown_name(lang, s).to_owned(), Some(entity_value(lang, s))),
+            };
+            (!s.enabled_by_default, choice)
         })
         .collect();
-    siblings.sort_by(|a, b| a.label.cmp(&b.label));
-    list.extend(siblings);
+    siblings.sort_by(|(a_off, a), (b_off, b)| (a_off, &a.label).cmp(&(b_off, &b.label)));
+    list.extend(siblings.into_iter().map(|(_, choice)| choice));
     list
 }
 
@@ -481,19 +483,26 @@ mod tests {
         battery.unit = Some("%".into());
         battery.category = EntityCategory::Diagnostic;
         battery.state.value = StateValue::Number(80.0);
-        let mut hidden = ent(Kind::Sensor);
-        hidden.id = "0xabc_hidden".into();
-        hidden.device_id = Some("0xabc".into());
-        hidden.enabled_by_default = false;
+        // Zigbee2MQTT announces link quality disabled by default: listed, after the others.
+        let mut link = ent(Kind::Sensor);
+        link.id = "0xabc_linkquality".into();
+        link.name = "Linkquality".into();
+        link.device_id = Some("0xabc".into());
+        link.category = EntityCategory::Diagnostic;
+        link.enabled_by_default = false;
         let mut other = ent(Kind::Sensor);
         other.id = "0xdef_battery".into();
         other.device_id = Some("0xdef".into());
-        let entities = house(vec![smoke.clone(), battery, hidden, other]);
+        let entities = house(vec![smoke.clone(), link, battery, other]);
         let choices = value_of_choices(Lang::En, &entities, &smoke);
         let of: Vec<ValueOf> = choices.iter().map(|c| c.of.clone()).collect();
         assert_eq!(
             of,
-            [ValueOf::Headline, ValueOf::Sibling("0xabc_battery".into())]
+            [
+                ValueOf::Headline,
+                ValueOf::Sibling("0xabc_battery".into()),
+                ValueOf::Sibling("0xabc_linkquality".into()),
+            ]
         );
         assert_eq!(choices[1].label, "Battery (80\u{a0}%)");
     }

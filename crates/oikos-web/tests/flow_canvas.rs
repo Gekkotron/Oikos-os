@@ -2133,3 +2133,28 @@ async fn entity_change_clears_field_value_to_from() {
     assert!(params.get("from").is_none(), "{params}");
     settle_history().await;
 }
+
+/// An average the card's value cannot have stays on screen, so it can be cleared.
+#[wasm_bindgen_test]
+async fn a_set_average_stays_visible_when_the_field_has_no_history() {
+    let view = line_view(
+        r#"[
+          { "id": "start", "type": "trigger.state",
+            "params": { "entity": "light.table", "field": "brightness" } },
+          { "id": "check", "type": "if", "params": { "op": "gt", "value": 50, "average": "15m" } },
+          { "id": "plain", "type": "if", "params": { "op": "gt", "value": 50 } }
+        ]"#,
+    );
+    let (host, _mounted, house) = editing(view).await;
+    house.entities.update(|m| {
+        let lamp = table_lamp();
+        m.insert(lamp.id.clone(), lamp);
+    });
+    let average_boxes =
+        |host: &web_sys::Element| count(host, ".flow-drawer input[placeholder*='15m']");
+    select_card(&host, "check").await;
+    assert_eq!(average_boxes(&host), 1, "{}", host.inner_html());
+    select_card(&host, "plain").await;
+    assert_eq!(average_boxes(&host), 0, "{}", host.inner_html());
+    settle_history().await;
+}

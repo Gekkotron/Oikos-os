@@ -1036,9 +1036,20 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                     }
                 });
             });
+            // An average the value cannot have stays on screen until cleared; the hub refuses it.
+            let average_set = Signal::derive({
+                let id = id.clone();
+                move || {
+                    draft.with(|f| {
+                        matches!(f.node(&id).map(|n| &n.kind), Some(NodeKind::If(i)) if i.average.is_some())
+                    })
+                }
+            });
             let averages = move || {
-                compared
-                    .with(|e| compared_field.with(|f| average_allowed(e.as_ref(), f.as_deref())))
+                average_set.get()
+                    || compared.with(|e| {
+                        compared_field.with(|f| average_allowed(e.as_ref(), f.as_deref()))
+                    })
             };
             let value_id = id.clone();
             let stored_value = Signal::derive(move || {
@@ -1642,8 +1653,18 @@ fn switch_fields(form: Form, id: String, p: SwitchParams) -> impl IntoView {
             }
         });
     });
+    // An average the value cannot have stays on screen until cleared; the hub refuses it.
+    let average_set = Signal::derive({
+        let id = id.clone();
+        move || {
+            draft.with(|f| {
+                matches!(f.node(&id).map(|n| &n.kind), Some(NodeKind::Switch(s)) if s.average.is_some())
+            })
+        }
+    });
     let averages = move || {
-        compared.with(|e| compared_field.with(|f| average_allowed(e.as_ref(), f.as_deref())))
+        average_set.get()
+            || compared.with(|e| compared_field.with(|f| average_allowed(e.as_ref(), f.as_deref())))
     };
     let average_initial = {
         let id = id.clone();

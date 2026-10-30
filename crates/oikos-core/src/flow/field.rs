@@ -85,6 +85,15 @@ pub fn fields(
     }
 }
 
+/// The headline value of an entity of discovery `component`: its type's primary field for a
+/// type-table entity, else [`Scalar::of_state`].
+pub fn headline_scalar(component: &str, value: &StateValue) -> Option<Scalar> {
+    match value {
+        StateValue::Generic(state) => Scalar::of_generic(type_def(component)?, state),
+        other => Scalar::of_state(other),
+    }
+}
+
 /// Field `field` of a state; `None` for a field the state does not have or has not reported.
 pub fn field_scalar(value: &StateValue, field: &str) -> Option<Scalar> {
     let number = |n: Option<f64>| n.map(Scalar::Number);
@@ -228,6 +237,20 @@ mod tests {
         );
         // `update` reports versions, which a flow cannot compare.
         assert!(fields(Kind::Generic, "update", &Capabilities::default(), None).is_empty());
+    }
+
+    #[test]
+    fn headline_reads_a_generic_primary() {
+        let lock = StateValue::Generic(GenericState {
+            fields: [("state".to_owned(), GenericValue::Text("locked".into()))].into(),
+        });
+        assert_eq!(
+            headline_scalar("lock", &lock),
+            Some(Scalar::Text("locked".into()))
+        );
+        assert_eq!(headline_scalar("nope", &lock), None);
+        let on = StateValue::OnOff(true);
+        assert_eq!(headline_scalar("switch", &on), Some(Scalar::Bool(true)));
     }
 
     #[test]

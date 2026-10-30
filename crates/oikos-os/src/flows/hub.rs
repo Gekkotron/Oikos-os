@@ -13,7 +13,8 @@ use oikos_api::{
 use oikos_core::command::{Publish, map_command};
 use oikos_core::flow::template::parse;
 use oikos_core::flow::{
-    Flow, FlowMode, NodeKind, Reading, Scalar, field_scalar, fields, uses_sun_or_is_dark, validate,
+    Flow, FlowMode, NodeKind, Reading, Scalar, field_scalar, fields, headline_scalar,
+    uses_sun_or_is_dark, validate,
 };
 use oikos_core::model::{Command, Kind, UNASSIGNED_AREA};
 use oikos_core::types::{Placement, type_def};
@@ -332,10 +333,10 @@ impl Hub {
     /// absent value.
     pub fn entity_value(&self, id: &str, field: Option<&str>) -> Option<Scalar> {
         let reg = self.read();
-        reg.entity(id)?;
+        let entity = reg.entity(id)?;
         let value = &reg.state(id)?.value;
         match field {
-            None => Scalar::of_state(value),
+            None => headline_scalar(&entity.component, value),
             Some(field) => field_scalar(value, field),
         }
     }
@@ -451,6 +452,15 @@ impl Hub {
                         node.id
                     )));
                 }
+                // An If or Switch without an entity downstream reads this field too.
+                if matches!(node.kind, NodeKind::TriggerState(_))
+                    && !info.recorded
+                    && let Some(averaging) = averaging_trigger_value(flow, &node.id)
+                {
+                    return Err(HubError::InvalidFlow(format!(
+                        "node `{averaging}`: `{field}` of `{entity}` has no history to average"
+                    )));
+                }
             }
             let signal_source =
                 type_def(&found.component).is_some_and(|def| def.placement == Placement::Signal);
@@ -544,6 +554,30 @@ impl Hub {
 }
 
 /// The signal names an entity announces: its `signals`, else (an `event`) the options of `last`.
+/// The first If or Switch reachable from `trigger` that averages the trigger's value (no
+/// `entity` of its own, an `average`).
+fn averaging_trigger_value<'a>(flow: &'a Flow, trigger: &str) -> Option<&'a str> {
+    let mut seen = BTreeSet::from([trigger]);
+    let mut queue = vec![trigger];
+    while let Some(id) = queue.pop() {
+        for edge in flow.edges.iter().filter(|e| e.from == id) {
+            if !seen.insert(edge.to.as_str()) {
+                continue;
+            }
+            let averages = match flow.node(&edge.to).map(|n| &n.kind) {
+                Some(NodeKind::If(p)) => p.entity.is_none() && p.average.is_some(),
+                Some(NodeKind::Switch(p)) => p.entity.is_none() && p.average.is_some(),
+                _ => false,
+            };
+            if averages {
+                return Some(edge.to.as_str());
+            }
+            queue.push(edge.to.as_str());
+        }
+    }
+    None
+}
+
 fn announced_signals(entity: &oikos_core::model::Entity) -> Vec<String> {
     let Some(generic) = &entity.capabilities.generic else {
         return Vec::new();

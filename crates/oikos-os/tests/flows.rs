@@ -2195,3 +2195,38 @@ async fn entity_value_reads_the_field() {
     assert_eq!(hub.entity_value(VACUUM_ID, Some("fan_speed")), None);
     assert_eq!(hub.entity_value("nope", Some("battery")), None);
 }
+
+/// A field trigger on `entity`, then an If with no entity that averages the trigger's value.
+fn averaged_after_field_flow(entity: &str, field: &str) -> Flow {
+    let text = serde_json::json!({
+        "id": "fielded", "name": "Fielded", "enabled": true,
+        "nodes": [
+            { "id": "start", "type": "trigger.state", "params": { "entity": entity, "field": field } },
+            { "id": "wait", "type": "delay", "params": { "for": "1m" } },
+            { "id": "check", "type": "if",
+              "params": { "op": "lte", "value": 19, "average": "15m" } }
+        ],
+        "edges": [
+            { "from": "start", "to": "wait" },
+            { "from": "wait", "to": "check" }
+        ]
+    });
+    Flow::decode(text.to_string().as_bytes()).expect("averaged flow")
+}
+
+#[tokio::test]
+async fn average_after_an_unrecorded_field_trigger_is_refused() {
+    let (hub, _publisher) = hub_with_vacuum_and_climate();
+    assert_eq!(
+        invalid_reason(
+            hub.set_flow(averaged_after_field_flow(VACUUM_ID, "battery"))
+                .await
+        ),
+        format!("node `check`: `battery` of `{VACUUM_ID}` has no history to average")
+    );
+    assert!(
+        hub.set_flow(averaged_after_field_flow(CLIMATE_ID, "current"))
+            .await
+            .is_ok()
+    );
+}

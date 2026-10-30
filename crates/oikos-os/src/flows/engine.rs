@@ -21,8 +21,8 @@ use oikos_core::flow::sun::is_dark_with_offset;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
     Flow, FlowMode, Missing, Node, NodeKind, OffPeakEdge, Op, Reading, Scalar, Schedule, compare,
-    field_scalar, format_duration, in_time_range, parse_clock, parse_duration, pick_duration,
-    switch_exits,
+    field_scalar, format_duration, headline_scalar, in_time_range, parse_clock, parse_duration,
+    pick_duration, switch_exits,
 };
 use oikos_core::history::buckets::{Sample, readings_mean};
 use oikos_core::model::StateValue;
@@ -180,10 +180,11 @@ struct Engine {
 /// A value a trigger watches: an entity and a field of its state (`None` for its headline value).
 type Watched = (String, Option<String>);
 
-/// The value `field` names in `value`: its headline value when `None`.
-fn watched_value(value: &StateValue, field: Option<&str>) -> Option<Scalar> {
+/// The value `field` names in `value` of an entity of discovery `component`: its headline value
+/// when `None`.
+fn watched_value(component: &str, value: &StateValue, field: Option<&str>) -> Option<Scalar> {
     match field {
-        None => Scalar::of_state(value),
+        None => headline_scalar(component, value),
         Some(field) => field_scalar(value, field),
     }
 }
@@ -726,9 +727,18 @@ impl Engine {
             .filter(|key| key.0 == id)
             .cloned()
             .collect();
+        if keys.is_empty() {
+            return;
+        }
+        let component = self
+            .hub
+            .read()
+            .entity(id)
+            .map(|e| e.component.clone())
+            .unwrap_or_default();
         let mut fires: Vec<(Flow, String, TriggerInfo)> = Vec::new();
         for key in keys {
-            let next = watched_value(state, key.1.as_deref());
+            let next = watched_value(&component, state, key.1.as_deref());
             // Never seen since the last reset: recorded, not acted on.
             let Some(previous) = self.known.insert(key.clone(), next.clone()) else {
                 continue;
@@ -1286,7 +1296,7 @@ async fn node_left(
         (None, None) => return Err("no triggering entity".to_owned()),
     };
     Ok(match average {
-        Some(window) => window_average(hub, entity, window, now())
+        Some(window) => window_average(hub, entity, field, window, now())
             .await
             .map(Scalar::Number),
         None => hub.entity_value(entity, field),
@@ -1329,17 +1339,20 @@ fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
     windows
 }
 
-/// The mean of the readings of `entity` over the `window` ending at `now`: the ones the hub
-/// kept, newest included, with history filling the part of the window before them (after a
-/// restart, or a flow saved since). With no reading in the window the value held throughout,
-/// the current one, is the mean. `None` when the entity is unknown, unavailable or not a number.
+/// The mean of the readings of `entity` (its recorded `field` when set) over the `window` ending
+/// at `now`: the ones the hub kept, newest included, with history filling the part of the window
+/// before them (after a restart, or a flow saved since). With no reading in the window the value
+/// held throughout, the current one, is the mean. `None` when the entity is unknown, unavailable or not a number.
 async fn window_average(
     hub: &Hub,
     entity: &str,
+    field: Option<&str>,
     window: &str,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Option<f64> {
-    let Scalar::Number(current) = hub.entity_scalar(entity)? else {
+    // A field is averaged only when it is the entity's recorded number, so its current value is
+    // the number the readings and the history hold.
+    let Scalar::Number(current) = hub.entity_value(entity, field)? else {
         return None;
     };
     let window = parse_duration(window).ok()?;
@@ -2130,5 +2143,70 @@ mod tests {
             run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
         assert_eq!(outcome, StepOutcome::Ok, "{detail}");
         assert_eq!(ports, ["2"]);
+    }
+
+    #[tokio::test]
+    async fn if_average_reads_a_recorded_field() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/climate/clim/config",
+            br#"{"unique_id":"clim","mode_state_topic":"test/clim","mode_state_template":"{{ value_json.mode }}","current_temperature_topic":"test/clim","current_temperature_template":"{{ value_json.current }}","modes":["off","heat"]}"#,
+        );
+        let entity = engine.hub.snapshot().entities[0].id.clone();
+        let flow = serde_json::json!({
+            "id": "avg", "name": "avg", "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.state", "params": { "entity": entity } },
+                { "id": "check", "type": "if", "params": { "entity": entity, "field": "current",
+                    "op": "lte", "value": 19, "average": "30m" } }
+            ],
+            "edges": [{ "from": "t", "to": "check" }]
+        });
+        engine
+            .hub
+            .ingest("oikos/automation/avg", flow.to_string().as_bytes());
+        engine.reload();
+        for t in [20, 20, 17] {
+            engine.hub.ingest(
+                "test/clim",
+                format!(r#"{{"mode":"heat","current":{t}}}"#).as_bytes(),
+            );
+        }
+        let node = engine.flows[0].nodes[1].clone();
+        let (outcome, detail, port) =
+            run_node(&engine.hub, &engine.now, "avg", "r", &node, None).await;
+        assert_eq!(outcome, StepOutcome::Ok, "{detail}");
+        assert_eq!(detail, "average 30m = 19.0 → true");
+        assert_eq!(port, ["true"]);
+    }
+
+    #[tokio::test]
+    async fn generic_headline_trigger_fires() {
+        let mut engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/lock/front/config",
+            br#"{"unique_id":"front","state_topic":"test/front"}"#,
+        );
+        engine.hub.set_connection(ConnectionStatus::Online);
+        let id = engine.hub.snapshot().entities[0].id.clone();
+        state_flow(
+            &engine,
+            "lock",
+            serde_json::json!({ "entity": id, "to": "unlocked" }),
+        );
+        engine.reload();
+        for payload in ["LOCKED", "UNLOCKED"] {
+            engine.hub.ingest("test/front", payload.as_bytes());
+            let state = engine.hub.read().state(&id).cloned().expect("lock state");
+            engine.handle_event(WsEvent::StateChanged {
+                id: id.clone(),
+                state,
+            });
+        }
+        assert_eq!(run_count(&engine, "lock"), 1);
+        assert_eq!(
+            engine.hub.entity_value(&id, None),
+            Some(Scalar::Text("unlocked".into()))
+        );
     }
 }
