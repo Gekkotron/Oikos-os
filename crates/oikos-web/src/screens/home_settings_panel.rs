@@ -423,7 +423,7 @@ fn OffPeakDeviceRow(draft: RwSignal<Draft>) -> impl IntoView {
                 let chosen = values();
                 Some(view! {
                     <span class="climate-field__label">{move || t(HomeText::OffPeakValues)}</span>
-                    <div class="home-settings__values" role="group">
+                    <div class="chip-row" role="group">
                         {offered
                             .into_iter()
                             .map(|v| {
@@ -433,7 +433,7 @@ fn OffPeakDeviceRow(draft: RwSignal<Draft>) -> impl IntoView {
                                     <button
                                         type="button"
                                         class="chip"
-                                        class:chip--on=on
+                                        class:chip--selected=on
                                         aria-pressed=if on { "true" } else { "false" }
                                         on:click=move |_| toggle(v.clone())
                                     >

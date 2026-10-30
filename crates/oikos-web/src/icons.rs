@@ -332,6 +332,7 @@ pub fn trigger_icon(kind: crate::flow_list::TriggerKind) -> &'static str {
         TriggerKind::State => NODE_BOLT,
         TriggerKind::Schedule => NODE_CLOCK,
         TriggerKind::Sun => SUN,
+        TriggerKind::OffPeak => NODE_BOLT,
         TriggerKind::Signal => NODE_SIGNAL,
         TriggerKind::Manual => NODE_PLAY_CIRCLE,
     }

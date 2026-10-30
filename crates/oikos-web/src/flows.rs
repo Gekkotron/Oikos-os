@@ -8,7 +8,7 @@ use oikos_api::{EntityView, RunStatus, RunView, StepOutcome, StepView};
 use oikos_core::command::command_name;
 use oikos_core::flow::{Flow, Node, NodeKind, parse_duration};
 
-use crate::flow_text::{sun_summary, value_words};
+use crate::flow_text::{off_peak_edge_text, sun_summary, value_words};
 use crate::format::entity_title;
 use crate::i18n::Lang;
 use crate::i18n::flows::{self as t, FlowText, flow_text};
@@ -64,7 +64,7 @@ fn summary_label(lang: Lang, node: &Node) -> String {
         NodeKind::TriggerState(_) => flow_text(lang, FlowText::NodeTrigger).into(),
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(_) => flow_text(lang, FlowText::NodeSun).into(),
-        NodeKind::TriggerOffPeak(_) => flow_text(lang, FlowText::NodeTrigger).into(),
+        NodeKind::TriggerOffPeak(_) => flow_text(lang, FlowText::NodeOffPeak).into(),
         NodeKind::TriggerManual(_) => flow_text(lang, FlowText::NodeManual).into(),
         NodeKind::TriggerSignal(_) => flow_text(lang, FlowText::NodeSignal).into(),
         NodeKind::If(_) => flow_text(lang, FlowText::NodeIf).into(),
@@ -151,6 +151,11 @@ pub fn trigger_line(
             None => head.to_owned(),
         };
     }
+    let first = run.steps.first().and_then(|s| flow.node(&s.node));
+    // The device that decided rides along as the entity: the edge says more than its reading.
+    if let Some(NodeKind::TriggerOffPeak(p)) = first.map(|n| &n.kind) {
+        return flow_text(lang, off_peak_edge_text(p.edge)).to_owned();
+    }
     if let Some((trigger, id)) = run
         .trigger
         .as_ref()
@@ -167,7 +172,6 @@ pub fn trigger_line(
             )
         );
     }
-    let first = run.steps.first().and_then(|s| flow.node(&s.node));
     match first.map(|n| &n.kind) {
         Some(NodeKind::TriggerSchedule(_)) => flow_text(lang, FlowText::ScheduleRun).to_owned(),
         Some(NodeKind::TriggerSun(_)) => flow_text(lang, FlowText::SunRun).to_owned(),
@@ -507,6 +511,38 @@ mod tests {
             "wait".to_owned()
         )));
         assert!(!h.nodes.contains_key("wait"));
+    }
+
+    #[test]
+    fn trigger_line_reads_off_peak_runs() {
+        let none = BTreeMap::new();
+        let mut run = running(vec![step("motion", StepOutcome::Ok, "")]);
+        let mut flow = reference();
+        let motion = flow.nodes.iter_mut().find(|n| n.id == "motion").unwrap();
+        motion.kind = NodeKind::TriggerOffPeak(
+            serde_json::from_value(serde_json::json!({"edge": "start"})).unwrap(),
+        );
+        // The device that decided rides along as the entity; the line still names the edge.
+        run.trigger = Some(TriggerInfo {
+            entity: Some("sensor.tariff".into()),
+            value: serde_json::json!("start"),
+            previous: serde_json::json!("end"),
+        });
+        assert_eq!(
+            trigger_line(Lang::En, &run, &flow, &none),
+            "Off-peak starts"
+        );
+        // The windows decided (no entity); the node that fired names the edge.
+        let motion = flow.nodes.iter_mut().find(|n| n.id == "motion").unwrap();
+        motion.kind = NodeKind::TriggerOffPeak(
+            serde_json::from_value(serde_json::json!({"edge": "end"})).unwrap(),
+        );
+        run.trigger = Some(TriggerInfo {
+            entity: None,
+            value: serde_json::json!("end"),
+            previous: serde_json::json!("start"),
+        });
+        assert_eq!(trigger_line(Lang::En, &run, &flow, &none), "Off-peak ends");
     }
 
     #[test]
