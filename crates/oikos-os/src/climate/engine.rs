@@ -285,21 +285,35 @@ impl Hub {
         }
     }
 
-    /// Seeds the command ledger from the retained decisions, newest last so it wins.
+    /// Seeds the command ledger from the retained decisions, newest last so it wins, and picks
+    /// up each zone's room-thermometer correction where it was.
     fn ensure_seeded(&self) {
         if self.climate_runtime().seeded {
             return;
         }
-        let mut decisions: Vec<Decision> = self
-            .climate_store()
-            .zones
-            .values()
-            .filter_map(|docs| docs.decision.clone())
-            .collect();
+        let (mut decisions, feedback): (Vec<Decision>, Vec<(String, FeedbackState)>) = {
+            let store = self.climate_store();
+            let decisions = store
+                .zones
+                .values()
+                .filter_map(|docs| docs.decision.clone())
+                .collect();
+            let feedback = store
+                .zones
+                .iter()
+                .filter_map(|(zone, docs)| {
+                    let decision = docs.decision.as_ref()?;
+                    let state = FeedbackState::restored(decision, docs.settings.feedback.enabled)?;
+                    Some((zone.clone(), state))
+                })
+                .collect();
+            (decisions, feedback)
+        };
         decisions.sort_by_key(|d| d.at);
         let mut rt = self.climate_runtime();
         if !rt.seeded {
             rt.ledger = Ledger::from_decisions(&decisions);
+            rt.feedback.extend(feedback);
             rt.seeded = true;
         }
     }
@@ -1325,6 +1339,43 @@ mod tests {
             &device(Some(9.0), "off"),
             &want(Some(10.0), "off")
         ));
+    }
+
+    #[tokio::test]
+    async fn restart_restores_the_retained_correction() {
+        let mut cfg = crate::config::Config::default();
+        cfg.climate.enabled = true;
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
+        let hub = Hub::new(&cfg, tx);
+        let decision = |zone: &str| {
+            let mut d = no_safety(zone);
+            d.source = Source::Schedule;
+            d.setpoint = Some(Setpoint::Temp(19.0));
+            d.adjust = Some(-1.0);
+            d.at = 500;
+            d
+        };
+        {
+            let mut store = hub.climate_store();
+            let living = store.zones.entry("living".to_owned()).or_default();
+            living.settings.feedback.enabled = true;
+            living.decision = Some(decision("living"));
+            // Correction switched off since: nothing to restore.
+            let office = store.zones.entry("office".to_owned()).or_default();
+            office.decision = Some(decision("office"));
+        }
+        hub.ensure_seeded();
+        let rt = hub.climate_runtime();
+        assert_eq!(
+            rt.feedback.get("living"),
+            Some(&FeedbackState {
+                target: 19.0,
+                offset: -1.0,
+                since: 500,
+                last_step_at: Some(500),
+            })
+        );
+        assert!(!rt.feedback.contains_key("office"));
     }
 
     #[test]

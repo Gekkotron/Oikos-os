@@ -170,6 +170,26 @@ fn raw_limits(input: &CorrectionInput) -> (f64, f64) {
 }
 
 impl FeedbackState {
+    /// The state a hub restart picks up from the zone's retained decision: the offset it last
+    /// applied, its warm-up and step clock started at that decision. A decision is republished
+    /// only when its outcome changes, so its time is about when the offset last stepped. `None`
+    /// when that decision carried no correction.
+    pub fn restored(decision: &Decision, enabled: bool) -> Option<FeedbackState> {
+        if !enabled || !matches!(decision.source, Source::Schedule | Source::Empty) {
+            return None;
+        }
+        let Some(Setpoint::Temp(target)) = decision.setpoint else {
+            return None;
+        };
+        let offset = decision.adjust.filter(|a| a.abs() > f64::EPSILON)?;
+        Some(FeedbackState {
+            target,
+            offset,
+            since: decision.at,
+            last_step_at: Some(decision.at),
+        })
+    }
+
     /// The state to keep after a decision: `Some` only for an enabled, scheduled (or set back)
     /// temperature.
     pub fn after(
@@ -446,6 +466,45 @@ mod tests {
         let back = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), Some(-1.5));
         let s = FeedbackState::after(Some(&state(17.0, -1.5, 500, Some(900))), &back, true, NOW);
         assert_eq!(s, Some(state(19.0, -1.5, NOW, Some(900))));
+    }
+
+    #[test]
+    fn restored_picks_up_the_retained_offset() {
+        let d = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), Some(-1.0));
+        assert_eq!(
+            FeedbackState::restored(&d, true),
+            Some(state(19.0, -1.0, NOW, Some(NOW)))
+        );
+        let d = decision(Source::Empty, Some(Setpoint::Temp(17.0)), Some(-0.5));
+        assert_eq!(
+            FeedbackState::restored(&d, true),
+            Some(state(17.0, -0.5, NOW, Some(NOW)))
+        );
+    }
+
+    #[test]
+    fn restored_skips_decisions_without_a_correction() {
+        let d = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), Some(-1.0));
+        assert_eq!(FeedbackState::restored(&d, false), None);
+        let none = decision(Source::Schedule, Some(Setpoint::Temp(19.0)), None);
+        assert_eq!(FeedbackState::restored(&none, true), None);
+        let eco = decision(Source::Eco, Some(Setpoint::Temp(14.0)), Some(-1.0));
+        assert_eq!(FeedbackState::restored(&eco, true), None);
+        let off = decision(Source::Schedule, Some(Setpoint::Off), Some(-1.0));
+        assert_eq!(FeedbackState::restored(&off, true), None);
+    }
+
+    #[test]
+    fn restored_offset_waits_for_the_next_interval() {
+        // Right after a restart the room still reads warm: the restored step is not repeated
+        // until `interval_min` has passed since the retained decision.
+        let p = FeedbackState::restored(
+            &decision(Source::Schedule, Some(Setpoint::Temp(19.0)), Some(-1.0)),
+            true,
+        )
+        .unwrap();
+        let c = run(Mode::Heat, 19.0, Some(15.0), 19.8, 0, Some(&p), false);
+        assert_eq!(c.offset, -1.0);
     }
 
     #[test]
