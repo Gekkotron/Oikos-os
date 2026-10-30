@@ -7300,12 +7300,26 @@ dialog.popup::backdrop {
 .climate-eco__field {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   font: var(--type-label);
   color: var(--muted);
 }
 
-/* The room's eco (climate/eco_pill.rs): "Eco…", or "Eco until …" with a ✕. */
+/* Same fix as `.climate-field .field`: content-box inputs at 100% ran past the popup edge. */
+.climate-eco__field .field {
+  box-sizing: border-box;
+  margin: 0;
+  color: var(--ink);
+}
+
+/* The room's eco (climate/eco_pill.rs): "Eco…", or "Eco until …" with a ✕. As tall as the
+   state buttons beside it (`.segmented__option`), not a plain 40px chip. */
+.climate-eco-pill {
+  justify-content: center;
+  min-height: var(--touch-min);
+  padding: 0 16px;
+}
+
 .climate-eco-pill--on {
   gap: 4px;
   padding-right: 4px;
@@ -7668,16 +7682,28 @@ dialog.popup::backdrop {
   font: var(--type-body);
 }
 
+/* Days on top, then From / To / Temperature / Off side by side (stacking when narrow), then
+   the actions. A grid, because `.card` is a column flex box. */
 .climate-timeline__editor {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  align-items: end;
+  gap: 12px;
+}
+
+.climate-timeline__editor > .climate-field--inline {
+  min-height: var(--touch-min);
 }
 
 .climate-timeline__editor-actions {
   display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
   gap: 8px;
+}
+
+.climate-timeline__editor-actions .btn {
+  padding: 0 14px;
 }
 
 .climate-timeline__hint {
@@ -7686,11 +7712,10 @@ dialog.popup::backdrop {
   opacity: 0.7;
 }
 
-/* Its own full-width line whichever way the popover (a column `.card`) lays out. */
+/* Its own full-width line across the popover's grid. */
 .climate-timeline__days {
   display: flex;
-  flex: none;
-  width: 100%;
+  grid-column: 1 / -1;
   flex-wrap: wrap;
   gap: 6px;
 }
