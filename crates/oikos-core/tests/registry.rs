@@ -367,6 +367,39 @@ fn folding_moving_into_cover() {
 }
 
 #[test]
+fn groups_never_fold_into_each_other() {
+    // Every group is on the hub's one `oikos_group` device: with a single light group, a number
+    // group must stay a card of its own.
+    let mut registry = Registry::new(config());
+    let group = |id: &str| {
+        json!({
+            "name": id,
+            "unique_id": format!("group_{id}"),
+            "device": { "identifiers": ["oikos_group"], "name": "Groups" },
+            "command_topic": format!("oikos/group/{id}/set"),
+        })
+    };
+    let mut light = group("light_living");
+    light["schema"] = json!("json");
+    light["state_topic"] = json!("oikos/group/light_living/state");
+    feed(
+        &mut registry,
+        "oikos/light/oikos_group/light_living/config",
+        light.to_string().into_bytes(),
+    );
+    feed(
+        &mut registry,
+        "oikos/number/oikos_group/water_heater_power/config",
+        group("water_heater_power").to_string().into_bytes(),
+    );
+    let number = registry
+        .entity("group_water_heater_power")
+        .expect("number group");
+    assert_eq!(number.device_id.as_deref(), Some("oikos_group"));
+    assert_eq!(number.part_of, None);
+}
+
+#[test]
 fn diagnostic_flag_present() {
     let registry = load_house();
     let entity = registry.entity(LINKQUALITY).expect("linkquality");
