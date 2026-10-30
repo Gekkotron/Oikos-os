@@ -194,7 +194,15 @@ pub struct SetFlowParams {
     ///   from `search` or `list_entities`), optional `to` (only when the new value equals it)
     ///   and `from` (only when the previous value equalled it), as JSON values such as `true`,
     ///   `"ON"` or `21.5`. A flow needs at least one trigger, and the run carries that entity's
-    ///   new value.
+    ///   new value. With a `to` and no `from`, it also fires when the value was unknown (a
+    ///   report arrived without it) and then becomes `to`.
+    /// - `trigger.silent` starts a run when an entity sends no report for a while. params:
+    ///   `entity` and `for` (a duration, `1m` to `168h`, such as `50m`). It fires once per
+    ///   silence; the clock restarts at every report, at a flow save or enable and when the
+    ///   broker link returns, and is frozen while the link is down. The trigger value is `for`.
+    /// - `limit` lets a run through at most `max` times (1 to 100) in any rolling `per` window
+    ///   (a duration, `1m` to `168h`); beyond that the run ends at this node. Counts are kept
+    ///   in memory and reset when the hub restarts.
     /// - `if` branches on a comparison. params: `op` (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`),
     ///   `value` (the constant to compare with) and optional `entity`. Without `entity` it
     ///   compares the triggering entity's live value, the one that fired the run; with it, that
