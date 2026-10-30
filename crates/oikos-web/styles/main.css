@@ -9014,6 +9014,62 @@ dialog.popup::backdrop {
   justify-content: flex-end;
 }
 
+/* The math card editor: one bordered row per input (name, window, remove, then the entity). */
+.math-inputs {
+  gap: 8px;
+}
+
+.math-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-radius: 8px;
+}
+
+.math-input__entity {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+}
+
+/* The picker's label is the sheet's title; the row needs no caption. */
+.math-input__entity > .picker-field__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.math-input__name,
+.math-formula,
+.math-name {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.math-line {
+  margin: 0;
+  font: var(--type-label);
+  overflow-wrap: anywhere;
+}
+
+.math-line--value {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+}
+
+.math-line__value {
+  color: var(--accent-mint);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .node-editor__check {
   display: flex;
   align-items: center;

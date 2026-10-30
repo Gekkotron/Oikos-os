@@ -11,6 +11,7 @@ use oikos_core::model::{Command, Kind};
 
 use super::Editor;
 use super::graph::Selection;
+use super::math::math_fields;
 use super::sun::{FallbackBadge, sun_sheet};
 use super::template_field::{NotifyPreview, TemplateField};
 use super::value_field::IfValueField;
@@ -33,7 +34,7 @@ use crate::if_value::{
 use crate::screens::flow_schedule::ScheduleField;
 
 /// A fixed word as a signal that follows the language, for a field's label or placeholder.
-fn word(k: FlowText) -> Signal<String> {
+pub(super) fn word(k: FlowText) -> Signal<String> {
     let lang = use_lang();
     Signal::derive(move || flow_text(lang(), k).to_owned())
 }
@@ -47,14 +48,14 @@ fn plain(s: &str) -> Signal<String> {
 /// on a field, a click, a committed `change`) records an undo step; the keystrokes that follow
 /// in the same field join it.
 #[derive(Clone, Copy)]
-struct Form {
-    editor: Editor,
+pub(super) struct Form {
+    pub(super) editor: Editor,
     armed: StoredValue<bool>,
 }
 
 impl Form {
     /// Applies `mutate` to node `id`; a write that changes nothing is dropped.
-    fn update(self, id: &str, mutate: impl FnOnce(&mut Node)) {
+    pub(super) fn update(self, id: &str, mutate: impl FnOnce(&mut Node)) {
         let draft = self.editor.draft;
         let Some(mut node) = draft.with_untracked(|f| f.node(id).cloned()) else {
             return;
@@ -645,8 +646,7 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
     let t = use_flow_text();
     let lang = use_lang();
     match kind {
-        // The math card editor lands with the settings drawer task.
-        NodeKind::Math(_) => ().into_any(),
+        NodeKind::Math(_) => math_fields(form, id).into_any(),
         NodeKind::TriggerState(p) => {
             let entity_value = node_entity(form, id.clone(), |k| match k {
                 NodeKind::TriggerState(t) => Some(t.entity.clone()),

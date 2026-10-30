@@ -2,9 +2,10 @@
 
 use oikos_core::flow::TriggerSignalParams;
 use oikos_core::flow::{
-    CommandParams, DelayParams, FlowEnableParams, IfParams, Node, NodeKind, NotifyParams,
-    OffPeakEdge, Op, RuleOp, Scalar, SunWhich, SwitchParams, SwitchRule, TimeBetweenParams,
-    TriggerManualParams, TriggerOffPeakParams, TriggerScheduleParams, TriggerStateParams,
+    CommandParams, DelayParams, FlowEnableParams, IfParams, MathParams, Node, NodeKind,
+    NotifyParams, OffPeakEdge, Op, RuleOp, Scalar, SunWhich, SwitchParams, SwitchRule,
+    TimeBetweenParams, TriggerManualParams, TriggerOffPeakParams, TriggerScheduleParams,
+    TriggerStateParams,
 };
 use oikos_core::model::Command;
 use serde_json::Value;
@@ -161,6 +162,12 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             }),
             Some(FlowText::SwitchCard),
             FlowText::SwitchSub,
+        ),
+        (
+            Group::And,
+            NodeKind::Math(MathParams::default()),
+            Some(FlowText::MathCard),
+            FlowText::MathSub,
         ),
         (
             Group::And,
@@ -431,7 +438,7 @@ mod tests {
         assert_eq!(labels[0], "Programmation");
         assert!(labels.contains(&"Quand il fait nuit"));
         assert!(
-            matches!(&fr[8].kind, NodeKind::Notify(p) if p.title == "Notification"),
+            matches!(&fr[9].kind, NodeKind::Notify(p) if p.title == "Notification"),
             "the stored default follows the language at creation"
         );
         // The English word finds the card on the French UI, and the French word on the English UI.
@@ -480,6 +487,7 @@ mod tests {
                 (Group::And, "When it's dark"),
                 (Group::And, "Is it off-peak?"),
                 (Group::And, "Switch"),
+                (Group::And, "Math"),
                 (Group::And, "Time of day"),
                 (Group::Then, "Notify"),
                 (Group::Wait, "Wait"),
@@ -498,6 +506,7 @@ mod tests {
                 Some("Between dusk and dawn"),
                 Some("Off-peak hours right now"),
                 Some("Several exits, one per rule"),
+                Some("Compute a number from your devices"),
                 Some("Inside or outside two times"),
                 Some("A push to your phone"),
                 Some("A fixed or random delay"),
@@ -509,8 +518,9 @@ mod tests {
             &got[0].kind,
             NodeKind::TriggerSchedule(p) if p.cron == "0 * * * *"
         ));
-        assert!(matches!(&got[8].kind, NodeKind::Notify(p) if p.title == "Notification"));
-        assert!(matches!(&got[9].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+        assert!(matches!(&got[7].kind, NodeKind::Math(p) if p.name.is_empty()));
+        assert!(matches!(&got[9].kind, NodeKind::Notify(p) if p.title == "Notification"));
+        assert!(matches!(&got[10].kind, NodeKind::Delay(p) if p.for_ == "5m"));
         assert!(matches!(
             &got[6].kind,
             NodeKind::Switch(p) if p.otherwise && p.entity.is_none()
@@ -518,7 +528,7 @@ mod tests {
                 && p.rules[0].value == Value::Bool(true)
         ));
         assert!(matches!(
-            &got[7].kind,
+            &got[8].kind,
             NodeKind::TimeBetween(p) if p.from == "07:00" && p.to == "22:00"
         ));
     }

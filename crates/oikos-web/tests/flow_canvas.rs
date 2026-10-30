@@ -1083,7 +1083,7 @@ async fn library_open_in_edit_mode() {
     let html = host.inner_html();
     assert_eq!(count(&host, ".flow-drawer--open"), 1, "{html}");
     assert_eq!(count(&host, ".flow-library"), 1, "{html}");
-    assert_eq!(count(&host, ".flow-library__item"), 12, "{html}");
+    assert_eq!(count(&host, ".flow-library__item"), 13, "{html}");
     assert_eq!(count(&host, ".flow-picker-wrap"), 0, "{html}");
 }
 
@@ -2004,4 +2004,122 @@ async fn manual_number_box_keeps_what_is_typed() {
         .find(|n| n["id"] == "go")
         .unwrap_or_else(|| panic!("{body}"));
     assert_eq!(go["params"]["value"], serde_json::json!(-1.5), "{body}");
+}
+
+// ---- Math card ------------------------------------------------------------------------------
+
+/// A power sensor reading 21, for the math card's preview.
+fn power_sensor() -> oikos_api::EntityView {
+    use oikos_core::model::{EntityState, Kind, StateValue};
+    oikos_api::EntityView {
+        id: "sensor.power".into(),
+        name: "Power meter".into(),
+        kind: Kind::Sensor,
+        protocol_kind: Kind::Sensor,
+        component: Kind::Sensor.component().to_string(),
+        unit: Some("W".into()),
+        state: EntityState {
+            value: StateValue::Number(21.0),
+            ..Default::default()
+        },
+        ..table_lamp()
+    }
+}
+
+/// Adds a Math card from the library and opens its drawer.
+async fn open_math_drawer(host: &web_sys::Element) {
+    add_row(host, "Math").await;
+    select_card(host, "math_1").await;
+    // Field values are set by effects.
+    gloo_timers::future::TimeoutFuture::new(50).await;
+}
+
+fn input_named(host: &web_sys::Element, selector: &str) -> web_sys::HtmlInputElement {
+    element(host, selector).unchecked_into()
+}
+
+#[wasm_bindgen_test]
+async fn math_card_from_library_opens_its_drawer() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    let drawer = text(&host, ".flow-drawer");
+    for word in ["Inputs", "Formula", "Result name", "Save to"] {
+        assert!(drawer.contains(word), "{word}: {drawer}");
+    }
+    // The card is named with the first free result name.
+    assert_eq!(input_named(&host, ".math-name").value(), "result");
+    assert_eq!(count(&host, ".math-input"), 0);
+}
+
+#[wasm_bindgen_test]
+async fn math_formula_error_shows_and_blocks_save() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    let formula = input_named(&host, ".math-formula");
+    type_into(&formula, "gird + 1", "input");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(
+        text(&host, ".math-line.node-editor__error"),
+        "unknown name `gird`",
+        "{html}"
+    );
+    let save = element(&host, ".flow-toolbar button[aria-label=Save]");
+    assert!(save.has_attribute("disabled"), "{html}");
+    let fetch = FakeFetch::answer(&write_outcome(&reference_view(None, vec![])));
+    click(&host, ".flow-toolbar button[aria-label=Save]");
+    gloo_timers::future::TimeoutFuture::new(50).await;
+    assert!(puts(&fetch).is_empty(), "{:?}", puts(&fetch));
+    // A formula that reads fine lifts the block.
+    type_into(&formula, "1 + 1", "input");
+    tick().await;
+    assert!(
+        !element(&host, ".flow-toolbar button[aria-label=Save]").has_attribute("disabled"),
+        "{}",
+        host.inner_html()
+    );
+    assert_eq!(text(&host, ".math-line__value"), "= 2");
+}
+
+#[wasm_bindgen_test]
+async fn math_preview_uses_house_values() {
+    let (host, _mounted, house) = editing(reference_view(None, vec![])).await;
+    let sensor = power_sensor();
+    house.entities.update(|m| {
+        m.insert(sensor.id.clone(), sensor);
+    });
+    open_math_drawer(&host).await;
+    click(&host, ".math-inputs__add");
+    tick().await;
+    assert_eq!(count(&host, ".math-input"), 1);
+    open_entity_picker(&host).await;
+    let row: web_sys::HtmlElement = host
+        .query_selector("[id$='-opt-sensor.power']")
+        .unwrap()
+        .unwrap_or_else(|| panic!("no sensor row: {}", host.inner_html()))
+        .unchecked_into();
+    row.click();
+    tick().await;
+    // The input is named from the entity, then renamed by hand.
+    assert_eq!(
+        input_named(&host, ".math-input__name").value(),
+        "power_meter"
+    );
+    type_into(&input_named(&host, ".math-input__name"), "p", "input");
+    type_into(&input_named(&host, ".math-formula"), "p * 2", "input");
+    tick().await;
+    let html = host.inner_html();
+    assert_eq!(text(&host, ".math-line__value"), "= 42", "{html}");
+    // An average window reads the current value in the preview and says so.
+    let window: web_sys::HtmlSelectElement = element(&host, ".math-input__window").unchecked_into();
+    window.set_value("5m");
+    let init = web_sys::EventInit::new();
+    init.set_bubbles(true);
+    window
+        .dispatch_event(&web_sys::Event::new_with_event_init_dict("change", &init).unwrap())
+        .unwrap();
+    tick().await;
+    let line = text(&host, ".math-line");
+    assert!(line.contains("= 42") && line.contains("5m"), "{line}");
+    settle_history().await;
 }
