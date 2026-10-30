@@ -133,7 +133,8 @@ A flow can sit in a room: its optional `area` is an area id, and it only decides
 
 ## The Flows page
 
-![The Flows page: a search box, sort, group and view toggles, filter chips, and flows grouped by room with an enable switch and a ⋯ menu on each row](/img/screens/flows.webp)
+![The Flows page: a search box, sort, group and view toggles, filter chips, and flows grouped by room with an enable switch and a ⋯ menu on each row](/img/screens/flows.webp#gh-dark-mode-only)
+![The Flows page: a search box, sort, group and view toggles, filter chips, and flows grouped by room with an enable switch and a ⋯ menu on each row](/img/screens/flows-ivoire.webp#gh-light-mode-only)
 
 The Flows page (`/flows`) has a **New flow** button and a bar to find flows:
 
@@ -150,7 +151,8 @@ The assistant writes flows through the `set_flow` MCP tool (with `list_flows`, `
 
 ## The flow canvas
 
-![A flow on the canvas: a header with the flow's name, mode and room, the enable switch, run, edit and Runs buttons at the top right, zoom buttons bottom left and a minimap bottom right](/img/screens/flow-canvas.webp)
+![A flow on the canvas: a header with the flow's name, mode and room, the enable switch, run, edit and Runs buttons at the top right, zoom buttons bottom left and a minimap bottom right](/img/screens/flow-canvas.webp#gh-dark-mode-only)
+![A flow on the canvas: a header with the flow's name, mode and room, the enable switch, run, edit and Runs buttons at the top right, zoom buttons bottom left and a minimap bottom right](/img/screens/flow-canvas-ivoire.webp#gh-light-mode-only)
 
 The flow page (`/flows/<id>`) is a full-bleed canvas. The top left holds a back arrow, the flow's name, its mode tag (`single` or `restart`) and its room. The top right holds the enable switch, a run button (**Run now**), a pencil to edit, and **Runs**, which opens the recent runs. Zoom buttons (+, −, fit) sit bottom left and a minimap bottom right; the wheel pans, and ⌘/Ctrl-wheel or pinch zooms. Each node is a pill with a coloured icon and a sentence title ("Motion at Entrée", "Turn off LED", "Wait 5 min"), joined by routed wires that go around the cards, with green "yes" and red "no" labels on the two outputs of an `if`, and a label per output on a `switch` (the rule, such as "< 18", or "otherwise") or a time-of-day card (the range, such as "07:00–22:30", and "outside"). The last run, or one clicked in the Runs drawer, is replayed on the graph: visited cards and wires lit, the rest dimmed, failed steps red; a run in progress pulses live.
 

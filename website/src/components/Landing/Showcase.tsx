@@ -1,6 +1,7 @@
 import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import Heading from '@theme/Heading';
+import ThemedImage from '@theme/ThemedImage';
 import styles from './Landing.module.css';
 
 type Row = { eyebrow: string; title: string; text: string; to: string; cta: string; img: string; height: number; alt: string };
@@ -29,7 +30,8 @@ const ROWS: Row[] = [
 ];
 
 function ShowRow({ row, flip }: { row: Row; flip: boolean }) {
-  const src = useBaseUrl(row.img);
+  const dark = useBaseUrl(row.img);
+  const light = useBaseUrl(row.img.replace(/\.webp$/, '-ivoire.webp'));
   return (
     <div className={flip ? `${styles.row} ${styles.rowFlip}` : styles.row}>
       <div className={styles.rowText}>
@@ -43,7 +45,14 @@ function ShowRow({ row, flip }: { row: Row; flip: boolean }) {
         </Link>
       </div>
       <div className={styles.rowMedia}>
-        <img src={src} loading="lazy" width={2880} height={row.height} alt={row.alt} className={styles.rowImg} />
+        <ThemedImage
+          sources={{ dark, light }}
+          loading="lazy"
+          width={2880}
+          height={row.height}
+          alt={row.alt}
+          className={styles.rowImg}
+        />
       </div>
     </div>
   );

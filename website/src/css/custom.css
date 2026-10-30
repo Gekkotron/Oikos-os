@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------
  * Oikos-os docs site theme.
  * Tokens derive from the web UI (crates/oikos-web/styles/tokens.css):
- * "Night" (dark, default) and "Warm" (light). Fonts are self-hosted from
+ * Night Glass (dark, default) and Ivoire (light). Fonts are self-hosted from
  * static/fonts, copied from crates/oikos-web/assets/fonts.
  * ------------------------------------------------------------------------- */
 
@@ -27,44 +27,61 @@
   src: url('../../static/fonts/Inter-Bold.woff2') format('woff2');
 }
 @font-face {
-  font-family: 'Fraunces';
+  font-family: 'Manrope';
   font-style: normal;
-  font-weight: 500;
+  font-weight: 600;
   font-display: swap;
-  src: url('../../static/fonts/Fraunces-Medium.woff2') format('woff2');
+  src: url('../../static/fonts/Manrope-SemiBold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../../static/fonts/Manrope-Bold.woff2') format('woff2');
 }
 
 :root {
   --oikos-font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --oikos-font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --oikos-font-display: 'Manrope', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  /* Warm (light) */
-  --oikos-bg: #f5f1ea;
-  --oikos-ink: #1f1b16;
-  --oikos-ink-soft: #5d554a;
-  --oikos-card: #fffdf9;
-  --oikos-card-border: #efe8dc;
+  /* Ivoire (light): ivory surfaces, sage for selection, honey for lit things. */
+  --oikos-bg: #f3f0e8;
+  --oikos-ink: #1f2420;
+  --oikos-ink-soft: #5f665c;
+  --oikos-card: #fffdf8;
+  --oikos-card-border: #ebe6da;
   --oikos-chip-border: #d9d0c2;
-  --oikos-shadow: 0 6px 18px rgb(60 40 10 / 10%);
-  --oikos-amber: #d98b3a;
-  --oikos-amber-text: #a85f17;
-  --oikos-mint: #3f6b3a;
-  --oikos-cyan: #2b8fb3;
+  --oikos-raised: #f7f5ef;
+  --oikos-shadow: 0 2px 6px rgb(60 50 20 / 6%), 0 10px 28px rgb(60 50 20 / 8%);
+  --oikos-shot-shadow: 0 30px 80px -24px rgb(60 50 20 / 28%);
+  --oikos-sage: #4f6b4a;
+  --oikos-sage-ink: #2f4a2b;
+  --oikos-sage-soft: #e3eadf;
+  --oikos-amber: #c9973d;
+  --oikos-amber-text: #8f6613;
+  --oikos-amber-soft: #fbf0d4;
+  --oikos-mint: #4f6b4a;
+  --oikos-cyan: #38738f;
   --oikos-violet: #6a5acd;
-  --oikos-rose: #c4526b;
-  --oikos-radius: 20px;
+  --oikos-rose: #ac512b;
+  --oikos-cta-bg: #232a26;
+  --oikos-cta-ink: #fffdf8;
+  --oikos-cta-glow: rgb(35 42 38 / 35%);
+  --oikos-code-bg: #fffdf8;
+  --oikos-radius: 24px;
 
-  --ifm-color-primary: #d98b3a;
-  --ifm-color-primary-dark: #c97f2c;
-  --ifm-color-primary-darker: #c07a29;
-  --ifm-color-primary-darkest: #9f6422;
-  --ifm-color-primary-light: #e09a50;
-  --ifm-color-primary-lighter: #e3a35f;
-  --ifm-color-primary-lightest: #eebb8a;
+  --ifm-color-primary: #4f6b4a;
+  --ifm-color-primary-dark: #476043;
+  --ifm-color-primary-darker: #435b3f;
+  --ifm-color-primary-darkest: #374b34;
+  --ifm-color-primary-light: #577651;
+  --ifm-color-primary-lighter: #5b7b55;
+  --ifm-color-primary-lightest: #678b60;
 
   --ifm-font-family-base: var(--oikos-font-body);
   --ifm-heading-font-family: var(--oikos-font-display);
-  --ifm-heading-font-weight: 500;
+  --ifm-heading-font-weight: 700;
   --ifm-font-size-base: 100%;
   --ifm-line-height-base: 1.7;
   --ifm-code-font-size: 90%;
@@ -80,21 +97,28 @@
   --ifm-color-content: var(--oikos-ink);
   --ifm-color-content-secondary: var(--oikos-ink-soft);
   --ifm-heading-color: var(--oikos-ink);
-  --ifm-link-color: var(--oikos-amber-text);
-  --ifm-link-hover-color: #7d4710;
-  --ifm-navbar-background-color: rgb(245 241 234 / 85%);
+  --ifm-link-color: var(--oikos-sage);
+  --ifm-link-hover-color: var(--oikos-sage-ink);
+  --ifm-navbar-background-color: rgb(243 240 232 / 85%);
   --ifm-navbar-shadow: none;
-  --ifm-footer-background-color: #1a1612;
-  --ifm-code-background: rgb(217 139 58 / 14%);
+  --ifm-footer-background-color: var(--oikos-raised);
+  --ifm-footer-link-color: var(--oikos-ink-soft);
+  --ifm-footer-link-hover-color: var(--oikos-sage);
+  --ifm-footer-title-color: var(--oikos-ink);
+  --ifm-footer-color: var(--oikos-ink-soft);
+  --ifm-code-background: var(--oikos-raised);
   --ifm-toc-border-color: var(--oikos-card-border);
   --ifm-hr-border-color: var(--oikos-card-border);
-  --ifm-table-border-color: var(--oikos-chip-border);
-  --ifm-table-stripe-background: rgb(60 40 10 / 3%);
-  --ifm-menu-color-background-active: rgb(217 139 58 / 14%);
-  --ifm-menu-color-background-hover: rgb(60 40 10 / 5%);
-  --docusaurus-highlighted-code-line-bg: rgb(217 139 58 / 16%);
+  --ifm-table-border-color: var(--oikos-card-border);
+  --ifm-table-stripe-background: var(--oikos-raised);
+  --ifm-menu-color: var(--oikos-ink-soft);
+  --ifm-menu-color-active: var(--oikos-sage-ink);
+  --ifm-menu-color-background-active: var(--oikos-sage-soft);
+  --ifm-menu-color-background-hover: rgb(60 50 20 / 5%);
+  --docusaurus-highlighted-code-line-bg: var(--oikos-sage-soft);
 }
 
+/* Night Glass (dark). */
 [data-theme='dark'] {
   --oikos-bg: #0b1020;
   --oikos-ink: #e8ecff;
@@ -102,13 +126,24 @@
   --oikos-card: rgb(255 255 255 / 6%);
   --oikos-card-border: rgb(255 255 255 / 9%);
   --oikos-chip-border: rgb(255 255 255 / 14%);
+  --oikos-raised: rgb(255 255 255 / 4%);
   --oikos-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  --oikos-shot-shadow: 0 30px 80px -20px rgb(0 0 0 / 55%), 0 0 0 1px rgb(255 196 87 / 6%);
+  --oikos-sage: #6ff0bf;
+  --oikos-sage-ink: #6ff0bf;
+  --oikos-sage-soft: rgb(111 240 191 / 10%);
   --oikos-amber: #ffc457;
   --oikos-amber-text: #ffc457;
+  --oikos-amber-soft: rgb(255 196 87 / 22%);
   --oikos-mint: #6ff0bf;
   --oikos-cyan: #58e1ff;
   --oikos-violet: #8f7bff;
   --oikos-rose: #ff7a9a;
+  --oikos-cta-bg: #ffc457;
+  --oikos-cta-ink: #1a1206;
+  --oikos-cta-glow: rgb(255 196 87 / 55%);
+  --oikos-code-bg: #0e1530;
+  --oikos-radius: 20px;
 
   --ifm-color-primary: #ffc457;
   --ifm-color-primary-dark: #ffbb35;
@@ -124,8 +159,15 @@
   --ifm-link-hover-color: #ffdb94;
   --ifm-navbar-background-color: rgb(11 16 32 / 80%);
   --ifm-footer-background-color: #070a15;
+  --ifm-footer-link-color: #c9cff0;
+  --ifm-footer-link-hover-color: #ffc457;
+  --ifm-footer-title-color: #fff4dc;
+  --ifm-footer-color: #a9b2d6;
   --ifm-code-background: rgb(255 196 87 / 12%);
+  --ifm-table-border-color: var(--oikos-chip-border);
   --ifm-table-stripe-background: rgb(255 255 255 / 3%);
+  --ifm-menu-color: var(--oikos-ink-soft);
+  --ifm-menu-color-active: #ffc457;
   --ifm-menu-color-background-active: rgb(255 196 87 / 12%);
   --ifm-menu-color-background-hover: rgb(255 255 255 / 5%);
   --docusaurus-highlighted-code-line-bg: rgb(255 196 87 / 14%);
@@ -152,8 +194,9 @@ body {
 }
 .navbar__title {
   font-family: var(--oikos-font-display);
-  font-weight: 500;
-  font-size: 1.25rem;
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
 }
 .navbar__logo img {
   border-radius: 8px;
@@ -166,14 +209,15 @@ body {
 .markdown h1,
 .markdown h2,
 .markdown h3 {
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 .markdown > h2 {
   margin-top: 2.6rem;
   padding-top: 0.4rem;
 }
 .markdown h1:first-child {
-  font-size: 2.6rem;
+  font-size: 2.4rem;
+  letter-spacing: -0.03em;
 }
 .markdown a:not(.button) {
   text-decoration-thickness: 1px;
@@ -193,17 +237,11 @@ body {
 
 /* Code blocks */
 div[class*='codeBlockContainer'] {
+  --prism-background-color: var(--oikos-code-bg);
+  background: var(--oikos-code-bg);
   border-radius: 14px;
   border: 1px solid var(--oikos-card-border);
   box-shadow: none;
-}
-[data-theme='dark'] div[class*='codeBlockContainer'] {
-  --prism-background-color: #0e1530;
-  background: #0e1530;
-}
-[data-theme='light'] div[class*='codeBlockContainer'] {
-  --prism-background-color: #fffdf9;
-  background: #fffdf9;
 }
 pre {
   font-size: 0.86rem;
@@ -288,10 +326,7 @@ article .card:hover {
 
 /* Footer */
 .footer {
-  --ifm-footer-link-color: #c9cff0;
-  --ifm-footer-title-color: #fff4dc;
-  --ifm-footer-color: #a9b2d6;
-  border-top: 1px solid rgb(255 255 255 / 8%);
+  border-top: 1px solid var(--oikos-card-border);
 }
 .footer__copyright {
   font-size: 0.85rem;
@@ -307,13 +342,15 @@ article .card:hover {
 }
 
 /* Code block surface follows the theme tokens. */
-[data-theme='dark'] .theme-code-block,
-[data-theme='dark'] .theme-code-block pre {
-  --prism-background-color: #0e1530;
-  background-color: #0e1530 !important;
+.theme-code-block,
+.theme-code-block pre {
+  --prism-background-color: var(--oikos-code-bg);
+  background-color: var(--oikos-code-bg) !important;
 }
-[data-theme='light'] .theme-code-block,
-[data-theme='light'] .theme-code-block pre {
-  --prism-background-color: #fffdf9;
-  background-color: #fffdf9 !important;
+
+/* Screenshots come in pairs, as on GitHub: the Night Glass shot is tagged
+   #gh-dark-mode-only and the Ivoire one #gh-light-mode-only. */
+[data-theme='light'] img[src$='#gh-dark-mode-only'],
+[data-theme='dark'] img[src$='#gh-light-mode-only'] {
+  display: none;
 }

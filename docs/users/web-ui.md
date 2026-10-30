@@ -113,7 +113,8 @@ When the [solar forecast](solar-forecast.md) is on and its data is less than 24 
 
 The weather page is at `/weather`, opened from the weather card. The Back button returns to the screen you came from. It is not in the sidebar.
 
-![The weather page: current conditions, eight Now tiles and the forecast days](/img/screens/weather.webp)
+![The weather page: current conditions, eight Now tiles and the forecast days](/img/screens/weather.webp#gh-dark-mode-only)
+![The weather page: current conditions, eight Now tiles and the forecast days](/img/screens/weather-ivoire.webp#gh-light-mode-only)
 
 - **Top**: the condition icon, the current temperature to one decimal, the condition, the feels-like temperature, today's low and high, tonight's minimum and the rain expected in the next hour.
 - **Now**: eight tiles, four across on a wide window and two on a phone. Wind (speed, an arrow for the direction the wind comes from, a compass word and gusts), humidity, pressure, cloud cover, today's rain (amount and chance), the strongest gust today, the UV index with a word (Low, Moderate, High, Very high, Extreme), and the sun (sunrise and sunset).
@@ -124,7 +125,8 @@ The page keeps showing the last data however old it is, unlike the header card. 
 
 ## Dashboards
 
-![The House dashboard: the sidebar with the rooms, the greeting with the weather and solar cards, the moods and the Favorites cards](/img/screens/house.webp)
+![The House dashboard: the sidebar with the rooms, the greeting with the weather and solar cards, the moods and the Favorites cards](/img/screens/house.webp#gh-dark-mode-only)
+![The House dashboard: the sidebar with the rooms, the greeting with the weather and solar cards, the moods and the Favorites cards](/img/screens/house-ivoire.webp#gh-light-mode-only)
 
 Dashboards (`/dashboards/<id>`): once you have a dashboard of your own, the sidebar lists the dashboards under Overview. House is always the first entry, and the page the web UI opens on: the comprehensive rooms overview, synthesized by the hub (id `"house"`, non-editable, non-deletable), rendered on the client with the existing rooms-overview screen. Below House are user-authored named dashboards built from widgets. A widget is one of: `light`, `cover`, `climate`, `lock`, `sensor`, `room-group`, `flow-button`, `energy-stat`, `history-chart`, `camera`, `water-heater`, each with a kind-specific config and a `span` from a kind-specific set: `1x1` and `2x1` for most kinds, plus `2x2` for `room-group`, `2x1`, `2x2` and `1x2` for `history-chart`, and those plus `4x2` (wide) and `6x3` (full width) for `camera`; a span wider than the grid clamps to its column count. The grid adapts phone (2 columns, up to 600 px) ↔ tablet (4, up to 1200 px) ↔ desktop (6). On the desktop grid each widget keeps the cell it was placed on, so a dashboard can leave empty space between widgets (a thermometer under its room's climate card, for example); the tablet and phone grids show the widgets row by row in that order, without the gaps.
 
@@ -149,7 +151,8 @@ Home shows a row titled **One mood, one tap**, under the header. It holds up to 
 
 ### My moods
 
-![My moods: each mood with Apply, Edit, move up and down, Delete and its Show on Home switch](/img/screens/moods.webp)
+![My moods: each mood with Apply, Edit, move up and down, Delete and its Show on Home switch](/img/screens/moods.webp#gh-dark-mode-only)
+![My moods: each mood with Apply, Edit, move up and down, Delete and its Show on Home switch](/img/screens/moods-ivoire.webp#gh-light-mode-only)
 
 The page (`/ambiances`) has the title **My moods**, a **How it works** link and a **New mood** button at the top. Below, every mood is a card, in order, with its icon, name and subtitle.
 
@@ -185,7 +188,8 @@ After a run, **Last run** opens the report (`/ambiances/<id>/report`), with the 
 
 ## Energy
 
-![The Energy screen: live power flow between solar, grid, house and consumers, above the grid day chart](/img/screens/energy.webp)
+![The Energy screen: live power flow between solar, grid, house and consumers, above the grid day chart](/img/screens/energy.webp#gh-dark-mode-only)
+![The Energy screen: live power flow between solar, grid, house and consumers, above the grid day chart](/img/screens/energy-ivoire.webp#gh-light-mode-only)
 
 Energy (`/energy`): the live power flow as in the app. Solar, the grid, the battery and the house are large glowing circles: solar top-left, the grid on the left, the battery below them, and the house in the centre with a ring showing where its power comes from (solar, battery, grid) and its solar share. Consumers are smaller circles on the right, and the water meter, when there is one, is a smaller circle in the battery's place. On a phone the circles stack top to bottom: solar, battery or water and grid on top, the house in the middle, consumers in a row below. Dots travel along each wire in the flow direction, more, bigger and faster with more power; solar feeds the house only, and export runs from the house to the grid. With the system's reduced-motion setting there are no dots, while the wire widths and the ring stay. The diagram has room for three consumers; with more, the last slot folds the rest into "more" and a **Show all N consumers** button lists them all. A line under the title sums up the flow, and a hint asks you to check the grid or battery sign when the numbers look inverted. Under the diagram come the grid day chart (below), then one card per node, every consumer included, with the live value, the lifetime kWh of its paired energy counter and the kWh since midnight. Tap a card's title to open its sensor. Without any energy role, the screen says how to set one.
 
@@ -201,13 +205,15 @@ The chart reads the lifetime counters paired with the entities that carry the `g
 
 ## Security
 
-![The Security screen: the alarm card with its arm modes, the opted-in actions, the summary line and the sensor sections](/img/screens/security.webp)
+![The Security screen: the alarm card with its arm modes, the opted-in actions, the summary line and the sensor sections](/img/screens/security.webp#gh-dark-mode-only)
+![The Security screen: the alarm card with its arm modes, the opted-in actions, the summary line and the sensor sections](/img/screens/security-ivoire.webp#gh-light-mode-only)
 
 Security (`/security`): the alarm panel as a hero card (the arm modes Home, Away and Night the panel offers, Disarm, an inline code field when the panel asks for one, and the exit or entry countdown and the cause while it lasts), the opted-in actions (`securityAction` on a switch or a button; a tap asks first unless `securityAsk` is off, and turning a switch off never asks), a summary line ("1 smoke · 2 open" or "All clear"), the safety and intrusion sensors in sections (Openings, Motion, Fire, Water, Other) as two-column tiles with the name, room, state and how long ago it changed, and the last five alerts of the camera, alarm and security channels with a **See all** link to [Alerts](#alerts). `securityHidden` takes a sensor off the tab; hiding it on Home does not.
 
 ## Climate
 
-![The Climate screen: the room list, the selected room's status and its week calendar](/img/screens/climate.webp)
+![The Climate screen: the room list, the selected room's status and its week calendar](/img/screens/climate.webp#gh-dark-mode-only)
+![The Climate screen: the room list, the selected room's status and its week calendar](/img/screens/climate-ivoire.webp#gh-light-mode-only)
 
 Climate (`/climate`, beta) spans the page. The rooms are listed on the left (a row of chips on a phone), each with a dot in the colour of its decided temperature, an **Eco** pill while it is in eco, its reading and a line saying where it stands ("Heat 14° · Active", "Pending · no schedule"). The selected room shows its status: the reading and how long ago it came, the target with the source of the decision and its reason, the state (Off, Pending, Active), and, on an active room, a quick hold of a setpoint for 1 h, 2 h or until the next change in the schedule; any hold is listed with **Clear**. The eco row offers **Eco until…**, which starts the room's own eco until a date and time; while it runs, the row reads "Eco until Tue 3 Nov 19:00" with **Cancel eco**, and the status card shows the "Eco" source. A room whose state is Off has no eco row.
 
@@ -215,7 +221,8 @@ Under the status comes the room's week as a calendar: seven day columns with the
 
 ## History
 
-![The History screen: a temperature over 24 hours with the hover card](/img/screens/history.webp)
+![The History screen: a temperature over 24 hours with the hover card](/img/screens/history.webp#gh-dark-mode-only)
+![The History screen: a temperature over 24 hours with the hover card](/img/screens/history-ivoire.webp#gh-light-mode-only)
 
 History (`/history/<id>`): a full-screen chart of one entity over 1 h, 6 h, 24 h (the default), 7 d, 30 d or 1 y, picked with range chips (the range is kept in the address, as `?range=7d`). The title is the entity's name and type, with its room and availability under it. A numeric sensor draws a smooth line over a soft fill, with round tick labels on the left, a faint grid and a time axis that ends at "now"; on 7 d, 30 d and 1 y a light band shows each bucket's min to max. Hover the chart (or touch and drag) for a crosshair and a card with the time and value, plus the min–max on the long ranges. Under the chart, a footer names the range ("Last 24 hours") and gives the minimum and maximum of what is drawn. Lights, switches, binary sensors and covers keep a thin step line, with their On/Off words (0 and 100 for a cover) on the axis. An energy counter draws daily bars over 7 d, 30 d and 1 y, with the range's total in the footer, and hovering a bar shows its day and total; over 1 h, 6 h and 24 h it draws the power of its paired power sensor as a line, or a single daily bar when it has none. The same chart serves the history widget on dashboards. It needs `[history] url`; see [History](history.md).
 

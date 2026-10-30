@@ -13,7 +13,8 @@
 
 Oikos-os is a home-automation hub written in Rust. It runs on the home server next to Mosquitto, builds the device registry from Zigbee2MQTT and Home Assistant MQTT discovery, and serves a web UI, a REST and WebSocket API, and the Oikos Android app. It is configured through conversation: an MCP server lets an AI assistant inspect and change the house instead of a rules editor.
 
-![The House dashboard](website/static/img/screens/house.webp)
+![The House dashboard](website/static/img/screens/house.webp#gh-dark-mode-only)
+![The House dashboard](website/static/img/screens/house-ivoire.webp#gh-light-mode-only)
 
 ## What it does
 
@@ -25,7 +26,8 @@ Oikos-os is a home-automation hub written in Rust. It runs on the home server ne
 - **History**: every state change in TimescaleDB, for charts and energy totals. [History](https://gekkotron.github.io/Oikos-os/docs/users/history)
 - **Talk to it**: an MCP server for Claude Code, Codex, Claude Desktop and any MCP client. [MCP](https://gekkotron.github.io/Oikos-os/docs/users/assistants-mcp)
 
-![A flow on the canvas](website/static/img/screens/flow-canvas.webp)
+![A flow on the canvas](website/static/img/screens/flow-canvas.webp#gh-dark-mode-only)
+![A flow on the canvas](website/static/img/screens/flow-canvas-ivoire.webp#gh-light-mode-only)
 
 ## Quick start
 
