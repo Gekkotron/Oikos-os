@@ -122,6 +122,8 @@ const NODE_SWITCH: &str =
     svg!(r#"<rect x="3" y="8" width="18" height="8" rx="4"/><circle cx="16" cy="12" r="2"/>"#);
 const NODE_PLAY_CIRCLE: &str =
     svg!(r#"<circle cx="12" cy="12" r="9"/><path d="M10 8.5v7l6-3.5z"/>"#);
+// A plus over an equals sign, the math card.
+const NODE_MATH: &str = svg!(r#"<path d="M12 4v8M8 8h8M8 16.5h8M8 20h8"/>"#);
 const NODE_PLAY: &str = svg!(r#"<path d="M7 4.5v15l12-7.5z"/>"#);
 
 // Energy and Security glyphs.
@@ -318,6 +320,7 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::Command(_) => NODE_PLAY,
         NodeKind::FlowEnable(_) => NODE_SWITCH,
         NodeKind::Notify(_) => CHANNEL_ALARM,
+        NodeKind::Math(_) => NODE_MATH,
     }
 }
 

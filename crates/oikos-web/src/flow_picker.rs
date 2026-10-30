@@ -67,6 +67,7 @@ fn command(entity: &str, command: Command) -> NodeKind {
     NodeKind::Command(CommandParams {
         entity: entity.to_owned(),
         command,
+        value_from: None,
         extra: Default::default(),
     })
 }
@@ -125,6 +126,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 missing: None,
                 average: None,
                 offset_minutes: None,
+                result: None,
                 extra: Default::default(),
             }),
             Some(FlowText::WhenDark),
@@ -139,6 +141,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                 missing: None,
                 average: None,
                 offset_minutes: None,
+                result: None,
                 extra: Default::default(),
             }),
             Some(FlowText::IsOffPeak),
@@ -283,6 +286,7 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
                     missing: None,
                     average: None,
                     offset_minutes: None,
+                    result: None,
                     extra: Default::default(),
                 }),
                 ctx,

@@ -405,7 +405,8 @@ impl Hub {
                 | NodeKind::TriggerSchedule(_)
                 | NodeKind::TriggerSun(_)
                 | NodeKind::TriggerOffPeak(_)
-                | NodeKind::TriggerManual(_) => None,
+                | NodeKind::TriggerManual(_)
+                | NodeKind::Math(_) => None,
             };
             let Some(entity) = entity else { continue };
             let Some(found) = reg.entity(entity) else {

@@ -1,6 +1,6 @@
 //! The flow document: nodes, edges and the lenient JSON form stored on the broker.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -177,6 +177,10 @@ pub enum NodeKind {
     /// Branches on whether the house clock is inside a daily time range.
     #[serde(rename = "time.between")]
     TimeBetween(TimeBetweenParams),
+    /// Computes one number from entity readings and earlier math results, optionally saving it
+    /// to a number entity.
+    #[serde(rename = "math")]
+    Math(MathParams),
 }
 
 impl NodeKind {
@@ -196,6 +200,7 @@ impl NodeKind {
             NodeKind::Notify(_) => "notify",
             NodeKind::Switch(_) => "switch",
             NodeKind::TimeBetween(_) => "time.between",
+            NodeKind::Math(_) => "math",
         }
     }
 
@@ -367,6 +372,10 @@ pub struct IfParams {
     /// makes it dark earlier in the evening and until later in the morning); absent means 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub offset_minutes: Option<i32>,
+    /// Compare the result of the math card with this `name` instead of an entity; it cannot be
+    /// combined with `entity`, `average` or `missing`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }
@@ -448,6 +457,10 @@ pub struct SwitchParams {
     /// Take every matching rule instead of the first one only.
     #[serde(default, skip_serializing_if = "is_false")]
     pub all: bool,
+    /// Switch on the result of the math card with this `name` instead of an entity; it cannot be
+    /// combined with `entity` or `average`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }
@@ -572,8 +585,78 @@ pub struct CommandParams {
     pub entity: String,
     /// The command, the same JSON as `send_command`'s, e.g. `{"type": "turn_on"}`.
     pub command: Command,
+    /// The `name` of a math card whose result replaces the command's number: `set_number`'s
+    /// `value`, `set_temperature`'s `temperature`, `set_position`'s `position` or `turn_on`'s
+    /// `brightness`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_from: Option<String>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// One named reading a math card's formula uses.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct MathInput {
+    /// How the formula refers to the reading: `[a-z][a-z0-9_]{0,31}`, unique within the card.
+    pub name: String,
+    /// The entity whose current value is read.
+    pub entity: String,
+    /// Read the mean of the entity's readings over this window (`15m`, `1h`, at most `24h`)
+    /// instead of its current value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub average: Option<String>,
+}
+
+/// Params of `math`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct MathParams {
+    /// The readings the formula uses, 0 to 10.
+    #[serde(default)]
+    pub inputs: Vec<MathInput>,
+    /// The expression, 1 to 500 characters: numbers, input names, `trigger`, other math cards'
+    /// names, `+ - * / %`, comparisons, `and`, `or`, `not`, and the functions `min`, `max`,
+    /// `clamp`, `abs`, `round`, `floor`, `ceil`, `if` and `interp`.
+    pub formula: String,
+    /// The result's name, used by later cards; same form as an input name.
+    pub name: String,
+    /// A number entity the result is written to with `set_number`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub save_to: Option<String>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// The names of the flow's math cards. Two cards may share a name (branches computing the same
+/// result).
+pub fn math_names(flow: &Flow) -> BTreeSet<&str> {
+    flow.nodes
+        .iter()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Math(p) => Some(p.name.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The command with its number replaced by `value`, or `None` when the command takes none:
+/// `set_number`, `set_temperature`, `set_position` (rounded, kept in 0..=100) and `turn_on`
+/// (brightness rounded, kept in 0..=255, other fields kept).
+pub fn command_with_number(command: &Command, value: f64) -> Option<Command> {
+    Some(match command {
+        Command::SetNumber { .. } => Command::SetNumber { value },
+        Command::SetTemperature { .. } => Command::SetTemperature { temperature: value },
+        Command::SetPosition { .. } => Command::SetPosition {
+            position: value.round().clamp(0.0, 100.0) as u8,
+        },
+        Command::TurnOn { color, effect, .. } => Command::TurnOn {
+            brightness: Some(value.round().clamp(0.0, 255.0) as u8),
+            color: *color,
+            effect: effect.clone(),
+        },
+        _ => return None,
+    })
 }
 
 /// A connection from a node's output to another node; `port` picks an `if` branch.

@@ -58,6 +58,7 @@ pub enum FlowText {
     SwitchSub,
     TimeCard,
     TimeSub,
+    MathCard,
     Otherwise,
     Outside,
     WaitCard,
@@ -313,6 +314,7 @@ impl FlowText {
         FlowText::SwitchSub,
         FlowText::TimeCard,
         FlowText::TimeSub,
+        FlowText::MathCard,
         FlowText::Otherwise,
         FlowText::Outside,
         FlowText::WaitCard,
@@ -588,6 +590,7 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
             "Plusieurs sorties, une par règle",
         ),
         T::TimeCard => ("Time of day", "Plage horaire"),
+        T::MathCard => ("Math", "Calcul"),
         T::TimeSub => (
             "Inside or outside two times",
             "Dans ou hors d'une plage horaire",

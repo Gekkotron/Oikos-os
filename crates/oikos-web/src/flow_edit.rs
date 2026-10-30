@@ -3,7 +3,9 @@
 
 use std::collections::BTreeSet;
 
-use oikos_core::flow::{Edge, Flow, Lang, Node, NodeKind, Position, SwitchParams, SwitchRule};
+use oikos_core::flow::{
+    Edge, Flow, Lang, MathParams, Node, NodeKind, Position, SwitchParams, SwitchRule, math_names,
+};
 
 use crate::flow_layout::Pt;
 
@@ -331,11 +333,29 @@ pub fn next_node_id(flow: &Flow, kind: &NodeKind) -> String {
         NodeKind::Notify(_) => "notify",
         NodeKind::Switch(_) => "switch",
         NodeKind::TimeBetween(_) => "time",
+        NodeKind::Math(_) => "math",
     };
     (1..)
         .map(|n| format!("{prefix}_{n}"))
         .find(|id| flow.node(id).is_none())
         .expect("an unbounded range always yields a free id")
+}
+
+/// A new math card: no inputs or formula yet, named with the first free of `result`, `result2`,
+/// `result3`, …
+pub fn new_math_card(flow: &Flow) -> NodeKind {
+    let taken = math_names(flow);
+    let name = std::iter::once("result".to_owned())
+        .chain((2..).map(|n| format!("result{n}")))
+        .find(|name| !taken.contains(name.as_str()))
+        .expect("an unbounded range always yields a free name");
+    NodeKind::Math(MathParams {
+        inputs: Vec::new(),
+        formula: String::new(),
+        name,
+        save_to: None,
+        extra: Default::default(),
+    })
 }
 
 /// The ASCII spelling of a lowercase accented letter; `None` for any other character.
@@ -471,6 +491,7 @@ mod tests {
             missing: None,
             average: None,
             offset_minutes: None,
+            result: None,
             extra: Default::default(),
         })
     }
@@ -920,6 +941,7 @@ mod tests {
         let command = NodeKind::Command(CommandParams {
             entity: "e".into(),
             command: serde_json::from_value(json!({"type": "turn_on"})).unwrap(),
+            value_from: None,
             extra: Default::default(),
         });
         assert_eq!(next_node_id(&f, &command), "command_1");
@@ -991,5 +1013,19 @@ mod tests {
         let restored = h.undo(f).unwrap();
         assert_eq!(restored, original);
         assert!(!h.can_undo());
+    }
+
+    #[test]
+    fn new_math_card_takes_the_first_free_result_name() {
+        let mut f = Flow::default();
+        let name = |kind: &NodeKind| match kind {
+            NodeKind::Math(p) => p.name.clone(),
+            other => panic!("not a math card: {other:?}"),
+        };
+        assert_eq!(name(&new_math_card(&f)), "result");
+        f.nodes.push(node("m1", new_math_card(&f)));
+        assert_eq!(name(&new_math_card(&f)), "result2");
+        f.nodes.push(node("m2", new_math_card(&f)));
+        assert_eq!(name(&new_math_card(&f)), "result3");
     }
 }

@@ -231,6 +231,7 @@ fn device_sentence(
         kind: NodeKind::Command(CommandParams {
             entity: entity.to_owned(),
             command: command.clone(),
+            value_from: None,
             extra: Default::default(),
         }),
         extra: Default::default(),

@@ -331,6 +331,7 @@ fn node_editor_body(
         NodeKind::Notify(_) => FlowText::Notify,
         NodeKind::Switch(_) => FlowText::SwitchCard,
         NodeKind::TimeBetween(_) => FlowText::TimeCard,
+        NodeKind::Math(_) => FlowText::MathCard,
     };
     let id_display = id.clone();
     let close = move |_: web_sys::MouseEvent| selected.set(None);
@@ -644,6 +645,8 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
     let t = use_flow_text();
     let lang = use_lang();
     match kind {
+        // The math card editor lands with the settings drawer task.
+        NodeKind::Math(_) => ().into_any(),
         NodeKind::TriggerState(p) => {
             let entity_value = node_entity(form, id.clone(), |k| match k {
                 NodeKind::TriggerState(t) => Some(t.entity.clone()),
@@ -1816,6 +1819,7 @@ mod tests {
             missing: Some(Missing::True),
             average: Some("15m".into()),
             offset_minutes: None,
+            result: None,
             extra: Default::default(),
         };
         let mut stash = IfStash::default();
@@ -1842,6 +1846,7 @@ mod tests {
             missing: Some(Missing::True),
             average: Some("15m".into()),
             offset_minutes: None,
+            result: None,
             extra: Default::default(),
         };
         let mut stash = IfStash::default();
@@ -1879,6 +1884,7 @@ mod tests {
             missing: None,
             average: None,
             offset_minutes: Some(-30),
+            result: None,
             extra: Default::default(),
         };
         let mut stash = IfStash::default();
@@ -1897,6 +1903,7 @@ mod tests {
             missing: None,
             average: None,
             offset_minutes: Some(-30),
+            result: None,
             extra: Default::default(),
         };
         let mut stash = IfStash::default();
@@ -1915,6 +1922,7 @@ mod tests {
             missing: None,
             average: None,
             offset_minutes: None,
+            result: None,
             extra: Default::default(),
         };
         switch_op(&mut i, Op::Gt, &mut IfStash::default());

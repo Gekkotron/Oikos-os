@@ -42,7 +42,10 @@ pub fn role(kind: &NodeKind) -> Role {
         | NodeKind::TriggerSignal(_)
         | NodeKind::TriggerOffPeak(_) => Role::Trigger,
         NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_) => Role::Check,
-        NodeKind::Command(_) | NodeKind::FlowEnable(_) | NodeKind::Notify(_) => Role::Action,
+        NodeKind::Command(_)
+        | NodeKind::FlowEnable(_)
+        | NodeKind::Notify(_)
+        | NodeKind::Math(_) => Role::Action,
         NodeKind::Delay(_) => Role::Wait,
     }
 }
@@ -332,6 +335,13 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
             t::switch_on(lang, &e)
         }
         NodeKind::TimeBetween(p) => t::time_between(lang, &p.from, &p.to),
+        NodeKind::Math(p) => {
+            let head = format!("{} = {}", p.name, p.formula);
+            match &p.save_to {
+                Some(id) => format!("{head} → {}", entity_text(id, ctx)),
+                None => head,
+            }
+        }
         NodeKind::Notify(p) => {
             // Placeholders show the entity's name; a text that does not parse shows as typed.
             let name = |id: &str| ctx.entities.get(id).map(|e| entity_title(lang, e));
@@ -1003,6 +1013,7 @@ mod generic_tests {
                 missing: None,
                 average: average.map(Into::into),
                 offset_minutes: None,
+                result: None,
                 extra: Default::default(),
             }),
             extra: Default::default(),

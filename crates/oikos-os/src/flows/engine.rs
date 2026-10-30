@@ -1016,6 +1016,7 @@ async fn run_node(
                 Err(err) => failed(err.to_string()),
             }
         }
+        NodeKind::Math(_) => failed("math cards are not run yet".to_owned()),
         NodeKind::TimeBetween(params) => {
             let (Ok(from), Ok(to)) = (parse_clock(&params.from), parse_clock(&params.to)) else {
                 return failed("time is not HH:MM".to_owned());
