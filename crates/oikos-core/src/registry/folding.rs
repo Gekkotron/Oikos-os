@@ -6,6 +6,8 @@
 //!   sensor folds into the cover of its device when both read the same `state_topic` and the
 //!   sensor's `value_template` reads exactly one JSON field that the cover's template also reads.
 //!   A binary sensor with `device_class: moving` on a device with exactly one cover folds too.
+//! - Hub groups never fold: they all share the hub's one `oikos_group` device, so a single light
+//!   group would otherwise swallow every number or select group.
 //!
 //! Recomputed from scratch after every change, so the result is the same whatever order the
 //! cover and its sensor arrived in, and clears when either goes away. The cover rule wins a
@@ -17,11 +19,14 @@ use serde_json::Value;
 
 use crate::model::{Entity, Kind};
 
+/// The device every hub group is published on (`groups/discovery.rs` in oikos-os).
+const GROUPS_DEVICE: &str = "oikos_group";
+
 /// `unique_id → owner unique_id` for every folded entity.
 pub(super) fn compute(entities: &BTreeMap<String, Entity>) -> BTreeMap<String, String> {
     let mut part_of = BTreeMap::new();
     let light_of = single_per_device(entities, Kind::Light);
-    for entity in entities.values() {
+    for entity in entities.values().filter(|e| folds(e)) {
         if !matches!(entity.kind, Kind::Number | Kind::Select) {
             continue;
         }
@@ -34,7 +39,7 @@ pub(super) fn compute(entities: &BTreeMap<String, Entity>) -> BTreeMap<String, S
         .values()
         .filter(|e| e.kind == Kind::Cover)
         .collect();
-    for entity in entities.values() {
+    for entity in entities.values().filter(|e| folds(e)) {
         let Some(device_id) = entity.device_id.as_deref() else {
             continue;
         };
@@ -53,6 +58,12 @@ pub(super) fn compute(entities: &BTreeMap<String, Entity>) -> BTreeMap<String, S
         }
     }
     part_of
+}
+
+/// False for the entities that never fold: the hub's groups. Only an entity of the same device
+/// folds into an owner, so skipping them here also keeps group owners out.
+fn folds(entity: &Entity) -> bool {
+    entity.device_id.as_deref() != Some(GROUPS_DEVICE)
 }
 
 /// `device_id → unique_id` for the devices holding exactly one entity of `kind`.
