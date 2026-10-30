@@ -3,6 +3,7 @@ import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
 import Layout from '@theme/Layout';
 import Heading from '@theme/Heading';
+import ThemedImage from '@theme/ThemedImage';
 import Features from '../components/Landing/Features';
 import Showcase from '../components/Landing/Showcase';
 import TalkToIt from '../components/Landing/TalkToIt';
@@ -62,8 +63,11 @@ function ProductShot() {
             <span className={styles.light} />
             <span className={styles.url}>http://hub.local:8081 · House</span>
           </div>
-          <img
-            src={useBaseUrl('/img/screens/house.webp')}
+          <ThemedImage
+            sources={{
+              dark: useBaseUrl('/img/screens/house.webp'),
+              light: useBaseUrl('/img/screens/house-ivoire.webp'),
+            }}
             className={styles.shot}
             width={2880}
             height={2270}

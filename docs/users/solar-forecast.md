@@ -96,7 +96,8 @@ When there is no solar entity, or history is off, nothing is measured. The headl
 
 ## The Solar page
 
-![The Solar page: today's production against the forecast and its likely range, the day figures and the next days](/img/screens/solar.webp)
+![The Solar page: today's production against the forecast and its likely range, the day figures and the next days](/img/screens/solar.webp#gh-dark-mode-only)
+![The Solar page: today's production against the forecast and its likely range, the day figures and the next days](/img/screens/solar-ivoire.webp#gh-light-mode-only)
 
 Open it from the card, or at `/solar`. A **Back** link leads out. The page has:
 

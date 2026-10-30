@@ -13,14 +13,15 @@
   text-align: center;
 }
 
-/* Sky: warm wash in light mode, night gradient with stars in dark mode. */
+/* Sky: Ivoire morning in light mode, night gradient with stars in dark mode. */
 .sky {
   position: absolute;
   inset: 0;
   z-index: -1;
   background:
-    radial-gradient(60% 50% at 50% 100%, rgb(217 139 58 / 22%), transparent 70%),
-    linear-gradient(180deg, #f5f1ea 0%, #f5f1ea 100%);
+    radial-gradient(55% 45% at 50% 100%, rgb(201 151 61 / 22%), transparent 70%),
+    radial-gradient(70% 60% at 50% 0%, rgb(79 107 74 / 10%), transparent 70%),
+    linear-gradient(180deg, #f3f0e8 0%, #f3f0e8 100%);
 }
 :global([data-theme='dark']) .sky {
   background:
@@ -64,8 +65,8 @@
   margin: 0 auto;
   font-size: clamp(2.6rem, 7.5vw, 5rem);
   line-height: 1.04;
-  letter-spacing: -0.025em;
-  font-weight: 500;
+  letter-spacing: -0.035em;
+  font-weight: 700;
   color: var(--oikos-ink);
 }
 .line1, .line2 {
@@ -76,8 +77,7 @@
 .line1 { animation-delay: 180ms; }
 .line2 {
   animation-delay: 340ms;
-  font-style: italic;
-  color: var(--oikos-amber);
+  color: var(--oikos-amber-text);
 }
 
 .subhead {
@@ -100,18 +100,18 @@
   animation: rise 800ms ease-out 620ms forwards;
 }
 .ctaPrimary {
-  background: var(--oikos-amber);
-  border-color: var(--oikos-amber);
-  color: #1f1b16;
+  background: var(--oikos-cta-bg);
+  border-color: var(--oikos-cta-bg);
+  color: var(--oikos-cta-ink);
   font-weight: 600;
-  box-shadow: 0 10px 30px -12px rgb(255 196 87 / 55%);
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  box-shadow: 0 10px 30px -12px var(--oikos-cta-glow);
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
 }
 .ctaPrimary:hover {
-  color: #1f1b16;
+  color: var(--oikos-cta-ink);
   transform: translateY(-1px);
-  background: var(--ifm-color-primary-light);
-  box-shadow: 0 14px 36px -12px rgb(255 196 87 / 70%);
+  filter: brightness(1.08);
+  box-shadow: 0 14px 36px -12px var(--oikos-cta-glow);
 }
 .ctaGhost {
   background: transparent;
@@ -128,7 +128,7 @@
   font-weight: 500;
   color: var(--oikos-ink-soft);
 }
-.ctaText:hover { color: var(--oikos-amber-text); text-decoration: none; }
+.ctaText:hover { color: var(--ifm-link-color); text-decoration: none; }
 
 .chips {
   display: flex;
@@ -163,8 +163,8 @@
   overflow: hidden;
   border: 1px solid var(--oikos-card-border);
   border-radius: var(--oikos-radius);
-  background: #0b1020;
-  box-shadow: 0 30px 80px -20px rgb(0 0 0 / 55%), 0 0 0 1px rgb(255 196 87 / 6%);
+  background: var(--oikos-bg);
+  box-shadow: var(--oikos-shot-shadow);
   opacity: 0;
   animation: rise 900ms cubic-bezier(0.2, 0.7, 0.2, 1) 800ms forwards;
 }
@@ -173,17 +173,17 @@
   align-items: center;
   gap: 6px;
   padding: 0.65rem 0.9rem;
-  background: #141b36;
-  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  background: var(--oikos-raised);
+  border-bottom: 1px solid var(--oikos-card-border);
 }
-.light { width: 10px; height: 10px; border-radius: 50%; background: rgb(255 255 255 / 20%); }
+.light { width: 10px; height: 10px; border-radius: 50%; background: var(--oikos-chip-border); }
 .url {
   margin-left: 0.8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.75rem;
-  color: #8f98c0;
+  color: var(--oikos-ink-soft);
 }
 .shot { display: block; width: 100%; height: auto; }
 
@@ -191,7 +191,7 @@
 .closing {
   padding: clamp(3rem, 8vw, 6rem) 0 clamp(4rem, 9vw, 7rem);
   text-align: center;
-  background: radial-gradient(60% 80% at 50% 100%, rgb(255 196 87 / 12%), transparent 70%);
+  background: radial-gradient(60% 80% at 50% 100%, var(--oikos-amber-soft), transparent 70%);
 }
 .closingTitle {
   font-size: clamp(2rem, 5vw, 3.2rem);
