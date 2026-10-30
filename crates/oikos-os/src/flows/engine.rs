@@ -14,13 +14,16 @@ use std::sync::Arc;
 use chrono::Timelike;
 
 use oikos_api::{RunStatus, StepOutcome, StepView, TriggerInfo, WsEvent};
+use oikos_core::flow::math::{fit_to_entity, parse_formula};
 use oikos_core::flow::sun::is_dark_with_offset;
 use oikos_core::flow::template::render;
 use oikos_core::flow::{
-    Flow, FlowMode, Missing, Node, NodeKind, OffPeakEdge, Op, Reading, Scalar, Schedule, compare,
-    format_duration, in_time_range, parse_clock, parse_duration, pick_duration, switch_exits,
+    Flow, FlowMode, MathParams, Missing, Node, NodeKind, OffPeakEdge, Op, Reading, Scalar,
+    Schedule, command_with_number, compare, format_duration, in_time_range, parse_clock,
+    parse_duration, pick_duration, switch_exits,
 };
 use oikos_core::history::buckets::{Sample, readings_mean};
+use oikos_core::model::Command;
 use serde_json::Value;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::{AbortHandle, JoinSet};
@@ -896,6 +899,8 @@ pub(super) async fn execute(
     trigger: Option<TriggerInfo>,
 ) -> RunStatus {
     let mut stack = vec![start];
+    // The results of the run's math cards, by name; every branch reads and writes this one map.
+    let mut results: BTreeMap<String, f64> = BTreeMap::new();
     while let Some(id) = stack.pop() {
         let Some(node) = flow.node(&id) else {
             let step = step(&id, StepOutcome::Failed, "unknown node".to_owned(), None);
@@ -904,8 +909,16 @@ pub(super) async fn execute(
             }
             return RunStatus::Failed;
         };
-        let (outcome, detail, ports) =
-            run_node(&hub, &now, &flow.id, &run_id, node, trigger.as_ref()).await;
+        let (outcome, detail, ports) = run_node(
+            &hub,
+            &now,
+            &flow.id,
+            &run_id,
+            node,
+            trigger.as_ref(),
+            &mut results,
+        )
+        .await;
         let branching = matches!(
             node.kind,
             NodeKind::If(_) | NodeKind::Switch(_) | NodeKind::TimeBetween(_)
@@ -950,6 +963,7 @@ async fn run_node(
     run_id: &str,
     node: &Node,
     trigger: Option<&TriggerInfo>,
+    results: &mut BTreeMap<String, f64>,
 ) -> (StepOutcome, String, Vec<String>) {
     let failed = |detail: String| (StepOutcome::Failed, detail, Vec::new());
     match &node.kind {
@@ -1016,7 +1030,10 @@ async fn run_node(
                 Err(err) => failed(err.to_string()),
             }
         }
-        NodeKind::Math(_) => failed("math cards are not run yet".to_owned()),
+        NodeKind::Math(params) => match run_math(hub, now, params, trigger, results).await {
+            Ok(detail) => (StepOutcome::Ok, detail, Vec::new()),
+            Err(reason) => failed(reason),
+        },
         NodeKind::TimeBetween(params) => {
             let (Ok(from), Ok(to)) = (parse_clock(&params.from), parse_clock(&params.to)) else {
                 return failed("time is not HH:MM".to_owned());
@@ -1040,7 +1057,9 @@ async fn run_node(
                 now,
                 params.entity.as_deref(),
                 params.average.as_deref(),
+                params.result.as_deref(),
                 trigger,
+                results,
             )
             .await
             {
@@ -1067,7 +1086,17 @@ async fn run_node(
         }
         NodeKind::Notify(params) => {
             let lang = params.lang.unwrap_or_default();
-            let lookup = |id: &str| hub.reading(id);
+            // A math result of this run wins over an entity of the same name.
+            let lookup = |id: &str| {
+                results
+                    .get(id)
+                    .map(|value| Reading {
+                        value: Scalar::Number(*value),
+                        unit: None,
+                        device_class: None,
+                    })
+                    .or_else(|| hub.reading(id))
+            };
             // The value the trigger carried, with the unit and words of its entity.
             let trigger = trigger.and_then(|t| {
                 let value = Scalar::from_json(&t.value)?;
@@ -1144,7 +1173,9 @@ async fn run_node(
                 now,
                 params.entity.as_deref(),
                 params.average.as_deref(),
+                params.result.as_deref(),
                 trigger,
+                results,
             )
             .await
             {
@@ -1203,10 +1234,20 @@ async fn run_node(
             Err(reason) => failed(reason),
         },
         NodeKind::Command(params) => {
-            match hub
-                .send_command(&params.entity, params.command.clone())
-                .await
-            {
+            let command = match &params.value_from {
+                Some(name) => {
+                    let value = match result_of(results, name) {
+                        Ok(value) => value,
+                        Err(reason) => return failed(reason),
+                    };
+                    match command_with_number(&params.command, value) {
+                        Some(command) => command,
+                        None => return failed("this command takes no number".to_owned()),
+                    }
+                }
+                None => params.command.clone(),
+            };
+            match hub.send_command(&params.entity, command).await {
                 Ok(response) if response.accepted => {
                     (StepOutcome::Ok, "accepted".to_owned(), Vec::new())
                 }
@@ -1218,6 +1259,101 @@ async fn run_node(
                 Err(err) => failed(err.to_string()),
             }
         }
+    }
+}
+
+/// The result a math card of this run stored under `name`.
+fn result_of(results: &BTreeMap<String, f64>, name: &str) -> Result<f64, String> {
+    results
+        .get(name)
+        .copied()
+        .ok_or_else(|| format!("no result {name} in this run"))
+}
+
+/// A number as shown in a step detail: at most 2 decimals, trailing zeros trimmed.
+fn number_text(value: f64) -> String {
+    let text = format!("{value:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text == "-0" {
+        "0".to_owned()
+    } else {
+        text.to_owned()
+    }
+}
+
+/// Runs a math card: reads its inputs, evaluates the formula, keeps the result under the
+/// card's name for the rest of the run and, with `save_to`, writes it to that number entity
+/// (rounded to its step, kept in its range). Returns the step detail.
+async fn run_math(
+    hub: &Hub,
+    now: &Now,
+    params: &MathParams,
+    trigger: Option<&TriggerInfo>,
+    results: &mut BTreeMap<String, f64>,
+) -> Result<String, String> {
+    let formula = parse_formula(&params.formula).map_err(|err| err.to_string())?;
+    let mut inputs: Vec<(&str, f64)> = Vec::new();
+    for input in &params.inputs {
+        let value = match &input.average {
+            Some(window) => window_average(hub, &input.entity, window, now())
+                .await
+                .map(Scalar::Number),
+            None => hub.entity_scalar(&input.entity),
+        };
+        let number = match value {
+            Some(Scalar::Number(n)) => n,
+            Some(Scalar::Bool(b)) => f64::from(u8::from(b)),
+            Some(Scalar::Text(_)) => return Err(format!("{} is not a number", input.name)),
+            None => return Err(format!("{} is unknown", input.name)),
+        };
+        inputs.push((input.name.as_str(), number));
+    }
+    let trigger_number = trigger.and_then(|t| match &t.value {
+        Value::Number(n) => n.as_f64(),
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        _ => None,
+    });
+    let value = formula.eval(&|name| {
+        if let Some((_, value)) = inputs.iter().find(|(input, _)| *input == name) {
+            Ok(*value)
+        } else if name == "trigger" {
+            trigger_number.ok_or_else(|| "trigger has no number".to_owned())
+        } else {
+            result_of(results, name)
+        }
+    })?;
+    results.insert(params.name.clone(), value);
+    let shown = inputs
+        .iter()
+        .map(|(name, value)| format!("{name}={}", number_text(*value)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut detail = if shown.is_empty() {
+        String::new()
+    } else {
+        format!("{shown} → ")
+    };
+    detail.push_str(&format!("{} = {}", params.name, number_text(value)));
+    let Some(target) = &params.save_to else {
+        return Ok(detail);
+    };
+    let (min, max, step) = hub
+        .number_limits(target)
+        .ok_or_else(|| format!("unknown entity `{target}`"))?;
+    let (saved, clamped) = fit_to_entity(value, min, max, step);
+    detail.push_str(&format!(" → {target} = {}", number_text(saved)));
+    if clamped {
+        detail.push_str(" (kept in range)");
+    }
+    match hub
+        .send_command(target, Command::SetNumber { value: saved })
+        .await
+    {
+        Ok(response) if response.accepted => Ok(detail),
+        Ok(response) => Err(response
+            .reason
+            .unwrap_or_else(|| "command not accepted".to_owned())),
+        Err(err) => Err(err.to_string()),
     }
 }
 
@@ -1238,8 +1374,13 @@ async fn node_left(
     now: &Now,
     entity: Option<&str>,
     average: Option<&str>,
+    result: Option<&str>,
     trigger: Option<&TriggerInfo>,
+    results: &BTreeMap<String, f64>,
 ) -> Result<Option<Scalar>, String> {
+    if let Some(name) = result {
+        return result_of(results, name).map(|value| Some(Scalar::Number(value)));
+    }
     let entity = match (entity, trigger) {
         (Some(entity), _) => entity,
         (None, Some(trigger)) => match trigger.entity.as_deref() {
@@ -1272,6 +1413,21 @@ fn averaged_windows(flows: &[Flow]) -> BTreeMap<String, i64> {
             })
             .collect();
         for node in &flow.nodes {
+            if let NodeKind::Math(params) = &node.kind {
+                for input in &params.inputs {
+                    let Some(window) = input
+                        .average
+                        .as_deref()
+                        .and_then(|w| parse_duration(w).ok())
+                    else {
+                        continue;
+                    };
+                    let micros = i64::try_from(window.as_micros()).unwrap_or(i64::MAX);
+                    let longest = windows.entry(input.entity.clone()).or_insert(micros);
+                    *longest = (*longest).max(micros);
+                }
+                continue;
+            }
             let (entity, average) = match &node.kind {
                 NodeKind::If(params) => (&params.entity, &params.average),
                 NodeKind::Switch(params) => (&params.entity, &params.average),
@@ -1621,8 +1777,16 @@ mod tests {
         let check = node(serde_json::json!({
             "id": "c", "type": "if", "params": { "op": "is_off_peak" }
         }));
-        let (outcome, detail, ports) =
-            run_node(&engine.hub, &engine.now, "f", "r", &check, None).await;
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &check,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(ports, ["true"]);
         assert_eq!(detail, "is_off_peak → true");
@@ -1642,7 +1806,16 @@ mod tests {
             "id": "check", "type": "if", "params": params
         }))
         .unwrap();
-        run_node(&engine.hub, &engine.now, "f", "r", &node, None).await
+        run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await
     }
 
     #[tokio::test]
@@ -1696,8 +1869,16 @@ mod tests {
             value: serde_json::json!(17),
             previous: serde_json::json!(20),
         };
-        let (outcome, detail, port) =
-            run_node(&engine.hub, &engine.now, "avg", "r", &node, Some(&trigger)).await;
+        let (outcome, detail, port) = run_node(
+            &engine.hub,
+            &engine.now,
+            "avg",
+            "r",
+            &node,
+            Some(&trigger),
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(detail, "average 30m = 19.0 → true");
         assert_eq!(port, ["true"]);
@@ -1739,12 +1920,38 @@ mod tests {
             "r",
             &node,
             Some(&trigger),
+            &mut BTreeMap::new(),
         )
         .await;
         assert_eq!(outcome, StepOutcome::Ok);
         // The mean is 19, not the current 17 (which would take rule 1).
         assert_eq!(detail, "average 30m = 19.0 → 2");
         assert_eq!(ports, ["2"]);
+    }
+
+    #[test]
+    fn math_input_average_registers_the_window() {
+        let flow = Flow::decode(
+            serde_json::json!({
+                "id": "m", "name": "m", "enabled": true, "mode": "single",
+                "nodes": [
+                    { "id": "t", "type": "trigger.schedule", "params": { "cron": "* * * * *" } },
+                    { "id": "calc", "type": "math", "params": {
+                        "inputs": [
+                            { "name": "a", "entity": "sensor_a", "average": "15m" },
+                            { "name": "b", "entity": "sensor_b" }
+                        ],
+                        "formula": "a + b", "name": "sum" } }
+                ],
+                "edges": [{ "from": "t", "to": "calc" }]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+        let windows = averaged_windows(&[flow]);
+        assert_eq!(windows.len(), 1, "{windows:?}");
+        assert_eq!(windows["sensor_a"], 15 * 60 * 1_000_000);
     }
 
     /// Reports a numeric sensor and returns its entity id.
@@ -1776,8 +1983,16 @@ mod tests {
                 { "op": "between", "value": 18, "to": 22 },
                 { "op": "gt", "value": 22 } ] }
         }));
-        let (outcome, detail, ports) =
-            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(ports, ["2"]);
         assert!(detail.ends_with("→ 2"), "{detail}");
@@ -1791,8 +2006,16 @@ mod tests {
                 "entity": "nobody", "otherwise": true,
                 "rules": [{ "op": "gt", "value": 1 }] }
         }));
-        let (outcome, detail, ports) =
-            run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        let (outcome, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert_eq!(outcome, StepOutcome::Ok);
         assert_eq!(ports, ["otherwise"]);
         assert_eq!(detail, "unknown → otherwise");
@@ -1806,7 +2029,16 @@ mod tests {
             "id": "s", "type": "switch", "params": {
                 "entity": entity, "rules": [{ "op": "gt", "value": 99 }] }
         }));
-        let (_, detail, ports) = run_node(&engine.hub, &engine.now, "f", "r", &node, None).await;
+        let (_, detail, ports) = run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await;
         assert!(ports.is_empty());
         assert_eq!(detail, "20 → none");
     }
@@ -1870,9 +2102,17 @@ mod tests {
         let node = node(serde_json::json!({
             "id": "tm", "type": "time.between", "params": { "from": from, "to": to }
         }));
-        run_node(&engine.hub, &engine.now, "f", "r", &node, None)
-            .await
-            .2
+        run_node(
+            &engine.hub,
+            &engine.now,
+            "f",
+            "r",
+            &node,
+            None,
+            &mut BTreeMap::new(),
+        )
+        .await
+        .2
     }
 
     #[tokio::test]
