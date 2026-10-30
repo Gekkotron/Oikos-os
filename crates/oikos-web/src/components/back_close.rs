@@ -15,6 +15,16 @@ fn next_marker() -> String {
     format!("overlay{}", NEXT.fetch_add(1, Ordering::Relaxed))
 }
 
+/// Whether the current history entry is the one the overlay marked `marker` pushed.
+fn is_top(marker: &str) -> bool {
+    web_sys::window()
+        .and_then(|w| w.history().ok())
+        .and_then(|h| h.state().ok())
+        .and_then(|s| js_sys::Reflect::get(&s, &JsValue::from_str(STATE_KEY)).ok())
+        .and_then(|m| m.as_string())
+        .is_some_and(|m| m == marker)
+}
+
 /// What an open overlay keeps: the `popstate` listener and whether Back already popped the
 /// entry it pushed.
 #[derive(Clone, Copy)]
@@ -61,7 +71,13 @@ impl BackClose {
             let _ = history.push_state(&state, "");
         }
         let popped = self.popped;
+        let marker = self.marker;
         let cb = Closure::<dyn FnMut()>::new(move || {
+            // Back landed on this overlay's own entry: an overlay opened over it dropped its
+            // entry, and this one stays open.
+            if marker.with_value(|m| is_top(m)) {
+                return;
+            }
             popped.set_value(true);
             on_back.run(());
         });
@@ -89,13 +105,8 @@ impl BackClose {
         // Only drop the entry while it is still the top one: if something else navigated, the
         // overlay's entry is not ours to pop.
         if !self.popped.get_value()
+            && self.marker.with_value(|m| is_top(m))
             && let Ok(history) = window.history()
-            && history.state().ok().is_some_and(|s| {
-                js_sys::Reflect::get(&s, &JsValue::from_str(STATE_KEY))
-                    .ok()
-                    .and_then(|m| m.as_string())
-                    .is_some_and(|m| m == self.marker.get_value())
-            })
         {
             let _ = history.back();
         }

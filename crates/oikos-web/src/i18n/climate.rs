@@ -40,14 +40,10 @@ pub enum ClimateText {
     Now,
     NoDecision,
     Clear,
-    EnterTarget,
     Target,
     ZoneStateLabel,
-    HoldTemperature,
     UntilNextChange,
-    NextChange,
     LearnNow,
-    HideDecisions,
     RecentDecisions,
     ProposedSchedule,
     ProposedChanges,
@@ -133,6 +129,15 @@ pub enum ClimateText {
     StartEco,
     CancelEco,
     EcoPickDate,
+    HouseSettings,
+    RoomSettings,
+    RoomSettingsTitle,
+    AdvancedSettings,
+    EcoPill,
+    LowerTarget,
+    RaiseTarget,
+    Learning,
+    TargetIn,
 }
 
 impl ClimateText {
@@ -170,14 +175,10 @@ impl ClimateText {
         ClimateText::Now,
         ClimateText::NoDecision,
         ClimateText::Clear,
-        ClimateText::EnterTarget,
         ClimateText::Target,
         ClimateText::ZoneStateLabel,
-        ClimateText::HoldTemperature,
         ClimateText::UntilNextChange,
-        ClimateText::NextChange,
         ClimateText::LearnNow,
-        ClimateText::HideDecisions,
         ClimateText::RecentDecisions,
         ClimateText::ProposedSchedule,
         ClimateText::ProposedChanges,
@@ -246,6 +247,15 @@ impl ClimateText {
         ClimateText::StartEco,
         ClimateText::CancelEco,
         ClimateText::EcoPickDate,
+        ClimateText::HouseSettings,
+        ClimateText::RoomSettings,
+        ClimateText::RoomSettingsTitle,
+        ClimateText::AdvancedSettings,
+        ClimateText::EcoPill,
+        ClimateText::LowerTarget,
+        ClimateText::RaiseTarget,
+        ClimateText::Learning,
+        ClimateText::TargetIn,
         ClimateText::CorrectionTitle,
         ClimateText::CorrectionNoSensor,
         ClimateText::CorrectionStep,
@@ -321,17 +331,10 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
         T::Now => ("Now", "Maintenant"),
         T::NoDecision => ("No decision yet", "Pas encore de décision"),
         T::Clear => ("Clear", "Effacer"),
-        T::EnterTarget => (
-            "Enter a target temperature first",
-            "Saisissez d'abord une température cible",
-        ),
         T::Target => ("Target", "Consigne"),
         T::ZoneStateLabel => ("Zone state", "État de la zone"),
-        T::HoldTemperature => ("Hold temperature", "Température à maintenir"),
         T::UntilNextChange => ("Until next change", "Jusqu'au prochain changement"),
-        T::NextChange => ("Next change", "Prochain changement"),
         T::LearnNow => ("Learn now", "Apprendre maintenant"),
-        T::HideDecisions => ("Hide decisions", "Masquer les décisions"),
         T::RecentDecisions => ("Recent decisions", "Décisions récentes"),
         T::ProposedSchedule => ("Proposed schedule", "Programmation proposée"),
         T::ProposedChanges => ("Proposed changes", "Modifications proposées"),
@@ -441,6 +444,15 @@ pub fn climate_text(lang: Lang, k: ClimateText) -> &'static str {
             "Pick an end date in the future",
             "Choisissez une date de fin à venir",
         ),
+        T::HouseSettings => ("House settings", "Réglages de la maison"),
+        T::RoomSettings => ("Room settings", "Réglages de la pièce"),
+        T::RoomSettingsTitle => ("Room settings ·", "Réglages ·"),
+        T::AdvancedSettings => ("Advanced settings", "Réglages avancés"),
+        T::EcoPill => ("Eco…", "Éco…"),
+        T::LowerTarget => ("Lower target", "Baisser la consigne"),
+        T::RaiseTarget => ("Raise target", "Monter la consigne"),
+        T::Learning => ("Learning", "Apprentissage"),
+        T::TargetIn => ("Target ·", "Consigne ·"),
     };
     match lang {
         Lang::En => en,
@@ -459,6 +471,16 @@ fn pick(lang: Lang, en: String, fr: String) -> String {
         Lang::En => en,
         Lang::Fr => fr,
     }
+}
+
+/// The correction's main numbers, already formatted: "Step 0.5 °C · tolerance 0.5 °C · every
+/// 15 min" / "Pas 0,5 °C · écart 0,5 °C · toutes les 15 min".
+pub fn correction_summary_line(lang: Lang, step: &str, band: &str, interval_min: u32) -> String {
+    pick(
+        lang,
+        format!("Step {step} °C · tolerance {band} °C · every {interval_min} min"),
+        format!("Pas {step} °C · écart {band} °C · toutes les {interval_min} min"),
+    )
 }
 
 /// "Learning: 6 of 10 days so far" / "Apprentissage : 6 jours sur 10 pour l'instant".

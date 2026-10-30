@@ -6,9 +6,11 @@ use oikos_climate::doc::{
     Block, Day, Decision, HhMm, Mode, ModeRules, Rules, Setpoint, Source, ZoneSettings, ZoneState,
 };
 use oikos_climate::view::{LearnStatus, ZoneView};
+use oikos_web::climate::eco_pill::EcoPill;
 use oikos_web::climate::proposal::RulesPanel;
 use oikos_web::climate::room_list::RoomList;
 use oikos_web::climate::room_panel::RoomPanel;
+use oikos_web::climate::target_stepper::TargetStepper;
 use oikos_web::components::toast::Toasts;
 use oikos_web::house::House;
 use oikos_web::i18n::Lang;
@@ -400,59 +402,663 @@ async fn the_room_follows_the_language_without_a_remount() {
     tick().await;
     let text = || host.text_content().unwrap_or_default();
     for french in [
-        "Consigne",
+        "Consigne ·",
+        "Chauffage",
+        "18,5°",
         "Maintenant",
-        "Chauffage 18,5°",
         "Programmation",
         "Aucune programmation approuvée pour l'instant",
         "Cette semaine",
-        "Apprendre maintenant",
-        "Décisions récentes",
         "Active",
         "Arrêt",
         "En attente",
     ] {
         assert!(text().contains(french), "{french} in {}", text());
     }
-    for english in [
+    for hidden in [
         "Target",
         "Now",
-        "Heat 18",
+        "Heat",
         "This week",
-        "Learn now",
-        "Recent decisions",
         "Pending",
+        // In the room settings, behind the ⚙.
+        "Apprendre maintenant",
+        "Décisions récentes",
     ] {
-        assert!(!text().contains(english), "{english} in {}", text());
+        assert!(!text().contains(hidden), "{hidden} in {}", text());
     }
-    let hold: HtmlInputElement = host
-        .query_selector(".climate-hold__setpoint")
+    let raise: HtmlElement = host
+        .query_selector(".climate-stepper__step:last-of-type")
         .unwrap()
-        .expect("hold field")
+        .expect("+ button")
         .unchecked_into();
     assert_eq!(
-        hold.get_attribute("aria-label").as_deref(),
-        Some("Température à maintenir")
+        raise.get_attribute("aria-label").as_deref(),
+        Some("Monter la consigne")
     );
 
     lang.set(Lang::En);
     tick().await;
-    for english in [
-        "Target",
-        "Now",
-        "Heat 18.5",
-        "This week",
-        "Learn now",
-        "Recent decisions",
-        "Pending",
-    ] {
+    for english in ["Target ·", "Now", "Heat", "18.5°", "This week", "Pending"] {
         assert!(text().contains(english), "{english} in {}", text());
     }
-    for french in ["Consigne", "Maintenant", "Chauffage", "Cette semaine"] {
-        assert!(!text().contains(french), "{french} in {}", text());
+    for hidden in [
+        "Consigne",
+        "Maintenant",
+        "Chauffage",
+        "Cette semaine",
+        "Learn now",
+        "Recent decisions",
+    ] {
+        assert!(!text().contains(hidden), "{hidden} in {}", text());
     }
     assert_eq!(
-        hold.get_attribute("aria-label").as_deref(),
-        Some("Hold temperature")
+        raise.get_attribute("aria-label").as_deref(),
+        Some("Raise target")
     );
+}
+
+const OVERRIDE_URL: &str = "/api/v1/climate/zones/living-room/override";
+
+/// The − / + stepper alone, in English, over a zone the test can change.
+async fn mount_stepper(current: RwSignal<ZoneView>) -> Element {
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(RwSignal::new(Lang::En));
+        view! {
+            <TargetStepper
+                zone=current.into()
+                now=Signal::from((Day::Mon, 0))
+                on_changed=Callback::new(|_| {})
+            />
+        }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+    host
+}
+
+fn stepper_value(host: &Element) -> String {
+    host.query_selector(".climate-stepper__value")
+        .unwrap()
+        .expect("target value")
+        .text_content()
+        .unwrap_or_default()
+}
+
+fn step_button(host: &Element, label: &str) -> HtmlElement {
+    let all = host.query_selector_all(".climate-stepper__step").unwrap();
+    (0..all.length())
+        .filter_map(|i| all.item(i))
+        .map(|n| n.unchecked_into::<HtmlElement>())
+        .find(|b| b.get_attribute("aria-label").as_deref() == Some(label))
+        .unwrap_or_else(|| panic!("no {label} button"))
+}
+
+fn posts(stub: &FetchStub) -> Vec<String> {
+    stub.requests()
+        .into_iter()
+        .filter(|r| r.method == "POST" && r.url == OVERRIDE_URL)
+        .map(|r| r.body)
+        .collect()
+}
+
+async fn past_the_pause() {
+    gloo_timers::future::TimeoutFuture::new(1_600).await;
+    settle().await;
+}
+
+#[wasm_bindgen_test]
+async fn taps_send_one_hold_after_the_pause() {
+    let stub = FetchStub::install();
+    stub.reply("POST", OVERRIDE_URL, 200, "{}");
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let host = mount_stepper(current).await;
+    assert_eq!(stepper_value(&host), "19°");
+
+    let raise = step_button(&host, "Raise target");
+    for _ in 0..3 {
+        raise.click();
+        tick().await;
+    }
+    assert_eq!(stepper_value(&host), "20.5°");
+    assert!(posts(&stub).is_empty(), "nothing sent while tapping");
+
+    past_the_pause().await;
+    let sent = posts(&stub);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(sent[0].contains("\"setpoint\":20.5"), "{}", sent[0]);
+    assert!(sent[0].contains("\"minutes\":120"), "{}", sent[0]);
+    let chips = host
+        .query_selector(".climate-stepper__chips")
+        .unwrap()
+        .expect("duration chips");
+    let text = chips.text_content().unwrap_or_default();
+    assert!(text.contains("1 h") && text.contains("2 h"), "{text}");
+    assert!(!text.contains("Until next change"), "{text}");
+}
+
+#[wasm_bindgen_test]
+async fn a_refetch_during_the_wait_keeps_the_new_target() {
+    let stub = FetchStub::install();
+    stub.reply("POST", OVERRIDE_URL, 200, "{}");
+    let base = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    let current = RwSignal::new(base.clone());
+    let host = mount_stepper(current).await;
+
+    step_button(&host, "Raise target").click();
+    tick().await;
+    assert_eq!(stepper_value(&host), "19.5°");
+    current.set(ZoneView {
+        reading: Some(18.0),
+        ..base.clone()
+    });
+    settle().await;
+    assert_eq!(stepper_value(&host), "19.5°", "a refetch before the send");
+
+    past_the_pause().await;
+    assert_eq!(posts(&stub).len(), 1);
+    assert_eq!(stepper_value(&host), "19.5°", "sent, not yet refetched");
+    current.set(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.5),
+    ));
+    settle().await;
+    assert_eq!(stepper_value(&host), "19.5°");
+    current.set(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(18.0),
+    ));
+    settle().await;
+    assert_eq!(stepper_value(&host), "18°", "the hub's value again");
+}
+
+#[wasm_bindgen_test]
+async fn a_chip_resends_with_its_duration() {
+    let stub = FetchStub::install();
+    stub.reply("POST", OVERRIDE_URL, 200, "{}");
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let host = mount_stepper(current).await;
+    step_button(&host, "Raise target").click();
+    past_the_pause().await;
+    assert_eq!(posts(&stub).len(), 1);
+
+    find_button(&host, "1 h").expect("1 h chip").click();
+    settle().await;
+    let sent = posts(&stub);
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert!(sent[1].contains("\"setpoint\":19.5"), "{}", sent[1]);
+    assert!(sent[1].contains("\"minutes\":60"), "{}", sent[1]);
+    assert!(
+        host.query_selector(".climate-stepper__chips")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[wasm_bindgen_test]
+async fn a_pending_room_cannot_step() {
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Pending,
+        Some(19.0),
+    ));
+    let host = mount_stepper(current).await;
+    assert_eq!(stepper_value(&host), "19°");
+    for label in ["Lower target", "Raise target"] {
+        assert!(
+            step_button(&host, label).has_attribute("disabled"),
+            "{label}"
+        );
+    }
+}
+
+const ECO_URL: &str = "/api/v1/climate/zones/living-room/eco";
+
+/// The eco pill alone, in English, in UTC.
+async fn mount_eco(zone: ZoneView) -> Element {
+    let host = host();
+    let current = RwSignal::new(zone);
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(oikos_web::components::now::install_now());
+        view! {
+            <EcoPill
+                zone=current.into()
+                tz=Signal::from(chrono_tz::Tz::UTC)
+                on_changed=Callback::new(|_| {})
+            />
+        }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+    host
+}
+
+fn requests_to(stub: &FetchStub, method: &str, url: &str) -> usize {
+    stub.requests()
+        .into_iter()
+        .filter(|r| r.method == method && r.url == url)
+        .count()
+}
+
+#[wasm_bindgen_test]
+async fn eco_starts_from_the_pill() {
+    let stub = FetchStub::install();
+    stub.reply("PUT", ECO_URL, 200, "{}");
+    let host = mount_eco(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ))
+    .await;
+
+    find_button(&host, "Eco…").expect("eco pill").click();
+    settle().await;
+    let dialog = host
+        .query_selector("dialog.popup--small")
+        .unwrap()
+        .expect("the eco popup");
+    let date: HtmlInputElement = dialog
+        .query_selector("input[type=date]")
+        .unwrap()
+        .expect("date")
+        .unchecked_into();
+    assert!(dialog.query_selector("input[type=time]").unwrap().is_some());
+    date.set_value("2099-01-01");
+    date.dispatch_event(&web_sys::Event::new("input").unwrap())
+        .unwrap();
+    tick().await;
+
+    find_button(&host, "Start eco").expect("Start eco").click();
+    settle().await;
+    assert_eq!(requests_to(&stub, "PUT", ECO_URL), 1);
+    assert!(host.query_selector("dialog").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn a_running_eco_cancels_in_one_tap() {
+    let stub = FetchStub::install();
+    stub.reply("DELETE", ECO_URL, 200, "{}");
+    let mut z = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    z.eco = Some(oikos_climate::doc::RoomEco {
+        until: 4_000_000_000,
+        set_at: 0,
+    });
+    let host = mount_eco(z).await;
+    let pill = host
+        .query_selector(".climate-eco-pill")
+        .unwrap()
+        .expect("eco pill");
+    let text = pill.text_content().unwrap_or_default();
+    assert!(text.contains("Eco until"), "{text}");
+
+    pill.query_selector("button[aria-label='Cancel eco']")
+        .unwrap()
+        .expect("cancel")
+        .unchecked_into::<HtmlElement>()
+        .click();
+    settle().await;
+    assert_eq!(requests_to(&stub, "DELETE", ECO_URL), 1);
+}
+
+#[wasm_bindgen_test]
+async fn an_off_room_has_no_eco_pill() {
+    let host = mount_eco(zone("living-room", "Living room", ZoneState::Off, None)).await;
+    assert!(host.query_selector(".climate-eco-pill").unwrap().is_none());
+}
+
+/// The client ends a query with "&".
+const DECISIONS_URL: &str = "/api/v1/climate/zones/living-room/decisions?limit=50&";
+
+/// One room's panel, in English, over a zone the test can change.
+async fn mount_panel(current: RwSignal<ZoneView>) -> Element {
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(House::new());
+        provide_context(oikos_web::components::now::install_now());
+        provide_context(RwSignal::new(Lang::En));
+        view! {
+            <RoomPanel
+                zone=current.into()
+                tz=Signal::from(chrono_tz::Tz::UTC)
+                on_changed=Callback::new(|_| {})
+            />
+        }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+    host
+}
+
+fn reply_decisions(stub: &FetchStub) {
+    let decision = zone("living-room", "Living room", ZoneState::Active, Some(19.0))
+        .decision
+        .unwrap();
+    let log = oikos_climate::view::DecisionLog {
+        recent: vec![decision],
+        older: vec![],
+    };
+    stub.reply(
+        "GET",
+        DECISIONS_URL,
+        200,
+        &serde_json::to_string(&log).unwrap(),
+    );
+}
+
+async fn open_room_settings(host: &Element) -> Element {
+    host.query_selector(".climate-card__gear")
+        .unwrap()
+        .expect("the room's ⚙")
+        .unchecked_into::<HtmlElement>()
+        .click();
+    settle().await;
+    host.query_selector("dialog.popup")
+        .unwrap()
+        .expect("the room settings")
+}
+
+#[wasm_bindgen_test]
+async fn the_gear_opens_the_room_settings() {
+    let stub = FetchStub::install();
+    reply_decisions(&stub);
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let host = mount_panel(current).await;
+    assert!(host.query_selector("dialog").unwrap().is_none());
+    assert_eq!(
+        requests_to(&stub, "GET", DECISIONS_URL),
+        0,
+        "fetched on open"
+    );
+
+    let dialog = open_room_settings(&host).await;
+    let text = dialog.text_content().unwrap_or_default();
+    for word in [
+        "Room settings · Living room",
+        "Room thermometer",
+        "Learn now",
+        "Recent decisions",
+    ] {
+        assert!(text.contains(word), "{word} in {text}");
+    }
+    assert!(
+        dialog
+            .query_selector(".climate-correction-card [role=switch]")
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(requests_to(&stub, "GET", DECISIONS_URL), 1);
+}
+
+#[wasm_bindgen_test]
+async fn a_refetch_keeps_the_room_settings_open() {
+    let stub = FetchStub::install();
+    reply_decisions(&stub);
+    let base = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    let current = RwSignal::new(base.clone());
+    let host = mount_panel(current).await;
+    open_room_settings(&host).await;
+    assert!(
+        host.query_selector(".climate-decisions__list li")
+            .unwrap()
+            .is_some()
+    );
+
+    current.set(ZoneView {
+        reading: Some(18.0),
+        ..base
+    });
+    settle().await;
+    assert!(
+        host.query_selector("dialog.popup[open]").unwrap().is_some(),
+        "still open"
+    );
+    assert!(
+        host.query_selector(".climate-decisions__list li")
+            .unwrap()
+            .is_some(),
+        "the decisions stay"
+    );
+}
+
+#[wasm_bindgen_test]
+async fn an_override_shows_as_a_chip_and_clears() {
+    let stub = FetchStub::install();
+    stub.reply("DELETE", OVERRIDE_URL, 200, "{}");
+    let mut z = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    z.overrides = vec![oikos_climate::doc::Override {
+        entity: None,
+        setpoint: Some(Setpoint::Temp(21.0)),
+        mode: None,
+        until: 4_000_000_000,
+        origin: oikos_climate::doc::OverrideOrigin::User,
+    }];
+    let host = mount_panel(RwSignal::new(z)).await;
+    let holds = host.query_selector_all(".climate-card__hold").unwrap();
+    assert_eq!(holds.length(), 1);
+    let text = holds.item(0).unwrap().text_content().unwrap_or_default();
+    assert!(text.contains("21°") && text.contains("set here"), "{text}");
+
+    host.query_selector(".climate-card__holds button[aria-label='Clear']")
+        .unwrap()
+        .expect("the ✕")
+        .unchecked_into::<HtmlElement>()
+        .click();
+    settle().await;
+    assert_eq!(requests_to(&stub, "DELETE", OVERRIDE_URL), 1);
+}
+
+#[wasm_bindgen_test]
+async fn correction_fields_fold_under_advanced() {
+    let stub = FetchStub::install();
+    reply_decisions(&stub);
+    let mut base = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    base.settings.feedback.enabled = true;
+    base.room_sensor = Some("sensor.living_room_temperature".into());
+    let current = RwSignal::new(base.clone());
+    let host = mount_panel(current).await;
+    let dialog = open_room_settings(&host).await;
+    let text = dialog.text_content().unwrap_or_default();
+    assert!(
+        text.contains("Step 0.5 °C · tolerance 0.5 °C · every 15 min"),
+        "{text}"
+    );
+    let fold = dialog
+        .query_selector("details.climate-correction__more")
+        .unwrap()
+        .expect("the Advanced settings fold");
+    assert!(!fold.has_attribute("open"), "folded by default");
+    assert!(
+        fold.text_content()
+            .unwrap_or_default()
+            .contains("Advanced settings (7)")
+    );
+    assert_eq!(fold.query_selector_all("input.field").unwrap().length(), 7);
+
+    // Opened, it stays open through a refetch (each saved field refetches).
+    fold.set_attribute("open", "").unwrap();
+    current.set(ZoneView {
+        reading: Some(18.0),
+        ..base
+    });
+    settle().await;
+    let fold = host
+        .query_selector("details.climate-correction__more")
+        .unwrap()
+        .expect("still there");
+    assert!(fold.has_attribute("open"), "still open");
+}
+
+#[wasm_bindgen_test]
+async fn the_house_gear_opens_the_settings_popup() {
+    let stub = FetchStub::install();
+    let climate = oikos_climate::view::ClimateView {
+        enabled: true,
+        house: Default::default(),
+        house_invalid: None,
+        history: true,
+        timezone: "UTC".into(),
+        zones: vec![zone(
+            "living-room",
+            "Living room",
+            ZoneState::Active,
+            Some(19.0),
+        )],
+    };
+    stub.reply(
+        "GET",
+        "/api/v1/climate",
+        200,
+        &serde_json::to_string(&climate).unwrap(),
+    );
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(House::new());
+        provide_context(oikos_web::components::now::install_now());
+        provide_context(RwSignal::new(Lang::En));
+        view! { <oikos_web::screens::climate::ClimateScreen /> }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+    settle().await;
+    assert!(host.query_selector("dialog").unwrap().is_none());
+
+    let gear = host
+        .query_selector(".climate-screen__gear")
+        .unwrap()
+        .expect("the house ⚙");
+    assert_eq!(
+        gear.get_attribute("aria-label").as_deref(),
+        Some("House settings")
+    );
+    gear.unchecked_into::<HtmlElement>().click();
+    settle().await;
+    let dialog = host
+        .query_selector("dialog.popup")
+        .unwrap()
+        .expect("the house settings popup");
+    let text = dialog.text_content().unwrap_or_default();
+    assert!(text.contains("Season"), "{text}");
+
+    let cancel = web_sys::Event::new("cancel").unwrap();
+    dialog.dispatch_event(&cancel).unwrap();
+    settle().await;
+    assert!(host.query_selector("dialog").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn a_late_reply_does_not_undo_a_newer_press() {
+    let stub = FetchStub::install();
+    stub.reply_after("POST", OVERRIDE_URL, 200, "{}", 500);
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let host = mount_stepper(current).await;
+    let raise = step_button(&host, "Raise target");
+
+    raise.click();
+    // 19.5 is sent at 1.5 s and answered at 2 s; a press in between makes 20.
+    gloo_timers::future::TimeoutFuture::new(1_600).await;
+    assert_eq!(posts(&stub).len(), 1);
+    raise.click();
+    tick().await;
+    assert_eq!(stepper_value(&host), "20°");
+    gloo_timers::future::TimeoutFuture::new(600).await;
+    current.set(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.5),
+    ));
+    settle().await;
+    assert_eq!(stepper_value(&host), "20°", "the newer press stays");
+    assert!(
+        host.query_selector(".climate-stepper__chips")
+            .unwrap()
+            .is_none(),
+        "no chips for the older value"
+    );
+
+    past_the_pause().await;
+    let sent = posts(&stub);
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert!(
+        sent[1].contains("\"setpoint\":20.0") || sent[1].contains("\"setpoint\":20,"),
+        "{}",
+        sent[1]
+    );
+}
+
+#[wasm_bindgen_test]
+async fn an_off_decision_shows_off() {
+    let mut z = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    z.decision.as_mut().unwrap().setpoint = Some(Setpoint::Off);
+    let host = mount_stepper(RwSignal::new(z)).await;
+    assert_eq!(stepper_value(&host), "Off");
+}
+
+#[wasm_bindgen_test]
+async fn a_press_is_sent_when_the_card_goes_away() {
+    let stub = FetchStub::install();
+    stub.reply("POST", OVERRIDE_URL, 200, "{}");
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let shown = RwSignal::new(true);
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(RwSignal::new(Lang::En));
+        view! {
+            <Show when=move || shown.get()>
+                <TargetStepper
+                    zone=current.into()
+                    now=Signal::from((Day::Mon, 0))
+                    on_changed=Callback::new(|_| {})
+                />
+            </Show>
+        }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+
+    step_button(&host, "Raise target").click();
+    tick().await;
+    shown.set(false);
+    settle().await;
+    let sent = posts(&stub);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(sent[0].contains("\"setpoint\":19.5"), "{}", sent[0]);
 }

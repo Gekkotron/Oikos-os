@@ -6877,6 +6877,87 @@ html:has(.flow-canvas-screen) {
 }
 
 /* The Climate screen takes the whole content width, not the 1200 px other screens keep. */
+/* A modal popup (components/popup.rs): a titled card over a scrim. No padding on the dialog,
+   so a click on the dialog itself is a click on the backdrop. */
+dialog.popup {
+  box-sizing: border-box;
+  width: min(640px, 100vw - 32px);
+  max-height: min(760px, 100vh - 64px);
+  padding: 0;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  background: var(--menu-bg);
+  color: var(--ink);
+  box-shadow: var(--menu-shadow);
+  overflow: hidden;
+}
+
+dialog.popup.popup--small {
+  width: min(380px, 100vw - 32px);
+}
+
+dialog.popup[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.popup::backdrop {
+  background: var(--scrim);
+}
+
+.popup__bar {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding: 14px 16px 8px;
+}
+
+.popup__title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: var(--type-card-value);
+}
+
+.popup__close {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: var(--type-body);
+  cursor: pointer;
+}
+
+.popup__close:hover {
+  background: var(--select-soft);
+}
+
+.popup__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+}
+
+@media (max-width: 640px) {
+  dialog.popup:not(.popup--small) {
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
 .screen:has(.climate-screen),
 .shell__content:has(.climate-screen) > .content-header {
   max-width: none;
@@ -6983,7 +7064,6 @@ html:has(.flow-canvas-screen) {
 
 .climate-status,
 .climate-week,
-.climate-learn-card,
 .climate-decisions {
   display: flex;
   flex-direction: column;
@@ -7015,7 +7095,6 @@ html:has(.flow-canvas-screen) {
 }
 
 .climate-status__label,
-.climate-status__reason,
 .climate-screen__empty,
 .climate-learn__text,
 .climate-field__label {
@@ -7028,34 +7107,188 @@ html:has(.flow-canvas-screen) {
   letter-spacing: var(--type-display-spacing);
 }
 
-.climate-status__target {
-  font: 700 22px/28px var(--font-display);
+/* The room's target with − / + (climate/target_stepper.rs). */
+.climate-stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.climate-status__why {
+.climate-stepper__step {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  padding: 0;
+  border: 1px solid var(--chip-border);
+  border-radius: 50%;
+  background: var(--card-bg);
+  color: var(--ink);
+  font: 400 20px/1 var(--font-body);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--motion-short) var(--ease);
+}
+
+.climate-stepper__step:hover:not(:disabled) {
+  background: var(--select-soft);
+}
+
+.climate-stepper__step:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 0;
+}
+
+.climate-stepper__step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.climate-stepper__value {
+  min-width: 3.5ch;
+  font: var(--type-display);
+  letter-spacing: var(--type-display-spacing);
+  text-align: center;
+}
+
+.climate-stepper__chips {
   display: flex;
   flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The room card (climate/room_card.rs): ⚙, target on the right, why, holds, actions. */
+.climate-card__gear,
+.climate-screen__gear,
+.climate-card__clear {
+  display: flex;
+  flex: none;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 
-.climate-status__state {
-  align-self: flex-start;
+.climate-card__gear,
+.climate-screen__gear {
+  width: 36px;
+  height: 36px;
+  margin-left: auto;
+  border: 1px solid var(--chip-border);
+  font: 400 18px/1 var(--font-body);
 }
 
-.climate-hold,
-.climate-learn,
-.climate-overrides,
-.climate-eco {
+.climate-card__clear {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  font: var(--type-label);
+}
+
+.climate-card__gear:hover,
+.climate-screen__gear:hover:not(:disabled),
+.climate-card__clear:hover {
+  background: var(--select-soft);
+}
+
+.climate-card__gear:focus-visible,
+.climate-screen__gear:focus-visible,
+.climate-card__clear:focus-visible {
+  outline: 2px solid var(--accent-mint);
+  outline-offset: 0;
+}
+
+.climate-screen__gear:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.climate-card__target {
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.climate-card__why {
+  margin: 0;
+  font: var(--type-label);
+  color: var(--muted);
+}
+
+.climate-card__holds,
+.climate-card__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
 }
 
-.climate-hold__setpoint {
-  flex: 0 0 90px;
-  width: 90px;
+.climate-card__hold {
+  color: var(--accent-amber);
+  cursor: default;
+}
+
+/* The room settings popup (climate/room_settings.rs): sections split by a rule. */
+.climate-room-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.climate-room-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--card-border);
+}
+
+.climate-room-settings__section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.climate-room-settings__heading {
+  margin: 0;
+  font: var(--type-body);
+  font-weight: 600;
+}
+
+/* The room's cards read as plain sections inside the popup. */
+.climate-room-settings .card {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.climate-correction__more > summary {
+  font: var(--type-label);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.climate-correction__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+
+.climate-status__state {
+  align-self: flex-start;
+}
+
+.climate-learn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Buttons keep their own width on wide screens (`.btn` grows by default). */
@@ -7064,26 +7297,46 @@ html:has(.flow-canvas-screen) {
   padding-inline: 16px;
 }
 
-.climate-hold__short {
-  display: none;
-}
-
-.climate-overrides {
-  color: var(--accent-amber);
-}
-
-.climate-overrides__list {
-  flex: 1 1 auto;
-  margin: 0;
-  padding-left: 18px;
-}
-
 .climate-eco__field {
   display: flex;
   flex-direction: column;
   gap: 2px;
   font: var(--type-label);
   color: var(--muted);
+}
+
+/* The room's eco (climate/eco_pill.rs): "Eco…", or "Eco until …" with a ✕. */
+.climate-eco-pill--on {
+  gap: 4px;
+  padding-right: 4px;
+  border-color: transparent;
+  background: var(--accent-soft);
+  cursor: default;
+}
+
+.climate-eco-pill__cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.climate-eco-pill__cancel:hover {
+  background: var(--select-soft);
+}
+
+.climate-eco-pill__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .climate-room__eco {
@@ -7107,17 +7360,6 @@ html:has(.flow-canvas-screen) {
   margin-right: 6px;
   border-radius: 4px;
   vertical-align: middle;
-}
-
-.climate-panel__lower {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
-  gap: 12px;
-}
-
-.climate-decisions > .chip {
-  align-self: flex-start;
 }
 
 .climate-decisions__list {
@@ -7153,7 +7395,6 @@ html:has(.flow-canvas-screen) {
   gap: 12px 16px;
 }
 
-.climate-settings__title,
 .climate-settings__group,
 .climate-field__hint,
 .climate-settings > .segmented {
@@ -7168,10 +7409,6 @@ html:has(.flow-canvas-screen) {
   margin: 0;
   font: var(--type-label);
   color: var(--muted);
-}
-
-.climate-settings__title {
-  margin: 0;
 }
 
 .climate-settings > .segmented {
@@ -7475,8 +7712,7 @@ html:has(.flow-canvas-screen) {
 
 /* Narrow: the rooms become a row of chips above the panel, and everything stacks. */
 @media (max-width: 1099px) {
-  .climate-screen__body,
-  .climate-panel__lower {
+  .climate-screen__body {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -7533,24 +7769,6 @@ html:has(.flow-canvas-screen) {
 
   .climate-status__state > .chip {
     flex: 1;
-  }
-
-  .climate-hold__long {
-    display: none;
-  }
-
-  .climate-hold > .btn {
-    flex: 1;
-    min-width: 0;
-  }
-
-  /* "Prochain changement" does not fit beside the other three: it takes its own row. */
-  .climate-hold > .climate-hold__next {
-    flex: 1 1 100%;
-  }
-
-  .climate-hold__short {
-    display: inline;
   }
 
   .climate-timeline__cal {

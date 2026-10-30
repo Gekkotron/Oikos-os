@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Climate room card mockup</title>
+<style>body{margin:0;padding:24px;background:#faf8f3;color:#1f1b16;font-family:system-ui,sans-serif}.subtitle{opacity:.7}.split{display:grid;grid-template-columns:repeat(auto-fit,minmax(520px,1fr));gap:24px}.mockup-header{font-size:12px;opacity:.7;margin-bottom:6px}</style></head><body>
+<style>
+  .iv { --bg:#f1ede4; --card:#fdfcf7; --line:#e3dccd; --ink:#1f1b16; --mute:#7a7266; --acc:#8a5a1e; --accs:#f3e8d6;
+        font-family: Inter, system-ui, sans-serif; color:var(--ink); background:var(--bg); padding:20px; border-radius:14px; position:relative; }
+  .rc { background:var(--card); border-radius:18px; padding:18px 20px; box-shadow:0 1px 3px rgba(0,0,0,.06); position:relative; margin-bottom:14px; }
+  .rc h4 { margin:0; font-size:17px; font-weight:600; }
+  .gear { position:absolute; top:14px; right:14px; width:34px; height:34px; border-radius:50%; border:1px solid var(--line);
+          display:flex; align-items:center; justify-content:center; font-size:17px; color:var(--mute); background:#fff; }
+  .mute { color:var(--mute); font-size:12px; }
+  .big { font-size:34px; font-weight:700; letter-spacing:-.5px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:999px; padding:7px 13px; font-size:13px; background:#fff; }
+  .pill.on { background:var(--acc); color:#fff; border-color:var(--acc); }
+  .pill.soft { background:var(--accs); border-color:transparent; color:var(--acc); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:999px; padding:3px; background:#fff; }
+  .seg span { padding:5px 12px; border-radius:999px; font-size:12.5px; }
+  .seg .on { background:var(--acc); color:#fff; }
+  .step { width:38px; height:38px; border-radius:50%; border:1px solid var(--line); background:#fff; display:flex; align-items:center; justify-content:center; font-size:20px; }
+  .why { font-size:12px; color:var(--mute); margin-top:4px; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+  .hdr h3 { margin:0; font-size:24px; }
+  .badge { font-size:11px; background:var(--accs); color:var(--acc); border-radius:999px; padding:2px 8px; margin-left:6px; vertical-align:middle; font-weight:500; }
+  .layout { display:grid; grid-template-columns: 170px 1fr; gap:16px; }
+  .rooms div { padding:10px 12px; border-radius:12px; font-size:13.5px; display:flex; justify-content:space-between; }
+  .rooms .sel { background:var(--card); box-shadow:0 1px 3px rgba(0,0,0,.06); font-weight:600; }
+  .week { display:grid; grid-template-columns: 34px 1fr; gap:4px 8px; font-size:11px; color:var(--mute); }
+  .bar { height:14px; border-radius:4px; display:flex; overflow:hidden; }
+  .bar i { display:block; height:100%; }
+  .lo { background:#c9d6e3; } .mi { background:#e8cf9f; } .hi { background:#d7905a; }
+  .scrim { position:absolute; inset:0; background:rgba(31,27,22,.35); border-radius:14px; }
+  .modal { position:absolute; top:26px; right:26px; width:340px; background:var(--card); border-radius:18px; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,.2); }
+  .sec { border-top:1px solid var(--line); padding:12px 0; }
+  .sec:first-of-type { border-top:none; }
+  .sec h5 { margin:0 0 8px; font-size:13px; font-weight:600; display:flex; justify-content:space-between; align-items:center; }
+  .tog { width:36px; height:20px; border-radius:999px; background:var(--acc); position:relative; display:inline-block; }
+  .tog::after { content:''; position:absolute; right:2px; top:2px; width:16px; height:16px; border-radius:50%; background:#fff; }
+  .tog.off { background:var(--line); } .tog.off::after { right:auto; left:2px; }
+  .fld { border:1px solid var(--line); border-radius:12px; padding:8px 12px; font-size:13px; background:#fff; display:flex; justify-content:space-between; }
+  .fold { font-size:12px; color:var(--acc); margin-top:6px; }
+  .log li { font-size:12px; color:var(--mute); margin:3px 0; }
+  .panes { display:grid; grid-template-columns: 1fr; gap:24px; }
+</style>
+
+<h2>Climate page — full layout</h2>
+<p class="subtitle">Left: the page as you'd normally see it. Right: the same page with the Salon ⚙ popup open. The ⚙ in the page header opens the house-wide settings (unchanged content).</p>
+
+<div class="split">
+
+  <!-- Page -->
+  <div class="mockup">
+    <div class="mockup-header">Page · normal</div>
+    <div class="mockup-body"><div class="iv">
+      <div class="hdr">
+        <div><h3>Climat <span class="badge">Bêta</span></h3><div class="mute">Chauffage et climatisation par pièce</div></div>
+        <div class="gear" style="position:static" title="Réglages de la maison">⚙</div>
+      </div>
+      <div class="layout">
+        <div class="rooms">
+          <div class="sel"><span>Salon</span><span>19,5°</span></div>
+          <div><span>Chambre</span><span>18,1°</span></div>
+          <div><span>Bureau</span><span>20,2°</span></div>
+        </div>
+        <div>
+          <div class="rc">
+            <h4>Salon</h4><div class="gear" title="Réglages de la pièce">⚙</div>
+            <div class="row" style="margin-top:14px; justify-content:space-between; align-items:flex-end;">
+              <div><div class="mute">Maintenant</div><div class="big">19,5°</div><div class="mute">il y a 20 min</div></div>
+              <div style="text-align:right">
+                <div class="mute">Consigne · Chauffage</div>
+                <div class="row" style="justify-content:flex-end; gap:10px; margin-top:4px;">
+                  <div class="step">−</div><div class="big" style="font-size:28px">19°</div><div class="step">+</div>
+                </div>
+              </div>
+            </div>
+            <div class="why">Programme · bloc 1 jusqu'à 22:00</div>
+            <div class="row" style="margin-top:14px;">
+              <div class="seg"><span>Arrêt</span><span>Attente</span><span class="on">Active</span></div>
+              <span class="pill">🌙 Éco…</span>
+            </div>
+          </div>
+
+          <div class="rc">
+            <div class="row" style="justify-content:space-between"><h4 style="font-size:15px">Semaine</h4><span class="pill">✎ Modifier</span></div>
+            <div class="week" style="margin-top:12px">
+              <span>Lun</span><div class="bar"><i class="lo" style="width:27%"></i><i class="mi" style="width:8%"></i><i class="lo" style="width:35%"></i><i class="hi" style="width:22%"></i><i class="lo" style="width:8%"></i></div>
+              <span>Mar</span><div class="bar"><i class="lo" style="width:27%"></i><i class="mi" style="width:8%"></i><i class="lo" style="width:35%"></i><i class="hi" style="width:22%"></i><i class="lo" style="width:8%"></i></div>
+              <span>Mer</span><div class="bar"><i class="lo" style="width:27%"></i><i class="hi" style="width:65%"></i><i class="lo" style="width:8%"></i></div>
+              <span>…</span><div></div>
+            </div>
+          </div>
+
+          <div class="rc" style="border:1px solid var(--acc)">
+            <h4 style="font-size:15px">Nouvelle proposition</h4>
+            <ul class="log" style="margin:6px 0 0;padding-left:16px">
+              <li>Lun–Ven : 20° de 17:30 à 22:00 (au lieu de 19° dès 18:00)</li>
+              <li>Mer : 19° de 08:00 à 22:00</li>
+            </ul>
+            <div class="week" style="margin-top:10px">
+              <span>Lun</span><div class="bar"><i class="lo" style="width:27%"></i><i class="mi" style="width:8%"></i><i class="lo" style="width:38%"></i><i class="hi" style="width:19%"></i><i class="lo" style="width:8%"></i></div>
+              <span>Mar</span><div class="bar"><i class="lo" style="width:27%"></i><i class="mi" style="width:8%"></i><i class="lo" style="width:38%"></i><i class="hi" style="width:19%"></i><i class="lo" style="width:8%"></i></div>
+              <span>Mer</span><div class="bar"><i class="lo" style="width:33%"></i><i class="mi" style="width:59%"></i><i class="lo" style="width:8%"></i></div>
+              <span>…</span><div></div>
+            </div>
+            <div class="row" style="margin-top:10px"><span class="pill">✎ Modifier</span><span class="pill on">Approuver</span><span class="pill">Rejeter</span></div>
+            <div class="mute" style="margin-top:8px">Same as today: what changes, the proposed week, edit / approve / reject. Only shown while a proposal is waiting.</div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Popup -->
+  <div class="mockup">
+    <div class="mockup-header">Page · Salon ⚙ open</div>
+    <div class="mockup-body"><div class="iv" style="min-height:720px">
+      <div class="hdr"><div><h3>Climat <span class="badge">Bêta</span></h3></div><div class="gear" style="position:static">⚙</div></div>
+      <div class="rc" style="opacity:.6"><h4>Salon</h4><div class="big" style="margin-top:10px">19,5°</div></div>
+      <div class="scrim"></div>
+      <div class="modal">
+        <div class="row" style="justify-content:space-between; margin-bottom:6px"><h4 style="margin:0;font-size:17px">Réglages · Salon</h4><span class="mute" style="font-size:18px">✕</span></div>
+
+        <div class="sec">
+          <h5>Thermomètre de la pièce</h5>
+          <div class="fld"><span>🌡 thermometer · Salon</span><span class="mute">19,5 °C</span></div>
+        </div>
+
+        <div class="sec">
+          <h5>Correction par le thermomètre <span class="tog"></span></h5>
+          <div class="mute">Pas 0,5° · écart 0,5° · toutes les 15 min</div>
+          <div class="fold">▸ Réglages avancés (7)</div>
+        </div>
+
+        <div class="sec">
+          <h5>Présence dans la pièce <span class="tog"></span></h5>
+          <div class="mute">Occupée · 2 détecteurs</div>
+          <div class="row" style="margin-top:6px"><span class="pill" style="padding:4px 10px;font-size:12px">Couloir ✕</span><span class="pill" style="padding:4px 10px;font-size:12px">Cuisine ✕</span><span class="pill" style="padding:4px 10px;font-size:12px">＋</span></div>
+        </div>
+
+        <div class="sec">
+          <h5>Apprentissage</h5>
+          <div class="mute">Dernière proposition rejetée</div>
+          <div class="row" style="margin-top:6px"><span class="pill">Apprendre maintenant</span></div>
+        </div>
+
+        <div class="sec">
+          <h5>Décisions récentes</h5>
+          <ul class="log" style="margin:0;padding-left:16px">
+            <li>14:02 · Chauffage 19° — programme bloc 1</li>
+            <li>13:47 · AC 17° (−2,0) — correction</li>
+            <li>11:30 · En attente — fenêtre ouverte</li>
+          </ul>
+          <div class="fold">▸ Plus anciennes</div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+</body></html>

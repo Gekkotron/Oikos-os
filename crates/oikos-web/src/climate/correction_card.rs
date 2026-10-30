@@ -1,4 +1,5 @@
-//! The thermometer correction card of a room: a switch and the numbers that tune it.
+//! The thermometer correction card of a room: a switch, a one-line summary and, folded under
+//! Advanced settings, the numbers that tune it.
 //!
 //! Every change sends the whole zone settings, as the room's other controls do.
 
@@ -8,10 +9,14 @@ use oikos_climate::doc::{FeedbackSettings, ZoneSettings};
 use oikos_climate::view::ZoneView;
 
 use crate::api::climate as api;
+use crate::climate::correction_summary;
 use crate::climate::settings_sheet::{NumField, Unit};
 use crate::components::toast::Toasts;
 use crate::i18n::climate::{ClimateText, could_not_save, use_climate_text};
 use crate::i18n::use_lang;
+
+/// How many fields the Advanced settings fold holds.
+const FIELDS: usize = 7;
 
 /// The quiet limit in hours, for the field.
 fn quiet_hours(min: u32) -> f64 {
@@ -30,8 +35,11 @@ pub fn CorrectionCard(zone: Signal<ZoneView>, on_changed: Callback<()>) -> impl 
     let t = use_climate_text();
     let id = zone.with_untracked(|z| z.zone.clone());
 
-    let enabled = move || zone.with(|z| z.settings.feedback.enabled);
-    let has_sensor = move || zone.with(|z| z.room_sensor.is_some() || z.settings.sensor.is_some());
+    // Memos, so a refetch that changes neither keeps the fields and an opened fold as they are.
+    let enabled = Memo::new(move |_| zone.with(|z| z.settings.feedback.enabled));
+    let has_sensor =
+        Memo::new(move |_| zone.with(|z| z.room_sensor.is_some() || z.settings.sensor.is_some()));
+    let summary = move || zone.with(|z| correction_summary(lang(), &z.settings.feedback));
 
     // Applies `edit` to the zone's feedback settings and saves the whole settings.
     let save = {
@@ -56,7 +64,7 @@ pub fn CorrectionCard(zone: Signal<ZoneView>, on_changed: Callback<()>) -> impl 
     let toggle = {
         let save = save.clone();
         move |_| {
-            let on = !enabled();
+            let on = !enabled.get_untracked();
             save(Box::new(move |f| f.enabled = on));
         }
     };
@@ -80,8 +88,8 @@ pub fn CorrectionCard(zone: Signal<ZoneView>, on_changed: Callback<()>) -> impl 
     };
 
     let fields = move || {
-        enabled().then(|| {
-            view! {
+        enabled.get().then(|| {
+            let fields = view! {
                 {num(ClimateText::CorrectionStep, Unit::Celsius, |f| f.step, |f, v| f.step = v)}
                 {num(ClimateText::CorrectionBand, Unit::Celsius, |f| f.band, |f, v| f.band = v)}
                 {num(
@@ -114,6 +122,13 @@ pub fn CorrectionCard(zone: Signal<ZoneView>, on_changed: Callback<()>) -> impl 
                     |f| quiet_hours(f.quiet_limit_min),
                     |f, v| f.quiet_limit_min = quiet_minutes(v),
                 )}
+            };
+            view! {
+                <p class="climate-field__hint">{summary}</p>
+                <details class="climate-correction__more">
+                    <summary>{move || format!("{} ({FIELDS})", t(ClimateText::AdvancedSettings))}</summary>
+                    <div class="climate-correction__fields">{fields}</div>
+                </details>
             }
         })
     };
@@ -126,15 +141,15 @@ pub fn CorrectionCard(zone: Signal<ZoneView>, on_changed: Callback<()>) -> impl 
                     type="button"
                     role="switch"
                     class="switch"
-                    class:switch--on=enabled
-                    aria-checked=move || enabled().to_string()
+                    class:switch--on=move || enabled.get()
+                    aria-checked=move || enabled.get().to_string()
                     on:click=toggle
                 >
                     <span class="switch__knob"></span>
                 </button>
             </label>
             {move || {
-                if has_sensor() {
+                if has_sensor.get() {
                     fields().into_any()
                 } else {
                     view! { <p class="climate-field__hint">{move || t(ClimateText::CorrectionNoSensor)}</p> }
