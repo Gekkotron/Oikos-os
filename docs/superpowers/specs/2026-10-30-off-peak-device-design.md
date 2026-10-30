@@ -34,7 +34,7 @@ is any entity the hub knows; the values that mean off-peak are chosen by the use
 
 ## Non-goals
 
-- Tariff prices, Tempo/day-colour logic, more than two periods. A device that reports several
+- Tariff prices, day-colour tariffs, more than two periods. A device that reports several
   off-peak codes is handled by selecting all of them as off-peak values.
 - Notify text tokens (`{…}`) for the off-peak state.
 - The Android app.

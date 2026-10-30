@@ -177,6 +177,12 @@ fn instructions() -> String {
          optional `offset_minutes` in [-720, 720] moves dusk by that much and dawn by the \
          opposite (`-30`: dark 30 minutes earlier in the evening and until 30 minutes later in \
          the morning). \
+         Off-peak: `trigger.off_peak` with `edge` `start` or `end` fires when off-peak starts \
+         or ends (trigger value `\"start\"` / `\"end\"`), and `if` with `op: is_off_peak` (no \
+         operand) is true during off-peak. Off-peak comes from the home settings' \
+         `off_peak_device` (`{{entity, values}}`: the entity whose state, matched as `on`/`off`, \
+         a plain number or its text, is one of `values`) when that entity has a usable \
+         reading, else from the `off_peak` windows; with neither it is never off-peak. \
          Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`; the hub falls back to \
          Paris otherwise and reports a warning on save. `get_history` returns one slice of an entity's history — a chart \
          series (`what: series` with `range`), kWh per day (`daily` with `days` and \
@@ -289,6 +295,14 @@ mod tests {
         }
         assert!(text.contains("lightOnBrightness"));
         assert!(text.contains(SNAPSHOT_URI));
+    }
+
+    #[test]
+    fn mcp_instructions_mention_off_peak_nodes() {
+        let instr = instructions();
+        assert!(instr.contains("trigger.off_peak"));
+        assert!(instr.contains("is_off_peak"));
+        assert!(instr.contains("off_peak_device"));
     }
 
     #[test]

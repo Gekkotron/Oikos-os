@@ -36,11 +36,12 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
   - `trigger.signal`: a remote press, an event entity or a tag scan.
   - `trigger.schedule`: a five-field cron expression in the house time zone (the time zone of your home location, set in the setup wizard or **Settings → Location**; the hub's system zone when none is set).
   - `trigger.sun`: sunrise, sunset, dusk or dawn, with an optional `offset_minutes`.
+  - `trigger.off_peak`: off-peak starts or ends (`edge`), following the off-peak device or the off-peak hours in **Settings → Home**.
   - `trigger.manual`: a button you press on the card (see [Manual trigger](#manual-trigger)). It has an optional `value`: an on/off bool, a number or text.
 - **Checks** branch:
   - `switch` compares one value with up to 10 rules and has one output per rule (see [Branch on several values](#branch-on-several-values)).
   - `time.between` is true inside a daily range of the clock (see [Only at certain hours](#only-at-certain-hours)).
-  - `if` compares a value with `value` using `op` (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`), or uses `op: is_dark`, which is true between civil dusk and civil dawn at the configured point. Give `is_dark` an `offset_minutes` (the card's Shift field) to move that window: `-30` makes it dark 30 minutes before civil dusk and keeps it dark until 30 minutes after civil dawn. The two outputs are `true` and `false`. Add `average` (for example `15m`, at most `24h`) to compare the mean of the entity's readings over that window, the newest included, instead of its current value: a temperature whose 30-minute average is 19 or less, rather than one noisy reading.
+  - `if` compares a value with `value` using `op` (`eq`, `ne`, `gt`, `lt`, `gte`, `lte`), or uses `op: is_dark`, which is true between civil dusk and civil dawn at the configured point, or `op: is_off_peak`, which is true during off-peak hours. Give `is_dark` an `offset_minutes` (the card's Shift field) to move that window: `-30` makes it dark 30 minutes before civil dusk and keeps it dark until 30 minutes after civil dawn. The two outputs are `true` and `false`. Add `average` (for example `15m`, at most `24h`) to compare the mean of the entity's readings over that window, the newest included, instead of its current value: a temperature whose 30-minute average is 19 or less, rather than one noisy reading.
 - **Actions** do something:
   - `command` sends a command to an entity.
   - `notify` sends a phone push notification.

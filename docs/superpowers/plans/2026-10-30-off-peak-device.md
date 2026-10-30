@@ -194,7 +194,7 @@ Rules (the spec's, made exact):
 
 - [ ] **Step 1:** Add `trigger.off_peak` (`edge`: `start`|`end`, trigger value `"start"`/`"end"`) and `op: is_off_peak` beside `trigger.sun` / `is_dark` in the MCP instructions and `flow-nodes.md`; the four set-ups table from the spec in `web-ui.md`; one paragraph in `history.md`; the field in `http-api.md`. Generic wording only.
 - [ ] **Step 2:** `cargo test -p oikos-os mcp` → PASS (instruction snapshot tests, if any, updated).
-- [ ] **Step 3:** `grep -rniE "linky|zlinky|enedis|tempo" crates docs --include='*.rs' --include='*.md' | grep -v superpowers` → no new hits.
+- [ ] **Step 3:** grep the changed code and docs for vendor, meter-model and utility names → no hits.
 - [ ] **Step 4: Commit** `docs: off-peak device, trigger and check`.
 
 ### Final verification
