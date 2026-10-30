@@ -13,8 +13,8 @@ use oikos_climate::view::ZoneView;
 
 use crate::api::climate::{self as api, OverrideBody};
 use crate::climate::{
-    TARGET_STEP, can_hold, degrees_text, hold_minutes, minutes_to_next_change, start_target,
-    step_target,
+    TARGET_STEP, can_hold, degrees_text, hold_minutes, minutes_to_next_change, setpoint_text,
+    start_target, step_target,
 };
 use crate::components::toast::Toasts;
 use crate::i18n::climate::{ClimateText, use_climate_text};
@@ -35,6 +35,7 @@ pub fn TargetStepper(
     let lang = use_lang();
     let t = use_climate_text();
     let toasts = expect_context::<Toasts>();
+    let id = StoredValue::new(zone.with_untracked(|z| z.zone.clone()));
 
     // The pressed target, from the first press until the refetch after its send.
     let draft = RwSignal::new(None::<f64>);
@@ -44,12 +45,35 @@ pub fn TargetStepper(
     let chips_open = RwSignal::new(false);
     let send_timer = StoredValue::new_local(None::<Timeout>);
     let chips_timer = StoredValue::new_local(None::<Timeout>);
+    // Counts the presses: a reply to a send older than the last press changes nothing shown.
+    let presses = StoredValue::new(0_u32);
+    // The pressed value and its hold minutes while the send waits for the pause.
+    let unsent = StoredValue::new(None::<(f64, u32)>);
+
+    // A press still waiting when the card goes away is sent anyway, without the chips.
     on_cleanup(move || {
         send_timer.try_set_value(None);
         chips_timer.try_set_value(None);
+        let unsent = unsent.try_update_value(Option::take).flatten();
+        if let (Some((v, minutes)), Some(id)) = (unsent, id.try_get_value()) {
+            let body = OverrideBody {
+                setpoint: Some(Setpoint::Temp(v)),
+                minutes: Some(minutes),
+                ..OverrideBody::default()
+            };
+            spawn_local(async move {
+                if let Err(e) = api::set_override(&id, body).await {
+                    toasts.push(e.error);
+                }
+            });
+        }
     });
 
+    // Where − / + start from; what shows is the same, except "Off" when the engine decided off.
     let shown = Memo::new(move |_| draft.get().or_else(|| zone.with(start_target)));
+    let decided_off = Memo::new(move |_| {
+        zone.with(|z| z.decision.as_ref().and_then(|d| d.setpoint) == Some(Setpoint::Off))
+    });
     let holdable = Memo::new(move |_| zone.with(|z| can_hold(z.settings.state)));
     let next_change = move || {
         zone.with(|z| {
@@ -77,14 +101,21 @@ pub fn TargetStepper(
     };
     // `offer_chips`: a hold from the presses offers the chips; one from a chip does not.
     let send = move |v: f64, minutes: u32, offer_chips: bool| {
-        let id = zone.with_untracked(|z| z.zone.clone());
+        let id = id.get_value();
+        let mine = presses.get_value();
         let body = OverrideBody {
             setpoint: Some(Setpoint::Temp(v)),
             minutes: Some(minutes),
             ..OverrideBody::default()
         };
         spawn_local(async move {
-            match api::set_override(&id, body).await {
+            let result = api::set_override(&id, body).await;
+            let current = presses.try_get_value() == Some(mine);
+            match result {
+                Ok(()) if !current => {
+                    on_changed.try_run(());
+                }
+                Err(e) if !current => toasts.push(e.error),
                 Ok(()) => {
                     last_sent.try_set(Some(v));
                     if offer_chips {
@@ -92,7 +123,7 @@ pub fn TargetStepper(
                         chips_timer.try_set_value(Some(Timeout::new(CHIPS_FOR_MS, close_chips)));
                     }
                     awaiting.try_set(true);
-                    on_changed.run(());
+                    on_changed.try_run(());
                 }
                 Err(e) => {
                     toasts.push(e.error);
@@ -109,9 +140,13 @@ pub fn TargetStepper(
         draft.set(Some(v));
         // A new press starts a new change: a refetch now must not drop it.
         awaiting.set(false);
+        presses.update_value(|n| *n = n.wrapping_add(1));
         close_chips();
+        unsent.set_value(Some((v, hold_minutes(untrack(next_change)))));
         let timer = Timeout::new(SEND_AFTER_MS, move || {
-            send(v, hold_minutes(untrack(next_change)), true);
+            if let Some((v, minutes)) = unsent.try_update_value(Option::take).flatten() {
+                send(v, minutes, true);
+            }
         });
         send_timer.set_value(Some(timer));
     };
@@ -124,6 +159,9 @@ pub fn TargetStepper(
 
     let disabled = move || !holdable.get() || shown.with(Option::is_none);
     let value = move || {
+        if draft.with(Option::is_none) && decided_off.get() {
+            return setpoint_text(lang(), Some(Setpoint::Off));
+        }
         shown
             .get()
             .map_or_else(|| "—".to_owned(), |v| degrees_text(lang(), v))

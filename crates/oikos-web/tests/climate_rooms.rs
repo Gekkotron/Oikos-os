@@ -971,3 +971,94 @@ async fn the_house_gear_opens_the_settings_popup() {
     settle().await;
     assert!(host.query_selector("dialog").unwrap().is_none());
 }
+
+#[wasm_bindgen_test]
+async fn a_late_reply_does_not_undo_a_newer_press() {
+    let stub = FetchStub::install();
+    stub.reply_after("POST", OVERRIDE_URL, 200, "{}", 500);
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let host = mount_stepper(current).await;
+    let raise = step_button(&host, "Raise target");
+
+    raise.click();
+    // 19.5 is sent at 1.5 s and answered at 2 s; a press in between makes 20.
+    gloo_timers::future::TimeoutFuture::new(1_600).await;
+    assert_eq!(posts(&stub).len(), 1);
+    raise.click();
+    tick().await;
+    assert_eq!(stepper_value(&host), "20°");
+    gloo_timers::future::TimeoutFuture::new(600).await;
+    current.set(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.5),
+    ));
+    settle().await;
+    assert_eq!(stepper_value(&host), "20°", "the newer press stays");
+    assert!(
+        host.query_selector(".climate-stepper__chips")
+            .unwrap()
+            .is_none(),
+        "no chips for the older value"
+    );
+
+    past_the_pause().await;
+    let sent = posts(&stub);
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    assert!(
+        sent[1].contains("\"setpoint\":20.0") || sent[1].contains("\"setpoint\":20,"),
+        "{}",
+        sent[1]
+    );
+}
+
+#[wasm_bindgen_test]
+async fn an_off_decision_shows_off() {
+    let mut z = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    z.decision.as_mut().unwrap().setpoint = Some(Setpoint::Off);
+    let host = mount_stepper(RwSignal::new(z)).await;
+    assert_eq!(stepper_value(&host), "Off");
+}
+
+#[wasm_bindgen_test]
+async fn a_press_is_sent_when_the_card_goes_away() {
+    let stub = FetchStub::install();
+    stub.reply("POST", OVERRIDE_URL, 200, "{}");
+    let current = RwSignal::new(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ));
+    let shown = RwSignal::new(true);
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(RwSignal::new(Lang::En));
+        view! {
+            <Show when=move || shown.get()>
+                <TargetStepper
+                    zone=current.into()
+                    now=Signal::from((Day::Mon, 0))
+                    on_changed=Callback::new(|_| {})
+                />
+            </Show>
+        }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+
+    step_button(&host, "Raise target").click();
+    tick().await;
+    shown.set(false);
+    settle().await;
+    let sent = posts(&stub);
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(sent[0].contains("\"setpoint\":19.5"), "{}", sent[0]);
+}
