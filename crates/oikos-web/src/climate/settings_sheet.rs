@@ -15,7 +15,7 @@ use crate::i18n::climate::{ClimateText, could_not_save, fan_choice, use_climate_
 use crate::i18n::format::{input_number, parse_decimal};
 use crate::i18n::picker::PickerText;
 use crate::i18n::states::{StateCtx, state_word};
-use crate::i18n::{Key, use_lang, use_text};
+use crate::i18n::use_lang;
 
 fn season_value(s: Season) -> &'static str {
     match s {
@@ -141,7 +141,6 @@ pub fn SettingsSheet(
     let toasts = expect_context::<Toasts>();
     let lang = use_lang();
     let t = use_climate_text();
-    let text = use_text();
     let draft = RwSignal::new(house);
     let none_text = Signal::derive(move || t(ClimateText::None).to_owned());
     let saving = RwSignal::new(false);
@@ -177,8 +176,7 @@ pub fn SettingsSheet(
     };
 
     view! {
-        <section class="climate-settings card" aria-label=move || t(ClimateText::SettingsLabel)>
-            <h2 class="climate-settings__title">{move || text(Key::Settings)}</h2>
+        <section class="climate-settings" aria-label=move || t(ClimateText::SettingsLabel)>
             <label class="climate-field">
                 <span class="climate-field__label">{move || t(ClimateText::Season)}</span>
                 <select

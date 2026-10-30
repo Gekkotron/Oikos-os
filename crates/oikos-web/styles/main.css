@@ -7161,6 +7161,7 @@ dialog.popup::backdrop {
 
 /* The room card (climate/room_card.rs): ⚙, target on the right, why, holds, actions. */
 .climate-card__gear,
+.climate-screen__gear,
 .climate-card__clear {
   display: flex;
   flex: none;
@@ -7173,7 +7174,8 @@ dialog.popup::backdrop {
   cursor: pointer;
 }
 
-.climate-card__gear {
+.climate-card__gear,
+.climate-screen__gear {
   width: 36px;
   height: 36px;
   margin-left: auto;
@@ -7189,14 +7191,21 @@ dialog.popup::backdrop {
 }
 
 .climate-card__gear:hover,
+.climate-screen__gear:hover:not(:disabled),
 .climate-card__clear:hover {
   background: var(--select-soft);
 }
 
 .climate-card__gear:focus-visible,
+.climate-screen__gear:focus-visible,
 .climate-card__clear:focus-visible {
   outline: 2px solid var(--accent-mint);
   outline-offset: 0;
+}
+
+.climate-screen__gear:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .climate-card__target {
@@ -7386,7 +7395,6 @@ dialog.popup::backdrop {
   gap: 12px 16px;
 }
 
-.climate-settings__title,
 .climate-settings__group,
 .climate-field__hint,
 .climate-settings > .segmented {
@@ -7401,10 +7409,6 @@ dialog.popup::backdrop {
   margin: 0;
   font: var(--type-label);
   color: var(--muted);
-}
-
-.climate-settings__title {
-  margin: 0;
 }
 
 .climate-settings > .segmented {

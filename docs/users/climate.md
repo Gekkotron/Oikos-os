@@ -16,17 +16,31 @@ Settings are retained documents under that prefix. While climate is off the REST
 
 ## The Climate screen
 
-The **Climate** tab appears when climate is on. It lists the rooms with their state, the current reading and what the engine decided (the source and the reason). Open a room to see its panel:
+The **Climate** tab appears when climate is on. It lists the rooms with their state, the current reading and what the engine decided (the source and the reason). Open a room to see its panel.
 
-- **Zone state**: Off, Pending or Active.
+The room card:
+
+- **Now**: the current reading, with the room thermometer's own value and age when it is more than 15 minutes old.
+- **Target**: the decided temperature with **−** and **+**. Each press moves it by 0.5 °C; once you stop, one hold is sent, until the next schedule change (two hours when there is none). Chips then offer the same target for **1 h**, **2 h** or **Until next change** for a few seconds.
+- Under the figures, why the engine chose the target (its source and reason).
+- Active holds, one chip each, with a **✕** that clears them.
+- **Zone state**: Off, Pending or Active. **−** and **+** only work in an Active room.
+- **Eco…** opens a small popup to start eco until a date and time; a running eco reads **Eco until …** with a **✕** that cancels it (see [Eco](#eco)).
+
+The **⚙** on the card opens the room's settings:
+
 - **Room thermometer**: Automatic (the room's own temperature sensor when it has one, else the mean of its climate devices' readings) or a sensor you pick.
-- **Hold temperature**: a zone override, **Until next change** or until a time you set. Active holds are listed with a **Clear** button.
-- **Eco until…** and **Cancel eco** (see [Eco](#eco)).
-- **This week**: the approved schedule as a week calendar, with a base temperature and coloured blocks. **Create schedule** starts one when there is none, **Edit schedule** changes it, and you tap an empty spot to add a block.
-- **Proposed schedule**: what the learner found, with **Approve**, **Reject** and, after you edit it, **Approve edited**. **Learn now** runs the learner on demand.
+- **Thermometer correction**: the switch, a one-line summary of the step, tolerance and interval, and its seven numbers folded under **Advanced settings** (see [Thermometer correction](#thermometer-correction)).
+- **Room presence** (see [Room presence](#room-presence)).
+- **Learning**: where the learner stands, and **Learn now** to run it on demand.
 - **Recent decisions**: the engine's last decisions for the room.
 
-The **Settings** button opens **Climate settings**, the house document (see below). Banners explain when learning is off or [History](history.md) is not set up.
+Below the card:
+
+- **This week**: the approved schedule as a week calendar, with a base temperature and coloured blocks. **Create schedule** starts one when there is none, **Edit schedule** changes it, and you tap an empty spot to add a block.
+- **Proposed schedule**: what the learner found, with **Approve**, **Reject** and, after you edit it, **Approve edited**.
+
+The **⚙** in the page header opens **Settings**, the house document (see below). Banners explain when learning is off or [History](history.md) is not set up.
 
 ## House settings
 

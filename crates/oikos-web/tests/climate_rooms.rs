@@ -913,3 +913,61 @@ async fn correction_fields_fold_under_advanced() {
         .expect("still there");
     assert!(fold.has_attribute("open"), "still open");
 }
+
+#[wasm_bindgen_test]
+async fn the_house_gear_opens_the_settings_popup() {
+    let stub = FetchStub::install();
+    let climate = oikos_climate::view::ClimateView {
+        enabled: true,
+        house: Default::default(),
+        house_invalid: None,
+        history: true,
+        timezone: "UTC".into(),
+        zones: vec![zone(
+            "living-room",
+            "Living room",
+            ZoneState::Active,
+            Some(19.0),
+        )],
+    };
+    stub.reply(
+        "GET",
+        "/api/v1/climate",
+        200,
+        &serde_json::to_string(&climate).unwrap(),
+    );
+    let host = host();
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(House::new());
+        provide_context(oikos_web::components::now::install_now());
+        provide_context(RwSignal::new(Lang::En));
+        view! { <oikos_web::screens::climate::ClimateScreen /> }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+    settle().await;
+    assert!(host.query_selector("dialog").unwrap().is_none());
+
+    let gear = host
+        .query_selector(".climate-screen__gear")
+        .unwrap()
+        .expect("the house ⚙");
+    assert_eq!(
+        gear.get_attribute("aria-label").as_deref(),
+        Some("House settings")
+    );
+    gear.unchecked_into::<HtmlElement>().click();
+    settle().await;
+    let dialog = host
+        .query_selector("dialog.popup")
+        .unwrap()
+        .expect("the house settings popup");
+    let text = dialog.text_content().unwrap_or_default();
+    assert!(text.contains("Season"), "{text}");
+
+    let cancel = web_sys::Event::new("cancel").unwrap();
+    dialog.dispatch_event(&cancel).unwrap();
+    settle().await;
+    assert!(host.query_selector("dialog").unwrap().is_none());
+}

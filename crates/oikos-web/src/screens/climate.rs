@@ -1,7 +1,7 @@
-//! The Climate screen: the room list, the selected room's panel, the house settings and the
-//! engine's banners.
+//! The Climate screen: the room list, the selected room's panel, the house settings behind a ⚙
+//! and the engine's banners.
 //!
-//! Only the zone list is keyed by zone id; the panels, the settings sheet and their local state
+//! Only the zone list is keyed by zone id; the panels, the settings popup and their local state
 //! live outside the closures that react to a refetch, so a refresh never resets them. Every
 //! room's panel stays mounted and only the selected one shows, so switching rooms keeps an edit
 //! in progress too.
@@ -16,6 +16,7 @@ use crate::climate::room_list::RoomList;
 use crate::climate::room_panel::RoomPanel;
 use crate::climate::settings_sheet::SettingsSheet;
 use crate::climate::{parse_zone, pick_zone};
+use crate::components::popup::Popup;
 use crate::house::House;
 use crate::i18n::climate::{ClimateText, use_climate_text};
 use crate::i18n::{Key, use_text};
@@ -89,12 +90,15 @@ pub fn ClimateScreen() -> impl IntoView {
                     </h1>
                     <p class="sheet__subtitle">{move || t(ClimateText::Subtitle)}</p>
                 </div>
+                // Disabled until the settings are loaded, so the draft never starts from defaults.
                 <button
                     type="button"
-                    class="btn btn--compact"
-                    on:click=move |_| settings_open.update(|o| *o = !*o)
+                    class="climate-screen__gear"
+                    aria-label=move || t(ClimateText::HouseSettings)
+                    disabled=move || !loaded()
+                    on:click=move |_| settings_open.set(true)
                 >
-                    {move || text(Key::Settings)}
+                    "⚙"
                 </button>
             </header>
             {move || failed.get().map(|e| view! { <p class="badge climate__error">{e}</p> })}
@@ -111,9 +115,9 @@ pub fn ClimateScreen() -> impl IntoView {
                         </p>
                     })
             }}
-            // Built when the sheet opens from the settings of that moment; a refetch leaves the
+            // Built when the popup opens from the settings of that moment; a refetch leaves the
             // draft alone.
-            <Show when=move || settings_open.get() && loaded()>
+            <Popup open=settings_open title=Signal::derive(move || text(Key::Settings).to_owned())>
                 {move || {
                     let current = climate.get_untracked().map(|v| v.house).unwrap_or_default();
                     view! {
@@ -127,7 +131,7 @@ pub fn ClimateScreen() -> impl IntoView {
                         />
                     }
                 }}
-            </Show>
+            </Popup>
             <Show when=move || loaded() && ids.with(|i| i.is_empty())>
                 <p class="climate-screen__empty">{move || t(ClimateText::NoRoomClimate)}</p>
             </Show>
