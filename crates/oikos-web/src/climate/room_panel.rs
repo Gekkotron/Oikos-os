@@ -7,7 +7,6 @@
 use chrono_tz::Tz;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use oikos_api::ApiError;
 use oikos_climate::doc::{Mode, Override, OverrideOrigin, Setpoint, ZoneState};
 use oikos_climate::view::{DecisionLog, ZoneView};
 
@@ -17,9 +16,9 @@ use crate::climate::entity_field::ThermometerField;
 use crate::climate::presence_card::PresenceCard;
 use crate::climate::proposal::{ProposalPanel, RulesPanel};
 use crate::climate::{
-    age_text, can_hold, decision_line, degrees_text, eco_end_text, eco_until, learn_status_text,
-    minutes_to_next_change, mode_word, row_line, setpoint_text, source_word, until_text,
-    week_minute,
+    act, age_text, can_hold, decision_line, degrees_text, eco_end_text, eco_until,
+    learn_status_text, minutes_to_next_change, mode_word, row_line, setpoint_text, source_word,
+    until_text, week_minute,
 };
 use crate::components::now::{Now, unix_now};
 use crate::components::toast::Toasts;
@@ -64,19 +63,6 @@ fn override_text(lang: Lang, o: &Override, now: u64, tz: Tz) -> String {
 /// A typed temperature ("19.5" or "19,5"), when it is a usable number.
 fn parse_setpoint(text: &str) -> Option<f64> {
     parse_decimal(text)
-}
-
-/// Runs `work`, then refreshes the screen; a failure becomes a toast.
-fn act<F>(toasts: Toasts, on_changed: Callback<()>, work: F)
-where
-    F: std::future::Future<Output = Result<(), ApiError>> + 'static,
-{
-    spawn_local(async move {
-        match work.await {
-            Ok(()) => on_changed.run(()),
-            Err(e) => toasts.push(e.error),
-        }
-    });
 }
 
 #[component]

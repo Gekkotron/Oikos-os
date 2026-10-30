@@ -7219,6 +7219,40 @@ dialog.popup::backdrop {
   color: var(--muted);
 }
 
+/* The room's eco (climate/eco_pill.rs): "Eco…", or "Eco until …" with a ✕. */
+.climate-eco-pill--on {
+  gap: 4px;
+  padding-right: 4px;
+  border-color: transparent;
+  background: var(--accent-soft);
+  cursor: default;
+}
+
+.climate-eco-pill__cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.climate-eco-pill__cancel:hover {
+  background: var(--select-soft);
+}
+
+.climate-eco-pill__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .climate-room__eco {
   margin-left: 6px;
   font: var(--type-label);

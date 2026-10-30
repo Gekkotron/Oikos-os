@@ -6,6 +6,7 @@ use oikos_climate::doc::{
     Block, Day, Decision, HhMm, Mode, ModeRules, Rules, Setpoint, Source, ZoneSettings, ZoneState,
 };
 use oikos_climate::view::{LearnStatus, ZoneView};
+use oikos_web::climate::eco_pill::EcoPill;
 use oikos_web::climate::proposal::RulesPanel;
 use oikos_web::climate::room_list::RoomList;
 use oikos_web::climate::room_panel::RoomPanel;
@@ -627,4 +628,101 @@ async fn a_pending_room_cannot_step() {
             "{label}"
         );
     }
+}
+
+const ECO_URL: &str = "/api/v1/climate/zones/living-room/eco";
+
+/// The eco pill alone, in English, in UTC.
+async fn mount_eco(zone: ZoneView) -> Element {
+    let host = host();
+    let current = RwSignal::new(zone);
+    let mounted = leptos::mount::mount_to(host.clone().unchecked_into(), move || {
+        provide_context(Toasts::new());
+        provide_context(RwSignal::new(Lang::En));
+        provide_context(oikos_web::components::now::install_now());
+        view! {
+            <EcoPill
+                zone=current.into()
+                tz=Signal::from(chrono_tz::Tz::UTC)
+                on_changed=Callback::new(|_| {})
+            />
+        }
+    });
+    std::mem::forget(mounted);
+    settle().await;
+    host
+}
+
+fn requests_to(stub: &FetchStub, method: &str, url: &str) -> usize {
+    stub.requests()
+        .into_iter()
+        .filter(|r| r.method == method && r.url == url)
+        .count()
+}
+
+#[wasm_bindgen_test]
+async fn eco_starts_from_the_pill() {
+    let stub = FetchStub::install();
+    stub.reply("PUT", ECO_URL, 200, "{}");
+    let host = mount_eco(zone(
+        "living-room",
+        "Living room",
+        ZoneState::Active,
+        Some(19.0),
+    ))
+    .await;
+
+    find_button(&host, "Eco…").expect("eco pill").click();
+    settle().await;
+    let dialog = host
+        .query_selector("dialog.popup--small")
+        .unwrap()
+        .expect("the eco popup");
+    let date: HtmlInputElement = dialog
+        .query_selector("input[type=date]")
+        .unwrap()
+        .expect("date")
+        .unchecked_into();
+    assert!(dialog.query_selector("input[type=time]").unwrap().is_some());
+    date.set_value("2099-01-01");
+    date.dispatch_event(&web_sys::Event::new("input").unwrap())
+        .unwrap();
+    tick().await;
+
+    find_button(&host, "Start eco").expect("Start eco").click();
+    settle().await;
+    assert_eq!(requests_to(&stub, "PUT", ECO_URL), 1);
+    assert!(host.query_selector("dialog").unwrap().is_none());
+}
+
+#[wasm_bindgen_test]
+async fn a_running_eco_cancels_in_one_tap() {
+    let stub = FetchStub::install();
+    stub.reply("DELETE", ECO_URL, 200, "{}");
+    let mut z = zone("living-room", "Living room", ZoneState::Active, Some(19.0));
+    z.eco = Some(oikos_climate::doc::RoomEco {
+        until: 4_000_000_000,
+        set_at: 0,
+    });
+    let host = mount_eco(z).await;
+    let pill = host
+        .query_selector(".climate-eco-pill")
+        .unwrap()
+        .expect("eco pill");
+    let text = pill.text_content().unwrap_or_default();
+    assert!(text.contains("Eco until"), "{text}");
+
+    pill.query_selector("button[aria-label='Cancel eco']")
+        .unwrap()
+        .expect("cancel")
+        .unchecked_into::<HtmlElement>()
+        .click();
+    settle().await;
+    assert_eq!(requests_to(&stub, "DELETE", ECO_URL), 1);
+}
+
+#[wasm_bindgen_test]
+async fn an_off_room_has_no_eco_pill() {
+    let host = mount_eco(zone("living-room", "Living room", ZoneState::Off, None)).await;
+    assert!(host.query_selector(".climate-eco-pill").unwrap().is_none());
 }

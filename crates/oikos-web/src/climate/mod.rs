@@ -1,6 +1,7 @@
 //! The Climate screen's parts: the zone card, the settings sheet and the pure text helpers.
 
 pub mod correction_card;
+pub mod eco_pill;
 pub mod entity_field;
 pub mod presence_card;
 pub mod proposal;
@@ -12,6 +13,9 @@ pub mod timeline;
 
 use chrono::{DateTime, Datelike, Timelike};
 use chrono_tz::Tz;
+use leptos::prelude::{Callable, Callback};
+use leptos::task::spawn_local;
+use oikos_api::ApiError;
 use oikos_api::EntityView;
 use oikos_climate::doc::{
     Day, Decision, FeedbackSettings, Mode, Rules, Setpoint, Source, ZoneState,
@@ -19,6 +23,7 @@ use oikos_climate::doc::{
 use oikos_climate::view::{DecisionRow, LearnStatus, ZoneView};
 use oikos_core::model::Kind;
 
+use crate::components::toast::Toasts;
 use crate::i18n::Lang;
 use crate::i18n::climate::{ClimateText, climate_text, correction_summary_line, learning_progress};
 use crate::i18n::format::{ago, decimal, month_short, weekday_short};
@@ -384,6 +389,19 @@ pub fn minutes_to_next_change(rules: &Rules, mode: Mode, today: Day, minute: u16
         }
     }
     best
+}
+
+/// Runs `work`, then refreshes the screen; a failure becomes a toast.
+pub(crate) fn act<F>(toasts: Toasts, on_changed: Callback<()>, work: F)
+where
+    F: std::future::Future<Output = Result<(), ApiError>> + 'static,
+{
+    spawn_local(async move {
+        match work.await {
+            Ok(()) => on_changed.run(()),
+            Err(e) => toasts.push(e.error),
+        }
+    });
 }
 
 /// How far one − / + press moves a room's target.
