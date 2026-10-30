@@ -12,12 +12,14 @@ pub mod timeline;
 use chrono::{DateTime, Datelike, Timelike};
 use chrono_tz::Tz;
 use oikos_api::EntityView;
-use oikos_climate::doc::{Day, Decision, Mode, Rules, Setpoint, Source, ZoneState};
+use oikos_climate::doc::{
+    Day, Decision, FeedbackSettings, Mode, Rules, Setpoint, Source, ZoneState,
+};
 use oikos_climate::view::{DecisionRow, LearnStatus, ZoneView};
 use oikos_core::model::Kind;
 
 use crate::i18n::Lang;
-use crate::i18n::climate::{ClimateText, climate_text, learning_progress};
+use crate::i18n::climate::{ClimateText, climate_text, correction_summary_line, learning_progress};
 use crate::i18n::format::{ago, decimal, month_short, weekday_short};
 use crate::i18n::states::{StateCtx, state_word};
 
@@ -42,12 +44,16 @@ pub fn age_text(lang: Lang, secs: u64) -> String {
 
 /// A temperature without a trailing ".0": `21°`, `20.5°` (`20,5°` in French).
 pub fn degrees_text(lang: Lang, t: f64) -> String {
-    let s = decimal(lang, t, 1);
-    let trimmed = s
-        .strip_suffix(".0")
+    format!("{}°", short_decimal(lang, t))
+}
+
+/// A number with one decimal and no trailing ".0": `21`, `20.5` (`20,5` in French).
+fn short_decimal(lang: Lang, v: f64) -> String {
+    let s = decimal(lang, v, 1);
+    s.strip_suffix(".0")
         .or_else(|| s.strip_suffix(",0"))
-        .unwrap_or(&s);
-    format!("{trimmed}°")
+        .map(str::to_owned)
+        .unwrap_or(s)
 }
 
 pub fn setpoint_text(lang: Lang, sp: Option<Setpoint>) -> String {
@@ -377,6 +383,37 @@ pub fn minutes_to_next_change(rules: &Rules, mode: Mode, today: Day, minute: u16
         }
     }
     best
+}
+
+/// How far one − / + press moves a room's target.
+pub const TARGET_STEP: f64 = 0.5;
+
+/// `current + delta` on the half-degree grid, kept within 0–40 °C.
+pub fn step_target(current: f64, delta: f64) -> f64 {
+    ((current + delta) * 2.0).round().clamp(0.0, 80.0) / 2.0
+}
+
+/// How long a − / + hold lasts: until the next schedule change, else two hours.
+pub fn hold_minutes(next_change: Option<u32>) -> u32 {
+    next_change.unwrap_or(120)
+}
+
+/// The target the − / + start from: the decided temperature, else the rounded reading.
+pub fn start_target(z: &ZoneView) -> Option<f64> {
+    match z.decision.as_ref().and_then(|d| d.setpoint) {
+        Some(Setpoint::Temp(t)) => Some(t),
+        _ => z.reading.map(f64::round),
+    }
+}
+
+/// The correction's main numbers on one line, for under its switch.
+pub fn correction_summary(lang: Lang, f: &FeedbackSettings) -> String {
+    correction_summary_line(
+        lang,
+        &short_decimal(lang, f.step),
+        &short_decimal(lang, f.band),
+        f.interval_min,
+    )
 }
 
 #[cfg(test)]
@@ -815,5 +852,49 @@ mod tests {
         let mut z = decided(z, Setpoint::Temp(16.0));
         z.decision.as_mut().unwrap().source = Source::Away;
         assert!(in_eco(&z, 100));
+    }
+
+    #[test]
+    fn step_target_rounds_and_clamps() {
+        assert_eq!(step_target(19.0, TARGET_STEP), 19.5);
+        assert_eq!(step_target(19.3, TARGET_STEP), 20.0);
+        assert_eq!(step_target(0.2, -TARGET_STEP), 0.0);
+        assert_eq!(step_target(39.8, TARGET_STEP), 40.0);
+    }
+
+    #[test]
+    fn hold_minutes_defaults_to_two_hours() {
+        assert_eq!(hold_minutes(Some(45)), 45);
+        assert_eq!(hold_minutes(None), 120);
+    }
+
+    #[test]
+    fn start_target_prefers_the_decision() {
+        let mut read = zone_view(ZoneState::Active);
+        read.reading = Some(19.6);
+        assert_eq!(
+            start_target(&decided(read.clone(), Setpoint::Temp(18.5))),
+            Some(18.5)
+        );
+        assert_eq!(start_target(&read), Some(20.0));
+        assert_eq!(start_target(&zone_view(ZoneState::Active)), None);
+    }
+
+    #[test]
+    fn correction_summary_reads_in_both_languages() {
+        let f = oikos_climate::doc::FeedbackSettings {
+            step: 0.5,
+            band: 0.5,
+            interval_min: 15,
+            ..Default::default()
+        };
+        assert_eq!(
+            correction_summary(Lang::En, &f),
+            "Step 0.5 °C · tolerance 0.5 °C · every 15 min"
+        );
+        assert_eq!(
+            correction_summary(Lang::Fr, &f),
+            "Pas 0,5 °C · écart 0,5 °C · toutes les 15 min"
+        );
     }
 }
