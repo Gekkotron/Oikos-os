@@ -313,9 +313,15 @@ pub fn sentence(node: &Node, ctx: &Ctx) -> String {
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(p) => sun_summary(lang, p.which, p.offset()),
         NodeKind::TriggerOffPeak(p) => flow_text(lang, off_peak_edge_text(p.edge)).to_owned(),
-        // Placeholders until the Silent and Limit cards get their words.
-        NodeKind::TriggerSilent(_) => flow_text(lang, FlowText::NodeTrigger).to_owned(),
-        NodeKind::Limit(_) => flow_text(lang, FlowText::NodeDelay).to_owned(),
+        NodeKind::TriggerSilent(p) => {
+            let e = if p.entity.is_empty() {
+                String::new()
+            } else {
+                entity_text(&p.entity, ctx)
+            };
+            t::silent_for(lang, &e, &p.for_)
+        }
+        NodeKind::Limit(p) => t::at_most(lang, p.max, &p.per),
         NodeKind::TriggerManual(p) => {
             let head = flow_text(lang, FlowText::NodeManual);
             match &p.value {
@@ -763,6 +769,21 @@ mod tests {
         let check = r#"{"id":"c","type":"if","params":{"op":"is_off_peak"}}"#;
         assert_eq!(text(check), "Is it off-peak?");
         assert_eq!(text_in(Lang::Fr, check), "Est-ce les heures creuses\u{a0}?");
+    }
+
+    #[test]
+    fn silent_and_limit_cards_read_as_sentences() {
+        let silent = r#"{"id":"s","type":"trigger.silent","params":{"entity":"l1","for":"50m"}}"#;
+        assert_eq!(text(silent), "Lumière TV silent for 50m");
+        assert_eq!(
+            text_in(Lang::Fr, silent),
+            "Lumière TV silencieux depuis 50m"
+        );
+        let unset = r#"{"id":"s","type":"trigger.silent","params":{"entity":"","for":"50m"}}"#;
+        assert_eq!(text(unset), "Silent for 50m");
+        let limit = r#"{"id":"l","type":"limit","params":{"max":4,"per":"24h"}}"#;
+        assert_eq!(text(limit), "At most 4 every 24h");
+        assert_eq!(text_in(Lang::Fr, limit), "Au plus 4 fois par 24h");
     }
 
     #[test]

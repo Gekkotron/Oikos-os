@@ -116,6 +116,8 @@ const NODE_FORK: &str = svg!(
 const NODE_HOURGLASS: &str = svg!(
     r#"<path d="M6 3h12"/><path d="M6 21h12"/><path d="M7 3v3a5 5 0 0 0 2 4l3 2-3 2a5 5 0 0 0-2 4v3"/><path d="M17 3v3a5 5 0 0 1-2 4l-3 2 3 2a5 5 0 0 1 2 4v3"/>"#
 );
+const NODE_SILENT: &str = svg!(r#"<path d="M13 2 4 14h7l-1 8 9-12h-7z"/><path d="M3 3l18 18"/>"#);
+const NODE_LIMIT: &str = svg!(r#"<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>"#);
 const NODE_CLOCK: &str = svg!(r#"<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>"#);
 const NODE_MOON: &str = svg!(r#"<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>"#);
 const NODE_SWITCH: &str =
@@ -311,13 +313,14 @@ pub fn node_icon(kind: &NodeKind) -> &'static str {
         NodeKind::TriggerSchedule(_) => NODE_CLOCK,
         NodeKind::TriggerSun(_) => SUN,
         NodeKind::TriggerOffPeak(_) => NODE_BOLT,
-        NodeKind::TriggerSilent(_) => NODE_BOLT,
+        NodeKind::TriggerSilent(_) => NODE_SILENT,
         NodeKind::TriggerSignal(_) => NODE_BOLT,
         NodeKind::TriggerManual(_) => NODE_PLAY_CIRCLE,
         NodeKind::If(p) if p.op == oikos_core::flow::Op::IsDark => NODE_MOON,
         NodeKind::If(_) | NodeKind::Switch(_) => NODE_FORK,
         NodeKind::TimeBetween(_) => NODE_CLOCK,
-        NodeKind::Delay(_) | NodeKind::Limit(_) => NODE_HOURGLASS,
+        NodeKind::Delay(_) => NODE_HOURGLASS,
+        NodeKind::Limit(_) => NODE_LIMIT,
         NodeKind::Command(_) => NODE_PLAY,
         NodeKind::FlowEnable(_) => NODE_SWITCH,
         NodeKind::Notify(_) => CHANNEL_ALARM,
@@ -337,6 +340,7 @@ pub fn trigger_icon(kind: crate::flow_list::TriggerKind) -> &'static str {
         TriggerKind::Schedule => NODE_CLOCK,
         TriggerKind::Sun => SUN,
         TriggerKind::OffPeak => NODE_BOLT,
+        TriggerKind::Silent => NODE_SILENT,
         TriggerKind::Signal => NODE_SIGNAL,
         TriggerKind::Manual => NODE_PLAY_CIRCLE,
     }

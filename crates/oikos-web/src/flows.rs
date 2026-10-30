@@ -65,8 +65,8 @@ fn summary_label(lang: Lang, node: &Node) -> String {
         NodeKind::TriggerSchedule(p) => describe(lang, &p.cron),
         NodeKind::TriggerSun(_) => flow_text(lang, FlowText::NodeSun).into(),
         NodeKind::TriggerOffPeak(_) => flow_text(lang, FlowText::NodeOffPeak).into(),
-        NodeKind::TriggerSilent(_) => flow_text(lang, FlowText::NodeTrigger).into(),
-        NodeKind::Limit(_) => flow_text(lang, FlowText::NodeDelay).into(),
+        NodeKind::TriggerSilent(_) => flow_text(lang, FlowText::NodeSilent).into(),
+        NodeKind::Limit(_) => flow_text(lang, FlowText::NodeLimit).into(),
         NodeKind::TriggerManual(_) => flow_text(lang, FlowText::NodeManual).into(),
         NodeKind::TriggerSignal(_) => flow_text(lang, FlowText::NodeSignal).into(),
         NodeKind::If(_) => flow_text(lang, FlowText::NodeIf).into(),
@@ -102,6 +102,11 @@ pub fn trigger_summary(lang: Lang, flow: &Flow, entities: &BTreeMap<String, Enti
             NodeKind::TriggerSchedule(p) => Some(describe(lang, &p.cron)),
             NodeKind::TriggerSun(p) => Some(sun_summary(lang, p.which, p.offset())),
             NodeKind::TriggerManual(_) => Some(flow_text(lang, FlowText::NodeManual).into()),
+            NodeKind::TriggerSilent(p) => Some(t::silent_for(
+                lang,
+                &entity_label(lang, &p.entity, entities),
+                &p.for_,
+            )),
             _ => None,
         })
         .collect();
@@ -158,6 +163,10 @@ pub fn trigger_line(
     // The device that decided rides along as the entity: the edge says more than its reading.
     if let Some(NodeKind::TriggerOffPeak(p)) = first.map(|n| &n.kind) {
         return flow_text(lang, off_peak_edge_text(p.edge)).to_owned();
+    }
+    // The silent entity rides along as the entity, the window as the value: say it as a sentence.
+    if let Some(NodeKind::TriggerSilent(p)) = first.map(|n| &n.kind) {
+        return t::silent_for(lang, &entity_label(lang, &p.entity, entities), &p.for_);
     }
     if let Some((trigger, id)) = run
         .trigger
