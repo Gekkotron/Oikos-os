@@ -2082,6 +2082,20 @@ async fn math_formula_error_shows_and_blocks_save() {
 }
 
 #[wasm_bindgen_test]
+async fn math_runtime_failure_shows_but_keeps_save_enabled() {
+    let (host, _mounted, _) = editing(reference_view(None, vec![])).await;
+    open_math_drawer(&host).await;
+    type_into(&input_named(&host, ".math-formula"), "1 / 0", "input");
+    tick().await;
+    let html = host.inner_html();
+    assert!(text(&host, ".math-line--fails").contains("Fails"), "{html}");
+    assert!(
+        !element(&host, ".flow-toolbar button[aria-label=Save]").has_attribute("disabled"),
+        "{html}"
+    );
+}
+
+#[wasm_bindgen_test]
 async fn math_preview_uses_house_values() {
     let (host, _mounted, house) = editing(reference_view(None, vec![])).await;
     let sensor = power_sensor();

@@ -2325,6 +2325,65 @@ async fn unknown_input_fails_the_step() {
 }
 
 #[tokio::test]
+async fn unknown_input_in_the_untaken_branch_is_not_read() {
+    let (hub, publisher, _engine) = math_hub().await;
+    let _log = math_echo(publisher, Arc::clone(&hub), &[]);
+    hub.ingest(
+        TEMP_CONFIG_TOPIC,
+        &fixture("discovery/sensor__0x00124b0008fd6568__temperature_1.json"),
+    );
+    let inputs = serde_json::json!([
+        { "name": "meter", "entity": METER_ID },
+        { "name": "ghost", "entity": TEMP_ID },
+        { "name": "unused", "entity": TEMP_ID },
+    ]);
+    let json = math_flow_json(
+        "m",
+        vec![math_node(
+            "calc",
+            inputs,
+            "if(meter > 0, meter * 2, ghost)",
+            "slider",
+            None,
+        )],
+        vec![edge("t", "calc")],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"7", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Done, "{:?}", run.steps);
+    let detail = &run.steps.last().expect("step").detail;
+    assert_eq!(detail, "meter=7, ghost=?, unused=? → slider = 14");
+}
+
+#[tokio::test]
+async fn command_value_from_is_kept_in_the_entity_range() {
+    let (hub, publisher, _engine) = math_hub().await;
+    let log = math_echo(publisher, Arc::clone(&hub), &[]);
+    let command = serde_json::json!({ "id": "set", "type": "command", "params": {
+        "entity": TARGET_ID, "value_from": "big", "command": { "type": "set_number", "value": 0 } } });
+    let json = math_flow_json(
+        "m",
+        vec![
+            math_node("calc", meter_input(), "meter * 10", "big", None),
+            command,
+        ],
+        vec![edge("t", "calc"), edge("calc", "set")],
+    );
+    let mut events = arm_math_flow(&hub, json).await;
+    hub.ingest_message(METER_TOPIC, b"50", true);
+    let run = next_run(&mut events, |r| r.status != RunStatus::Running).await;
+
+    assert_eq!(run.status, RunStatus::Done, "{:?}", run.steps);
+    assert_eq!(sent_to(&log, TARGET_TOPIC), ["100"]);
+    assert_eq!(
+        run.steps.last().expect("step").detail,
+        "accepted (kept in range)"
+    );
+}
+
+#[tokio::test]
 async fn text_input_fails_the_step() {
     let (hub, publisher, _engine) = math_hub().await;
     let _log = math_echo(publisher, Arc::clone(&hub), &[]);
@@ -2375,6 +2434,15 @@ async fn refused_save_stops_the_run() {
     assert_eq!(run.status, RunStatus::Failed);
     assert_eq!(step_nodes(&run), ["t", "calc"]);
     assert_eq!(run.steps[1].outcome, StepOutcome::Failed);
+    let detail = &run.steps[1].detail;
+    assert!(
+        detail.starts_with("meter=5 → slider = 5 → virtual_target = 5 → "),
+        "{detail}"
+    );
+    assert!(
+        detail.len() > "meter=5 → slider = 5 → virtual_target = 5 → ".len(),
+        "the refusal reason follows: {detail}"
+    );
     assert!(
         sent_to(&log, LED_COMMAND_TOPIC).is_empty(),
         "the command after the refused save never ran"

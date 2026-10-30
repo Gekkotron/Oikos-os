@@ -1234,6 +1234,7 @@ async fn run_node(
             Err(reason) => failed(reason),
         },
         NodeKind::Command(params) => {
+            let mut kept_in_range = false;
             let command = match &params.value_from {
                 Some(name) => {
                     let value = match result_of(results, name) {
@@ -1241,6 +1242,15 @@ async fn run_node(
                         Err(reason) => return failed(reason),
                     };
                     match command_with_number(&params.command, value) {
+                        // A number entity takes what fits its range and step, as `save_to` does.
+                        Some(Command::SetNumber { value }) => {
+                            let Some((min, max, step)) = hub.number_limits(&params.entity) else {
+                                return failed(format!("unknown entity `{}`", params.entity));
+                            };
+                            let (fitted, clamped) = fit_to_entity(value, min, max, step);
+                            kept_in_range = clamped;
+                            Command::SetNumber { value: fitted }
+                        }
                         Some(command) => command,
                         None => return failed("this command takes no number".to_owned()),
                     }
@@ -1249,7 +1259,12 @@ async fn run_node(
             };
             match hub.send_command(&params.entity, command).await {
                 Ok(response) if response.accepted => {
-                    (StepOutcome::Ok, "accepted".to_owned(), Vec::new())
+                    let detail = if kept_in_range {
+                        "accepted (kept in range)"
+                    } else {
+                        "accepted"
+                    };
+                    (StepOutcome::Ok, detail.to_owned(), Vec::new())
                 }
                 Ok(response) => failed(
                     response
@@ -1292,7 +1307,9 @@ async fn run_math(
     results: &mut BTreeMap<String, f64>,
 ) -> Result<String, String> {
     let formula = parse_formula(&params.formula).map_err(|err| err.to_string())?;
-    let mut inputs: Vec<(&str, f64)> = Vec::new();
+    // Each input is read now but fails the step only if the formula reads it (an unused input
+    // or one in an untaken `if` branch never does), so the editor's preview and the hub agree.
+    let mut inputs: Vec<(&str, Result<f64, String>)> = Vec::new();
     for input in &params.inputs {
         let value = match &input.average {
             Some(window) => window_average(hub, &input.entity, window, now())
@@ -1301,10 +1318,10 @@ async fn run_math(
             None => hub.entity_scalar(&input.entity),
         };
         let number = match value {
-            Some(Scalar::Number(n)) => n,
-            Some(Scalar::Bool(b)) => f64::from(u8::from(b)),
-            Some(Scalar::Text(_)) => return Err(format!("{} is not a number", input.name)),
-            None => return Err(format!("{} is unknown", input.name)),
+            Some(Scalar::Number(n)) => Ok(n),
+            Some(Scalar::Bool(b)) => Ok(f64::from(u8::from(b))),
+            Some(Scalar::Text(_)) => Err(format!("{} is not a number", input.name)),
+            None => Err(format!("{} is unknown", input.name)),
         };
         inputs.push((input.name.as_str(), number));
     }
@@ -1315,7 +1332,7 @@ async fn run_math(
     });
     let value = formula.eval(&|name| {
         if let Some((_, value)) = inputs.iter().find(|(input, _)| *input == name) {
-            Ok(*value)
+            value.clone()
         } else if name == "trigger" {
             trigger_number.ok_or_else(|| "trigger has no number".to_owned())
         } else {
@@ -1325,7 +1342,10 @@ async fn run_math(
     results.insert(params.name.clone(), value);
     let shown = inputs
         .iter()
-        .map(|(name, value)| format!("{name}={}", number_text(*value)))
+        .map(|(name, value)| match value {
+            Ok(value) => format!("{name}={}", number_text(*value)),
+            Err(_) => format!("{name}=?"),
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let mut detail = if shown.is_empty() {
@@ -1337,24 +1357,25 @@ async fn run_math(
     let Some(target) = &params.save_to else {
         return Ok(detail);
     };
-    let (min, max, step) = hub
-        .number_limits(target)
-        .ok_or_else(|| format!("unknown entity `{target}`"))?;
+    let Some((min, max, step)) = hub.number_limits(target) else {
+        return Err(format!("{detail} → unknown entity `{target}`"));
+    };
     let (saved, clamped) = fit_to_entity(value, min, max, step);
     detail.push_str(&format!(" → {target} = {}", number_text(saved)));
     if clamped {
         detail.push_str(" (kept in range)");
     }
-    match hub
+    let refusal = match hub
         .send_command(target, Command::SetNumber { value: saved })
         .await
     {
-        Ok(response) if response.accepted => Ok(detail),
-        Ok(response) => Err(response
+        Ok(response) if response.accepted => return Ok(detail),
+        Ok(response) => response
             .reason
-            .unwrap_or_else(|| "command not accepted".to_owned())),
-        Err(err) => Err(err.to_string()),
-    }
+            .unwrap_or_else(|| "command not accepted".to_owned()),
+        Err(err) => err.to_string(),
+    };
+    Err(format!("{detail} → {refusal}"))
 }
 
 /// A scalar as shown in a step detail.

@@ -9057,6 +9057,10 @@ dialog.popup::backdrop {
   overflow-wrap: anywhere;
 }
 
+.math-line--fails {
+  color: var(--warning);
+}
+
 .math-line--value {
   display: flex;
   flex-wrap: wrap;

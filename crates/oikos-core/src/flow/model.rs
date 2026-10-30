@@ -606,6 +606,8 @@ pub struct MathInput {
     /// instead of its current value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub average: Option<String>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
 }
 
 /// Params of `math`.

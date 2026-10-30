@@ -1325,6 +1325,14 @@ pub fn function_help(lang: Lang, name: &str) -> &'static str {
     }
 }
 
+/// The warning when the formula fails with the readings as they are now.
+pub fn math_fails(lang: Lang, reason: &str) -> String {
+    match lang {
+        Lang::En => format!("Fails with the readings now: {reason}"),
+        Lang::Fr => format!("Échoue avec les valeurs actuelles : {reason}"),
+    }
+}
+
 /// Why the formula shows no preview: `name` has no value in the editor.
 pub fn math_unknown(lang: Lang, name: &str) -> String {
     match lang {

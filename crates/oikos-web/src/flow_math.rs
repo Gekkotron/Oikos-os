@@ -21,6 +21,9 @@ pub enum Preview {
     Unknown(String),
     /// Why the card would be refused on save.
     Error(String),
+    /// Why the formula fails with the readings as they are now (`heater / grid` while `grid` is
+    /// 0). The hub accepts the card, so this shows without blocking Save.
+    Fails(String),
 }
 
 /// The preview of math card `node_id` (with `params`, a draft of it) in `flow`. Errors come from
@@ -66,7 +69,7 @@ pub fn preview(
             value,
             averaged_now: params.inputs.iter().any(|i| i.average.is_some()),
         },
-        Err(reason) => Preview::Error(reason),
+        Err(reason) => Preview::Fails(reason),
     }
 }
 
@@ -240,6 +243,7 @@ mod tests {
             name: name.into(),
             entity: entity.into(),
             average: average.map(str::to_owned),
+            extra: Default::default(),
         }
     }
 
@@ -326,8 +330,9 @@ mod tests {
         let p = params("grid + 1", vec![input("grid", "sensor.missing", None)]);
         assert_eq!(run(&p, None), Preview::Unknown("grid".into()));
 
+        // A run-time failure with today's readings is shown, not refused.
         let p = params("1 / 0", vec![]);
-        assert!(matches!(run(&p, None), Preview::Error(_)));
+        assert!(matches!(run(&p, None), Preview::Fails(_)));
     }
 
     #[test]

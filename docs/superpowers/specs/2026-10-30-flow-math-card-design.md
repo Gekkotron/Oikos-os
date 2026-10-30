@@ -63,8 +63,8 @@ and chose **one math card with a formula** over wiring small arithmetic cards to
 ```json
 { "id": "target", "type": "math", "params": {
     "inputs": [
-      { "name": "grid",   "entity": "0xa4c1…_power_a_zigbee2mqtt" },
-      { "name": "heater", "entity": "0xa4c1…_power_b_zigbee2mqtt", "average": "1m" }
+      { "name": "grid",   "entity": "sensor_grid_power" },
+      { "name": "heater", "entity": "sensor_heater_power", "average": "1m" }
     ],
     "formula": "clamp(heater - 100 - grid, 0, 1650)",
     "name": "desired",
@@ -255,9 +255,9 @@ whichever lands second rebases onto the other. `result` and `field` do not combi
 
 ## Appendix: the water-heater scenario as a flow
 
-Entities: grid `0xa4c13898428fae3a_power_a_zigbee2mqtt` (Réseau), heater power
-`0xa4c13870d8ba6a60_power_b_zigbee2mqtt` (Chauffe eau), tank `water_heater_tank_temp`,
-force flag `virtual_force_heating`, the three power channels `water_heater_power_0/1/2`.
+Entities: grid power `sensor_grid_power`, heater power `sensor_heater_power`, tank
+`sensor_tank_temperature`, force flag `virtual_force_heating`, the three power channels
+`water_heater_power_0/1/2`.
 Created with the flow: a number group `group_water_heater_power` over the three channels
 (so one save drives all three) and a virtual number `virtual_heater_target` (0..2200 W,
 step 1) to remember the smoothed target.
@@ -272,6 +272,6 @@ step 1) to remember the smoothed target.
   math `slider = round(interp(smoothed, [0, 38, 81, 160, 274, 438, 621, 843, 1062, 1270, 1450, 1650, 1947, 2100, 2180, 2200], [0, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100]))`
   save to the group.
 
-Which Oikos temperature matches each of the scenario's two (Jeedom commands 4811 "cmdTemp"
-for force mode and 4812 "tempInside" for the cut-off) is settled with the user when the
-flow is built, after this feature lands.
+Which of the house's temperature sensors matches each of the scenario's two (the force-mode
+temperature and the cut-off temperature) is settled with the user when the flow is built, after
+this feature lands.

@@ -146,8 +146,8 @@ This flow heats with the surplus, and does not heat when the tank is already abo
   "id": "water_heater_solar", "name": "Water heater from solar surplus", "enabled": true, "mode": "single",
   "nodes": [
     { "id": "grid", "type": "trigger.state", "params": { "entity": "sensor_grid_power" } },
-    { "id": "hot", "type": "if", "params": { "entity": "sensor_tank_temperature", "op": "gt", "value": 72, "missing": "false" } },
-    { "id": "cut", "type": "command", "params": { "entity": "group_heater_power", "command": { "type": "set_number", "value": 0 } } },
+    { "id": "hot", "type": "if", "params": { "entity": "sensor_tank_temperature", "op": "gt", "value": 72, "missing": "true" } },
+    { "id": "cut", "type": "command", "params": { "entity": "virtual_heater_target", "command": { "type": "set_number", "value": 0 } } },
     { "id": "target", "type": "math", "params": {
         "inputs": [
           { "name": "grid", "entity": "sensor_grid_power" },
@@ -155,7 +155,7 @@ This flow heats with the surplus, and does not heat when the tank is already abo
         ],
         "formula": "clamp(heater - 100 - grid, 0, 1650)",
         "name": "desired",
-        "save_to": "group_heater_power" } }
+        "save_to": "virtual_heater_target" } }
   ],
   "edges": [
     { "from": "grid", "to": "hot" },
@@ -165,7 +165,7 @@ This flow heats with the surplus, and does not heat when the tank is already abo
 }
 ```
 
-Each run reads the meter. The `if` card takes its `true` output when the tank is above 72, and the `command` card then switches the heater's group to 0. Otherwise the `math` card computes `desired` and saves it to `group_heater_power`, a number group over the heater's channels, so one save sets all of them.
+Each run reads the meter. The `if` card takes its `true` output when the tank is above 72, and the `command` card then sets the target to 0. `missing` is `true` so that a tank sensor with no reading counts as too hot: the flow fails safe and never heats blind. Otherwise the `math` card computes `desired` and saves it to `virtual_heater_target`, a [virtual number](groups-and-virtual-entities.md) in watts (0 to 1650). A group of 0 to 100 % channels would need the watts converted to a percentage first, with an `interp` step.
 
 A result can be used by other cards of the same run:
 

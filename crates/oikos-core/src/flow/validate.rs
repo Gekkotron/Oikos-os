@@ -180,6 +180,8 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     Some("missing")
                 } else if p.average.is_some() {
                     Some("average")
+                } else if p.result.is_some() {
+                    Some("result")
                 } else {
                     None
                 };
@@ -202,6 +204,7 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     ("entity", p.entity.is_some()),
                     ("missing", p.missing.is_some()),
                     ("average", p.average.is_some()),
+                    ("result", p.result.is_some()),
                     ("offset_minutes", p.offset_minutes.is_some()),
                 ]
                 .into_iter()
@@ -232,6 +235,12 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                     });
                 }
                 Some(value) => {
+                    if p.result.is_some() && !value.is_number() {
+                        return Err(FlowError::BadOperand {
+                            node: node.id.clone(),
+                            reason: "value must be a number with result".to_owned(),
+                        });
+                    }
                     if let Some(window) = &p.average {
                         let bad = |reason: String| FlowError::BadOperand {
                             node: node.id.clone(),
@@ -293,6 +302,9 @@ pub fn validate(flow: &Flow) -> Result<(), FlowError> {
                             )));
                         }
                         (_, None) => {}
+                    }
+                    if p.result.is_some() && !rule.value.is_number() {
+                        return Err(bad(format!("rule {n}: value must be a number with result")));
                     }
                     if p.average.is_some() && !rule.value.is_number() {
                         return Err(bad(format!(
@@ -1208,6 +1220,7 @@ mod tests {
             ("entity", r#"{"op":"is_dark","entity":"e"}"#),
             ("missing", r#"{"op":"is_dark","missing":"true"}"#),
             ("average", r#"{"op":"is_dark","average":"15m"}"#),
+            ("result", r#"{"op":"is_dark","result":"x"}"#),
         ] {
             let err = validate(&flow_with_if_params_json(patch)).unwrap_err();
             assert!(
@@ -1257,6 +1270,7 @@ mod tests {
             ("entity", r#"{"op":"is_off_peak","entity":"e"}"#),
             ("missing", r#"{"op":"is_off_peak","missing":"true"}"#),
             ("average", r#"{"op":"is_off_peak","average":"15m"}"#),
+            ("result", r#"{"op":"is_off_peak","result":"x"}"#),
             (
                 "offset_minutes",
                 r#"{"op":"is_off_peak","offset_minutes":5}"#,
@@ -1393,6 +1407,28 @@ mod tests {
                 time_edges()
             )),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn if_and_switch_result_need_a_number_value() {
+        let reason = |json: &str| match validate(&flow_with_if_params_json(json)) {
+            Err(FlowError::BadOperand { node, reason }) if node == "chk" => reason,
+            other => panic!("expected BadOperand on chk, got {other:?}"),
+        };
+        assert_eq!(
+            reason(r#"{"op":"eq","result":"x","value":"on"}"#),
+            "value must be a number with result"
+        );
+        assert_eq!(
+            reason(r#"{"op":"eq","result":"x","value":true}"#),
+            "value must be a number with result"
+        );
+        assert_eq!(
+            switch_reason(serde_json::json!({
+                "result": "x", "rules": [{ "op": "lt", "value": 1 }, { "op": "eq", "value": "on" }]
+            })),
+            "rule 2: value must be a number with result"
         );
     }
 
@@ -1847,13 +1883,17 @@ mod tests {
     #[test]
     fn math_round_trips() {
         let flow = math_flow(serde_json::json!({
-            "inputs": [{ "name": "a", "entity": "e", "average": "5m" }],
+            "inputs": [{ "name": "a", "entity": "e", "average": "5m", "tag": "kept too" }],
             "formula": "a", "name": "r", "save_to": "virtual_x", "note": "kept"
         }));
         let NodeKind::Math(p) = &flow.nodes[1].kind else {
             panic!("not a math card");
         };
         assert_eq!(p.inputs[0].average.as_deref(), Some("5m"));
+        assert_eq!(
+            p.inputs[0].extra.get("tag"),
+            Some(&serde_json::json!("kept too"))
+        );
         assert_eq!(p.save_to.as_deref(), Some("virtual_x"));
         assert_eq!(p.extra.get("note"), Some(&serde_json::json!("kept")));
         assert_eq!(Flow::decode(flow.encode().as_bytes()).unwrap(), flow);

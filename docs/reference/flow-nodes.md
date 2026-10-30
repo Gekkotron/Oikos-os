@@ -169,7 +169,7 @@ Branches on a comparison.
 | `missing` | `fail`, `true` or `false`, optional | What to do when the value is unknown. Refused with `is_dark` and `is_off_peak`. |
 | `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window instead of its current value. `value` must then be a number. Refused with `is_dark` and `is_off_peak`. |
 | `offset_minutes` | integer in [-720, 720], optional | With `is_dark` only. Moves civil dusk by this many minutes and civil dawn by the opposite. Absent means 0. Refused with every other op. |
-| `result` | string, optional | The `name` of a [`math`](#math) card. Its result of this run is compared instead of an entity's value, as a number. Refused together with `entity`, `average` or `missing`. A result missing from the run fails the node (`no result x in this run`); `missing` does not apply to it. |
+| `result` | string, optional | The `name` of a [`math`](#math) card. Its result of this run is compared instead of an entity's value, as a number. Refused together with `entity`, `average` or `missing`; `value` must then be a number. A result missing from the run fails the node (`no result x in this run`); `missing` does not apply to it. |
 
 Outputs: two ports, `true` and `false`. Every edge leaving an `if` names one.
 
@@ -199,7 +199,7 @@ Branches on several values at once: one output per rule, tried in order. It is a
 | `rules` | array of rules | 1 to 10 rules. Required. See below. |
 | `entity` | string, optional | The entity whose current scalar is read, live. Absent: the entity that triggered the run. |
 | `average` | duration, optional | A window such as `15m` or `1h`, at most `24h`. Compare the mean of the entity's readings over that window, as for the [`if`](#if) `average`. Every rule `value` (and `to`) must then be a number. |
-| `result` | string, optional | The `name` of a [`math`](#math) card. Its result of this run is switched on instead of an entity's value. Refused together with `entity` or `average`. A result missing from the run fails the node. |
+| `result` | string, optional | The `name` of a [`math`](#math) card. Its result of this run is switched on instead of an entity's value. Refused together with `entity` or `average`; every rule's `value` must then be a number. A result missing from the run fails the node. |
 | `otherwise` | bool, default `false` | Adds an `otherwise` port, taken when no rule matches. |
 | `all` | bool, default `false` | Take every matching rule instead of the first one only. |
 
@@ -291,7 +291,7 @@ A flow is refused on save when:
 
 - The step runs its inputs, evaluates the formula and keeps the result under `name`. A later card of the same run reads it. Results do not outlive the run.
 - A card that runs again in the same run (in a loop path) overwrites its earlier result. Two cards may share a `name` when they sit on different branches and compute the same result. A card after a fork sees the results of sibling branches that ran before it, in edge order, so compute a value on the path that needs it.
-- A step fails, and the run ends as `failed`, on: division or `%` by zero, a result that is not a finite number, a `clamp` whose bounds have crossed at run time, `round` with `n` outside 0 to 6, an unknown input, a `trigger` with no number, or a name whose math card did not run on this path (`no result desired in this run`).
+- A step fails, and the run ends as `failed`, on: division or `%` by zero, a result that is not a finite number, a `clamp` whose bounds have crossed at run time, `round` with `n` outside 0 to 6, an input the formula reads that is unknown or not a number (an input in the untaken branch of `if`, or one the formula never names, does not fail the step), a `trigger` with no number, or a name whose math card did not run on this path (`no result desired in this run`).
 - With `save_to`, the card then sends `set_number` to that entity. The value is rounded to the entity's `step` and kept inside its `min` and `max` when the entity announces them; the step detail adds `(kept in range)` when it was clamped. The step succeeds only when the command is accepted, like a `command` card, and fails with the entity's refusal reason otherwise. The result kept for the run is the exact computed value, before rounding.
 - Saving to a virtual number and reading it back as an input on the next run is how a flow remembers a value (for example, to smooth a target from one run to the next).
 
@@ -356,7 +356,7 @@ Sends a command to an entity.
 | `command` | object | The same JSON as the API's `Command`, for example `{"type": "turn_on", "brightness": 200}`. See [MCP tools](mcp-tools.md#commands). |
 | `value_from` | string, optional | The `name` of a [`math`](#math) card. Its result replaces the command's number: `set_number`'s `value`, `set_temperature`'s `temperature`, `set_position`'s `position` (rounded, kept between 0 and 100) or `turn_on`'s `brightness` (rounded, kept between 0 and 255). Refused on save with any other command type, and with a name that is no math card of the flow. |
 
-With `value_from`, the number in `command` stays in the JSON (the web editor shows it when the option is switched off) and is ignored. A result that is missing from the run fails the node (`no result x in this run`).
+With `value_from`, the number in `command` stays in the JSON (the web editor shows it when the option is switched off) and is ignored. A result that is missing from the run fails the node (`no result x in this run`). On a `set_number` command the number is fitted to the target entity like a math card's `save_to`: rounded to its `step` and kept inside its `min` and `max`, and the step detail reads `accepted (kept in range)` when it was clamped.
 
 Outputs: one. The command goes through the hub's command path, confirmed by the entity's state echo within the `commands.confirm_timeout_ms` setting (default 5000), exactly like `send_command`. No echo, a rejection or an offline entity fails the node.
 

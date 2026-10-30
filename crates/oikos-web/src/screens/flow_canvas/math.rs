@@ -19,7 +19,8 @@ use crate::flow_math::{
 use crate::format::entity_title;
 use crate::house::House;
 use crate::i18n::flows::{
-    FlowText, function_help, math_averaged_note, math_unknown, math_value, use_flow_text,
+    FlowText, function_help, math_averaged_note, math_fails, math_unknown, math_value,
+    use_flow_text,
 };
 use crate::i18n::use_lang;
 use crate::screens::flow_schedule::SaveBlocked;
@@ -80,7 +81,8 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
             })
         }
     });
-    // Save waits for a formula the hub would accept.
+    // Save waits for a formula the hub would accept; a failure with today's readings
+    // (`Preview::Fails`) does not block it.
     if let Some(blocked) = use_context::<SaveBlocked>() {
         Effect::new(move |_| {
             blocked
@@ -118,6 +120,7 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
                     name,
                     entity: String::new(),
                     average: None,
+                    extra: Default::default(),
                 });
             }
         });
@@ -271,6 +274,12 @@ pub(super) fn math_fields(form: Form, id: String) -> impl IntoView {
                 view! { <p class="node-editor__error math-line" role="alert">{reason}</p> }
                     .into_any()
             }
+            Preview::Fails(reason) => view! {
+                <p class="math-line math-line--fails" role="status">
+                    {math_fails(lang(), &reason)}
+                </p>
+            }
+            .into_any(),
             Preview::Unknown(name) => view! {
                 <p class="node-editor__hint math-line">{math_unknown(lang(), &name)}</p>
             }
