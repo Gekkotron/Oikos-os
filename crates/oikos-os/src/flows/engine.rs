@@ -23,7 +23,7 @@ use oikos_core::flow::template::render;
 use oikos_core::flow::{
     Flow, FlowMode, MathParams, Missing, Node, NodeKind, OffPeakEdge, Op, Reading, Scalar,
     Schedule, command_with_number, compare, field_scalar, format_duration, headline_scalar,
-    in_time_range, parse_clock, parse_duration, pick_duration, switch_exits,
+    in_time_range, parse_clock, parse_duration, pick_duration, switch_exits, window,
 };
 use oikos_core::history::buckets::{Sample, readings_mean};
 use oikos_core::model::{Command, StateValue};
@@ -36,11 +36,14 @@ use super::schedule::{Armed, Now, now_in, rearm, timer_clock};
 use super::sun::{ArmedSun, next_sun_fire};
 use crate::clock;
 use crate::home::OffPeakNow;
-use crate::hub::{Hub, StateSeen};
+use crate::hub::{Hub, StateTouched};
 use oikos_api::ConnectionStatus;
 
 /// How long after the link comes back the off-peak base is seeded when no device report did.
 const OFF_PEAK_SETTLE: chrono::Duration = chrono::Duration::seconds(60);
+
+/// The port a `limit` node reports when it holds the run back; `execute` follows no edge then.
+const LIMITED: &str = "limited";
 
 /// What a finished run task reports: the flow, the run and how it ended.
 type Finished = (String, String, RunStatus);
@@ -59,7 +62,7 @@ struct Active {
 /// starts it through `Hub::start_engine`, which subscribes earlier so no event is missed.
 pub async fn run(hub: Arc<Hub>, requests: mpsc::UnboundedReceiver<EngineRequest>) {
     let events = hub.subscribe();
-    let seen = hub.subscribe_state_seen();
+    let seen = hub.subscribe_state_touched();
     run_with(hub, events, seen, requests).await;
 }
 
@@ -67,7 +70,7 @@ pub async fn run(hub: Arc<Hub>, requests: mpsc::UnboundedReceiver<EngineRequest>
 pub(super) async fn run_with(
     hub: Arc<Hub>,
     mut events: broadcast::Receiver<WsEvent>,
-    mut seen: broadcast::Receiver<StateSeen>,
+    mut seen: broadcast::Receiver<StateTouched>,
     mut requests: mpsc::UnboundedReceiver<EngineRequest>,
 ) {
     let mut engine = Engine {
@@ -75,12 +78,15 @@ pub(super) async fn run_with(
         flows: Vec::new(),
         known: BTreeMap::new(),
         watched: BTreeSet::new(),
+        confirmed_unknown: BTreeSet::new(),
         active: BTreeMap::new(),
         keep: BTreeSet::new(),
         tasks: JoinSet::new(),
         zone: hub.zone(),
         now: timer_clock(),
         schedules: BTreeMap::new(),
+        silents: BTreeMap::new(),
+        silent_epoch: hub.link_epoch(),
         sun_timers: BTreeMap::new(),
         off_peak_base: None,
         off_peak_timer: None,
@@ -115,6 +121,7 @@ pub(super) async fn run_with(
             // Before the events: a tick that is due is not held back by a busy event stream.
             () = sleep_until_deadline(deadline), if deadline.is_some() => {
                 engine.tick();
+                engine.tick_silents();
                 engine.tick_suns();
                 engine.tick_off_peak();
             }
@@ -126,12 +133,13 @@ pub(super) async fn run_with(
                 }
                 Err(broadcast::error::RecvError::Closed) => return,
             },
-            // After the events, so a change is stored by `StateChanged` first. This one only
-            // re-seeds an entity whose report was identical to its last state (no event).
+            // After the events, so a change is stored by `StateChanged` first. Every message on
+            // an entity's state topic, read or not: it re-seeds an unseeded value, restarts that
+            // entity's silent clocks and confirms a value that is still unknown.
             seen = seen.recv() => match seen {
-                Ok(seen) => engine.state_seen(&seen),
-                // Nothing to recover: the next report of an entity seeds it again.
-                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Ok(seen) => engine.state_touched(&seen),
+                // Reports may have been missed: no entity can be called silent from here.
+                Err(broadcast::error::RecvError::Lagged(_)) => engine.seen_lagged(),
                 Err(broadcast::error::RecvError::Closed) => return,
             },
         }
@@ -146,6 +154,20 @@ async fn sleep_until_deadline(deadline: Option<tokio::time::Instant>) {
     }
 }
 
+/// A `trigger.silent` node's clock: it runs from `since`, which every report of the entity
+/// restarts, and fires once when it reaches `period`.
+struct Silent {
+    node: String,
+    entity: String,
+    /// The node's `for` text, to tell an edited node from an unchanged one.
+    for_: String,
+    period: chrono::Duration,
+    since: chrono::DateTime<chrono::Utc>,
+    /// Set when the clock fired; cleared by the next report. A due clock whose flow is busy in
+    /// `single` mode does not fire (and stays unset) until that run ends.
+    fired: bool,
+}
+
 struct Engine {
     hub: Arc<Hub>,
     /// The house time zone schedules run in.
@@ -153,6 +175,11 @@ struct Engine {
     now: Now,
     /// Armed schedule nodes, keyed `"{flow}/{node}"`.
     schedules: BTreeMap<String, Armed>,
+    /// Armed silent nodes, keyed `"{flow}/{node}"`.
+    silents: BTreeMap<String, Silent>,
+    /// The hub's [`Hub::link_epoch`] the silent clocks were last restarted in. A different one
+    /// while online means the link bounced and the clocks are from before it.
+    silent_epoch: u64,
     /// Armed sun nodes, keyed `"{flow}/{node}"`.
     sun_timers: BTreeMap<String, ArmedSun>,
     /// The off-peak answer `trigger.off_peak` compares against; `None` until seeded. Seeding
@@ -171,6 +198,10 @@ struct Engine {
     /// disconnect empties `known` while the watched set stays: those values must stay
     /// unseeded until the broker's replay shows them, not be re-seeded from stale values.
     watched: BTreeSet<Watched>,
+    /// Watched values that a report of their entity showed to be unknown, as opposed to unknown
+    /// because nothing was seen yet. A value appearing out of this state is a real first value
+    /// and fires a `trigger.state` with a `to`. Cleared with `known`.
+    confirmed_unknown: BTreeSet<Watched>,
     active: BTreeMap<String, Active>,
     /// `(flow, run)` pairs whose run disabled its own flow with a `flow.enable` node: that run
     /// survives the reload the disable causes. Forgotten when the run ends.
@@ -230,6 +261,7 @@ impl Engine {
             .collect();
         let watched = self.watched_values();
         self.known.retain(|key, _| watched.contains(key));
+        self.confirmed_unknown.retain(|key| watched.contains(key));
         // Seed only what became watched now, and only while the link is up: otherwise the
         // registry may hold pre-drop values and the broker's replay would look like a change.
         let online = *self.hub.connection().borrow() == ConnectionStatus::Online;
@@ -257,8 +289,22 @@ impl Engine {
             self.cancel(&id);
         }
         self.arm_schedules();
+        self.arm_silents();
         self.arm_suns();
         self.off_peak_reload();
+        // Disabled flows keep their counts: only a removed or edited node forgets them.
+        let mut limits = BTreeMap::new();
+        for flow in &definitions {
+            for node in &flow.nodes {
+                if let NodeKind::Limit(params) = &node.kind {
+                    limits.insert(
+                        (flow.id.clone(), node.id.clone()),
+                        (params.max, params.per.clone()),
+                    );
+                }
+            }
+        }
+        self.hub.limit_retain(&limits);
     }
 
     /// Whether `active` is a run that disabled its own flow (announced by `KeepRun`) and whose
@@ -319,6 +365,122 @@ impl Engine {
         }
     }
 
+    /// Arms every silent node of an enabled flow that is not armed with the same entity and
+    /// duration yet, counting from now, and disarms the rest: disabled, removed or edited. A
+    /// node armed with the same parameters keeps its clock, so renaming the flow does not
+    /// restart it.
+    fn arm_silents(&mut self) {
+        let now = (self.now)();
+        let mut wanted = BTreeMap::new();
+        for flow in &self.flows {
+            for node in flow.triggers() {
+                let NodeKind::TriggerSilent(params) = &node.kind else {
+                    continue;
+                };
+                // The definition was validated when the flow was stored.
+                let Ok(period) = window(&params.for_) else {
+                    continue;
+                };
+                let Ok(period) = chrono::Duration::from_std(period) else {
+                    continue;
+                };
+                wanted.insert(
+                    format!("{}/{}", flow.id, node.id),
+                    (
+                        node.id.clone(),
+                        params.entity.clone(),
+                        params.for_.clone(),
+                        period,
+                    ),
+                );
+            }
+        }
+        self.silents.retain(|key, armed| {
+            wanted.get(key).is_some_and(|(node, entity, for_, _)| {
+                *node == armed.node && *entity == armed.entity && *for_ == armed.for_
+            })
+        });
+        for (key, (node, entity, for_, period)) in wanted {
+            self.silents.entry(key).or_insert(Silent {
+                node,
+                entity,
+                for_,
+                period,
+                since: now,
+                fired: false,
+            });
+        }
+    }
+
+    /// Fires every silent node whose entity stayed silent for its duration, once. Nothing fires
+    /// while the broker link is not online: no report could arrive.
+    ///
+    /// A link that bounced since the clocks last restarted (the `Online` event may be handled
+    /// late or lost) restarts them instead of firing: no report could arrive while it was down.
+    /// A due clock whose flow is busy in `single` mode waits for that run to end.
+    fn tick_silents(&mut self) {
+        if !self.online() {
+            return;
+        }
+        if self.silent_epoch != self.hub.link_epoch() {
+            self.restart_silents();
+            return;
+        }
+        let now = (self.now)();
+        let due: Vec<String> = self
+            .silents
+            .iter()
+            .filter(|(key, armed)| {
+                !armed.fired && armed.since + armed.period <= now && !self.silent_blocked(key)
+            })
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in due {
+            let Some(armed) = self.silents.get_mut(&key) else {
+                continue;
+            };
+            armed.fired = true;
+            let node = armed.node.clone();
+            let trigger = TriggerInfo {
+                entity: Some(armed.entity.clone()),
+                field: None,
+                value: Value::String(armed.for_.clone()),
+                previous: Value::Null,
+            };
+            let flow_id = key.split('/').next().unwrap_or_default();
+            let Some(flow) = self.flows.iter().find(|f| f.id == flow_id).cloned() else {
+                continue;
+            };
+            self.fire(flow, node, Some(trigger));
+        }
+    }
+
+    /// Whether the flow of silent clock `key` is running in `single` mode, so a fire would only
+    /// be recorded as skipped.
+    fn silent_blocked(&self, key: &str) -> bool {
+        let flow_id = key.split('/').next().unwrap_or_default();
+        self.active.contains_key(flow_id)
+            && self
+                .flows
+                .iter()
+                .any(|f| f.id == flow_id && f.mode == FlowMode::Single)
+    }
+
+    /// Restarts every silent clock from now: the link came back or reports may have been lost.
+    fn restart_silents(&mut self) {
+        self.silent_epoch = self.hub.link_epoch();
+        let now = (self.now)();
+        for armed in self.silents.values_mut() {
+            armed.since = now;
+            armed.fired = false;
+        }
+    }
+
+    /// The `StateTouched` receiver lagged: reports of any entity may be missing.
+    fn seen_lagged(&mut self) {
+        self.restart_silents();
+    }
+
     /// Arms every sun node of an enabled flow that is not armed for the same event and offset
     /// yet, and disarms the rest: disabled, removed or edited. A node whose next event is more
     /// than seven days out (polar night, midnight sun) stays disarmed until the next reload.
@@ -372,18 +534,35 @@ impl Engine {
         }
     }
 
-    /// When the timer branch should wake: the earliest armed tick or sun event, as a tokio
-    /// instant.
+    /// When the timer branch should wake: the earliest armed tick, sun event or silent clock, as
+    /// a tokio instant.
     fn next_deadline(&self) -> Option<tokio::time::Instant> {
+        let silent = if !self.online() {
+            None
+        } else if self.silent_epoch != self.hub.link_epoch() {
+            // The next tick restarts the clocks.
+            Some((self.now)())
+        } else {
+            self.silents
+                .iter()
+                .filter(|(key, armed)| {
+                    let due = armed.since + armed.period;
+                    // A due clock behind a busy `single` flow wakes up when the run ends.
+                    !armed.fired && !(due <= (self.now)() && self.silent_blocked(key))
+                })
+                .map(|(_, armed)| armed.since + armed.period)
+                .min()
+        };
         let at = self
             .schedules
             .values()
-            .map(|armed| armed.at)
-            .chain(self.sun_timers.values().map(|armed| armed.at))
-            .chain(self.off_peak_timer)
-            .chain(self.off_peak_settle)
+            .map(|armed| armed.at.to_utc())
+            .chain(self.sun_timers.values().map(|armed| armed.at.to_utc()))
+            .chain(self.off_peak_timer.map(|at| at.to_utc()))
+            .chain(self.off_peak_settle.map(|at| at.to_utc()))
+            .chain(silent)
             .min()?;
-        let wait = (at.to_utc() - (self.now)())
+        let wait = (at - (self.now)())
             .to_std()
             .unwrap_or(std::time::Duration::ZERO);
         Some(tokio::time::Instant::now() + wait)
@@ -485,7 +664,10 @@ impl Engine {
     /// Events were missed: values seen before may be stale. A device's answer is forgotten and
     /// seeded again by its next report, or a minute later.
     fn events_lagged(&mut self) {
+        // The `Online` event may be among the missed ones.
+        self.restart_silents();
         self.known.clear();
+        self.confirmed_unknown.clear();
         if self.off_peak_device().is_some() {
             self.off_peak_base = None;
         }
@@ -624,6 +806,7 @@ impl Engine {
             }
             WsEvent::HomeSettingsChanged { .. } => self.off_peak_reseed(),
             WsEvent::ConnectionChanged(ConnectionStatus::Online) => {
+                self.restart_silents();
                 self.off_peak_settle = Some(now_in(&self.now, self.zone) + OFF_PEAK_SETTLE);
             }
             WsEvent::ButtonPressed { id } => self.button_pressed(&id),
@@ -632,6 +815,7 @@ impl Engine {
             // is only recorded, never acted on.
             WsEvent::ConnectionChanged(status) if status != ConnectionStatus::Online => {
                 self.known.clear();
+                self.confirmed_unknown.clear();
                 self.off_peak_lost();
             }
             _ => {}
@@ -690,15 +874,22 @@ impl Engine {
         }
     }
 
-    /// A state topic of `id` was reported, changed or not. A watched entity missing from the
-    /// map is seeded silently from the registry: after a reconnect the retained replay is
-    /// usually identical to the last state, so the registry emits no `StateChanged` for it.
+    /// A message arrived on a state topic of `id`, whatever the entity read from it. A watched
+    /// entity missing from the map is seeded silently from the registry: after a reconnect the
+    /// retained replay is usually identical to the last state, so the registry emits no
+    /// `StateChanged` for it. A message that left the value unknown (`read` false) seeds only
+    /// keys the registry also has unknown, and still confirms an unknown value.
     ///
     /// A report from before the latest link drop is stale (the engine may only get to it after
     /// the clear) and is ignored: its registry value is exactly the pre-drop one.
-    fn state_seen(&mut self, seen: &StateSeen) {
+    fn state_touched(&mut self, seen: &StateTouched) {
         let id = seen.id.as_str();
         if seen.epoch == self.hub.link_epoch() {
+            let now = (self.now)();
+            for armed in self.silents.values_mut().filter(|a| a.entity == id) {
+                armed.since = now;
+                armed.fired = false;
+            }
             let unseeded: Vec<Watched> = self
                 .watched
                 .iter()
@@ -707,10 +898,22 @@ impl Engine {
                 .collect();
             for key in unseeded {
                 let scalar = self.hub.entity_value(id, key.1.as_deref());
-                self.known.insert(key, scalar);
+                if seen.read || scalar.is_none() {
+                    self.known.insert(key, scalar);
+                }
             }
+            // The entity reported while this value was unknown: a value that shows up in a
+            // later report is a first value, not a replay.
+            let unknown: Vec<Watched> = self
+                .watched
+                .iter()
+                .filter(|key| key.0 == id && self.known.get(*key) == Some(&None))
+                .cloned()
+                .collect();
+            self.confirmed_unknown.extend(unknown);
         }
-        if seen.epoch == self.hub.link_epoch()
+        if seen.read
+            && seen.epoch == self.hub.link_epoch()
             && self.off_peak_base.is_none()
             && self.off_peak_device().as_deref() == Some(id)
         {
@@ -718,9 +921,11 @@ impl Engine {
         }
     }
 
-    /// Fires the triggers an entity's change satisfies, value by watched value. Only a change
-    /// between two present, different values counts: a first sighting, an availability-only
-    /// report (same value) and a value appearing or vanishing are recorded silently.
+    /// Fires the triggers an entity's change satisfies, value by watched value. A change between
+    /// two present, different values counts, and so does a value appearing after a report
+    /// showed it unknown (only for a trigger with a `to` and no `from`). A first sighting, an
+    /// availability-only report (same value), a restore and a value vanishing are recorded
+    /// silently.
     fn state_changed(&mut self, id: &str, state: &StateValue) {
         let keys: Vec<Watched> = self
             .watched
@@ -744,17 +949,20 @@ impl Engine {
             let Some(previous) = self.known.insert(key.clone(), next.clone()) else {
                 continue;
             };
-            let (Some(previous), Some(next)) = (previous, next) else {
-                continue;
+            let confirmed = next.is_some() && self.confirmed_unknown.remove(&key);
+            let (previous, next) = match (previous, next) {
+                (Some(previous), Some(next)) => (Some(previous), next),
+                (None, Some(next)) if confirmed => (None, next),
+                _ => continue,
             };
-            if previous == next {
+            if previous.as_ref() == Some(&next) {
                 continue;
             }
             let trigger = TriggerInfo {
                 entity: Some(id.to_owned()),
                 field: key.1.clone(),
                 value: next.to_json(),
-                previous: previous.to_json(),
+                previous: previous.as_ref().map_or(Value::Null, Scalar::to_json),
             };
             for flow in &self.flows {
                 for node in flow.triggers() {
@@ -765,7 +973,10 @@ impl Engine {
                         && params.field == key.1
                         && !fires.iter().any(|(f, _, _)| f.id == flow.id)
                         && filter_matches(params.to.as_ref(), &next)
-                        && filter_matches(params.from.as_ref(), &previous)
+                        && match &previous {
+                            Some(previous) => filter_matches(params.from.as_ref(), previous),
+                            None => params.from.is_none() && params.to.is_some(),
+                        }
                     {
                         fires.push((flow.clone(), node.id.clone(), trigger.clone()));
                     }
@@ -971,6 +1182,10 @@ pub(super) async fn execute(
         if outcome == StepOutcome::Failed {
             return RunStatus::Failed;
         }
+        // A limit that held the run back ends it here, successfully.
+        if matches!(node.kind, NodeKind::Limit(_)) && ports == [LIMITED] {
+            continue;
+        }
         // A node with no port to follow continues on its port-less edges; a branching node
         // that fired nothing follows nothing (its edges all carry a port).
         let next: Vec<&Node> = if branching {
@@ -1022,6 +1237,32 @@ async fn run_node(
             };
             (StepOutcome::Ok, detail, Vec::new())
         }
+        NodeKind::TriggerSilent(params) => {
+            let detail = match trigger {
+                Some(_) => format!("{} silent for {}", params.entity, params.for_),
+                None => "manual".to_owned(),
+            };
+            (StepOutcome::Ok, detail, Vec::new())
+        }
+        NodeKind::Limit(params) => match window(&params.per) {
+            Ok(per) => match hub.limit_pass(flow_id, &node.id, params.max, per, now()) {
+                Ok(passes) => (
+                    StepOutcome::Ok,
+                    format!(
+                        "passed ({passes} of {} in the last {})",
+                        params.max, params.per
+                    ),
+                    Vec::new(),
+                ),
+                // `execute` ends the run on this port.
+                Err(_) => (
+                    StepOutcome::Ok,
+                    format!("limited: {} in the last {}", params.max, params.per),
+                    vec![LIMITED.to_owned()],
+                ),
+            },
+            Err(err) => failed(err),
+        },
         NodeKind::TriggerSchedule(params) => (
             StepOutcome::Ok,
             format!("schedule {}", params.cron),
@@ -1579,11 +1820,14 @@ mod tests {
             flows: Vec::new(),
             known: BTreeMap::new(),
             watched: BTreeSet::new(),
+            confirmed_unknown: BTreeSet::new(),
             active: BTreeMap::new(),
             keep: BTreeSet::new(),
             tasks: JoinSet::new(),
             now: Arc::new(move || fixed),
             schedules: BTreeMap::new(),
+            silents: BTreeMap::new(),
+            silent_epoch: 0,
             sun_timers: BTreeMap::new(),
             off_peak_base: None,
             off_peak_timer: None,
@@ -2501,5 +2745,601 @@ mod tests {
             engine.hub.entity_value(&id, None),
             Some(Scalar::Text("unlocked".into()))
         );
+    }
+
+    /// An online Paris engine with a binary sensor `det` whose alarm is the `alarm` key of the
+    /// JSON on `test/det`: `{"alarm":"yes"}` is on, `{}` leaves the alarm unknown.
+    fn alarm_engine() -> (Engine, String) {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/binary_sensor/det/alarm/config",
+            br#"{"unique_id":"alarm","state_topic":"test/det","value_template":"{{ value_json.alarm }}","payload_on":"yes","payload_off":"no"}"#,
+        );
+        engine.hub.set_connection(ConnectionStatus::Online);
+        let id = engine.hub.snapshot().entities[0].id.clone();
+        (engine, id)
+    }
+
+    /// Publishes `payload` on the detector's topic and hands the engine what the hub sends: the
+    /// change event when the value moved, then every message signal the hub broadcast.
+    fn alarm_report(engine: &mut Engine, id: &str, payload: &str) {
+        let mut touched = engine.hub.subscribe_state_touched();
+        let changes = engine.hub.ingest("test/det", payload.as_bytes());
+        if changes
+            .iter()
+            .any(|c| matches!(c, oikos_core::registry::Change::StateChanged(_)))
+        {
+            let state = engine.hub.read().state(id).cloned().expect("state");
+            engine.handle_event(WsEvent::StateChanged {
+                id: id.to_owned(),
+                state,
+            });
+        }
+        while let Ok(signal) = touched.try_recv() {
+            engine.state_touched(&signal);
+        }
+    }
+
+    /// Lets every spawned run end, as the engine loop would.
+    async fn finish_runs(engine: &mut Engine) {
+        while let Some(joined) = engine.tasks.join_next_with_id().await {
+            engine.run_finished(joined);
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_then_value_fires_after_a_confirming_report() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, "{}");
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 1);
+        let trigger = engine.hub.flow("a").unwrap().runs[0]
+            .trigger
+            .clone()
+            .unwrap();
+        assert_eq!(trigger.value, serde_json::json!(true));
+        assert_eq!(trigger.previous, serde_json::Value::Null);
+    }
+
+    /// An online engine with the binary sensor a Zigbee2MQTT smoke detector announces: the
+    /// `smoke` key of the JSON on `test/det`, `true` on and `false` off.
+    fn smoke_engine() -> (Engine, String) {
+        let engine = engine_at(48.8566, 2.3522, "Europe/Paris");
+        engine.hub.ingest(
+            "oikos/binary_sensor/det/smoke/config",
+            br#"{"unique_id":"smoke","state_topic":"test/det","value_template":"{{ value_json[\"smoke\"] }}","payload_on":true,"payload_off":false}"#,
+        );
+        engine.hub.set_connection(ConnectionStatus::Online);
+        let id = engine.hub.snapshot().entities[0].id.clone();
+        (engine, id)
+    }
+
+    #[tokio::test]
+    async fn null_reports_then_true_fires_once() {
+        let (mut engine, id) = smoke_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":null}"#);
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":null}"#);
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
+        assert_eq!(run_count(&engine, "a"), 1);
+    }
+
+    /// At boot the restore waits for the broker's replay: a message that read nothing lands
+    /// first and confirms the unknown, so a recorded value put back after it would look like a
+    /// first value. The registry refuses to restore over an entity that spoke.
+    #[tokio::test]
+    async fn restore_after_a_null_report_does_not_fire() {
+        for (recorded, to) in [(true, true), (false, false)] {
+            let (mut engine, id) = smoke_engine();
+            state_flow(&engine, "a", serde_json::json!({ "entity": id, "to": to }));
+            engine.reload();
+            alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":null}"#);
+            let restored = engine.hub.restore_recorded_states(vec![(
+                id.clone(),
+                0,
+                StateValue::OnOff(recorded),
+            )]);
+            assert_eq!(restored, 0, "recorded {recorded}");
+            let state = engine.hub.read().state(&id).cloned().expect("state");
+            assert_eq!(state.value, StateValue::Unknown);
+            assert_eq!(run_count(&engine, "a"), 0, "recorded {recorded}");
+            alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
+            assert_eq!(
+                run_count(&engine, "a"),
+                usize::from(to),
+                "recorded {recorded}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_key_reports_then_true_fires_once() {
+        let (mut engine, id) = smoke_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, r#"{"battery":13}"#);
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
+        assert_eq!(run_count(&engine, "a"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_first_true_without_a_prior_report_stays_silent() {
+        let (mut engine, id) = smoke_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, r#"{"battery":13,"smoke":true}"#);
+        assert_eq!(run_count(&engine, "a"), 0);
+    }
+
+    #[tokio::test]
+    async fn first_report_with_the_value_is_silent() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 0);
+    }
+
+    #[tokio::test]
+    async fn restore_of_the_to_value_does_not_fire() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        engine
+            .hub
+            .restore_recorded_states(vec![(id.clone(), 0, StateValue::OnOff(true))]);
+        let state = engine.hub.read().state(&id).cloned().expect("state");
+        engine.handle_event(WsEvent::StateChanged {
+            id: id.clone(),
+            state,
+        });
+        assert_eq!(run_count(&engine, "a"), 0);
+    }
+
+    #[tokio::test]
+    async fn from_or_no_to_stays_silent() {
+        for params in [
+            serde_json::json!({ "to": true, "from": false }),
+            serde_json::json!({}),
+        ] {
+            let (mut engine, id) = alarm_engine();
+            let mut params = params;
+            params["entity"] = serde_json::json!(id);
+            state_flow(&engine, "a", params.clone());
+            engine.reload();
+            alarm_report(&mut engine, &id, "{}");
+            alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+            assert_eq!(run_count(&engine, "a"), 0, "{params}");
+        }
+    }
+
+    #[tokio::test]
+    async fn vanish_and_return_fires_again() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, "{}");
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 1);
+        finish_runs(&mut engine).await;
+        alarm_report(&mut engine, &id, r#"{"alarm":null}"#);
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 2);
+    }
+
+    #[tokio::test]
+    async fn link_drop_clears_the_mark() {
+        let (mut engine, id) = alarm_engine();
+        state_flow(
+            &engine,
+            "a",
+            serde_json::json!({ "entity": id, "to": true }),
+        );
+        engine.reload();
+        alarm_report(&mut engine, &id, "{}");
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        }));
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Online));
+        alarm_report(&mut engine, &id, r#"{"alarm":"yes"}"#);
+        assert_eq!(run_count(&engine, "a"), 0);
+    }
+
+    type TestClock = Arc<std::sync::Mutex<chrono::DateTime<chrono::Utc>>>;
+
+    /// An online detector engine whose clock the test moves, starting at 2026-01-01 00:00 UTC.
+    fn clocked_engine() -> (Engine, String, TestClock) {
+        let (mut engine, id) = alarm_engine();
+        let clock = Arc::new(std::sync::Mutex::new(
+            chrono::Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+        ));
+        let read = Arc::clone(&clock);
+        engine.now = Arc::new(move || *read.lock().unwrap());
+        (engine, id, clock)
+    }
+
+    /// Moves the clock to `minutes` after 2026-01-01 00:00 UTC.
+    fn at(clock: &TestClock, minutes: i64) {
+        *clock.lock().unwrap() = chrono::Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()
+            + chrono::Duration::minutes(minutes);
+    }
+
+    /// Stores flow `id` with a silent trigger on `entity` for `for_`, then a delay of `delay`.
+    fn silent_flow(engine: &Engine, id: &str, name: &str, for_: &str, delay: &str, entity: &str) {
+        let flow = serde_json::json!({
+            "id": id, "name": name, "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "t", "type": "trigger.silent", "params": { "entity": entity, "for": for_ } },
+                { "id": "d", "type": "delay", "params": { "for": delay } }
+            ],
+            "edges": [{ "from": "t", "to": "d" }]
+        });
+        engine.hub.ingest(
+            &format!("oikos/automation/{id}"),
+            flow.to_string().as_bytes(),
+        );
+    }
+
+    /// An entity report, as the engine's `StateTouched` branch gets it.
+    fn report(engine: &mut Engine, id: &str) {
+        let epoch = engine.hub.link_epoch();
+        engine.state_touched(&StateTouched {
+            id: id.to_owned(),
+            epoch,
+            read: true,
+        });
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_fires_once_after_for() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 49);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 50);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+        finish_runs(&mut engine).await;
+        at(&clock, 180);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+        let run = &engine.hub.flow("s").unwrap().runs[0];
+        let trigger = run.trigger.clone().unwrap();
+        assert_eq!(trigger.entity.as_deref(), Some(id.as_str()));
+        assert_eq!(trigger.value, serde_json::json!("50m"));
+        assert_eq!(run.steps[0].detail, format!("{id} silent for 50m"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn messages_that_read_nothing_restart_the_clock() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        for minutes in [40, 80, 120] {
+            at(&clock, minutes);
+            alarm_report(&mut engine, &id, r#"{"battery":13}"#);
+            engine.tick_silents();
+            assert_eq!(run_count(&engine, "s"), 0, "at {minutes}m");
+        }
+        at(&clock, 170);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn report_restarts_the_clock() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 40);
+        report(&mut engine, &id);
+        at(&clock, 50);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 90);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn fires_again_after_a_report_and_new_silence() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 50);
+        engine.tick_silents();
+        finish_runs(&mut engine).await;
+        at(&clock, 120);
+        report(&mut engine, &id);
+        at(&clock, 170);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_counts_from_arming_not_last_update() {
+        let (mut engine, id, clock) = clocked_engine();
+        alarm_report(&mut engine, &id, r#"{"alarm":"no"}"#);
+        at(&clock, 600);
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 601);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_starts_at_enable() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        let mut flow = engine.hub.flow_definitions().remove(0);
+        flow.enabled = false;
+        engine
+            .hub
+            .ingest("oikos/automation/s", flow.encode().as_bytes());
+        engine.reload();
+        at(&clock, 300);
+        flow.enabled = true;
+        engine
+            .hub
+            .ingest("oikos/automation/s", flow.encode().as_bytes());
+        engine.reload();
+        at(&clock, 300 + 49);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 300 + 50);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_frozen_while_link_down_and_restarts_on_link_up() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 10);
+        let down = ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        };
+        engine.hub.set_connection(down.clone());
+        engine.handle_event(WsEvent::ConnectionChanged(down));
+        assert!(engine.next_deadline().is_none());
+        at(&clock, 120);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        engine.hub.set_connection(ConnectionStatus::Online);
+        engine.handle_event(WsEvent::ConnectionChanged(ConnectionStatus::Online));
+        assert!(engine.next_deadline().is_some());
+        at(&clock, 120 + 49);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 120 + 50);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_clock_survives_unrelated_edit() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 30);
+        silent_flow(&engine, "s", "renamed", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 50);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 30);
+        silent_flow(&engine, "s", "s", "1h", "1s", &id);
+        engine.reload();
+        at(&clock, 50);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 90);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn seen_lag_restarts_every_clock() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 30);
+        engine.seen_lagged();
+        at(&clock, 50);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 80);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn skipped_fire_retries_after_the_run_ends() {
+        let (mut engine, id, clock) = clocked_engine();
+        // The first run sleeps for an hour of real time and stays active.
+        silent_flow(&engine, "s", "s", "50m", "1h", &id);
+        engine.reload();
+        at(&clock, 50);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+        at(&clock, 60);
+        report(&mut engine, &id);
+        at(&clock, 110);
+        // Due, but the single-mode run is still active: no skipped run, no busy loop.
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+        assert!(engine.next_deadline().is_none());
+        finish_runs(&mut engine).await;
+        assert!(engine.next_deadline().is_some());
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 2);
+        assert_ne!(
+            engine.hub.flow("s").unwrap().runs[0].status,
+            RunStatus::Skipped
+        );
+        finish_runs(&mut engine).await;
+        at(&clock, 400);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_link_that_came_back_unseen_restarts_the_clocks() {
+        let (mut engine, id, clock) = clocked_engine();
+        silent_flow(&engine, "s", "s", "50m", "1s", &id);
+        engine.reload();
+        at(&clock, 10);
+        // The hub's link bounced but the engine has not handled the Online event yet.
+        engine.hub.set_connection(ConnectionStatus::Offline {
+            reason: "test".to_owned(),
+        });
+        engine.hub.set_connection(ConnectionStatus::Online);
+        at(&clock, 60);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 109);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 0);
+        at(&clock, 110);
+        engine.tick_silents();
+        assert_eq!(run_count(&engine, "s"), 1);
+    }
+
+    /// Stores flow `id`: a manual trigger, a limit of `max` per `per`, then a delay of 1s.
+    fn limit_flow(engine: &Engine, id: &str, name: &str, max: u32, per: &str) {
+        let flow = serde_json::json!({
+            "id": id, "name": name, "enabled": true, "mode": "single",
+            "nodes": [
+                { "id": "m", "type": "trigger.manual", "params": {} },
+                { "id": "l", "type": "limit", "params": { "max": max, "per": per } },
+                { "id": "d", "type": "delay", "params": { "for": "1s" } }
+            ],
+            "edges": [{ "from": "m", "to": "l" }, { "from": "l", "to": "d" }]
+        });
+        engine.hub.ingest(
+            &format!("oikos/automation/{id}"),
+            flow.to_string().as_bytes(),
+        );
+    }
+
+    /// Runs flow `id` by hand to its end; returns the step nodes and details and the status.
+    async fn run_now(engine: &mut Engine, id: &str) -> (Vec<(String, String)>, RunStatus) {
+        let run = engine.hub.run_flow(id).unwrap();
+        engine.run_manual(id, run.id, None);
+        finish_runs(engine).await;
+        let run = engine.hub.flow(id).unwrap().runs[0].clone();
+        let steps = run
+            .steps
+            .iter()
+            .map(|s| (s.node.clone(), s.detail.clone()))
+            .collect();
+        (steps, run.status)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn limit_passes_max_times_then_stops() {
+        let (mut engine, _, _) = clocked_engine();
+        limit_flow(&engine, "l", "l", 2, "1h");
+        engine.reload();
+        for passes in 1..=2 {
+            let (steps, status) = run_now(&mut engine, "l").await;
+            assert_eq!(status, RunStatus::Done);
+            assert_eq!(
+                steps[1],
+                (
+                    "l".to_owned(),
+                    format!("passed ({passes} of 2 in the last 1h)")
+                )
+            );
+            assert_eq!(steps[2].0, "d");
+        }
+        let (steps, status) = run_now(&mut engine, "l").await;
+        assert_eq!(status, RunStatus::Done);
+        assert_eq!(steps.len(), 2);
+        assert_eq!(
+            steps[1],
+            ("l".to_owned(), "limited: 2 in the last 1h".to_owned())
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn limit_window_rolls() {
+        let (mut engine, _, clock) = clocked_engine();
+        limit_flow(&engine, "l", "l", 2, "1h");
+        engine.reload();
+        run_now(&mut engine, "l").await;
+        at(&clock, 30);
+        run_now(&mut engine, "l").await;
+        at(&clock, 45);
+        let (steps, _) = run_now(&mut engine, "l").await;
+        assert!(steps[1].1.starts_with("limited:"));
+        at(&clock, 61);
+        let (steps, _) = run_now(&mut engine, "l").await;
+        assert!(steps[1].1.starts_with("passed"), "{steps:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn limit_count_survives_flow_save() {
+        let (mut engine, _, _) = clocked_engine();
+        limit_flow(&engine, "l", "l", 2, "1h");
+        engine.reload();
+        run_now(&mut engine, "l").await;
+        run_now(&mut engine, "l").await;
+        limit_flow(&engine, "l", "renamed", 2, "1h");
+        engine.reload();
+        let (steps, _) = run_now(&mut engine, "l").await;
+        assert!(steps[1].1.starts_with("limited:"), "{steps:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn limit_count_dropped_when_node_removed_or_changed() {
+        let (mut engine, _, _) = clocked_engine();
+        limit_flow(&engine, "l", "l", 2, "1h");
+        engine.reload();
+        run_now(&mut engine, "l").await;
+        run_now(&mut engine, "l").await;
+        limit_flow(&engine, "l", "l", 3, "1h");
+        engine.reload();
+        let (steps, _) = run_now(&mut engine, "l").await;
+        assert_eq!(steps[1].1, "passed (1 of 3 in the last 1h)");
     }
 }

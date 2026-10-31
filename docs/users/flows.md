@@ -37,6 +37,7 @@ The parameters of each node are in [Flow nodes](../reference/flow-nodes.md).
   - `trigger.schedule`: a five-field cron expression in the house time zone (the time zone of your home location, set in the setup wizard or **Settings → Location**; the hub's system zone when none is set).
   - `trigger.sun`: sunrise, sunset, dusk or dawn, with an optional `offset_minutes`.
   - `trigger.off_peak`: off-peak starts or ends (`edge`), following the off-peak device or the off-peak hours in **Settings → Home**.
+  - `trigger.silent`: an entity has sent no report for a duration (see [Alive checks](#alive-checks)).
   - `trigger.manual`: a button you press on the card (see [Manual trigger](#manual-trigger)). It has an optional `value`: an on/off bool, a number or text.
 - **Checks** branch:
   - `switch` compares one value with up to 10 rules and has one output per rule (see [Branch on several values](#branch-on-several-values)).
@@ -132,6 +133,33 @@ The scalar is the one value of a state that triggers and `if` compare: the on/of
 `mode` says what a trigger does while a run of the same flow is still active. `single` (the default) ignores the new trigger and records a skipped run. `restart` cancels the active run and starts a new one, which is what makes "5 minutes after the last motion" work: motion coming back cancels the pending `delay`.
 
 Two low-level settings, in the `advanced` section (see the [Settings reference](../reference/configuration.md#advanced)): `topics.automation_prefix` (default `oikos/automation`) and `automation.runs_kept` (recent runs remembered per flow, default 20). Runs live in memory only: a hub restart forgets them, the flow definitions stay on the broker.
+
+## Alive checks
+
+A smoke or battery sensor is only useful while it is alive. A **Silent for** card (`trigger.silent`) starts a run when an entity has sent no report at all for a duration, whatever its value. Chain a **Limit** card (`limit`) after it so a sensor that stays dead does not push again every hour:
+
+```json
+{
+  "id": "sensor_alive", "name": "Sensor alive check", "mode": "single",
+  "nodes": [
+    { "id": "silent", "type": "trigger.silent", "params": { "entity": "binary_sensor.smoke", "for": "50m" } },
+    { "id": "cap", "type": "limit", "params": { "max": 4, "per": "24h" } },
+    { "id": "alert", "type": "notify", "params": { "title": "No report for {trigger}", "severity": "warning" } }
+  ],
+  "edges": [
+    { "from": "silent", "to": "cap" },
+    { "from": "cap", "to": "alert" }
+  ]
+}
+```
+
+- The card fires once per silence, and again only after the entity reports and goes quiet for the duration again. `{trigger}` prints the duration.
+- The clock starts when the flow is saved or enabled, not from the entity's last report, so enabling a check on a sensor that has been quiet for hours waits the full duration first.
+- While the broker link is down nothing can be reported, so the clocks are frozen and restart when the link returns. A link that reconnects more often than the duration keeps restarting them.
+- **Limit** lets at most `max` runs through in any rolling window (`per`); past that the run ends there. Every run that reaches it counts, even one cancelled later or started by hand, so put it right before the action. The window slides, so there is no reset at midnight.
+- Silence clocks and Limit counts are kept in memory: a hub restart starts them again.
+
+A **When** card with a value (`to`) also fires when that value first appears after being unknown, for a sensor that only includes its alarm field once it is set; see [`trigger.state`](../reference/flow-nodes.md#triggerstate).
 
 ## Manual trigger
 

@@ -156,12 +156,18 @@ pub enum NodeKind {
     /// Starts a run when off-peak starts or ends (from the off-peak device, else the windows).
     #[serde(rename = "trigger.off_peak")]
     TriggerOffPeak(TriggerOffPeakParams),
+    /// Starts a run when an entity has sent no report for a duration.
+    #[serde(rename = "trigger.silent")]
+    TriggerSilent(TriggerSilentParams),
     /// Branches on a comparison of an entity (or the trigger value) with a constant.
     #[serde(rename = "if")]
     If(IfParams),
     /// Waits before continuing.
     #[serde(rename = "delay")]
     Delay(DelayParams),
+    /// Lets a run through at most `max` times per rolling window; further runs end here.
+    #[serde(rename = "limit")]
+    Limit(LimitParams),
     /// Sends a command to an entity.
     #[serde(rename = "command")]
     Command(CommandParams),
@@ -193,8 +199,10 @@ impl NodeKind {
             NodeKind::TriggerManual(_) => "trigger.manual",
             NodeKind::TriggerSignal(_) => "trigger.signal",
             NodeKind::TriggerOffPeak(_) => "trigger.off_peak",
+            NodeKind::TriggerSilent(_) => "trigger.silent",
             NodeKind::If(_) => "if",
             NodeKind::Delay(_) => "delay",
+            NodeKind::Limit(_) => "limit",
             NodeKind::Command(_) => "command",
             NodeKind::FlowEnable(_) => "flow.enable",
             NodeKind::Notify(_) => "notify",
@@ -214,6 +222,7 @@ impl NodeKind {
                 | NodeKind::TriggerManual(_)
                 | NodeKind::TriggerSignal(_)
                 | NodeKind::TriggerOffPeak(_)
+                | NodeKind::TriggerSilent(_)
         )
     }
 
@@ -351,6 +360,37 @@ pub struct TriggerOffPeakParams {
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, Value>,
 }
+
+/// Params of `trigger.silent`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct TriggerSilentParams {
+    /// The entity to watch (an id from `search` / `list_entities`).
+    pub entity: String,
+    /// How long the entity may stay without any report before the trigger fires: a duration
+    /// such as `50m` or `2h`, from `1m` to `168h`. Fires once per silence; a report of the
+    /// entity, changed or not, restarts the clock. The trigger value is this text.
+    #[serde(rename = "for")]
+    pub for_: String,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// Params of `limit`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+pub struct LimitParams {
+    /// How many runs may pass this node in one window, from 1 to 100.
+    pub max: u32,
+    /// The rolling window: a duration such as `24h`, from `1m` to `168h`. A run over the limit
+    /// ends at this node.
+    pub per: String,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// The most passes a `limit` may allow in one window.
+pub const MAX_LIMIT: u32 = 100;
 
 /// Params of `if`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -887,6 +927,40 @@ mod tests {
         );
         let bad = r#"{"id":"t","type":"trigger.off_peak","params":{"edge":"middle"}}"#;
         assert!(serde_json::from_str::<Node>(bad).is_err());
+    }
+
+    #[test]
+    fn silent_and_limit_round_trip() {
+        let silent = r#"{"id":"t","type":"trigger.silent","params":{"entity":"binary_sensor.smoke","for":"50m"}}"#;
+        let node: Node = serde_json::from_str(silent).unwrap();
+        match &node.kind {
+            NodeKind::TriggerSilent(p) => {
+                assert_eq!(p.entity, "binary_sensor.smoke");
+                assert_eq!(p.for_, "50m");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(node.kind.is_trigger());
+        assert_eq!(node.kind.type_name(), "trigger.silent");
+        assert_eq!(
+            serde_json::to_value(&node).unwrap(),
+            serde_json::from_str::<Value>(silent).unwrap()
+        );
+        let limit = r#"{"id":"l","type":"limit","params":{"max":4,"per":"24h"}}"#;
+        let node: Node = serde_json::from_str(limit).unwrap();
+        match &node.kind {
+            NodeKind::Limit(p) => {
+                assert_eq!(p.max, 4);
+                assert_eq!(p.per, "24h");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!node.kind.is_trigger());
+        assert_eq!(node.kind.type_name(), "limit");
+        assert_eq!(
+            serde_json::to_value(&node).unwrap(),
+            serde_json::from_str::<Value>(limit).unwrap()
+        );
     }
 
     #[test]

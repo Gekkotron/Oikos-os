@@ -193,6 +193,20 @@ fn instructions() -> String {
          `off_peak_device` (`{{entity, values}}`: the entity whose state, matched as `on`/`off`, \
          a plain number or its text, is one of `values`) when that entity has a usable \
          reading, else from the `off_peak` windows; with neither it is never off-peak. \
+         `trigger.silent` (`entity`, `for` from `1m` to `168h`) fires once when the entity has \
+         sent no report for `for`; it fires again only after the entity reports and goes silent \
+         again. A report is any state message on the entity's state topic, changed or not, even \
+         one that carries no value for it. The clocks start when the flow \
+         is saved or enabled and when the broker link returns, are frozen while the link is \
+         down (a link that reconnects more often than `for` keeps restarting them), and are \
+         forgotten by a hub restart. It is refused on buttons and signal entities. The trigger value is the `for` text. \
+         `limit` (`max` 1 to 100, `per` `1m` to `168h`) lets a run through at most `max` times \
+         in any rolling `per` window and ends the run there once the limit is reached \
+         (nothing after it runs); every run that reaches it counts, cancelled and manual runs \
+         included, so place it right before the action; its counts live in memory and reset on \
+         a hub restart. A typical alive check is `trigger.silent` then `limit` then `notify`. A `trigger.state` \
+         with a `to` (and no `from`) also fires when the value was unknown, confirmed by an \
+         earlier state message on its topic, and then becomes `to`; it never fires on the first value seen after boot. \
          Set `[flows] latitude` and `[flows] longitude` in `oikos.toml`; the hub falls back to \
          Paris otherwise and reports a warning on save. `get_history` returns one slice of an entity's history — a chart \
          series (`what: series` with `range`), kWh per day (`daily` with `days` and \
@@ -313,6 +327,14 @@ mod tests {
         assert!(instr.contains("trigger.off_peak"));
         assert!(instr.contains("is_off_peak"));
         assert!(instr.contains("off_peak_device"));
+    }
+
+    #[test]
+    fn mcp_instructions_mention_silent_and_limit() {
+        let instr = instructions();
+        assert!(instr.contains("trigger.silent"));
+        assert!(instr.contains("limit"));
+        assert!(instr.contains("unknown"));
     }
 
     #[test]

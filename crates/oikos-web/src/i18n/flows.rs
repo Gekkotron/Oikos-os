@@ -159,6 +159,12 @@ pub enum FlowText {
     NodeSignal,
     NodeIf,
     NodeDelay,
+    NodeSilent,
+    SilentSub,
+    NodeLimit,
+    LimitSub,
+    LimitMax,
+    LimitPer,
     NodeCommand,
     NodeFlowSwitch,
     TitleLabel,
@@ -431,6 +437,12 @@ impl FlowText {
         FlowText::NodeSignal,
         FlowText::NodeIf,
         FlowText::NodeDelay,
+        FlowText::NodeSilent,
+        FlowText::SilentSub,
+        FlowText::NodeLimit,
+        FlowText::LimitSub,
+        FlowText::LimitMax,
+        FlowText::LimitPer,
         FlowText::NodeCommand,
         FlowText::NodeFlowSwitch,
         FlowText::TitleLabel,
@@ -763,6 +775,24 @@ pub fn flow_text(lang: Lang, k: FlowText) -> &'static str {
         T::NodeSignal => ("Signal", "Signal"),
         T::NodeIf => ("If", "Si"),
         T::NodeDelay => ("Delay", "Attente"),
+        T::NodeSilent => ("Silent for", "Silencieux depuis"),
+        T::SilentSub => (
+            "When an entity stops reporting",
+            "Quand une entité n'envoie plus rien",
+        ),
+        T::NodeLimit => ("Limit", "Limite"),
+        T::LimitSub => (
+            "Lets only so many runs through",
+            "Ne laisse passer qu'un nombre de lancements",
+        ),
+        T::LimitMax => (
+            "Runs allowed (1\u{2013}100)",
+            "Lancements autorisés (1\u{2013}100)",
+        ),
+        T::LimitPer => (
+            "Per window (1m\u{2013}168h)",
+            "Par fenêtre (1m\u{2013}168h)",
+        ),
         T::NodeCommand => ("Command", "Commande"),
         T::NodeFlowSwitch => ("Flow switch", "Interrupteur d'automatisation"),
         T::TitleLabel => ("Title", "Titre"),
@@ -1134,6 +1164,28 @@ pub fn wait(lang: Lang, for_: &str, up_to: Option<&str>) -> String {
         ),
         None => format!("{verb} {for_}"),
     }
+}
+
+/// "Door silent for 50m" / "Door silencieux depuis 50m"; with no entity yet, "Silent for 50m".
+pub fn silent_for(lang: Lang, e: &str, for_: &str) -> String {
+    let head = flow_text(lang, FlowText::NodeSilent);
+    if e.is_empty() {
+        return format!("{head} {for_}");
+    }
+    pick(
+        lang,
+        format!("{e} silent for {for_}"),
+        format!("{e} silencieux depuis {for_}"),
+    )
+}
+
+/// "At most 4 every 24h" / "Au plus 4 fois par 24h".
+pub fn at_most(lang: Lang, max: u32, per: &str) -> String {
+    pick(
+        lang,
+        format!("At most {max} every {per}"),
+        format!("Au plus {max} fois par {per}"),
+    )
 }
 
 /// `Notify "Door open"` / `Notifier « Porte ouverte »`; no title reads "Notify" / "Notifier".

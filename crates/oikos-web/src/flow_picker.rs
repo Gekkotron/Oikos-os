@@ -2,10 +2,10 @@
 
 use oikos_core::flow::TriggerSignalParams;
 use oikos_core::flow::{
-    CommandParams, DelayParams, FlowEnableParams, IfParams, MathParams, Node, NodeKind,
-    NotifyParams, OffPeakEdge, Op, RuleOp, Scalar, SunWhich, SwitchParams, SwitchRule,
+    CommandParams, DelayParams, FlowEnableParams, IfParams, LimitParams, MathParams, Node,
+    NodeKind, NotifyParams, OffPeakEdge, Op, RuleOp, Scalar, SunWhich, SwitchParams, SwitchRule,
     TimeBetweenParams, TriggerManualParams, TriggerOffPeakParams, TriggerScheduleParams,
-    TriggerStateParams,
+    TriggerSilentParams, TriggerStateParams,
 };
 use oikos_core::model::Command;
 use serde_json::Value;
@@ -114,6 +114,16 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
         ),
         (
             Group::When,
+            NodeKind::TriggerSilent(TriggerSilentParams {
+                entity: String::new(),
+                for_: "50m".into(),
+                extra: Default::default(),
+            }),
+            Some(FlowText::NodeSilent),
+            FlowText::SilentSub,
+        ),
+        (
+            Group::When,
             NodeKind::TriggerManual(TriggerManualParams::default()),
             Some(FlowText::NodeManual),
             FlowText::ManualSub,
@@ -189,6 +199,16 @@ pub fn entries(query: &str, ctx: &Ctx) -> Vec<Entry> {
             }),
             Some(FlowText::WaitCard),
             FlowText::WaitSub,
+        ),
+        (
+            Group::Wait,
+            NodeKind::Limit(LimitParams {
+                max: 4,
+                per: "24h".into(),
+                extra: Default::default(),
+            }),
+            Some(FlowText::NodeLimit),
+            FlowText::LimitSub,
         ),
         (
             Group::Then,
@@ -441,7 +461,7 @@ mod tests {
         assert_eq!(labels[0], "Programmation");
         assert!(labels.contains(&"Quand il fait nuit"));
         assert!(
-            matches!(&fr[9].kind, NodeKind::Notify(p) if p.title == "Notification"),
+            matches!(&fr[10].kind, NodeKind::Notify(p) if p.title == "Notification"),
             "the stored default follows the language at creation"
         );
         // The English word finds the card on the French UI, and the French word on the English UI.
@@ -486,6 +506,7 @@ mod tests {
                 (Group::When, "Schedule"),
                 (Group::When, "Sun event"),
                 (Group::When, "Off-peak"),
+                (Group::When, "Silent for"),
                 (Group::When, "Manual"),
                 (Group::And, "When it's dark"),
                 (Group::And, "Is it off-peak?"),
@@ -494,6 +515,7 @@ mod tests {
                 (Group::And, "Time of day"),
                 (Group::Then, "Notify"),
                 (Group::Wait, "Wait"),
+                (Group::Wait, "Limit"),
                 (Group::Flow, "Disable this flow"),
                 (Group::Flow, "Enable a flow"),
             ]
@@ -505,6 +527,7 @@ mod tests {
                 Some("At a set time, or on a repeat"),
                 Some("Sunrise, sunset, dusk or dawn"),
                 Some("When off-peak starts or ends"),
+                Some("When an entity stops reporting"),
                 Some("Start by hand from the ▶ button"),
                 Some("Between dusk and dawn"),
                 Some("Off-peak hours right now"),
@@ -513,6 +536,7 @@ mod tests {
                 Some("Inside or outside two times"),
                 Some("A push to your phone"),
                 Some("A fixed or random delay"),
+                Some("Lets only so many runs through"),
                 Some("Stops it from running again"),
                 Some("Switches another flow on or off"),
             ]
@@ -521,19 +545,48 @@ mod tests {
             &got[0].kind,
             NodeKind::TriggerSchedule(p) if p.cron == "0 * * * *"
         ));
-        assert!(matches!(&got[7].kind, NodeKind::Math(p) if p.name.is_empty()));
-        assert!(matches!(&got[9].kind, NodeKind::Notify(p) if p.title == "Notification"));
-        assert!(matches!(&got[10].kind, NodeKind::Delay(p) if p.for_ == "5m"));
+        assert!(matches!(&got[8].kind, NodeKind::Math(p) if p.name.is_empty()));
+        assert!(matches!(&got[10].kind, NodeKind::Notify(p) if p.title == "Notification"));
+        assert!(matches!(&got[11].kind, NodeKind::Delay(p) if p.for_ == "5m"));
         assert!(matches!(
-            &got[6].kind,
+            &got[7].kind,
             NodeKind::Switch(p) if p.otherwise && p.entity.is_none()
                 && p.rules.len() == 1 && p.rules[0].op == RuleOp::Eq
                 && p.rules[0].value == Value::Bool(true)
         ));
         assert!(matches!(
-            &got[8].kind,
+            &got[9].kind,
             NodeKind::TimeBetween(p) if p.from == "07:00" && p.to == "22:00"
         ));
+    }
+
+    #[test]
+    fn library_lists_silent_and_limit() {
+        let entities = BTreeMap::new();
+        let got = run("", &entities);
+        let silent = got
+            .iter()
+            .find(|e| matches!(e.kind, NodeKind::TriggerSilent(_)))
+            .expect("a silent entry");
+        assert_eq!(silent.group, Group::When);
+        assert_eq!(silent.label, "Silent for");
+        assert!(matches!(
+            &silent.kind,
+            NodeKind::TriggerSilent(p) if p.entity.is_empty() && p.for_ == "50m"
+        ));
+        let limit = got
+            .iter()
+            .find(|e| matches!(e.kind, NodeKind::Limit(_)))
+            .expect("a limit entry");
+        assert_eq!(limit.group, Group::Wait);
+        assert_eq!(limit.label, "Limit");
+        assert!(matches!(
+            &limit.kind,
+            NodeKind::Limit(p) if p.max == 4 && p.per == "24h"
+        ));
+        // Either language's word finds the cards.
+        assert_eq!(run("silencieux", &entities).len(), 1);
+        assert_eq!(run("limite", &entities).len(), 1);
     }
 
     #[test]

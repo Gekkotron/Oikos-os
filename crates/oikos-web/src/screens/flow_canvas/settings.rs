@@ -342,6 +342,8 @@ fn node_editor_body(
         NodeKind::TriggerSchedule(_) => FlowText::Schedule,
         NodeKind::TriggerSun(_) => FlowText::NodeSun,
         NodeKind::TriggerOffPeak(_) => FlowText::NodeOffPeak,
+        NodeKind::TriggerSilent(_) => FlowText::NodeSilent,
+        NodeKind::Limit(_) => FlowText::NodeLimit,
         NodeKind::TriggerManual(_) => FlowText::NodeManual,
         NodeKind::TriggerSignal(_) => FlowText::NodeSignal,
         NodeKind::If(_) => FlowText::NodeIf,
@@ -836,6 +838,93 @@ fn kind_fields(form: Form, id: String, kind: NodeKind) -> impl IntoView {
                 />
                 <ValueOfField entity=entity_value field=field_value on_pick=pick />
                 {filters}
+            }
+            .into_any()
+        }
+        NodeKind::TriggerSilent(p) => {
+            let entity_value = node_entity(form, id.clone(), |k| match k {
+                NodeKind::TriggerSilent(t) => Some(t.entity.clone()),
+                _ => None,
+            });
+            let entity_id = id.clone();
+            let entity_write = Callback::new(move |value: Option<String>| {
+                form.update(&entity_id, |n| {
+                    if let NodeKind::TriggerSilent(ref mut t) = n.kind {
+                        t.entity = value.unwrap_or_default();
+                    }
+                });
+            });
+            let for_write = Callback::new(move |value: Option<String>| {
+                form.update(&id, |n| {
+                    if let NodeKind::TriggerSilent(ref mut t) = n.kind {
+                        t.for_ = value.unwrap_or_default();
+                    }
+                });
+            });
+            view! {
+                <EntityPickField
+                    label=word(FlowText::Entity)
+                    value=entity_value
+                    on_change=entity_write
+                    pool=Some(keep(|e| !is_signal(e)))
+                    compact=true
+                    class=Some("node-editor__field".to_owned())
+                />
+                <TextField
+                    label=word(FlowText::NodeSilent)
+                    initial=p.for_
+                    placeholder=plain("50m, 1h30m")
+                    optional=false
+                    write=for_write
+                />
+            }
+            .into_any()
+        }
+        NodeKind::Limit(p) => {
+            let max_id = id.clone();
+            let on_max = move |ev: web_sys::Event| {
+                let Some(m) = parse_decimal(&event_target_value(&ev)) else {
+                    return;
+                };
+                let m = (m as u32).clamp(1, oikos_core::flow::MAX_LIMIT);
+                // Show the value that was kept, so a typed 500 reads 100 in the field.
+                let input = event_target::<web_sys::HtmlInputElement>(&ev);
+                if input.value() != m.to_string() {
+                    input.set_value(&m.to_string());
+                }
+                form.update(&max_id, |n| {
+                    if let NodeKind::Limit(ref mut l) = n.kind {
+                        l.max = m;
+                    }
+                });
+            };
+            let per_write = Callback::new(move |value: Option<String>| {
+                form.update(&id, |n| {
+                    if let NodeKind::Limit(ref mut l) = n.kind {
+                        l.per = value.unwrap_or_default();
+                    }
+                });
+            });
+            view! {
+                <label class="node-editor__field">
+                    <span class="node-editor__label">{move || t(FlowText::LimitMax)}</span>
+                    <input
+                        type="number"
+                        class="field"
+                        min="1"
+                        max=oikos_core::flow::MAX_LIMIT.to_string()
+                        step="1"
+                        prop:value=p.max.to_string()
+                        on:input=on_max
+                    />
+                </label>
+                <TextField
+                    label=word(FlowText::LimitPer)
+                    initial=p.per
+                    placeholder=plain("24h, 1h30m")
+                    optional=false
+                    write=per_write
+                />
             }
             .into_any()
         }

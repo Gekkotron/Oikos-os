@@ -354,6 +354,30 @@ async fn send_command_ignores_an_echo_without_its_key() {
     );
 }
 
+/// The message without the switch's key still reached its topic: it is announced as touched
+/// (the liveness signal) but not as seen, so a command is not confirmed by it and nothing else
+/// that reads `state_seen` hears it.
+#[tokio::test]
+async fn a_message_that_reads_nothing_is_touched_but_not_seen() {
+    let (hub, _publisher) = hub();
+    feed_switch(&hub);
+    hub.ingest(&switch_state_topic(), br#"{"state":"ON"}"#);
+    let mut seen = hub.subscribe_state_seen();
+    let mut touched = hub.subscribe_state_touched();
+
+    let changes = hub.ingest(&switch_state_topic(), br#"{"linkquality":120}"#);
+
+    assert_eq!(changes, vec![Change::StateTouched(SWITCH_ID.to_owned())]);
+    assert!(seen.try_recv().is_err(), "nothing was read");
+    let signal = touched.try_recv().expect("touched");
+    assert_eq!(signal.id, SWITCH_ID);
+    assert!(!signal.read);
+
+    hub.ingest(&switch_state_topic(), br#"{"state":"OFF"}"#);
+    assert_eq!(seen.try_recv().expect("seen").id, SWITCH_ID);
+    assert!(touched.try_recv().expect("touched").read);
+}
+
 /// Turning on a switch that is already ON: the echoed `{"state":"ON"}` is a
 /// `StateReported` (nothing differs), which confirms the command without any event reaching
 /// the WebSocket clients.

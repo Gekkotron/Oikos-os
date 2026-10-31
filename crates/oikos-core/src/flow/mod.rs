@@ -15,18 +15,21 @@ pub mod template;
 mod validate;
 
 pub use clock::{in_time_range, parse_clock};
-pub use duration::{DurationError, format_duration, parse_duration, pick_duration};
+pub use duration::{
+    DurationError, MAX_WINDOW, MIN_WINDOW, format_duration, parse_duration, pick_duration, window,
+};
 pub use field::{FieldInfo, brightness_percent, field_scalar, fields, headline_scalar};
 pub use math::{
     FUNCTIONS, Formula, FormulaError, Function, MAX_DEPTH, MAX_FORMULA_CHARS, MAX_INPUTS,
     MAX_TABLE_POINTS, fit_to_entity, is_valid_name, parse_formula,
 };
 pub use model::{
-    CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, MAX_AVERAGE_SECS,
-    MAX_SWITCH_RULES, MathInput, MathParams, Missing, Node, NodeKind, NotifyParams, OffPeakEdge,
-    Op, Position, RuleOp, SunWhich, SwitchParams, SwitchRule, TimeBetweenParams,
-    TriggerManualParams, TriggerOffPeakParams, TriggerScheduleParams, TriggerSignalParams,
-    TriggerStateParams, TriggerSunParams, command_with_number, math_names, uses_sun_or_is_dark,
+    CommandParams, DelayParams, Edge, Flow, FlowEnableParams, FlowMode, IfParams, LimitParams,
+    MAX_AVERAGE_SECS, MAX_LIMIT, MAX_SWITCH_RULES, MathInput, MathParams, Missing, Node, NodeKind,
+    NotifyParams, OffPeakEdge, Op, Position, RuleOp, SunWhich, SwitchParams, SwitchRule,
+    TimeBetweenParams, TriggerManualParams, TriggerOffPeakParams, TriggerScheduleParams,
+    TriggerSignalParams, TriggerSilentParams, TriggerStateParams, TriggerSunParams,
+    command_with_number, math_names, uses_sun_or_is_dark,
 };
 pub use scalar::{CompareError, Scalar, compare};
 pub use schedule::{Schedule, ScheduleError};

@@ -30,6 +30,7 @@ pub enum TriggerKind {
     Signal,
     Manual,
     OffPeak,
+    Silent,
 }
 
 /// The status tab: every flow, running ones, switched-off ones, or those needing a look.
@@ -152,6 +153,7 @@ pub fn trigger_kinds(view: &FlowView) -> BTreeSet<TriggerKind> {
             NodeKind::TriggerSchedule(_) => Some(TriggerKind::Schedule),
             NodeKind::TriggerSun(_) => Some(TriggerKind::Sun),
             NodeKind::TriggerOffPeak(_) => Some(TriggerKind::OffPeak),
+            NodeKind::TriggerSilent(_) => Some(TriggerKind::Silent),
             NodeKind::TriggerSignal(_) => Some(TriggerKind::Signal),
             NodeKind::TriggerManual(_) => Some(TriggerKind::Manual),
             _ => None,
@@ -374,6 +376,7 @@ mod tests {
                     "trigger.schedule" => r#"{ "cron": "* * * * *" }"#,
                     "trigger.sun" => r#"{ "which": "sunset" }"#,
                     "trigger.off_peak" => r#"{ "edge": "start" }"#,
+                    "trigger.silent" => r#"{ "entity": "m", "for": "50m" }"#,
                     "trigger.manual" => "{}",
                     _ => r#"{ "entity": "r" }"#,
                 };
@@ -541,6 +544,12 @@ mod tests {
     fn kinds_off_peak_is_its_own_kind() {
         let only = view("f", "F", &["trigger.off_peak"]);
         assert_eq!(trigger_kinds(&only), BTreeSet::from([TriggerKind::OffPeak]));
+    }
+
+    #[test]
+    fn kinds_silent_is_its_own_kind() {
+        let only = view("f", "F", &["trigger.silent"]);
+        assert_eq!(trigger_kinds(&only), BTreeSet::from([TriggerKind::Silent]));
     }
 
     #[test]

@@ -320,9 +320,13 @@ fn equal_value_report_is_reported_not_changed() {
         vec![Change::StateChanged("test_switch".to_owned())]
     );
 
-    // A message the mapper cannot read (neither ON nor OFF) is no report at all.
+    // A message the mapper cannot read (neither ON nor OFF) is no report: the topic spoke
+    // (touched) but `last_update` stays.
     let changes = registry.apply(state("maybe", AT + 3));
-    assert!(changes.is_empty(), "{changes:?}");
+    assert_eq!(
+        changes,
+        vec![Change::StateTouched("test_switch".to_owned())]
+    );
     assert_eq!(
         registry.state("test_switch").expect("state").last_update,
         Some(AT + 2)
@@ -1135,6 +1139,22 @@ fn restore_state_ignores_an_unknown_id() {
             .restore_state("nope", StateValue::OnOff(true), AT)
             .is_empty()
     );
+}
+
+/// A message that reached the entity but read nothing (still unknown) means it has spoken
+/// since boot: an old recorded value must not come back over it.
+#[test]
+fn restore_state_skips_an_entity_touched_since_boot() {
+    let mut registry = switch_registry();
+    let inbound = registry.route("zigbee2mqtt/test", b"maybe".to_vec(), AT);
+    assert_eq!(
+        registry.apply(inbound),
+        vec![Change::StateTouched("test_switch".to_owned())]
+    );
+    let changes = registry.restore_state("test_switch", StateValue::OnOff(true), AT - 100);
+    assert!(changes.is_empty(), "{changes:?}");
+    let state = registry.state("test_switch").expect("state");
+    assert_eq!(state.value, StateValue::Unknown);
 }
 
 #[test]

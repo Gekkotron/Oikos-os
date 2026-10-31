@@ -331,6 +331,8 @@ pub fn next_node_id(flow: &Flow, kind: &NodeKind) -> String {
         NodeKind::TriggerSchedule(_) => "schedule",
         NodeKind::TriggerSun(_) => "sun",
         NodeKind::TriggerOffPeak(_) => "off_peak",
+        NodeKind::TriggerSilent(_) => "silent",
+        NodeKind::Limit(_) => "limit",
         NodeKind::TriggerManual(_) => "manual",
         NodeKind::TriggerSignal(_) => "signal",
         NodeKind::If(_) => "if",

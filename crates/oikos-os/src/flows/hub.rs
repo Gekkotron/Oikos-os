@@ -1,8 +1,9 @@
 //! The flow side of the hub: ingesting retained definitions, the writers behind the REST and
 //! MCP flow tools, and the run bookkeeping the engine reports through.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::task::JoinHandle;
 
@@ -23,6 +24,11 @@ use super::engine::manual_trigger;
 use super::{EngineRequest, StoreApplied};
 use crate::clock;
 use crate::hub::{Hub, HubError};
+
+/// The passes of each `limit` node, by (flow, node): its `max`, its window and the times of the
+/// passes still inside it, oldest first.
+pub(crate) type LimitCounts =
+    BTreeMap<(String, String), (u32, Duration, VecDeque<chrono::DateTime<chrono::Utc>>)>;
 
 /// The warning attached to a sun flow written while the house point is the Paris fallback.
 const PARIS_FALLBACK_WARNING: &str = "Running sun flows against the Paris fallback. Set `[flows] latitude` and `[flows] longitude` in `oikos.toml` to use your house's point.";
@@ -433,6 +439,7 @@ impl Hub {
             let entity = match &node.kind {
                 NodeKind::TriggerState(params) => Some(&params.entity),
                 NodeKind::TriggerSignal(params) => Some(&params.entity),
+                NodeKind::TriggerSilent(params) => Some(&params.entity),
                 NodeKind::If(params) => params.entity.as_ref(),
                 NodeKind::Switch(params) => params.entity.as_ref(),
                 NodeKind::Command(params) => Some(&params.entity),
@@ -449,6 +456,7 @@ impl Hub {
                     None
                 }
                 NodeKind::Delay(_)
+                | NodeKind::Limit(_)
                 | NodeKind::Notify(_)
                 | NodeKind::TimeBetween(_)
                 | NodeKind::TriggerSchedule(_)
@@ -505,6 +513,12 @@ impl Hub {
                 NodeKind::TriggerState(_) if signal_source => {
                     return Err(HubError::InvalidFlow(format!(
                         "node `{}`: `{entity}` sends signals, trigger on them with trigger.signal",
+                        node.id
+                    )));
+                }
+                NodeKind::TriggerSilent(_) if signal_source || found.kind == Kind::Button => {
+                    return Err(HubError::InvalidFlow(format!(
+                        "node `{}`: `{entity}` never reports state, so it cannot go silent",
                         node.id
                     )));
                 }
@@ -571,6 +585,44 @@ impl Hub {
 }
 
 impl Hub {
+    /// Lets a run through the `limit` node `node` of `flow` when fewer than `max` runs passed it
+    /// in the last `per`, and records the pass: `Ok` holds the passes in the window, this one
+    /// included. Over the limit nothing is recorded and `Err` holds the passes in the window.
+    pub fn limit_pass(
+        &self,
+        flow: &str,
+        node: &str,
+        max: u32,
+        per: Duration,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<usize, usize> {
+        let mut limits = self.limits();
+        let (_, _, passes) = limits
+            .entry((flow.to_owned(), node.to_owned()))
+            .or_insert_with(|| (max, per, VecDeque::new()));
+        let window = chrono::Duration::from_std(per).unwrap_or(chrono::Duration::MAX);
+        while passes.front().is_some_and(|at| *at <= now - window) {
+            passes.pop_front();
+        }
+        if passes.len() >= max as usize {
+            return Err(passes.len());
+        }
+        passes.push_back(now);
+        Ok(passes.len())
+    }
+
+    /// Forgets the counts of every `limit` node not in `keep` (its `max` and `per` text, by flow
+    /// and node) or whose `max` or window changed.
+    pub fn limit_retain(&self, keep: &BTreeMap<(String, String), (u32, String)>) {
+        self.limits().retain(|key, (max, per, _)| {
+            keep.get(key).is_some_and(|(keep_max, keep_per)| {
+                keep_max == max && oikos_core::flow::window(keep_per).is_ok_and(|p| p == *per)
+            })
+        });
+    }
+}
+
+impl Hub {
     /// Starts the flow engine on the runtime. The event subscription is taken before the task
     /// spawns so nothing ingested right after this call is missed. A second call logs a warning
     /// and returns an already finished handle: the request receiver can be taken only once.
@@ -580,7 +632,7 @@ impl Hub {
             return tokio::spawn(async {});
         };
         let events = self.subscribe();
-        let seen = self.subscribe_state_seen();
+        let seen = self.subscribe_state_touched();
         tokio::spawn(super::engine::run_with(
             Arc::clone(self),
             events,
@@ -624,4 +676,35 @@ fn announced_signals(entity: &oikos_core::model::Entity) -> Vec<String> {
         names.extend(options.iter().cloned());
     }
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn silent_names_an_existing_entity() {
+        let (tx, _rx) = tokio::sync::mpsc::channel::<Publish>(8);
+        let hub = Hub::new(&crate::config::Config::default(), tx);
+        let flow = Flow::decode(
+            serde_json::json!({
+                "id": "quiet", "name": "quiet", "enabled": true, "mode": "single",
+                "nodes": [
+                    { "id": "t", "type": "trigger.silent",
+                      "params": { "entity": "binary_sensor.smoke", "for": "50m" } },
+                    { "id": "w", "type": "delay", "params": { "for": "1s" } },
+                ],
+                "edges": [{ "from": "t", "to": "w" }]
+            })
+            .to_string()
+            .as_bytes(),
+        )
+        .unwrap();
+        match hub.set_flow(flow).await {
+            Err(HubError::InvalidFlow(reason)) => {
+                assert_eq!(reason, "unknown entity `binary_sensor.smoke` in node `t`");
+            }
+            other => panic!("expected InvalidFlow, got {other:?}"),
+        }
+    }
 }
